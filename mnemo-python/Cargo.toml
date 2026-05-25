@@ -1,0 +1,25 @@
+[package]
+name = "mnemo-python"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Python bindings for the Mnemo encrypted agent-memory engine"
+license = "Apache-2.0"
+
+# The compiled extension module is imported from Python as `mnemo`.
+[lib]
+name = "mnemo"
+crate-type = ["cdylib"]
+
+[dependencies]
+# The Rust core, renamed so it does not collide with this crate's own `mnemo`
+# library name.
+mnemo_core = { path = "../mnemo", package = "mnemo" }
+# `extension-module` keeps libpython unlinked; `abi3-py38` builds against the
+# stable ABI so one wheel works across Python 3.8+.
+pyo3 = { version = "=0.22.6", features = ["extension-module", "abi3-py38"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1

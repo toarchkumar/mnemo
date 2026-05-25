@@ -1,0 +1,7 @@
+MNEMO_BUILD_PLAN.md
+mnemo.tar
+
+.DS_Store
+target/
+*.mnemo
+.env

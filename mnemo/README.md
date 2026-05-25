@@ -1,0 +1,277 @@
+This directory is the **Memory Nemo** Rust crate: encrypted single-file storage, the `mnemo` CLI, examples, and tests.
+
+The repository overview and links to the landing page and Python bindings are in the [root README](../README.md).
+
+## Quick start
+
+```sh
+cargo run --example quickstart
+cargo run --bin mnemo -- demo
+```
+
+---
+# Memory Nemo (MNemo)
+
+**An encrypted, single-file, portable agent-memory engine, written in Rust.**
+
+A whole memory store — vectors, content, structured metadata, and the
+multi-signal recall machinery an agent needs — lives in **one file** you can
+copy, back up, or hand to another process. The file is encrypted at rest, so
+the memory of an agent is as portable and as private as a SQLite database.
+
+This repository implements a real, compiling, tested **core**. See
+[Scope](#scope-what-is-and-isnt-here) for what is deliberately left as roadmap.
+
+> The product is **Memory Nemo (MNemo)**. The crate, binary, Python package,
+> and `.mnemo` file extension all use the lowercase identifier `mnemo`.
+
+---
+
+## Why
+
+Agent frameworks usually bolt memory onto an external vector service: a
+network hop, a second thing to deploy, a second place secrets can leak.
+MNemo takes the SQLite position instead — memory is a *file*:
+
+- **Single file.** No server, no daemon, no schema migration dance.
+- **Encrypted at rest.** Passphrase in, ciphertext on disk.
+- **Portable.** `cp agent.mnemo backup.mnemo` is a complete, consistent backup.
+- **Agent-native.** First-class notions of memory *type*, *importance*,
+  *recency*, *access frequency*, TTL, and per-agent scoping — recall ranks on
+  all of them, not similarity alone.
+
+## Architecture
+
+```
+passphrase ──Argon2id──▶ KEK ──AES-256-GCM──▶ wraps DEK (random 256-bit)
+                                                   │
+                                                   ▼
+                              every 8 KiB page ──AES-256-GCM──▶ ciphertext
+```
+
+Two-tier key hierarchy: a passphrase derives a key-encryption key (KEK) via
+Argon2id; the KEK wraps a random data-encryption key (DEK); the DEK encrypts
+every data page with AES-256-GCM. Changing the passphrase (`rekey`) only
+re-wraps the DEK — the bulk pages are never rewritten.
+
+The file is a sequence of fixed **8 KiB pages**:
+
+- **Page 0** — the header (plaintext): magic, version, KDF parameters, salt,
+  the wrapped DEK, pointers to the current catalog and ANN index runs, the
+  location of the WAL region, and a CRC-32 over the header itself.
+- **Pages 1..W** — the write-ahead log region (see below).
+- **Pages W+** — encrypted runs. Each record (a memory, MessagePack-encoded),
+  each catalog snapshot, the optional ANN index, and the snapshot manifest
+  occupy runs of consecutive pages. The page allocator is append-only.
+
+Every page is sealed with a unique nonce derived from `page_number` and a
+monotonic `write_counter`, so a nonce is never reused under the DEK.
+
+### Durability — write-ahead log
+
+`flush()` is one **atomic transaction**, committed through a write-ahead log:
+
+1. Record (vector) data pages are written copy-on-write to fresh pages and
+   fsynced. Being unreferenced until the catalog below commits, they are
+   crash-safe by construction.
+2. The transaction's control plane — the new catalog, the ANN index, and the
+   new header — is written into the WAL region as a run of
+   `(txn_id, page_no, page_image)` frames followed by a checksummed `COMMIT`
+   frame.
+3. **One fsync of the WAL is the commit point.** Before it the transaction
+   does not exist; after it the transaction is durable even though no home
+   page has changed.
+4. A *checkpoint* copies each frame to its home page and rewrites page 0.
+
+A crash *before* the commit fsync leaves the previous state untouched. A crash
+*after* it is repaired on open: [`recover`](src/wal.rs) replays the committed
+transaction; a torn, never-committed tail is discarded. Because page 0 carries
+a CRC, even a torn header write is detected and healed from the WAL. The WAL
+region grows automatically when a transaction's control plane outgrows it.
+(`tests/integration.rs` exercises crash recovery, the torn-header heal, a
+discarded uncommitted log, and WAL growth.)
+
+What this buys over a plain copy-on-write header swap: a single-fsync commit
+and an explicit, replayable transaction boundary.
+
+### Snapshots & point-in-time recovery
+
+Because record, catalog, and index pages are only ever *appended*, every past
+flush's pages are still on disk. MNemo exploits this: each `flush` appends a
+small entry to a **snapshot manifest** recording where that transaction's
+catalog and index runs live. The manifest turns the append-only file into a
+navigable history.
+
+- `snapshots()` lists every committed transaction — its id, timestamp, and
+  memory count.
+- `restore_to(txn_id)` reinstates the database exactly as that transaction
+  left it; `restore_to_time(unix_secs)` picks the latest snapshot at or before
+  an instant.
+
+A restore is itself an ordinary committed transaction (and a new snapshot), so
+it is crash-safe *and* reversible — having rewound, you can roll forward again.
+History reaches back to the last `compact_file`, which reclaims space by
+rewriting the file and so collapses the manifest to a single snapshot. That
+compaction boundary is the one limit: there is no external log archiving, so
+you cannot restore to an instant older than the last compaction.
+
+### Page cache
+
+Decrypted page payloads are held in a **bounded LRU cache** so repeated reads
+skip a decrypt. Eviction targets the least-recently-used *clean* page; a dirty
+page — the only copy of an un-flushed write — is never evicted, so the cap
+bounds retained clean pages without ever risking data. The default cap is
+8192 pages (~64 MiB); `Mnemo::set_cache_capacity` tunes it, and
+`Mnemo::cache_stats` reports occupancy. The LRU order is an intrusive linked
+list over a slab of indices, so it stays within the crate's
+`#![forbid(unsafe_code)]`.
+
+### Recall
+
+`recall` scores each candidate with
+
+```
+score = α·similarity + β·recency + γ·importance + δ·ln(1 + access_count)
+```
+
+where `recency` decays exponentially (default 7-day half-life). It also
+filters by memory type and by agent scope (an agent sees its own memories
+plus any marked `Shared`), and skips TTL-expired entries. Weights and the
+similarity metric (cosine / dot / L2) are per-request.
+
+### Sessions
+
+A `Session` wraps the database for the span of one conversation. `db.session(agent)`
+opens it with a fresh session id; `add_turn` records each conversation turn as
+a `Working` memory tagged with that session and agent; `recall` retrieves
+context scoped to the agent. Closing the session **consolidates** its turns —
+`close()` promotes them from working memory to durable `Episodic` memory ("what
+happened"), while `discard()` throws them away. The session borrows the
+database mutably for its lifetime, so the single-writer rule is enforced by the
+compiler. See `examples/session.rs`.
+
+### Approximate index (IVF + PQ)
+
+Exact scan is `O(n)` — fine for thousands of memories. Past that, build an
+**IVF + PQ** index and `recall` becomes sub-linear:
+
+- **IVF** (inverted file): k-means groups vectors into ≈`√n` partitions; a
+  query only scans the `n_probe` partitions nearest its centroid.
+- **PQ** (product quantization): each vector is split into `m` subspaces,
+  each quantized to one of ≤256 learned codewords — a vector becomes `m`
+  bytes. Candidate distances come from precomputed per-subspace lookup
+  tables, so the scan never touches a full float vector.
+- **Rerank**: the closest `n_rerank` candidates are loaded at full precision
+  and ranked exactly with the caller's metric.
+
+```rust
+db.build_index()?;                 // or build_index_with(IndexConfig { .. })
+db.flush()?;                       // the index is persisted in the file
+
+// recall now runs IVF → PQ → rerank automatically; tune per query:
+let req = RecallRequest::new(query).top_k(10).n_probe(16).n_rerank(128);
+```
+
+`n_probe` and `n_rerank` are the accuracy/speed dials — higher is more
+accurate, lower is faster. The index is stored *inside* the encrypted file
+(its own page run), maintained incrementally on insert, and rebuilt fresh by
+`compact`. `build_index` re-clusters; `drop_index` reverts to exact scans.
+Internally the index ranks by squared-L2; the exact rerank uses the
+requested metric, so for cosine queries a generous `n_rerank` is advisable.
+
+`Mnemo::search` always stays exact — it is the brute-force ground truth.
+
+## Quick start (library)
+
+```rust
+use mnemo::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
+
+fn main() -> mnemo::Result<()> {
+    let cfg = MnemoConfig { dimensions: 3, ..Default::default() };
+    let mut db = Mnemo::create("agent.mnemo", "correct horse battery", cfg)?;
+
+    db.remember(
+        Memory::new("the user prefers dark mode", MemoryType::Semantic, vec![0.1, 0.2, 0.9])
+            .with_agent("assistant-1")
+            .with_importance(0.8),
+    )?;
+    db.flush()?; // durable
+
+    for hit in db.recall(&RecallRequest::new(vec![0.1, 0.2, 0.9]).top_k(5))? {
+        println!("{:.3}  {}", hit.score, hit.memory.content);
+    }
+    Ok(())
+}
+```
+
+Run the bundled example: `cargo run --example quickstart`.
+
+## Command-line tool
+
+```
+cargo run --bin mnemo -- <command>
+```
+
+| Command   | Purpose                                              |
+|-----------|------------------------------------------------------|
+| `init`    | Create a new empty encrypted database                |
+| `info`    | Print statistics (including ANN index shape)         |
+| `import`  | Bulk-load memories from a JSON Lines file            |
+| `index`   | Build, rebuild, or drop the IVF+PQ index             |
+| `search`  | Exact nearest-neighbour search                       |
+| `recall`  | (library API) multi-signal ranked retrieval          |
+| `verify`  | Decrypt and re-validate every live record            |
+| `rekey`   | Re-encrypt the data key under a new passphrase       |
+| `compact` | Rebuild the file, dropping tombstones and expired    |
+| `snapshots` | List the restorable snapshots (one per flush)      |
+| `restore` | Roll the database back to a past snapshot            |
+| `demo`    | Self-contained end-to-end demonstration              |
+
+The passphrase comes from `--passphrase` or the `MNEMO_PASSPHRASE`
+environment variable. **Passing a secret as a command-line argument is
+insecure** — it lands in shell history and process listings. Prefer the
+environment variable, and for real applications prefer the library API.
+
+```sh
+export MNEMO_PASSPHRASE=hunter2
+cargo run --bin mnemo -- init agent.mnemo --dimensions 768
+cargo run --bin mnemo -- demo            # try it without any setup
+```
+
+## Build and test
+
+```sh
+cargo build --release
+cargo test            # 11 integration tests + a doctest
+cargo run --example quickstart
+```
+
+Minimum supported Rust version: **1.75**. All dependency versions are pinned
+exactly for reproducibility.
+
+## Scope: what is and isn't here
+
+This crate is a faithful build of the MNemo plan, built to actually compile,
+run, and pass tests. The storage engine, encryption, agent-memory model,
+multi-signal recall, the IVF+PQ approximate index (Phase 2), the write-ahead
+log (Phase 3), snapshot-based point-in-time recovery, the bounded LRU page
+cache, and the `Session` lifecycle wrapper (Phase 5) are all built and tested.
+Search and recall scale from exact brute force to sub-linear retrieval; `flush`
+is a single-fsync atomic transaction repaired by WAL replay on a crash; every
+transaction is a restorable snapshot back to the last compaction; and a
+conversation runs through a `Session` that consolidates its turns into episodic
+memory. See [Durability](#durability--write-ahead-log),
+[Snapshots](#snapshots--point-in-time-recovery), [Sessions](#sessions), and
+[Approximate index](#approximate-index-ivf--pq).
+
+One item is deliberately left as a roadmap item and is **not** in this build:
+
+- **TypeScript bindings.** Phase 6 of the plan also calls for a Node/WASM
+  package via napi-rs; only the Python bindings are built so far. They live in
+  the sibling `mnemo-python/` crate — a PyO3 wrapper exposing `mnemo.open(...)`
+  and a `Mnemo` class (`pip install maturin && maturin build`). The Rust core
+  a TypeScript binding would wrap is complete.
+
+## License
+
+Apache-2.0.

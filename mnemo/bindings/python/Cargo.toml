@@ -1,0 +1,16 @@
+[package]
+name = "mnemo-python"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Python bindings for the Mnemo encrypted agent-memory engine"
+license = "Apache-2.0"
+
+[lib]
+name = "mnemo"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+mnemo = { path = "../.." }
+pyo3 = { version = "0.22", features = ["extension-module"] }
