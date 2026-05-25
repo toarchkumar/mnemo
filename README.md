@@ -8,8 +8,7 @@ vector server required.
 
 | | |
 |---|---|
-| **Site** | [index.html](index.html) — open locally, or enable **GitHub Pages** (Settings → Pages → branch `main`, folder `/ (root)`) for `https://toarchkumar.github.io/mnemo/` |
-| **GitHub** | https://github.com/toarchkumar/mnemo |
+| **Site** | https://toarchkumar.github.io/mnemo/ |
 | **Rust core** | [`mnemo/`](mnemo/) — library, CLI, examples, integration tests |
 | **Python** | [`mnemo-python/`](mnemo-python/) — PyO3 bindings ([maturin](https://www.maturin.rs)) |
 
@@ -32,7 +31,7 @@ Full architecture, API, CLI, durability, and scope notes:
 ## Repository layout
 
 ```
-├── index.html       # landing page (GitHub Pages)
+├── index.html       # landing page
 ├── mnemo/           # Rust crate + CLI
 └── mnemo-python/    # Python package
 ```
