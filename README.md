@@ -20,6 +20,8 @@ cargo run --example quickstart
 cargo run --bin mnemo -- demo
 ```
 
+CLI exploration (`info`, `list`, `get`, `recall`): see [`mnemo/README.md`](mnemo/README.md#exploring-a-database).
+
 ```sh
 cd mnemo-python
 pip install maturin && maturin develop

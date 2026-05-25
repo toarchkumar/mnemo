@@ -218,14 +218,41 @@ cargo run --bin mnemo -- <command>
 | `info`    | Print statistics (including ANN index shape)         |
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
-| `search`  | Exact nearest-neighbour search                       |
-| `recall`  | (library API) multi-signal ranked retrieval          |
+| `list`    | Browse live memories (table / json / jsonl, filters) |
+| `get`     | Fetch one memory by its ULID                         |
+| `search`  | Exact nearest-neighbour search (similarity only)     |
+| `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase       |
 | `compact` | Rebuild the file, dropping tombstones and expired    |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |
+
+### Exploring a database
+
+The four exploration commands compose into a quick read-only workflow:
+
+```sh
+# overview — size, agents, index shape, snapshot count
+cargo run --bin mnemo -- info agent.mnemo
+
+# browse — table by default; --format json|jsonl for pipelines
+cargo run --bin mnemo -- list agent.mnemo --type semantic --limit 20
+
+# fetch one — copy a ULID from `list`
+cargo run --bin mnemo -- get agent.mnemo 01HXYZ... --verbose
+
+# rank — multi-signal recall (uses the ANN index if built)
+cargo run --bin mnemo -- recall agent.mnemo --query 0.1,0.2,0.3 --top-k 5
+```
+
+`list` decrypts every live record (O(n)); it is meant for human-scale
+exploration, not for serving requests. `recall` updates each returned
+memory's access stats — those changes are persisted on the next `flush`.
+`recall` needs a vector in the database's dimensionality; for dogfooded
+runs over real embeddings, pull a query vector from your embedding model
+(or from `project-memory.jsonl` in the `test/` sandbox).
 
 The passphrase comes from `--passphrase` or the `MNEMO_PASSPHRASE`
 environment variable. **Passing a secret as a command-line argument is
@@ -242,7 +269,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 11 integration tests + a doctest
+cargo test            # 28 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 

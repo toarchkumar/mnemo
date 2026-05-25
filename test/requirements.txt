@@ -1,0 +1,3 @@
+# Dogfood scripts only. Install mnemo bindings separately:
+#   cd mnemo-python && pip install maturin && maturin develop
+sentence-transformers>=2.2.0,<3

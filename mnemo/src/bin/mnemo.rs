@@ -7,9 +7,9 @@
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use mnemo::{
-    Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, Result,
+    Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, RecallResult, Result, Ulid,
 };
 
 /// Encrypted, single-file agent-memory engine.
@@ -111,6 +111,88 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Fetch a single memory by its ULID.
+    Get {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// ULID of the memory to fetch.
+        id: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        /// Show agent, session, timestamps, importance, scope, and metadata.
+        #[arg(long)]
+        verbose: bool,
+        /// Include the embedding vector (json only; tables always omit it).
+        #[arg(long)]
+        vector: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Browse all live memories.
+    List {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        /// Restrict to these memory types (comma-separated:
+        /// `episodic,semantic,procedural,working`).
+        #[arg(long, value_name = "T[,T...]")]
+        r#type: Option<String>,
+        /// Restrict to a single agent ID.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Maximum rows to print (default: all).
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Skip this many rows before printing.
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        /// Sort order: `created`, `importance`, or `id`.
+        #[arg(long, default_value = "created")]
+        sort: String,
+        /// Include the embedding vector (json/jsonl only).
+        #[arg(long)]
+        vector: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Multi-signal ranked retrieval (similarity + recency + importance + frequency).
+    ///
+    /// Unlike `search`, recall blends four signals, honours type and agent
+    /// filters, uses the ANN index if one has been built, and updates the
+    /// returned memories' access stats (persisted on the next `flush`).
+    Recall {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Query vector as comma-separated floats (must match the DB dimensions).
+        #[arg(long)]
+        query: String,
+        #[arg(long, default_value_t = 10)]
+        top_k: usize,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        /// Restrict to these memory types (comma-separated:
+        /// `episodic,semantic,procedural,working`).
+        #[arg(long, value_name = "T[,T...]")]
+        r#type: Option<String>,
+        /// Restrict to one agent's view (their private memories + shared).
+        #[arg(long)]
+        agent: Option<String>,
+        /// Similarity metric: `cosine` (default), `l2`, or `dot`.
+        #[arg(long, default_value = "cosine")]
+        metric: String,
+        /// Override IVF partitions probed (ignored without an index).
+        #[arg(long)]
+        n_probe: Option<usize>,
+        /// Override candidates reranked exactly (ignored without an index).
+        #[arg(long)]
+        n_rerank: Option<usize>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
     /// Create a small database and exercise the full lifecycle.
     Demo {
         /// Where to write the demo database.
@@ -152,6 +234,198 @@ fn parse_vector(s: &str) -> std::result::Result<Vec<f32>, String> {
     s.split(',')
         .map(|t| t.trim().parse::<f32>().map_err(|e| format!("bad float '{t}': {e}")))
         .collect()
+}
+
+fn parse_ulid(s: &str) -> std::result::Result<Ulid, String> {
+    Ulid::from_string(s.trim()).map_err(|e| format!("bad ULID '{s}': {e}"))
+}
+
+fn parse_memory_types(s: &str) -> std::result::Result<Vec<MemoryType>, String> {
+    s.split(',')
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .map(|t| MemoryType::parse(t).ok_or_else(|| format!("unknown memory type '{t}'")))
+        .collect()
+}
+
+fn parse_metric(s: &str) -> std::result::Result<Metric, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "cosine" | "cos" => Ok(Metric::Cosine),
+        "l2" | "euclidean" => Ok(Metric::L2),
+        "dot" | "ip" => Ok(Metric::Dot),
+        other => Err(format!("unknown metric '{other}' (use cosine, l2, or dot)")),
+    }
+}
+
+/// Output format shared by the exploration commands.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "lowercase")]
+enum OutputFormat {
+    /// Human-readable text rows.
+    Table,
+    /// One JSON document per response.
+    Json,
+    /// JSON Lines (one record per line) — pipeline-friendly.
+    Jsonl,
+}
+
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            OutputFormat::Table => "table",
+            OutputFormat::Json => "json",
+            OutputFormat::Jsonl => "jsonl",
+        })
+    }
+}
+
+/// Truncate a string to `max` chars (not bytes), suffixing `…` when cut.
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Serialize a memory as JSON, optionally stripping the embedding.
+fn memory_to_json(m: &Memory, include_vector: bool) -> serde_json::Value {
+    let mut v = serde_json::to_value(m).unwrap_or_else(|_| serde_json::json!({}));
+    if !include_vector {
+        if let Some(obj) = v.as_object_mut() {
+            obj.remove("vector");
+        }
+    }
+    v
+}
+
+/// Print a single memory in the requested format.
+fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector: bool) {
+    match format {
+        OutputFormat::Table => {
+            let id = m.id.to_string();
+            let imp = format!("imp={:.2}", m.importance);
+            if verbose {
+                println!("{}  [{}]  agent={}  {}", id, m.memory_type.as_str(), m.agent_id, imp);
+                println!("  content : {}", m.content);
+                if let Some(sid) = &m.session_id {
+                    println!("  session : {sid}");
+                }
+                println!(
+                    "  scope   : {}",
+                    match m.scope {
+                        mnemo::Scope::Private => "private",
+                        mnemo::Scope::Shared => "shared",
+                    }
+                );
+                println!(
+                    "  times   : created={}  accessed={}  access_count={}",
+                    m.created_at, m.accessed_at, m.access_count
+                );
+                if let Some(ttl) = m.ttl_secs {
+                    println!("  ttl_secs: {ttl}");
+                }
+                if !m.metadata.is_empty() {
+                    let meta = serde_json::Value::Object(m.metadata.clone());
+                    println!("  meta    : {meta}");
+                }
+            } else {
+                println!(
+                    "{}  [{}]  agent={}  {}  {}",
+                    id,
+                    m.memory_type.as_str(),
+                    m.agent_id,
+                    imp,
+                    truncate(&m.content, 80),
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let v = memory_to_json(m, include_vector);
+            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into()));
+        }
+        OutputFormat::Jsonl => {
+            let v = memory_to_json(m, include_vector);
+            println!("{}", serde_json::to_string(&v).unwrap_or_else(|_| "{}".into()));
+        }
+    }
+}
+
+/// Print a list of memories with a header line in table mode.
+fn print_memories(items: &[Memory], total: usize, format: OutputFormat, include_vector: bool) {
+    match format {
+        OutputFormat::Table => {
+            if items.is_empty() {
+                println!("no memories");
+                return;
+            }
+            println!("showing {} of {} memories", items.len(), total);
+            for m in items {
+                print_memory(m, OutputFormat::Table, false, false);
+            }
+        }
+        OutputFormat::Json => {
+            let arr: Vec<_> = items.iter().map(|m| memory_to_json(m, include_vector)).collect();
+            let doc = serde_json::json!({ "total": total, "count": arr.len(), "memories": arr });
+            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()));
+        }
+        OutputFormat::Jsonl => {
+            for m in items {
+                println!(
+                    "{}",
+                    serde_json::to_string(&memory_to_json(m, include_vector))
+                        .unwrap_or_else(|_| "{}".into())
+                );
+            }
+        }
+    }
+}
+
+/// Print recall hits with the score/similarity columns up front.
+fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
+    match format {
+        OutputFormat::Table => {
+            if hits.is_empty() {
+                println!("no results");
+                return;
+            }
+            for h in hits {
+                println!(
+                    "score={:.3}  sim={:.3}  [{}]  {}  {}",
+                    h.score,
+                    h.similarity,
+                    h.memory.memory_type.as_str(),
+                    h.memory.id,
+                    truncate(&h.memory.content, 80),
+                );
+            }
+        }
+        OutputFormat::Json => {
+            let arr: Vec<_> = hits
+                .iter()
+                .map(|h| {
+                    serde_json::json!({
+                        "score": h.score,
+                        "similarity": h.similarity,
+                        "memory": memory_to_json(&h.memory, false),
+                    })
+                })
+                .collect();
+            let doc = serde_json::json!({ "count": arr.len(), "hits": arr });
+            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()));
+        }
+        OutputFormat::Jsonl => {
+            for h in hits {
+                let line = serde_json::json!({
+                    "score": h.score,
+                    "similarity": h.similarity,
+                    "memory": memory_to_json(&h.memory, false),
+                });
+                println!("{}", serde_json::to_string(&line).unwrap_or_else(|_| "{}".into()));
+            }
+        }
+    }
 }
 
 fn run() -> std::result::Result<(), String> {
@@ -275,6 +549,106 @@ fn run() -> std::result::Result<(), String> {
             for (m, sim) in hits {
                 println!("{sim:.4}  [{}]  {}", m.memory_type.as_str(), m.content);
             }
+        }
+        Command::Get { path, id, format, verbose, vector, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            let ulid = parse_ulid(&id)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let m = db.get(&ulid).map_err(fmt)?;
+            print_memory(&m, format, verbose, vector);
+        }
+        Command::List {
+            path,
+            format,
+            r#type,
+            agent,
+            limit,
+            offset,
+            sort,
+            vector,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let types = match r#type {
+                Some(s) => Some(parse_memory_types(&s)?),
+                None => None,
+            };
+            let sort = sort.trim().to_ascii_lowercase();
+            if !matches!(sort.as_str(), "created" | "importance" | "id") {
+                return Err(format!(
+                    "unknown sort '{sort}' (use created, importance, or id)"
+                ));
+            }
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut all = db.memories().map_err(fmt)?;
+
+            // Filter.
+            if let Some(ts) = &types {
+                all.retain(|m| ts.contains(&m.memory_type));
+            }
+            if let Some(a) = &agent {
+                all.retain(|m| &m.agent_id == a);
+            }
+            let total_after_filter = all.len();
+
+            // Friendly nudge for unbounded browses on large stores.
+            if limit.is_none() && total_after_filter > 10_000 {
+                eprintln!(
+                    "warning: {} memories — consider --limit; printing all anyway",
+                    total_after_filter
+                );
+            }
+
+            // Sort.
+            match sort.as_str() {
+                "created" => all.sort_by_key(|m| m.created_at),
+                "importance" => {
+                    all.sort_by(|a, b| b.importance.total_cmp(&a.importance));
+                }
+                "id" => all.sort_by_key(|m| m.id),
+                _ => unreachable!(),
+            }
+
+            // Paginate.
+            let start = offset.min(all.len());
+            let end = match limit {
+                Some(n) => (start + n).min(all.len()),
+                None => all.len(),
+            };
+            let page: Vec<Memory> = all[start..end].to_vec();
+            print_memories(&page, total_after_filter, format, vector);
+        }
+        Command::Recall {
+            path,
+            query,
+            top_k,
+            format,
+            r#type,
+            agent,
+            metric,
+            n_probe,
+            n_rerank,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let q = parse_vector(&query)?;
+            let metric = parse_metric(&metric)?;
+            let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
+            if let Some(s) = r#type {
+                req = req.types(parse_memory_types(&s)?);
+            }
+            if let Some(a) = agent {
+                req = req.agent(a);
+            }
+            if let Some(n) = n_probe {
+                req = req.n_probe(n);
+            }
+            if let Some(n) = n_rerank {
+                req = req.n_rerank(n);
+            }
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let hits = db.recall(&req).map_err(fmt)?;
+            print_recall_hits(&hits, format);
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
         Command::Snapshots { path, passphrase: pp } => {

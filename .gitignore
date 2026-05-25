@@ -5,3 +5,16 @@ mnemo.tar
 target/
 *.mnemo
 .env
+
+# Dogfooding sandbox — runtime artifacts stay local; tooling is tracked
+test/*
+!test/README.md
+!test/.env.example
+!test/requirements.txt
+!test/scripts/
+test/.env
+test/project.mnemo
+test/project-memory.jsonl
+test/.cache/
+test/__pycache__/
+test/.venv/

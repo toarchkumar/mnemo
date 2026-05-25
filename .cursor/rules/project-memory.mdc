@@ -1,0 +1,37 @@
+---
+description: Use MNemo test/project.mnemo as persistent project memory
+alwaysApply: true
+---
+
+# Project memory (MNemo dogfood)
+
+This repo keeps an encrypted local memory file at `test/project.mnemo`.
+
+## Before substantive work
+
+Run recall and treat the output as authoritative project context (especially for
+MNemo architecture, layout, commands, and prior dogfood decisions):
+
+```bash
+python test/scripts/project_memory.py recall "<short description of the current task>"
+```
+
+If the command fails (missing `.env`, `mnemo` package, or `project.mnemo`), say so
+and run setup from `test/README.md` or ask the user to fix `test/.env`.
+
+## After learning something durable
+
+Persist it for future sessions:
+
+```bash
+python test/scripts/project_memory.py remember "<one concise fact or decision>" \
+  --type semantic|episodic|procedural --importance 0.0-1.0
+```
+
+Prefer one fact per `remember` call. Use `episodic` for dated events/decisions,
+`procedural` for how-to steps, `semantic` for stable facts.
+
+## Do not
+
+- Commit `test/.env`, `test/project.mnemo`, or passphrases.
+- Put secrets on the CLI; use `test/.env` / `MNEMO_PASSPHRASE`.

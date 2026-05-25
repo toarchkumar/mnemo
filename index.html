@@ -522,24 +522,25 @@ db.remember(
 db.flush()
 db.close()</pre>
 
-  <pre class="code-block" id="tab-cli"><span class="cmt"># Create a new encrypted memory file</span>
-$ mnemo init agent.mnemo --dimensions <span class="num">768</span> --passphrase
+  <pre class="code-block" id="tab-cli"><span class="cmt"># Passphrase via env (preferred over --passphrase on the CLI)</span>
+$ <span class="kw">export</span> MNEMO_PASSPHRASE=your-secret
 
-<span class="cmt"># Import memories from JSON Lines</span>
-$ mnemo import memories.jsonl --into agent.mnemo
+<span class="cmt"># Create, load, and index</span>
+$ mnemo init agent.mnemo --dimensions <span class="num">768</span>
+$ mnemo import agent.mnemo memories.jsonl
+$ mnemo index agent.mnemo
 
-<span class="cmt"># Build the IVF+PQ index for fast recall</span>
-$ mnemo index agent.mnemo --build
-
-<span class="cmt"># Search</span>
-$ mnemo search --query <span class="str">"user preferences"</span> --top-k <span class="num">5</span>
-
-<span class="cmt"># File stats</span>
+<span class="cmt"># Explore — browse, fetch by ULID, multi-signal recall</span>
 $ mnemo info agent.mnemo
-<span class="str">→ 12,847 memories │ 3 agents │ 94 MB │ encrypted │ last modified 2h ago</span>
+$ mnemo list agent.mnemo --type semantic --limit <span class="num">20</span>
+$ mnemo get agent.mnemo 01HXYZ... --verbose
+$ mnemo recall agent.mnemo --query <span class="num">0.1</span>,<span class="num">0.2</span>,<span class="num">0.9</span> --top-k <span class="num">5</span>
+
+<span class="cmt"># Exact similarity-only search (ground truth)</span>
+$ mnemo search agent.mnemo --query <span class="num">0.1</span>,<span class="num">0.2</span>,<span class="num">0.9</span> --top-k <span class="num">5</span>
 
 <span class="cmt"># Re-key without rewriting bulk data</span>
-$ mnemo rekey agent.mnemo</pre>
+$ mnemo rekey agent.mnemo --new-passphrase new-secret</pre>
 </section>
 
 <div class="divider"></div>

@@ -1,0 +1,104 @@
+[
+  {
+    "content": "MNemo (Memory Nemo) is an encrypted single-file portable agent-memory engine written in Rust. One .mnemo file holds vectors, text, metadata, and recall logic with no external vector server.",
+    "memory_type": "semantic",
+    "importance": 1.0,
+    "metadata": { "area": "product", "topic": "overview" }
+  },
+  {
+    "content": "Repository layout: mnemo/ is the Rust core and CLI; mnemo-python/ is PyO3 bindings via maturin; mnemo/bindings/node/ is an napi-rs scaffold not shipped yet; index.html is the GitHub Pages landing page; MNEMO_BUILD_PLAN.md is the full phased spec.",
+    "memory_type": "semantic",
+    "importance": 0.95,
+    "metadata": { "area": "layout" }
+  },
+  {
+    "content": "Rust MSRV is 1.75. Default cargo build and test only build the core crate, not Python or Node bindings. Build bindings with cargo build -p mnemo-python or maturin in mnemo-python/.",
+    "memory_type": "semantic",
+    "importance": 0.85,
+    "metadata": { "area": "tooling" }
+  },
+  {
+    "content": "Core modules: store.rs (Mnemo DB), memory.rs (Memory types), session.rs (conversation wrapper), pager.rs, wal.rs (durability), format.rs, crypto.rs (Argon2id + AES-256-GCM), index.rs (IVF+PQ), cache.rs (LRU). Crate forbids unsafe_code.",
+    "memory_type": "semantic",
+    "importance": 0.9,
+    "metadata": { "area": "architecture" }
+  },
+  {
+    "content": "Encryption: passphrase derives KEK via Argon2id; KEK wraps random DEK; DEK encrypts every 8 KiB data page with AES-256-GCM. Page 0 header is plaintext. rekey() only re-wraps DEK.",
+    "memory_type": "semantic",
+    "importance": 0.85,
+    "metadata": { "area": "crypto" }
+  },
+  {
+    "content": "Memory types: episodic (events/conversations), semantic (facts), procedural (rules/preferences), working (current session scratch). Session close() consolidates working into episodic.",
+    "memory_type": "semantic",
+    "importance": 0.9,
+    "metadata": { "area": "model" }
+  },
+  {
+    "content": "recall() blends similarity with recency, importance, and ln(1+access_count). Filters by memory type, agent scope (private + shared), and TTL expiry. search() is always exact brute-force ground truth.",
+    "memory_type": "semantic",
+    "importance": 0.85,
+    "metadata": { "area": "recall" }
+  },
+  {
+    "content": "flush() is one WAL-backed atomic transaction with single-fsync commit. Snapshots record every flush; restore_to(txn_id) rewinds until compact_file collapses history.",
+    "memory_type": "semantic",
+    "importance": 0.8,
+    "metadata": { "area": "durability" }
+  },
+  {
+    "content": "Integration test suite: 28 tests in mnemo/tests/integration.rs covering WAL recovery, snapshots, sessions, ANN index, encryption, compaction. cargo test in mnemo/ passes.",
+    "memory_type": "semantic",
+    "importance": 0.75,
+    "metadata": { "area": "testing" }
+  },
+  {
+    "content": "Run Rust quickstart: cd mnemo && cargo run --example quickstart. Run CLI demo: cargo run --bin mnemo -- demo. Passphrase via MNEMO_PASSPHRASE env, not CLI args in production.",
+    "memory_type": "procedural",
+    "importance": 0.9,
+    "metadata": { "area": "commands" }
+  },
+  {
+    "content": "CLI commands: init, info, import (JSONL), index, search, verify, rekey, compact, snapshots, restore, demo. JSONL import requires content and vector fields per line.",
+    "memory_type": "procedural",
+    "importance": 0.8,
+    "metadata": { "area": "cli" }
+  },
+  {
+    "content": "Python bindings: cd mnemo-python && pip install maturin && maturin develop. API: mnemo.open(path, passphrase, dimensions=...), remember, recall, session, flush, build_index, snapshots.",
+    "memory_type": "procedural",
+    "importance": 0.85,
+    "metadata": { "area": "python" }
+  },
+  {
+    "content": "Dogfooding sandbox lives in test/ (gitignored runtime). Tracked: test/scripts/, seed.json, project_memory.py. Memory file: test/project.mnemo. Embeddings: all-MiniLM-L6-v2, 384 dimensions, normalized.",
+    "memory_type": "semantic",
+    "importance": 1.0,
+    "metadata": { "area": "dogfood", "topic": "this-project" }
+  },
+  {
+    "content": "Bootstrap project memory: python test/scripts/project_memory.py bootstrap. Recall for agent context: python test/scripts/project_memory.py recall \"your task\". Append memory: project_memory.py remember \"fact\" --type semantic.",
+    "memory_type": "procedural",
+    "importance": 1.0,
+    "metadata": { "area": "dogfood", "topic": "commands" }
+  },
+  {
+    "content": "Remote origin: https://github.com/toarchkumar/mnemo.git. Site: https://toarchkumar.github.io/mnemo/. License Apache-2.0.",
+    "memory_type": "semantic",
+    "importance": 0.6,
+    "metadata": { "area": "meta" }
+  },
+  {
+    "content": "Roadmap gap: TypeScript/Node bindings planned in MNEMO_BUILD_PLAN Phase 6; only Python bindings are production-ready in mnemo-python/.",
+    "memory_type": "semantic",
+    "importance": 0.7,
+    "metadata": { "area": "roadmap" }
+  },
+  {
+    "content": "2026-05-25: Started MNemo dogfooding — test/project.mnemo with local sentence-transformers embeddings and cursor-agent as agent_id. Passphrase in test/.env (gitignored).",
+    "memory_type": "episodic",
+    "importance": 0.9,
+    "metadata": { "area": "dogfood", "event": "bootstrap" }
+  }
+]

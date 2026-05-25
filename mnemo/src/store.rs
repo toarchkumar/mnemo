@@ -148,6 +148,16 @@ impl RecallRequest {
         self.agent_id = Some(agent_id.into());
         self
     }
+    /// Set the similarity metric (default: cosine).
+    pub fn metric(mut self, metric: Metric) -> Self {
+        self.metric = metric;
+        self
+    }
+    /// Replace the multi-signal score weights.
+    pub fn weights(mut self, weights: ScoreWeights) -> Self {
+        self.weights = weights;
+        self
+    }
     /// Override the number of IVF partitions probed (accuracy/speed dial).
     pub fn n_probe(mut self, n: usize) -> Self {
         self.n_probe = Some(n);
