@@ -8,7 +8,8 @@ vector server required.
 
 | | |
 |---|---|
-| **Site** | [index.html](index.html) — open locally, or publish with [GitHub Pages](https://pages.github.com/) from the repo root |
+| **Site** | [index.html](index.html) — open locally, or enable **GitHub Pages** (Settings → Pages → branch `main`, folder `/ (root)`) for `https://toarchkumar.github.io/mnemo/` |
+| **GitHub** | https://github.com/toarchkumar/mnemo |
 | **Rust core** | [`mnemo/`](mnemo/) — library, CLI, examples, integration tests |
 | **Python** | [`mnemo-python/`](mnemo-python/) — PyO3 bindings ([maturin](https://www.maturin.rs)) |
 
