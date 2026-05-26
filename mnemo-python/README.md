@@ -10,6 +10,39 @@ sibling `mnemo/` crate — the storage engine, AES-256-GCM encryption, the
 write-ahead log, the IVF+PQ index, snapshots, and the agent-memory model all
 run as compiled Rust; Python only sees a small, ergonomic surface.
 
+> Distribution name on PyPI: `mnemo-db` (the bare `mnemo` name was taken).
+> The import name stays `mnemo`, so `pip install mnemo-db` then
+> `import mnemo` is the full setup.
+
+## For AI agents
+
+An agent that's been handed a `.mnemo` file and its passphrase can become
+productive in two calls — no external documentation required:
+
+```python
+import mnemo, os
+
+db = mnemo.open("agent.mnemo", os.environ["MNEMO_PASSPHRASE"])
+
+# The file introduces itself: returns memories tagged metadata.area="onboarding",
+# manifest first. Each entry tells you the embedder, agent_id convention,
+# project metadata, and any other context the file's author recorded.
+for entry in db.about():
+    print(entry["content"])
+```
+
+Creating a new database? It's self-describing from creation:
+
+```python
+db = mnemo.open("new.mnemo", "passphrase", dimensions=384)
+db.insert_default_manifest()    # same scaffold that `mnemo init` adds
+db.flush()
+```
+
+The scaffold tells the next agent what to do: replace it with one that
+records your real embedder and conventions. See the [main README](../mnemo/README.md#self-describing-databases)
+for the full pattern.
+
 ## Build & install
 
 The bindings build with [maturin](https://www.maturin.rs):

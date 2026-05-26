@@ -9,6 +9,26 @@ cargo run --example quickstart
 cargo run --bin mnemo -- demo
 ```
 
+## For AI agents
+
+The CLI is designed so an agent can become productive against a `.mnemo`
+file in two commands, with no external documentation:
+
+```sh
+# Handed an existing file? The file introduces itself.
+mnemo about path/to/agent.mnemo
+
+# Starting fresh? `init` auto-inserts a scaffold manifest so the new file
+# is self-describing from creation. Replace the scaffold once you know your
+# embedder, agent_id convention, and project metadata.
+mnemo init my-agent.mnemo --dimensions 768
+mnemo about my-agent.mnemo
+```
+
+Working on this codebase (not just using mnemo)? Start at
+[../AGENTS.md](../AGENTS.md) — repo layout, build/test commands,
+conventions, and the dogfood workflow.
+
 ---
 # Memory Nemo (MNemo)
 
