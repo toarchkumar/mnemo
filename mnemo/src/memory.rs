@@ -157,6 +157,61 @@ impl Memory {
             None => false,
         }
     }
+
+    /// Build the **canonical scaffold manifest** for a freshly-initialised
+    /// database. This is the default "I am a brand-new MNemo file" memory
+    /// inserted by `mnemo init` (and surfaced by `mnemo about`) so every new
+    /// database is self-describing from birth — no opt-in step required.
+    ///
+    /// The scaffold is a placeholder: the vector is all-zeros (it doesn't
+    /// pretend to carry semantic content), and `metadata.scaffold = true`
+    /// marks it as auto-generated so tooling and humans can tell it apart
+    /// from a hand-written manifest. The expected workflow is for the file's
+    /// author to replace this memory with one that records the project's
+    /// actual embedder, agent_id default, and conventions.
+    ///
+    /// See [`crate::Mnemo::about`] for the rest of the convention.
+    pub fn scaffold_manifest(dimensions: usize) -> Self {
+        let content = format!(
+            "MNEMO MANIFEST (scaffold) — Fresh {}-dimensional database created \
+             by `mnemo init`. This is a placeholder. Replace it with a memory \
+             that records your project's embedder (name, dimensions, normalize), \
+             default agent_id, and metadata conventions; keep the metadata keys \
+             `area=\"onboarding\"` and `topic=\"manifest\"` so `mnemo about` \
+             continues to surface it as the headline orientation point. Drop \
+             `metadata.scaffold` once you've replaced this entry so tooling \
+             knows the manifest has been curated.",
+            dimensions
+        );
+        let mut metadata = Map::new();
+        metadata.insert("area".into(), Value::String("onboarding".into()));
+        metadata.insert("topic".into(), Value::String("manifest".into()));
+        metadata.insert("scaffold".into(), Value::Bool(true));
+        metadata.insert(
+            "engine_version".into(),
+            Value::String(env!("CARGO_PKG_VERSION").into()),
+        );
+        metadata.insert(
+            "dimensions".into(),
+            Value::Number(serde_json::Number::from(dimensions as u64)),
+        );
+        let now = now_secs();
+        Memory {
+            id: Ulid::new(),
+            memory_type: MemoryType::Semantic,
+            vector: vec![0.0; dimensions],
+            content,
+            metadata,
+            agent_id: "mnemo".to_string(),
+            session_id: None,
+            scope: Scope::Shared,
+            created_at: now,
+            accessed_at: now,
+            access_count: 0,
+            importance: 1.0,
+            ttl_secs: None,
+        }
+    }
 }
 
 /// Distance/similarity metric for vector comparison.

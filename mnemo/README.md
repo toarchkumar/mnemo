@@ -214,7 +214,7 @@ cargo run --bin mnemo -- <command>
 
 | Command   | Purpose                                              |
 |-----------|------------------------------------------------------|
-| `init`    | Create a new empty encrypted database                |
+| `init`    | Create a new encrypted database (auto-adds scaffold manifest) |
 | `info`    | Print statistics (including ANN index shape)         |
 | `about`   | Self-describing briefing — print onboarding memories |
 | `import`  | Bulk-load memories from a JSON Lines file            |
@@ -253,8 +253,14 @@ extra file:
   entry. Hoisted to the top of `about` regardless of importance, and the
   only entry returned by `mnemo about --manifest-only`.
 
-The manifest is the headline orientation point — write one when you create a
-database. Recommended fields inside `metadata` on the manifest itself:
+The manifest is the headline orientation point — every database should have one.
+`mnemo init` auto-inserts a **scaffold manifest** (a placeholder with
+`metadata.scaffold = true`) so a new file is self-describing from the moment
+it's created; `mnemo about` tags it as `(scaffold — please replace)` until you
+overwrite it. Pass `--no-manifest` to `mnemo init` for an entirely empty file.
+
+Replace the scaffold with one that records your project's actual values.
+Recommended fields inside `metadata` on the manifest itself:
 
 - `embedder.name`, `embedder.dimensions`, `embedder.normalize` — which
   embedding model produces vectors compatible with this file. A receiving

@@ -23,12 +23,19 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Create a new empty encrypted database.
+    ///
+    /// By default a starter "scaffold" manifest memory is inserted so the
+    /// new file is self-describing from birth (visible via `mnemo about`).
+    /// Pass `--no-manifest` to skip it for an entirely empty file.
     Init {
         /// Path to the new `.mnemo` file.
         path: String,
         /// Embedding dimensionality.
         #[arg(long, default_value_t = 768)]
         dimensions: usize,
+        /// Skip the auto-generated scaffold manifest (create an empty file).
+        #[arg(long)]
+        no_manifest: bool,
         /// Passphrase (else `MNEMO_PASSPHRASE`).
         #[arg(long)]
         passphrase: Option<String>,
@@ -452,12 +459,25 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Init { path, dimensions, passphrase: pp } => {
+        Command::Init { path, dimensions, no_manifest, passphrase: pp } => {
             let pp = passphrase(&pp)?;
             let cfg = MnemoConfig { dimensions, ..Default::default() };
             let mut db = Mnemo::create(&path, &pp, cfg).map_err(fmt)?;
+            if !no_manifest {
+                let manifest = Memory::scaffold_manifest(dimensions);
+                db.remember(manifest).map_err(fmt)?;
+                db.flush().map_err(fmt)?;
+            }
             db.close().map_err(fmt)?;
-            println!("created {path} ({dimensions} dimensions, encrypted)");
+            if no_manifest {
+                println!("created {path} ({dimensions} dimensions, encrypted, no manifest)");
+            } else {
+                println!(
+                    "created {path} ({dimensions} dimensions, encrypted) with scaffold manifest"
+                );
+                println!("  → run `mnemo about {path}` to view it");
+                println!("  → replace it with one that records your embedder and conventions");
+            }
         }
         Command::Info { path, passphrase: pp } => {
             let pp = passphrase(&pp)?;
@@ -642,8 +662,20 @@ fn run() -> std::result::Result<(), String> {
                                 .get("topic")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
+                            let is_scaffold = m
+                                .metadata
+                                .get("scaffold")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
                             let head = if topic.eq_ignore_ascii_case("manifest") {
-                                format!("MANIFEST  (importance={:.2})", m.importance)
+                                if is_scaffold {
+                                    format!(
+                                        "MANIFEST (scaffold — please replace)  (importance={:.2})",
+                                        m.importance
+                                    )
+                                } else {
+                                    format!("MANIFEST  (importance={:.2})", m.importance)
+                                }
                             } else if topic.is_empty() {
                                 format!("(importance={:.2})", m.importance)
                             } else {

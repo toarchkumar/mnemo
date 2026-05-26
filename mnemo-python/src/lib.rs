@@ -292,6 +292,18 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// Insert the canonical scaffold manifest into this database. Mirrors what
+    /// `mnemo init` does by default — useful when you create a database
+    /// programmatically via `mnemo.open(path, pp, dimensions=N)` and want the
+    /// same self-describing-by-default behavior. Returns the new memory's
+    /// ULID as a string. Does not flush.
+    fn insert_default_manifest(&mut self) -> PyResult<String> {
+        let dims = self.inner.stats().map_err(to_py)?.dimensions;
+        let manifest = Memory::scaffold_manifest(dims);
+        let id = self.inner.remember(manifest).map_err(to_py)?;
+        Ok(id.to_string())
+    }
+
     /// Build the IVF+PQ approximate index; `recall` then runs sub-linearly.
     fn build_index(&mut self) -> PyResult<()> {
         self.inner.build_index().map(|_| ()).map_err(to_py)
