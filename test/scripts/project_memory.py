@@ -181,6 +181,98 @@ def cmd_recall(args: argparse.Namespace) -> None:
         print()
 
 
+def cmd_perf(args: argparse.Namespace) -> None:
+    """Ingest a JSON file of performance measurements as episodic memories.
+
+    Each entry is stored as one memory with metadata.area="performance" so
+    later sessions can recall by version, metric, or build (and human
+    readers see one durable observation per call).
+
+    Expected JSON shape — a list of objects, each with at least:
+        version     short tag, e.g. "v0.1.0"
+        measured_at ISO date or unix timestamp, e.g. "2026-05-25"
+        metric      machine-friendly key, e.g. "cli_info_latency_ms"
+        label       one-line human description
+        value       numeric measurement (number or null)
+        units       e.g. "ms", "MB", "%"
+        build       what was measured, e.g. "debug-cli" / "release-python"
+        corpus      what the measurement was taken against
+        notes       (optional) caveats, context, or interpretation
+    """
+    path = Path(args.file).expanduser().resolve()
+    if not path.exists():
+        sys.exit(f"perf file not found: {path}")
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        sys.exit(f"{path}: invalid JSON: {e}")
+    if not isinstance(entries, list) or not entries:
+        sys.exit(f"{path}: expected a non-empty JSON array of perf entries")
+
+    contents: list[str] = []
+    rendered: list[tuple[str, dict]] = []
+    for i, e in enumerate(entries):
+        if not isinstance(e, dict):
+            sys.exit(f"{path}[{i}]: expected an object, got {type(e).__name__}")
+        for required in ("version", "metric", "label"):
+            if required not in e:
+                sys.exit(f"{path}[{i}]: missing required key '{required}'")
+        version = str(e["version"])
+        metric = str(e["metric"])
+        label = str(e["label"])
+        value = e.get("value")
+        units = e.get("units") or ""
+        build = e.get("build", "unspecified")
+        corpus = e.get("corpus", "unspecified")
+        notes = e.get("notes", "")
+        measured_at = e.get("measured_at", "")
+
+        value_str = "n/a" if value is None else f"{value} {units}".strip()
+        date_str = f", {measured_at}" if measured_at else ""
+        notes_tail = f" — {notes}" if notes else ""
+        content = (
+            f"PERF [{version}{date_str}] {label}: {value_str} "
+            f"(build={build}; corpus={corpus}){notes_tail}"
+        )
+        metadata = {
+            "area": "performance",
+            "topic": metric,
+            "version": version,
+            "metric": metric,
+            "value": value,
+            "units": units,
+            "build": build,
+            "corpus": corpus,
+            "measured_at": measured_at,
+        }
+        if notes:
+            metadata["notes"] = notes
+        contents.append(content)
+        rendered.append((content, metadata))
+
+    print(
+        f"embedding {len(contents)} perf entries ({EMBED_MODEL}, dim={DIMENSIONS})..."
+    )
+    vectors = embed_texts(contents)
+
+    db = open_db()
+    written: list[str] = []
+    for (content, metadata), vector in zip(rendered, vectors):
+        mid = db.remember(
+            content,
+            "episodic",
+            vector,
+            agent_id=AGENT_ID,
+            importance=args.importance,
+            metadata=metadata,
+        )
+        written.append(mid)
+        print(f"  + {metadata['version']}/{metadata['metric']}  {mid}")
+    db.flush()
+    db.close()
+    print(f"ingested {len(written)} perf memories from {path}")
+
+
 def cmd_info(_: argparse.Namespace) -> None:
     db = open_db()
     stats = db.stats()
@@ -222,6 +314,19 @@ def main() -> None:
 
     p_info = sub.add_parser("info", help="Show database stats")
     p_info.set_defaults(func=cmd_info)
+
+    p_perf = sub.add_parser(
+        "perf",
+        help="Ingest a JSON file of perf measurements as episodic memories",
+    )
+    p_perf.add_argument("file", help="Path to a JSON list of perf entries")
+    p_perf.add_argument(
+        "--importance",
+        type=float,
+        default=0.7,
+        help="Importance score for ingested perf memories (default: 0.7)",
+    )
+    p_perf.set_defaults(func=cmd_perf)
 
     args = parser.parse_args()
     args.func(args)

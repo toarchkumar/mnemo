@@ -276,6 +276,73 @@ cargo run --example quickstart
 Minimum supported Rust version: **1.75**. All dependency versions are pinned
 exactly for reproducibility.
 
+## Performance
+
+A running log of measured performance, so future versions can be compared
+against earlier baselines. Each entry records the corpus, the build, and the
+numbers — append a new entry rather than overwriting one when a change is
+expected to move them.
+
+### Baseline — v0.1.0, May 2026 (dogfood DB)
+
+**Corpus.** `test/project.mnemo`, 31 live memories, 384-dim MiniLM
+embeddings, encrypted, no ANN index, 1.41 MB on disk (844 KB at 28
+memories — the file grew under repeated bootstraps via append-only history).
+
+**Builds.** CLI numbers are from the **debug** `cargo run --bin mnemo`;
+Python numbers are from the **release** `maturin develop` wheel. Argon2id
+parameters are `KdfParams::secure()` (`m_cost=19456`, `t_cost=2`). Latencies
+are medians over a handful of runs, not rigorous percentiles.
+
+**File-size breakdown** at 844 KB / 28 memories:
+
+| Region                          | Pages | Size   | Share |
+|---------------------------------|-------|--------|-------|
+| Header (plaintext, KDF + salt)  | 1     | 8 KB   | ~1%   |
+| WAL region (reserved)           | 64    | 512 KB | ~62%  |
+| Data, catalog, manifest, history| 38    | 311 KB | ~37%  |
+
+Per-page crypto overhead is 28 B (12-byte nonce + 16-byte GCM tag) ≈ 0.3% —
+negligible. The dominant costs at small N are the 512 KiB WAL reservation,
+8 KiB page rounding, and the append-only snapshot history left behind by
+repeated flushes. Logical payload (UTF-8 text + f32 vectors) is ~50 KB,
+≈ 5.9% of the file; effective on-disk cost is ~45 KB per memory at N=31.
+
+**Operation latency** (debug CLI unless noted):
+
+| Operation                           | Median  | Notes                              |
+|-------------------------------------|---------|------------------------------------|
+| `info`                              | ~330 ms | KDF + read header/catalog          |
+| `list` (31 memories)                | ~330 ms | KDF + decrypt/decode all records   |
+| `get` (one memory)                  | ~290 ms | KDF + decrypt one record           |
+| `verify`                            | ~330 ms | KDF + decrypt/validate all         |
+| Python `open` + `recall` top-10     | ~35 ms  | release wheel, same crypto         |
+| Python `remember` + `flush`         | ~31 ms  | includes MiniLM embed + WAL fsync  |
+
+**Verdict at this scale.** Argon2id dominates every CLI invocation
+(~250–300 ms of the ~330 ms). Per-record decrypt is cheap; reopening the
+file is not. Long-lived processes (an agent server, the Python binding held
+across calls) avoid the KDF tax and land in the tens-of-milliseconds range.
+For a 31-memory dogfood file, on-disk overhead is ~17× the raw payload —
+this is the format's worst case (fixed WAL reservation + page rounding +
+append history dominate everything else). The README design targets
+(<5 ms recall at 100 K, <15 ms at 1 M, <4 KB/memory) are aspirational
+goals at scale, not yet measured here.
+
+**Knobs that should help small files.** Running `compact` collapses
+snapshot history back to a single page run; the default 64-page WAL
+reservation is fixed today and would need a config change to shrink. ANN
+index builds are not worth it below ~thousands of memories.
+
+### Performance history
+
+Append a row whenever a release changes how the format behaves. Earlier
+rows stay as-is so improvements (or regressions) are visible.
+
+| Version | Date     | Corpus     | File size | CLI `info` | Python recall | Notes                  |
+|---------|----------|------------|-----------|------------|---------------|------------------------|
+| v0.1.0  | 2026-05  | 31 mems, 384-dim, no index | 1.41 MB | ~330 ms | ~35 ms | Initial dogfood baseline |
+
 ## Scope: what is and isn't here
 
 This crate is a faithful build of the MNemo plan, built to actually compile,

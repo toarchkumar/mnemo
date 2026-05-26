@@ -1,5 +1,47 @@
 [
   {
+    "content": "PROJECT MISSION: We are building Memory Nemo (MNemo) — an encrypted single-file Rust agent-memory engine — while dogfooding it in this repo. Ongoing project context (architecture, decisions, how we work) lives in test/project.mnemo so new AI sessions stay aligned without relying only on chat history.",
+    "memory_type": "semantic",
+    "importance": 1.0,
+    "metadata": { "area": "onboarding", "topic": "mission" }
+  },
+  {
+    "content": "NEW SESSION ONBOARDING (do this first): (1) Read test/README.md. (2) Confirm test/.env has MNEMO_PASSPHRASE and test/project.mnemo exists. (3) source test/.venv/bin/activate (create venv + maturin develop per test/README if missing). (4) python test/scripts/project_memory.py recall \"project goals architecture dogfooding current task\". (5) Treat recall output as authoritative context. (6) Read mnemo/README.md for engine details if implementing Rust/CLI.",
+    "memory_type": "procedural",
+    "importance": 1.0,
+    "metadata": { "area": "onboarding", "topic": "checklist" }
+  },
+  {
+    "content": "HOW TO ACCESS PROJECT MEMORY: File test/project.mnemo (encrypted, 384 dimensions, agent_id cursor-agent). Passphrase in test/.env as MNEMO_PASSPHRASE — export it or the script loads .env automatically. Never commit test/.env or any .mnemo file. Python tool: test/scripts/project_memory.py. Rust CLI: cd mnemo && cargo run --bin mnemo -- <cmd> ../test/project.mnemo with MNEMO_PASSPHRASE set.",
+    "memory_type": "procedural",
+    "importance": 1.0,
+    "metadata": { "area": "onboarding", "topic": "access" }
+  },
+  {
+    "content": "AGENT WORKFLOW IN THIS REPO: Before substantive work → recall with a short task description. After durable learnings → remember one fact per call (semantic=stable facts, procedural=how-to, episodic=dated events). Optionally add to test/scripts/seed.json and run bootstrap to refresh canonical memory. Follow .cursor/rules/project-memory.mdc.",
+    "memory_type": "procedural",
+    "importance": 1.0,
+    "metadata": { "area": "onboarding", "topic": "workflow" }
+  },
+  {
+    "content": "TWO WAYS TO READ MEMORY: (A) Natural language — python test/scripts/project_memory.py recall \"your question\" (uses sentence-transformers all-MiniLM-L6-v2, 384-dim, local). (B) CLI only — mnemo info|list|get|verify on test/project.mnemo; mnemo recall|search need --query as comma-separated floats (copy vectors from test/project-memory.jsonl after bootstrap).",
+    "memory_type": "procedural",
+    "importance": 0.95,
+    "metadata": { "area": "onboarding", "topic": "read-paths" }
+  },
+  {
+    "content": "ONE-TIME / REPAIR SETUP: cd mnemo-python && pip install maturin && maturin develop. python3 -m venv test/.venv && source test/.venv/bin/activate && pip install -r test/requirements.txt. Copy test/.env.example to test/.env and set MNEMO_PASSPHRASE (or ask user). Create DB: python test/scripts/project_memory.py bootstrap.",
+    "memory_type": "procedural",
+    "importance": 0.95,
+    "metadata": { "area": "onboarding", "topic": "setup" }
+  },
+  {
+    "content": "REFRESH MEMORY FROM CANONICAL SEEDS: Edit test/scripts/seed.json (tracked in git), then python test/scripts/project_memory.py bootstrap — wipes test/project.mnemo and re-embeds all entries, writes test/project-memory.jsonl. Use remember for incremental adds without wiping prior episodic history.",
+    "memory_type": "procedural",
+    "importance": 0.9,
+    "metadata": { "area": "onboarding", "topic": "bootstrap" }
+  },
+  {
     "content": "MNemo (Memory Nemo) is an encrypted single-file portable agent-memory engine written in Rust. One .mnemo file holds vectors, text, metadata, and recall logic with no external vector server.",
     "memory_type": "semantic",
     "importance": 1.0,
@@ -48,7 +90,7 @@
     "metadata": { "area": "durability" }
   },
   {
-    "content": "Integration test suite: 28 tests in mnemo/tests/integration.rs covering WAL recovery, snapshots, sessions, ANN index, encryption, compaction. cargo test in mnemo/ passes.",
+    "content": "Test suite: 28 integration tests in mnemo/tests/integration.rs plus 9 CLI smoke tests in mnemo/tests/cli_smoke.rs (get, list, recall). cargo test in mnemo/ runs all.",
     "memory_type": "semantic",
     "importance": 0.75,
     "metadata": { "area": "testing" }
@@ -60,10 +102,16 @@
     "metadata": { "area": "commands" }
   },
   {
-    "content": "CLI commands: init, info, import (JSONL), index, search, verify, rekey, compact, snapshots, restore, demo. JSONL import requires content and vector fields per line.",
+    "content": "CLI commands: init, info, import (JSONL), index, list, get, search, recall, verify, rekey, compact, snapshots, restore, demo. list/get/recall support --format table|json|jsonl. recall needs --query as comma-separated floats (same dim as DB); search is similarity-only.",
     "memory_type": "procedural",
-    "importance": 0.8,
+    "importance": 0.95,
     "metadata": { "area": "cli" }
+  },
+  {
+    "content": "Explore a .mnemo file via CLI: mnemo info (stats), mnemo list (browse, O(n) decrypt), mnemo get <ULID> (one record), mnemo recall --query vec (multi-signal). Workflow: info → list → get → recall. Or use python test/scripts/project_memory.py recall for NL queries with embeddings.",
+    "memory_type": "procedural",
+    "importance": 0.9,
+    "metadata": { "area": "cli", "topic": "explore" }
   },
   {
     "content": "Python bindings: cd mnemo-python && pip install maturin && maturin develop. API: mnemo.open(path, passphrase, dimensions=...), remember, recall, session, flush, build_index, snapshots.",
@@ -72,21 +120,21 @@
     "metadata": { "area": "python" }
   },
   {
-    "content": "Dogfooding sandbox lives in test/ (gitignored runtime). Tracked: test/scripts/, seed.json, project_memory.py. Memory file: test/project.mnemo. Embeddings: all-MiniLM-L6-v2, 384 dimensions, normalized.",
+    "content": "Dogfooding sandbox: test/ holds project.mnemo (local encrypted brain). Tracked in git: test/scripts/seed.json, project_memory.py, test/README.md. Runtime gitignored: test/.env, test/project.mnemo, test/.venv, test/.cache/, test/project-memory.jsonl. Embeddings: all-MiniLM-L6-v2, 384 dim.",
     "memory_type": "semantic",
     "importance": 1.0,
     "metadata": { "area": "dogfood", "topic": "this-project" }
   },
   {
-    "content": "Bootstrap project memory: python test/scripts/project_memory.py bootstrap. Recall for agent context: python test/scripts/project_memory.py recall \"your task\". Append memory: project_memory.py remember \"fact\" --type semantic.",
+    "content": "project_memory.py commands: bootstrap (rebuild from seed.json), recall \"query\" (NL context), remember \"fact\" --type semantic|episodic|procedural [--importance 0-1], info (stats). All target test/project.mnemo.",
     "memory_type": "procedural",
     "importance": 1.0,
     "metadata": { "area": "dogfood", "topic": "commands" }
   },
   {
-    "content": "Remote origin: https://github.com/toarchkumar/mnemo.git. Site: https://toarchkumar.github.io/mnemo/. License Apache-2.0.",
+    "content": "Remote origin: https://github.com/toarchkumar/mnemo.git. Site: https://toarchkumar.github.io/mnemo/. License Apache-2.0. Latest dogfood+CLI work on main includes commit 6496f55 (list/get/recall CLI, test sandbox, Cursor rule).",
     "memory_type": "semantic",
-    "importance": 0.6,
+    "importance": 0.7,
     "metadata": { "area": "meta" }
   },
   {
@@ -96,9 +144,27 @@
     "metadata": { "area": "roadmap" }
   },
   {
+    "content": "index.html CLI tab documents real mnemo subcommands: MNEMO_PASSPHRASE env, init/import/index, list/get/recall/search with vector queries, rekey --new-passphrase. Landing page matches mnemo/README.md.",
+    "memory_type": "semantic",
+    "importance": 0.7,
+    "metadata": { "area": "docs" }
+  },
+  {
     "content": "2026-05-25: Started MNemo dogfooding — test/project.mnemo with local sentence-transformers embeddings and cursor-agent as agent_id. Passphrase in test/.env (gitignored).",
     "memory_type": "episodic",
     "importance": 0.9,
     "metadata": { "area": "dogfood", "event": "bootstrap" }
+  },
+  {
+    "content": "2026-05-25: Shipped CLI exploration (list, get, recall) and dogfood sandbox in commit 6496f55 on main. Cursor rule .cursor/rules/project-memory.mdc recalls test/project.mnemo before substantive work.",
+    "memory_type": "episodic",
+    "importance": 0.95,
+    "metadata": { "area": "dogfood", "event": "release", "commit": "6496f55" }
+  },
+  {
+    "content": "2026-05-25: Expanded project.mnemo seed with explicit new-session onboarding memories (mission, access paths, agent workflow, setup, bootstrap) so a fresh AI can recall and understand the full dogfood context.",
+    "memory_type": "episodic",
+    "importance": 0.95,
+    "metadata": { "area": "dogfood", "event": "onboarding-refresh" }
   }
 ]

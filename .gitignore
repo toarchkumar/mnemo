@@ -18,3 +18,4 @@ test/project-memory.jsonl
 test/.cache/
 test/__pycache__/
 test/.venv/
+**/__pycache__/

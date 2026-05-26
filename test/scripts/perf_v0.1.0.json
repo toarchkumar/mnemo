@@ -1,0 +1,145 @@
+[
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "file_size_bytes",
+    "label": "test/project.mnemo file size",
+    "value": 1409024,
+    "units": "bytes",
+    "build": "release-python (dogfood DB)",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "Was ~844 KB at 28 memories; grew via append-only history after benchmark writes. compact would collapse old snapshot pages."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "bytes_per_memory_on_disk",
+    "label": "Effective on-disk cost per memory",
+    "value": 45000,
+    "units": "bytes",
+    "build": "release-python (dogfood DB)",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "Worst case — raw payload is ~50 KB total (~1.6 KB/memory); fixed 512 KiB WAL reservation + page rounding + snapshot history dominate at small N."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "payload_share_pct",
+    "label": "Logical text+vectors as fraction of file",
+    "value": 5.9,
+    "units": "%",
+    "build": "release-python (dogfood DB)",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "~50 KB payload (6.8 KB text + 47.6 KB f32 vectors) inside ~844 KB at 28 memories."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "wal_share_pct",
+    "label": "Reserved WAL region as fraction of file",
+    "value": 62,
+    "units": "%",
+    "build": "release-python (dogfood DB)",
+    "corpus": "844 KB file at 28 memories",
+    "notes": "64 pages = 512 KiB reservation, fixed today. Smaller initial WAL would need a config change. WAL share shrinks as N grows."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "data_share_pct",
+    "label": "Data/catalog/manifest pages as fraction of file",
+    "value": 37,
+    "units": "%",
+    "build": "release-python (dogfood DB)",
+    "corpus": "844 KB file at 28 memories",
+    "notes": "38 pages = 311 KB of records, catalog snapshots, and history (append-only)."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "per_page_crypto_overhead_pct",
+    "label": "AES-256-GCM per-page overhead",
+    "value": 0.3,
+    "units": "%",
+    "build": "release-python (dogfood DB)",
+    "corpus": "8 KiB pages",
+    "notes": "28 bytes/page: 12-byte nonce + 16-byte GCM tag. Encryption is not the source of size bloat at small N."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "argon2id_open_latency_ms",
+    "label": "Argon2id KEK derivation on every open",
+    "value": 275,
+    "units": "ms",
+    "build": "release",
+    "corpus": "KdfParams::secure() — m_cost=19456, t_cost=2",
+    "notes": "Range observed ~250–300 ms. This cost dominates every sub-second CLI command. Long-lived processes amortize it across many calls."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "cli_info_latency_ms",
+    "label": "CLI `mnemo info` median latency",
+    "value": 330,
+    "units": "ms",
+    "build": "debug-cli",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "KDF-bound: ~275 ms Argon2id + decrypt header/catalog. Release build would be faster on the non-KDF part only."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "cli_list_latency_ms",
+    "label": "CLI `mnemo list` median latency (full live set)",
+    "value": 330,
+    "units": "ms",
+    "build": "debug-cli",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "KDF + decrypt every record; ~90 memories/s decrypt+decode throughput after Argon2id is paid."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "cli_get_latency_ms",
+    "label": "CLI `mnemo get` median latency (single record)",
+    "value": 290,
+    "units": "ms",
+    "build": "debug-cli",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "Per-record decrypt is microseconds; ~290 ms is almost all Argon2id. Point reads at ~3/s if you reopen each time."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "cli_verify_latency_ms",
+    "label": "CLI `mnemo verify` median latency",
+    "value": 330,
+    "units": "ms",
+    "build": "debug-cli",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "Same shape as list: KDF + decrypt/validate every live record."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "python_recall_top10_latency_ms",
+    "label": "Python open + recall top-10 (release wheel)",
+    "value": 35,
+    "units": "ms",
+    "build": "release-python (maturin develop)",
+    "corpus": "31 memories, 384-dim, encrypted, no ANN index",
+    "notes": "Same crypto as the CLI but on a release build, and the binary cost is much lower. Long-lived processes that keep the DB open avoid the KDF tax entirely on subsequent calls."
+  },
+  {
+    "version": "v0.1.0",
+    "measured_at": "2026-05-25",
+    "metric": "python_remember_flush_latency_ms",
+    "label": "Python remember + flush (one durable write)",
+    "value": 31,
+    "units": "ms",
+    "build": "release-python (maturin develop)",
+    "corpus": "31 memories, 384-dim",
+    "notes": "Includes one MiniLM embedding + one WAL-fsynced transaction. Each durable write costs roughly one commit; append-only layout adds catalog/manifest pages per flush."
+  }
+]
