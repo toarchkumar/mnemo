@@ -12,7 +12,9 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-mnemo = { path = "../.." }
+# Core crate is published as `mnemo-db`; its [lib] name stays `mnemo`,
+# so source code still writes `use mnemo::...`.
+mnemo = { package = "mnemo-db", path = "../.." }
 napi = { version = "2", default-features = false, features = ["napi6"] }
 napi-derive = "2"
 

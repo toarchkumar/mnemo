@@ -13,8 +13,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # The Rust core, renamed so it does not collide with this crate's own `mnemo`
-# library name.
-mnemo_core = { path = "../mnemo", package = "mnemo" }
+# library name. The core's package name on crates.io is `mnemo-db`.
+mnemo_core = { path = "../mnemo", package = "mnemo-db" }
 # `extension-module` keeps libpython unlinked; `abi3-py38` builds against the
 # stable ABI so one wheel works across Python 3.8+.
 pyo3 = { version = "=0.22.6", features = ["extension-module", "abi3-py38"] }

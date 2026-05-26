@@ -1,5 +1,9 @@
 [package]
-name = "mnemo"
+# Distribution name on crates.io is `mnemo-db` because `mnemo` is already
+# taken by an unrelated crate. The library and CLI binary names below stay
+# `mnemo`, so consumers still write `use mnemo::...` and invoke `mnemo` on
+# the command line after `cargo add mnemo-db`.
+name = "mnemo-db"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"

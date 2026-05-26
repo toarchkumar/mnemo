@@ -12,5 +12,7 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-mnemo = { path = "../.." }
+# Core crate is published as `mnemo-db`; its [lib] name stays `mnemo`,
+# so source code still writes `use mnemo::...`.
+mnemo = { package = "mnemo-db", path = "../.." }
 pyo3 = { version = "0.22", features = ["extension-module"] }
