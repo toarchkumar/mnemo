@@ -1,5 +1,30 @@
 [
   {
+    "content": "MNEMO MANIFEST — This .mnemo file is the project memory for the Memory Nemo (MNemo) project, an encrypted single-file Rust agent-memory engine. Embedder: sentence-transformers/all-MiniLM-L6-v2 (384-dim, normalize_embeddings=true). Default agent_id: cursor-agent. Metadata convention: area in {onboarding, performance, decision, ...} with a topic key. Self-describing: run `mnemo about <path>` (or db.about() in Python) to surface every memory tagged area=onboarding, sorted by importance — that briefing is the source of truth for how to use this file. Dogfood helper: test/scripts/project_memory.py. Engine docs: mnemo/README.md.",
+    "memory_type": "semantic",
+    "importance": 1.0,
+    "metadata": {
+      "area": "onboarding",
+      "topic": "manifest",
+      "embedder": {
+        "name": "sentence-transformers/all-MiniLM-L6-v2",
+        "dimensions": 384,
+        "normalize": true
+      },
+      "agent_id_default": "cursor-agent",
+      "conventions": {
+        "area_values": ["onboarding", "performance", "decision", "product", "architecture"],
+        "perf_keys": ["version", "metric", "value", "units", "build", "corpus"]
+      },
+      "project": {
+        "name": "Memory Nemo (MNemo)",
+        "repo": "https://github.com/toarchkumar/mnemo",
+        "engine_docs": "mnemo/README.md",
+        "dogfood_helper": "test/scripts/project_memory.py"
+      }
+    }
+  },
+  {
     "content": "PROJECT MISSION: We are building Memory Nemo (MNemo) — an encrypted single-file Rust agent-memory engine — while dogfooding it in this repo. Ongoing project context (architecture, decisions, how we work) lives in test/project.mnemo so new AI sessions stay aligned without relying only on chat history.",
     "memory_type": "semantic",
     "importance": 1.0,

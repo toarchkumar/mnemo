@@ -111,6 +111,27 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Self-describing briefing — print the database's onboarding memories.
+    ///
+    /// Surfaces memories tagged `metadata.area = "onboarding"` (most important
+    /// first), prefixed by a one-line stats summary. This is how a fresh
+    /// agent — yours or someone else's — gets oriented to a `.mnemo` file
+    /// using only the file itself and its passphrase, with no external docs.
+    ///
+    /// A canonical entry tagged `metadata.topic = "manifest"` is treated as
+    /// the headline orientation point.
+    About {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        /// Print only the manifest memory (topic=manifest), no other onboarding entries.
+        #[arg(long)]
+        manifest_only: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
     /// Fetch a single memory by its ULID.
     Get {
         /// Path to the `.mnemo` file.
@@ -548,6 +569,97 @@ fn run() -> std::result::Result<(), String> {
             }
             for (m, sim) in hits {
                 println!("{sim:.4}  [{}]  {}", m.memory_type.as_str(), m.content);
+            }
+        }
+        Command::About { path, format, manifest_only, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let stats = db.stats().map_err(fmt)?;
+            let snapshots = db.snapshots().len();
+            let mut entries = db.about().map_err(fmt)?;
+            if manifest_only {
+                entries.retain(|m| {
+                    m.metadata
+                        .get("topic")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.eq_ignore_ascii_case("manifest"))
+                        .unwrap_or(false)
+                });
+            }
+            match format {
+                OutputFormat::Json | OutputFormat::Jsonl => {
+                    let manifest = entries.iter().find(|m| {
+                        m.metadata
+                            .get("topic")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.eq_ignore_ascii_case("manifest"))
+                            .unwrap_or(false)
+                    });
+                    let doc = serde_json::json!({
+                        "path": path,
+                        "stats": {
+                            "memories": stats.memories,
+                            "dimensions": stats.dimensions,
+                            "file_bytes": stats.file_bytes,
+                            "encrypted": stats.encrypted,
+                            "snapshots": snapshots,
+                            "has_index": stats.index.is_some(),
+                        },
+                        "manifest": manifest.map(|m| memory_to_json(m, false)),
+                        "onboarding": entries
+                            .iter()
+                            .map(|m| memory_to_json(m, false))
+                            .collect::<Vec<_>>(),
+                    });
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
+                    );
+                }
+                OutputFormat::Table => {
+                    // One-line stats header — what kind of file you're looking at.
+                    println!(
+                        "# {}  ({} memories · {}-dim · {} · {} snapshots{})",
+                        path,
+                        stats.memories,
+                        stats.dimensions,
+                        if stats.encrypted { "encrypted" } else { "plaintext" },
+                        snapshots,
+                        if stats.index.is_some() { " · ANN index built" } else { "" },
+                    );
+                    if entries.is_empty() {
+                        println!();
+                        println!("(no onboarding memories — this database has no self-description.)");
+                        println!("To make a database self-describing, store a memory with");
+                        println!("  metadata = {{\"area\": \"onboarding\", \"topic\": \"manifest\"}}");
+                        println!("that introduces the project, embedder, and conventions.");
+                    } else {
+                        println!();
+                        println!("## Onboarding briefing ({} entries, most important first)", entries.len());
+                        for m in &entries {
+                            let topic = m
+                                .metadata
+                                .get("topic")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let head = if topic.eq_ignore_ascii_case("manifest") {
+                                format!("MANIFEST  (importance={:.2})", m.importance)
+                            } else if topic.is_empty() {
+                                format!("(importance={:.2})", m.importance)
+                            } else {
+                                format!("[{}]  (importance={:.2})", topic, m.importance)
+                            };
+                            println!();
+                            println!("### {head}");
+                            println!("{}", m.content);
+                        }
+                        println!();
+                        println!("## Quick start");
+                        println!("  mnemo list   {path}                 # browse all live memories");
+                        println!("  mnemo recall {path} --query VEC     # multi-signal recall");
+                        println!("  mnemo get    {path} <ulid> --verbose # fetch one memory");
+                    }
+                }
             }
         }
         Command::Get { path, id, format, verbose, vector, passphrase: pp } => {

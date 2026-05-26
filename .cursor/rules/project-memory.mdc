@@ -9,12 +9,21 @@ This repo keeps an encrypted local memory file at `test/project.mnemo`.
 
 ## Before substantive work
 
-Run recall and treat the output as authoritative project context (especially for
-MNemo architecture, layout, commands, and prior dogfood decisions):
+First, orient on the file itself — the manifest tells you which embedder,
+which agent_id, and which metadata conventions this database expects:
+
+```bash
+mnemo about test/project.mnemo
+```
+
+Then pull task-specific context via natural-language recall:
 
 ```bash
 python test/scripts/project_memory.py recall "<short description of the current task>"
 ```
+
+Treat both outputs as authoritative project context (especially for MNemo
+architecture, layout, commands, and prior dogfood decisions).
 
 If the command fails (missing `.env`, `mnemo` package, or `project.mnemo`), say so
 and run setup from `test/README.md` or ask the user to fix `test/.env`.

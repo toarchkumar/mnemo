@@ -284,6 +284,17 @@ fn load_index(
     Ok(Some(idx))
 }
 
+/// True if a memory's metadata marks it as the canonical onboarding manifest
+/// (`metadata.topic == "manifest"`). Used by [`Mnemo::about`] to hoist the
+/// manifest to the top of the briefing regardless of importance ordering.
+fn is_manifest(m: &Memory) -> bool {
+    m.metadata
+        .get("topic")
+        .and_then(|v| v.as_str())
+        .map(|s| s.eq_ignore_ascii_case("manifest"))
+        .unwrap_or(false)
+}
+
 /// Build the ULID → catalog-slot lookup map.
 fn build_id_index(catalog: &[CatalogEntry]) -> HashMap<u128, usize> {
     let mut m = HashMap::with_capacity(catalog.len());
@@ -599,6 +610,41 @@ impl Mnemo {
         for e in &entries {
             out.push(self.read_memory(e)?);
         }
+        Ok(out)
+    }
+
+    /// Return the database's **self-describing onboarding memories** — the
+    /// ones tagged `metadata.area = "onboarding"`. This is the engine-level
+    /// surface for the *single-file philosophy*: an agent who receives a
+    /// `.mnemo` file (and its passphrase) can call this to learn what the
+    /// file is, which embedder it expects, the recommended agent id, and any
+    /// other conventions the file's author chose to record — all without
+    /// needing any external documentation.
+    ///
+    /// Ordering: the canonical manifest (tag `metadata.topic = "manifest"`)
+    /// always comes first; everything else follows in `importance` descending,
+    /// then `created_at` ascending for deterministic results.
+    pub fn about(&mut self) -> Result<Vec<Memory>> {
+        let mut out: Vec<Memory> = self
+            .memories()?
+            .into_iter()
+            .filter(|m| {
+                m.metadata
+                    .get("area")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("onboarding"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            let a_manifest = is_manifest(a);
+            let b_manifest = is_manifest(b);
+            // Manifest topic wins first; then importance desc; then created_at asc.
+            b_manifest
+                .cmp(&a_manifest)
+                .then_with(|| b.importance.total_cmp(&a.importance))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
         Ok(out)
     }
 

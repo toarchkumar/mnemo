@@ -7,10 +7,18 @@ secrets. Runtime files are gitignored; `test/scripts/` and this README are track
 
 ```bash
 source test/.venv/bin/activate
+# Orient first — manifest + onboarding briefing, sourced from the .mnemo file itself
+mnemo about test/project.mnemo
+# (or: python -c "import mnemo, os; print(mnemo.open('test/project.mnemo', os.environ['MNEMO_PASSPHRASE']).about())")
+
+# Then pull task-specific context
 python test/scripts/project_memory.py recall "project goals architecture dogfooding"
 ```
 
-Treat the output as authoritative project context (see also `.cursor/rules/project-memory.mdc`).
+`mnemo about` surfaces the database's self-describing memories (tagged
+`metadata.area="onboarding"`), starting with the manifest. Treat it as the
+source of truth for embedder, agent_id, and conventions — see
+`.cursor/rules/project-memory.mdc` for the agent workflow rule.
 
 ## One-time setup
 

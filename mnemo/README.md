@@ -216,6 +216,7 @@ cargo run --bin mnemo -- <command>
 |-----------|------------------------------------------------------|
 | `init`    | Create a new empty encrypted database                |
 | `info`    | Print statistics (including ANN index shape)         |
+| `about`   | Self-describing briefing — print onboarding memories |
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters) |
@@ -229,11 +230,53 @@ cargo run --bin mnemo -- <command>
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |
 
-### Exploring a database
+### Self-describing databases
 
-The four exploration commands compose into a quick read-only workflow:
+A `.mnemo` file should be able to introduce itself. The single-file philosophy
+is that everything an agent needs to use this database lives in the file —
+not in a sibling README, not in environment configuration, not in tribal
+knowledge. The `about` command surfaces that introduction:
 
 ```sh
+cargo run --bin mnemo -- about agent.mnemo
+# Prints a one-line stats header, then every memory tagged
+# metadata.area = "onboarding" sorted with the canonical manifest first,
+# then by importance descending, ending with a quick-start footer.
+```
+
+The convention is two metadata keys on ordinary memories — no new schema, no
+extra file:
+
+- `metadata.area = "onboarding"` marks a memory as part of the orientation
+  briefing. Returned by `Mnemo::about()` (Rust) and `db.about()` (Python).
+- `metadata.topic = "manifest"` marks the *one* canonical "I am this file"
+  entry. Hoisted to the top of `about` regardless of importance, and the
+  only entry returned by `mnemo about --manifest-only`.
+
+The manifest is the headline orientation point — write one when you create a
+database. Recommended fields inside `metadata` on the manifest itself:
+
+- `embedder.name`, `embedder.dimensions`, `embedder.normalize` — which
+  embedding model produces vectors compatible with this file. A receiving
+  agent uses this to pick the right embedder or fail loudly when it can't.
+- `agent_id_default` — the agent id convention used when writing here.
+- `project.name`, `project.repo` — what project this database serves.
+- `conventions.*` — any project-specific metadata schemas (e.g. perf entries
+  always carry `version`, `metric`, `value`, `units`, `build`, `corpus`).
+
+`seed.json` in `test/scripts/` shows a working example. With a manifest in
+place, an agent receiving a `.mnemo` file plus its passphrase needs no
+external docs: `mnemo about <file>` (or `db.about()`) tells them what the
+file is and how to use it.
+
+### Exploring a database
+
+The exploration commands compose into a quick read-only workflow:
+
+```sh
+# orient — what is this file? (manifest + onboarding briefing)
+cargo run --bin mnemo -- about agent.mnemo
+
 # overview — size, agents, index shape, snapshot count
 cargo run --bin mnemo -- info agent.mnemo
 

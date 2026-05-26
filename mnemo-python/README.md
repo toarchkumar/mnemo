@@ -93,6 +93,7 @@ its own agent.
 | `recall(query, top_k=10, memory_types=None, agent_id=None)` | Multi-signal ranked retrieval |
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
+| `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
 | `session(agent_id)` | Begin a conversation `Session` |
 | `flush()` / `close()` | Persist pending changes |
 | `verify()` | Decrypt and re-validate every record |

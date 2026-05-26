@@ -277,6 +277,21 @@ impl Mnemo {
         self.inner.verify().map_err(to_py)
     }
 
+    /// Return the database's self-describing onboarding memories (those tagged
+    /// `metadata.area = "onboarding"`), sorted by importance descending then
+    /// created_at ascending. This is the engine-level entry point for a
+    /// fresh agent to learn what the file is, which embedder it expects, and
+    /// any other conventions the file's author chose to record — all without
+    /// needing any external documentation. Each entry is returned as a dict
+    /// matching the shape of `recall`/`get` results.
+    fn about(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let mut out = Vec::new();
+        for m in self.inner.about().map_err(to_py)? {
+            out.push(memory_to_dict(py, &m)?);
+        }
+        Ok(out)
+    }
+
     /// Build the IVF+PQ approximate index; `recall` then runs sub-linearly.
     fn build_index(&mut self) -> PyResult<()> {
         self.inner.build_index().map(|_| ()).map_err(to_py)
