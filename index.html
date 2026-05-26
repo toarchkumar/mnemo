@@ -160,18 +160,120 @@ nav {
   text-transform: uppercase; letter-spacing: 0.15em;
   color: var(--accent); margin-bottom: 2rem;
 }
-.arch-box {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(0.5rem, 1vw, 0.75rem);
-  line-height: 1.4;
-  color: var(--text-1);
-  white-space: pre;
+
+/* — VISUAL DIAGRAMS (Replaces ASCII) — */
+.visual-box {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 2rem 2.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(0.65rem, 1vw, 0.8rem);
+  color: var(--text-1);
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
+  margin: 0 auto;
+}
+
+/* Encryption Architecture Flow */
+.crypto-layout {
+  min-width: 650px;
+  margin-bottom: 2.5rem;
+}
+.crypto-row {
+  display: flex;
+  align-items: center;
+}
+.crypto-arrow {
+  color: var(--text-2);
+  margin: 0 0.75rem;
+}
+.crypto-link-down {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--text-2);
+  line-height: 1.1;
+  margin: 0.5rem 0;
+}
+
+/* File Structure Grid */
+.file-wrapper {
+  min-width: 650px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}
+.file-header {
+  color: var(--text-1);
+  margin-bottom: 1rem;
+}
+.file-container {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.file-band {
+  border-bottom: 1px solid var(--border);
+  padding: 1rem;
+}
+.file-band:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.band-title {
+  color: var(--text-0);
+  margin-bottom: 0.25rem;
+}
+.band-desc {
+  color: var(--text-2);
+}
+.file-columns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+}
+.file-col {
+  padding: 1rem 0.5rem;
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+.file-col:last-child {
+  border-right: none;
+}
+
+/* Score Formula */
+.formula-layout {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.5rem;
+  min-width: 700px;
+  padding: 1rem 0;
+}
+.formula-base, .formula-op {
+  color: var(--text-0);
+  padding-top: 0.1rem;
+}
+.formula-term {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.term-math {
+  color: var(--text-0);
+  margin-bottom: 0.5rem;
+}
+.term-arrow {
+  color: var(--text-2);
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+}
+.term-desc {
+  color: var(--text-2);
+  line-height: 1.4;
 }
 
 /* — SECTION HEADINGS — */
@@ -354,7 +456,7 @@ footer a:hover { color: var(--accent); }
 /* — RESPONSIVE — */
 @media (max-width: 640px) {
   .ascii-logo { font-size: 0.28rem; }
-  .arch-box { font-size: 0.45rem; padding: 1rem; }
+  .visual-box { font-size: 0.55rem; padding: 1.5rem; }
   nav { padding: 0.75rem 1rem; }
   .section { padding: 4rem 1.25rem; }
   .code-block { padding: 1rem; font-size: 0.72rem; }
@@ -363,7 +465,6 @@ footer a:hover { color: var(--accent); }
 </head>
 <body>
 
-<!-- NAV -->
 <nav>
   <a href="./" class="nav-logo">mnemo <span>.mnemo</span></a>
   <a href="https://github.com/toarchkumar/mnemo" class="nav-cta" id="nav-gh">
@@ -372,7 +473,6 @@ footer a:hover { color: var(--accent); }
   </a>
 </nav>
 
-<!-- HERO -->
 <section class="hero">
   <div class="ascii-logo" aria-hidden="true">
  ███╗   ███╗ ███████╗ ███╗   ███╗  ██████╗  ██████╗  ██╗   ██╗
@@ -401,10 +501,8 @@ footer a:hover { color: var(--accent); }
   </div>
 </section>
 
-<!-- DIVIDER -->
 <div class="divider"></div>
 
-<!-- FEATURES -->
 <section class="section">
   <p class="section-label">Why MNemo</p>
   <h2 class="section-title">The SQLite of agent memory</h2>
@@ -444,34 +542,65 @@ footer a:hover { color: var(--accent); }
   </div>
 </section>
 
-<!-- ARCHITECTURE -->
 <section class="arch-section">
   <h2>Encryption Architecture</h2>
-  <div class="arch-box">passphrase ──Argon2id──▶ KEK ──AES-256-GCM──▶ wraps DEK (random 256-bit)
-                                                   │
-                                                   ▼
-                              every 8 KiB page ──AES-256-GCM──▶ ciphertext
+  <div class="visual-box">
+    <div class="crypto-layout">
+      <div class="crypto-row" style="justify-content: flex-start; padding-left: 1rem;">
+        <span>passphrase</span>
+        <span class="crypto-arrow">──Argon2id──▶</span>
+        <span>KEK</span>
+        <span class="crypto-arrow">──AES-256-GCM──▶</span>
+        <span>wraps DEK (random 256-bit)</span>
+      </div>
+      <div class="crypto-row" style="justify-content: flex-end; padding-right: 170px;">
+        <span class="crypto-link-down">│<br>▼</span>
+      </div>
+      <div class="crypto-row" style="justify-content: flex-end; padding-right: 1rem;">
+        <span>every 8 KiB page</span>
+        <span class="crypto-arrow">──AES-256-GCM──▶</span>
+        <span>ciphertext</span>
+      </div>
+    </div>
 
-┌──────────────────────────────────────────────────────────────────┐
-│  .mnemo file                                                     │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │ Page 0 — Header (plaintext)                                │  │
-│  │ magic · version · KDF params · salt · wrapped DEK · CRC    │  │
-│  ├────────────────────────────────────────────────────────────┤  │
-│  │ Pages 1..W — Write-Ahead Log (encrypted)                   │  │
-│  ├────────────────────────────────────────────────────────────┤  │
-│  │ Pages W+ — Encrypted Data Runs                             │  │
-│  │ ┌──────────┬──────────┬───────────┬─────────────────────┐  │  │
-│  │ │ Records  │ Catalog  │ ANN Index │ Snapshot Manifest   │  │  │
-│  │ │(memories)│(metadata)│ (IVF+PQ)  │ (transaction log)   │  │  │
-│  │ └──────────┴──────────┴───────────┴─────────────────────┘  │  │
-│  └────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘</div>
+    <div class="file-wrapper">
+      <div class="file-header">.mnemo file</div>
+      <div class="file-container">
+        <div class="file-band">
+          <div class="band-title">Page 0 &mdash; Header (plaintext)</div>
+          <div class="band-desc">magic &middot; version &middot; KDF params &middot; salt &middot; wrapped DEK &middot; CRC</div>
+        </div>
+        <div class="file-band">
+          <div class="band-title">Pages 1..W &mdash; Write-Ahead Log (encrypted)</div>
+        </div>
+        <div class="file-band">
+          <div class="band-title">Pages W+ &mdash; Encrypted Data Runs</div>
+          <div class="file-columns">
+            <div class="file-col">
+              <div class="band-title">Records</div>
+              <div class="band-desc">(memories)</div>
+            </div>
+            <div class="file-col">
+              <div class="band-title">Catalog</div>
+              <div class="band-desc">(metadata)</div>
+            </div>
+            <div class="file-col">
+              <div class="band-title">ANN Index</div>
+              <div class="band-desc">(IVF+PQ)</div>
+            </div>
+            <div class="file-col">
+              <div class="band-title">Snapshot Manifest</div>
+              <div class="band-desc">(transaction log)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 
 <div class="divider"></div>
 
-<!-- CODE EXAMPLES -->
 <section class="code-section">
   <p class="section-label">Quick Start</p>
   <h2 class="section-title" style="margin-bottom:2rem;">Ten lines to persistent memory</h2>
@@ -545,7 +674,6 @@ $ mnemo rekey agent.mnemo --new-passphrase new-secret</pre>
 
 <div class="divider"></div>
 
-<!-- BENCHMARKS -->
 <section class="section">
   <p class="section-label">Performance</p>
   <h2 class="section-title">Built in Rust. Fast by default.</h2>
@@ -573,24 +701,43 @@ $ mnemo rekey agent.mnemo --new-passphrase new-secret</pre>
 
 <div class="divider"></div>
 
-<!-- RECALL -->
 <section class="section">
   <p class="section-label">Multi-Signal Recall</p>
   <h2 class="section-title">Not just vector similarity</h2>
   <p class="section-desc">Agents need more than cosine distance. MNemo ranks every candidate on four signals, weighted per query.</p>
 
-  <div class="arch-box" style="max-width:820px;margin:0 auto;font-size:0.85rem;">
-score = α · similarity  +  β · recency  +  γ · importance  +  δ · ln(1 + access_count)
-
-         ▲                    ▲                ▲                     ▲
-    vector distance      exponential       author-assigned      retrieval
-   (cosine/dot/L2)     decay (7-day       weight [0,1]         frequency
-                        half-life)                              boost</div>
+  <div class="visual-box" style="max-width:820px;">
+    <div class="formula-layout">
+      <div class="formula-base">score =</div>
+      <div class="formula-term">
+        <span class="term-math">&alpha; &middot; similarity</span>
+        <span class="term-arrow">▲</span>
+        <span class="term-desc">vector distance<br>(cosine/dot/L2)</span>
+      </div>
+      <div class="formula-op">+</div>
+      <div class="formula-term">
+        <span class="term-math">&beta; &middot; recency</span>
+        <span class="term-arrow">▲</span>
+        <span class="term-desc">exponential<br>decay (7-day<br>half-life)</span>
+      </div>
+      <div class="formula-op">+</div>
+      <div class="formula-term">
+        <span class="term-math">&gamma; &middot; importance</span>
+        <span class="term-arrow">▲</span>
+        <span class="term-desc">author-assigned<br>weight [0,1]</span>
+      </div>
+      <div class="formula-op">+</div>
+      <div class="formula-term">
+        <span class="term-math">&delta; &middot; ln(1 + access_count)</span>
+        <span class="term-arrow">▲</span>
+        <span class="term-desc">retrieval<br>frequency<br>boost</span>
+      </div>
+    </div>
+  </div>
 </section>
 
 <div class="divider"></div>
 
-<!-- MEMORY TYPES -->
 <section class="section">
   <p class="section-label">Agent Memory Model</p>
   <h2 class="section-title">Four types of memory</h2>
@@ -620,7 +767,6 @@ score = α · similarity  +  β · recency  +  γ · importance  +  δ · ln(1 +
   </div>
 </section>
 
-<!-- BOTTOM CTA -->
 <section class="bottom-cta">
   <h2>Your agent deserves a brain<br>it can carry</h2>
   <p>Open-source. Apache 2.0. Written in Rust.</p>
@@ -630,7 +776,6 @@ score = α · similarity  +  β · recency  +  γ · importance  +  δ · ln(1 +
   </a>
 </section>
 
-<!-- FOOTER -->
 <footer>
   Memory Nemo (MNemo) · Apache-2.0 · Built with Rust 🦀
 </footer>
