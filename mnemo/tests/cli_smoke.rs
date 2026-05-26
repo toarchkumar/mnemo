@@ -20,7 +20,7 @@ fn bin() -> &'static str {
 
 /// Cheap KDF so the tests are fast.
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
-    MnemoConfig { dimensions, kdf: KdfParams::fast() }
+    MnemoConfig { dimensions, kdf: KdfParams::fast(), ..Default::default() }
 }
 
 /// Create a tiny test database with three memories and return (path,

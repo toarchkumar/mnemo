@@ -12,7 +12,7 @@ use tempfile::tempdir;
 
 /// Config with cheap KDF params for fast tests.
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
-    MnemoConfig { dimensions, kdf: KdfParams::fast() }
+    MnemoConfig { dimensions, kdf: KdfParams::fast(), ..Default::default() }
 }
 
 fn vec4(a: f32, b: f32, c: f32, d: f32) -> Vec<f32> {
@@ -544,9 +544,12 @@ fn wal_discards_uncommitted_garbage() {
     }
     db.close().unwrap();
 
-    // Overwrite the entire WAL region (pages 1..=64) with 0xFF.
+    // Overwrite exactly the WAL region with 0xFF. The actual size lives in
+    // the header (offset 194), so we read it rather than hardcoding — the
+    // default WAL size has shrunk over the project's lifetime and may again.
     let mut bytes = read_bytes(&path);
-    let region_end = (1 + 64) * 8192;
+    let wal_pages = u64::from_le_bytes(bytes[194..202].try_into().unwrap()) as usize;
+    let region_end = (1 + wal_pages) * 8192;
     for b in bytes.iter_mut().take(region_end).skip(8192) {
         *b = 0xFF;
     }
@@ -557,14 +560,14 @@ fn wal_discards_uncommitted_garbage() {
 }
 
 /// The WAL region grows automatically once a transaction's control plane
-/// (here, a large catalog) outgrows the default 64-page region.
+/// (here, a large catalog) outgrows the initial reservation.
 #[test]
 fn wal_region_grows_for_large_catalog() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("big.mnemo");
 
-    // Enough memories that the serialized catalog exceeds the 512 KiB the
-    // default WAL region holds, forcing it to grow.
+    // Enough memories that the serialized catalog dwarfs any sensible
+    // initial WAL — the region must grow far past whatever the default is.
     let n = 22_000;
     let mut db = Mnemo::create(&path, "pw", fast_cfg(2)).unwrap();
     let mut rng = Rng::new(7);
@@ -575,13 +578,83 @@ fn wal_region_grows_for_large_catalog() {
     db.close().unwrap();
 
     // wal_pages lives at byte offset 194 of the (plaintext) header page.
+    // 64 was the v0.1.0 default; even after dropping the default to 8, a
+    // 22k-memory catalog still forces growth well past 64.
     let bytes = read_bytes(&path);
     let wal_pages = u64::from_le_bytes(bytes[194..202].try_into().unwrap());
-    assert!(wal_pages > 64, "WAL should have grown past the default (got {wal_pages})");
+    assert!(wal_pages > 64, "WAL should have grown well past the default (got {wal_pages})");
 
     // The grown/relocated WAL must reopen cleanly with every memory intact.
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), n);
+}
+
+/// The default initial WAL is small (8 pages = 64 KiB), so a populated file
+/// is well under what the v0.1.0 default (64 pages = 512 KiB) produced.
+///
+/// `Mnemo::create` only physically writes page 0; the WAL region and any
+/// data pages past it are only allocated once writes force the file to
+/// extend (sparsely, on most filesystems). To compare the *effective*
+/// footprint each config produces, we write a single memory and flush —
+/// that pushes the file out past `next_page = 1 + wal_pages`, so its
+/// reported length now reflects the WAL reservation honestly.
+#[test]
+fn fresh_file_uses_small_wal_by_default() {
+    use std::fs;
+    let dir = tempdir().unwrap();
+
+    // Helper: create with `cfg`, write one memory + flush, return
+    // (file length in bytes, the wal_pages value recorded in the header).
+    let make = |path: &std::path::Path, cfg: MnemoConfig| -> (u64, u64) {
+        let mut db = Mnemo::create(path, "pw", cfg).unwrap();
+        db.remember(Memory::new("seed", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
+            .unwrap();
+        db.flush().unwrap();
+        db.close().unwrap();
+        let bytes = fs::metadata(path).unwrap().len();
+        let raw = read_bytes(path);
+        let wal_pages = u64::from_le_bytes(raw[194..202].try_into().unwrap());
+        (bytes, wal_pages)
+    };
+
+    // 1. Default config: 8 WAL pages (64 KiB). After one write+flush the
+    //    file extends through the WAL reservation; it must stay well under
+    //    the v0.1.0 footprint (which started at 65 pages = 532 KiB before
+    //    any data was written).
+    let (small_bytes, small_wal) = make(&dir.path().join("small.mnemo"), fast_cfg(4));
+    assert_eq!(small_wal, 8, "default wal_pages_initial should be 8");
+    assert!(
+        small_bytes < 200_000,
+        "fresh-default file ballooned: {small_bytes} bytes (expected < 200 KB)"
+    );
+
+    // 2. Explicit override: a 64-page initial WAL sticks in the header and
+    //    produces a meaningfully larger file (the extra 56 reserved WAL
+    //    pages alone are 56 * 8 KiB = 458 KiB).
+    let big_cfg = MnemoConfig {
+        dimensions: 4,
+        kdf: KdfParams::fast(),
+        wal_pages_initial: 64,
+    };
+    let (big_bytes, big_wal) = make(&dir.path().join("big.mnemo"), big_cfg);
+    assert_eq!(big_wal, 64, "explicit wal_pages_initial=64 should stick");
+    let delta = big_bytes.saturating_sub(small_bytes);
+    assert!(
+        delta >= 56 * 8192 - 8192, // allow one page slack for transaction layout differences
+        "explicit large WAL should add ~56 pages; default={small_bytes} big={big_bytes} (delta={delta})"
+    );
+
+    // 3. Floor enforcement: 0 is clamped up to MIN_WAL_PAGES (2).
+    let tiny_cfg = MnemoConfig {
+        dimensions: 4,
+        kdf: KdfParams::fast(),
+        wal_pages_initial: 0,
+    };
+    let (_tiny_bytes, tiny_wal) = make(&dir.path().join("tiny.mnemo"), tiny_cfg);
+    assert!(
+        tiny_wal >= 2,
+        "wal_pages_initial=0 should be clamped to the MIN_WAL_PAGES floor (got {tiny_wal})"
+    );
 }
 
 // --- bounded page cache --------------------------------------------------

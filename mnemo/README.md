@@ -338,7 +338,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 28 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 29 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 
@@ -351,6 +351,49 @@ A running log of measured performance, so future versions can be compared
 against earlier baselines. Each entry records the corpus, the build, and the
 numbers — append a new entry rather than overwriting one when a change is
 expected to move them.
+
+### Sizing tips
+
+Two knobs cover most of the small-file size questions; the third is a
+modelling choice that compounds with the others.
+
+**1. Right-size the WAL reservation.** The default initial WAL is 8 pages
+(64 KiB), down from 64 (512 KiB) in v0.1.0 — the v0.1.0 reservation
+dominated small-file size (~62% of a 31-memory dogfood file). The WAL
+auto-grows, so the default is safe even for large catalogs; raise it only
+if you know each transaction routinely commits a large catalog or ANN
+index and you want to skip the first grow event:
+
+```rust
+let cfg = MnemoConfig {
+    dimensions: 768,
+    wal_pages_initial: 64,     // 512 KiB up front
+    ..Default::default()
+};
+```
+
+**2. Pick dimensions wisely.** Vector storage is `dimensions × 4` bytes
+per memory and dominates the data line for everything but tiny corpora.
+Cut dimensions and you cut that line proportionally — a 1024-dim model
+costs 4 KiB/memory; a 256-dim model costs 1 KiB/memory.
+
+**3. Use a Matryoshka (MRL) embedder, then truncate.** Matryoshka
+Representation Learning trains a model so the most important information
+is front-loaded into the early dimensions. With an MRL-trained embedder
+(OpenAI `text-embedding-3-*`, Nomic `nomic-embed-text-v1.5`, Snowflake
+`arctic-embed-l-v2.0`, and several others) you can store the first
+`k` dims of a `d`-dim vector and lose only 1–2% recall — a 4× storage
+win before any quantization. Concretely: a 1024-dim MRL model truncated
+to 256 dims fits in 1 KiB/memory instead of 4 KiB. Slice the vector on
+the client before passing it to `remember`; mnemo just sees a 256-dim
+vector and uses it as the database's native dimensionality.
+
+These three combine: a 256-dim MRL model in a fresh-default file gives
+roughly **8× less on-disk footprint at small N** versus a 1024-dim model
+in a v0.1.0 default file, and the gap widens as the corpus grows. Future
+versions may add page-level compression (Zstd) and binary quantization
+(32× on vectors); when they land they will compose on top of these
+choices, not replace them.
 
 ### Baseline — v0.1.0, May 2026 (dogfood DB)
 

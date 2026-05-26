@@ -37,9 +37,26 @@ use crate::memory::{self, Memory, MemoryType, Metric, Scope, ScoreWeights};
 use crate::pager::Pager;
 use crate::wal;
 
-/// Initial size of the write-ahead log region, in pages (512 KiB). The region
-/// grows automatically when a transaction's control plane outgrows it.
-const DEFAULT_WAL_PAGES: u64 = 64;
+/// Default initial size of the write-ahead log region, in pages (64 KiB).
+/// The region grows automatically when a transaction's control plane outgrows
+/// it, so this is a *floor* on the fresh-file footprint, not a cap on
+/// transaction size. Was 64 pages (512 KiB) in v0.1.0 — lowered because that
+/// reservation dominated small-file size (~62% of a 31-memory dogfood file).
+const DEFAULT_WAL_PAGES: u64 = 8;
+
+/// Hard floor on the WAL reservation. A single header-page flush already
+/// needs one full DATA frame plus a COMMIT frame; two pages are the bare
+/// minimum that lets the first transaction commit without immediate growth.
+const MIN_WAL_PAGES: u64 = 2;
+
+/// Upper bound for the WAL scan when recovering a torn-header file. The
+/// real WAL region size lives in the header, but a torn header is exactly
+/// the case where we can't read it — so we scan a generous fixed window
+/// from the conventional WAL start, relying on `wal::recover` stopping at
+/// the first non-magic frame. 64 covers the historical pre-0.2 default
+/// of a 64-page reservation; users who configure larger WALs and then
+/// suffer a torn header at the same time will need offline recovery.
+const TORN_HEADER_SCAN_PAGES: u64 = 64;
 
 /// Configuration for creating a new database.
 #[derive(Clone, Copy, Debug)]
@@ -48,11 +65,24 @@ pub struct MnemoConfig {
     pub dimensions: usize,
     /// Key-derivation parameters.
     pub kdf: KdfParams,
+    /// Initial size of the WAL region in 8 KiB pages. Default is
+    /// [`DEFAULT_WAL_PAGES`] (8 pages = 64 KiB), which keeps fresh files
+    /// small; the region auto-grows when a transaction's control plane needs
+    /// more space, so raising this is only a hint for the expected steady-state
+    /// transaction size. Write-heavy databases that routinely flush large
+    /// catalogs or ANN indexes can set this higher (e.g. 64 = 512 KiB) to
+    /// avoid early grow events; tiny embedded uses can leave it at the
+    /// default. Clamped to a minimum of [`MIN_WAL_PAGES`] (2 pages).
+    pub wal_pages_initial: u64,
 }
 
 impl Default for MnemoConfig {
     fn default() -> Self {
-        Self { dimensions: 768, kdf: KdfParams::secure() }
+        Self {
+            dimensions: 768,
+            kdf: KdfParams::secure(),
+            wal_pages_initial: DEFAULT_WAL_PAGES,
+        }
     }
 }
 
@@ -336,9 +366,11 @@ impl Mnemo {
             dimensions: config.dimensions as u32,
             created_at: memory::now_secs(),
             write_counter: 0,
-            // Page 0 is the header; pages 1..=DEFAULT_WAL_PAGES are the WAL;
-            // record/catalog/index pages start after it.
-            next_page: 1 + DEFAULT_WAL_PAGES,
+            // Page 0 is the header; pages 1..=wal_pages are the WAL;
+            // record/catalog/index pages start after it. Initial WAL size is
+            // chosen per-config (default 8 pages = 64 KiB) and clamped to a
+            // sane floor so the first transaction can always commit.
+            next_page: 1 + config.wal_pages_initial.max(MIN_WAL_PAGES),
             catalog_start: 0,
             catalog_pages: 0,
             catalog_len: 0,
@@ -353,7 +385,7 @@ impl Mnemo {
             index_pages: 0,
             index_len: 0,
             wal_start: 1,
-            wal_pages: DEFAULT_WAL_PAGES,
+            wal_pages: config.wal_pages_initial.max(MIN_WAL_PAGES),
             wal_seq: 0,
             manifest_start: 0,
             manifest_pages: 0,
@@ -393,8 +425,11 @@ impl Mnemo {
             Err(MnemoError::HeaderChecksum) => {
                 // Page 0 is torn — most likely a crash during a checkpoint's
                 // header write. Try to heal from the WAL at its default site
-                // (a never-grown WAL never moves from page 1).
-                let healed = wal::recover(&mut file, 1, DEFAULT_WAL_PAGES, 0)?;
+                // (a never-grown WAL never moves from page 1). We don't know
+                // the WAL size (the header that holds it is what's torn), so
+                // scan a generous fixed window — `wal::recover` stops at the
+                // first non-magic frame, so reading extra is safe.
+                let healed = wal::recover(&mut file, 1, TORN_HEADER_SCAN_PAGES, 0)?;
                 let frames = healed.ok_or(MnemoError::HeaderChecksum)?;
                 for (page_no, bytes) in &frames {
                     if bytes.len() != PAGE_SIZE {
@@ -1176,7 +1211,11 @@ impl Mnemo {
         let kdf = old.kdf;
         let tmp = format!("{path}.compact-tmp");
 
-        let mut new = Mnemo::create(&tmp, passphrase, MnemoConfig { dimensions: dims, kdf })?;
+        let mut new = Mnemo::create(
+            &tmp,
+            passphrase,
+            MnemoConfig { dimensions: dims, kdf, ..Default::default() },
+        )?;
         let want_index = old.ann.as_ref().map(|a| (a.n_probe(), a.n_rerank()));
         let now = memory::now_secs();
         let all = old.memories()?;
