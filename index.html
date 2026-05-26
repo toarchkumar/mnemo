@@ -456,15 +456,15 @@ footer a:hover { color: var(--accent); }
 │  .mnemo file                                                     │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │ Page 0 — Header (plaintext)                                │  │
-│  │ magic · version · KDF params · salt · wrapped DEK · CRC   │  │
+│  │ magic · version · KDF params · salt · wrapped DEK · CRC    │  │
 │  ├────────────────────────────────────────────────────────────┤  │
-│  │ Pages 1..W — Write-Ahead Log (encrypted)                  │  │
+│  │ Pages 1..W — Write-Ahead Log (encrypted)                   │  │
 │  ├────────────────────────────────────────────────────────────┤  │
-│  │ Pages W+ — Encrypted Data Runs                            │  │
-│  │ ┌──────────┬──────────┬───────────┬────────────────────┐  │  │
+│  │ Pages W+ — Encrypted Data Runs                             │  │
+│  │ ┌──────────┬──────────┬───────────┬─────────────────────┐  │  │
 │  │ │ Records  │ Catalog  │ ANN Index │ Snapshot Manifest   │  │  │
-│  │ │(memories)│(metadata)│ (IVF+PQ)  │ (transaction log)  │  │  │
-│  │ └──────────┴──────────┴───────────┴────────────────────┘  │  │
+│  │ │(memories)│(metadata)│ (IVF+PQ)  │ (transaction log)   │  │  │
+│  │ └──────────┴──────────┴───────────┴─────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘</div>
 </section>
@@ -579,7 +579,7 @@ $ mnemo rekey agent.mnemo --new-passphrase new-secret</pre>
   <h2 class="section-title">Not just vector similarity</h2>
   <p class="section-desc">Agents need more than cosine distance. MNemo ranks every candidate on four signals, weighted per query.</p>
 
-  <div class="arch-box" style="max-width:680px;margin:0 auto;font-size:0.85rem;">
+  <div class="arch-box" style="max-width:820px;margin:0 auto;font-size:0.85rem;">
 score = α · similarity  +  β · recency  +  γ · importance  +  δ · ln(1 + access_count)
 
          ▲                    ▲                ▲                     ▲
