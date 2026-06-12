@@ -164,6 +164,16 @@ impl Pager {
         Ok(())
     }
 
+    /// Number of pages currently dirty in the cache.
+    ///
+    /// Used by [`crate::Mnemo::flush`] to pre-compute how many `write_counter`
+    /// values the upcoming [`Pager::flush`] will consume, so the store can
+    /// stamp a "leased" header to disk *before* any encrypted page hits the
+    /// disk. See the leasing discussion on `Mnemo::flush`.
+    pub fn dirty_page_count(&self) -> usize {
+        self.cache.dirty_pages().len()
+    }
+
     /// Encrypt and write every dirty page, then fsync.
     ///
     /// Each page gets a fresh nonce from `(page_no, write_counter)`; the

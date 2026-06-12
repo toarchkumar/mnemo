@@ -98,6 +98,14 @@ struct CatalogEntry {
     deleted: bool,
 }
 
+/// Returned by [`Mnemo::prepare_for_flush`] and consumed by [`Mnemo::flush`].
+/// Carries the already-serialized control-plane bytes through the prelude
+/// so we don't re-serialize after the lease has been persisted.
+struct FlushPrelude {
+    cat_bytes: Option<Vec<u8>>,
+    idx_bytes: Option<Vec<u8>>,
+}
+
 /// One entry in the append-only snapshot manifest. Because record, catalog,
 /// and index pages are only ever *appended*, the runs a past flush wrote are
 /// still on disk; a `Snapshot` is the set of pointers needed to reconstruct
@@ -903,59 +911,55 @@ impl Mnemo {
 
     /// Persist all pending changes as one **write-ahead-logged transaction**.
     ///
-    /// Record data pages are written copy-on-write to fresh pages and fsynced;
-    /// the new catalog, ANN index, and header are then logged to the WAL and
-    /// committed with a single fsync — the durability point. A checkpoint
-    /// folds the WAL into the home pages. A crash before the commit leaves the
-    /// previous state intact; a crash after it is repaired by [`Mnemo::open`]
-    /// replaying the WAL. Safe to call repeatedly.
+    /// Sequence:
+    ///
+    /// 1. **Prepare.** Serialize the control plane (catalog, ANN index),
+    ///    grow the WAL if needed, and **lease** counter and page slots —
+    ///    bump `header.write_counter` and `header.next_page` by upper
+    ///    bounds on this transaction's consumption and persist that
+    ///    *leased* header to disk before any encrypted page is written.
+    /// 2. **Data pages.** [`Pager::flush`] writes dirty record pages
+    ///    copy-on-write under fresh nonces and fsyncs them. The orphan-page
+    ///    nonce-reuse window (see [Phase 1.1 of the improvement plan])
+    ///    is closed because the leased header on disk already records a
+    ///    `write_counter` past anything this step can produce.
+    /// 3. **Control plane.** Seal the new catalog / ANN index / snapshot
+    ///    manifest into fresh home page runs.
+    /// 4. **Commit.** Log all of step 3's frames plus the final header
+    ///    frame into the WAL and fsync — the durability point.
+    /// 5. **Checkpoint.** Fold the WAL into the home pages.
+    ///
+    /// A crash before step 4 leaves the previous state intact. A crash
+    /// after step 4 is repaired by [`Mnemo::open`] replaying the WAL.
+    /// Safe to call repeatedly.
     pub fn flush(&mut self) -> Result<()> {
-        // 1. Record (vector) data pages: copy-on-write to fresh pages, fsynced.
-        //    They are unreferenced until the catalog below commits.
-        self.pager.flush()?;
-
         if !self.dirty_catalog && !self.dirty_index {
+            // No control-plane changes pending. Because every `put` that
+            // dirties a data page also dirties the catalog, there can't
+            // be dirty data pages either — nothing to do.
             return Ok(());
         }
 
-        // 2. Serialize the control plane this transaction will commit.
-        let cat_bytes = if self.dirty_catalog {
-            Some(
-                rmp_serde::to_vec(&self.catalog)
-                    .map_err(|e| MnemoError::Serialize(e.to_string()))?,
-            )
-        } else {
-            None
-        };
-        let idx_bytes: Option<Vec<u8>> = if self.dirty_index {
-            match &self.ann {
-                Some(ann) => Some(
-                    rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?,
-                ),
-                None => None,
-            }
-        } else {
-            None
-        };
+        // 1. Serialize control plane, ensure WAL capacity, lease counter +
+        //    page slots, and persist the leased header *before* any data
+        //    page hits the disk.
+        let ctx = self.prepare_for_flush()?;
 
-        // 3. Size the WAL for the catalog, index, manifest and header pages.
-        let cat_pc = cat_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
-        let idx_pc = idx_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
-        // Upper bound on the manifest run: one extra entry, <=82 bytes each.
-        let man_upper = 9 + (self.manifest.len() + 1) * 82;
-        let man_pc_est = man_upper.div_ceil(PAYLOAD).max(1);
-        self.ensure_wal_capacity(cat_pc + idx_pc + man_pc_est + 1)?;
+        // 2. Record (vector) data pages: copy-on-write to fresh pages, fsynced.
+        //    Safe: the lease guarantees that even if we crash here, reopen
+        //    will see a `write_counter` past every nonce this step uses.
+        self.pager.flush()?;
 
-        // 4. Seal the catalog / index control pages into fresh home runs.
+        // 3. Seal the catalog / index control pages into fresh home runs.
         let mut frames: Vec<wal::Frame> = Vec::new();
-        if let Some(bytes) = &cat_bytes {
+        if let Some(bytes) = &ctx.cat_bytes {
             let (start, pages) = self.seal_run(bytes, &mut frames)?;
             self.header.catalog_start = start;
             self.header.catalog_pages = pages as u64;
             self.header.catalog_len = bytes.len() as u64;
         }
         if self.dirty_index {
-            match &idx_bytes {
+            match &ctx.idx_bytes {
                 Some(bytes) => {
                     let (start, pages) = self.seal_run(bytes, &mut frames)?;
                     self.header.index_start = start;
@@ -970,9 +974,9 @@ impl Mnemo {
             }
         }
 
-        // 5. Record this transaction as a restorable snapshot. The manifest
-        //    update is staged in a local and adopted only once the commit
-        //    below succeeds, so a failed flush leaves no phantom entry.
+        // 3b. Record this transaction as a restorable snapshot. The manifest
+        //     update is staged in a local and adopted only once the commit
+        //     below succeeds, so a failed flush leaves no phantom entry.
         let live = self.len() as u64;
         let txn_id = self.header.wal_seq + 1;
         let mut manifest = self.manifest.clone();
@@ -994,18 +998,22 @@ impl Mnemo {
         self.header.manifest_pages = m_pages as u64;
         self.header.manifest_len = man_bytes.len() as u64;
 
-        // 6. The header is the transaction's final frame; stamp the new id.
+        // 3c. The header is the transaction's final frame; stamp the new id
+        //     and the *actual* (post-flush) write counter, which is <= the
+        //     leased value persisted in `prepare_for_flush`. This is the
+        //     value that ultimately replaces the leased header on checkpoint.
         self.header.vector_count = live;
         self.header.write_counter = self.pager.write_counter;
         self.header.wal_seq = txn_id;
         frames.push((0, self.header.to_page().to_vec()));
 
-        // 7. COMMIT — log the transaction and fsync. Nothing at a home page
-        //    has changed yet; this single fsync is what makes it durable.
+        // 4. COMMIT — log the transaction and fsync. Nothing at a home page
+        //    other than the leased header has changed yet; this single
+        //    fsync is what makes the rest durable.
         let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
         wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
 
-        // 8. Checkpoint — fold the WAL into the home pages.
+        // 5. Checkpoint — fold the WAL into the home pages.
         self.checkpoint(&frames)?;
 
         self.manifest = manifest;
@@ -1014,9 +1022,100 @@ impl Mnemo {
         Ok(())
     }
 
+    /// Pre-flush prelude shared by [`Mnemo::flush`] and the
+    /// `__crash_partial_flush_for_testing` hook.
+    ///
+    /// Serializes the control plane (catalog, ANN index), grows the WAL if
+    /// needed, then **leases** counter and page slots — bumps a *clone* of
+    /// the header by upper-bound amounts and persists that leased clone
+    /// with `pager.write_raw + sync`. The in-memory `self.header` keeps
+    /// its pre-lease `next_page` so [`Mnemo::seal_run`] continues to
+    /// allocate from the right slot; the final committed header carries
+    /// the actual post-flush values and overwrites the leased one on
+    /// checkpoint.
+    ///
+    /// This pre-stamping is what closes the nonce-reuse window flagged in
+    /// Phase 1.1 of the improvement plan: a crash anywhere between here
+    /// and the WAL commit leaves a file whose on-disk header records a
+    /// `write_counter` *past* every nonce the rest of this transaction
+    /// could produce, so the next reopen starts from a counter that
+    /// guarantees uniqueness against any orphan data pages still on disk.
+    fn prepare_for_flush(&mut self) -> Result<FlushPrelude> {
+        // Serialize.
+        let cat_bytes = if self.dirty_catalog {
+            Some(
+                rmp_serde::to_vec(&self.catalog)
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let idx_bytes: Option<Vec<u8>> = if self.dirty_index {
+            match &self.ann {
+                Some(ann) => Some(
+                    rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?,
+                ),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        let cat_pc = cat_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
+        let idx_pc = idx_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
+        // Upper bound on the manifest run: one extra entry, <=82 bytes each
+        // (rmp_serde encodes a Snapshot as a 9-element fixarray of i64/u64,
+        // worst case 81 bytes plus a 1-byte array header).
+        let man_upper = 9 + (self.manifest.len() + 1) * 82;
+        let man_pc_est = man_upper.div_ceil(PAYLOAD).max(1);
+
+        // Grow WAL if needed (does its own header write+sync).
+        self.ensure_wal_capacity(cat_pc + idx_pc + man_pc_est + 1)?;
+
+        // Lease counter and page slots. counter_lease is an upper bound on
+        // how many `pager.write_counter` advances this transaction will
+        // make (one per dirty data page + one per sealed control-plane
+        // page). page_lease covers only the control-plane allocations,
+        // because dirty data pages were already allocated past
+        // `header.next_page` by `write_record` when `remember` ran.
+        let data_dirty = self.pager.dirty_page_count() as u64;
+        let counter_lease = data_dirty + (cat_pc + idx_pc + man_pc_est) as u64;
+        let page_lease = (cat_pc + idx_pc + man_pc_est) as u64;
+
+        // Persist a leased *clone* of the header — in-memory `self.header`
+        // keeps its pre-lease `next_page` for `seal_run` to consume from
+        // the correct slot.
+        let mut leased = self.header.clone();
+        leased.write_counter = self.pager.write_counter + counter_lease;
+        leased.next_page += page_lease;
+        self.pager.write_raw(0, &leased.to_page())?;
+        self.pager.sync()?;
+
+        Ok(FlushPrelude { cat_bytes, idx_bytes })
+    }
+
     /// Flush and close. Equivalent to `flush()`; the file is released on drop.
     pub fn close(&mut self) -> Result<()> {
         self.flush()
+    }
+
+    /// **TEST ONLY — do not use.** Reproduces a crash inside
+    /// [`Mnemo::flush`] *after* the prelude has leased counter+page slots
+    /// and persisted the leased header, but *before* the WAL is committed.
+    /// Runs `prepare_for_flush` + `pager.flush` and returns — leaving
+    /// data pages and a leased header on disk, with no commit frame.
+    ///
+    /// Used by `tests/integration.rs::nonce_unique_after_crashed_data_flush`
+    /// to verify that this window (Phase 1.1 of the improvement plan) does
+    /// not enable AES-GCM nonce reuse. Calling this in production code
+    /// strands data pages; never expose it from a binding.
+    #[doc(hidden)]
+    pub fn __crash_partial_flush_for_testing(&mut self) -> Result<()> {
+        if !self.dirty_catalog && !self.dirty_index {
+            return Ok(());
+        }
+        let _prelude = self.prepare_for_flush()?;
+        self.pager.flush()
     }
 
     /// Bound the in-memory page cache to `pages` decrypted pages.

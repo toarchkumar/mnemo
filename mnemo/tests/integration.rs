@@ -657,6 +657,120 @@ fn fresh_file_uses_small_wal_by_default() {
     );
 }
 
+// --- crash-recovery: nonce uniqueness across an aborted transaction ------
+
+/// Regression test for the **AES-GCM nonce-reuse window** documented in
+/// Phase 1.1 of the improvement plan.
+///
+/// Before the leasing fix, `Mnemo::flush` wrote data pages with advanced
+/// `write_counter` values *before* committing the WAL. A crash in that
+/// window left:
+///
+/// 1. Home pages on disk encrypted under nonces derived from the bumped
+///    counter values.
+/// 2. An on-disk header still recording the **old** `write_counter` and
+///    **old** `next_page`, because the transaction never committed.
+///
+/// On reopen the in-memory counter was restored from the stale header, so
+/// the next `remember + flush` re-allocated the same page slots and
+/// re-derived the same `(page_no, write_counter)` nonces — encrypting a
+/// *different* plaintext under the same DEK with the same nonce.
+///
+/// The fix is **counter+page leasing in `prepare_for_flush`**: bump a
+/// cloned header by upper-bound counter/page advances and persist it
+/// with `pager.write_raw + sync` *before* any data page is encrypted.
+/// A crash anywhere from the lease to the WAL commit then leaves a file
+/// whose on-disk header records a counter past every nonce the orphan
+/// transaction could have used.
+///
+/// This test takes a `prepare_for_flush + pager.flush` snapshot via
+/// `__crash_partial_flush_for_testing`, drops the handle, reopens, writes
+/// *different* content, and asserts no byte position in the file shows
+/// the same 12-byte nonce prefix with different ciphertexts. With the
+/// leasing fix in place it passes; without it (a previous commit), it
+/// fails with an explicit `NONCE REUSE confirmed at page N` message.
+#[test]
+fn nonce_unique_after_crashed_data_flush() {
+    use std::collections::HashMap;
+    const PAGE_SIZE: usize = 8192;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("crash.mnemo");
+
+    // --- Phase 1: orphan transaction (data pages on disk, no WAL commit) -
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        db.remember(Memory::new(
+            "ORPHAN_TRANSACTION_AAA",
+            MemoryType::Working,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+        // Run the data-page write portion of flush only — no WAL commit.
+        // Then drop the handle so the on-disk header still records the
+        // stale write_counter and next_page.
+        db.__crash_partial_flush_for_testing().unwrap();
+    }
+
+    // Snapshot every encrypted page's (nonce, ciphertext) after Phase 1.
+    let snap1 = read_bytes(&path);
+    assert!(snap1.len() % PAGE_SIZE == 0, "file must be page-aligned");
+    let page_count = snap1.len() / PAGE_SIZE;
+    let mut phase1: HashMap<u64, [u8; 12]> = HashMap::new();
+    for page_no in 1..page_count as u64 {
+        let off = page_no as usize * PAGE_SIZE;
+        let nonce: [u8; 12] = snap1[off..off + 12].try_into().unwrap();
+        // Skip pages that were never touched (all-zero nonces in the
+        // sparse WAL region or beyond the high-water mark).
+        if nonce != [0u8; 12] {
+            phase1.insert(page_no, nonce);
+        }
+    }
+    assert!(
+        !phase1.is_empty(),
+        "Phase 1 should have written at least one encrypted data page; \
+         did __crash_partial_flush_for_testing actually flush?"
+    );
+
+    // --- Phase 2: reopen, write DIFFERENT content, full flush -----------
+    {
+        let mut db = Mnemo::open(&path, "pw").unwrap();
+        db.remember(Memory::new(
+            "REUSE_ATTEMPT_DIFFERENT_BBB",
+            MemoryType::Working,
+            vec4(0.0, 1.0, 0.0, 0.0),
+        ))
+        .unwrap();
+        db.flush().unwrap();
+    }
+
+    // --- Detection: same nonce at the same page slot, different ct. -----
+    let snap2 = read_bytes(&path);
+    for (&page_no, &nonce_phase1) in &phase1 {
+        let off = page_no as usize * PAGE_SIZE;
+        if off + PAGE_SIZE > snap2.len() {
+            continue;
+        }
+        let nonce_phase2: [u8; 12] = snap2[off..off + 12].try_into().unwrap();
+        if nonce_phase2 == nonce_phase1 {
+            let ct_phase1 = &snap1[off + 12..off + PAGE_SIZE];
+            let ct_phase2 = &snap2[off + 12..off + PAGE_SIZE];
+            if ct_phase1 != ct_phase2 {
+                panic!(
+                    "NONCE REUSE confirmed at page {page_no}: \
+                     nonce {:02x?} was used to encrypt two different \
+                     ciphertexts under the same DEK.\n\
+                     This leaks keystream — anyone with both ciphertexts \
+                     can compute plaintext_phase1 XOR plaintext_phase2 \
+                     and breaks AES-GCM's authentication guarantees.\n\
+                     (Phase 1.1 leasing fix not applied yet.)",
+                    nonce_phase1
+                );
+            }
+        }
+    }
+}
+
 // --- bounded page cache --------------------------------------------------
 
 /// With the page cache capped well below the working set, every lookup must
