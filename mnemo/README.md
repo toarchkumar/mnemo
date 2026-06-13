@@ -92,6 +92,17 @@ who swaps two valid encrypted pages between slots makes them un-decryptable
 at the new addresses (the auth check fails with `PageAuthFailed`). The v5→v6
 migration re-encrypts every live data page in place under the new AAD.
 
+**Format v7** adds an AES-GCM seal at the tail of the header page that
+authenticates every mutable header field (write counter, next page,
+catalog/index/manifest pointers, version) under the DEK. The CRC at
+byte 238 stays as a pre-passphrase torn-write check; the seal is the
+keyed integrity layer that catches an attacker rewriting, say,
+`catalog_start` to point at an older catalog run. Open after a tampered
+flush errors with `HeaderTampered` instead of silently loading the
+stale state. The seal does not prevent rollback to a previous *valid*
+sealed state (replay of an old header byte-block); detecting that
+would need monotonic counters tracked outside the file.
+
 ### Durability — write-ahead log
 
 `flush()` is one **atomic transaction**, committed through a write-ahead log:
@@ -351,7 +362,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 32 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 33 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 

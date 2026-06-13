@@ -30,13 +30,19 @@ pub const MAGIC: &[u8; 4] = b"MNEM";
 ///   serialized body) and rewritten on the next flush.
 ///
 /// [`CatalogEntry`]: crate::store
-pub const VERSION: u16 = 6;
+pub const VERSION: u16 = 7;
 /// Lowest version this build can auto-migrate on open. Files older than
 /// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
 /// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
 /// and rewritten under the current `VERSION` on the next flush.
 ///
 /// History:
+/// - **v7** adds a small AES-GCM seal at the tail of the header page that
+///   authenticates every mutable header field (write_counter, next_page,
+///   catalog/index/manifest pointers, etc.) under the DEK. An attacker
+///   can no longer silently rewrite, e.g., `catalog_start` to point at a
+///   stale catalog run — the seal's GCM tag fails. Migration is just a
+///   single flush; pages are untouched (page crypto is unchanged from v6).
 /// - **v6** binds each encrypted page's home `page_no` as AES-GCM AAD so
 ///   page-transplant attacks (move a valid encrypted page to a different
 ///   slot) become tamper-evident. Migration re-encrypts every live page.
@@ -57,6 +63,35 @@ pub const FLAG_ENCRYPTED: u32 = 1;
 
 /// Byte offset of the header CRC-32 (everything before it is covered).
 pub const HEADER_CRC_OFF: usize = 238;
+
+// --- v7 header AEAD seal layout -----------------------------------------
+//
+// The v7 seal is a small AES-GCM authentication tag appended to the header
+// page that proves the mutable header fields have not been silently
+// rewritten by an attacker with file-write access. The seal uses:
+//
+//   nonce      = fresh random 12 bytes per header write (stored on disk)
+//   plaintext  = empty
+//   aad        = SEAL_AAD_PREFIX || version_le || all mutable u64 fields
+//   key        = DEK
+//   output     = 16-byte GCM tag (the seal)
+//
+// So a tampered field in the plaintext header produces a different AAD on
+// the next open, and the tag fails authentication. The CRC at byte 238
+// stays as a pre-passphrase torn-write check; the seal is the keyed
+// integrity layer that runs after the DEK is unwrapped.
+
+/// Byte offset of the v7 header seal nonce.
+pub const HEADER_SEAL_NONCE_OFF: usize = 242;
+/// Byte offset of the v7 header seal tag.
+pub const HEADER_SEAL_TAG_OFF: usize = HEADER_SEAL_NONCE_OFF + NONCE_LEN;
+/// Domain-separation prefix for the v7 header seal AAD. Distinguishes the
+/// header seal from page AAD and any future seals.
+pub const SEAL_AAD_PREFIX: &[u8] = b"mnemo-header-seal-v7";
+
+// Compile-time check: the seal region must fit inside one page after the
+// existing header fields and CRC.
+const _: () = assert!(HEADER_SEAL_TAG_OFF + TAG_LEN <= PAGE_SIZE);
 
 /// The header page. Fixed-size, unencrypted, lives at page 0.
 #[derive(Clone, Debug)]
@@ -111,6 +146,40 @@ pub struct Header {
     pub manifest_pages: u64,
     /// Exact serialized byte length of the snapshot manifest.
     pub manifest_len: u64,
+    /// v7 header AEAD seal nonce, parsed from disk for v7+ files. `None`
+    /// for older formats and for freshly created in-memory headers — the
+    /// seal nonce is regenerated per write by [`Header::apply_seal`].
+    pub seal_nonce: Option<[u8; NONCE_LEN]>,
+    /// v7 header AEAD seal tag, parsed from disk for v7+ files. `None`
+    /// for older formats and freshly created headers. Validated by
+    /// [`Header::validate_seal`] after the DEK is unwrapped.
+    pub seal_tag: Option<[u8; TAG_LEN]>,
+}
+
+/// Compute the AEAD AAD bytes used by the v7 header seal. The AAD covers
+/// every header field whose value carries security-relevant meaning at
+/// open time (catalog/index/manifest pointers, write counter, version
+/// itself), so flipping any of them invalidates the seal tag.
+fn header_seal_aad(h: &Header) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(SEAL_AAD_PREFIX.len() + 2 + 15 * 8);
+    aad.extend_from_slice(SEAL_AAD_PREFIX);
+    aad.extend_from_slice(&h.version.to_le_bytes());
+    aad.extend_from_slice(&h.write_counter.to_le_bytes());
+    aad.extend_from_slice(&h.next_page.to_le_bytes());
+    aad.extend_from_slice(&h.catalog_start.to_le_bytes());
+    aad.extend_from_slice(&h.catalog_pages.to_le_bytes());
+    aad.extend_from_slice(&h.catalog_len.to_le_bytes());
+    aad.extend_from_slice(&h.vector_count.to_le_bytes());
+    aad.extend_from_slice(&h.index_start.to_le_bytes());
+    aad.extend_from_slice(&h.index_pages.to_le_bytes());
+    aad.extend_from_slice(&h.index_len.to_le_bytes());
+    aad.extend_from_slice(&h.wal_start.to_le_bytes());
+    aad.extend_from_slice(&h.wal_pages.to_le_bytes());
+    aad.extend_from_slice(&h.wal_seq.to_le_bytes());
+    aad.extend_from_slice(&h.manifest_start.to_le_bytes());
+    aad.extend_from_slice(&h.manifest_pages.to_le_bytes());
+    aad.extend_from_slice(&h.manifest_len.to_le_bytes());
+    aad
 }
 
 fn rd_u16(b: &[u8], o: usize) -> u16 {
@@ -218,7 +287,77 @@ impl Header {
             manifest_start: rd_u64(b, 214),
             manifest_pages: rd_u64(b, 222),
             manifest_len: rd_u64(b, 230),
+            // v7+ headers store an AEAD seal nonce and tag after the CRC.
+            // For older formats the bytes are zero / unused; the seal is
+            // only validated when `version >= 7`.
+            seal_nonce: if version >= 7 {
+                let mut n = [0u8; NONCE_LEN];
+                n.copy_from_slice(&b[HEADER_SEAL_NONCE_OFF..HEADER_SEAL_NONCE_OFF + NONCE_LEN]);
+                Some(n)
+            } else {
+                None
+            },
+            seal_tag: if version >= 7 {
+                let mut t = [0u8; TAG_LEN];
+                t.copy_from_slice(&b[HEADER_SEAL_TAG_OFF..HEADER_SEAL_TAG_OFF + TAG_LEN]);
+                Some(t)
+            } else {
+                None
+            },
         })
+    }
+
+    /// Validate the v7 header seal under the given DEK. Recomputes the AAD
+    /// from this header's current field values and verifies the GCM tag
+    /// against the stored seal nonce. No-op for v6 and below, where no
+    /// seal exists. Returns [`MnemoError::HeaderTampered`] on failure.
+    pub fn validate_seal(&self, dek: &[u8; crate::crypto::KEY_LEN]) -> Result<()> {
+        if self.version < 7 {
+            return Ok(());
+        }
+        let nonce = self
+            .seal_nonce
+            .ok_or(MnemoError::HeaderTampered)?;
+        let tag = self
+            .seal_tag
+            .ok_or(MnemoError::HeaderTampered)?;
+        let aad = header_seal_aad(self);
+        // AES-GCM over empty plaintext yields a 16-byte tag; decryption
+        // takes the tag as the ciphertext input and returns empty bytes
+        // on success.
+        crate::crypto::aead_decrypt(dek, &nonce, &tag, &aad)
+            .map(|_| ())
+            .map_err(|_| MnemoError::HeaderTampered)
+    }
+
+    /// Write the v7 header seal into `page` at the fixed seal offsets.
+    /// Generates a fresh random nonce on every call and computes the tag
+    /// over a recomputed AAD, so every header write produces a new seal.
+    /// No-op for v6 and below.
+    pub fn apply_seal(
+        &mut self,
+        page: &mut [u8; PAGE_SIZE],
+        dek: &[u8; crate::crypto::KEY_LEN],
+    ) -> Result<()> {
+        if self.version < 7 {
+            return Ok(());
+        }
+        let nonce = crate::crypto::random_nonce();
+        let aad = header_seal_aad(self);
+        let tag_buf = crate::crypto::aead_encrypt(dek, &nonce, &[], &aad)?;
+        if tag_buf.len() != TAG_LEN {
+            return Err(MnemoError::Crypto(
+                "header seal: unexpected tag length".into(),
+            ));
+        }
+        let mut tag = [0u8; TAG_LEN];
+        tag.copy_from_slice(&tag_buf);
+        page[HEADER_SEAL_NONCE_OFF..HEADER_SEAL_NONCE_OFF + NONCE_LEN]
+            .copy_from_slice(&nonce);
+        page[HEADER_SEAL_TAG_OFF..HEADER_SEAL_TAG_OFF + TAG_LEN].copy_from_slice(&tag);
+        self.seal_nonce = Some(nonce);
+        self.seal_tag = Some(tag);
+        Ok(())
     }
 }
 

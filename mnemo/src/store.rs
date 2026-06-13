@@ -458,7 +458,7 @@ impl Mnemo {
         let mut wrapped_dek = [0u8; WRAPPED_DEK_LEN];
         wrapped_dek.copy_from_slice(&wrapped);
 
-        let header = Header {
+        let mut header = Header {
             version: VERSION,
             page_size: PAGE_SIZE as u32,
             flags: FLAG_ENCRYPTED,
@@ -489,10 +489,15 @@ impl Mnemo {
             manifest_start: 0,
             manifest_pages: 0,
             manifest_len: 0,
+            // Regenerated per write by `apply_seal`; `None` until we seal.
+            seal_nonce: None,
+            seal_tag: None,
         };
 
         let mut pager = Pager::new(file, dek, 0, VERSION);
-        pager.write_raw(0, &header.to_page())?;
+        let mut page = header.to_page();
+        header.apply_seal(&mut page, pager.dek())?;
+        pager.write_raw(0, &page)?;
         pager.sync()?;
 
         Ok(Mnemo {
@@ -573,6 +578,12 @@ impl Mnemo {
         let kek = crypto::derive_kek(passphrase.as_bytes(), &header.salt, kdf)?;
         let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
 
+        // Validate the v7 header seal now that we have the DEK. Returns
+        // `MnemoError::HeaderTampered` if any of the sealed mutable fields
+        // were rewritten after the last legitimate flush. No-op for v6 and
+        // older — pre-v7 files don't carry a seal.
+        header.validate_seal(&dek)?;
+
         // Build the pager at the file's *current* version so initial reads
         // use the matching AAD scheme — `Pager::page_aad` returns empty AAD
         // for v4/v5 (no page binding) and `page_no.to_le_bytes()` for v6+.
@@ -622,20 +633,15 @@ impl Mnemo {
         )?;
 
         // === v5→v6 page-encryption migration =============================
-        // The file's data pages were encrypted under the v5 AAD scheme
-        // (no page binding). v6 binds each page's home `page_no` as AAD,
-        // so an attacker who swaps two valid encrypted pages between
-        // slots is detected on read. We migrate by re-staging every live
-        // record page through `write_page` (which marks it dirty), then
-        // flipping the pager to v6. The next flush will encrypt each
-        // dirty page under v6 AAD at its same home slot.
-        //
-        // Tombstoned entries are skipped — they'll be reclaimed by
-        // `compact_file`. Old catalog / index / manifest pages stay as
-        // orphan v5 ciphertext on disk; the next flush writes the new
-        // runs at fresh slots and the old ones get reclaimed by compact.
-        let migrated_to_v6 = on_disk_version < VERSION;
-        if migrated_to_v6 {
+        // Pre-v6 data pages were encrypted under no AAD; v6 binds the home
+        // `page_no` as AAD so a page-transplant attack fails authentication
+        // on read. Re-stage every live record page through `write_page` so
+        // the next flush re-encrypts it under v6 AAD at the same home slot.
+        // Tombstoned entries skip — they're reclaimed by `compact_file`.
+        // Old catalog / ANN / manifest pages stay as orphan ciphertext;
+        // the next flush writes the new runs at fresh slots.
+        let migrated_pages_to_v6 = on_disk_version < 6;
+        if migrated_pages_to_v6 {
             for e in &catalog {
                 if e.deleted {
                     continue;
@@ -645,30 +651,44 @@ impl Mnemo {
                     pager.write_page(e.start_page + i, &payload)?;
                 }
             }
+            pager.set_version(6);
+        }
+
+        // === v6→v7 header-seal migration =================================
+        // v7 adds an AES-GCM seal at the tail of the header page that
+        // authenticates every mutable header field. Pre-v7 files have no
+        // seal — we just bump the version in memory and mark `dirty_catalog`
+        // so the next flush writes a sealed v7 header. Pages are untouched
+        // (page crypto is unchanged from v6).
+        let migrated_header_to_v7 = on_disk_version < 7;
+        if migrated_header_to_v7 {
             pager.set_version(VERSION);
         }
 
-        let migrated = migrated_from_v4 || migrated_to_v6;
+        let migrated = migrated_from_v4 || migrated_pages_to_v6 || migrated_header_to_v7;
         if migrated {
             // Stamp the version forward in memory; the next flush persists
-            // it via the WAL-committed header frame.
+            // it via the WAL-committed header frame (and the v7 seal).
             header.version = VERSION;
             // Snapshots written under an older format reference page runs
-            // encrypted with the old AAD scheme; this build can't decrypt
+            // encrypted under the old AAD scheme; this build can't decrypt
             // them under the new pager. Drop the manifest so the next
             // flush records a fresh snapshot of the migrated state.
             // Point-in-time recovery into the pre-migration past is
             // sacrificed for migration simplicity. Old pages remain on
-            // disk until `compact_file`.
+            // disk until `compact_file`. (For v6→v7 alone — which doesn't
+            // change page crypto — the old snapshots would technically
+            // still be readable, but dropping them uniformly keeps the
+            // migration policy simple.)
             manifest.clear();
         }
 
         // The ANN index pages on disk were sealed under the *old* AAD scheme
-        // if we migrated to v6; force a rewrite at fresh v6-encrypted slots
-        // on the next flush so a future reopen doesn't try to read them
-        // under the new AAD and fail. (Catalog and manifest already get
-        // rewritten via dirty_catalog and the manifest.clear() above.)
-        let dirty_index = migrated_to_v6 && ann.is_some();
+        // if we migrated pages to v6; force a rewrite at fresh v6-encrypted
+        // slots on the next flush so a future reopen doesn't try to read
+        // them under the new AAD and fail. (Catalog and manifest already
+        // get rewritten via dirty_catalog and the manifest.clear() above.)
+        let dirty_index = migrated_pages_to_v6 && ann.is_some();
 
         Ok(Mnemo {
             pager,
@@ -1092,7 +1112,9 @@ impl Mnemo {
         // Persist the relocation now: an isolated header write over an empty
         // WAL. A crash here leaves a consistent state with a bigger WAL.
         self.header.write_counter = self.pager.write_counter;
-        self.pager.write_raw(0, &self.header.to_page())?;
+        let mut page = self.header.to_page();
+        self.header.apply_seal(&mut page, self.pager.dek())?;
+        self.pager.write_raw(0, &page)?;
         self.pager.sync()?;
         Ok(())
     }
@@ -1204,7 +1226,9 @@ impl Mnemo {
         self.header.vector_count = live;
         self.header.write_counter = self.pager.write_counter;
         self.header.wal_seq = txn_id;
-        frames.push((0, self.header.to_page().to_vec()));
+        let mut hpage = self.header.to_page();
+        self.header.apply_seal(&mut hpage, self.pager.dek())?;
+        frames.push((0, hpage.to_vec()));
 
         // 4. COMMIT — log the transaction and fsync. Nothing at a home page
         //    other than the leased header has changed yet; this single
@@ -1287,7 +1311,9 @@ impl Mnemo {
         let mut leased = self.header.clone();
         leased.write_counter = self.pager.write_counter + counter_lease;
         leased.next_page += page_lease;
-        self.pager.write_raw(0, &leased.to_page())?;
+        let mut page = leased.to_page();
+        leased.apply_seal(&mut page, self.pager.dek())?;
+        self.pager.write_raw(0, &page)?;
         self.pager.sync()?;
 
         Ok(FlushPrelude { cat_bytes, idx_bytes })
@@ -1454,7 +1480,9 @@ impl Mnemo {
         self.header.write_counter = self.pager.write_counter;
         self.kdf = kdf;
 
-        self.pager.write_raw(0, &self.header.to_page())?;
+        let mut page = self.header.to_page();
+        self.header.apply_seal(&mut page, self.pager.dek())?;
+        self.pager.write_raw(0, &page)?;
         self.pager.sync()?;
         Ok(())
     }

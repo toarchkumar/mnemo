@@ -32,6 +32,13 @@ pub enum MnemoError {
     #[error("page {0} failed authentication — the file is corrupt or tampered")]
     PageAuthFailed(u64),
 
+    /// The v7 header seal failed authentication — at least one mutable
+    /// header field has been rewritten without the DEK. Open refuses to
+    /// proceed so a silent rollback or pointer-rewrite attack can't
+    /// surface stale data.
+    #[error("header seal authentication failed — mutable fields tampered with")]
+    HeaderTampered,
+
     /// A low-level cryptographic operation failed.
     #[error("cryptographic operation failed: {0}")]
     Crypto(String),

@@ -53,6 +53,46 @@ fn create_insert_search_reopen_recall() {
     assert_eq!(res[0].memory.content, "hello world");
 }
 
+/// Regression test for v7's header AEAD seal. Pre-v7, the only integrity
+/// check on the mutable header fields was an unkeyed CRC-32 — an attacker
+/// with write access could rewrite, say, `catalog_start` to point at an
+/// older catalog run and reopen the database against stale data, since
+/// the CRC is trivially recomputed without the DEK. v7 appends an
+/// AES-GCM tag whose AAD covers every mutable header field; flipping
+/// any of them (or any of the seal bytes themselves) invalidates the
+/// tag, so the next open errors with `HeaderTampered`.
+///
+/// The test flips a single bit in the seal tag — which lives at byte
+/// 254 of the header, well past the byte-238 CRC region — and confirms
+/// the open fails. Tampering with bytes inside the CRC range would
+/// instead trip the prefix-CRC torn-write check, so that case is not
+/// tested here; the keyed seal is what makes the rollback attack loud.
+#[test]
+fn header_tamper_is_detected_by_v7_seal() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("tamper.mnemo");
+
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::new("x", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
+        .unwrap();
+    db.flush().unwrap();
+    db.close().unwrap();
+
+    // Seal tag offset matches `format::HEADER_SEAL_TAG_OFF`.
+    const SEAL_TAG_OFF: usize = 254;
+    let mut bytes = read_bytes(&path);
+    bytes[SEAL_TAG_OFF] ^= 0x01;
+    write_bytes(&path, &bytes);
+
+    // `unwrap_err` would require `Mnemo: Debug`; match the Result instead.
+    match Mnemo::open(&path, "pw") {
+        Err(MnemoError::HeaderTampered) => {}
+        Err(other) => panic!("expected HeaderTampered, got {other:?}"),
+        Ok(_) => panic!("expected Mnemo::open to fail after seal tamper, but it succeeded"),
+    }
+}
+
 /// Regression test for v6's page-binding AAD. Before v6, page encryption
 /// passed no AAD to AES-GCM, so an attacker with write access could swap
 /// two valid encrypted pages between slots and the database would happily
