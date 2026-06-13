@@ -26,18 +26,52 @@ pub struct Pager {
     dek: Zeroizing<[u8; KEY_LEN]>,
     /// Monotonic nonce counter. Incremented for every encrypted page write.
     pub write_counter: u64,
+    /// Format version this pager is currently encrypting *for*. `Pager` is
+    /// version-aware because the format-bump in v6 changed page encryption
+    /// to bind each page's home `page_no` as AAD on AES-GCM, making
+    /// page-swap attacks tamper-evident. The pager picks the right AAD
+    /// scheme per version on every encrypt/decrypt. During a v5→v6
+    /// migration the pager flips from 5 to 6 mid-flight via
+    /// [`Pager::set_version`].
+    version: u16,
     /// Bounded LRU cache of decrypted page payloads.
     cache: PageCache,
 }
 
 impl Pager {
     /// Wrap an open file with a pager. `write_counter` comes from the header.
-    pub fn new(file: File, dek: Zeroizing<[u8; KEY_LEN]>, write_counter: u64) -> Self {
+    pub fn new(
+        file: File,
+        dek: Zeroizing<[u8; KEY_LEN]>,
+        write_counter: u64,
+        version: u16,
+    ) -> Self {
         Self {
             file,
             dek,
             write_counter,
+            version,
             cache: PageCache::new(DEFAULT_CACHE_PAGES),
+        }
+    }
+
+    /// Switch the pager to a new format version. Used by [`crate::Mnemo::open`]
+    /// during a migration that needs to read with the old version's AAD
+    /// scheme and write with the new one.
+    pub(crate) fn set_version(&mut self, version: u16) {
+        self.version = version;
+    }
+
+    /// AAD bound to an encrypted page under this pager's version. Returns a
+    /// fresh `Vec` each call to keep the `Aead::Payload` lifetime simple at
+    /// every call site. Empty for v4/v5 (matching the historical scheme
+    /// without page binding); `page_no.to_le_bytes()` from v6 onwards.
+    #[inline]
+    fn page_aad(&self, page_no: u64) -> Vec<u8> {
+        if self.version >= 6 {
+            page_no.to_le_bytes().to_vec()
+        } else {
+            Vec::new()
         }
     }
 
@@ -100,7 +134,8 @@ impl Pager {
 
         self.write_counter += 1;
         let nonce = crypto::page_nonce(page_no, self.write_counter);
-        let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &padded)?;
+        let aad = self.page_aad(page_no);
+        let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &padded, &aad)?;
 
         let mut disk = [0u8; PAGE_SIZE];
         disk[..NONCE_LEN].copy_from_slice(&nonce);
@@ -140,7 +175,8 @@ impl Pager {
         nonce.copy_from_slice(&disk[0..NONCE_LEN]);
         let ciphertext = &disk[NONCE_LEN..];
 
-        let payload = crypto::aead_decrypt(&self.dek, &nonce, ciphertext)
+        let aad = self.page_aad(page_no);
+        let payload = crypto::aead_decrypt(&self.dek, &nonce, ciphertext, &aad)
             .map_err(|_| MnemoError::PageAuthFailed(page_no))?;
 
         self.cache.insert(page_no, payload.clone(), false);
@@ -192,7 +228,8 @@ impl Pager {
                 .to_vec();
             self.write_counter += 1;
             let nonce = crypto::page_nonce(page_no, self.write_counter);
-            let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &payload)?;
+            let aad = self.page_aad(page_no);
+            let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &payload, &aad)?;
 
             let mut disk = Vec::with_capacity(PAGE_SIZE);
             disk.extend_from_slice(&nonce);

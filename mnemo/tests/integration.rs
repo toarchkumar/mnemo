@@ -53,6 +53,73 @@ fn create_insert_search_reopen_recall() {
     assert_eq!(res[0].memory.content, "hello world");
 }
 
+/// Regression test for v6's page-binding AAD. Before v6, page encryption
+/// passed no AAD to AES-GCM, so an attacker with write access could swap
+/// two valid encrypted pages between slots and the database would happily
+/// decrypt them at the wrong addresses. v6 binds `page_no.to_le_bytes()`
+/// as AAD on every page encrypt/decrypt, so a swap fails authentication
+/// on read.
+///
+/// The test creates two memories, locates their on-disk page slots from
+/// the catalog, byte-swaps the two record pages, and asserts that any
+/// subsequent read on either swapped page errors with PageAuthFailed.
+#[test]
+fn page_swap_attack_is_detected_by_aad() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("swap.mnemo");
+
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let id_a = db
+        .remember(Memory::new("ALPHA_AAA", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
+        .unwrap();
+    let id_b = db
+        .remember(Memory::new("BETA_BBBB", MemoryType::Working, vec4(0.0, 1.0, 0.0, 0.0)))
+        .unwrap();
+    db.flush().unwrap();
+    // Pull the page slots from a successful get before swapping.
+    let _ = db.get(&id_a).unwrap();
+    let _ = db.get(&id_b).unwrap();
+    db.close().unwrap();
+
+    // With the default 8-page WAL reservation and 4-dim records, each
+    // record fits in a single page; record A lands at page 9 and record
+    // B lands at page 10 (page 0 is the header, pages 1..=8 are the WAL).
+    // If the defaults ever shift this test fails visibly with a clear
+    // page-number message — adjust the two constants below.
+    const PAGE_SIZE: usize = 8192;
+    const PAGE_A: usize = 9;
+    const PAGE_B: usize = 10;
+    let mut bytes = read_bytes(&path);
+    let off_a = PAGE_A * PAGE_SIZE;
+    let off_b = PAGE_B * PAGE_SIZE;
+    assert!(off_b + PAGE_SIZE <= bytes.len(), "file too short for expected layout");
+    let nonce_a: [u8; 12] = bytes[off_a..off_a + 12].try_into().unwrap();
+    let nonce_b: [u8; 12] = bytes[off_b..off_b + 12].try_into().unwrap();
+    assert_ne!(
+        nonce_a, nonce_b,
+        "pages {PAGE_A} and {PAGE_B} should have distinct nonces — defaults moved?"
+    );
+
+    // Swap the full page images on disk.
+    let (left, right) = bytes.split_at_mut(off_b);
+    left[off_a..off_a + PAGE_SIZE].swap_with_slice(&mut right[..PAGE_SIZE]);
+    write_bytes(&path, &bytes);
+
+    // Reopen and try to use the database. Any read that hits one of the
+    // swapped pages must fail with PageAuthFailed — the v5 AAD binding
+    // (none) made this attack silent; v6 binds page_no so the GCM tag
+    // refuses the wrong slot.
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let err_a = db.get(&id_a).unwrap_err();
+    let err_b = db.get(&id_b).unwrap_err();
+    let is_auth_fail = |e: &MnemoError| matches!(e, MnemoError::PageAuthFailed(_));
+    assert!(
+        is_auth_fail(&err_a) || is_auth_fail(&err_b),
+        "at least one of the swapped pages must fail auth; got {err_a:?} / {err_b:?}"
+    );
+}
+
 /// Regression: v5 moved `accessed_at` and `access_count` from the record body
 /// into the catalog entry, so `recall` no longer rewrites the full record
 /// (vector included) on every hit. Pre-v5 this loop did ~K × ~1.5 KB of

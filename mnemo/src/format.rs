@@ -30,11 +30,20 @@ pub const MAGIC: &[u8; 4] = b"MNEM";
 ///   serialized body) and rewritten on the next flush.
 ///
 /// [`CatalogEntry`]: crate::store
-pub const VERSION: u16 = 5;
+pub const VERSION: u16 = 6;
 /// Lowest version this build can auto-migrate on open. Files older than
 /// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
 /// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
 /// and rewritten under the current `VERSION` on the next flush.
+///
+/// History:
+/// - **v6** binds each encrypted page's home `page_no` as AES-GCM AAD so
+///   page-transplant attacks (move a valid encrypted page to a different
+///   slot) become tamper-evident. Migration re-encrypts every live page.
+/// - **v5** widened `CatalogEntry` with `accessed_at` and `access_count`
+///   so `recall` no longer rewrites the full record. Migration replays
+///   the v4 catalog into the v5 shape.
+/// - v4 added the snapshot-manifest region.
 pub const MIGRATABLE_FROM: u16 = 4;
 /// Size of a page in bytes (on disk).
 pub const PAGE_SIZE: usize = 8192;

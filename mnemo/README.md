@@ -85,7 +85,12 @@ The file is a sequence of fixed **8 KiB pages**:
   occupy runs of consecutive pages. The page allocator is append-only.
 
 Every page is sealed with a unique nonce derived from `page_number` and a
-monotonic `write_counter`, so a nonce is never reused under the DEK.
+monotonic `write_counter`, so a nonce is never reused under the DEK. From
+**format v6** onwards, each page's home `page_no` is also bound into the
+GCM authentication tag as Associated Authenticated Data (AAD) — an attacker
+who swaps two valid encrypted pages between slots makes them un-decryptable
+at the new addresses (the auth check fails with `PageAuthFailed`). The v5→v6
+migration re-encrypts every live data page in place under the new AAD.
 
 ### Durability — write-ahead log
 
@@ -346,7 +351,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 31 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 32 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 

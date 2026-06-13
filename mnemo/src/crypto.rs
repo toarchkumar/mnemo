@@ -20,7 +20,7 @@
 //! where `write_counter` is a monotonic counter persisted in the file header.
 //! Because the counter never repeats, an AES-GCM nonce is never reused.
 
-use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use zeroize::Zeroizing;
@@ -87,26 +87,38 @@ fn cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
     Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key))
 }
 
-/// AES-256-GCM encrypt. Output is `ciphertext || 16-byte tag`.
+/// AES-256-GCM encrypt with **Associated Authenticated Data**. The AAD is not
+/// part of the ciphertext but is bound into the authentication tag; decryption
+/// fails unless the caller supplies the same AAD. Output is
+/// `ciphertext || 16-byte tag`.
+///
+/// Pass `&[]` to encrypt without AAD — this matches the format before v6, used
+/// for wrapping the DEK and for v4/v5 page encryption. From v6 onwards, page
+/// encryption passes `page_no.to_le_bytes()` as AAD so an attacker can't
+/// transplant a valid encrypted page to a different page slot — the
+/// authentication tag binds the page image to its home page number.
 pub fn aead_encrypt(
     key: &[u8; KEY_LEN],
     nonce: &[u8; NONCE_LEN],
     plaintext: &[u8],
+    aad: &[u8],
 ) -> Result<Vec<u8>> {
     cipher(key)
-        .encrypt(Nonce::from_slice(nonce), plaintext)
+        .encrypt(Nonce::from_slice(nonce), Payload { msg: plaintext, aad })
         .map_err(|e| MnemoError::Crypto(e.to_string()))
 }
 
-/// AES-256-GCM decrypt. Input must be `ciphertext || 16-byte tag`.
-/// Returns an error if authentication fails.
+/// AES-256-GCM decrypt with AAD. Input must be `ciphertext || 16-byte tag`.
+/// Returns an error if authentication fails — including when the supplied
+/// AAD doesn't match what was used during encryption.
 pub fn aead_decrypt(
     key: &[u8; KEY_LEN],
     nonce: &[u8; NONCE_LEN],
     ciphertext: &[u8],
+    aad: &[u8],
 ) -> Result<Vec<u8>> {
     cipher(key)
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad })
         .map_err(|_| MnemoError::Crypto("authentication failed".into()))
 }
 
@@ -144,13 +156,15 @@ pub fn page_nonce(page_no: u64, write_counter: u64) -> [u8; NONCE_LEN] {
     n
 }
 
-/// Wrap (encrypt) the DEK with the KEK.
+/// Wrap (encrypt) the DEK with the KEK. The wrap uses **empty AAD** in every
+/// version, so v5 wrapped-DEK bytes on disk round-trip unchanged through a v6
+/// build — only page encryption changed in v6.
 pub fn wrap_dek(
     kek: &[u8; KEY_LEN],
     nonce: &[u8; NONCE_LEN],
     dek: &[u8; KEY_LEN],
 ) -> Result<Vec<u8>> {
-    aead_encrypt(kek, nonce, dek)
+    aead_encrypt(kek, nonce, dek, &[])
 }
 
 /// Unwrap (decrypt) the DEK with the KEK. A wrong KEK (wrong passphrase)
@@ -161,7 +175,10 @@ pub fn unwrap_dek(
     wrapped: &[u8],
 ) -> Result<Zeroizing<[u8; KEY_LEN]>> {
     let plain = cipher(kek)
-        .decrypt(Nonce::from_slice(nonce), wrapped)
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload { msg: wrapped, aad: &[] },
+        )
         .map_err(|_| MnemoError::WrongPassphrase)?;
     if plain.len() != KEY_LEN {
         return Err(MnemoError::WrongPassphrase);

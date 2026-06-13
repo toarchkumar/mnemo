@@ -491,7 +491,7 @@ impl Mnemo {
             manifest_len: 0,
         };
 
-        let mut pager = Pager::new(file, dek, 0);
+        let mut pager = Pager::new(file, dek, 0, VERSION);
         pager.write_raw(0, &header.to_page())?;
         pager.sync()?;
 
@@ -573,16 +573,19 @@ impl Mnemo {
         let kek = crypto::derive_kek(passphrase.as_bytes(), &header.salt, kdf)?;
         let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
 
-        let mut pager = Pager::new(file, dek, header.write_counter);
+        // Build the pager at the file's *current* version so initial reads
+        // use the matching AAD scheme — `Pager::page_aad` returns empty AAD
+        // for v4/v5 (no page binding) and `page_no.to_le_bytes()` for v6+.
+        let on_disk_version = header.version;
+        let mut pager = Pager::new(file, dek, header.write_counter, on_disk_version);
         let dimensions = header.dimensions as usize;
 
-        // Catalog: v5+ reads directly; v4 reads through the frozen shim and
-        // then migrates each row by reading the memory's serialized body to
-        // populate the new `accessed_at` / `access_count` fields. The
-        // migration is fully in-memory at this point — `dirty_catalog` is
-        // set and `header.version` is bumped so the next flush persists the
-        // v5 shape and version stamp.
-        let (catalog, migrated_from_v4) = if header.version == VERSION {
+        // === v4→v5 catalog migration =====================================
+        // v6 reads directly; v5 reads directly; v4 replays the catalog into
+        // the v5 shape by reading each memory's body to populate the new
+        // `accessed_at` / `access_count` fields. All page reads here still
+        // use the v4/v5 AAD scheme (none).
+        let (catalog, migrated_from_v4) = if on_disk_version >= 5 {
             (
                 load_catalog(
                     &mut pager,
@@ -592,7 +595,7 @@ impl Mnemo {
                 )?,
                 false,
             )
-        } else if header.version == 4 {
+        } else if on_disk_version == 4 {
             let v4 = load_catalog_v4(
                 &mut pager,
                 header.catalog_start,
@@ -601,7 +604,7 @@ impl Mnemo {
             )?;
             (migrate_v4_catalog(&mut pager, v4)?, true)
         } else {
-            return Err(MnemoError::UnsupportedVersion(header.version));
+            return Err(MnemoError::UnsupportedVersion(on_disk_version));
         };
         let index = build_id_index(&catalog);
         let ann = load_index(
@@ -618,17 +621,54 @@ impl Mnemo {
             header.manifest_len,
         )?;
 
-        if migrated_from_v4 {
-            // Stamp the version forward and mark the catalog dirty so the
-            // next flush rewrites it in the v5 shape and records the bump.
+        // === v5→v6 page-encryption migration =============================
+        // The file's data pages were encrypted under the v5 AAD scheme
+        // (no page binding). v6 binds each page's home `page_no` as AAD,
+        // so an attacker who swaps two valid encrypted pages between
+        // slots is detected on read. We migrate by re-staging every live
+        // record page through `write_page` (which marks it dirty), then
+        // flipping the pager to v6. The next flush will encrypt each
+        // dirty page under v6 AAD at its same home slot.
+        //
+        // Tombstoned entries are skipped — they'll be reclaimed by
+        // `compact_file`. Old catalog / index / manifest pages stay as
+        // orphan v5 ciphertext on disk; the next flush writes the new
+        // runs at fresh slots and the old ones get reclaimed by compact.
+        let migrated_to_v6 = on_disk_version < VERSION;
+        if migrated_to_v6 {
+            for e in &catalog {
+                if e.deleted {
+                    continue;
+                }
+                for i in 0..e.page_count as u64 {
+                    let payload = pager.read_page(e.start_page + i)?;
+                    pager.write_page(e.start_page + i, &payload)?;
+                }
+            }
+            pager.set_version(VERSION);
+        }
+
+        let migrated = migrated_from_v4 || migrated_to_v6;
+        if migrated {
+            // Stamp the version forward in memory; the next flush persists
+            // it via the WAL-committed header frame.
             header.version = VERSION;
-            // Pre-v5 snapshots point at v4-encoded catalog runs this build
-            // can't read; restore_to them would fail. Drop them — the next
-            // flush will record a fresh v5 snapshot of the migrated state.
-            // PITR into the pre-migration past is sacrificed for migration
-            // simplicity. Old pages remain on disk until `compact_file`.
+            // Snapshots written under an older format reference page runs
+            // encrypted with the old AAD scheme; this build can't decrypt
+            // them under the new pager. Drop the manifest so the next
+            // flush records a fresh snapshot of the migrated state.
+            // Point-in-time recovery into the pre-migration past is
+            // sacrificed for migration simplicity. Old pages remain on
+            // disk until `compact_file`.
             manifest.clear();
         }
+
+        // The ANN index pages on disk were sealed under the *old* AAD scheme
+        // if we migrated to v6; force a rewrite at fresh v6-encrypted slots
+        // on the next flush so a future reopen doesn't try to read them
+        // under the new AAD and fail. (Catalog and manifest already get
+        // rewritten via dirty_catalog and the manifest.clear() above.)
+        let dirty_index = migrated_to_v6 && ann.is_some();
 
         Ok(Mnemo {
             pager,
@@ -638,9 +678,9 @@ impl Mnemo {
             path,
             dimensions,
             kdf,
-            dirty_catalog: migrated_from_v4,
+            dirty_catalog: migrated,
             ann,
-            dirty_index: false,
+            dirty_index,
             manifest,
         })
     }
