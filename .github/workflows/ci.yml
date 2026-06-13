@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Treat new clippy lints in future toolchain releases as warnings, not
+  # build-breaking errors, so a CI run going red is always something we
+  # actually changed. The job below still uses `-D warnings` to enforce
+  # the existing lint surface; `RUSTFLAGS` only governs the build itself.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # --- Rust core: library + CLI + integration tests + clippy -----------
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Run every platform even if one fails, so we get a full picture
+      # of which OSes broke when a change lands.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # Caches ~/.cargo/registry, ~/.cargo/git, and ./target keyed on the
+      # Cargo.lock(s) in the listed workspaces. Saves the bulk of every
+      # rebuild — first CI run is slow, subsequent runs are cache hits.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+
+      - name: cargo test
+        working-directory: mnemo
+        run: cargo test
+
+      - name: cargo clippy
+        working-directory: mnemo
+        run: cargo clippy --all-targets -- -D warnings
+
+  # --- Python bindings: build via maturin + run mnemo-python test_mnemo
+  python:
+    name: python bindings (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo-python
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install maturin
+        run: pip install maturin
+
+      # `maturin develop` builds the abi3 wheel for the cross-Python ABI
+      # and installs it into the runner's Python so `python test_mnemo.py`
+      # can import it directly.
+      - name: Build and install wheel
+        working-directory: mnemo-python
+        run: maturin develop --release
+
+      - name: Run Python tests
+        working-directory: mnemo-python
+        run: python test_mnemo.py

@@ -1,5 +1,7 @@
 # Memory Nemo (MNemo)
 
+[![CI](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml)
+
 **An encrypted, single-file, portable agent-memory engine, written in Rust.**
 
 Give your agent a brain it can carry: one `.mnemo` file, encrypted at rest, with
