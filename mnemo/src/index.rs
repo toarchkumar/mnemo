@@ -214,10 +214,9 @@ impl PqCodebook {
     fn encode(&self, v: &[f32]) -> Vec<u8> {
         let m = self.m();
         let mut code = vec![0u8; m];
-        for s in 0..m {
+        for (s, slot) in code.iter_mut().enumerate().take(m) {
             let (lo, hi) = (self.sub_offsets[s], self.sub_offsets[s + 1]);
-            let idx = nearest(&self.centroids[s], hi - lo, &v[lo..hi]);
-            code[s] = idx as u8;
+            *slot = nearest(&self.centroids[s], hi - lo, &v[lo..hi]) as u8;
         }
         code
     }

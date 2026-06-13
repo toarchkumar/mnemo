@@ -87,6 +87,13 @@ impl Default for MnemoConfig {
 }
 
 /// Catalog entry: maps a memory ID to its page run on disk.
+///
+/// **Schema (v5+):** carries `accessed_at` and `access_count` so `recall`
+/// can update access stats by mutating the catalog entry rather than
+/// rewriting the entire record (Phase 2.1 of the improvement plan). The
+/// values in a memory's serialized record body become a stale snapshot
+/// after the first recall; [`Mnemo::read_memory`] re-populates them from
+/// the catalog so consumers always see the live values.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct CatalogEntry {
     /// ULID as a raw `u128`.
@@ -94,6 +101,22 @@ struct CatalogEntry {
     start_page: u64,
     page_count: u32,
     /// Exact serialized byte length of the record.
+    len: u32,
+    deleted: bool,
+    /// Unix seconds of the most recent recall hit (or write, for fresh entries).
+    accessed_at: i64,
+    /// How many times `recall` has surfaced this memory.
+    access_count: u32,
+}
+
+/// Frozen v4 catalog entry shape, used only by the v4→v5 migration path in
+/// [`Mnemo::open`]. Its layout matches the catalog encoding written by
+/// pre-v5 builds (5 positional fields). Do not change this struct.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct CatalogEntryV4 {
+    id: u128,
+    start_page: u64,
+    page_count: u32,
     len: u32,
     deleted: bool,
 }
@@ -155,6 +178,15 @@ pub struct RecallRequest {
     /// Index override: candidates to rerank (`None` = index default). Ignored
     /// when no ANN index is present.
     pub n_rerank: Option<usize>,
+    /// Whether to update each result's `accessed_at` and `access_count` in
+    /// the catalog. Defaults to `true`, matching pre-v5 behavior.
+    ///
+    /// Set to `false` for **fully read-only recall** — useful for batch
+    /// scoring, dry-run scoring, or recalls run by introspection tooling
+    /// (e.g. `mnemo about` consumers) where you don't want the score's own
+    /// observation to perturb the database. With `false`, recall does not
+    /// dirty the catalog and the next `flush` is a no-op.
+    pub track_access: bool,
 }
 
 impl RecallRequest {
@@ -169,6 +201,7 @@ impl RecallRequest {
             weights: ScoreWeights::default(),
             n_probe: None,
             n_rerank: None,
+            track_access: true,
         }
     }
     /// Set the result cap.
@@ -204,6 +237,13 @@ impl RecallRequest {
     /// Override the number of candidates reranked exactly (accuracy dial).
     pub fn n_rerank(mut self, n: usize) -> Self {
         self.n_rerank = Some(n);
+        self
+    }
+    /// Toggle whether recall updates `accessed_at` / `access_count` on
+    /// the returned memories' catalog entries (default `true`). Pass
+    /// `false` for a fully read-only recall — see the field doc.
+    pub fn track_access(mut self, track: bool) -> Self {
+        self.track_access = track;
         self
     }
 }
@@ -281,13 +321,64 @@ fn read_run_bytes(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result
     Ok(buf)
 }
 
-/// Load a catalog run (an empty `pages` yields an empty catalog).
+/// Load a v5+ catalog run (an empty `pages` yields an empty catalog).
 fn load_catalog(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result<Vec<CatalogEntry>> {
     if pages == 0 {
         return Ok(Vec::new());
     }
     let buf = read_run_bytes(pager, start, pages, len)?;
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
+}
+
+/// Load a **v4** catalog run using the frozen [`CatalogEntryV4`] shape.
+/// Used only by the v4→v5 migration path in [`Mnemo::open`].
+fn load_catalog_v4(
+    pager: &mut Pager,
+    start: u64,
+    pages: u64,
+    len: u64,
+) -> Result<Vec<CatalogEntryV4>> {
+    if pages == 0 {
+        return Ok(Vec::new());
+    }
+    let buf = read_run_bytes(pager, start, pages, len)?;
+    rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
+}
+
+/// Walk a v4 catalog and synthesize the v5 shape. For each live entry,
+/// reads the memory's serialized body and copies its `accessed_at` and
+/// `access_count` into the catalog row (the v4 record body still carries
+/// them — they're moving *from* the body *to* the catalog). Deleted
+/// entries skip the read and zero the fields.
+fn migrate_v4_catalog(
+    pager: &mut Pager,
+    v4: Vec<CatalogEntryV4>,
+) -> Result<Vec<CatalogEntry>> {
+    let mut out = Vec::with_capacity(v4.len());
+    for e in &v4 {
+        let (accessed_at, access_count) = if e.deleted {
+            (0i64, 0u32)
+        } else {
+            let mut buf = Vec::with_capacity(e.len as usize);
+            for i in 0..e.page_count as u64 {
+                buf.extend_from_slice(&pager.read_page(e.start_page + i)?);
+            }
+            buf.truncate(e.len as usize);
+            let mem: Memory = rmp_serde::from_slice(&buf)
+                .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+            (mem.accessed_at, mem.access_count)
+        };
+        out.push(CatalogEntry {
+            id: e.id,
+            start_page: e.start_page,
+            page_count: e.page_count,
+            len: e.len,
+            deleted: e.deleted,
+            accessed_at,
+            access_count,
+        });
+    }
+    Ok(out)
 }
 
 /// Load the snapshot manifest (an empty `pages` yields an empty manifest).
@@ -485,12 +576,33 @@ impl Mnemo {
         let mut pager = Pager::new(file, dek, header.write_counter);
         let dimensions = header.dimensions as usize;
 
-        let catalog = load_catalog(
-            &mut pager,
-            header.catalog_start,
-            header.catalog_pages,
-            header.catalog_len,
-        )?;
+        // Catalog: v5+ reads directly; v4 reads through the frozen shim and
+        // then migrates each row by reading the memory's serialized body to
+        // populate the new `accessed_at` / `access_count` fields. The
+        // migration is fully in-memory at this point — `dirty_catalog` is
+        // set and `header.version` is bumped so the next flush persists the
+        // v5 shape and version stamp.
+        let (catalog, migrated_from_v4) = if header.version == VERSION {
+            (
+                load_catalog(
+                    &mut pager,
+                    header.catalog_start,
+                    header.catalog_pages,
+                    header.catalog_len,
+                )?,
+                false,
+            )
+        } else if header.version == 4 {
+            let v4 = load_catalog_v4(
+                &mut pager,
+                header.catalog_start,
+                header.catalog_pages,
+                header.catalog_len,
+            )?;
+            (migrate_v4_catalog(&mut pager, v4)?, true)
+        } else {
+            return Err(MnemoError::UnsupportedVersion(header.version));
+        };
         let index = build_id_index(&catalog);
         let ann = load_index(
             &mut pager,
@@ -499,12 +611,24 @@ impl Mnemo {
             header.index_len,
             dimensions,
         )?;
-        let manifest = load_manifest(
+        let mut manifest = load_manifest(
             &mut pager,
             header.manifest_start,
             header.manifest_pages,
             header.manifest_len,
         )?;
+
+        if migrated_from_v4 {
+            // Stamp the version forward and mark the catalog dirty so the
+            // next flush rewrites it in the v5 shape and records the bump.
+            header.version = VERSION;
+            // Pre-v5 snapshots point at v4-encoded catalog runs this build
+            // can't read; restore_to them would fail. Drop them — the next
+            // flush will record a fresh v5 snapshot of the migrated state.
+            // PITR into the pre-migration past is sacrificed for migration
+            // simplicity. Old pages remain on disk until `compact_file`.
+            manifest.clear();
+        }
 
         Ok(Mnemo {
             pager,
@@ -514,7 +638,7 @@ impl Mnemo {
             path,
             dimensions,
             kdf,
-            dirty_catalog: false,
+            dirty_catalog: migrated_from_v4,
             ann,
             dirty_index: false,
             manifest,
@@ -561,7 +685,15 @@ impl Mnemo {
 
     fn read_memory(&mut self, e: &CatalogEntry) -> Result<Memory> {
         let bytes = self.read_record(e)?;
-        rmp_serde::from_slice(&bytes).map_err(|err| MnemoError::Serialize(err.to_string()))
+        let mut m: Memory = rmp_serde::from_slice(&bytes)
+            .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        // The catalog is the source of truth for access stats — the values
+        // in the record body are a stale snapshot from when the record was
+        // last written. Overwrite them here so consumers always see live
+        // values regardless of when the record was last serialized.
+        m.accessed_at = e.accessed_at;
+        m.access_count = e.access_count;
+        Ok(m)
     }
 
     /// Serialize and store a memory (insert or overwrite by ID).
@@ -578,12 +710,20 @@ impl Mnemo {
         let id_u: u128 = m.id.0;
         let bytes = rmp_serde::to_vec(&m).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         let (start, pc) = self.write_record(&bytes)?;
+        // For overwrites preserve the existing access stats; for inserts
+        // seed them from the memory (which carries them in its body).
+        let (prev_accessed, prev_count) = match self.index.get(&id_u).copied() {
+            Some(idx) => (self.catalog[idx].accessed_at, self.catalog[idx].access_count),
+            None => (m.accessed_at, m.access_count),
+        };
         let entry = CatalogEntry {
             id: id_u,
             start_page: start,
             page_count: pc,
             len: bytes.len() as u32,
             deleted: false,
+            accessed_at: prev_accessed,
+            access_count: prev_count,
         };
         match self.index.get(&id_u).copied() {
             Some(idx) => self.catalog[idx] = entry,
@@ -790,11 +930,30 @@ impl Mnemo {
         scored.sort_by(|a, b| b.score.total_cmp(&a.score));
         scored.truncate(req.top_k);
 
-        // Update access statistics for everything we surfaced.
-        for r in &mut scored {
-            r.memory.accessed_at = now;
-            r.memory.access_count = r.memory.access_count.saturating_add(1);
-            self.put(r.memory.clone())?;
+        // Update access statistics for everything we surfaced — but only
+        // mutate the catalog entry, not the full record on disk. Pre-v5
+        // this loop called `self.put(r.memory.clone())`, which serialized
+        // and rewrote every result (vector included) to fresh pages,
+        // turning a top-K recall into K full record rewrites. Now the
+        // catalog is the source of truth for these two fields and the
+        // record body stays untouched until the next real edit.
+        if req.track_access {
+            for r in &mut scored {
+                if let Some(&idx) = self.index.get(&r.memory.id.0) {
+                    let entry = &mut self.catalog[idx];
+                    entry.accessed_at = now;
+                    entry.access_count = entry.access_count.saturating_add(1);
+                    // Propagate the just-updated values onto the returned
+                    // Memory so the caller sees the post-recall state.
+                    r.memory.accessed_at = entry.accessed_at;
+                    r.memory.access_count = entry.access_count;
+                }
+            }
+            // Mark the catalog dirty so the next flush persists these
+            // bumps. The records themselves are not dirty.
+            if !scored.is_empty() {
+                self.dirty_catalog = true;
+            }
         }
         Ok(scored)
     }

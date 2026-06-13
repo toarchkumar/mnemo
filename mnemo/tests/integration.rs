@@ -53,6 +53,69 @@ fn create_insert_search_reopen_recall() {
     assert_eq!(res[0].memory.content, "hello world");
 }
 
+/// Regression: v5 moved `accessed_at` and `access_count` from the record body
+/// into the catalog entry, so `recall` no longer rewrites the full record
+/// (vector included) on every hit. Pre-v5 this loop did ~K × ~1.5 KB of
+/// vector churn per recall plus a catalog rewrite at the next flush; v5
+/// only dirties the catalog, and `track_access(false)` skips even that.
+#[test]
+fn recall_does_not_rewrite_records() {
+    use std::fs;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ro.mnemo");
+
+    // Seed two memories and flush.
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::new("a", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
+        .unwrap();
+    db.remember(Memory::new("b", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)))
+        .unwrap();
+    db.flush().unwrap();
+    let baseline = fs::metadata(&path).unwrap().len();
+
+    // Many recalls with `track_access(false)` must not dirty anything —
+    // the next flush is a no-op and the file size stays put.
+    for _ in 0..50 {
+        let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+            .top_k(2)
+            .track_access(false);
+        let _ = db.recall(&req).unwrap();
+    }
+    db.flush().unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().len(),
+        baseline,
+        "track_access=false recalls should not grow the file at all"
+    );
+
+    // With default `track_access(true)`, each recall+flush rewrites only the
+    // catalog (one small page run) plus the manifest. Per-flush growth must
+    // stay well under one full-record rewrite (vector + content), which at
+    // 4-dim is small but pre-v5 would still scale with K results.
+    let mut prev = baseline;
+    for i in 0..20 {
+        let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(2);
+        let _ = db.recall(&req).unwrap();
+        db.flush().unwrap();
+        let now = fs::metadata(&path).unwrap().len();
+        let growth = now - prev;
+        // One catalog rewrite (~1 page) + one manifest entry (~1 page) +
+        // some WAL frame overhead. Far below 50 KB per recall.
+        assert!(
+            growth < 50_000,
+            "iter {i}: per-recall+flush growth {growth} bytes — pre-v5 catalog rewrite path?"
+        );
+        prev = now;
+    }
+
+    // Sanity: access stats actually got bumped despite no record rewrites.
+    let hits = db.recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(1).track_access(false)).unwrap();
+    assert!(
+        hits[0].memory.access_count > 0,
+        "track_access(true) recalls should have bumped access_count via the catalog"
+    );
+}
+
 #[test]
 fn file_is_encrypted_at_rest() {
     let dir = tempdir().unwrap();
@@ -526,7 +589,7 @@ fn wal_heals_torn_header() {
     write_bytes(&path, &bytes);
 
     // Open must notice the bad CRC and rebuild page 0 from the WAL.
-    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 6, "torn header must self-heal from the WAL");
 }
 
@@ -555,7 +618,7 @@ fn wal_discards_uncommitted_garbage() {
     }
     write_bytes(&path, &bytes);
 
-    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 5, "a garbage WAL must not disturb a checkpointed db");
 }
 
@@ -585,7 +648,7 @@ fn wal_region_grows_for_large_catalog() {
     assert!(wal_pages > 64, "WAL should have grown well past the default (got {wal_pages})");
 
     // The grown/relocated WAL must reopen cleanly with every memory intact.
-    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), n);
 }
 

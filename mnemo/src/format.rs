@@ -18,8 +18,24 @@ use crate::error::{MnemoError, Result};
 
 /// Magic bytes at the start of every `.mnemo` file.
 pub const MAGIC: &[u8; 4] = b"MNEM";
-/// Current format version. v4 adds the snapshot-manifest region.
-pub const VERSION: u16 = 4;
+/// Current format version.
+///
+/// History:
+/// - v4 added the snapshot-manifest region.
+/// - **v5** widens [`CatalogEntry`] with `accessed_at` and `access_count`,
+///   so `recall` can update access stats without rewriting the full record
+///   (Phase 2.1 of the improvement plan). Migration is automatic on
+///   first [`crate::Mnemo::open`] of a v4 file: the catalog is replayed
+///   into the v5 shape (populating the new fields from each record's
+///   serialized body) and rewritten on the next flush.
+///
+/// [`CatalogEntry`]: crate::store
+pub const VERSION: u16 = 5;
+/// Lowest version this build can auto-migrate on open. Files older than
+/// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
+/// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
+/// and rewritten under the current `VERSION` on the next flush.
+pub const MIGRATABLE_FROM: u16 = 4;
 /// Size of a page in bytes (on disk).
 pub const PAGE_SIZE: usize = 8192;
 /// Usable plaintext bytes per encrypted page (`PAGE_SIZE` minus crypto overhead).
@@ -147,7 +163,11 @@ impl Header {
             return Err(MnemoError::BadMagic);
         }
         let version = rd_u16(b, 4);
-        if version != VERSION {
+        // Accept the current VERSION and any migratable predecessor; older
+        // and forward versions are rejected. `Mnemo::open` is responsible
+        // for upgrading migratable in-memory state and rewriting the on-disk
+        // format on the next flush.
+        if version != VERSION && !(MIGRATABLE_FROM..VERSION).contains(&version) {
             return Err(MnemoError::UnsupportedVersion(version));
         }
         let stored_crc = rd_u32(b, HEADER_CRC_OFF);

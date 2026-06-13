@@ -802,7 +802,7 @@ fn run() -> std::result::Result<(), String> {
             if snaps.is_empty() {
                 println!("no snapshots yet (nothing has been flushed)");
             } else {
-                println!("{:<8}  {:<12}  {}", "txn", "memories", "committed (unix)");
+                println!("{:<8}  {:<12}  committed (unix)", "txn", "memories");
                 for s in snaps {
                     println!(
                         "{:<8}  {:<12}  {}",

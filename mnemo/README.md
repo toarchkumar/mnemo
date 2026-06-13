@@ -318,7 +318,15 @@ cargo run --bin mnemo -- recall agent.mnemo --query 0.1,0.2,0.3 --top-k 5
 
 `list` decrypts every live record (O(n)); it is meant for human-scale
 exploration, not for serving requests. `recall` updates each returned
-memory's access stats — those changes are persisted on the next `flush`.
+memory's `accessed_at` and `access_count` — but as of **v5** these live
+on the catalog entry, not in the record body, so the update touches
+**one catalog page per flush**, not the full vector of every result.
+Pre-v5, a top-K recall rewrote K full records (vector + content) at
+the next flush; v5 makes recall effectively a write-once-on-catalog
+operation. Set `RecallRequest::track_access(false)` for a fully
+read-only recall — useful for batch scoring, dry-runs, or tooling that
+shouldn't perturb the database.
+
 `recall` needs a vector in the database's dimensionality; for dogfooded
 runs over real embeddings, pull a query vector from your embedding model
 (or from `project-memory.jsonl` in the `test/` sandbox).
@@ -338,7 +346,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 29 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 31 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 
