@@ -8,7 +8,7 @@ build-backend = "maturin"
 # is still named `mnemo` (see [lib] name in Cargo.toml), so user code keeps
 # writing `import mnemo` after `pip install mnemo-db`.
 name = "mnemo-db"
-version = "0.1.0"
+version = "0.2.0"
 description = "Encrypted, portable agent-memory engine — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"

@@ -13,6 +13,7 @@ vector server required.
 | **Site** | https://toarchkumar.github.io/mnemo/ |
 | **Rust core** | [`mnemo/`](mnemo/) — library, CLI, examples, integration tests |
 | **Python** | [`mnemo-python/`](mnemo-python/) — PyO3 bindings ([maturin](https://www.maturin.rs)) |
+| **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## Quick start
 
