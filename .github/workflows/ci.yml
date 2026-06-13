@@ -73,12 +73,18 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      # `maturin develop` builds the abi3 wheel for the cross-Python ABI
-      # and installs it into the runner's Python so `python test_mnemo.py`
-      # can import it directly.
-      - name: Build and install wheel
+      # `maturin develop` would be more direct, but it requires an active
+      # virtualenv to install into; `actions/setup-python` gives us a
+      # system Python on PATH without a venv. Build the abi3 wheel and
+      # `pip install` it instead — this matches the recipe maturin's own
+      # error message recommends for CI environments.
+      - name: Build wheel
         working-directory: mnemo-python
-        run: maturin develop --release
+        run: maturin build --release --out target/wheels
+
+      - name: Install wheel
+        working-directory: mnemo-python
+        run: pip install target/wheels/*.whl
 
       - name: Run Python tests
         working-directory: mnemo-python
