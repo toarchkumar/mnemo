@@ -376,7 +376,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mnemo"
+name = "mnemo-db"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
@@ -397,7 +397,7 @@ dependencies = [
 name = "mnemo-python"
 version = "0.1.0"
 dependencies = [
- "mnemo",
+ "mnemo-db",
  "pyo3",
  "serde_json",
 ]
