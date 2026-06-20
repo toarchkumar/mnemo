@@ -49,6 +49,14 @@ const DEFAULT_WAL_PAGES: u64 = 8;
 /// minimum that lets the first transaction commit without immediate growth.
 const MIN_WAL_PAGES: u64 = 2;
 
+/// Default cap on retained snapshot manifest entries. Each `flush` appends
+/// one entry; without a cap, long-running processes accumulate entries
+/// forever, growing per-flush manifest-serialize cost as O(total flushes)
+/// and the manifest run size on disk in lockstep. 256 keeps roughly a
+/// week of hourly snapshots while staying tiny (256 × ~82 bytes ≈ 21 KiB
+/// of manifest). Set `MnemoConfig::max_snapshots = 0` to disable the cap.
+pub const DEFAULT_MAX_SNAPSHOTS: usize = 256;
+
 /// Upper bound for the WAL scan when recovering a torn-header file. The
 /// real WAL region size lives in the header, but a torn header is exactly
 /// the case where we can't read it — so we scan a generous fixed window
@@ -74,6 +82,20 @@ pub struct MnemoConfig {
     /// avoid early grow events; tiny embedded uses can leave it at the
     /// default. Clamped to a minimum of [`MIN_WAL_PAGES`] (2 pages).
     pub wal_pages_initial: u64,
+    /// Maximum number of snapshot manifest entries to retain. Each `flush`
+    /// appends one entry; once the cap is hit, the *oldest* entry is dropped
+    /// from the in-memory manifest before the new one is added, so the
+    /// retained set is always the most-recent N. Defaults to
+    /// [`DEFAULT_MAX_SNAPSHOTS`] (256). Set to `0` to disable the cap and
+    /// retain every snapshot forever (the pre-v0.3 behavior).
+    ///
+    /// Pages referenced *only* by pruned snapshots stay on disk until the
+    /// next [`Mnemo::compact_file`], which reclaims them. Point-in-time
+    /// recovery via [`Mnemo::restore_to`] into a pruned `txn_id` returns
+    /// [`MnemoError::NotFound`].
+    ///
+    /// Apply to an already-open database with [`Mnemo::set_max_snapshots`].
+    pub max_snapshots: usize,
 }
 
 impl Default for MnemoConfig {
@@ -82,6 +104,7 @@ impl Default for MnemoConfig {
             dimensions: 768,
             kdf: KdfParams::secure(),
             wal_pages_initial: DEFAULT_WAL_PAGES,
+            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
         }
     }
 }
@@ -307,8 +330,13 @@ pub struct Mnemo {
     ann: Option<IvfPqIndex>,
     /// Set whenever the ANN index changes; drives whether `flush` rewrites it.
     dirty_index: bool,
-    /// Append-only manifest of committed snapshots, oldest first.
+    /// Append-only manifest of committed snapshots, oldest first. Capped
+    /// at [`Mnemo::max_snapshots`] entries on every flush — the oldest
+    /// entries are pruned first.
     manifest: Vec<Snapshot>,
+    /// Maximum manifest entries to retain across flushes. `0` disables
+    /// the cap (retain forever). Defaults to [`DEFAULT_MAX_SNAPSHOTS`].
+    max_snapshots: usize,
 }
 
 /// Read a run of consecutive encrypted pages and concatenate their plaintext.
@@ -512,6 +540,7 @@ impl Mnemo {
             ann: None,
             dirty_index: false,
             manifest: Vec::new(),
+            max_snapshots: config.max_snapshots,
         })
     }
 
@@ -702,7 +731,19 @@ impl Mnemo {
             ann,
             dirty_index,
             manifest,
+            // `Mnemo::open` has no [`MnemoConfig`] to read; default the cap
+            // to [`DEFAULT_MAX_SNAPSHOTS`]. Override with
+            // [`Mnemo::set_max_snapshots`] right after open if you need
+            // unlimited retention or a different cap for this handle.
+            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
         })
+    }
+
+    /// Override the manifest snapshot cap on this open handle. `0` disables
+    /// the cap; any positive value keeps the most-recent `max` snapshots and
+    /// drops the rest on the next flush. See [`MnemoConfig::max_snapshots`].
+    pub fn set_max_snapshots(&mut self, max: usize) {
+        self.max_snapshots = max;
     }
 
     /// Embedding dimensionality this database expects.
@@ -1198,9 +1239,21 @@ impl Mnemo {
         // 3b. Record this transaction as a restorable snapshot. The manifest
         //     update is staged in a local and adopted only once the commit
         //     below succeeds, so a failed flush leaves no phantom entry.
+        //
+        //     The cap (`self.max_snapshots`) is applied to the staged local
+        //     before the new entry lands, so after appending the manifest
+        //     holds at most `max_snapshots` entries — the most-recent N.
+        //     `max_snapshots == 0` disables the cap. Pages referenced only
+        //     by pruned snapshots stay on disk until `compact_file`.
         let live = self.len() as u64;
         let txn_id = self.header.wal_seq + 1;
         let mut manifest = self.manifest.clone();
+        if self.max_snapshots > 0 {
+            // Drop the oldest entries so there's room for the new one.
+            while manifest.len() >= self.max_snapshots {
+                manifest.remove(0);
+            }
+        }
         manifest.push(Snapshot {
             txn_id,
             created_at: memory::now_secs(),

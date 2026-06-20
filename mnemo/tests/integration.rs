@@ -805,6 +805,7 @@ fn fresh_file_uses_small_wal_by_default() {
         dimensions: 4,
         kdf: KdfParams::fast(),
         wal_pages_initial: 64,
+        ..Default::default()
     };
     let (big_bytes, big_wal) = make(&dir.path().join("big.mnemo"), big_cfg);
     assert_eq!(big_wal, 64, "explicit wal_pages_initial=64 should stick");
@@ -819,6 +820,7 @@ fn fresh_file_uses_small_wal_by_default() {
         dimensions: 4,
         kdf: KdfParams::fast(),
         wal_pages_initial: 0,
+        ..Default::default()
     };
     let (_tiny_bytes, tiny_wal) = make(&dir.path().join("tiny.mnemo"), tiny_cfg);
     assert!(
@@ -1013,6 +1015,68 @@ fn snapshots_record_every_flush() {
         assert_eq!(s.txn_id, (i + 1) as u64);
         assert_eq!(s.memory_count, (i + 1) as u64);
     }
+}
+
+/// `MnemoConfig::max_snapshots` (Phase 2.3) caps the retained manifest
+/// length. The newest N entries are kept; the rest get pruned at flush
+/// time. `restore_to` a pruned txn_id returns `NotFound`. Setting the
+/// cap to 0 disables it entirely.
+#[test]
+fn max_snapshots_prunes_oldest_entries() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cap.mnemo");
+
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.set_max_snapshots(10);
+    for i in 0..15 {
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Semantic,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+        db.flush().unwrap();
+    }
+    let snaps = db.snapshots();
+    assert_eq!(snaps.len(), 10, "cap=10 should keep exactly 10 snapshots");
+    // The retained txn_ids must be the most-recent ten (6..=15 for
+    // 15 flushes), not the oldest ten.
+    let kept_ids: Vec<u64> = snaps.iter().map(|s| s.txn_id).collect();
+    assert_eq!(kept_ids, (6..=15).collect::<Vec<_>>());
+
+    // restore_to one of the pruned txn_ids must fail with NotFound; the
+    // pages those snapshots reference are still on disk but the manifest
+    // no longer knows where they are.
+    let err = db.restore_to(3).expect_err("pruned txn must not resolve");
+    assert!(
+        matches!(err, MnemoError::NotFound(_)),
+        "expected NotFound for pruned txn_id 3; got {err:?}"
+    );
+
+    // The most-recent retained txn_id IS still restorable.
+    let restored = db.restore_to(10).expect("retained txn 10 must restore");
+    assert_eq!(restored.txn_id, 10);
+
+    // After restore_to, one more flush appends a new snapshot — verify
+    // the cap holds at 10 (one pruned to make room for the new one).
+    assert_eq!(db.snapshots().len(), 10);
+
+    // Disabling the cap mid-life: cap=0 lets the manifest grow again.
+    db.set_max_snapshots(0);
+    for i in 0..5 {
+        db.remember(Memory::new(
+            format!("more-{i}"),
+            MemoryType::Working,
+            vec4(0.0, i as f32, 0.0, 0.0),
+        ))
+        .unwrap();
+        db.flush().unwrap();
+    }
+    assert!(
+        db.snapshots().len() > 10,
+        "cap=0 should let the manifest grow past the old cap"
+    );
 }
 
 /// Restoring to a past transaction reinstates exactly that state, and the

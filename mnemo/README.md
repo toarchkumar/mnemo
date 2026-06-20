@@ -347,10 +347,20 @@ shouldn't perturb the database.
 runs over real embeddings, pull a query vector from your embedding model
 (or from `project-memory.jsonl` in the `test/` sandbox).
 
-The passphrase comes from `--passphrase` or the `MNEMO_PASSPHRASE`
-environment variable. **Passing a secret as a command-line argument is
-insecure** — it lands in shell history and process listings. Prefer the
-environment variable, and for real applications prefer the library API.
+The passphrase is resolved in this priority order:
+
+1. **`--passphrase`** flag if given. The CLI prints a warning to stderr
+   because the value lands in shell history and process listings.
+2. **`MNEMO_PASSPHRASE`** environment variable if set. Recommended for
+   scripts and CI.
+3. **Interactive TTY prompt** without echo. The fallback when neither
+   the flag nor the env var is set. `init` and `rekey` prompt twice and
+   verify a match so a typo doesn't lock the file. `rekey`'s new
+   passphrase follows the same chain via `--new-passphrase`,
+   `MNEMO_NEW_PASSPHRASE`, or a double-prompt.
+
+For real applications, prefer the library API and supply the passphrase
+in-process.
 
 ```sh
 export MNEMO_PASSPHRASE=hunter2
@@ -362,7 +372,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 33 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 34 integration + 9 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 
@@ -378,7 +388,7 @@ expected to move them.
 
 ### Sizing tips
 
-Two knobs cover most of the small-file size questions; the third is a
+Three knobs cover most of the small-file size questions; the fourth is a
 modelling choice that compounds with the others.
 
 **1. Right-size the WAL reservation.** The default initial WAL is 8 pages
@@ -396,12 +406,32 @@ let cfg = MnemoConfig {
 };
 ```
 
-**2. Pick dimensions wisely.** Vector storage is `dimensions × 4` bytes
+**2. Cap the snapshot manifest.** Every `flush` appends one snapshot
+entry; without a cap, long-running services accumulate them forever —
+manifest serialize-cost and the manifest run on disk grow O(total
+flushes). The default cap is 256 retained snapshots (the most recent N
+are kept; older ones are pruned at flush time, with their data pages
+left on disk until the next `compact_file`). Override per-database:
+
+```rust
+let cfg = MnemoConfig {
+    dimensions: 768,
+    max_snapshots: 1024,   // keep more history
+    ..Default::default()
+};
+// or 0 to disable the cap entirely (pre-v0.3 behavior):
+let cfg = MnemoConfig { max_snapshots: 0, ..Default::default() };
+```
+
+`Mnemo::set_max_snapshots(usize)` overrides on an already-open handle.
+`restore_to` a pruned `txn_id` returns `MnemoError::NotFound`.
+
+**3. Pick dimensions wisely.** Vector storage is `dimensions × 4` bytes
 per memory and dominates the data line for everything but tiny corpora.
 Cut dimensions and you cut that line proportionally — a 1024-dim model
 costs 4 KiB/memory; a 256-dim model costs 1 KiB/memory.
 
-**3. Use a Matryoshka (MRL) embedder, then truncate.** Matryoshka
+**4. Use a Matryoshka (MRL) embedder, then truncate.** Matryoshka
 Representation Learning trains a model so the most important information
 is front-loaded into the early dimensions. With an MRL-trained embedder
 (OpenAI `text-embedding-3-*`, Nomic `nomic-embed-text-v1.5`, Snowflake
@@ -412,7 +442,7 @@ to 256 dims fits in 1 KiB/memory instead of 4 KiB. Slice the vector on
 the client before passing it to `remember`; mnemo just sees a 256-dim
 vector and uses it as the database's native dimensionality.
 
-These three combine: a 256-dim MRL model in a fresh-default file gives
+These knobs combine: a 256-dim MRL model in a fresh-default file gives
 roughly **8× less on-disk footprint at small N** versus a 1024-dim model
 in a v0.1.0 default file, and the gap widens as the corpus grows. Future
 versions may add page-level compression (Zstd) and binary quantization

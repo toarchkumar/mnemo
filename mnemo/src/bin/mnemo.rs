@@ -48,14 +48,19 @@ enum Command {
         passphrase: Option<String>,
     },
     /// Re-encrypt the data key under a new passphrase.
+    ///
+    /// The new passphrase comes from (in priority order) `--new-passphrase`,
+    /// the `MNEMO_NEW_PASSPHRASE` env var, or an interactive double-prompt
+    /// without echo. The old passphrase follows the same priority chain as
+    /// every other command.
     Rekey {
         /// Path to the `.mnemo` file.
         path: String,
         #[arg(long)]
         passphrase: Option<String>,
-        /// The new passphrase.
+        /// The new passphrase. Omit to be prompted twice without echo.
         #[arg(long)]
-        new_passphrase: String,
+        new_passphrase: Option<String>,
     },
     /// Rebuild the file, dropping tombstoned and expired memories.
     Compact {
@@ -249,13 +254,69 @@ enum Command {
     },
 }
 
+/// Resolve the passphrase from (in priority order) the `--passphrase` flag,
+/// the `MNEMO_PASSPHRASE` env var, or an interactive TTY prompt without
+/// echo. Non-interactive paths (env var, `--passphrase`) keep working so
+/// scripts and CI don't break.
+///
+/// When `--passphrase` is used the passphrase ends up in shell history and
+/// process listings; we warn once to stderr to make that obvious.
 fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
     if let Some(p) = arg {
+        eprintln!(
+            "warning: passing the passphrase as `--passphrase` is insecure; \
+             it lands in shell history and process listings. Prefer the \
+             MNEMO_PASSPHRASE env var, or omit both to be prompted."
+        );
         return Ok(p.clone());
     }
-    std::env::var("MNEMO_PASSPHRASE").map_err(|_| {
-        "no passphrase: pass --passphrase or set MNEMO_PASSPHRASE".to_string()
-    })
+    if let Ok(p) = std::env::var("MNEMO_PASSPHRASE") {
+        return Ok(p);
+    }
+    // No flag, no env var. If stdin is a TTY, prompt without echo. If it
+    // isn't (e.g. a CI runner without a real terminal), bail with the
+    // historical error message so existing scripts that forgot to set
+    // MNEMO_PASSPHRASE get the same diagnostic they used to.
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return Err(
+            "no passphrase: pass --passphrase or set MNEMO_PASSPHRASE".to_string()
+        );
+    }
+    rpassword::prompt_password("Passphrase: ")
+        .map_err(|e| format!("failed to read passphrase: {e}"))
+}
+
+/// Like [`passphrase`] but for *new* passphrases on `init` / `rekey`:
+/// double-prompts and rejects mismatches. Non-interactive paths (`--flag`,
+/// env var) skip the double-prompt and use the value directly.
+fn new_passphrase(
+    arg: &Option<String>,
+    env_var: &str,
+) -> std::result::Result<String, String> {
+    if let Some(p) = arg {
+        eprintln!(
+            "warning: passing the passphrase as a flag is insecure; it lands \
+             in shell history and process listings. Prefer the {env_var} env \
+             var, or omit both to be prompted twice."
+        );
+        return Ok(p.clone());
+    }
+    if let Ok(p) = std::env::var(env_var) {
+        return Ok(p);
+    }
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return Err(format!(
+            "no passphrase: pass the flag or set {env_var}"
+        ));
+    }
+    let first = rpassword::prompt_password("New passphrase: ")
+        .map_err(|e| format!("failed to read passphrase: {e}"))?;
+    let second = rpassword::prompt_password("Confirm passphrase: ")
+        .map_err(|e| format!("failed to read passphrase: {e}"))?;
+    if first != second {
+        return Err("passphrases do not match".to_string());
+    }
+    Ok(first)
 }
 
 fn parse_vector(s: &str) -> std::result::Result<Vec<f32>, String> {
@@ -460,7 +521,12 @@ fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
         Command::Init { path, dimensions, no_manifest, passphrase: pp } => {
-            let pp = passphrase(&pp)?;
+            // Init wraps `new_passphrase` because the passphrase chosen
+            // here is irrecoverable — typoing it makes the file
+            // unopenable. The double-prompt catches typos at the interactive
+            // path; flag and env-var paths trust the caller (they already
+            // know what they typed).
+            let pp = new_passphrase(&pp, "MNEMO_PASSPHRASE")?;
             let cfg = MnemoConfig { dimensions, ..Default::default() };
             let mut db = Mnemo::create(&path, &pp, cfg).map_err(fmt)?;
             if !no_manifest {
@@ -511,10 +577,11 @@ fn run() -> std::result::Result<(), String> {
                 None => println!("ann index:   none (recall uses exact scan)"),
             }
         }
-        Command::Rekey { path, passphrase: pp, new_passphrase } => {
+        Command::Rekey { path, passphrase: pp, new_passphrase: new } => {
             let pp = passphrase(&pp)?;
+            let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            db.rekey(&new_passphrase, mnemo::KdfParams::secure()).map_err(fmt)?;
+            db.rekey(&new, mnemo::KdfParams::secure()).map_err(fmt)?;
             db.close().map_err(fmt)?;
             println!("rekeyed {path}");
         }
