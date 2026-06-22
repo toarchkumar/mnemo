@@ -49,6 +49,35 @@ jobs:
         working-directory: mnemo
         run: cargo clippy --all-targets -- -D warnings
 
+  # --- MSRV check: ensure the codebase still builds against the floor
+  #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
+  #     keep job count down; toolchain drift across platforms is rare and
+  #     would surface on the stable matrix above first.
+  msrv:
+    name: msrv (rust 1.75, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@1.75
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: msrv-1.75
+
+      - name: cargo build
+        working-directory: mnemo
+        run: cargo build --all-targets
+
+      - name: cargo test (lib + integration only)
+        working-directory: mnemo
+        # Skip --all-targets so we don't have to compile every test on
+        # MSRV; the integration tests are the real correctness check.
+        run: cargo test --test integration --test cli_smoke
+
   # --- Python bindings: build via maturin + run mnemo-python test_mnemo
   python:
     name: python bindings (linux)

@@ -8,6 +8,48 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **`release.yml` GitHub Actions workflow** that fires on `v*` tag
+  pushes. Builds the `mnemo` CLI binary for x86_64 / aarch64 Linux,
+  x86_64 / aarch64 macOS, and x86_64 Windows; builds matching Python
+  wheels via `maturin-action`. All artifacts attach to the auto-created
+  GitHub Release. PyPI publishing is opt-in via an `ENABLE_PYPI_PUBLISH`
+  repo variable + a `PYPI_API_TOKEN` secret, so first releases produce
+  just the GitHub-attached assets until the maintainer is ready to
+  automate uploads.
+- **MSRV check in CI** — `ci.yml` gained a Linux-only Rust 1.75 job that
+  builds the crate and runs the integration + CLI smoke tests, catching
+  accidental drift past the declared MSRV.
+- **`cargo publish` readiness on `mnemo-db`.** `mnemo/Cargo.toml` gained
+  `homepage`, `documentation`, `keywords`, and `categories`, completing
+  the required metadata for crates.io. `mnemo-python/Cargo.toml` and
+  `mnemo/bindings/node/Cargo.toml` are marked `publish = false` —
+  they're built by maturin / napi-rs into their own distribution
+  artifacts (PyPI wheel, npm package) and aren't meant for crates.io.
+
+### Changed
+
+- CLI exploration (Phase 3.2): `search` and `recall` accept `--query-file
+  <path|->` as an alternative to inline `--query`. File contents
+  auto-detected as JSON array, comma-separated, or whitespace-separated
+  floats. Makes high-dimensional queries usable from the CLI.
+- Python binding (Phase 3.4): `db.recall(..., track_access=True)` exposes
+  the read-only-recall flag; new `db.set_max_snapshots(max)` mirrors the
+  Rust API.
+- CLI (Phase 3.1): passphrase resolution adds a TTY prompt fallback
+  (`rpassword`). `init` and `rekey` double-prompt and verify a match.
+- Storage (Phase 2.3): `MnemoConfig::max_snapshots` (default 256) caps
+  the snapshot manifest; pruning happens at flush time.
+
+### Removed
+
+- The in-tree `mnemo/bindings/python` crate. It was a strict subset of
+  the published `mnemo-python/` crate (13 methods vs 25+, no unique
+  features). The workspace member list drops it; the standalone crate
+  is now the single source of truth for the Python bindings.
+
+
 ## [0.2.0] — 2026-06-13
 
 This release tightens the security model, drops file-size and recall-cost

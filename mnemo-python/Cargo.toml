@@ -1,10 +1,23 @@
 [package]
+# This crate is NOT published to crates.io — it exists only to drive
+# `maturin build`, which produces the `mnemo-db` wheel for PyPI. The
+# fields below are still useful for `cargo publish --dry-run` to lint
+# cleanly and for `cargo doc` to render coherently.
 name = "mnemo-python"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
-description = "Python bindings for the Mnemo encrypted agent-memory engine"
+description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-db wheel on PyPI"
 license = "Apache-2.0"
+repository = "https://github.com/toarchkumar/mnemo"
+homepage = "https://toarchkumar.github.io/mnemo/"
+readme = "README.md"
+keywords = ["database", "encryption", "vector", "ai", "memory"]
+categories = ["database", "cryptography"]
+# Per https://doc.rust-lang.org/cargo/reference/manifest.html#the-publish-field
+# this prevents an accidental `cargo publish` — the wheel is the real
+# artifact, not a crates.io upload.
+publish = false
 
 # The compiled extension module is imported from Python as `mnemo`.
 [lib]

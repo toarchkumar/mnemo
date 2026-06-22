@@ -3,8 +3,12 @@ name = "mnemo-node"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
-description = "Node.js bindings for the Mnemo encrypted agent-memory engine"
+description = "Node.js bindings for the Mnemo encrypted agent-memory engine (experimental scaffold; not yet published to npm)"
 license = "Apache-2.0"
+# Not yet published. When the bindings are stable enough to ship the
+# real distribution will go to npm via napi-build, not to crates.io;
+# this prevents an accidental `cargo publish`.
+publish = false
 
 [lib]
 name = "mnemo_node"

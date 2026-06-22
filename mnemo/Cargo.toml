@@ -7,10 +7,17 @@ name = "mnemo-db"
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
-description = "Encrypted, single-file, portable agent memory engine"
+description = "Encrypted, single-file, portable agent memory engine with multi-signal recall, sessions, snapshots, and an IVF+PQ index"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
+homepage = "https://toarchkumar.github.io/mnemo/"
+documentation = "https://docs.rs/mnemo-db"
 readme = "README.md"
+# crates.io shows 5 keywords; pick the ones most likely to match how
+# people search for this. Each keyword must be ≤20 chars and lowercase.
+keywords = ["database", "encryption", "vector", "ai", "memory"]
+# Standard crates.io category slugs (https://crates.io/category_slugs).
+categories = ["database", "cryptography", "command-line-utilities"]
 
 # The core crate is the workspace root. The Node binding lives here as a
 # workspace member but is NOT a default member: a plain `cargo build` /

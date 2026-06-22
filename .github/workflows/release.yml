@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Fire on any version tag (e.g. v0.2.0, v0.3.0-rc1). The CHANGELOG
+      # entry for the version is the source of truth for what shipped;
+      # this workflow just builds and attaches artifacts to the GitHub
+      # Release that auto-creates from the tag.
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  # softprops/action-gh-release needs write access to create the release
+  # and upload assets.
+  contents: write
+
+jobs:
+  # --- Create the GitHub Release once (idempotent on re-runs). Subsequent
+  #     binary / wheel jobs attach to this release by tag name.
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release (or no-op if it already exists)
+        uses: softprops/action-gh-release@v2
+        with:
+          # Body left empty so GitHub's "Generate release notes" picks up
+          # commit history since the previous tag. The CHANGELOG section
+          # for this version is the canonical record; the maintainer can
+          # paste it into the release body via the UI after the fact.
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+
+  # --- Build the `mnemo` CLI binary for each release platform and attach
+  #     to the GitHub Release. Linux aarch64 cross-compiles via zigbuild
+  #     from an ubuntu-latest runner so we don't pay for a separate
+  #     arm runner.
+  build-cli:
+    name: cli (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+            use_zig: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+            use_zig: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            ext: ""
+            use_zig: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            ext: ""
+            use_zig: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+            use_zig: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install zigbuild (Linux aarch64 cross only)
+        if: matrix.use_zig
+        run: |
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+
+      - name: Build release binary
+        working-directory: mnemo
+        run: |
+          if [ "${{ matrix.use_zig }}" = "true" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Stage and rename artifact
+        id: stage
+        working-directory: mnemo
+        run: |
+          src="target/${{ matrix.target }}/release/mnemo${{ matrix.ext }}"
+          tag="${GITHUB_REF#refs/tags/}"
+          out="mnemo-${tag}-${{ matrix.target }}${{ matrix.ext }}"
+          cp "$src" "$out"
+          echo "asset=$out" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mnemo/${{ steps.stage.outputs.asset }}
+
+  # --- Build Python wheels for each platform via maturin-action and attach
+  #     to the release. Optionally publish to PyPI if the maintainer set
+  #     `PYPI_API_TOKEN` as a repo secret.
+  build-wheels:
+    name: wheels (${{ matrix.target }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            manylinux: auto
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            manylinux: auto
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            manylinux: "off"
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            manylinux: "off"
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            manylinux: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Build wheel via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          # `auto` lets maturin pick the right manylinux baseline. On
+          # macOS/Windows the field is ignored when set to "off".
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist
+          working-directory: mnemo-python
+
+      - name: Attach wheels to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mnemo-python/dist/*
+
+      - name: Upload wheel artifact for PyPI publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: mnemo-python/dist/*
+
+  # --- Optional: publish all wheels to PyPI. Runs only when PYPI_API_TOKEN
+  #     is set on the repo — no-op otherwise so first-time releases just
+  #     produce GitHub-attached wheels and the maintainer publishes by hand
+  #     until they're ready to automate it.
+  publish-pypi:
+    name: publish to PyPI
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # Pull every wheel-* artifact this run uploaded.
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --skip-existing dist/*
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
