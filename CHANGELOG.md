@@ -8,6 +8,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-15
+
+This release is the consolidation of the Phase 3 (CLI / UX) and Phase 4
+(release engineering) work that accumulated against `main` after v0.2.0.
+No on-disk format change — v0.2.x files open transparently and continue
+to use v7.
+
 ### Added
 
 - **`release.yml` GitHub Actions workflow** that fires on `v*` tag
@@ -218,6 +225,7 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/toarchkumar/mnemo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/toarchkumar/mnemo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/toarchkumar/mnemo/releases/tag/v0.1.0

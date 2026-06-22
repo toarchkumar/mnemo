@@ -4,7 +4,7 @@
 # fields below are still useful for `cargo publish --dry-run` to lint
 # cleanly and for `cargo doc` to render coherently.
 name = "mnemo-python"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-db wheel on PyPI"
