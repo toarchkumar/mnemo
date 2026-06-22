@@ -12,12 +12,16 @@ license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
 readme = "README.md"
 
-# The core crate is the workspace root. The language bindings are members but
-# NOT default members: a plain `cargo build` / `cargo test` builds only the
-# core (which needs no Python or Node toolchain). Build a binding explicitly
-# with `cargo build -p mnemo-python` / `-p mnemo-node`.
+# The core crate is the workspace root. The Node binding lives here as a
+# workspace member but is NOT a default member: a plain `cargo build` /
+# `cargo test` builds only the core (which needs no Node toolchain).
+# Build the Node binding explicitly with `cargo build -p mnemo-node`.
+#
+# The published Python binding lives in the sibling `mnemo-python/` crate
+# (a standalone workspace, not a member of this one); it's built and
+# packaged via `maturin` from its own directory.
 [workspace]
-members = ["bindings/python", "bindings/node"]
+members = ["bindings/node"]
 default-members = ["."]
 
 [lib]

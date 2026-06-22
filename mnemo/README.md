@@ -217,6 +217,68 @@ requested metric, so for cosine queries a generous `n_rerank` is advisable.
 
 `Mnemo::search` always stays exact — it is the brute-force ground truth.
 
+## Security model
+
+MNemo's threat model is **data at rest plus tamper-evidence**. The file on
+disk is opaque without the passphrase, and an attacker who modifies bytes
+in the file is detected — not allowed to silently substitute or roll back
+to a previous valid state.
+
+**What's protected:**
+
+- **Confidentiality of page contents.** Every 8 KiB page (records,
+  catalog, ANN index, snapshot manifest, WAL frames) is encrypted under
+  the random 256-bit DEK using AES-256-GCM. The header's KDF parameters
+  and salt are plaintext — they're the bootstrap; everything past the
+  passphrase derivation is ciphertext.
+- **Page placement integrity (v6+).** Each page's home `page_no` is bound
+  into the GCM authentication tag as AAD. An attacker who transplants a
+  valid encrypted page to a different slot makes it un-decryptable at the
+  new address — open errors with `MnemoError::PageAuthFailed`.
+- **Header field integrity (v7+).** A small AES-GCM seal at the tail of
+  the header page authenticates every mutable header field
+  (`write_counter`, `next_page`, catalog/index/manifest pointers, version)
+  under the DEK. Rewriting any of them invalidates the GCM tag and open
+  errors with `MnemoError::HeaderTampered` — not a silent stale-data load.
+- **Passphrase secrecy.** Wrong passphrase fails authenticated decryption
+  on the wrapped DEK and is reported as `MnemoError::WrongPassphrase` —
+  indistinguishable from a tampered wrapped-DEK blob. No oracle.
+- **Crash-safety nonce uniqueness.** `flush` leases write-counter and
+  page slots in the header *before* any data page hits the disk, so a
+  crash mid-flush can't lead a subsequent flush to reuse a `(page_no,
+  write_counter)` nonce on different plaintext under the same DEK.
+
+**What's not protected:**
+
+- **Availability.** An attacker with write access can always destroy data
+  — truncate the file, zero pages, delete it outright. Tamper-evidence
+  means modifications are *detected*, not prevented.
+- **Rollback to a previously valid sealed state.** The v7 seal catches a
+  point-in-time tamper, but it can't tell that the entire header block
+  has been replaced with an older valid snapshot of itself (a "replay"
+  attack). Detecting that needs monotonic counters tracked outside the
+  file — out of scope.
+- **`agent_id` scoping.** `recall(agent_id=...)` is *cooperative*
+  filtering, not isolation. Anyone holding the passphrase can read every
+  agent's memories; the scoping helps an honest agent stay in its lane,
+  not protect one agent's data from another.
+- **Side channels.** Encryption is not constant-time at the engine level;
+  page-cache behavior, file-size growth, and access patterns can leak
+  metadata. Mnemo trusts the OS and the AES-GCM implementation for
+  primitive-level side-channel hardness (AES-NI on x86, equivalent on
+  ARM).
+- **In-memory secrecy.** Decrypted page payloads and the DEK live in
+  process memory while the database is open. Use [`Mnemo::close`] (or
+  drop the handle) promptly when the database isn't needed; do not
+  swap-out without `mlock` if the host's swap policy is a concern.
+- **External attackers with the passphrase.** Mnemo authenticates page
+  content under the DEK, not the user — anyone with the passphrase IS the
+  user as far as the format is concerned.
+
+The v0.2.0 format (v7) closes every "silent stale-data load" path
+flagged in the security review; rollback-replay and availability are
+acknowledged limitations.
+
 ## Quick start (library)
 
 ```rust
@@ -372,7 +434,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 34 integration + 9 CLI smoke + 2 doctests + unit tests
+cargo test            # 34 integration + 12 CLI smoke + 2 doctests + unit tests
 cargo run --example quickstart
 ```
 

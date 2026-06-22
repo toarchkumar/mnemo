@@ -112,12 +112,23 @@ enum Command {
         n_rerank: usize,
     },
     /// Run an exact nearest-neighbour search.
+    ///
+    /// Provide the query vector via exactly one of `--query` (inline) or
+    /// `--query-file` (file path; use `-` for stdin). Files may contain a
+    /// JSON array of floats, comma-separated floats, or whitespace /
+    /// newline-separated floats — the parser auto-detects.
     Search {
         /// Path to the `.mnemo` file.
         path: String,
         /// Query vector as comma-separated floats, e.g. `0.1,0.2,0.9`.
-        #[arg(long)]
-        query: String,
+        /// Mutually exclusive with `--query-file`.
+        #[arg(long, conflicts_with = "query_file")]
+        query: Option<String>,
+        /// Path to a file containing the query vector (`-` for stdin).
+        /// Accepts a JSON array, comma-separated floats, or one float
+        /// per line. Mutually exclusive with `--query`.
+        #[arg(long, conflicts_with = "query")]
+        query_file: Option<String>,
         #[arg(long, default_value_t = 5)]
         top_k: usize,
         #[arg(long)]
@@ -199,9 +210,15 @@ enum Command {
     Recall {
         /// Path to the `.mnemo` file.
         path: String,
-        /// Query vector as comma-separated floats (must match the DB dimensions).
-        #[arg(long)]
-        query: String,
+        /// Query vector as comma-separated floats. Mutually exclusive with
+        /// `--query-file`. Must match the DB's dimensionality either way.
+        #[arg(long, conflicts_with = "query_file")]
+        query: Option<String>,
+        /// Path to a file containing the query vector (`-` for stdin).
+        /// Accepts a JSON array, comma-separated floats, or one float
+        /// per line. Mutually exclusive with `--query`.
+        #[arg(long, conflicts_with = "query")]
+        query_file: Option<String>,
         #[arg(long, default_value_t = 10)]
         top_k: usize,
         /// Output format.
@@ -319,9 +336,62 @@ fn new_passphrase(
     Ok(first)
 }
 
-fn parse_vector(s: &str) -> std::result::Result<Vec<f32>, String> {
-    s.split(',')
-        .map(|t| t.trim().parse::<f32>().map_err(|e| format!("bad float '{t}': {e}")))
+/// Resolve a query vector from CLI input, accepting exactly one of:
+///
+/// - `inline`: comma-separated floats from `--query`
+/// - `file`: path to a file (or `-` for stdin) from `--query-file`,
+///   containing a JSON array, comma-separated floats, or whitespace /
+///   newline-separated floats (auto-detected)
+///
+/// Clap's `conflicts_with` enforces the "not both" half; this fn enforces
+/// the "at least one" half. Wrap the `(query, query_file)` pair from any
+/// CLI variant in one call: `let vec = resolve_query(query, query_file)?;`
+fn resolve_query(
+    inline: Option<String>,
+    file: Option<String>,
+) -> std::result::Result<Vec<f32>, String> {
+    let text = match (inline, file) {
+        (Some(s), None) => s,
+        (None, Some(p)) => {
+            if p == "-" {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut buf)
+                    .map_err(|e| format!("reading stdin: {e}"))?;
+                buf
+            } else {
+                std::fs::read_to_string(&p)
+                    .map_err(|e| format!("reading {p}: {e}"))?
+            }
+        }
+        (Some(_), Some(_)) => {
+            // Clap's conflicts_with should catch this before we get here.
+            return Err("pass only one of --query or --query-file".into());
+        }
+        (None, None) => {
+            return Err("missing query: pass --query <floats> or --query-file <path|->".into());
+        }
+    };
+    parse_query_text(&text)
+}
+
+/// Parse a query vector from a text blob. Tries JSON-array form first if
+/// the input starts with `[`; otherwise splits on commas, whitespace, and
+/// newlines and parses each non-empty token as `f32`.
+fn parse_query_text(text: &str) -> std::result::Result<Vec<f32>, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("query text was empty".into());
+    }
+    if trimmed.starts_with('[') {
+        return serde_json::from_str::<Vec<f32>>(trimmed)
+            .map_err(|e| format!("invalid JSON array of floats: {e}"));
+    }
+    trimmed
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .map(|t| t.parse::<f32>().map_err(|e| format!("bad float '{t}': {e}")))
         .collect()
 }
 
@@ -646,9 +716,9 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
-        Command::Search { path, query, top_k, passphrase: pp } => {
+        Command::Search { path, query, query_file, top_k, passphrase: pp } => {
             let pp = passphrase(&pp)?;
-            let q = parse_vector(&query)?;
+            let q = resolve_query(query, query_file)?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
             let hits = db.search(&q, top_k, mnemo::Metric::Cosine).map_err(fmt)?;
             if hits.is_empty() {
@@ -832,6 +902,7 @@ fn run() -> std::result::Result<(), String> {
         Command::Recall {
             path,
             query,
+            query_file,
             top_k,
             format,
             r#type,
@@ -842,7 +913,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let q = parse_vector(&query)?;
+            let q = resolve_query(query, query_file)?;
             let metric = parse_metric(&metric)?;
             let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
             if let Some(s) = r#type {

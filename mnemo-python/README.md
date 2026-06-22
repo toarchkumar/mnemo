@@ -123,7 +123,7 @@ its own agent.
 | Method | Purpose |
 |---|---|
 | `remember(content, memory_type, vector, *, agent_id, importance, session_id, ttl_secs, shared, metadata)` | Store a memory; returns its id |
-| `recall(query, top_k=10, memory_types=None, agent_id=None)` | Multi-signal ranked retrieval |
+| `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall) |
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
 | `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
@@ -134,6 +134,7 @@ its own agent.
 | `build_index()` / `drop_index()` / `has_index()` | Approximate index control |
 | `snapshots()` / `restore_to(txn_id)` / `restore_to_time(unix_secs)` | Point-in-time recovery |
 | `set_cache_capacity(pages)` / `cache_stats()` | Page-cache tuning |
+| `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
 | `stats()` | Summary statistics |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
 | `len(db)` | Live memory count |

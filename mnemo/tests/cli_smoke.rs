@@ -230,3 +230,61 @@ fn recall_filters_by_type_excludes_other_kinds() {
     assert!(!stdout.contains("prefers tea"));
     assert!(!stdout.contains("deploy script"));
 }
+
+#[test]
+fn recall_query_file_json_works() {
+    // --query-file accepts a JSON array of floats from a file path, as an
+    // alternative to inline --query (which is unusable at high dims).
+    let (dir, path, pp, _) = seed_db();
+    let qf = dir.path().join("q.json");
+    std::fs::write(&qf, "[1.0, 0.0, 0.0, 0.0]").unwrap();
+    let (status, stdout, stderr) = run_cli(
+        &[
+            "recall",
+            path.to_str().unwrap(),
+            "--query-file",
+            qf.to_str().unwrap(),
+            "--top-k",
+            "1",
+        ],
+        pp,
+    );
+    assert!(status.success(), "recall failed: {stderr}");
+    assert!(stdout.contains("the user prefers tea"), "got: {stdout}");
+}
+
+#[test]
+fn recall_query_file_whitespace_works() {
+    // --query-file also accepts whitespace/newline-separated floats — handy
+    // for piping from awk/jq without JSON serialization.
+    let (dir, path, pp, _) = seed_db();
+    let qf = dir.path().join("q.txt");
+    std::fs::write(&qf, "1.0\n0.0\n0.0\n0.0\n").unwrap();
+    let (status, stdout, stderr) = run_cli(
+        &[
+            "recall",
+            path.to_str().unwrap(),
+            "--query-file",
+            qf.to_str().unwrap(),
+            "--top-k",
+            "1",
+        ],
+        pp,
+    );
+    assert!(status.success(), "recall failed: {stderr}");
+    assert!(stdout.contains("the user prefers tea"), "got: {stdout}");
+}
+
+#[test]
+fn recall_requires_query_source() {
+    // Neither --query nor --query-file should fail loudly rather than silently
+    // running with no query.
+    let (_dir, path, pp, _) = seed_db();
+    let (status, _stdout, stderr) =
+        run_cli(&["recall", path.to_str().unwrap(), "--top-k", "1"], pp);
+    assert!(!status.success(), "recall without query should fail");
+    assert!(
+        stderr.contains("--query") || stderr.contains("query"),
+        "stderr should mention missing query, got: {stderr}"
+    );
+}

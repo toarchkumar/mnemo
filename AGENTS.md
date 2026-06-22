@@ -108,15 +108,61 @@ file. The `.gitignore` already excludes them.
 | Touch the on-disk format | `mnemo/src/format.rs` (bump VERSION constant + handle the migration) |
 | Change the manifest scaffold | `mnemo/src/memory.rs` (`Memory::scaffold_manifest`) |
 
+## CI
+
+A GitHub Actions workflow at `.github/workflows/ci.yml` runs on every
+push to `main` and every PR. Two jobs:
+
+- `rust (ubuntu-latest | macos-latest | windows-latest)` — `cargo test`
+  + `cargo clippy --all-targets -- -D warnings` against `mnemo/` on all
+  three platforms in parallel.
+- `python bindings (linux)` — `maturin build --release` + `pip install`
+  the wheel + `python test_mnemo.py` against `mnemo-python/`.
+
+`cargo fmt --check` is deliberately not yet wired (no codebase-wide
+format pass has happened); if you do that pass, add the check.
+
+## Format-version policy
+
+The on-disk format is `mnemo/src/format.rs::VERSION` (currently 7).
+`MIGRATABLE_FROM` is the lowest version this build can auto-upgrade on
+open — files older than that are rejected with
+`MnemoError::UnsupportedVersion`. Files in `[MIGRATABLE_FROM, VERSION)`
+are migrated in place on first open and rewritten under `VERSION` on
+the next flush.
+
+Rules for any change that touches on-disk shape (catalog encoding, page
+crypto, header layout):
+
+1. **Bump `VERSION`** and document the change in the doc-comment history
+   on `MIGRATABLE_FROM` (one bullet per bump, newest first).
+2. **Add the migration path in `Mnemo::open`** so existing files upgrade
+   transparently. Cascade — a v4 file may need to walk through v5, v6,
+   ... to current.
+3. **Preserve live data.** Past snapshots can be dropped (the migration
+   policy does this uniformly; PITR into the pre-migration past is
+   sacrificed for migration simplicity), but every live memory must
+   survive the upgrade.
+4. **Add a regression test** that exercises either the new format or the
+   migration boundary.
+5. **Update CHANGELOG.md** under `[Unreleased]` and note that the
+   on-disk format moved.
+
+If the change is breaking enough that auto-migration isn't viable, fail
+fast with a clear error and document the manual upgrade path (e.g.
+`compact_file` from the previous build, then open with the new one).
+
 ## Pull request expectations
 
 - Run `cargo test` before pushing. The sandbox most agents work in cannot
-  always run cargo; if you couldn't, say so in the PR description and the
-  reviewer will catch breakage in CI.
+  always run cargo; if you couldn't, say so in the PR description and CI
+  will catch breakage at push time.
+- Run `cargo clippy --all-targets -- -D warnings` — CI gates on it.
 - Update the relevant README when adding a public API or CLI command.
 - If a change affects the on-disk format or any agent-facing convention,
   add a memory to `test/scripts/seed.json` explaining the new behaviour
   so future agents pick it up via recall.
+- Format-breaking changes must follow the "Format-version policy" above.
 
 ## Where the philosophy lives
 

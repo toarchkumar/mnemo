@@ -196,7 +196,12 @@ impl Mnemo {
 
     /// Multi-signal recall. Returns a list of result dicts, each a memory with
     /// added `score` and `similarity` keys, best first.
-    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None))]
+    ///
+    /// `track_access` (default `True`) controls whether the catalog's
+    /// `accessed_at` / `access_count` get bumped on the returned memories
+    /// — pass `False` for a fully read-only recall that doesn't dirty the
+    /// catalog, useful for batch scoring or dry-runs.
+    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None, track_access=true))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -204,8 +209,9 @@ impl Mnemo {
         top_k: usize,
         memory_types: Option<Vec<String>>,
         agent_id: Option<String>,
+        track_access: bool,
     ) -> PyResult<Vec<PyObject>> {
-        let mut req = RecallRequest::new(query).top_k(top_k);
+        let mut req = RecallRequest::new(query).top_k(top_k).track_access(track_access);
         if let Some(types) = memory_types {
             let parsed: PyResult<Vec<MemoryType>> =
                 types.iter().map(|t| parse_type(t)).collect();
@@ -360,6 +366,16 @@ impl Mnemo {
     /// Page-cache occupancy as `(pages_cached, capacity)`.
     fn cache_stats(&self) -> (usize, usize) {
         self.inner.cache_stats()
+    }
+
+    /// Override the snapshot-manifest retention cap on this open handle.
+    /// `0` disables the cap (retain every snapshot forever); any positive
+    /// value keeps the most-recent N and prunes the rest on the next
+    /// `flush()`. Defaults at open are inherited from
+    /// `MnemoConfig::max_snapshots` (256). See the Rust-side
+    /// `Mnemo::set_max_snapshots` docs.
+    fn set_max_snapshots(&mut self, max: usize) {
+        self.inner.set_max_snapshots(max);
     }
 
     /// Summary statistics as a dict.
