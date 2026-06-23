@@ -4,7 +4,7 @@
 # `mnemo`, so consumers still write `use mnemo::...` and invoke `mnemo` on
 # the command line after `cargo add mnemo-db`.
 name = "mnemo-db"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.75"
 description = "Encrypted, single-file, portable agent memory engine with multi-signal recall, sessions, snapshots, and an IVF+PQ index"
