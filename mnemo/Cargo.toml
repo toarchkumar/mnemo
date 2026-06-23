@@ -1,17 +1,19 @@
 [package]
-# Distribution name on crates.io is `mnemo-db` because `mnemo` is already
-# taken by an unrelated crate. The library and CLI binary names below stay
-# `mnemo`, so consumers still write `use mnemo::...` and invoke `mnemo` on
-# the command line after `cargo add mnemo-db`.
-name = "mnemo-db"
-version = "0.3.1"
+# Distribution name on crates.io is `mnemo-engine`. The bare `mnemo` name
+# is held by an unrelated crate, and `mnemo-db` is held by a different
+# (MCP-native, DuckDB-backed) agent-memory project — see the v0.3.2 entry
+# in CHANGELOG.md for the full rationale. The library and CLI binary names
+# below stay `mnemo`, so consumers still write `use mnemo::...` and invoke
+# `mnemo` on the command line after `cargo add mnemo-engine`.
+name = "mnemo-engine"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.75"
 description = "Encrypted, single-file, portable agent memory engine with multi-signal recall, sessions, snapshots, and an IVF+PQ index"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
 homepage = "https://toarchkumar.github.io/mnemo/"
-documentation = "https://docs.rs/mnemo-db"
+documentation = "https://docs.rs/mnemo-engine"
 readme = "README.md"
 # crates.io shows 5 keywords; pick the ones most likely to match how
 # people search for this. Each keyword must be ≤20 chars and lowercase.

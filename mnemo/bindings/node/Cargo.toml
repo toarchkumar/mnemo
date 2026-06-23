@@ -1,6 +1,6 @@
 [package]
 name = "mnemo-node"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.75"
 description = "Node.js bindings for the Mnemo encrypted agent-memory engine (experimental scaffold; not yet published to npm)"
@@ -16,9 +16,9 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-# Core crate is published as `mnemo-db`; its [lib] name stays `mnemo`,
+# Core crate is published as `mnemo-engine`; its [lib] name stays `mnemo`,
 # so source code still writes `use mnemo::...`.
-mnemo = { package = "mnemo-db", path = "../.." }
+mnemo = { package = "mnemo-engine", path = "../.." }
 napi = { version = "2", default-features = false, features = ["napi6"] }
 napi-derive = "2"
 

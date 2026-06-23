@@ -1,13 +1,13 @@
 [package]
 # This crate is NOT published to crates.io — it exists only to drive
-# `maturin build`, which produces the `mnemo-db` wheel for PyPI. The
+# `maturin build`, which produces the `mnemo-engine` wheel for PyPI. The
 # fields below are still useful for `cargo publish --dry-run` to lint
 # cleanly and for `cargo doc` to render coherently.
 name = "mnemo-python"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.75"
-description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-db wheel on PyPI"
+description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-engine wheel on PyPI"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
 homepage = "https://toarchkumar.github.io/mnemo/"
@@ -26,8 +26,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # The Rust core, renamed so it does not collide with this crate's own `mnemo`
-# library name. The core's package name on crates.io is `mnemo-db`.
-mnemo_core = { path = "../mnemo", package = "mnemo-db" }
+# library name. The core's package name on crates.io is `mnemo-engine`.
+mnemo_core = { path = "../mnemo", package = "mnemo-engine" }
 # `extension-module` keeps libpython unlinked; `abi3-py38` builds against the
 # stable ABI so one wheel works across Python 3.8+.
 pyo3 = { version = "=0.22.6", features = ["extension-module", "abi3-py38"] }

@@ -3,12 +3,15 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-# Distribution name on PyPI is `mnemo-db` because `mnemo` is already taken
-# by an unrelated 2020-era notebook assistant. The compiled extension module
-# is still named `mnemo` (see [lib] name in Cargo.toml), so user code keeps
-# writing `import mnemo` after `pip install mnemo-db`.
-name = "mnemo-db"
-version = "0.3.1"
+# Distribution name on PyPI is `mnemo-engine`. The bare `mnemo` name is
+# held by an unrelated 2020-era notebook assistant, and `mnemo-db` is
+# held by a different (MCP-native, DuckDB-backed) agent-memory project
+# — see the v0.3.2 entry in CHANGELOG.md for the full rationale. The
+# compiled extension module is still named `mnemo` (see [lib] name in
+# Cargo.toml), so user code keeps writing `import mnemo` after
+# `pip install mnemo-engine`.
+name = "mnemo-engine"
+version = "0.3.2"
 description = "Encrypted, portable agent-memory engine — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"

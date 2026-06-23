@@ -10,9 +10,10 @@ sibling `mnemo/` crate — the storage engine, AES-256-GCM encryption, the
 write-ahead log, the IVF+PQ index, snapshots, and the agent-memory model all
 run as compiled Rust; Python only sees a small, ergonomic surface.
 
-> Distribution name on PyPI: `mnemo-db` (the bare `mnemo` name was taken).
-> The import name stays `mnemo`, so `pip install mnemo-db` then
-> `import mnemo` is the full setup.
+> Distribution name on PyPI: `mnemo-engine` (both `mnemo` and `mnemo-db`
+> were already taken by unrelated projects). The import name stays
+> `mnemo`, so `pip install mnemo-engine` then `import mnemo` is the
+> full setup.
 
 ## For AI agents
 

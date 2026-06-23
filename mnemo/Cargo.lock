@@ -418,8 +418,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "mnemo-db"
-version = "0.3.0"
+name = "mnemo-engine"
+version = "0.3.2"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -439,9 +439,9 @@ dependencies = [
 
 [[package]]
 name = "mnemo-node"
-version = "0.3.0"
+version = "0.3.2"
 dependencies = [
- "mnemo-db",
+ "mnemo-engine",
  "napi",
  "napi-build",
  "napi-derive",

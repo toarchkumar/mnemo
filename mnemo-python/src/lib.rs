@@ -15,6 +15,16 @@
 //! db.close()
 //! ```
 
+// Many methods chain `?` on helper calls that already return `PyResult<_>`
+// (e.g. `parse_type(s)?`, `parse_id(s)?`, `key.extract::<String>()?`). When
+// the inner and outer error types are both `PyErr`, `?` desugars to
+// `<PyErr as From<PyErr>>::from`, the no-op blanket identity impl. Clippy
+// ≥1.95 flags every such site as `useless_conversion` and reports the
+// diagnostic on the function return type, which is misleading: the
+// conversion is part of `?`'s sugar, not user code we can remove. Rewriting
+// each call site to `match` would add noise without changing semantics.
+#![allow(clippy::useless_conversion)]
+
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};

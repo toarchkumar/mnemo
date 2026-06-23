@@ -305,7 +305,7 @@
     }
   },
   {
-    "content": "DISTRIBUTION NAME is mnemo-db (NOT mnemo) on PyPI and crates.io \u2014 the bare 'mnemo' name was taken on both (PyPI: Gabriele Girelli's 2020 notebook assistant; crates.io: aayushadhikari7/mnemo, unrelated). LIBRARY/IMPORT name stays mnemo end-to-end: `pip install mnemo-db; import mnemo` works, `cargo add mnemo-db; use mnemo::...` works, CLI binary is still `mnemo`. Path-deps in bindings use `package = \"mnemo-db\"` syntax to keep source-level `use mnemo` working. pip normalizes the dash so wheel filenames read `mnemo_db-0.1.0-...whl`.",
+    "content": "DISTRIBUTION NAME is mnemo-engine (NOT mnemo, NOT mnemo-db) on PyPI and crates.io. The bare 'mnemo' was taken on both (PyPI: Gabriele Girelli's 2020 notebook assistant; crates.io: aayushadhikari7/mnemo, unrelated), and 'mnemo-db' is taken on PyPI by sattyamjjain/mnemo (an MCP-native, DuckDB-backed agent-memory project; a different codebase that picked the same -db suffix for the same reason). v0.3.1 hit this 403 on first automated publish; v0.3.2 is the rename. LIBRARY/IMPORT name stays mnemo end-to-end: `pip install mnemo-engine; import mnemo` works, `cargo add mnemo-engine; use mnemo::...` works, CLI binary is still `mnemo`. Path-deps in bindings use `package = \"mnemo-engine\"` syntax to keep source-level `use mnemo` working. pip normalizes the dash so wheel filenames read `mnemo_engine-0.3.2-...whl`.",
     "memory_type": "semantic",
     "importance": 0.95,
     "metadata": {
@@ -314,7 +314,7 @@
     }
   },
   {
-    "content": "CROSS-BUILD Linux-arm64 wheel from Mac (for sandboxed agents that need the Python binding before Phase 6 publishes prebuilt wheels): (1) rustup target add aarch64-unknown-linux-gnu, (2) pip install ziglang, (3) cd mnemo-python && maturin build --release --target aarch64-unknown-linux-gnu --zig. Wheel lands at mnemo-python/target/wheels/mnemo_db-0.1.0-cp38-abi3-manylinux_2_17_aarch64.whl. Install in a Linux sandbox with `pip install --user --force-reinstall <wheel>`. Becomes obsolete once Phase 6 ships prebuilt wheels to PyPI for all 4 major platforms.",
+    "content": "CROSS-BUILD Linux-arm64 wheel from Mac (for sandboxed agents that need the Python binding before Phase 6 publishes prebuilt wheels): (1) rustup target add aarch64-unknown-linux-gnu, (2) pip install ziglang, (3) cd mnemo-python && maturin build --release --target aarch64-unknown-linux-gnu --zig. Wheel lands at mnemo-python/target/wheels/mnemo_engine-0.3.2-cp38-abi3-manylinux_2_17_aarch64.whl. Install in a Linux sandbox with `pip install --user --force-reinstall <wheel>`. Becomes obsolete once Phase 6 ships prebuilt wheels to PyPI for all 4 major platforms.",
     "memory_type": "procedural",
     "importance": 0.75,
     "metadata": {

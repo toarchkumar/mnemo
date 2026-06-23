@@ -8,16 +8,70 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-06-22
+
+Distribution rename: `mnemo-db` → `mnemo-engine` on both PyPI and
+crates.io. No code or on-disk format changes; v0.3.1 files open
+unchanged.
+
+### Why the rename
+
+When v0.3.1 attempted its first automated PyPI publish, the upload was
+rejected with HTTP 403: `mnemo-db` on PyPI is a different project
+([sattyamjjain/mnemo](https://github.com/sattyamjjain/mnemo), an
+MCP-native agent-memory layer built on DuckDB + USearch HNSW +
+Tantivy). Independent project, same naming logic — they reached for
+`-db` for the same reason we did (the bare `mnemo` is held by an
+unrelated 2020-era notebook helper) and they shipped first.
+
+We picked `mnemo-engine` over close alternatives (`mnemodb`,
+`mnemo-store`) because (a) the README's own tagline already calls
+MNemo an "agent-memory engine"; (b) it reads as a structurally
+different category from `mnemo-db`, reducing search-confusion with
+the other project; (c) the name is free on every registry we ship to
+(crates.io, PyPI).
+
+### Changed
+
+- **`mnemo/Cargo.toml`** — package `name` is now `mnemo-engine`;
+  `documentation` URL is `https://docs.rs/mnemo-engine`. Library and
+  binary names stay `mnemo`, so `use mnemo::...` and the `mnemo` CLI
+  are unaffected.
+- **`mnemo-python/pyproject.toml`** — PyPI distribution name is
+  `mnemo-engine`. Import name stays `mnemo`. Users move from
+  `pip install mnemo-db` (which never resolved for this project) to
+  `pip install mnemo-engine`.
+- **`mnemo-python/Cargo.toml`** and **`mnemo/bindings/node/Cargo.toml`**
+  — `mnemo_core` / `mnemo` path-deps now reference
+  `package = "mnemo-engine"` to match the core crate's new name.
+- **`AGENTS.md`**, **`mnemo-python/README.md`**, **`index.html`**,
+  **`test/scripts/seed.json`** — install commands and the
+  distribution-name explanation updated to `mnemo-engine`.
+
+### Notes for downstream users
+
+- `cargo add mnemo-db` and `pip install mnemo-db` will no longer
+  resolve to this project. Switch to `cargo add mnemo-engine` /
+  `pip install mnemo-engine`.
+- The failed v0.3.1 git tag and GitHub Release are retained as a
+  historical record of the collision; no PyPI/crates.io artifact
+  was ever published under v0.3.1.
+
 ## [0.3.1] — 2026-06-15
 
-First automated publish to PyPI. No code changes from v0.3.0; this
-release exists to exercise the `release.yml` workflow's `publish-pypi`
-job after the maintainer added `ENABLE_PYPI_PUBLISH=true` as a repo
-variable and `PYPI_API_TOKEN` as a repo secret in the GitHub settings.
+First *attempted* automated publish to PyPI. The `publish-pypi` job
+in `release.yml` was reached for the first time after the maintainer
+added `ENABLE_PYPI_PUBLISH=true` and `PYPI_API_TOKEN` to the GitHub
+repo. The upload failed with HTTP 403: the `mnemo-db` name on PyPI is
+owned by a different project (see the v0.3.2 entry above for the full
+rationale). No artifact was published. The git tag and GitHub Release
+remain as a historical record. The rename happens in v0.3.2.
 
-After this lands, `pip install mnemo-db` resolves to a published wheel
-on PyPI for the first time. The CLI binaries continue to ship as
-GitHub Release attachments.
+The originally-intended changelog text was: "After this lands,
+`pip install mnemo-db` resolves to a published wheel on PyPI for the
+first time. The CLI binaries continue to ship as GitHub Release
+attachments." — that did not happen; the CLI binaries did attach to
+the GitHub Release, but no wheel reached PyPI.
 
 ## [0.3.0] — 2026-06-15
 
