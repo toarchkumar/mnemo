@@ -712,10 +712,34 @@ impl Session {
 ///
 /// `dimensions` is required only when creating; it is ignored for an existing
 /// file (the stored dimensionality wins).
+/// Open an existing database, or create one if `path` does not yet exist.
+///
+/// `dimensions` is required only when creating; it is ignored for an existing
+/// file (the stored dimensionality wins).
+///
+/// `read_only=True` opens the file with a shared OS lock and blocks every
+/// mutating call (raises `RuntimeError: operation requires a read-write
+/// handle`). Read-only opens are refused if the file has a pending WAL
+/// recovery or a pending format-version migration — open read-write once
+/// to clear either, then reopen read-only. Cannot be combined with
+/// creation: read-only + non-existent path raises `ValueError`.
 #[pyfunction]
-#[pyo3(signature = (path, passphrase, dimensions=None))]
-fn open(path: &str, passphrase: &str, dimensions: Option<usize>) -> PyResult<Mnemo> {
-    let inner = if std::path::Path::new(path).exists() {
+#[pyo3(signature = (path, passphrase, dimensions=None, read_only=false))]
+fn open(
+    path: &str,
+    passphrase: &str,
+    dimensions: Option<usize>,
+    read_only: bool,
+) -> PyResult<Mnemo> {
+    let exists = std::path::Path::new(path).exists();
+    let inner = if read_only {
+        if !exists {
+            return Err(PyValueError::new_err(
+                "read_only=True cannot create a new database",
+            ));
+        }
+        Core::open_read_only(path, passphrase).map_err(to_py)?
+    } else if exists {
         Core::open(path, passphrase).map_err(to_py)?
     } else {
         let dims = dimensions.ok_or_else(|| {

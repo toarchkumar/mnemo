@@ -240,6 +240,11 @@ enum Command {
         /// Override candidates reranked exactly (ignored without an index).
         #[arg(long)]
         n_rerank: Option<usize>,
+        /// Skip access-tracking (does not bump `accessed_at` /
+        /// `access_count`). Opens the file with a shared OS lock so the
+        /// command can run alongside a writer holding the exclusive lock.
+        #[arg(long)]
+        no_track: bool,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -617,7 +622,7 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Info { path, passphrase: pp } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
             println!("path:        {path}");
             println!("memories:    {}", s.memories);
@@ -662,7 +667,7 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Verify { path, passphrase: pp } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let n = db.verify().map_err(fmt)?;
             println!("verified {n} records — all pages decrypt and decode");
         }
@@ -717,9 +722,11 @@ fn run() -> std::result::Result<(), String> {
             }
         }
         Command::Search { path, query, query_file, top_k, passphrase: pp } => {
+            // Search is a pure catalog scan — no access-tracking, no
+            // catalog writes. Safe on a read-only handle.
             let pp = passphrase(&pp)?;
             let q = resolve_query(query, query_file)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let hits = db.search(&q, top_k, mnemo::Metric::Cosine).map_err(fmt)?;
             if hits.is_empty() {
                 println!("no results");
@@ -730,7 +737,7 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::About { path, format, manifest_only, passphrase: pp } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
             let mut entries = db.about().map_err(fmt)?;
@@ -832,9 +839,10 @@ fn run() -> std::result::Result<(), String> {
             }
         }
         Command::Get { path, id, format, verbose, vector, passphrase: pp } => {
+            // `get` is a plain catalog lookup + record read — no writes.
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let m = db.get(&ulid).map_err(fmt)?;
             print_memory(&m, format, verbose, vector);
         }
@@ -860,7 +868,8 @@ fn run() -> std::result::Result<(), String> {
                     "unknown sort '{sort}' (use created, importance, or id)"
                 ));
             }
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            // `list` is a bulk read of the catalog + record bodies — no writes.
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let mut all = db.memories().map_err(fmt)?;
 
             // Filter.
@@ -910,6 +919,7 @@ fn run() -> std::result::Result<(), String> {
             metric,
             n_probe,
             n_rerank,
+            no_track,
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
@@ -928,14 +938,24 @@ fn run() -> std::result::Result<(), String> {
             if let Some(n) = n_rerank {
                 req = req.n_rerank(n);
             }
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            let hits = db.recall(&req).map_err(fmt)?;
+            // Default `recall` opens read-write so it can bump the
+            // catalog access stats. `--no-track` opens read-only with a
+            // shared lock and disables access-tracking on the request,
+            // so it can coexist with a writer holding the exclusive lock.
+            let hits = if no_track {
+                req = req.track_access(false);
+                let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+                db.recall(&req).map_err(fmt)?
+            } else {
+                let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+                db.recall(&req).map_err(fmt)?
+            };
             print_recall_hits(&hits, format);
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
         Command::Snapshots { path, passphrase: pp } => {
             let pp = passphrase(&pp)?;
-            let db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let snaps = db.snapshots();
             if snaps.is_empty() {
                 println!("no snapshots yet (nothing has been flushed)");

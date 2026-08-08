@@ -8,6 +8,45 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **OS file locking (Phase 1.1).** `Mnemo::create` and `Mnemo::open` now
+  acquire an exclusive advisory lock on the target `.mnemo` file for the
+  lifetime of the returned handle. A second concurrent open (from any
+  process) returns the new `MnemoError::Locked { path }` instead of
+  silently interleaving WAL frames and corrupting the file. Uses `fs4`
+  (`flock` on Unix, `LockFileEx` on Windows); MSRV 1.75 preserved.
+- **Read-only opens.** New `Mnemo::open_read_only(path, passphrase)`
+  takes a shared OS lock. Multiple read-only handles coexist; a
+  read-only handle does NOT coexist with a writer holding the exclusive
+  lock (advisory locks via `flock`/`LockFileEx` refuse a shared-lock
+  request while an exclusive lock is held, on both Unix and Windows).
+  All mutating methods return the new `MnemoError::ReadOnly`; `recall`
+  with default `track_access(true)` counts as a mutation and is refused
+  (call with `track_access(false)` for read-only recall).
+- **Read-only opens fail loud on pending on-disk work.** A read-only
+  handle cannot replay a committed-but-uncheckpointed WAL transaction
+  nor perform a format-version migration — both would require write
+  access. Either case returns the new `MnemoError::NeedsWriteOpen`
+  with a `reason`, telling the caller to open read-write once first.
+  See the README's Durability section.
+- **CLI `--no-track` on `recall`.** Opens the file via
+  `Mnemo::open_read_only` with `RecallRequest::track_access(false)`, so
+  the command can run alongside an agent process holding the exclusive
+  write lock.
+- **CLI read-only commands** (`info`, `about`, `list`, `get`, `search`,
+  `verify`, `snapshots`, `recall --no-track`) now open via the shared
+  lock and coexist with a writer.
+- **Python `mnemo.open(..., read_only=True)`** mirrors
+  `Mnemo::open_read_only`. Combining `read_only=True` with a
+  non-existent path raises `ValueError` (read-only cannot create).
+
+### Changed
+
+- `Mnemo::close()` on a read-only handle is a no-op success (no dirty
+  state to persist) rather than returning `ReadOnly` from the inner
+  `flush()` call.
+
 ## [0.3.2] — 2026-06-22
 
 Distribution rename: `mnemo-db` → `mnemo-engine` on both PyPI and

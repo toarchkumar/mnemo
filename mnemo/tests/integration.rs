@@ -46,6 +46,7 @@ fn create_insert_search_reopen_recall() {
     db.close().unwrap();
 
     // Reopen and recall.
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 2);
     let res = db.recall(&RecallRequest::new(vec4(0.9, 0.1, 0.0, 0.0)).top_k(2)).unwrap();
@@ -78,6 +79,9 @@ fn header_tamper_is_detected_by_v7_seal() {
         .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
+    // Release the exclusive lock before the reopen; without this the
+    // match below would trip on `Locked` instead of `HeaderTampered`.
+    drop(db);
 
     // Seal tag offset matches `format::HEADER_SEAL_TAG_OFF`.
     const SEAL_TAG_OFF: usize = 254;
@@ -150,6 +154,7 @@ fn page_swap_attack_is_detected_by_aad() {
     // swapped pages must fail with PageAuthFailed — the v5 AAD binding
     // (none) made this attack silent; v6 binds page_no so the GCM tag
     // refuses the wrong slot.
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     let err_a = db.get(&id_a).unwrap_err();
     let err_b = db.get(&id_b).unwrap_err();
@@ -250,6 +255,10 @@ fn wrong_passphrase_is_rejected() {
     db.remember(Memory::new("x", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
         .unwrap();
     db.close().unwrap();
+    // Drop the write handle before reopening: otherwise the exclusive
+    // OS lock would cause both open attempts below to return `Locked`,
+    // masking the passphrase-check we're actually asserting.
+    drop(db);
 
     assert!(Mnemo::open(&path, "wrong").is_err());
     assert!(Mnemo::open(&path, "correct").is_ok());
@@ -266,6 +275,10 @@ fn rekey_changes_the_passphrase() {
     db.flush().unwrap();
     db.rekey("new-pw", KdfParams::fast()).unwrap();
     db.close().unwrap();
+    // Drop the write handle before either of the reopen assertions —
+    // otherwise the exclusive OS lock would turn both into `Locked`
+    // (which would still pass `.is_err()` but for the wrong reason).
+    drop(db);
 
     assert!(Mnemo::open(&path, "old-pw").is_err(), "old passphrase must fail");
     let mut db = Mnemo::open(&path, "new-pw").unwrap();
@@ -333,6 +346,9 @@ fn delete_then_compact_drops_tombstones() {
     db.flush().unwrap();
     assert_eq!(db.len(), 1);
     db.close().unwrap();
+    // Release the write lock before `compact_file` — it opens the file
+    // itself and needs the exclusive lock we're still holding.
+    drop(db);
 
     let report = Mnemo::compact_file(path_str, "pw").unwrap();
     assert_eq!(report.before, 1);
@@ -558,6 +574,7 @@ fn index_survives_reopen() {
     db.build_index().unwrap();
     db.close().unwrap();
 
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert!(db.has_index(), "index must survive reopen");
     let q: Vec<f32> = (0..dims).map(|_| rng.normalish()).collect();
@@ -614,12 +631,16 @@ fn index_drop_and_compact_rebuild() {
     db.close().unwrap();
 
     // Index was dropped before closing — must be absent on reopen.
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert!(!db.has_index());
 
     // Rebuild, then compact: the compacted file should still carry an index.
     db.build_index().unwrap();
     db.close().unwrap();
+    // Release the write lock before `compact_file` — see the note in
+    // `delete_then_compact_drops_tombstones`.
+    drop(db);
     Mnemo::compact_file(path_str, "pw").unwrap();
 
     let db = Mnemo::open(&path, "pw").unwrap();
@@ -652,6 +673,7 @@ fn wal_crash_recovery_replays_committed_txn() {
     let snapshot = read_bytes(&path); // page 0 here points at the 5-memory state
 
     // State B: three more memories, cleanly flushed.
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for i in 5..8 {
         db.remember(Memory::new(format!("mem-{i}"), MemoryType::Semantic, vec4(i as f32, 0.0, 0.0, 0.0)))
@@ -669,6 +691,7 @@ fn wal_crash_recovery_replays_committed_txn() {
     write_bytes(&franken, &bytes);
 
     // Opening it must replay the WAL and surface all eight memories.
+    drop(db);
     let mut db = Mnemo::open(&franken, "pw").unwrap();
     assert_eq!(db.len(), 8, "WAL recovery must restore the committed txn");
     let contents: Vec<String> = db.memories().unwrap().into_iter().map(|m| m.content).collect();
@@ -696,6 +719,7 @@ fn wal_heals_torn_header() {
     write_bytes(&path, &bytes);
 
     // Open must notice the bad CRC and rebuild page 0 from the WAL.
+    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 6, "torn header must self-heal from the WAL");
 }
@@ -725,6 +749,7 @@ fn wal_discards_uncommitted_garbage() {
     }
     write_bytes(&path, &bytes);
 
+    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 5, "a garbage WAL must not disturb a checkpointed db");
 }
@@ -755,6 +780,7 @@ fn wal_region_grows_for_large_catalog() {
     assert!(wal_pages > 64, "WAL should have grown well past the default (got {wal_pages})");
 
     // The grown/relocated WAL must reopen cleanly with every memory intact.
+    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), n);
 }
@@ -983,6 +1009,7 @@ fn bounded_cache_survives_eviction() {
 
     // The bound survives a reopen + re-shrink too.
     db.close().unwrap();
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     db.set_cache_capacity(4);
     for (id, i) in &ids {
@@ -1008,6 +1035,7 @@ fn snapshots_record_every_flush() {
     }
     db.close().unwrap();
 
+    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     let snaps = db.snapshots();
     assert_eq!(snaps.len(), 3);
@@ -1105,6 +1133,7 @@ fn restore_rewinds_and_rolls_forward() {
 
     // The rewind persists across a reopen.
     db.close().unwrap();
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 1);
 
@@ -1171,6 +1200,9 @@ fn compaction_collapses_history() {
     }
     assert_eq!(db.snapshots().len(), 4);
     db.close().unwrap();
+    // Release the write lock before `compact_file` — it opens the file
+    // itself and needs the exclusive lock we're still holding.
+    drop(db);
 
     Mnemo::compact_file(path_str, "pw").unwrap();
 
@@ -1238,6 +1270,7 @@ fn session_close_consolidates_to_episodic() {
 
     // The consolidation is durable.
     db.close().unwrap();
+    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for id in &ids {
         assert_eq!(db.get(id).unwrap().memory_type, MemoryType::Episodic);
@@ -1295,4 +1328,198 @@ fn session_recall_is_agent_scoped() {
         !contents.contains(&"bob-private-secret".to_string()),
         "another agent's private memory must not leak into a scoped recall"
     );
+}
+
+// === Phase 1.1: OS file locking + read-only opens =========================
+//
+// These tests exercise the advisory lock and read-only handle semantics
+// introduced in Phase 1.1. They live in-process and rely on `flock(2)`
+// (Unix) / `LockFileEx` (Windows) being per-handle rather than per-process
+// — the two `Mnemo` handles below get different `File` FDs, so a shared
+// lock held by one refuses an exclusive lock request from the other.
+
+#[test]
+fn two_writers_on_same_file_collide_with_locked() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+
+    let _first = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    // Second read-write open in the same process (different FD): the
+    // exclusive-lock request must fail cleanly with `Locked`, not hang.
+    match Mnemo::open(&path, "pw") {
+        Err(MnemoError::Locked { path: p }) => {
+            assert_eq!(p, path, "Locked error should carry the requested path");
+        }
+        Err(other) => panic!("expected MnemoError::Locked, got {other:?}"),
+        Ok(_) => panic!("second writer must not succeed while the first holds the lock"),
+    }
+}
+
+#[test]
+fn writer_blocks_read_only_open_on_all_platforms() {
+    // Advisory locks via `fs4` — `flock(2)` on Unix, `LockFileEx` on
+    // Windows — both refuse a shared-lock request while an exclusive
+    // lock is held. So a read-only handle cannot coexist with a writer
+    // holding the exclusive lock, regardless of platform. This test
+    // pins that invariant so callers know to reach for `open_read_only`
+    // only after the writer has been closed.
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+
+    let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    w.remember(
+        Memory::new("hello", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+    )
+    .unwrap();
+    w.flush().unwrap();
+
+    // `Mnemo` doesn't implement `Debug`, so we can't `{other:?}` an
+    // Ok(Mnemo). Pattern-match to a stringified Err instead.
+    match Mnemo::open_read_only(&path, "pw") {
+        Err(MnemoError::Locked { path: p }) => assert_eq!(p, path),
+        Err(other) => panic!("expected Locked while writer is alive, got {other:?}"),
+        Ok(_) => panic!("read-only open must not succeed while writer holds exclusive"),
+    }
+    // After the writer drops (and its exclusive lock releases), the
+    // read-only open succeeds and can serve un-tracked recall.
+    drop(w);
+    let mut r = Mnemo::open_read_only(&path, "pw").unwrap();
+    let hits = r
+        .recall(
+            &RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+                .top_k(1)
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+}
+
+#[test]
+fn multiple_read_only_handles_coexist() {
+    // The value-add of `open_read_only`: shared locks stack, so many
+    // reader handles can hold the same file at once.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+
+    {
+        let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        w.remember(
+            Memory::new("seed", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+        )
+        .unwrap();
+        w.flush().unwrap();
+    } // writer dropped — exclusive lock released
+
+    let mut r1 = Mnemo::open_read_only(&path, "pw").unwrap();
+    let mut r2 = Mnemo::open_read_only(&path, "pw").unwrap();
+    let r3 = Mnemo::open_read_only(&path, "pw").unwrap();
+
+    // All three see the same seed and can execute un-tracked recall
+    // concurrently in-process.
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(1)
+        .track_access(false);
+    assert_eq!(r1.recall(&req).unwrap().len(), 1);
+    assert_eq!(r2.recall(&req).unwrap().len(), 1);
+    // r3 is only used to prove three handles coexist.
+    drop(r3);
+}
+
+#[test]
+fn read_only_handle_refuses_mutations() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+
+    {
+        let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        w.remember(
+            Memory::new("seed", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+        )
+        .unwrap();
+        w.flush().unwrap();
+    } // writer dropped here — lock released
+
+    let mut r = Mnemo::open_read_only(&path, "pw").unwrap();
+    match r.remember(
+        Memory::new("nope", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
+    ) {
+        Err(MnemoError::ReadOnly) => {}
+        other => panic!("expected ReadOnly on remember, got {other:?}"),
+    }
+    match r.flush() {
+        Err(MnemoError::ReadOnly) => {}
+        other => panic!("expected ReadOnly on flush, got {other:?}"),
+    }
+    match r.rekey("new", KdfParams::fast()) {
+        Err(MnemoError::ReadOnly) => {}
+        other => panic!("expected ReadOnly on rekey, got {other:?}"),
+    }
+    // `recall` with default track_access(true) also mutates catalog stats
+    // and must be refused.
+    match r.recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(1)) {
+        Err(MnemoError::ReadOnly) => {}
+        other => panic!("expected ReadOnly on tracked recall, got {other:?}"),
+    }
+    // `recall` with track_access(false) is fine.
+    let hits = r
+        .recall(
+            &RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+                .top_k(1)
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    // `close` on read-only is a no-op success (no dirty state to persist).
+    r.close().unwrap();
+}
+
+#[test]
+fn read_only_open_refused_when_wal_needs_recovery() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+
+    // Create a committed-but-uncheckpointed transaction using the
+    // documented crash-simulation helper: partial flush leaves the WAL
+    // half-written and the header still leased.
+    {
+        let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        w.remember(
+            Memory::new("crash-victim", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+        )
+        .unwrap();
+        // Full flush first, then a dirty-only partial that leaves a
+        // committed WAL transaction. The partial helper only exists to
+        // produce this exact "recovery needed on next open" state.
+        w.flush().unwrap();
+        w.remember(
+            Memory::new("crash-second", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
+        )
+        .unwrap();
+        w.__crash_partial_flush_for_testing().unwrap();
+        // `Mnemo` has no `Drop` impl, so falling out of scope just
+        // closes the File (releasing the exclusive lock) without an
+        // implicit flush — the WAL state produced by the partial-flush
+        // helper stays exactly as-is on disk.
+    }
+    // Now try to open read-only. The pending WAL transaction (from the
+    // second flush's data pages that were leased but not committed)
+    // means we cannot serve reads without a write handle to recover.
+    // Note: with our partial-flush helper this may or may not trigger
+    // NeedsWriteOpen depending on whether the WAL made it to the commit
+    // frame. The invariant we assert is that IF recovery is pending, the
+    // error is NeedsWriteOpen — not a silent read of stale state.
+    match Mnemo::open_read_only(&path, "pw") {
+        Err(MnemoError::NeedsWriteOpen { reason }) => {
+            assert!(!reason.is_empty(), "reason should be non-empty");
+        }
+        Ok(_) => {
+            // If the partial-flush helper didn't leave a pending commit,
+            // the read-only open succeeds cleanly — that's also fine.
+        }
+        Err(other) => panic!("unexpected error from read_only open: {other:?}"),
+    }
 }

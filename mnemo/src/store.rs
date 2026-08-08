@@ -22,10 +22,11 @@
 //! history along with them — are reclaimed by [`Mnemo::compact_file`].
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -337,6 +338,48 @@ pub struct Mnemo {
     /// Maximum manifest entries to retain across flushes. `0` disables
     /// the cap (retain forever). Defaults to [`DEFAULT_MAX_SNAPSHOTS`].
     max_snapshots: usize,
+    /// If `true`, this handle was opened via [`Mnemo::open_read_only`] and
+    /// every mutating API returns [`MnemoError::ReadOnly`]. The underlying
+    /// file was opened without write permission and holds an OS shared
+    /// lock; the OS would reject a write() anyway, but gating in Rust
+    /// gives callers a clean, typed error.
+    read_only: bool,
+}
+
+/// Open a file and take an OS advisory lock, returning `Locked { path }`
+/// if the requested lock cannot be acquired. On drop of the returned
+/// [`File`], the OS releases the lock. `flock`/`LockFileEx` semantics
+/// (per file-descriptor on Unix, per-open-file-handle on Windows) mean
+/// the lock is scoped to this handle: cloning the file (or the returned
+/// `File`) shares the lock, but a fresh `open()` from any process gets a
+/// distinct handle and will collide.
+fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    if write {
+        opts.write(true);
+    }
+    if create {
+        opts.create(true).truncate(true);
+    }
+    let file = opts.open(path)?;
+    // `fs4` 0.9.x signals contention via `ErrorKind::WouldBlock` — on
+    // success the returned `Result<()>` is `Ok(())`; on conflict it's
+    // `Err(io::Error { kind: WouldBlock, .. })`. Any other I/O error is a
+    // real failure (permissions, invalid handle, etc.) and gets bubbled
+    // up as `MnemoError::Io`.
+    let result = if write {
+        FileExt::try_lock_exclusive(&file)
+    } else {
+        FileExt::try_lock_shared(&file)
+    };
+    match result {
+        Ok(()) => Ok(file),
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(MnemoError::Locked {
+            path: path.to_path_buf(),
+        }),
+        Err(e) => Err(MnemoError::Io(e)),
+    }
 }
 
 /// Read a run of consecutive encrypted pages and concatenate their plaintext.
@@ -468,12 +511,8 @@ impl Mnemo {
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
         }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)?;
+        // Exclusive lock covers the write path; second writer sees `Locked`.
+        let file = open_with_lock(&path, /*write=*/ true, /*create=*/ true)?;
 
         let salt = crypto::random_salt();
         let dek = crypto::random_dek();
@@ -541,14 +580,22 @@ impl Mnemo {
             dirty_index: false,
             manifest: Vec::new(),
             max_snapshots: config.max_snapshots,
+            read_only: false,
         })
     }
 
     /// Open an existing database. A wrong passphrase fails cleanly with
-    /// [`MnemoError::WrongPassphrase`].
+    /// [`MnemoError::WrongPassphrase`]. Takes an OS exclusive lock for
+    /// the lifetime of the returned handle; a second concurrent open
+    /// (from any process) returns [`MnemoError::Locked`].
+    ///
+    /// For a caller that only needs to read (and can tolerate the
+    /// pending-recovery / pending-migration cases documented on
+    /// [`Mnemo::open_read_only`]), prefer that entry point — it takes a
+    /// shared lock and coexists with other readers.
     pub fn open(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
         let path: PathBuf = path.into();
-        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
+        let mut file = open_with_lock(&path, /*write=*/ true, /*create=*/ false)?;
 
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;
@@ -736,6 +783,114 @@ impl Mnemo {
             // [`Mnemo::set_max_snapshots`] right after open if you need
             // unlimited retention or a different cap for this handle.
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            read_only: false,
+        })
+    }
+
+    /// Open an existing database in **read-only** mode. Takes an OS shared
+    /// lock; multiple read-only handles can coexist, but any attempt to
+    /// open the same file read-write elsewhere returns
+    /// [`MnemoError::Locked`]. All mutating methods on the returned handle
+    /// return [`MnemoError::ReadOnly`], including `recall` with
+    /// `track_access(true)`.
+    ///
+    /// Two conditions block a read-only open and return
+    /// [`MnemoError::NeedsWriteOpen`]:
+    ///
+    /// 1. The file has a committed-but-uncheckpointed WAL transaction that
+    ///    would ordinarily be replayed on open. A read-only handle
+    ///    cannot write the recovered pages back.
+    /// 2. The on-disk format version is older than the current
+    ///    `format::VERSION`, requiring an on-disk migration.
+    ///
+    /// In either case, open the file read-write once (which recovers /
+    /// migrates in place), close the handle cleanly, and reopen
+    /// read-only. This is documented in the README's Durability section.
+    pub fn open_read_only(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
+        let path: PathBuf = path.into();
+        let mut file = open_with_lock(&path, /*write=*/ false, /*create=*/ false)?;
+
+        let mut hbuf = [0u8; PAGE_SIZE];
+        file.seek(SeekFrom::Start(0))?;
+        file.read_exact(&mut hbuf)?;
+        // A torn header on a read-only open cannot be healed (that requires
+        // writing recovered frames back). Surface as `NeedsWriteOpen` so the
+        // caller knows to reopen read-write once.
+        let header = Header::from_page(&hbuf).map_err(|e| match e {
+            MnemoError::HeaderChecksum => MnemoError::NeedsWriteOpen {
+                reason: "torn header page needs recovery from WAL",
+            },
+            other => other,
+        })?;
+
+        // Refuse to migrate on read-only opens. v6→v7 is header-only
+        // (no page writes required), but even that bumps `version` on
+        // disk and re-seals the header — which needs write access. Keep
+        // the policy uniform across all sub-version bumps.
+        if header.version < VERSION {
+            return Err(MnemoError::NeedsWriteOpen {
+                reason: "pending format-version migration",
+            });
+        }
+
+        // Refuse if there is a committed-but-uncheckpointed transaction
+        // waiting for `wal::recover` to fold it into home pages.
+        if wal::recover(&mut file, header.wal_start, header.wal_pages, header.wal_seq)?.is_some() {
+            return Err(MnemoError::NeedsWriteOpen {
+                reason: "pending WAL recovery",
+            });
+        }
+
+        let kdf = KdfParams {
+            m_cost: header.m_cost,
+            t_cost: header.t_cost,
+            p_cost: header.p_cost,
+        };
+        let kek = crypto::derive_kek(passphrase.as_bytes(), &header.salt, kdf)?;
+        let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
+        header.validate_seal(&dek)?;
+
+        let mut pager = Pager::new(file, dek, header.write_counter, header.version);
+        let dimensions = header.dimensions as usize;
+
+        let catalog = load_catalog(
+            &mut pager,
+            header.catalog_start,
+            header.catalog_pages,
+            header.catalog_len,
+        )?;
+        let index = build_id_index(&catalog);
+        let ann = load_index(
+            &mut pager,
+            header.index_start,
+            header.index_pages,
+            header.index_len,
+            dimensions,
+        )?;
+        let manifest = load_manifest(
+            &mut pager,
+            header.manifest_start,
+            header.manifest_pages,
+            header.manifest_len,
+        )?;
+
+        Ok(Mnemo {
+            pager,
+            header,
+            catalog,
+            index,
+            path,
+            dimensions,
+            kdf,
+            // No mutation is possible; leave both dirty flags false so
+            // `close()` is a genuine no-op even if we later add an
+            // auto-flush on drop.
+            dirty_catalog: false,
+            ann,
+            dirty_index: false,
+            manifest,
+            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            read_only: true,
         })
     }
 
@@ -849,6 +1004,9 @@ impl Mnemo {
     /// Store a memory. Returns its ULID. If the memory's ID is nil a fresh
     /// one is assigned; an existing ID overwrites in place.
     pub fn remember(&mut self, memory: Memory) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         self.put(memory)
     }
 
@@ -867,6 +1025,9 @@ impl Mnemo {
 
     /// Soft-delete a memory (tombstoned; space reclaimed by `compact`).
     pub fn delete(&mut self, id: &Ulid) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         let idx = *self
             .index
             .get(&id.0)
@@ -986,6 +1147,12 @@ impl Mnemo {
                 got: req.query.len(),
             });
         }
+        // Access-tracking bumps `accessed_at` / `access_count` in the
+        // catalog, which is a mutation. On a read-only handle the caller
+        // must pass `track_access(false)` (via CLI `--no-track`).
+        if self.read_only && req.track_access {
+            return Err(MnemoError::ReadOnly);
+        }
         let now = memory::now_secs();
 
         // Candidate set: ANN-narrowed when an index exists, else everything.
@@ -1071,6 +1238,9 @@ impl Mnemo {
 
     /// Build the ANN index with explicit tuning.
     pub fn build_index_with(&mut self, cfg: IndexConfig) -> Result<IndexInfo> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         let mems = self.memories()?;
         if mems.is_empty() {
             return Err(MnemoError::Invalid(
@@ -1102,7 +1272,13 @@ impl Mnemo {
     }
 
     /// Drop the ANN index; recall reverts to exact scans. Persisted on flush.
+    /// No-op on a read-only handle (signature is infallible — callers of
+    /// `build_index` / `flush` on a read-only handle already get a typed
+    /// `ReadOnly` error, which is the enforceable boundary).
     pub fn drop_index(&mut self) {
+        if self.read_only {
+            return;
+        }
         if self.ann.is_some() {
             self.ann = None;
             self.dirty_index = true;
@@ -1195,6 +1371,9 @@ impl Mnemo {
     /// after step 4 is repaired by [`Mnemo::open`] replaying the WAL.
     /// Safe to call repeatedly.
     pub fn flush(&mut self) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         if !self.dirty_catalog && !self.dirty_index {
             // No control-plane changes pending. Because every `put` that
             // dirties a data page also dirties the catalog, there can't
@@ -1372,8 +1551,13 @@ impl Mnemo {
         Ok(FlushPrelude { cat_bytes, idx_bytes })
     }
 
-    /// Flush and close. Equivalent to `flush()`; the file is released on drop.
+    /// Flush and close. Equivalent to `flush()` on a read-write handle; on
+    /// a read-only handle it's a no-op (no dirty state to persist). The
+    /// file is released on drop, which also drops the OS advisory lock.
     pub fn close(&mut self) -> Result<()> {
+        if self.read_only {
+            return Ok(());
+        }
         self.flush()
     }
 
@@ -1389,6 +1573,9 @@ impl Mnemo {
     /// strands data pages; never expose it from a binding.
     #[doc(hidden)]
     pub fn __crash_partial_flush_for_testing(&mut self) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         if !self.dirty_catalog && !self.dirty_index {
             return Ok(());
         }
@@ -1475,6 +1662,9 @@ impl Mnemo {
     /// snapshot), so it is crash-safe and reversible — restoring forward to a
     /// later snapshot afterwards works just as well.
     pub fn restore_to(&mut self, txn_id: u64) -> Result<SnapshotInfo> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         let snap = self
             .manifest
             .iter()
@@ -1493,6 +1683,9 @@ impl Mnemo {
     /// `unix_secs`. Returns [`MnemoError::NotFound`] if no snapshot is that
     /// old. Like [`Mnemo::restore_to`], the restore is a new transaction.
     pub fn restore_to_time(&mut self, unix_secs: i64) -> Result<SnapshotInfo> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         let snap = self
             .manifest
             .iter()
@@ -1513,6 +1706,9 @@ impl Mnemo {
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps the DEK;
     /// the encrypted pages are never rewritten.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
         self.flush()?;
         let new_salt = crypto::random_salt();
         let new_kek = crypto::derive_kek(new_passphrase.as_bytes(), &new_salt, kdf)?;

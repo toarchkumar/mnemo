@@ -67,6 +67,31 @@ pub enum MnemoError {
     /// A caller-supplied argument was invalid.
     #[error("invalid argument: {0}")]
     Invalid(String),
+
+    /// Another process (or another handle in this process) already holds a
+    /// conflicting OS file lock on the target `.mnemo` file. Write handles
+    /// take an exclusive lock; read-only handles take a shared lock. Two
+    /// writers or a writer + reader will collide.
+    #[error("file already locked by another handle: {path}")]
+    Locked {
+        /// The path whose lock was requested and refused.
+        path: std::path::PathBuf,
+    },
+
+    /// A mutation was attempted on a handle opened via
+    /// [`crate::Mnemo::open_read_only`]. Reopen read-write to mutate.
+    #[error("operation requires a read-write handle (this one is read-only)")]
+    ReadOnly,
+
+    /// A read-only open was requested but the file has pending on-disk work
+    /// that requires a write handle to complete — a committed-but-unchecked
+    /// WAL transaction, or a format-version migration older than the current
+    /// `VERSION`. Open read-write once, close cleanly, then reopen read-only.
+    #[error("read-only open blocked: {reason} — open read-write once to fix")]
+    NeedsWriteOpen {
+        /// Human-readable reason (e.g. `"pending WAL recovery"`).
+        reason: &'static str,
+    },
 }
 
 /// Convenience result alias used throughout the crate.

@@ -130,6 +130,34 @@ discarded uncommitted log, and WAL growth.)
 What this buys over a plain copy-on-write header swap: a single-fsync commit
 and an explicit, replayable transaction boundary.
 
+### Concurrency & read-only opens
+
+Every read-write open (`Mnemo::create`, `Mnemo::open`) takes an **exclusive
+OS advisory lock** on the file for the lifetime of the handle (`flock(2)` on
+Unix, `LockFileEx` on Windows). A second concurrent open — from any
+process — returns `MnemoError::Locked` instead of silently interleaving WAL
+frames and corrupting the file. The lock releases when the handle drops.
+
+`Mnemo::open_read_only(path, passphrase)` opens the file with a **shared**
+lock. Multiple read-only handles coexist — this is what the shared-lock
+tier buys you. A read-only handle does **not** coexist with a writer
+holding the exclusive lock: `flock(2)` on Unix and `LockFileEx` on Windows
+both refuse a shared-lock request while an exclusive lock is held. So
+"long-lived reader alongside a live writer" needs the writer to release
+first (drop the write handle, then reopen read-only). Every mutating
+method on a read-only handle returns `MnemoError::ReadOnly`; `recall`
+with the default `track_access(true)` counts as a mutation (it bumps
+catalog access stats) and requires `track_access(false)` on a read-only
+handle. The matching CLI knob is `mnemo recall --no-track`.
+
+Two conditions block a read-only open and return `MnemoError::NeedsWriteOpen`:
+a committed-but-uncheckpointed WAL transaction waiting to be replayed on
+open, and an on-disk format version older than the current build. Both cases
+require write access to fix. The remedy is the same either way: open
+read-write once (which recovers / migrates in place), close cleanly, and
+reopen read-only. We chose this fail-loud policy over an in-memory WAL
+overlay so read-only reads can never return stale pre-recovery state.
+
 ### Snapshots & point-in-time recovery
 
 Because record, catalog, and index pages are only ever *appended*, every past

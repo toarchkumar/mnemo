@@ -108,6 +108,7 @@ file. The `.gitignore` already excludes them.
 | Add a CLI smoke test | `mnemo/tests/cli_smoke.rs` (uses `CARGO_BIN_EXE_mnemo` + tempfile) |
 | Touch the on-disk format | `mnemo/src/format.rs` (bump VERSION constant + handle the migration) |
 | Change the manifest scaffold | `mnemo/src/memory.rs` (`Memory::scaffold_manifest`) |
+| Add a mutating method | must guard on `self.read_only` → `MnemoError::ReadOnly` (see `remember`, `flush`, `rekey` for the pattern) and be routed via `Mnemo::open` (not `open_read_only`) in the CLI |
 
 ## CI
 
