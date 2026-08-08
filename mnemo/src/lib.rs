@@ -54,6 +54,7 @@ mod crypto;
 mod error;
 mod format;
 mod index;
+pub mod mcp;
 mod memory;
 mod pager;
 mod session;

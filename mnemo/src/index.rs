@@ -67,7 +67,12 @@ impl Default for IndexConfig {
 }
 
 /// A read-only snapshot of an index's shape, surfaced via `Mnemo::stats`.
-#[derive(Clone, Copy, Debug)]
+///
+/// `Serialize`/`Deserialize` derived so the MCP `stats` tool (and any
+/// other JSON-shaped consumer) can emit / round-trip it without a
+/// per-field object build. Plain-old-data type — no invariants to
+/// preserve across (de)serialization.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct IndexInfo {
     /// Vectors currently held in the index.
     pub vectors: usize,

@@ -47,6 +47,29 @@ Pre-1.0, the minor component carries the breaking-change signal.
   state to persist) rather than returning `ReadOnly` from the inner
   `flush()` call.
 
+### Added (Phase 4: MCP server)
+
+- **`mnemo serve --mcp <file.mnemo>`** — Model Context Protocol server
+  over stdio, so any MCP-compatible agent can drive a `.mnemo` file
+  as a tool. Tools: `about`, `remember`, `recall`, `forget`, `list`,
+  `snapshot_list`, `stats`. Every mutation flushes before returning.
+  Passphrase via `MNEMO_PASSPHRASE` only (no CLI-flag fallback).
+- **Hand-rolled** rather than depending on `rmcp`. The official SDK
+  declares `edition = "2024"` on its workspace, requiring Rust 1.85+;
+  our MSRV is 1.75 and locked (`rmp` 0.8.14 and `base64ct` 1.6.0
+  transitively pin us). Hand-rolling stdio JSON-RPC framing is ~250
+  LoC and adds zero deps beyond `serde_json` (already present). Lives
+  in `mnemo/src/mcp.rs`; wired into the CLI via the new `Serve`
+  subcommand.
+- **README's "Serve as an MCP server" block** near the top with a
+  ready-to-paste Claude Desktop `mcpServers` config snippet.
+- **Smoke tests** in `cli_smoke.rs` that spawn `mnemo serve --mcp`
+  as a subprocess and drive `initialize` / `tools/list` /
+  `tools/call` over piped stdin/stdout.
+- **`remember` and `recall` are embedder-agnostic** — the caller
+  supplies vectors on both. Text-only variants that call an embedder
+  land with Phase 3.
+
 ## [0.3.2] — 2026-06-22
 
 Distribution rename: `mnemo-db` → `mnemo-engine` on both PyPI and

@@ -288,3 +288,146 @@ fn recall_requires_query_source() {
         "stderr should mention missing query, got: {stderr}"
     );
 }
+
+// === MCP stdio server ====================================================
+
+/// Drive the MCP server end-to-end: spawn `mnemo serve --mcp <path>`,
+/// pipe a scripted JSON-RPC session through stdin, capture stdout, and
+/// assert the responses. Uses one long-lived child process rather than
+/// one per request so we exercise the actual line-oriented dispatch loop.
+#[test]
+fn mcp_serve_initialize_list_and_call_tools() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Seed the file with a *scoped* writer so its exclusive lock is
+    // released before the server subprocess tries to acquire its own.
+    // The temp dir stays alive for the whole test so the file survives.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mcp.mnemo");
+    let pp = "smoke-pw";
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(
+            Memory::new(
+                "the user prefers tea",
+                MemoryType::Semantic,
+                vec![1.0, 0.0, 0.0, 0.0],
+            )
+            .with_importance(0.9),
+        )
+        .unwrap();
+        db.flush().unwrap();
+    }
+
+    let mut child = Command::new(bin())
+        .args(["serve", path.to_str().unwrap(), "--mcp"])
+        .env("MNEMO_PASSPHRASE", pp)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn mnemo serve --mcp");
+
+    // Scripted client session: initialize, then list tools, then call
+    // `stats`. Each line is one JSON-RPC message. Closing stdin ends
+    // the loop and the child exits.
+    let stdin = child.stdin.as_mut().expect("child stdin missing");
+    let script = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#,
+    ];
+    for line in script {
+        writeln!(stdin, "{line}").unwrap();
+    }
+    // Close stdin — signals EOF to the server's read loop.
+    drop(child.stdin.take());
+
+    // Wait for shutdown (bounded — the server should exit as soon as
+    // stdin closes; hanging here would fail the test with a timeout at
+    // the test-runner level).
+    let out = child.wait_with_output().expect("child wait failed");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        out.status.success(),
+        "server exited non-zero: status={:?} stderr={stderr}",
+        out.status
+    );
+
+    // Parse the response lines back and assert on structure.
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert!(
+        lines.len() >= 3,
+        "expected ≥3 response lines (init, tools/list, stats), got {}: {stdout}",
+        lines.len()
+    );
+
+    let init: serde_json::Value = serde_json::from_str(lines[0]).expect("init parse");
+    assert_eq!(init["jsonrpc"], "2.0");
+    assert_eq!(init["id"], 1);
+    assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(init["result"]["serverInfo"]["name"], "mnemo");
+
+    let list: serde_json::Value = serde_json::from_str(lines[1]).expect("tools/list parse");
+    let tools = list["result"]["tools"].as_array().expect("tools array");
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    for expected in [
+        "about",
+        "remember",
+        "recall",
+        "forget",
+        "list",
+        "snapshot_list",
+        "stats",
+    ] {
+        assert!(names.contains(&expected), "missing tool '{expected}' in {names:?}");
+    }
+
+    let stats: serde_json::Value = serde_json::from_str(lines[2]).expect("stats parse");
+    let content = &stats["result"]["content"][0]["text"];
+    assert!(content.is_string(), "stats content should be a text block: {stats}");
+    let stats_body: serde_json::Value =
+        serde_json::from_str(content.as_str().unwrap()).expect("stats body parse");
+    assert_eq!(
+        stats_body["memories"], 1,
+        "seeded exactly one live memory: {stats_body}"
+    );
+}
+
+#[test]
+fn mcp_serve_refuses_without_passphrase() {
+    // Env var missing → server errors at startup with a clear message
+    // and non-zero exit, never opening the file.
+    use std::process::{Command, Stdio};
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mcp-nopw.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "smoke-pw", fast_cfg(4)).unwrap();
+        db.remember(Memory::new(
+            "x",
+            MemoryType::Semantic,
+            vec![1.0, 0.0, 0.0, 0.0],
+        ))
+        .unwrap();
+        db.flush().unwrap();
+    }
+
+    let out = Command::new(bin())
+        .args(["serve", path.to_str().unwrap(), "--mcp"])
+        .env_remove("MNEMO_PASSPHRASE")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn failed");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(!out.status.success(), "expected non-zero exit without passphrase");
+    assert!(
+        stderr.contains("MNEMO_PASSPHRASE"),
+        "stderr should mention the env var, got: {stderr}"
+    );
+}

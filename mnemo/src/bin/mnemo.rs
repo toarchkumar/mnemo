@@ -274,6 +274,20 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Serve the `.mnemo` file as a Model Context Protocol server. Reads
+    /// JSON-RPC 2.0 requests line-by-line from stdin, writes responses
+    /// to stdout, and logs diagnostics to stderr. Passphrase must be
+    /// provided via `MNEMO_PASSPHRASE` (no CLI-flag fallback — that
+    /// would leak into shell history and process listings).
+    Serve {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Speak the Model Context Protocol (stdio transport). Required
+        /// today — the flag exists so future transports (HTTP, SSE, ...)
+        /// can co-opt `serve` without breaking scripts.
+        #[arg(long)]
+        mcp: bool,
+    },
 }
 
 /// Resolve the passphrase from (in priority order) the `--passphrase` flag,
@@ -983,6 +997,18 @@ fn run() -> std::result::Result<(), String> {
                 "restored {path} to snapshot txn {} ({} memories)",
                 info.txn_id, info.memory_count
             );
+        }
+        Command::Serve { path, mcp } => {
+            if !mcp {
+                return Err(
+                    "serve requires --mcp today (other transports may come later)".into(),
+                );
+            }
+            // The MCP server pulls `MNEMO_PASSPHRASE` itself — passing
+            // `passphrase()` here would open a TTY prompt and break the
+            // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
+            let p = std::path::Path::new(&path);
+            mnemo::mcp::serve_stdio(p).map_err(fmt)?;
         }
     }
     Ok(())

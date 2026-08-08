@@ -109,6 +109,7 @@ file. The `.gitignore` already excludes them.
 | Touch the on-disk format | `mnemo/src/format.rs` (bump VERSION constant + handle the migration) |
 | Change the manifest scaffold | `mnemo/src/memory.rs` (`Memory::scaffold_manifest`) |
 | Add a mutating method | must guard on `self.read_only` → `MnemoError::ReadOnly` (see `remember`, `flush`, `rekey` for the pattern) and be routed via `Mnemo::open` (not `open_read_only`) in the CLI |
+| Add an MCP tool | `mnemo/src/mcp.rs` — extend the JSON schema in `tools_list()` and add a `tool_*` handler dispatched from `tools_call()`. Mutating tools must `db.flush()` before returning. |
 
 ## CI
 

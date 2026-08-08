@@ -29,6 +29,42 @@ Working on this codebase (not just using mnemo)? Start at
 [../AGENTS.md](../AGENTS.md) — repo layout, build/test commands,
 conventions, and the dogfood workflow.
 
+### Serve as an MCP server
+
+`mnemo` can expose a `.mnemo` file as a Model Context Protocol server over
+stdio, so any MCP-compatible agent (Claude Desktop, Cursor, custom MCP
+clients) can drive it as a tool:
+
+```sh
+mnemo serve --mcp path/to/agent.mnemo
+```
+
+The passphrase is read from `MNEMO_PASSPHRASE` (never a CLI flag — that
+would leak into shell history and process listings). Tools exposed:
+`about`, `remember`, `recall`, `forget`, `list`, `snapshot_list`, `stats`.
+Every mutation flushes before returning. `remember` and `recall` are
+embedder-agnostic — the caller supplies vectors; text-only variants
+land with Phase 3 of the level-up plan.
+
+Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "mnemo": {
+      "command": "mnemo",
+      "args": ["serve", "--mcp", "/absolute/path/to/agent.mnemo"],
+      "env": { "MNEMO_PASSPHRASE": "your-passphrase-here" }
+    }
+  }
+}
+```
+
+The server holds an exclusive write lock on the file for its lifetime
+(see [Concurrency](#concurrency--read-only-opens)), so two MCP servers
+on the same file will conflict — one will fail to start with
+`Locked`. That's intentional.
+
 ---
 # Memory Nemo (MNemo)
 
