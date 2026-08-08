@@ -39,6 +39,7 @@ use crate::pager::Pager;
 use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy,
     CachePutOpts, CacheStats, CachedValue, CounterState, DirectoryIndex,
+    SemanticCachePutOpts,
 };
 use crate::wal;
 
@@ -1829,6 +1830,8 @@ impl Mnemo {
             ttl_secs: opts.ttl_secs,
             cost_hint_ms: opts.cost_hint_ms,
             size_bytes,
+            vector: None,
+            model: None,
         };
         let bytes =
             rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
@@ -1854,6 +1857,8 @@ impl Mnemo {
             size_bytes,
             ttl_secs: opts.ttl_secs,
             created_at: now,
+            vector: None,
+            model: None,
         };
         let pos = self.cache_dir.len();
         self.cache_dir.push(dir_entry);
@@ -2110,6 +2115,195 @@ impl Mnemo {
             self.cache_idx.remove(&ns, &key_hash);
             self.cache_counters.evictions += 1;
         }
+    }
+
+    // === Semantic cache (Phase 10.2) ==================================
+
+    /// Insert or overwrite a **semantic** cache entry — same as
+    /// [`Mnemo::cache_put`] but with a required embedding vector and
+    /// model identifier. The vector is stored on the directory entry
+    /// so [`Mnemo::cache_get_semantic`] can score without decrypting
+    /// record bodies.
+    ///
+    /// Vector dimensionality is validated against the database's
+    /// configured `dimensions` — a mismatch returns
+    /// [`MnemoError::DimensionMismatch`], the same signal `remember`
+    /// gives for the memory catalog.
+    ///
+    /// The `model` string is matched **exactly** on lookup — a
+    /// different model's cache is invisible to a given query. Pick
+    /// canonical identifiers (`"text-embedding-3-small"`,
+    /// `"bge-large-en-v1.5"`, ...) and stick to them.
+    pub fn cache_put_semantic(
+        &mut self,
+        namespace: &str,
+        key: &str,
+        vector: Vec<f32>,
+        value: &[u8],
+        opts: SemanticCachePutOpts,
+    ) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if vector.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: vector.len(),
+            });
+        }
+        let key_hash = result_cache::hash_key(key);
+        let key_preview = result_cache::key_preview(key);
+        let now = memory::now_secs();
+        let size_bytes = value.len() as u64;
+
+        let entry = CacheEntry {
+            namespace: namespace.to_string(),
+            key_hash,
+            key_preview: key_preview.clone(),
+            value: value.to_vec(),
+            content_type: opts.content_type.clone(),
+            created_at: now,
+            accessed_at: now,
+            access_count: 0,
+            ttl_secs: opts.ttl_secs,
+            cost_hint_ms: opts.cost_hint_ms,
+            size_bytes,
+            vector: Some(vector.clone()),
+            model: Some(opts.model.clone()),
+        };
+        let bytes =
+            rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let (start_page, page_count) = self.write_record(&bytes)?;
+
+        if let Some(prev_pos) = self.cache_idx.get(namespace, &key_hash) {
+            self.cache_dir[prev_pos].deleted = true;
+            self.cache_idx.remove(namespace, &key_hash);
+        }
+
+        let dir_entry = CacheDirectoryEntry {
+            namespace: namespace.to_string(),
+            key_hash,
+            start_page,
+            page_count,
+            len: bytes.len() as u32,
+            deleted: false,
+            accessed_at: now,
+            access_count: 0,
+            size_bytes,
+            ttl_secs: opts.ttl_secs,
+            created_at: now,
+            vector: Some(vector),
+            model: Some(opts.model),
+        };
+        let pos = self.cache_dir.len();
+        self.cache_dir.push(dir_entry);
+        self.cache_idx.insert(namespace, key_hash, pos);
+
+        self.evict_to_budget(namespace)?;
+
+        self.dirty_cache = true;
+        self.cache_batch.record_dirty();
+        if self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Semantic recall over the cache: score every live entry in
+    /// `namespace` whose `model` matches against `query_vector` using
+    /// cosine similarity; return the top-1 hit and its similarity iff
+    /// `sim >= threshold`. `None` otherwise.
+    ///
+    /// Uses [`crate::result_cache::DEFAULT_SEMANTIC_THRESHOLD`] if you
+    /// want a sensible default — pass it explicitly (`0.97` today).
+    ///
+    /// Exact-key entries (those without a vector) are transparently
+    /// skipped, as are entries whose model doesn't match — a
+    /// different-model hit would be a semantic bug, not a win.
+    /// TTL-expired entries are also skipped.
+    ///
+    /// Access-stat updates on hit follow the same policy as
+    /// [`Mnemo::cache_get`]: bumped on read-write handles, silently
+    /// skipped on read-only. Hits and misses are recorded in the
+    /// per-handle counters just like exact-key lookups.
+    pub fn cache_get_semantic(
+        &mut self,
+        namespace: &str,
+        query_vector: &[f32],
+        threshold: f32,
+        model: &str,
+    ) -> Result<Option<(CachedValue, f32)>> {
+        if query_vector.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: query_vector.len(),
+            });
+        }
+        let now = memory::now_secs();
+
+        // Scan namespace live entries, filter by model, compute
+        // cosine, keep the best. Exact-key entries have `vector: None`
+        // and are skipped by the filter.
+        let mut best: Option<(usize, f32)> = None;
+        for (i, e) in self.cache_dir.iter().enumerate() {
+            if e.deleted || e.namespace != namespace || e.is_expired(now) {
+                continue;
+            }
+            let Some(ref v) = e.vector else { continue };
+            let Some(ref m) = e.model else { continue };
+            if m != model {
+                continue;
+            }
+            let sim = memory::cosine(query_vector, v);
+            if best.map(|(_, s)| sim > s).unwrap_or(true) {
+                best = Some((i, sim));
+            }
+        }
+
+        let Some((pos, sim)) = best else {
+            self.cache_counters.misses += 1;
+            return Ok(None);
+        };
+        if sim < threshold {
+            self.cache_counters.misses += 1;
+            return Ok(None);
+        }
+
+        // Extract fields before any mutation to keep the borrow checker
+        // happy.
+        let (start_page, page_count, len, ttl_secs, created_at) = {
+            let e = &self.cache_dir[pos];
+            (e.start_page, e.page_count, e.len, e.ttl_secs, e.created_at)
+        };
+
+        // Decrypt and decode the record body.
+        let mut buf = Vec::with_capacity(len as usize);
+        for i in 0..page_count as u64 {
+            buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
+        }
+        buf.truncate(len as usize);
+        let entry: CacheEntry = rmp_serde::from_slice(&buf)
+            .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+
+        if !self.read_only {
+            self.cache_dir[pos].accessed_at = now;
+            self.cache_dir[pos].access_count =
+                self.cache_dir[pos].access_count.saturating_add(1);
+            self.dirty_cache = true;
+        }
+        self.cache_counters.hits += 1;
+        let access_count = self.cache_dir[pos].access_count;
+        Ok(Some((
+            CachedValue {
+                value: entry.value,
+                content_type: entry.content_type,
+                created_at,
+                accessed_at: if self.read_only { entry.accessed_at } else { now },
+                access_count,
+                ttl_secs,
+            },
+            sim,
+        )))
     }
 
     /// Begin a conversation [`Session`](crate::Session) for `agent_id`.

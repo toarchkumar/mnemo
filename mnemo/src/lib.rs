@@ -67,8 +67,9 @@ pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
 pub use memory::{Memory, MemoryType, Metric, Scope, ScoreWeights};
 pub use result_cache::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, DEFAULT_BATCH_MAX_AGE,
-    DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue,
+    SemanticCachePutOpts, DEFAULT_BATCH_MAX_AGE, DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_ENTRIES, DEFAULT_SEMANTIC_THRESHOLD,
 };
 pub use session::{Role, Session, Turn};
 pub use store::{

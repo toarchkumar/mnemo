@@ -77,6 +77,41 @@ Pre-1.0, the minor component carries the breaking-change signal.
   state to persist) rather than returning `ReadOnly` from the inner
   `flush()` call.
 
+### Added (Phase 10.2: semantic cache)
+
+- **`Mnemo::cache_put_semantic(ns, key, vector, value, opts)`** — same
+  entry model as `cache_put` plus a required embedding vector and a
+  required `model` string in [`SemanticCachePutOpts`]. Vector
+  dimensionality is validated against the database's configured
+  `dimensions` (same signal as `remember`). Vector is stored on the
+  directory entry so lookup can score without decrypting record
+  bodies.
+- **`Mnemo::cache_get_semantic(ns, query_vector, threshold, model)
+  -> Option<(CachedValue, similarity)>`** — top-1 cosine scan over
+  live vectored entries in the namespace whose `model` matches the
+  query; hits iff `sim >= threshold`. Exact-key entries (those
+  without a vector) are transparently skipped. Different-model
+  entries are invisible to the query, by design — a hit from a
+  different embedder's cache is a bug, not a win.
+- **`DEFAULT_SEMANTIC_THRESHOLD = 0.97`** — conservative default,
+  model-dependent. Override per call.
+- **No format bump.** `CacheEntry` and `CacheDirectoryEntry` gain
+  `vector: Option<Vec<f32>>` and `model: Option<String>` fields with
+  `#[serde(default)]`. Existing v8 cache entries (created between
+  PR 3 and PR 4) decode unchanged as `vector = None, model = None`
+  — the exact-key state. The extension rides in-place under v8.
+- **Five new integration tests** covering hit above threshold, miss
+  below, model-mismatch miss, dimension-mismatch rejection, and
+  side-by-side coexistence of exact-key + semantic entries in one
+  namespace (backwards-compat regression).
+- **`memory::cosine`** promoted to `pub(crate)` so
+  `cache_get_semantic` reuses the same scoring routine as `recall`
+  — one canonical implementation, one behavior.
+
+Deferred to PR 5 (Phase 10.4): MCP cache tools including
+`cache_get_semantic`, Python `db.cache_get_semantic` mirror, and the
+`@db.cached(embed=...)` decorator recipe.
+
 ### Added (Phase 10.1 + 10.3: exact-key result cache, format v8)
 
 - **On-disk format bump v7 → v8.** Header gains three u64 fields

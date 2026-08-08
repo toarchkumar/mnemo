@@ -77,6 +77,14 @@ pub const DEFAULT_BATCH_MAX_DIRTY: usize = 128;
 /// Default `max_age` for [`CacheFlushPolicy::Batched`].
 pub const DEFAULT_BATCH_MAX_AGE: Duration = Duration::from_secs(5);
 
+/// Default similarity threshold for [`crate::Mnemo::cache_get_semantic`].
+/// Lookups below this are treated as misses. Chosen conservatively to
+/// avoid false hits on subtly-different prompts; callers can override
+/// per-lookup. Model-dependent — text-embedding-ada-002 and BGE at
+/// this threshold rarely surface unrelated content, but if you're
+/// working with a lossier embedder consider raising it.
+pub const DEFAULT_SEMANTIC_THRESHOLD: f32 = 0.97;
+
 /// Length in chars of the human-readable key preview stored on every
 /// directory entry. Long enough to be recognizable, short enough that
 /// the directory scan stays fast on large caches.
@@ -108,6 +116,42 @@ impl Default for CachePutOpts {
             content_type: "text".into(),
             ttl_secs: None,
             cost_hint_ms: None,
+        }
+    }
+}
+
+/// Options for [`crate::Mnemo::cache_put_semantic`]. Same as
+/// [`CachePutOpts`] plus a **required** `model` string — a hit from a
+/// different embedding model's cache is a semantics bug, not a win, so
+/// the engine forces callers to declare the model and matches it on
+/// lookup.
+///
+/// The vector itself is a separate argument to `cache_put_semantic`
+/// (not inside opts) so callers who already own the vector don't have
+/// to `.clone()` it into the struct.
+#[derive(Clone, Debug)]
+pub struct SemanticCachePutOpts {
+    /// Free-form content-type label recorded on the entry.
+    pub content_type: String,
+    /// TTL in seconds. Omit for no expiry.
+    pub ttl_secs: Option<u64>,
+    /// Cost hint recorded on the entry (see [`CachePutOpts::cost_hint_ms`]).
+    pub cost_hint_ms: Option<u32>,
+    /// Embedding model identifier. Matched exactly on lookup; a
+    /// different model's cache is invisible to this query. Convention:
+    /// `"text-embedding-3-small"`, `"bge-large-en-v1.5"`, etc.
+    pub model: String,
+}
+
+impl SemanticCachePutOpts {
+    /// Construct with just the required `model`; all other fields
+    /// default (content_type = "text", no TTL, no cost hint).
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            content_type: "text".into(),
+            ttl_secs: None,
+            cost_hint_ms: None,
+            model: model.into(),
         }
     }
 }
@@ -192,6 +236,13 @@ pub struct CacheStats {
 
 /// The MessagePack record body of a cache entry. Stored in the same
 /// encrypted-page region as memory records.
+///
+/// `vector` and `model` are the semantic-cache extension (Phase 10.2).
+/// `#[serde(default)]` keeps pre-semantic v8 entries — where the
+/// on-disk record has no vector / no model — round-trip-safe under
+/// the extended schema: rmp-serde decodes missing tail fields as
+/// their `Default::default()`, so old entries surface as `None`/`None`
+/// (exactly the "exact-key only, no vector" state we want).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct CacheEntry {
     pub namespace: String,
@@ -205,6 +256,15 @@ pub(crate) struct CacheEntry {
     pub ttl_secs: Option<u64>,
     pub cost_hint_ms: Option<u32>,
     pub size_bytes: u64,
+    /// Semantic-cache: embedding vector for this entry, or `None` for
+    /// pure exact-key entries.
+    #[serde(default)]
+    pub vector: Option<Vec<f32>>,
+    /// Semantic-cache: embedding model identifier this vector was
+    /// computed under, or `None` for pure exact-key entries. Matched
+    /// exactly on `cache_get_semantic` — different-model hits are bugs.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Directory entry — the "catalog row" for a cache record. Access stats
@@ -226,6 +286,16 @@ pub(crate) struct CacheDirectoryEntry {
     pub size_bytes: u64,
     pub ttl_secs: Option<u64>,
     pub created_at: i64,
+    /// Semantic-cache: embedding vector duplicated onto the directory
+    /// entry so lookup can scan without reading (and decrypting) every
+    /// record body. `None` on pure exact-key entries. `#[serde(default)]`
+    /// keeps pre-semantic v8 directories decoding under the extended
+    /// schema.
+    #[serde(default)]
+    pub vector: Option<Vec<f32>>,
+    /// Semantic-cache: model identifier. `None` on pure exact-key entries.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl CacheDirectoryEntry {
@@ -408,6 +478,8 @@ mod tests {
                 size_bytes: 42,
                 ttl_secs: None,
                 created_at: 0,
+                vector: None,
+                model: None,
             },
             CacheDirectoryEntry {
                 namespace: "http".into(),
@@ -421,6 +493,8 @@ mod tests {
                 size_bytes: 42,
                 ttl_secs: None,
                 created_at: 0,
+                vector: None,
+                model: None,
             },
         ];
         let idx = DirectoryIndex::build(&entries);
@@ -457,6 +531,8 @@ mod tests {
             size_bytes: 0,
             ttl_secs: Some(60),
             created_at: now - 30,
+            vector: None,
+            model: None,
         };
         assert!(!fresh.is_expired(now), "30s old with 60s TTL is fresh");
         let stale = CacheDirectoryEntry {

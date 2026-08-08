@@ -241,7 +241,11 @@ fn dot(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-fn cosine(a: &[f32], b: &[f32]) -> f32 {
+/// Cosine similarity in `[-1.0, 1.0]`; returns `0.0` if either vector
+/// has zero magnitude. `pub(crate)` so [`crate::Mnemo::cache_get_semantic`]
+/// (Phase 10.2) can reuse the same scoring routine that recall uses,
+/// keeping the two paths semantically identical.
+pub(crate) fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let na = dot(a, a).sqrt();
     let nb = dot(b, b).sqrt();
     if na == 0.0 || nb == 0.0 {

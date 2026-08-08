@@ -6,7 +6,8 @@
 
 use mnemo::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Metric, Mnemo,
-    MnemoConfig, RecallRequest, ScoreWeights, Turn,
+    MnemoConfig, RecallRequest, ScoreWeights, SemanticCachePutOpts, Turn,
+    DEFAULT_SEMANTIC_THRESHOLD,
 };
 use tempfile::tempdir;
 
@@ -1806,6 +1807,184 @@ fn cache_read_only_handle_can_read_but_not_write() {
         Err(MnemoError::ReadOnly) => {}
         other => panic!("expected ReadOnly on cache_purge, got {other:?}"),
     }
+}
+
+// === Phase 10.2: Semantic cache ==========================================
+
+#[test]
+fn semantic_hit_above_threshold_returns_top_1() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("sem.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // Populate with a couple of vectored entries plus one exact-key
+    // entry to prove the semantic scan ignores non-vectored rows.
+    let v_a = vec4(1.0, 0.0, 0.0, 0.0);
+    let v_b = vec4(0.0, 1.0, 0.0, 0.0);
+    db.cache_put_semantic(
+        "llm",
+        "prompt-a",
+        v_a.clone(),
+        b"answer-a",
+        SemanticCachePutOpts::new("bge-large-en-v1.5"),
+    )
+    .unwrap();
+    db.cache_put_semantic(
+        "llm",
+        "prompt-b",
+        v_b.clone(),
+        b"answer-b",
+        SemanticCachePutOpts::new("bge-large-en-v1.5"),
+    )
+    .unwrap();
+    db.cache_put("llm", "exact-only", b"no-vec", cache_opts("text", None))
+        .unwrap();
+    db.flush().unwrap();
+
+    // Query near v_a → high similarity → hit above threshold.
+    let query = vec4(0.98, 0.20, 0.0, 0.0);
+    let hit = db
+        .cache_get_semantic("llm", &query, DEFAULT_SEMANTIC_THRESHOLD, "bge-large-en-v1.5")
+        .unwrap()
+        .expect("expected a hit for the near-a query");
+    assert_eq!(hit.0.value, b"answer-a", "top-1 should be prompt-a");
+    assert!(hit.1 >= DEFAULT_SEMANTIC_THRESHOLD, "sim = {}", hit.1);
+}
+
+#[test]
+fn semantic_miss_below_threshold_returns_none() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("sem.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.cache_put_semantic(
+        "llm",
+        "prompt-a",
+        vec4(1.0, 0.0, 0.0, 0.0),
+        b"answer-a",
+        SemanticCachePutOpts::new("bge-large-en-v1.5"),
+    )
+    .unwrap();
+    db.flush().unwrap();
+
+    // Query orthogonal to the stored vector → cosine = 0.0 → miss.
+    let query = vec4(0.0, 1.0, 0.0, 0.0);
+    let miss = db
+        .cache_get_semantic("llm", &query, DEFAULT_SEMANTIC_THRESHOLD, "bge-large-en-v1.5")
+        .unwrap();
+    assert!(miss.is_none(), "orthogonal query must not hit");
+
+    // Threshold sweep — hit under a permissive threshold, miss under
+    // the default. Confirms the cutoff is doing the right work.
+    let hit = db
+        .cache_get_semantic("llm", &query, -1.0, "bge-large-en-v1.5")
+        .unwrap();
+    assert!(hit.is_some(), "with threshold -1.0 the top-1 should always surface");
+}
+
+#[test]
+fn semantic_model_mismatch_is_a_miss() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("sem.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    // Store under one model; look up under a different one.
+    let v = vec4(1.0, 0.0, 0.0, 0.0);
+    db.cache_put_semantic(
+        "llm",
+        "prompt-a",
+        v.clone(),
+        b"answer-a",
+        SemanticCachePutOpts::new("bge-large-en-v1.5"),
+    )
+    .unwrap();
+    db.flush().unwrap();
+
+    // Same vector as stored → cosine would be 1.0 → definite hit if
+    // the model matched. Doesn't hit because the models differ.
+    let miss = db
+        .cache_get_semantic("llm", &v, DEFAULT_SEMANTIC_THRESHOLD, "text-embedding-3-small")
+        .unwrap();
+    assert!(
+        miss.is_none(),
+        "different-model hit is a semantics bug; must miss"
+    );
+
+    // Looking up under the correct model still hits.
+    let hit = db
+        .cache_get_semantic("llm", &v, DEFAULT_SEMANTIC_THRESHOLD, "bge-large-en-v1.5")
+        .unwrap()
+        .expect("same-model exact-vector query must hit");
+    assert_eq!(hit.0.value, b"answer-a");
+}
+
+#[test]
+fn semantic_dimension_mismatch_is_rejected() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("dim.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    let three_dims = vec![1.0, 0.0, 0.0];
+    let err = db
+        .cache_put_semantic(
+            "llm",
+            "k",
+            three_dims,
+            b"v",
+            SemanticCachePutOpts::new("m"),
+        )
+        .unwrap_err();
+    match err {
+        MnemoError::DimensionMismatch { expected: 4, got: 3 } => {}
+        other => panic!("expected DimensionMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn exact_key_and_semantic_entries_coexist_in_same_namespace() {
+    // Backwards-compat regression: the semantic-cache extension added
+    // optional `vector`/`model` fields to CacheEntry with serde
+    // defaults. Old (exact-key-only) entries must still roundtrip.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("coexist.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        db.cache_put("llm", "exact", b"exact-value", cache_opts("text", None))
+            .unwrap();
+        db.cache_put_semantic(
+            "llm",
+            "sem",
+            vec4(1.0, 0.0, 0.0, 0.0),
+            b"sem-value",
+            SemanticCachePutOpts::new("bge"),
+        )
+        .unwrap();
+        db.flush().unwrap();
+    }
+    // Reopen with a fresh handle — decoding old-shape and new-shape
+    // entries side by side must not error.
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let e = db.cache_get("llm", "exact").unwrap().expect("exact-key still hits");
+    assert_eq!(e.value, b"exact-value");
+    let s = db
+        .cache_get_semantic(
+            "llm",
+            &vec4(1.0, 0.0, 0.0, 0.0),
+            DEFAULT_SEMANTIC_THRESHOLD,
+            "bge",
+        )
+        .unwrap()
+        .expect("semantic entry still hits");
+    assert_eq!(s.0.value, b"sem-value");
+    // Exact-key entry has no vector → semantic scan ignores it.
+    let orth = db
+        .cache_get_semantic("llm", &vec4(0.0, 0.0, 0.0, 1.0), -1.0, "bge")
+        .unwrap()
+        .expect("some entry must surface with threshold=-1");
+    // The only candidate visible to the semantic scan is the "sem"
+    // entry — the exact-key "exact" entry has no vector, so it
+    // cannot surface even at threshold=-1.
+    assert_eq!(s.0.value, b"sem-value");
+    assert_eq!(orth.0.value, b"sem-value");
 }
 
 #[test]

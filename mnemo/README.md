@@ -119,7 +119,62 @@ mnemo cache delete agent.mnemo --ns llm --key prompt-42
 ```
 
 MCP tools + Python `@db.cached(...)` decorator land in a follow-up
-(Phase 10.4). Semantic (vector-similarity) caching is Phase 10.2.
+(Phase 10.4).
+
+#### Semantic cache (Phase 10.2)
+
+For LLM workloads where prompts vary slightly but map to the same
+completion, the exact-key hash-of-string layer isn't enough — "please
+summarize this doc" and "summarize the following doc please" would
+miss. Semantic caching bridges the gap by keying on an embedding
+vector and returning the closest hit above a similarity threshold:
+
+```rust
+use mnemo::{Mnemo, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD};
+
+let mut db = Mnemo::open("agent.mnemo", "pw")?;
+
+// Store: bring your own embedding vector + the model that produced it.
+db.cache_put_semantic(
+    "llm",
+    "prompt-abc",
+    embed("please summarize this doc"),          // Vec<f32>, caller-supplied
+    b"...LLM response bytes...",
+    SemanticCachePutOpts::new("bge-large-en-v1.5"),
+)?;
+db.flush()?;
+
+// Look up: top-1 cosine over the namespace's vectored entries whose
+// model matches. Returns Some((value, similarity)) iff sim >= τ.
+if let Some((hit, sim)) = db.cache_get_semantic(
+    "llm",
+    &embed("summarize the following doc please"),
+    DEFAULT_SEMANTIC_THRESHOLD,                  // 0.97
+    "bge-large-en-v1.5",
+)? {
+    println!("cache hit at similarity {sim:.3}: {} bytes", hit.value.len());
+}
+```
+
+Key contracts:
+
+- **Exact-key and semantic entries coexist** in the same namespace.
+  `cache_get` (exact-key) and `cache_get_semantic` (vector) each
+  ignore the other kind, so you can freely mix.
+- **Model is matched exactly.** A hit under `"text-embedding-3-small"`
+  is invisible to a query under `"bge-large-en-v1.5"`. Different
+  embedders produce vectors in incompatible spaces — a cross-model
+  hit would be a semantics bug.
+- **Vector dimensionality is enforced** against the database's
+  configured `dimensions` (same as `remember`) — a mismatch returns
+  `MnemoError::DimensionMismatch`.
+- **`DEFAULT_SEMANTIC_THRESHOLD = 0.97`** is a conservative default.
+  Model-dependent — with a lossier embedder consider raising it;
+  with dense models on well-separated tasks you can drop it.
+
+Text-in/text-out (`cache_get_semantic_text(ns, "prompt", &embedder, τ)`)
+lands with Phase 3's embedder integration. Until then callers own the
+embedding step, same as `remember` / `recall`.
 
 ---
 # Memory Nemo (MNemo)
