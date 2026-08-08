@@ -51,6 +51,9 @@ use serde_json::{json, Map, Value};
 
 use crate::error::{MnemoError, Result};
 use crate::memory::{Memory, MemoryType, Metric, Scope};
+use crate::result_cache::{
+    CachePutOpts, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD,
+};
 use crate::store::{Mnemo, RecallRequest};
 
 /// MCP protocol version we advertise on `initialize`.
@@ -332,6 +335,79 @@ fn tools_list() -> Value {
                     "properties": {},
                     "additionalProperties": false
                 }
+            },
+            {
+                "name": "cache_put",
+                "description": "Insert or overwrite an exact-key cache entry. Value is a UTF-8 string; use `content_type` to label the payload. Persists to disk before returning. Namespace and key are caller-chosen; the key is SHA-256 hashed by the engine.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["namespace", "key", "value"],
+                    "properties": {
+                        "namespace": { "type": "string" },
+                        "key": { "type": "string" },
+                        "value": { "type": "string" },
+                        "content_type": { "type": "string", "default": "text" },
+                        "ttl_secs": { "type": "integer", "minimum": 0 }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "cache_get",
+                "description": "Look up an exact-key cache entry. Returns `{value, content_type, hit}` on a hit, `{hit: false}` on miss (missing or TTL-expired). Bumps access stats catalog-only.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["namespace", "key"],
+                    "properties": {
+                        "namespace": { "type": "string" },
+                        "key": { "type": "string" }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "cache_stats",
+                "description": "Cache statistics for a namespace (omit for the whole cache). Returns entries, bytes, hits, misses, hit_rate, evictions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string" }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "cache_put_semantic",
+                "description": "Insert an entry with an embedding vector for semantic recall (Phase 10.2). Requires a caller-supplied `vector` in the database's dimensionality and a `model` identifier — later cache_get_semantic calls under a different model won't see this entry (a different-model hit would be a semantics bug).",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["namespace", "key", "vector", "value", "model"],
+                    "properties": {
+                        "namespace": { "type": "string" },
+                        "key": { "type": "string" },
+                        "vector": { "type": "array", "items": { "type": "number" } },
+                        "value": { "type": "string" },
+                        "model": { "type": "string" },
+                        "content_type": { "type": "string", "default": "text" },
+                        "ttl_secs": { "type": "integer", "minimum": 0 }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "cache_get_semantic",
+                "description": "Semantic recall over the cache: top-1 cosine over live vectored entries in the namespace whose `model` matches. Returns `{hit: true, value, similarity, ...}` iff similarity >= threshold, else `{hit: false}`. Threshold defaults to 0.97 if omitted.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["namespace", "query", "model"],
+                    "properties": {
+                        "namespace": { "type": "string" },
+                        "query": { "type": "array", "items": { "type": "number" } },
+                        "model": { "type": "string" },
+                        "threshold": { "type": "number", "minimum": -1.0, "maximum": 1.0 }
+                    },
+                    "additionalProperties": false
+                }
             }
         ]
     })
@@ -357,6 +433,11 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "list" => tool_list(db, args)?,
         "snapshot_list" => tool_snapshot_list(db)?,
         "stats" => tool_stats(db)?,
+        "cache_put" => tool_cache_put(db, args)?,
+        "cache_get" => tool_cache_get(db, args)?,
+        "cache_stats" => tool_cache_stats(db, args)?,
+        "cache_put_semantic" => tool_cache_put_semantic(db, args)?,
+        "cache_get_semantic" => tool_cache_get_semantic(db, args)?,
         other => {
             return Err(RpcError::new(
                 METHOD_NOT_FOUND,
@@ -567,6 +648,176 @@ fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
         "cache_capacity": cache_capacity,
     })
     .to_string())
+}
+
+// --- Result-cache tool handlers (Phase 10.4) -----------------------------
+
+fn tool_cache_put(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let ns = args
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put: missing 'namespace'"))?;
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put: missing 'key'"))?;
+    let value = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put: missing 'value'"))?;
+    let content_type = args
+        .get("content_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text")
+        .to_string();
+    let ttl_secs = args.get("ttl_secs").and_then(|v| v.as_u64());
+    let opts = CachePutOpts {
+        content_type,
+        ttl_secs,
+        cost_hint_ms: None,
+    };
+    db.cache_put(ns, key, value.as_bytes(), opts).map_err(mnemo_err)?;
+    db.flush().map_err(mnemo_err)?;
+    Ok(json!({ "cached": true, "namespace": ns, "key": key, "bytes": value.len() }).to_string())
+}
+
+fn tool_cache_get(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let ns = args
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get: missing 'namespace'"))?;
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get: missing 'key'"))?;
+    match db.cache_get(ns, key).map_err(mnemo_err)? {
+        Some(hit) => Ok(json!({
+            "hit": true,
+            "value": String::from_utf8_lossy(&hit.value),
+            "content_type": hit.content_type,
+            "created_at": hit.created_at,
+            "accessed_at": hit.accessed_at,
+            "access_count": hit.access_count,
+        })
+        .to_string()),
+        None => Ok(json!({ "hit": false }).to_string()),
+    }
+}
+
+fn tool_cache_stats(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let ns = args.get("namespace").and_then(|v| v.as_str());
+    let s = db.cache_stats(ns);
+    Ok(json!({
+        "namespace": ns,
+        "entries": s.entries,
+        "bytes": s.bytes,
+        "hits": s.hits,
+        "misses": s.misses,
+        "hit_rate": s.hit_rate,
+        "evictions": s.evictions,
+    })
+    .to_string())
+}
+
+fn tool_cache_put_semantic(
+    db: &mut Mnemo,
+    args: &Value,
+) -> std::result::Result<String, RpcError> {
+    let ns = args
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'namespace'"))?;
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'key'"))?;
+    let value = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'value'"))?;
+    let model = args
+        .get("model")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'model'"))?
+        .to_string();
+    let vector = args
+        .get("vector")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            RpcError::new(INVALID_PARAMS, "cache_put_semantic: 'vector' must be a JSON array")
+        })?
+        .iter()
+        .map(|v| v.as_f64().map(|f| f as f32))
+        .collect::<Option<Vec<f32>>>()
+        .ok_or_else(|| {
+            RpcError::new(
+                INVALID_PARAMS,
+                "cache_put_semantic: 'vector' must be an array of numbers",
+            )
+        })?;
+    let content_type = args
+        .get("content_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("text")
+        .to_string();
+    let ttl_secs = args.get("ttl_secs").and_then(|v| v.as_u64());
+    let opts = SemanticCachePutOpts {
+        content_type,
+        ttl_secs,
+        cost_hint_ms: None,
+        model,
+    };
+    db.cache_put_semantic(ns, key, vector, value.as_bytes(), opts)
+        .map_err(mnemo_err)?;
+    db.flush().map_err(mnemo_err)?;
+    Ok(json!({ "cached": true, "namespace": ns, "key": key, "bytes": value.len() }).to_string())
+}
+
+fn tool_cache_get_semantic(
+    db: &mut Mnemo,
+    args: &Value,
+) -> std::result::Result<String, RpcError> {
+    let ns = args
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get_semantic: missing 'namespace'"))?;
+    let model = args
+        .get("model")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get_semantic: missing 'model'"))?;
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            RpcError::new(INVALID_PARAMS, "cache_get_semantic: 'query' must be a JSON array")
+        })?
+        .iter()
+        .map(|v| v.as_f64().map(|f| f as f32))
+        .collect::<Option<Vec<f32>>>()
+        .ok_or_else(|| {
+            RpcError::new(
+                INVALID_PARAMS,
+                "cache_get_semantic: 'query' must be an array of numbers",
+            )
+        })?;
+    let threshold = args
+        .get("threshold")
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32)
+        .unwrap_or(DEFAULT_SEMANTIC_THRESHOLD);
+    match db.cache_get_semantic(ns, &query, threshold, model).map_err(mnemo_err)? {
+        Some((hit, similarity)) => Ok(json!({
+            "hit": true,
+            "similarity": similarity,
+            "value": String::from_utf8_lossy(&hit.value),
+            "content_type": hit.content_type,
+            "created_at": hit.created_at,
+            "accessed_at": hit.accessed_at,
+            "access_count": hit.access_count,
+        })
+        .to_string()),
+        None => Ok(json!({ "hit": false }).to_string()),
+    }
 }
 
 /// Serialize a `Memory` into the JSON shape MCP tool responses use.

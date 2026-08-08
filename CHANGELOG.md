@@ -77,6 +77,27 @@ Pre-1.0, the minor component carries the breaking-change signal.
   state to persist) rather than returning `ReadOnly` from the inner
   `flush()` call.
 
+### Added (Phase 10.4: live surfaces for the result cache)
+
+- **MCP tools** — `mnemo serve --mcp` gains five cache tools:
+  `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
+  `cache_get_semantic`. All mutating variants flush before returning.
+  Semantic variants take vectors as JSON arrays (BYO-vector, same
+  pattern as `remember` / `recall`).
+- **Python bindings** — `Mnemo` gets `cache_put` / `cache_get` /
+  `cache_delete` / `cache_purge` / `cache_stats` /
+  `cache_put_semantic` / `cache_get_semantic` mirrors. `cache_put` and
+  `cache_put_semantic` accept `str` or `bytes` for the value; get
+  variants return `bytes` in the `value` field of the response dict.
+- **`@db.cached(...)` decorator recipe** — ~90-line pure-Python
+  helper documented in `mnemo-python/README.md`, with three copy-paste
+  recipes: OpenAI GPT-4o call wrapped end-to-end, Anthropic Claude
+  swap-in, and semantic-mode variant using OpenAI embeddings. Not
+  shipped as an installable module — the plan called for a helper
+  users copy into their project, so the README carries it verbatim.
+- **Python API table updated** in `mnemo-python/README.md` with the
+  new methods and the `cache_stats` → `page_cache_stats` rename.
+
 ### Added (Phase 10.2: semantic cache)
 
 - **`Mnemo::cache_put_semantic(ns, key, vector, value, opts)`** — same

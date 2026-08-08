@@ -51,6 +51,21 @@ fn parse_id(s: &str) -> PyResult<Ulid> {
     Ulid::from_string(s).map_err(|_| PyValueError::new_err(format!("invalid memory id '{s}'")))
 }
 
+/// Accept either `str` (UTF-8 encoded) or `bytes` from Python and
+/// return a `Vec<u8>`. Used by `cache_put` / `cache_put_semantic` so
+/// callers don't have to pre-encode text values.
+fn py_value_to_bytes(v: &pyo3::Bound<'_, pyo3::PyAny>) -> PyResult<Vec<u8>> {
+    if let Ok(s) = v.extract::<String>() {
+        return Ok(s.into_bytes());
+    }
+    if let Ok(b) = v.extract::<Vec<u8>>() {
+        return Ok(b);
+    }
+    Err(PyTypeError::new_err(
+        "cache value must be str or bytes",
+    ))
+}
+
 /// Convert a `serde_json::Value` into the equivalent Python object.
 fn json_to_py(py: Python<'_>, v: &serde_json::Value) -> PyResult<PyObject> {
     use serde_json::Value;
@@ -429,6 +444,164 @@ impl Mnemo {
     #[getter]
     fn path(&self) -> &str {
         &self.path
+    }
+
+    // === Result cache (Phase 10.1 / 10.2 / 10.4) ==========================
+
+    /// Insert or overwrite an exact-key cache entry.
+    ///
+    /// `value` accepts either `str` (UTF-8 encoded to bytes) or `bytes`.
+    /// `content_type` defaults to `"text"`; use `"json"`, `"bytes"`, or
+    /// any MIME string you want to round-trip on `cache_get`.
+    #[pyo3(signature = (namespace, key, value, content_type="text", ttl_secs=None))]
+    fn cache_put(
+        &mut self,
+        namespace: &str,
+        key: &str,
+        value: &Bound<'_, PyAny>,
+        content_type: &str,
+        ttl_secs: Option<u64>,
+    ) -> PyResult<()> {
+        let bytes = py_value_to_bytes(value)?;
+        let opts = mnemo_core::CachePutOpts {
+            content_type: content_type.to_string(),
+            ttl_secs,
+            cost_hint_ms: None,
+        };
+        self.inner.cache_put(namespace, key, &bytes, opts).map_err(to_py)?;
+        self.inner.flush().map_err(to_py)
+    }
+
+    /// Look up an exact-key cache entry. Returns `None` on miss or a
+    /// dict with `{value, content_type, created_at, accessed_at,
+    /// access_count, ttl_secs}` on hit. `value` is always returned as
+    /// `bytes`; decode with `.decode('utf-8')` if you stored text.
+    fn cache_get(
+        &mut self,
+        py: Python<'_>,
+        namespace: &str,
+        key: &str,
+    ) -> PyResult<PyObject> {
+        match self.inner.cache_get(namespace, key).map_err(to_py)? {
+            Some(hit) => {
+                let d = PyDict::new_bound(py);
+                d.set_item("value", pyo3::types::PyBytes::new_bound(py, &hit.value))?;
+                d.set_item("content_type", hit.content_type)?;
+                d.set_item("created_at", hit.created_at)?;
+                d.set_item("accessed_at", hit.accessed_at)?;
+                d.set_item("access_count", hit.access_count)?;
+                if let Some(ttl) = hit.ttl_secs {
+                    d.set_item("ttl_secs", ttl)?;
+                }
+                Ok(d.into())
+            }
+            None => Ok(py.None()),
+        }
+    }
+
+    /// Tombstone a cache entry. Silently succeeds if the entry does
+    /// not exist. Space reclaimed by `compact` (external CLI).
+    fn cache_delete(&mut self, namespace: &str, key: &str) -> PyResult<()> {
+        self.inner.cache_delete(namespace, key).map_err(to_py)?;
+        self.inner.flush().map_err(to_py)
+    }
+
+    /// Purge cache entries. `namespace=None` targets the whole cache.
+    /// `expired_only=True` restricts to TTL-expired entries.
+    /// Returns the count of newly tombstoned entries.
+    #[pyo3(signature = (namespace=None, expired_only=false))]
+    fn cache_purge(
+        &mut self,
+        namespace: Option<&str>,
+        expired_only: bool,
+    ) -> PyResult<usize> {
+        let n = self.inner.cache_purge(namespace, expired_only).map_err(to_py)?;
+        self.inner.flush().map_err(to_py)?;
+        Ok(n)
+    }
+
+    /// Cache statistics for `namespace` (or the whole cache if
+    /// `None`). Returns a dict with `{entries, bytes, hits, misses,
+    /// hit_rate, evictions}`.
+    #[pyo3(signature = (namespace=None))]
+    fn cache_stats(&self, py: Python<'_>, namespace: Option<&str>) -> PyResult<PyObject> {
+        let s = self.inner.cache_stats(namespace);
+        let d = PyDict::new_bound(py);
+        d.set_item("entries", s.entries)?;
+        d.set_item("bytes", s.bytes)?;
+        d.set_item("hits", s.hits)?;
+        d.set_item("misses", s.misses)?;
+        d.set_item("hit_rate", s.hit_rate)?;
+        d.set_item("evictions", s.evictions)?;
+        Ok(d.into())
+    }
+
+    /// Insert or overwrite a semantic-cache entry (Phase 10.2).
+    /// `vector` is a list of floats matching the database's
+    /// dimensionality. `model` is matched exactly on lookup —
+    /// different-model queries won't see this entry.
+    // PyO3 bindings for functions with many kwargs naturally exceed the
+    // clippy limit — the shape mirrors what a Python caller expects.
+    // Restructuring into a builder would hurt the Python ergonomics
+    // (`db.cache_put_semantic(...)` is the natural call site) without
+    // any Rust-side benefit.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (namespace, key, vector, value, model, content_type="text", ttl_secs=None))]
+    fn cache_put_semantic(
+        &mut self,
+        namespace: &str,
+        key: &str,
+        vector: Vec<f32>,
+        value: &Bound<'_, PyAny>,
+        model: String,
+        content_type: &str,
+        ttl_secs: Option<u64>,
+    ) -> PyResult<()> {
+        let bytes = py_value_to_bytes(value)?;
+        let opts = mnemo_core::SemanticCachePutOpts {
+            content_type: content_type.to_string(),
+            ttl_secs,
+            cost_hint_ms: None,
+            model,
+        };
+        self.inner
+            .cache_put_semantic(namespace, key, vector, &bytes, opts)
+            .map_err(to_py)?;
+        self.inner.flush().map_err(to_py)
+    }
+
+    /// Semantic recall over the cache. Returns `None` on miss or a
+    /// dict with `{value, similarity, content_type, ...}` on hit.
+    /// `threshold` defaults to `0.97`.
+    #[pyo3(signature = (namespace, query, model, threshold=0.97))]
+    fn cache_get_semantic(
+        &mut self,
+        py: Python<'_>,
+        namespace: &str,
+        query: Vec<f32>,
+        model: &str,
+        threshold: f32,
+    ) -> PyResult<PyObject> {
+        match self
+            .inner
+            .cache_get_semantic(namespace, &query, threshold, model)
+            .map_err(to_py)?
+        {
+            Some((hit, similarity)) => {
+                let d = PyDict::new_bound(py);
+                d.set_item("value", pyo3::types::PyBytes::new_bound(py, &hit.value))?;
+                d.set_item("similarity", similarity)?;
+                d.set_item("content_type", hit.content_type)?;
+                d.set_item("created_at", hit.created_at)?;
+                d.set_item("accessed_at", hit.accessed_at)?;
+                d.set_item("access_count", hit.access_count)?;
+                if let Some(ttl) = hit.ttl_secs {
+                    d.set_item("ttl_secs", ttl)?;
+                }
+                Ok(d.into())
+            }
+            None => Ok(py.None()),
+        }
     }
 
     /// Begin a conversation `Session` for `agent_id`.

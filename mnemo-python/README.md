@@ -134,7 +134,13 @@ its own agent.
 | `verify()` | Decrypt and re-validate every record |
 | `build_index()` / `drop_index()` / `has_index()` | Approximate index control |
 | `snapshots()` / `restore_to(txn_id)` / `restore_to_time(unix_secs)` | Point-in-time recovery |
-| `set_cache_capacity(pages)` / `cache_stats()` | Page-cache tuning |
+| `set_cache_capacity(pages)` / `page_cache_stats()` | Page-cache tuning (renamed from `cache_stats` in v0.4.0 — that name now belongs to the result cache below) |
+| `cache_put(namespace, key, value, content_type="text", ttl_secs=None)` | Exact-key result cache put (Phase 10.1). `value` accepts `str` or `bytes` |
+| `cache_get(namespace, key)` | Exact-key cache get — returns `dict` on hit (`value` is `bytes`) or `None` |
+| `cache_delete(namespace, key)` / `cache_purge(namespace=None, expired_only=False)` | Tombstone by key or in bulk |
+| `cache_stats(namespace=None)` | Result-cache stats: `{entries, bytes, hits, misses, hit_rate, evictions}` |
+| `cache_put_semantic(namespace, key, vector, value, model, content_type="text", ttl_secs=None)` | Semantic cache put (Phase 10.2) — vector must match db dimensions |
+| `cache_get_semantic(namespace, query, model, threshold=0.97)` | Top-1 cosine over the namespace's vectored entries whose `model` matches |
 | `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
 | `stats()` | Summary statistics |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
@@ -146,6 +152,198 @@ context manager (exiting consolidates).
 
 Memories and results are returned as plain dicts; `metadata` round-trips as a
 nested dict.
+
+## Result caching
+
+MNemo doubles as a durable result cache — memoize LLM tool-call outputs,
+prompt→completion pairs, HTTP responses, anything reconstructible on miss —
+in the same encrypted single file that holds your agent memory. See the
+[core README's Result caching section](../mnemo/README.md) for the
+concepts (namespaces, budgets, TTL, Strict vs Batched flush policy).
+
+### Recipe: `@db.cached(...)` decorator (~90 lines, pure Python)
+
+Copy this into your project as `mnemo_cached.py` or paste inline. It
+wraps any function whose arguments serialize to JSON, keying the cache
+on `f"{namespace}:{fn_name}:{json_args}"`. When `embed` is supplied it
+switches to semantic mode; otherwise it's an exact-key cache.
+
+```python
+"""@db.cached — pure-Python helper on top of mnemo.Mnemo's cache API.
+
+Usage:
+    import mnemo, json, os
+    from mnemo_cached import cached
+
+    db = mnemo.open("agent.mnemo", os.environ["MNEMO_PASSPHRASE"])
+
+    @cached(db, namespace="llm", ttl=3600)
+    def call_llm(prompt: str) -> str:
+        return openai.chat.completions.create(...).choices[0].message.content
+
+    # Second call with the same prompt is a cache hit.
+    answer = call_llm("summarize this doc")
+"""
+from __future__ import annotations
+
+import functools
+import hashlib
+import json
+from typing import Any, Callable, Optional
+
+
+def cached(
+    db,
+    *,
+    namespace: str,
+    ttl: Optional[int] = None,
+    embed: Optional[Callable[[str], list[float]]] = None,
+    model: Optional[str] = None,
+    threshold: float = 0.97,
+    key_fn: Optional[Callable[..., str]] = None,
+):
+    """Memoize a function's results into a mnemo.Mnemo cache.
+
+    - Exact-key mode (default): key is JSON(args, kwargs) plus fn name.
+    - Semantic mode: pass `embed=my_embedder` and `model="..."`; the key
+      is embedded and semantic recall is tried before falling back.
+    - Custom `key_fn(*args, **kwargs) -> str` overrides the default key.
+    """
+    if embed is not None and model is None:
+        raise ValueError("semantic mode requires `model=`")
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            key = key_fn(*args, **kwargs) if key_fn else _default_key(fn, args, kwargs)
+
+            # Try semantic hit first (if configured); otherwise exact-key.
+            if embed is not None:
+                vec = embed(key)
+                hit = db.cache_get_semantic(namespace, vec, model, threshold)
+                if hit is not None:
+                    return _decode(hit["value"])
+                # Miss — compute the real result.
+                result = fn(*args, **kwargs)
+                encoded = _encode(result)
+                db.cache_put_semantic(namespace, key, vec, encoded, model, ttl_secs=ttl)
+                return result
+
+            hit = db.cache_get(namespace, key)
+            if hit is not None:
+                return _decode(hit["value"])
+            result = fn(*args, **kwargs)
+            encoded = _encode(result)
+            db.cache_put(namespace, key, encoded, ttl_secs=ttl)
+            return result
+
+        return wrapper
+
+    return decorator
+
+
+def _default_key(fn, args, kwargs) -> str:
+    payload = json.dumps(
+        {"fn": fn.__qualname__, "args": args, "kwargs": kwargs},
+        default=str, sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _encode(v: Any) -> bytes:
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v)
+    if isinstance(v, str):
+        return v.encode()
+    return json.dumps(v, default=str).encode()
+
+
+def _decode(b: bytes) -> Any:
+    # Best-effort round-trip: try JSON first, fall back to str, then bytes.
+    try:
+        return json.loads(b)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        try:
+            return b.decode()
+        except UnicodeDecodeError:
+            return b
+```
+
+### Recipe: OpenAI/Anthropic call wrapped end-to-end
+
+```python
+import os, mnemo
+from openai import OpenAI
+from mnemo_cached import cached
+
+db = mnemo.open("agent.mnemo", os.environ["MNEMO_PASSPHRASE"])
+client = OpenAI()
+
+@cached(db, namespace="openai-gpt-4o-mini", ttl=86_400)
+def chat(prompt: str) -> str:
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return r.choices[0].message.content
+
+# First call → hits the model, caches the response.
+# Second identical call → hits the cache, no OpenAI request.
+print(chat("Give me a haiku about SQLite."))
+print(chat("Give me a haiku about SQLite."))
+
+print("cache stats:", db.cache_stats("openai-gpt-4o-mini"))
+```
+
+Anthropic swap-in — same shape, different client:
+
+```python
+import anthropic
+from mnemo_cached import cached
+
+client = anthropic.Anthropic()
+
+@cached(db, namespace="claude-3-5-sonnet", ttl=86_400)
+def chat(prompt: str) -> str:
+    r = client.messages.create(
+        model="claude-3-5-sonnet-latest",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return r.content[0].text
+```
+
+### Recipe: semantic cache with an embedder
+
+```python
+from openai import OpenAI
+from mnemo_cached import cached
+
+client = OpenAI()
+def embed(text: str) -> list[float]:
+    return client.embeddings.create(
+        model="text-embedding-3-small", input=text,
+    ).data[0].embedding
+
+# Semantic mode: prompts that differ in wording but mean the same
+# thing hit the same cache entry.
+@cached(db, namespace="llm-semantic", ttl=86_400,
+        embed=embed, model="text-embedding-3-small", threshold=0.97)
+def chat(prompt: str) -> str:
+    return client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    ).choices[0].message.content
+```
+
+**Note:** the database must have been created with `dimensions` matching
+your embedder's output — `text-embedding-3-small` is 1536-dim,
+`bge-large-en-v1.5` is 1024-dim, etc. Set at
+`mnemo.open(path, pw, dimensions=1536)` on first creation.
+
+**Don't use this for:** multi-node fleets where the cache must be
+consistent across hosts (use Redis / DynamoDB DAX). MNemo's cache is
+optimized for a single-host agent that owns its cache file.
 
 ## License
 
