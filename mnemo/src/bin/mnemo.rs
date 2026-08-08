@@ -288,6 +288,93 @@ enum Command {
         #[arg(long)]
         mcp: bool,
     },
+    /// Result-cache management (Phase 10.1). One `.mnemo` file is
+    /// both an agent-memory store AND a durable key/value cache;
+    /// these commands manipulate the cache side.
+    Cache {
+        #[command(subcommand)]
+        op: CacheOp,
+    },
+}
+
+/// Subcommands under `mnemo cache`. Each operates on a `--ns` namespace
+/// inside the given `.mnemo` file. Passphrase resolves via `--passphrase`
+/// or `MNEMO_PASSPHRASE` (same rules as top-level commands).
+#[derive(Subcommand)]
+enum CacheOp {
+    /// Look up a key; prints the value to stdout on hit, non-zero
+    /// exit on miss.
+    Get {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Cache namespace.
+        #[arg(long)]
+        ns: String,
+        /// Cache key (SHA-256 hashed by the engine).
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Insert or overwrite an entry. Either `--value <string>` (UTF-8)
+    /// or `--file <path>` (raw bytes) must be provided.
+    Put {
+        /// Path to the `.mnemo` file.
+        path: String,
+        #[arg(long)]
+        ns: String,
+        #[arg(long)]
+        key: String,
+        /// Inline UTF-8 value. Mutually exclusive with `--file`.
+        #[arg(long, conflicts_with = "file")]
+        value: Option<String>,
+        /// Path to a file whose bytes become the value. Mutually
+        /// exclusive with `--value`.
+        #[arg(long, conflicts_with = "value")]
+        file: Option<String>,
+        /// Free-form content-type label recorded on the entry.
+        #[arg(long, default_value = "text")]
+        content_type: String,
+        /// TTL in seconds. Omit for no expiry.
+        #[arg(long)]
+        ttl: Option<u64>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Tombstone an entry. Space reclaimed by `mnemo compact`.
+    Delete {
+        /// Path to the `.mnemo` file.
+        path: String,
+        #[arg(long)]
+        ns: String,
+        #[arg(long)]
+        key: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Print cache statistics as JSON. `--ns` restricts to one
+    /// namespace; without it the whole cache is summarized.
+    Stats {
+        /// Path to the `.mnemo` file.
+        path: String,
+        #[arg(long)]
+        ns: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Tombstone entries in bulk. `--ns` restricts to one namespace.
+    /// `--expired` restricts to TTL-expired entries only; otherwise
+    /// every live entry in the scope is tombstoned.
+    Purge {
+        /// Path to the `.mnemo` file.
+        path: String,
+        #[arg(long)]
+        ns: Option<String>,
+        #[arg(long)]
+        expired: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
 }
 
 /// Resolve the passphrase from (in priority order) the `--passphrase` flag,
@@ -652,6 +739,15 @@ fn run() -> std::result::Result<(), String> {
             println!("created at:  {}", s.created_at);
             println!("agents:      {}", s.agents.join(", "));
             println!("snapshots:   {}", db.snapshots().len());
+            // Phase 10.1 result-cache summary — one line even when
+            // the cache is empty, for symmetry with the other fields.
+            {
+                let cs = db.cache_stats(None);
+                println!(
+                    "cache:       {} entries, {} bytes (hits {}, misses {}, evict {})",
+                    cs.entries, cs.bytes, cs.hits, cs.misses, cs.evictions
+                );
+            }
             match s.index {
                 Some(ix) => {
                     println!(
@@ -1009,6 +1105,106 @@ fn run() -> std::result::Result<(), String> {
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let p = std::path::Path::new(&path);
             mnemo::mcp::serve_stdio(p).map_err(fmt)?;
+        }
+        Command::Cache { op } => run_cache_op(op)?,
+    }
+    Ok(())
+}
+
+/// Dispatch a `mnemo cache …` subcommand. Kept out of `run()` to hold
+/// the main match down to one line per subcommand.
+fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
+    use mnemo::CachePutOpts;
+
+    match op {
+        CacheOp::Get { path, ns, key, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            // Get on a cache is a mutation (bumps access stats) unless
+            // the handle is read-only. Use read-write here so the stats
+            // update lands durably on the next user-driven flush.
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            match db.cache_get(&ns, &key).map_err(fmt)? {
+                Some(v) => {
+                    // Print value to stdout verbatim. If the caller
+                    // asked for binary content-type, they can pipe;
+                    // the CLI does not decode.
+                    use std::io::Write;
+                    std::io::stdout().write_all(&v.value).map_err(|e| e.to_string())?;
+                    // A trailing newline for terminal ergonomics when
+                    // the content is text; skip if the value already
+                    // ends in one to avoid double-newlines in scripts.
+                    if !v.value.ends_with(b"\n") {
+                        println!();
+                    }
+                    // Persist the access-stats bump.
+                    db.flush().map_err(fmt)?;
+                }
+                None => {
+                    return Err(format!("cache miss on ({ns}, {key})"));
+                }
+            }
+        }
+        CacheOp::Put {
+            path,
+            ns,
+            key,
+            value,
+            file,
+            content_type,
+            ttl,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let bytes = match (value, file) {
+                (Some(v), None) => v.into_bytes(),
+                (None, Some(f)) => std::fs::read(&f)
+                    .map_err(|e| format!("read {f}: {e}"))?,
+                (Some(_), Some(_)) => {
+                    return Err("--value and --file are mutually exclusive".into())
+                }
+                (None, None) => {
+                    return Err("cache put needs --value <string> or --file <path>".into())
+                }
+            };
+            let opts = CachePutOpts {
+                content_type,
+                ttl_secs: ttl,
+                cost_hint_ms: None,
+            };
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            db.cache_put(&ns, &key, &bytes, opts).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("cached {} bytes at ({ns}, {key})", bytes.len());
+        }
+        CacheOp::Delete { path, ns, key, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            db.cache_delete(&ns, &key).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("deleted ({ns}, {key}) (space reclaimed on next compact)");
+        }
+        CacheOp::Stats { path, ns, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            // Read-only handle is fine — stats is a pure scan.
+            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let s = db.cache_stats(ns.as_deref());
+            let obj = serde_json::json!({
+                "namespace": ns,
+                "entries": s.entries,
+                "bytes": s.bytes,
+                "hits": s.hits,
+                "misses": s.misses,
+                "hit_rate": s.hit_rate,
+                "evictions": s.evictions,
+            });
+            println!("{}", serde_json::to_string_pretty(&obj).unwrap());
+        }
+        CacheOp::Purge { path, ns, expired, passphrase: pp } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("purged {n} entr{}", if n == 1 { "y" } else { "ies" });
         }
     }
     Ok(())

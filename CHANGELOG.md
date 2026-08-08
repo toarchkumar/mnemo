@@ -77,6 +77,48 @@ Pre-1.0, the minor component carries the breaking-change signal.
   state to persist) rather than returning `ReadOnly` from the inner
   `flush()` call.
 
+### Added (Phase 10.1 + 10.3: exact-key result cache, format v8)
+
+- **On-disk format bump v7 → v8.** Header gains three u64 fields
+  (`cache_start`, `cache_pages`, `cache_len`) at bytes 270–293, after
+  the v7 seal tag. The v7 header seal AAD is extended to cover them
+  for v8+ files, so tampering with the cache pointer trips the seal
+  just like every other mutable header field. Migration from v7 is
+  trivial: pre-v8 bytes at those offsets are zero, which is the legal
+  "empty cache directory" state; no data touched, no page rewrites.
+  Follows the AGENTS.md format-version policy end to end.
+- **`Mnemo::cache_put` / `cache_get` / `cache_delete` / `cache_purge` /
+  `cache_stats`.** SHA-256-hashed keys, per-namespace budgets (default
+  10,000 entries / 64 MiB), TTL support, catalog-only access-stat
+  updates on hit (v5 recall-trick applied to the cache). `cache_get`
+  on a read-only handle succeeds silently without bumping stats.
+- **`CacheFlushPolicy::Strict` (default) or `Batched { max_dirty,
+  max_age }`.** Batched mode auto-flushes when either threshold
+  trips; the flush is a full WAL-committed transaction, so unflushed
+  cache entries on a crash are misses, never corruption. **Memory
+  writes are never batched** — only cache mutations get the relaxed
+  lane. Set via `Mnemo::set_cache_flush_policy`.
+- **`Mnemo::set_cache_budget(namespace, CacheBudget)`** for per-namespace
+  eviction caps.
+- **CLI `mnemo cache <get|put|delete|stats|purge> <file> ...`** — five
+  subcommands under a nested-subcommand shape. `mnemo info` gains a
+  cache summary line.
+- **Nine integration tests** covering put/get roundtrip (json/text/
+  bytes), TTL expiry, LRU budget eviction, stats counters,
+  persistence across reopen, batched-policy auto-flush + crash
+  behavior, read-only handle refusing mutations, and the v7→v8
+  migration outcome (empty cache directory).
+
+### Changed
+
+- **`Mnemo::cache_stats` renamed to `page_cache_stats`.** Same rename
+  in the Python binding. The `cache_stats` name now belongs to the
+  result cache (Phase 10.1) — it takes an optional namespace and
+  returns a `CacheStats` struct. Callers on the page-cache pair
+  should update to `page_cache_stats` (breaking; documented here).
+- **`IndexInfo` derives `Serialize`/`Deserialize`.** Was landed as
+  part of PR 2's MCP `stats` tool; noting here for completeness.
+
 ### Added (Phase 4: MCP server)
 
 - **`mnemo serve --mcp <file.mnemo>`** — Model Context Protocol server

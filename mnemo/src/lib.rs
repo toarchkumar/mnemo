@@ -57,6 +57,7 @@ mod index;
 pub mod mcp;
 mod memory;
 mod pager;
+mod result_cache;
 mod session;
 mod store;
 mod wal;
@@ -65,6 +66,10 @@ pub use crypto::KdfParams;
 pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
 pub use memory::{Memory, MemoryType, Metric, Scope, ScoreWeights};
+pub use result_cache::{
+    CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, DEFAULT_BATCH_MAX_AGE,
+    DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,
+};
 pub use session::{Role, Session, Turn};
 pub use store::{
     CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResult, SnapshotInfo, Stats,

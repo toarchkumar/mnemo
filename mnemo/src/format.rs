@@ -21,16 +21,21 @@ pub const MAGIC: &[u8; 4] = b"MNEM";
 /// Current format version.
 ///
 /// History:
+/// - **v8** adds a cache-directory region for the exact-key result cache
+///   (Phase 10.1 of the level-up plan). Three new header fields
+///   (`cache_start`, `cache_pages`, `cache_len`) live at bytes 270–293,
+///   after the v7 seal tag. The seal AAD is extended to cover them.
+///   Migration from v7 is trivial: the new fields default to 0 / 0 / 0
+///   (empty cache directory), the version bumps in memory, and the next
+///   flush persists the v8-sealed header. Pages are untouched.
 /// - v4 added the snapshot-manifest region.
-/// - **v5** widens [`CatalogEntry`] with `accessed_at` and `access_count`,
+/// - v5 widens `CatalogEntry` with `accessed_at` and `access_count`,
 ///   so `recall` can update access stats without rewriting the full record
 ///   (Phase 2.1 of the improvement plan). Migration is automatic on
 ///   first [`crate::Mnemo::open`] of a v4 file: the catalog is replayed
 ///   into the v5 shape (populating the new fields from each record's
 ///   serialized body) and rewritten on the next flush.
-///
-/// [`CatalogEntry`]: crate::store
-pub const VERSION: u16 = 7;
+pub const VERSION: u16 = 8;
 /// Lowest version this build can auto-migrate on open. Files older than
 /// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
 /// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
@@ -85,13 +90,30 @@ pub const HEADER_CRC_OFF: usize = 238;
 pub const HEADER_SEAL_NONCE_OFF: usize = 242;
 /// Byte offset of the v7 header seal tag.
 pub const HEADER_SEAL_TAG_OFF: usize = HEADER_SEAL_NONCE_OFF + NONCE_LEN;
-/// Domain-separation prefix for the v7 header seal AAD. Distinguishes the
-/// header seal from page AAD and any future seals.
+/// Domain-separation prefix for the header seal AAD. The suffix in the
+/// bytes acts as a version marker so a v7 file rewritten under v8 (or
+/// vice-versa) fails auth cleanly rather than "just working" against
+/// a different AAD shape.
 pub const SEAL_AAD_PREFIX: &[u8] = b"mnemo-header-seal-v7";
 
-// Compile-time check: the seal region must fit inside one page after the
-// existing header fields and CRC.
-const _: () = assert!(HEADER_SEAL_TAG_OFF + TAG_LEN <= PAGE_SIZE);
+// --- v8 cache-directory pointer layout ----------------------------------
+//
+// The v8 header adds a pointer to the result-cache directory run (Phase
+// 10.1). Three u64s packed immediately after the v7 seal tag. On a v7
+// file opened by a v8 build these bytes are zero-initialized (the file
+// is short-read into a zeroed page-sized buffer), which is the legal
+// "empty cache directory" state — no data migration required.
+
+/// Byte offset of `cache_start` (v8+).
+pub const HEADER_CACHE_START_OFF: usize = HEADER_SEAL_TAG_OFF + TAG_LEN;
+/// Byte offset of `cache_pages` (v8+).
+pub const HEADER_CACHE_PAGES_OFF: usize = HEADER_CACHE_START_OFF + 8;
+/// Byte offset of `cache_len` (v8+).
+pub const HEADER_CACHE_LEN_OFF: usize = HEADER_CACHE_PAGES_OFF + 8;
+
+// Compile-time check: the seal region + v8 cache-pointer trailer must
+// still fit inside one page after the existing header fields and CRC.
+const _: () = assert!(HEADER_CACHE_LEN_OFF + 8 <= PAGE_SIZE);
 
 /// The header page. Fixed-size, unencrypted, lives at page 0.
 #[derive(Clone, Debug)]
@@ -154,6 +176,14 @@ pub struct Header {
     /// for older formats and freshly created headers. Validated by
     /// [`Header::validate_seal`] after the DEK is unwrapped.
     pub seal_tag: Option<[u8; TAG_LEN]>,
+    /// First page of the result-cache directory run (v8+, `0` if empty).
+    /// Present on every in-memory header regardless of on-disk version;
+    /// old v7 files read as `0`, meaning "no cache directory yet".
+    pub cache_start: u64,
+    /// Page count of the result-cache directory run (v8+, `0` if empty).
+    pub cache_pages: u64,
+    /// Exact serialized byte length of the result-cache directory (v8+).
+    pub cache_len: u64,
 }
 
 /// Compute the AEAD AAD bytes used by the v7 header seal. The AAD covers
@@ -161,7 +191,7 @@ pub struct Header {
 /// open time (catalog/index/manifest pointers, write counter, version
 /// itself), so flipping any of them invalidates the seal tag.
 fn header_seal_aad(h: &Header) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(SEAL_AAD_PREFIX.len() + 2 + 15 * 8);
+    let mut aad = Vec::with_capacity(SEAL_AAD_PREFIX.len() + 2 + 18 * 8);
     aad.extend_from_slice(SEAL_AAD_PREFIX);
     aad.extend_from_slice(&h.version.to_le_bytes());
     aad.extend_from_slice(&h.write_counter.to_le_bytes());
@@ -179,6 +209,15 @@ fn header_seal_aad(h: &Header) -> Vec<u8> {
     aad.extend_from_slice(&h.manifest_start.to_le_bytes());
     aad.extend_from_slice(&h.manifest_pages.to_le_bytes());
     aad.extend_from_slice(&h.manifest_len.to_le_bytes());
+    // v8+ appended fields — including them unconditionally is safe
+    // because `version` is *also* in the AAD, so a v7 header (where these
+    // are 0 by definition) authenticates against a different AAD than a
+    // v8 header would; the seal never crosses format boundaries silently.
+    if h.version >= 8 {
+        aad.extend_from_slice(&h.cache_start.to_le_bytes());
+        aad.extend_from_slice(&h.cache_pages.to_le_bytes());
+        aad.extend_from_slice(&h.cache_len.to_le_bytes());
+    }
     aad
 }
 
@@ -227,8 +266,24 @@ impl Header {
         b[222..230].copy_from_slice(&self.manifest_pages.to_le_bytes());
         b[230..238].copy_from_slice(&self.manifest_len.to_le_bytes());
         // Header CRC over every byte before it — detects a torn page-0 write.
+        // The v7 seal (bytes 242..270) and v8 cache pointer (bytes 270..294)
+        // deliberately live outside the CRC region: the CRC is a
+        // pre-passphrase torn-write check, the seal is the keyed
+        // post-KDF integrity layer. `apply_seal` writes the seal bytes
+        // and the v8+ cache pointer AFTER this CRC.
         let crc = crate::wal::checksum(&b[0..HEADER_CRC_OFF]);
         b[HEADER_CRC_OFF..HEADER_CRC_OFF + 4].copy_from_slice(&crc.to_le_bytes());
+        // v8+ cache pointer bytes. Zero on a v7 file re-serialized under
+        // v8 (empty cache directory). Sealed into the AAD by
+        // `apply_seal`, not covered by the CRC above.
+        if self.version >= 8 {
+            b[HEADER_CACHE_START_OFF..HEADER_CACHE_START_OFF + 8]
+                .copy_from_slice(&self.cache_start.to_le_bytes());
+            b[HEADER_CACHE_PAGES_OFF..HEADER_CACHE_PAGES_OFF + 8]
+                .copy_from_slice(&self.cache_pages.to_le_bytes());
+            b[HEADER_CACHE_LEN_OFF..HEADER_CACHE_LEN_OFF + 8]
+                .copy_from_slice(&self.cache_len.to_le_bytes());
+        }
         b
     }
 
@@ -304,6 +359,14 @@ impl Header {
             } else {
                 None
             },
+            // v8+ cache pointer fields. For a v7 file the bytes at these
+            // offsets are whatever was there originally (likely zero, since
+            // the pre-v8 header ended at byte 269) — reading them as u64
+            // yields 0/0/0 which means "no cache directory", the correct
+            // migration state.
+            cache_start: if version >= 8 { rd_u64(b, HEADER_CACHE_START_OFF) } else { 0 },
+            cache_pages: if version >= 8 { rd_u64(b, HEADER_CACHE_PAGES_OFF) } else { 0 },
+            cache_len: if version >= 8 { rd_u64(b, HEADER_CACHE_LEN_OFF) } else { 0 },
         })
     }
 

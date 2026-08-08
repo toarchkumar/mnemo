@@ -548,7 +548,7 @@ fn tool_snapshot_list(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
 
 fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
     let s = db.stats().map_err(mnemo_err)?;
-    let (cache_pages, cache_capacity) = db.cache_stats();
+    let (cache_pages, cache_capacity) = db.page_cache_stats();
     let snapshot_count = db.snapshots().len();
     // Field names mirror `Stats` in `store.rs` verbatim so MCP clients
     // that reference the Rust doc for the same DB see the same shape.

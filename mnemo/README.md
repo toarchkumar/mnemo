@@ -65,6 +65,62 @@ The server holds an exclusive write lock on the file for its lifetime
 on the same file will conflict — one will fail to start with
 `Locked`. That's intentional.
 
+### Result caching
+
+The same `.mnemo` file is also a durable exact-key cache (Phase 10.1). One
+file, two live surfaces: agent memories and result cache, sharing the same
+encrypted-page storage and the same single-fsync WAL commit. Useful for
+memoizing LLM tool-call outputs, prompt→completion pairs, expensive HTTP
+responses — anything reconstructible on cache miss:
+
+```rust
+use mnemo::{Mnemo, CachePutOpts};
+
+let mut db = Mnemo::open("agent.mnemo", "correct horse battery")?;
+
+// Insert (key is SHA-256-hashed by the engine — pass the raw input).
+db.cache_put(
+    "llm",
+    "prompt-42",
+    br#"{"model":"gpt-4","cost":0.03}"#,
+    CachePutOpts { content_type: "json".into(), ttl_secs: Some(3600), cost_hint_ms: Some(250) },
+)?;
+db.flush()?;
+
+// Lookup — hit updates access stats catalog-only (no full record rewrite).
+if let Some(hit) = db.cache_get("llm", "prompt-42")? {
+    println!("cached: {} bytes, {} accesses", hit.value.len(), hit.access_count);
+}
+```
+
+Namespaces (`"llm"`, `"http"`, `"tool"`, `...`) isolate independent caches
+inside one file. Per-namespace [`CacheBudget`] caps entry count and byte
+total; overflow evicts LRU. TTL is per-entry.
+
+**Flush policy** (`Mnemo::set_cache_flush_policy`) is per-handle:
+
+- `Strict` (default) — every `cache_put` dirties the cache directory;
+  next `flush()` persists it.
+- `Batched { max_dirty, max_age }` — cache mutations accumulate; when
+  either threshold trips, the engine internally calls `flush()`. **Memory
+  writes stay strict** — only cache mutations get the relaxed lane.
+
+Losing unflushed batched entries on a crash is a cache *miss*, never
+corruption — commits still ride the same single-fsync WAL transaction.
+
+CLI:
+
+```sh
+mnemo cache put   agent.mnemo --ns llm  --key prompt-42 --value '{"...":"..."}' --content-type json --ttl 3600
+mnemo cache get   agent.mnemo --ns llm  --key prompt-42
+mnemo cache stats agent.mnemo --ns llm         # or omit --ns for the whole cache
+mnemo cache purge agent.mnemo --ns llm --expired
+mnemo cache delete agent.mnemo --ns llm --key prompt-42
+```
+
+MCP tools + Python `@db.cached(...)` decorator land in a follow-up
+(Phase 10.4). Semantic (vector-similarity) caching is Phase 10.2.
+
 ---
 # Memory Nemo (MNemo)
 

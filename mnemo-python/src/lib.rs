@@ -373,9 +373,11 @@ impl Mnemo {
         self.inner.set_cache_capacity(pages);
     }
 
-    /// Page-cache occupancy as `(pages_cached, capacity)`.
-    fn cache_stats(&self) -> (usize, usize) {
-        self.inner.cache_stats()
+    /// Page-cache occupancy as `(pages_cached, capacity)`. Renamed from
+    /// `cache_stats` in v0.4.0 to make room for the result-cache
+    /// `cache_stats(namespace)` from Phase 10.1.
+    fn page_cache_stats(&self) -> (usize, usize) {
+        self.inner.page_cache_stats()
     }
 
     /// Override the snapshot-manifest retention cap on this open handle.

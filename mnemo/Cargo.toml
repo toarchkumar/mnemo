@@ -70,6 +70,10 @@ rpassword = "=7.3.1"
 # See CHANGELOG's Phase 1.1 entry. If this fails to build on your
 # toolchain, the fallback is `fd-lock`.
 fs4 = { version = "=0.9.1", default-features = false, features = ["sync"] }
+# SHA-256 for the result-cache key hashing (Phase 10.1). Pure Rust,
+# widely deployed, small. RustCrypto family, so it interops with the
+# same digest traits `argon2` and `blake2` already pull in transitively.
+sha2 = "=0.10.8"
 
 [dev-dependencies]
 tempfile = "=3.10.1"

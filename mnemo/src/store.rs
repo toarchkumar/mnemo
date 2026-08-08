@@ -36,6 +36,10 @@ use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{self, Memory, MemoryType, Metric, Scope, ScoreWeights};
 use crate::pager::Pager;
+use crate::result_cache::{
+    self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy,
+    CachePutOpts, CacheStats, CachedValue, CounterState, DirectoryIndex,
+};
 use crate::wal;
 
 /// Default initial size of the write-ahead log region, in pages (64 KiB).
@@ -151,6 +155,12 @@ struct CatalogEntryV4 {
 struct FlushPrelude {
     cat_bytes: Option<Vec<u8>>,
     idx_bytes: Option<Vec<u8>>,
+    /// Serialized result-cache directory bytes when `dirty_cache` is
+    /// set (Phase 10.1). `None` if the cache didn't change since the
+    /// last flush — in that case the header keeps its current
+    /// `cache_start` / `cache_pages` / `cache_len` and no fresh cache
+    /// run is written.
+    cache_bytes: Option<Vec<u8>>,
 }
 
 /// One entry in the append-only snapshot manifest. Because record, catalog,
@@ -344,6 +354,27 @@ pub struct Mnemo {
     /// lock; the OS would reject a write() anyway, but gating in Rust
     /// gives callers a clean, typed error.
     read_only: bool,
+    /// Result-cache directory (Phase 10.1). See [`crate::result_cache`].
+    /// Loaded from `header.cache_start` on open; persisted on `flush`
+    /// via the same seal_run pipeline as catalog/index/manifest.
+    cache_dir: Vec<CacheDirectoryEntry>,
+    /// In-memory index over `cache_dir` for O(1) `(namespace, key_hash)`
+    /// lookups. Rebuilt on open + kept in sync on `cache_put`/`delete`.
+    cache_idx: DirectoryIndex,
+    /// Set whenever `cache_dir` changes; drives whether `flush` rewrites
+    /// the cache directory run.
+    dirty_cache: bool,
+    /// Per-namespace eviction budgets. Missing entries fall back to
+    /// [`CacheBudget::default`]. Not persisted (per-handle policy).
+    cache_budgets: std::collections::HashMap<String, CacheBudget>,
+    /// Flush policy for cache mutations. Memory writes ignore this and
+    /// always behave as `Strict`.
+    cache_flush_policy: CacheFlushPolicy,
+    /// Bookkeeping for `CacheFlushPolicy::Batched` — pending mutation
+    /// count and first-dirty timestamp.
+    cache_batch: BatchState,
+    /// In-memory hit/miss/eviction counters (reset on reopen).
+    cache_counters: CounterState,
 }
 
 /// Open a file and take an OS advisory lock, returning `Locked { path }`
@@ -486,6 +517,22 @@ fn load_manifest(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result<
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
 }
 
+/// Load the result-cache directory (v8+). An empty `pages` yields an
+/// empty directory, which is the natural state for v7 files migrated
+/// to v8 (no cache entries yet) and for freshly created v8 files.
+fn load_cache_directory(
+    pager: &mut Pager,
+    start: u64,
+    pages: u64,
+    len: u64,
+) -> Result<Vec<CacheDirectoryEntry>> {
+    if pages == 0 {
+        return Ok(Vec::new());
+    }
+    let buf = read_run_bytes(pager, start, pages, len)?;
+    rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
+}
+
 /// Load an ANN index run, validating its dimensionality.
 fn load_index(
     pager: &mut Pager,
@@ -584,6 +631,12 @@ impl Mnemo {
             // Regenerated per write by `apply_seal`; `None` until we seal.
             seal_nonce: None,
             seal_tag: None,
+            // v8+ result-cache pointer — zero-initialized on create,
+            // populated only when `cache_put` runs at least once and
+            // the next `flush` seals a directory run.
+            cache_start: 0,
+            cache_pages: 0,
+            cache_len: 0,
         };
 
         let mut pager = Pager::new(file, dek, 0, VERSION);
@@ -606,6 +659,13 @@ impl Mnemo {
             manifest: Vec::new(),
             max_snapshots: config.max_snapshots,
             read_only: false,
+            cache_dir: Vec::new(),
+            cache_idx: DirectoryIndex::new(),
+            dirty_cache: false,
+            cache_budgets: std::collections::HashMap::new(),
+            cache_flush_policy: CacheFlushPolicy::default(),
+            cache_batch: BatchState::default(),
+            cache_counters: CounterState::default(),
         })
     }
 
@@ -763,10 +823,27 @@ impl Mnemo {
         // (page crypto is unchanged from v6).
         let migrated_header_to_v7 = on_disk_version < 7;
         if migrated_header_to_v7 {
+            pager.set_version(7);
+        }
+
+        // === v7→v8 cache-directory migration =============================
+        // v8 adds three u64 header fields (cache_start/pages/len) for the
+        // result-cache directory (Phase 10.1). Pre-v8 files have those
+        // three bytes as zero (the on-disk region beyond the v7 seal is
+        // zero-initialized), which is the legal "empty cache directory"
+        // state — no data migration required. We bump the version in
+        // memory and mark dirty_catalog so the next flush writes a
+        // v8-sealed header with the new AAD shape covering the cache
+        // pointer. Pages are untouched.
+        let migrated_header_to_v8 = on_disk_version < 8;
+        if migrated_header_to_v8 {
             pager.set_version(VERSION);
         }
 
-        let migrated = migrated_from_v4 || migrated_pages_to_v6 || migrated_header_to_v7;
+        let migrated = migrated_from_v4
+            || migrated_pages_to_v6
+            || migrated_header_to_v7
+            || migrated_header_to_v8;
         if migrated {
             // Stamp the version forward in memory; the next flush persists
             // it via the WAL-committed header frame (and the v7 seal).
@@ -791,6 +868,17 @@ impl Mnemo {
         // get rewritten via dirty_catalog and the manifest.clear() above.)
         let dirty_index = migrated_pages_to_v6 && ann.is_some();
 
+        // Load the cache directory (v8+ only). Pre-v8 files have
+        // cache_pages == 0 by header layout, so this trivially yields
+        // an empty directory without touching the disk.
+        let cache_dir = load_cache_directory(
+            &mut pager,
+            header.cache_start,
+            header.cache_pages,
+            header.cache_len,
+        )?;
+        let cache_idx = DirectoryIndex::build(&cache_dir);
+
         Ok(Mnemo {
             pager,
             header,
@@ -809,6 +897,13 @@ impl Mnemo {
             // unlimited retention or a different cap for this handle.
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             read_only: false,
+            cache_dir,
+            cache_idx,
+            dirty_cache: false,
+            cache_budgets: std::collections::HashMap::new(),
+            cache_flush_policy: CacheFlushPolicy::default(),
+            cache_batch: BatchState::default(),
+            cache_counters: CounterState::default(),
         })
     }
 
@@ -898,6 +993,13 @@ impl Mnemo {
             header.manifest_pages,
             header.manifest_len,
         )?;
+        let cache_dir = load_cache_directory(
+            &mut pager,
+            header.cache_start,
+            header.cache_pages,
+            header.cache_len,
+        )?;
+        let cache_idx = DirectoryIndex::build(&cache_dir);
 
         Ok(Mnemo {
             pager,
@@ -916,6 +1018,13 @@ impl Mnemo {
             manifest,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             read_only: true,
+            cache_dir,
+            cache_idx,
+            dirty_cache: false,
+            cache_budgets: std::collections::HashMap::new(),
+            cache_flush_policy: CacheFlushPolicy::default(),
+            cache_batch: BatchState::default(),
+            cache_counters: CounterState::default(),
         })
     }
 
@@ -1399,10 +1508,12 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
-        if !self.dirty_catalog && !self.dirty_index {
+        if !self.dirty_catalog && !self.dirty_index && !self.dirty_cache {
             // No control-plane changes pending. Because every `put` that
-            // dirties a data page also dirties the catalog, there can't
-            // be dirty data pages either — nothing to do.
+            // dirties a data page also dirties the catalog, and every
+            // `cache_put` that dirties a data page also dirties
+            // `dirty_cache`, there can't be dirty data pages either —
+            // nothing to do.
             return Ok(());
         }
 
@@ -1436,6 +1547,29 @@ impl Mnemo {
                     self.header.index_start = 0;
                     self.header.index_pages = 0;
                     self.header.index_len = 0;
+                }
+            }
+        }
+        // v8+ result-cache directory (Phase 10.1). Seal the serialized
+        // directory into a fresh page run and update the pointer in the
+        // header. The seal AAD already covers cache_start/pages/len for
+        // v8+ (see `header_seal_aad`), so tampering with the pointer
+        // trips the header seal on the next open.
+        if self.dirty_cache {
+            match &ctx.cache_bytes {
+                Some(bytes) if !self.cache_dir.is_empty() => {
+                    let (start, pages) = self.seal_run(bytes, &mut frames)?;
+                    self.header.cache_start = start;
+                    self.header.cache_pages = pages as u64;
+                    self.header.cache_len = bytes.len() as u64;
+                }
+                _ => {
+                    // Either the directory serialized to nothing (all
+                    // entries deleted after tombstone-only migration) or
+                    // it's empty — collapse the pointer to zero.
+                    self.header.cache_start = 0;
+                    self.header.cache_pages = 0;
+                    self.header.cache_len = 0;
                 }
             }
         }
@@ -1499,6 +1633,9 @@ impl Mnemo {
         self.manifest = manifest;
         self.dirty_catalog = false;
         self.dirty_index = false;
+        self.dirty_cache = false;
+        // Batched policy: successful flush consumes the pending batch.
+        self.cache_batch.reset();
         Ok(())
     }
 
@@ -1540,27 +1677,44 @@ impl Mnemo {
         } else {
             None
         };
+        // Serialize the result-cache directory when it's dirty. An
+        // empty directory serializes to a small header + 0-element
+        // array; still cheap enough that we don't special-case it.
+        let cache_bytes: Option<Vec<u8>> = if self.dirty_cache {
+            Some(
+                rmp_serde::to_vec(&self.cache_dir)
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?,
+            )
+        } else {
+            None
+        };
 
         let cat_pc = cat_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
         let idx_pc = idx_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
+        let cache_pc = cache_bytes
+            .as_ref()
+            .map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
         // Upper bound on the manifest run: one extra entry, <=82 bytes each
         // (rmp_serde encodes a Snapshot as a 9-element fixarray of i64/u64,
         // worst case 81 bytes plus a 1-byte array header).
         let man_upper = 9 + (self.manifest.len() + 1) * 82;
         let man_pc_est = man_upper.div_ceil(PAYLOAD).max(1);
 
-        // Grow WAL if needed (does its own header write+sync).
-        self.ensure_wal_capacity(cat_pc + idx_pc + man_pc_est + 1)?;
+        // Grow WAL if needed (does its own header write+sync). The
+        // cache directory rides in the same transaction so its page
+        // count contributes to the reservation.
+        self.ensure_wal_capacity(cat_pc + idx_pc + cache_pc + man_pc_est + 1)?;
 
         // Lease counter and page slots. counter_lease is an upper bound on
         // how many `pager.write_counter` advances this transaction will
         // make (one per dirty data page + one per sealed control-plane
         // page). page_lease covers only the control-plane allocations,
         // because dirty data pages were already allocated past
-        // `header.next_page` by `write_record` when `remember` ran.
+        // `header.next_page` by `write_record` when `remember` ran or
+        // `cache_put` ran.
         let data_dirty = self.pager.dirty_page_count() as u64;
-        let counter_lease = data_dirty + (cat_pc + idx_pc + man_pc_est) as u64;
-        let page_lease = (cat_pc + idx_pc + man_pc_est) as u64;
+        let counter_lease = data_dirty + (cat_pc + idx_pc + cache_pc + man_pc_est) as u64;
+        let page_lease = (cat_pc + idx_pc + cache_pc + man_pc_est) as u64;
 
         // Persist a leased *clone* of the header — in-memory `self.header`
         // keeps its pre-lease `next_page` for `seal_run` to consume from
@@ -1573,7 +1727,11 @@ impl Mnemo {
         self.pager.write_raw(0, &page)?;
         self.pager.sync()?;
 
-        Ok(FlushPrelude { cat_bytes, idx_bytes })
+        Ok(FlushPrelude {
+            cat_bytes,
+            idx_bytes,
+            cache_bytes,
+        })
     }
 
     /// Flush and close. Equivalent to `flush()` on a read-write handle; on
@@ -1619,9 +1777,339 @@ impl Mnemo {
         self.pager.set_cache_capacity(pages);
     }
 
-    /// Page-cache occupancy: `(pages_cached, capacity)`.
-    pub fn cache_stats(&self) -> (usize, usize) {
+    /// Page-cache occupancy: `(pages_cached, capacity)`. Renamed from
+    /// `cache_stats` in v0.4.0: the result-cache API (Phase 10.1) took
+    /// that name for its per-namespace [`CacheStats`] summary, and the
+    /// page-cache pair is the older/less-user-facing of the two, so it
+    /// gets the more-specific name.
+    pub fn page_cache_stats(&self) -> (usize, usize) {
         self.pager.cache_stats()
+    }
+
+    // === Result cache (Phase 10.1 + 10.3) ============================
+
+    /// Insert or overwrite a cache entry at `(namespace, key)`.
+    ///
+    /// The engine SHA-256-hashes `key` — callers pass the raw input
+    /// string. Persists to disk on the next `flush()` under the current
+    /// flush policy (see [`Mnemo::set_cache_flush_policy`]); in
+    /// [`CacheFlushPolicy::Batched`] the engine may call `flush()`
+    /// internally when a threshold trips.
+    ///
+    /// On overflow of the namespace's [`CacheBudget`] (default 10,000
+    /// entries / 64 MiB) the LRU entry is tombstoned before the new
+    /// insert. Tombstones are reclaimed by
+    /// [`Mnemo::compact_file`], not the runtime flush.
+    ///
+    /// Returns [`MnemoError::ReadOnly`] on a read-only handle.
+    pub fn cache_put(
+        &mut self,
+        namespace: &str,
+        key: &str,
+        value: &[u8],
+        opts: CachePutOpts,
+    ) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let key_hash = result_cache::hash_key(key);
+        let key_preview = result_cache::key_preview(key);
+        let now = memory::now_secs();
+        let size_bytes = value.len() as u64;
+
+        let entry = CacheEntry {
+            namespace: namespace.to_string(),
+            key_hash,
+            key_preview: key_preview.clone(),
+            value: value.to_vec(),
+            content_type: opts.content_type.clone(),
+            created_at: now,
+            accessed_at: now,
+            access_count: 0,
+            ttl_secs: opts.ttl_secs,
+            cost_hint_ms: opts.cost_hint_ms,
+            size_bytes,
+        };
+        let bytes =
+            rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let (start_page, page_count) = self.write_record(&bytes)?;
+
+        // Tombstone any prior entry for this key. Its pages remain on
+        // disk until `compact_file`, exactly like memory-record
+        // overwrites — the tombstone just hides it from lookups.
+        if let Some(prev_pos) = self.cache_idx.get(namespace, &key_hash) {
+            self.cache_dir[prev_pos].deleted = true;
+            self.cache_idx.remove(namespace, &key_hash);
+        }
+
+        let dir_entry = CacheDirectoryEntry {
+            namespace: namespace.to_string(),
+            key_hash,
+            start_page,
+            page_count,
+            len: bytes.len() as u32,
+            deleted: false,
+            accessed_at: now,
+            access_count: 0,
+            size_bytes,
+            ttl_secs: opts.ttl_secs,
+            created_at: now,
+        };
+        let pos = self.cache_dir.len();
+        self.cache_dir.push(dir_entry);
+        self.cache_idx.insert(namespace, key_hash, pos);
+
+        // Enforce budget — evict LRU tombstones until the namespace
+        // fits under both caps.
+        self.evict_to_budget(namespace)?;
+
+        self.dirty_cache = true;
+        self.cache_batch.record_dirty();
+
+        // Batched policy: auto-flush if a threshold tripped. Successful
+        // `flush()` calls `cache_batch.reset()` for us.
+        if self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Look up `(namespace, key)`. Returns `None` on miss (either the
+    /// key was never inserted or the entry is TTL-expired). On hit
+    /// updates catalog-side access stats (mirrors the recall v5-trick);
+    /// on a read-only handle the stats update is silently skipped.
+    ///
+    /// A miss is recorded as a miss in this handle's counters even if
+    /// the key was TTL-expired — from the caller's perspective the two
+    /// are indistinguishable.
+    pub fn cache_get(
+        &mut self,
+        namespace: &str,
+        key: &str,
+    ) -> Result<Option<CachedValue>> {
+        let key_hash = result_cache::hash_key(key);
+        let pos = match self.cache_idx.get(namespace, &key_hash) {
+            Some(p) => p,
+            None => {
+                self.cache_counters.misses += 1;
+                return Ok(None);
+            }
+        };
+        let now = memory::now_secs();
+        // Snapshot the directory entry fields we need before any
+        // mutation — the borrow checker gets grumpy otherwise.
+        let (start_page, page_count, len, ttl_secs, expired, created_at) = {
+            let e = &self.cache_dir[pos];
+            (
+                e.start_page,
+                e.page_count,
+                e.len,
+                e.ttl_secs,
+                e.is_expired(now),
+                e.created_at,
+            )
+        };
+        if expired {
+            // Treat expired as a miss for the caller. Don't tombstone
+            // here — cache_purge does that. Just skip.
+            self.cache_counters.misses += 1;
+            return Ok(None);
+        }
+        // Decrypt and decode the record body.
+        let mut buf = Vec::with_capacity(len as usize);
+        for i in 0..page_count as u64 {
+            buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
+        }
+        buf.truncate(len as usize);
+        let entry: CacheEntry = rmp_serde::from_slice(&buf)
+            .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+
+        // Bump access stats catalog-only (v5 trick — no full record
+        // rewrite on a hit). Skipped on read-only handles so a shared-lock
+        // reader can't dirty the catalog.
+        if !self.read_only {
+            self.cache_dir[pos].accessed_at = now;
+            self.cache_dir[pos].access_count =
+                self.cache_dir[pos].access_count.saturating_add(1);
+            self.dirty_cache = true;
+        }
+        self.cache_counters.hits += 1;
+        // On a mutating handle: access_count reflects the just-bumped
+        // value. On a read-only handle: the on-disk value is unchanged,
+        // so returning it verbatim is honest (the caller's reads did
+        // not, and cannot, alter the persisted counter).
+        let access_count = self.cache_dir[pos].access_count;
+        Ok(Some(CachedValue {
+            value: entry.value,
+            content_type: entry.content_type,
+            created_at,
+            accessed_at: if self.read_only { entry.accessed_at } else { now },
+            access_count,
+            ttl_secs,
+        }))
+    }
+
+    /// Tombstone the entry at `(namespace, key)`. Silently succeeds if
+    /// no such entry exists. Space is reclaimed by `compact_file`.
+    pub fn cache_delete(&mut self, namespace: &str, key: &str) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let key_hash = result_cache::hash_key(key);
+        if let Some(pos) = self.cache_idx.get(namespace, &key_hash) {
+            self.cache_dir[pos].deleted = true;
+            self.cache_idx.remove(namespace, &key_hash);
+            self.dirty_cache = true;
+            self.cache_batch.record_dirty();
+            if self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+                self.flush()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Purge cache entries. If `namespace` is `Some`, restrict to that
+    /// namespace; otherwise purge across the whole cache. If
+    /// `expired_only` is `true`, only TTL-expired entries are removed;
+    /// otherwise every live entry in the target scope is tombstoned.
+    /// Returns the number of entries newly tombstoned.
+    pub fn cache_purge(
+        &mut self,
+        namespace: Option<&str>,
+        expired_only: bool,
+    ) -> Result<usize> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let now = memory::now_secs();
+        let mut purged = 0usize;
+        // Iterate the directory by index; mark matching entries as
+        // deleted and pull them out of the in-memory index.
+        for pos in 0..self.cache_dir.len() {
+            if self.cache_dir[pos].deleted {
+                continue;
+            }
+            if let Some(ns) = namespace {
+                if self.cache_dir[pos].namespace != ns {
+                    continue;
+                }
+            }
+            if expired_only && !self.cache_dir[pos].is_expired(now) {
+                continue;
+            }
+            let key_hash = self.cache_dir[pos].key_hash;
+            let ns = self.cache_dir[pos].namespace.clone();
+            self.cache_dir[pos].deleted = true;
+            self.cache_idx.remove(&ns, &key_hash);
+            purged += 1;
+        }
+        if purged > 0 {
+            self.dirty_cache = true;
+            self.cache_batch.record_dirty();
+            if self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+                self.flush()?;
+            }
+        }
+        Ok(purged)
+    }
+
+    /// Statistics for `namespace` (or the whole cache if `None`).
+    /// `hits`/`misses`/`evictions` are per-handle in-memory counters
+    /// that reset on reopen; `entries`/`bytes` reflect the durable
+    /// on-disk state (live entries only, tombstones excluded).
+    pub fn cache_stats(&self, namespace: Option<&str>) -> CacheStats {
+        let mut entries = 0usize;
+        let mut bytes = 0u64;
+        for e in &self.cache_dir {
+            if e.deleted {
+                continue;
+            }
+            if let Some(ns) = namespace {
+                if e.namespace != ns {
+                    continue;
+                }
+            }
+            entries += 1;
+            bytes += e.size_bytes;
+        }
+        let hits = self.cache_counters.hits;
+        let misses = self.cache_counters.misses;
+        let total = hits + misses;
+        let hit_rate = if total > 0 {
+            hits as f64 / total as f64
+        } else {
+            0.0
+        };
+        CacheStats {
+            entries,
+            bytes,
+            hits,
+            misses,
+            hit_rate,
+            evictions: self.cache_counters.evictions,
+        }
+    }
+
+    /// Set (or update) the eviction budget for `namespace`. Applies to
+    /// subsequent `cache_put` calls; does not retroactively evict
+    /// entries that already sit under a looser cap.
+    pub fn set_cache_budget(&mut self, namespace: &str, budget: CacheBudget) {
+        self.cache_budgets.insert(namespace.to_string(), budget);
+    }
+
+    /// Set the per-handle cache flush policy. Defaults to
+    /// [`CacheFlushPolicy::Strict`]. Memory writes are never batched;
+    /// this affects only cache mutations.
+    pub fn set_cache_flush_policy(&mut self, policy: CacheFlushPolicy) {
+        self.cache_flush_policy = policy;
+        // Switching mid-run: if we're moving to Strict and the batch is
+        // non-empty, the pending count still counts toward dirty_cache
+        // which the next flush() will consume.
+    }
+
+    /// Evict LRU live entries in `namespace` until it fits under both
+    /// budget caps. Called from `cache_put` after the insert; the new
+    /// entry is included in the count so we always leave room.
+    fn evict_to_budget(&mut self, namespace: &str) -> Result<()> {
+        let budget = self
+            .cache_budgets
+            .get(namespace)
+            .copied()
+            .unwrap_or_default();
+        loop {
+            // Sum current live count + bytes in the namespace.
+            let mut live_count = 0usize;
+            let mut live_bytes = 0u64;
+            for e in &self.cache_dir {
+                if !e.deleted && e.namespace == namespace {
+                    live_count += 1;
+                    live_bytes += e.size_bytes;
+                }
+            }
+            if live_count <= budget.max_entries && live_bytes <= budget.max_bytes {
+                return Ok(());
+            }
+            // Find the LRU (oldest accessed_at) live entry.
+            let victim_pos = self
+                .cache_dir
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| !e.deleted && e.namespace == namespace)
+                .min_by_key(|(_, e)| e.accessed_at)
+                .map(|(i, _)| i);
+            let Some(pos) = victim_pos else {
+                // Nothing to evict but still over budget — the single
+                // just-inserted entry itself is bigger than
+                // max_bytes. Nothing we can safely do here without
+                // rejecting the put; leave it and return.
+                return Ok(());
+            };
+            let key_hash = self.cache_dir[pos].key_hash;
+            let ns = self.cache_dir[pos].namespace.clone();
+            self.cache_dir[pos].deleted = true;
+            self.cache_idx.remove(&ns, &key_hash);
+            self.cache_counters.evictions += 1;
+        }
     }
 
     /// Begin a conversation [`Session`](crate::Session) for `agent_id`.
