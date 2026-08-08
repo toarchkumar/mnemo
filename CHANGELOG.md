@@ -8,6 +8,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows lock-conflict detection** — `open_with_lock` previously
+  only mapped Unix `WouldBlock` errors to `MnemoError::Locked`.
+  Windows `LockFileEx` returns `ERROR_LOCK_VIOLATION` (raw OS code 33)
+  or `ERROR_SHARING_VIOLATION` (32), both surfaced by Rust as
+  `ErrorKind::Uncategorized`. All Phase 1.1 lock-collision tests were
+  panicking on Windows CI with `Io(...)` instead of `Locked(...)` as
+  a result. Added a platform-conditional `is_lock_conflict` helper
+  that recognizes both.
+- **Python test `test_persistence_and_reopen` / `test_index_and_snapshots`
+  / `test_wrong_passphrase`** — added `del db` after `close()` before
+  reopens. Python's `close()` currently flushes but does not release
+  the underlying Rust handle (and thus the OS lock); the Python
+  binding needs a follow-up refactor to `Option<Core>` so `close()`
+  drops the inner and users don't need the `del` incantation. Tracked
+  as a follow-up.
+
 ### Added
 
 - **OS file locking (Phase 1.1).** `Mnemo::create` and `Mnemo::open` now

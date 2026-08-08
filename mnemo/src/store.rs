@@ -363,11 +363,14 @@ fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<File> {
         opts.create(true).truncate(true);
     }
     let file = opts.open(path)?;
-    // `fs4` 0.9.x signals contention via `ErrorKind::WouldBlock` — on
-    // success the returned `Result<()>` is `Ok(())`; on conflict it's
-    // `Err(io::Error { kind: WouldBlock, .. })`. Any other I/O error is a
-    // real failure (permissions, invalid handle, etc.) and gets bubbled
-    // up as `MnemoError::Io`.
+    // On success the returned `Result<()>` is `Ok(())`. On conflict:
+    //   * Unix `flock(2)` → `ErrorKind::WouldBlock` (EWOULDBLOCK / EAGAIN)
+    //   * Windows `LockFileEx` → raw OS code 33 (ERROR_LOCK_VIOLATION)
+    //     or 32 (ERROR_SHARING_VIOLATION), both surfaced by Rust as
+    //     `ErrorKind::Uncategorized` because `std::io::ErrorKind`
+    //     doesn't carry a portable "locked" variant.
+    // Anything else is a real I/O failure (permissions, invalid handle,
+    // ...) and gets bubbled up as `MnemoError::Io`.
     let result = if write {
         FileExt::try_lock_exclusive(&file)
     } else {
@@ -375,11 +378,33 @@ fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<File> {
     };
     match result {
         Ok(()) => Ok(file),
-        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Err(MnemoError::Locked {
+        Err(e) if is_lock_conflict(&e) => Err(MnemoError::Locked {
             path: path.to_path_buf(),
         }),
         Err(e) => Err(MnemoError::Io(e)),
     }
+}
+
+/// Was this I/O error the OS reporting a conflicting file lock, or a
+/// genuine I/O failure? Platform-conditional because
+/// [`std::io::ErrorKind`] carries no portable "resource-locked" variant
+/// as of Rust 1.75 — Windows surfaces `ERROR_LOCK_VIOLATION` /
+/// `ERROR_SHARING_VIOLATION` as `Uncategorized`.
+fn is_lock_conflict(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        return true;
+    }
+    #[cfg(windows)]
+    if let Some(code) = e.raw_os_error() {
+        // 33 = ERROR_LOCK_VIOLATION, 32 = ERROR_SHARING_VIOLATION —
+        // both mean "someone else holds an incompatible lock on this
+        // region of the file". See
+        // https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
+        if code == 33 || code == 32 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Read a run of consecutive encrypted pages and concatenate their plaintext.

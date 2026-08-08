@@ -40,6 +40,14 @@ def test_persistence_and_reopen():
         db = mnemo.open(path, "pw", dimensions=3)
         mid = db.remember("persist me", "procedural", [0.5, 0.5, 0.5])
         db.close()
+        # `close()` currently flushes but does NOT release the underlying
+        # OS lock — the Rust handle stays alive until the Python object
+        # is garbage-collected. Force a `drop` so the reopen below can
+        # acquire the exclusive lock (Phase 1.1). Follow-up: refactor
+        # the Rust wrapper to make `close()` release the handle so this
+        # `del` isn't required. See CHANGELOG's [Unreleased] Fixed
+        # section for the tracking note.
+        del db
 
         # Reopen without dimensions — must read them from the file.
         db2 = mnemo.open(path, "pw")
@@ -48,13 +56,20 @@ def test_persistence_and_reopen():
         assert got["content"] == "persist me"
         assert got["memory_type"] == "procedural"
         db2.close()
+        del db2
     print("ok  persistence / reopen / get")
 
 
 def test_wrong_passphrase():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "t.mnemo")
-        mnemo.open(path, "correct", dimensions=2).close()
+        # `mnemo.open(...).close()` flushes but the transient handle
+        # holds the exclusive lock until the temp-expression drops.
+        # Bind + explicitly `del` so the lock is released before the
+        # wrong-passphrase reopen tries to acquire.
+        writer = mnemo.open(path, "correct", dimensions=2)
+        writer.close()
+        del writer
         try:
             mnemo.open(path, "wrong")
             raise AssertionError("wrong passphrase should have failed")
@@ -81,11 +96,16 @@ def test_index_and_snapshots():
             assert len(snaps) >= 1
             first = snaps[0]["txn_id"]
             # context-manager __exit__ will flush.
+        # `with` doesn't unbind the name; `db` still holds the Rust
+        # handle (and its exclusive lock) until reassignment or `del`.
+        # Force release before the reopen.
+        del db
         # Reopen and roll back to the first snapshot.
         db = mnemo.open(path, "pw")
         info = db.restore_to(first)
         assert info["txn_id"] == first
         db.close()
+        del db
     print("ok  index / snapshots / restore")
 
 
