@@ -18,6 +18,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
   panicking on Windows CI with `Io(...)` instead of `Locked(...)` as
   a result. Added a platform-conditional `is_lock_conflict` helper
   that recognizes both.
+- **Windows raw-file-I/O in tests** — 7 tamper/WAL tests read
+  (`std::fs::read` or the `read_bytes` helper) or wrote raw bytes
+  while the Mnemo handle was still alive. On Unix `flock(2)` is
+  advisory so plain reads are unaffected; on Windows `LockFileEx`
+  is *mandatory* — any other open of a locked byte range fails with
+  `ERROR_LOCK_VIOLATION`. Added `drop(db);` right after `close()`
+  in `file_is_encrypted_at_rest`, `page_swap_attack_is_detected_by_aad`,
+  `wal_crash_recovery_replays_committed_txn`, `wal_heals_torn_header`,
+  `wal_discards_uncommitted_garbage`,
+  `wal_region_grows_for_large_catalog`, and inside the closure of
+  `fresh_file_uses_small_wal_by_default`. Removed the now-unreachable
+  `drop(db)` before subsequent reopens in the same tests.
 - **Python test `test_persistence_and_reopen` / `test_index_and_snapshots`
   / `test_wrong_passphrase`** — added `del db` after `close()` before
   reopens. Python's `close()` currently flushes but does not release

@@ -125,6 +125,10 @@ fn page_swap_attack_is_detected_by_aad() {
     let _ = db.get(&id_a).unwrap();
     let _ = db.get(&id_b).unwrap();
     db.close().unwrap();
+    // Windows LockFileEx is mandatory — release the write lock before
+    // the raw file read below (see file_is_encrypted_at_rest for the
+    // full rationale).
+    drop(db);
 
     // With the default 8-page WAL reservation and 4-dim records, each
     // record fits in a single page; record A lands at page 9 and record
@@ -153,8 +157,8 @@ fn page_swap_attack_is_detected_by_aad() {
     // Reopen and try to use the database. Any read that hits one of the
     // swapped pages must fail with PageAuthFailed — the v5 AAD binding
     // (none) made this attack silent; v6 binds page_no so the GCM tag
-    // refuses the wrong slot.
-    drop(db);
+    // refuses the wrong slot. (Writer already dropped above so the raw
+    // read/write could run under Windows' mandatory lock.)
     let mut db = Mnemo::open(&path, "pw").unwrap();
     let err_a = db.get(&id_a).unwrap_err();
     let err_b = db.get(&id_b).unwrap_err();
@@ -239,6 +243,11 @@ fn file_is_encrypted_at_rest() {
         .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
+    // Release the exclusive lock BEFORE the raw file read. `flock(2)` on
+    // Unix is advisory (`std::fs::read` doesn't care), but `LockFileEx`
+    // on Windows is *mandatory* — any other open of the file's byte
+    // range fails with ERROR_LOCK_VIOLATION while the lock is held.
+    drop(db);
 
     let raw = std::fs::read(&path).unwrap();
     let needle = secret.as_bytes();
@@ -670,16 +679,19 @@ fn wal_crash_recovery_replays_committed_txn() {
             .unwrap();
     }
     db.close().unwrap();
+    // Windows mandatory-lock: release before raw read.
+    drop(db);
     let snapshot = read_bytes(&path); // page 0 here points at the 5-memory state
 
     // State B: three more memories, cleanly flushed.
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for i in 5..8 {
         db.remember(Memory::new(format!("mem-{i}"), MemoryType::Semantic, vec4(i as f32, 0.0, 0.0, 0.0)))
             .unwrap();
     }
     db.close().unwrap();
+    // Release before the second raw read.
+    drop(db);
     let file_b = read_bytes(&path);
 
     // Frankenfile: state B's file with page 0 rewound to state A. This is
@@ -691,7 +703,7 @@ fn wal_crash_recovery_replays_committed_txn() {
     write_bytes(&franken, &bytes);
 
     // Opening it must replay the WAL and surface all eight memories.
-    drop(db);
+    // (Prior writer already dropped above.)
     let mut db = Mnemo::open(&franken, "pw").unwrap();
     assert_eq!(db.len(), 8, "WAL recovery must restore the committed txn");
     let contents: Vec<String> = db.memories().unwrap().into_iter().map(|m| m.content).collect();
@@ -710,6 +722,8 @@ fn wal_heals_torn_header() {
             .unwrap();
     }
     db.close().unwrap();
+    // Windows mandatory-lock: release before raw file I/O.
+    drop(db);
 
     // Corrupt the header page — simulate a torn write to page 0.
     let mut bytes = read_bytes(&path);
@@ -719,7 +733,6 @@ fn wal_heals_torn_header() {
     write_bytes(&path, &bytes);
 
     // Open must notice the bad CRC and rebuild page 0 from the WAL.
-    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 6, "torn header must self-heal from the WAL");
 }
@@ -737,6 +750,8 @@ fn wal_discards_uncommitted_garbage() {
             .unwrap();
     }
     db.close().unwrap();
+    // Windows mandatory-lock: release before raw file I/O.
+    drop(db);
 
     // Overwrite exactly the WAL region with 0xFF. The actual size lives in
     // the header (offset 194), so we read it rather than hardcoding — the
@@ -749,7 +764,6 @@ fn wal_discards_uncommitted_garbage() {
     }
     write_bytes(&path, &bytes);
 
-    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 5, "a garbage WAL must not disturb a checkpointed db");
 }
@@ -771,6 +785,8 @@ fn wal_region_grows_for_large_catalog() {
         db.remember(Memory::new("x", MemoryType::Semantic, v)).unwrap();
     }
     db.close().unwrap();
+    // Windows mandatory-lock: release before raw file I/O.
+    drop(db);
 
     // wal_pages lives at byte offset 194 of the (plaintext) header page.
     // 64 was the v0.1.0 default; even after dropping the default to 8, a
@@ -780,7 +796,6 @@ fn wal_region_grows_for_large_catalog() {
     assert!(wal_pages > 64, "WAL should have grown well past the default (got {wal_pages})");
 
     // The grown/relocated WAL must reopen cleanly with every memory intact.
-    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), n);
 }
@@ -801,12 +816,15 @@ fn fresh_file_uses_small_wal_by_default() {
 
     // Helper: create with `cfg`, write one memory + flush, return
     // (file length in bytes, the wal_pages value recorded in the header).
+    // Explicitly drops the write handle before reading raw bytes so
+    // Windows' mandatory `LockFileEx` doesn't refuse the read.
     let make = |path: &std::path::Path, cfg: MnemoConfig| -> (u64, u64) {
         let mut db = Mnemo::create(path, "pw", cfg).unwrap();
         db.remember(Memory::new("seed", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
             .unwrap();
         db.flush().unwrap();
         db.close().unwrap();
+        drop(db);
         let bytes = fs::metadata(path).unwrap().len();
         let raw = read_bytes(path);
         let wal_pages = u64::from_le_bytes(raw[194..202].try_into().unwrap());
