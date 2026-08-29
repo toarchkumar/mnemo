@@ -380,35 +380,86 @@ fn mcp_serve_initialize_list_and_call_tools() {
         db.flush().unwrap();
     }
 
-    let mut child = Command::new(bin())
-        .args(["serve", path.to_str().unwrap(), "--mcp"])
-        .env("MNEMO_PASSPHRASE", pp)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn mnemo serve --mcp");
+    // ---- Race note (Linux only, observed on Rust 1.75 MSRV CI, 2026-08-29) ----
+    // cargo runs `integration.rs` and `cli_smoke.rs` in parallel; several
+    // integration tests fork subprocesses of their own via `Command::spawn`.
+    // On Rust 1.75 Linux, `Command::spawn` still uses fork+exec, which
+    // briefly clones ALL parent FDs into the sibling child before exec's
+    // CLOEXEC pass drops them. If a sibling test forks while our own
+    // scoped seed writer above is mid-drop, an inherited copy of the
+    // writer's FD can keep the flock on `mcp.mnemo` alive for a few
+    // milliseconds after our writer's `db` has dropped. Our `mnemo serve
+    // --mcp` subprocess then loses the race for `try_lock_exclusive` and
+    // exits with `MnemoError::Locked`. Stable Rust switched `spawn` to
+    // `posix_spawn`, which skips the FD-clone window, so this reproduces
+    // only on the MSRV Linux job.
+    //
+    // Fix scope: **test-only retry**. We re-spawn the whole session up
+    // to 5 times with 100/200/400/800 ms backoff, but ONLY when the
+    // child stderr carries the specific `file already locked` marker.
+    // Any other non-zero exit falls through to the normal assertion
+    // below with the same panic message it used to have. Do not weaken
+    // the engine — the exclusive lock is a correctness invariant for
+    // Phase 1.1; the race is inherent to fork+exec-plus-parallel-tests
+    // on 1.75 and cannot recur once the process is stable.
+    // -------------------------------------------------------------------------
+    let mut out_opt = None;
+    let mut last_stderr = String::new();
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            // 100 ms → 200 → 400 → 800; cumulative worst case ~1.5 s.
+            let backoff_ms = 100u64 << (attempt - 1);
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        }
+        let mut child = Command::new(bin())
+            .args(["serve", path.to_str().unwrap(), "--mcp"])
+            .env("MNEMO_PASSPHRASE", pp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn mnemo serve --mcp");
 
-    // Scripted client session: initialize, then list tools, then call
-    // `stats`. Each line is one JSON-RPC message. Closing stdin ends
-    // the loop and the child exits.
-    let stdin = child.stdin.as_mut().expect("child stdin missing");
-    let script = [
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
-        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#,
-    ];
-    for line in script {
-        writeln!(stdin, "{line}").unwrap();
+        // Scripted client session: initialize, then list tools, then call
+        // `stats`. Each line is one JSON-RPC message. Closing stdin ends
+        // the loop and the child exits.
+        let stdin = child.stdin.as_mut().expect("child stdin missing");
+        let script = [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#,
+        ];
+        for line in script {
+            writeln!(stdin, "{line}").unwrap();
+        }
+        // Close stdin — signals EOF to the server's read loop.
+        drop(child.stdin.take());
+
+        // Wait for shutdown (bounded — the server should exit as soon as
+        // stdin closes; hanging here would fail the test with a timeout
+        // at the test-runner level).
+        let run = child.wait_with_output().expect("child wait failed");
+        if !run.status.success() {
+            let stderr_snapshot = String::from_utf8_lossy(&run.stderr).into_owned();
+            if stderr_snapshot.contains("file already locked") {
+                // Race lost — retry after backoff.
+                last_stderr = stderr_snapshot;
+                continue;
+            }
+            // Any other failure: bubble up unchanged.
+            out_opt = Some(run);
+            break;
+        }
+        out_opt = Some(run);
+        break;
     }
-    // Close stdin — signals EOF to the server's read loop.
-    drop(child.stdin.take());
-
-    // Wait for shutdown (bounded — the server should exit as soon as
-    // stdin closes; hanging here would fail the test with a timeout at
-    // the test-runner level).
-    let out = child.wait_with_output().expect("child wait failed");
+    let out = out_opt.unwrap_or_else(|| {
+        panic!(
+            "mnemo serve --mcp lost the fork/flock race on all 5 attempts \
+             (bounded retry exhausted); last stderr:\n{last_stderr}"
+        )
+    });
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(
