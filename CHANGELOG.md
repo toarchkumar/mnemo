@@ -8,6 +8,48 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-28
+
+**On-disk format v7 → v8.** Files written by v0.3.x on v4/v5/v6/v7
+migrate transparently on first open under v0.4.0 (the existing
+cascade migration extends by one step). **Files written by v0.4.0
+do NOT open on v0.3.x** — the header seal's AAD now covers the
+new cache-directory pointer, so a 0.3.x build reads the file as
+tampered rather than trying to interpret unknown bytes. Pre-1.0,
+the minor-version bump carries the breaking-change signal, so
+this is 0.4.0 rather than 0.3.3.
+
+Cumulative feature deltas since v0.3.2, grouped by shipping PR:
+
+- **PR 1 — Phase 1.1 file locking + read-only opens** (`fs4`,
+  `MnemoError::Locked`/`ReadOnly`/`NeedsWriteOpen`,
+  `Mnemo::open_read_only`, CLI `recall --no-track`, Python
+  `mnemo.open(..., read_only=True)`).
+- **PR 2 — Phase 4 MCP server** (`mnemo serve --mcp`, hand-rolled
+  JSON-RPC 2.0, 7 initial tools, `MNEMO_PASSPHRASE`-only auth,
+  ready-to-paste Claude Desktop config in the README).
+- **PR 3 — Phase 10.1 + 10.3 exact-key result cache, format v8**
+  (`result_cache.rs`, `Mnemo::cache_put`/`get`/`delete`/`purge`/
+  `stats`, `CacheFlushPolicy::Strict`/`Batched`, CLI
+  `mnemo cache <op>`, `page_cache_stats` rename).
+- **PR 4 — Phase 10.2 semantic cache** (`cache_put_semantic` /
+  `cache_get_semantic`, `SemanticCachePutOpts` with mandatory
+  `model`, `DEFAULT_SEMANTIC_THRESHOLD = 0.97`, no format bump —
+  optional fields ride under `#[serde(default)]`).
+- **PR 5 — Phase 10.4 live surfaces** (five new MCP cache tools,
+  seven new Python `cache_*` methods, ~90-line `@db.cached(...)`
+  decorator recipe with OpenAI/Anthropic/semantic-mode examples
+  in `mnemo-python/README.md`).
+
+Two hotfixes on top of PR 1 kept CI green after Windows exposed
+that `LockFileEx` returns `ERROR_LOCK_VIOLATION` (raw OS code 33)
+as `ErrorKind::Uncategorized`, and that it is mandatory (unlike
+Unix `flock`) — so several tamper/WAL tests needed `drop(db)`
+before raw file reads.
+
+Sections below capture the full change list unchanged from the
+`[Unreleased]` sequence that these PRs appended.
+
 ### Fixed
 
 - **Windows lock-conflict detection** — `open_with_lock` previously

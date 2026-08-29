@@ -13,7 +13,11 @@ use tempfile::tempdir;
 
 /// Config with cheap KDF params for fast tests.
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
-    MnemoConfig { dimensions, kdf: KdfParams::fast(), ..Default::default() }
+    MnemoConfig {
+        dimensions,
+        kdf: KdfParams::fast(),
+        ..Default::default()
+    }
 }
 
 fn vec4(a: f32, b: f32, c: f32, d: f32) -> Vec<f32> {
@@ -29,15 +33,25 @@ fn create_insert_search_reopen_recall() {
     assert!(db.is_empty());
 
     let id = db
-        .remember(Memory::new("hello world", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
+        .remember(Memory::new(
+            "hello world",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
-    db.remember(Memory::new("goodbye", MemoryType::Episodic, vec4(0.0, 1.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "goodbye",
+        MemoryType::Episodic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
     assert_eq!(db.len(), 2);
 
     // Exact search finds the nearest vector first.
-    let hits = db.search(&vec4(0.9, 0.1, 0.0, 0.0), 1, Metric::Cosine).unwrap();
+    let hits = db
+        .search(&vec4(0.9, 0.1, 0.0, 0.0), 1, Metric::Cosine)
+        .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].0.content, "hello world");
 
@@ -50,7 +64,9 @@ fn create_insert_search_reopen_recall() {
     drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 2);
-    let res = db.recall(&RecallRequest::new(vec4(0.9, 0.1, 0.0, 0.0)).top_k(2)).unwrap();
+    let res = db
+        .recall(&RecallRequest::new(vec4(0.9, 0.1, 0.0, 0.0)).top_k(2))
+        .unwrap();
     assert_eq!(res.len(), 2);
     assert_eq!(res[0].memory.content, "hello world");
 }
@@ -76,8 +92,12 @@ fn header_tamper_is_detected_by_v7_seal() {
     let path = dir.path().join("tamper.mnemo");
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("x", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "x",
+        MemoryType::Working,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
     // Release the exclusive lock before the reopen; without this the
@@ -116,10 +136,18 @@ fn page_swap_attack_is_detected_by_aad() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     let id_a = db
-        .remember(Memory::new("ALPHA_AAA", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
+        .remember(Memory::new(
+            "ALPHA_AAA",
+            MemoryType::Working,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
     let id_b = db
-        .remember(Memory::new("BETA_BBBB", MemoryType::Working, vec4(0.0, 1.0, 0.0, 0.0)))
+        .remember(Memory::new(
+            "BETA_BBBB",
+            MemoryType::Working,
+            vec4(0.0, 1.0, 0.0, 0.0),
+        ))
         .unwrap();
     db.flush().unwrap();
     // Pull the page slots from a successful get before swapping.
@@ -142,7 +170,10 @@ fn page_swap_attack_is_detected_by_aad() {
     let mut bytes = read_bytes(&path);
     let off_a = PAGE_A * PAGE_SIZE;
     let off_b = PAGE_B * PAGE_SIZE;
-    assert!(off_b + PAGE_SIZE <= bytes.len(), "file too short for expected layout");
+    assert!(
+        off_b + PAGE_SIZE <= bytes.len(),
+        "file too short for expected layout"
+    );
     let nonce_a: [u8; 12] = bytes[off_a..off_a + 12].try_into().unwrap();
     let nonce_b: [u8; 12] = bytes[off_b..off_b + 12].try_into().unwrap();
     assert_ne!(
@@ -183,10 +214,18 @@ fn recall_does_not_rewrite_records() {
 
     // Seed two memories and flush.
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("a", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
-    db.remember(Memory::new("b", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "a",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    db.remember(Memory::new(
+        "b",
+        MemoryType::Semantic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
     let baseline = fs::metadata(&path).unwrap().len();
 
@@ -226,7 +265,13 @@ fn recall_does_not_rewrite_records() {
     }
 
     // Sanity: access stats actually got bumped despite no record rewrites.
-    let hits = db.recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(1).track_access(false)).unwrap();
+    let hits = db
+        .recall(
+            &RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+                .top_k(1)
+                .track_access(false),
+        )
+        .unwrap();
     assert!(
         hits[0].memory.access_count > 0,
         "track_access(true) recalls should have bumped access_count via the catalog"
@@ -240,8 +285,12 @@ fn file_is_encrypted_at_rest() {
 
     let secret = "TOP-SECRET-PLAINTEXT-MARKER";
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new(secret, MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        secret,
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
     // Release the exclusive lock BEFORE the raw file read. `flock(2)` on
@@ -253,7 +302,10 @@ fn file_is_encrypted_at_rest() {
     let raw = std::fs::read(&path).unwrap();
     let needle = secret.as_bytes();
     let found = raw.windows(needle.len()).any(|w| w == needle);
-    assert!(!found, "plaintext content must not appear in the on-disk file");
+    assert!(
+        !found,
+        "plaintext content must not appear in the on-disk file"
+    );
 }
 
 #[test]
@@ -262,8 +314,12 @@ fn wrong_passphrase_is_rejected() {
     let path = dir.path().join("wp.mnemo");
 
     let mut db = Mnemo::create(&path, "correct", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("x", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "x",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.close().unwrap();
     // Drop the write handle before reopening: otherwise the exclusive
     // OS lock would cause both open attempts below to return `Locked`,
@@ -280,8 +336,12 @@ fn rekey_changes_the_passphrase() {
     let path = dir.path().join("rk.mnemo");
 
     let mut db = Mnemo::create(&path, "old-pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("durable", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "durable",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
     db.rekey("new-pw", KdfParams::fast()).unwrap();
     db.close().unwrap();
@@ -290,7 +350,10 @@ fn rekey_changes_the_passphrase() {
     // (which would still pass `.is_err()` but for the wrong reason).
     drop(db);
 
-    assert!(Mnemo::open(&path, "old-pw").is_err(), "old passphrase must fail");
+    assert!(
+        Mnemo::open(&path, "old-pw").is_err(),
+        "old passphrase must fail"
+    );
     let mut db = Mnemo::open(&path, "new-pw").unwrap();
     assert_eq!(db.len(), 1);
     let id = db.memories().unwrap()[0].id;
@@ -304,20 +367,32 @@ fn copy_on_write_crash_safety() {
 
     // State A: one memory, flushed.
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("state-a", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "state-a",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
 
     // Write more WITHOUT flushing, then simulate a crash by dropping.
-    db.remember(Memory::new("uncommitted", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "uncommitted",
+        MemoryType::Semantic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    ))
+    .unwrap();
     drop(db); // no flush — header still points at state A
 
     // Reopen: must see the last consistent state, uncorrupted.
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 1, "only the flushed state should survive");
     assert_eq!(db.memories().unwrap()[0].content, "state-a");
-    assert_eq!(db.verify().unwrap(), 1, "surviving record must decrypt and decode");
+    assert_eq!(
+        db.verify().unwrap(),
+        1,
+        "surviving record must decrypt and decode"
+    );
 }
 
 #[test]
@@ -331,12 +406,18 @@ fn ttl_expiry_hides_memories() {
         Memory::new("ephemeral", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)).with_ttl(0),
     )
     .unwrap();
-    db.remember(Memory::new("permanent", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "permanent",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
 
     // Both are catalog-live, but recall/search skip the expired one.
-    let res = db.recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(10)).unwrap();
+    let res = db
+        .recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(10))
+        .unwrap();
     assert_eq!(res.len(), 1);
     assert_eq!(res[0].memory.content, "permanent");
 }
@@ -348,10 +429,20 @@ fn delete_then_compact_drops_tombstones() {
     let path_str = path.to_str().unwrap();
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    let keep =
-        db.remember(Memory::new("keep", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))).unwrap();
-    let drop_id =
-        db.remember(Memory::new("drop", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0))).unwrap();
+    let keep = db
+        .remember(Memory::new(
+            "keep",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+    let drop_id = db
+        .remember(Memory::new(
+            "drop",
+            MemoryType::Semantic,
+            vec4(0.0, 1.0, 0.0, 0.0),
+        ))
+        .unwrap();
     db.delete(&drop_id).unwrap();
     db.flush().unwrap();
     assert_eq!(db.len(), 1);
@@ -377,18 +468,28 @@ fn recall_ranking_uses_importance() {
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     // Two memories with identical vectors but different importance.
     db.remember(
-        Memory::new("low importance", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
-            .with_importance(0.0),
+        Memory::new(
+            "low importance",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_importance(0.0),
     )
     .unwrap();
     db.remember(
-        Memory::new("high importance", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
-            .with_importance(1.0),
+        Memory::new(
+            "high importance",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_importance(1.0),
     )
     .unwrap();
     db.flush().unwrap();
 
-    let res = db.recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(2)).unwrap();
+    let res = db
+        .recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(2))
+        .unwrap();
     assert_eq!(res.len(), 2);
     assert_eq!(
         res[0].memory.content, "high importance",
@@ -404,30 +505,49 @@ fn agent_scoping_filters_recall() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     db.remember(
-        Memory::new("alice private", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
-            .with_agent("alice"),
+        Memory::new(
+            "alice private",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_agent("alice"),
     )
     .unwrap();
     db.remember(
-        Memory::new("bob private", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
-            .with_agent("bob"),
+        Memory::new(
+            "bob private",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_agent("bob"),
     )
     .unwrap();
     db.remember(
-        Memory::new("shared note", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
-            .with_agent("bob")
-            .with_scope(mnemo::Scope::Shared),
+        Memory::new(
+            "shared note",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_agent("bob")
+        .with_scope(mnemo::Scope::Shared),
     )
     .unwrap();
     db.flush().unwrap();
 
     let res = db
-        .recall(&RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0)).top_k(10).agent("alice"))
+        .recall(
+            &RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+                .top_k(10)
+                .agent("alice"),
+        )
         .unwrap();
     let contents: Vec<&str> = res.iter().map(|r| r.memory.content.as_str()).collect();
     assert!(contents.contains(&"alice private"));
     assert!(contents.contains(&"shared note"));
-    assert!(!contents.contains(&"bob private"), "alice must not see bob's private memory");
+    assert!(
+        !contents.contains(&"bob private"),
+        "alice must not see bob's private memory"
+    );
 }
 
 #[test]
@@ -446,10 +566,18 @@ fn type_filter_restricts_recall() {
     let path = dir.path().join("type.mnemo");
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("a fact", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
-    db.remember(Memory::new("an event", MemoryType::Episodic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "a fact",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    db.remember(Memory::new(
+        "an event",
+        MemoryType::Episodic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap();
 
     let res = db
@@ -495,7 +623,13 @@ impl Rng {
 /// Score weights that depend on similarity only — makes recall ranking
 /// directly comparable to exact search.
 fn sim_only() -> ScoreWeights {
-    ScoreWeights { alpha: 1.0, beta: 0.0, gamma: 0.0, delta: 0.0, half_life_secs: 1.0 }
+    ScoreWeights {
+        alpha: 1.0,
+        beta: 0.0,
+        gamma: 0.0,
+        delta: 0.0,
+        half_life_secs: 1.0,
+    }
 }
 
 /// Build a clustered dataset (like real embeddings) and verify the ANN index
@@ -517,7 +651,8 @@ fn ann_index_recall_quality() {
     for c in &centers {
         for _ in 0..per_cluster {
             let v: Vec<f32> = c.iter().map(|&x| x + rng.normalish() * 0.3).collect();
-            db.remember(Memory::new("vec", MemoryType::Semantic, v)).unwrap();
+            db.remember(Memory::new("vec", MemoryType::Semantic, v))
+                .unwrap();
         }
     }
     db.flush().unwrap();
@@ -528,7 +663,10 @@ fn ann_index_recall_quality() {
     let queries: Vec<Vec<f32>> = (0..30)
         .map(|_| {
             let ci = (rng.next_u64() as usize) % n_clusters;
-            centers[ci].iter().map(|&x| x + rng.normalish() * 0.3).collect()
+            centers[ci]
+                .iter()
+                .map(|&x| x + rng.normalish() * 0.3)
+                .collect()
         })
         .collect();
 
@@ -554,7 +692,10 @@ fn ann_index_recall_quality() {
     let mut overlap = 0usize;
     let mut total = 0usize;
     for (q, want) in queries.iter().zip(&exact) {
-        let mut req = RecallRequest::new(q.clone()).top_k(10).n_probe(20).n_rerank(200);
+        let mut req = RecallRequest::new(q.clone())
+            .top_k(10)
+            .n_probe(20)
+            .n_rerank(200);
         req.metric = Metric::L2;
         req.weights = sim_only();
         for h in db.recall(&req).unwrap() {
@@ -565,7 +706,10 @@ fn ann_index_recall_quality() {
         total += want.len();
     }
     let recall = overlap as f64 / total as f64;
-    assert!(recall >= 0.95, "ANN recall@10 was {recall:.3}, expected >= 0.95");
+    assert!(
+        recall >= 0.95,
+        "ANN recall@10 was {recall:.3}, expected >= 0.95"
+    );
 }
 
 /// The index must persist across a close/reopen cycle.
@@ -579,7 +723,8 @@ fn index_survives_reopen() {
     let mut rng = Rng::new(7);
     for _ in 0..120 {
         let v: Vec<f32> = (0..dims).map(|_| rng.normalish()).collect();
-        db.remember(Memory::new("m", MemoryType::Semantic, v)).unwrap();
+        db.remember(Memory::new("m", MemoryType::Semantic, v))
+            .unwrap();
     }
     db.build_index().unwrap();
     db.close().unwrap();
@@ -604,14 +749,16 @@ fn index_incremental_insert_is_searchable() {
     let mut rng = Rng::new(99);
     for _ in 0..100 {
         let v: Vec<f32> = (0..dims).map(|_| rng.normalish()).collect();
-        db.remember(Memory::new("old", MemoryType::Semantic, v)).unwrap();
+        db.remember(Memory::new("old", MemoryType::Semantic, v))
+            .unwrap();
     }
     db.build_index().unwrap();
 
     // Insert a distinctive vector after the index exists.
     let needle = vec![9.0f32; dims];
-    let needle_id =
-        db.remember(Memory::new("needle", MemoryType::Semantic, needle.clone())).unwrap();
+    let needle_id = db
+        .remember(Memory::new("needle", MemoryType::Semantic, needle.clone()))
+        .unwrap();
     db.flush().unwrap();
 
     let mut req = RecallRequest::new(needle).top_k(1).n_probe(8).n_rerank(64);
@@ -619,7 +766,10 @@ fn index_incremental_insert_is_searchable() {
     req.weights = sim_only();
     let hits = db.recall(&req).unwrap();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].memory.id, needle_id, "post-build insert must be indexed");
+    assert_eq!(
+        hits[0].memory.id, needle_id,
+        "post-build insert must be indexed"
+    );
 }
 
 /// Dropping the index reverts recall to exact scans; compaction rebuilds it.
@@ -634,7 +784,8 @@ fn index_drop_and_compact_rebuild() {
     let mut rng = Rng::new(55);
     for _ in 0..80 {
         let v: Vec<f32> = (0..dims).map(|_| rng.normalish()).collect();
-        db.remember(Memory::new("m", MemoryType::Semantic, v)).unwrap();
+        db.remember(Memory::new("m", MemoryType::Semantic, v))
+            .unwrap();
     }
     db.build_index().unwrap();
     db.drop_index();
@@ -676,8 +827,12 @@ fn wal_crash_recovery_replays_committed_txn() {
     // State A: five memories, cleanly flushed.
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     for i in 0..5 {
-        db.remember(Memory::new(format!("mem-{i}"), MemoryType::Semantic, vec4(i as f32, 0.0, 0.0, 0.0)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("mem-{i}"),
+            MemoryType::Semantic,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
     }
     db.close().unwrap();
     // Windows mandatory-lock: release before raw read.
@@ -687,8 +842,12 @@ fn wal_crash_recovery_replays_committed_txn() {
     // State B: three more memories, cleanly flushed.
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for i in 5..8 {
-        db.remember(Memory::new(format!("mem-{i}"), MemoryType::Semantic, vec4(i as f32, 0.0, 0.0, 0.0)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("mem-{i}"),
+            MemoryType::Semantic,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
     }
     db.close().unwrap();
     // Release before the second raw read.
@@ -707,7 +866,12 @@ fn wal_crash_recovery_replays_committed_txn() {
     // (Prior writer already dropped above.)
     let mut db = Mnemo::open(&franken, "pw").unwrap();
     assert_eq!(db.len(), 8, "WAL recovery must restore the committed txn");
-    let contents: Vec<String> = db.memories().unwrap().into_iter().map(|m| m.content).collect();
+    let contents: Vec<String> = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
     assert!(contents.contains(&"mem-7".to_string()));
 }
 
@@ -719,8 +883,12 @@ fn wal_heals_torn_header() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     for i in 0..6 {
-        db.remember(Memory::new(format!("k-{i}"), MemoryType::Episodic, vec4(i as f32, 1.0, 2.0, 3.0)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("k-{i}"),
+            MemoryType::Episodic,
+            vec4(i as f32, 1.0, 2.0, 3.0),
+        ))
+        .unwrap();
     }
     db.close().unwrap();
     // Windows mandatory-lock: release before raw file I/O.
@@ -747,8 +915,12 @@ fn wal_discards_uncommitted_garbage() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     for i in 0..5 {
-        db.remember(Memory::new(format!("g-{i}"), MemoryType::Working, vec4(i as f32, 0.0, 0.0, 0.0)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("g-{i}"),
+            MemoryType::Working,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
     }
     db.close().unwrap();
     // Windows mandatory-lock: release before raw file I/O.
@@ -766,7 +938,11 @@ fn wal_discards_uncommitted_garbage() {
     write_bytes(&path, &bytes);
 
     let db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.len(), 5, "a garbage WAL must not disturb a checkpointed db");
+    assert_eq!(
+        db.len(),
+        5,
+        "a garbage WAL must not disturb a checkpointed db"
+    );
 }
 
 /// The WAL region grows automatically once a transaction's control plane
@@ -783,7 +959,8 @@ fn wal_region_grows_for_large_catalog() {
     let mut rng = Rng::new(7);
     for _ in 0..n {
         let v = vec![rng.unit(), rng.unit()];
-        db.remember(Memory::new("x", MemoryType::Semantic, v)).unwrap();
+        db.remember(Memory::new("x", MemoryType::Semantic, v))
+            .unwrap();
     }
     db.close().unwrap();
     // Windows mandatory-lock: release before raw file I/O.
@@ -794,7 +971,10 @@ fn wal_region_grows_for_large_catalog() {
     // 22k-memory catalog still forces growth well past 64.
     let bytes = read_bytes(&path);
     let wal_pages = u64::from_le_bytes(bytes[194..202].try_into().unwrap());
-    assert!(wal_pages > 64, "WAL should have grown well past the default (got {wal_pages})");
+    assert!(
+        wal_pages > 64,
+        "WAL should have grown well past the default (got {wal_pages})"
+    );
 
     // The grown/relocated WAL must reopen cleanly with every memory intact.
     let db = Mnemo::open(&path, "pw").unwrap();
@@ -821,8 +1001,12 @@ fn fresh_file_uses_small_wal_by_default() {
     // Windows' mandatory `LockFileEx` doesn't refuse the read.
     let make = |path: &std::path::Path, cfg: MnemoConfig| -> (u64, u64) {
         let mut db = Mnemo::create(path, "pw", cfg).unwrap();
-        db.remember(Memory::new("seed", MemoryType::Working, vec4(1.0, 0.0, 0.0, 0.0)))
-            .unwrap();
+        db.remember(Memory::new(
+            "seed",
+            MemoryType::Working,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
         db.flush().unwrap();
         db.close().unwrap();
         drop(db);
@@ -1051,8 +1235,12 @@ fn snapshots_record_every_flush() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     for i in 0..3 {
-        db.remember(Memory::new(format!("m{i}"), MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0))).unwrap();
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Semantic,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
         db.flush().unwrap();
     }
     db.close().unwrap();
@@ -1139,8 +1327,13 @@ fn restore_rewinds_and_rolls_forward() {
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     let mut ids = Vec::new();
     for i in 0..3 {
-        let id = db.remember(Memory::new(format!("content-{i}"), MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0))).unwrap();
+        let id = db
+            .remember(Memory::new(
+                format!("content-{i}"),
+                MemoryType::Semantic,
+                vec4(i as f32, 0.0, 0.0, 0.0),
+            ))
+            .unwrap();
         db.flush().unwrap(); // snapshot txn i+1 holds i+1 memories
         ids.push(id);
     }
@@ -1177,15 +1370,23 @@ fn restore_to_a_past_instant() {
     let path = dir.path().join("t.mnemo");
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.remember(Memory::new("first", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "first",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap(); // snapshot 1
 
     // Ensure the next snapshot lands in a strictly later second.
     std::thread::sleep(std::time::Duration::from_millis(1100));
 
-    db.remember(Memory::new("second", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)))
-        .unwrap();
+    db.remember(Memory::new(
+        "second",
+        MemoryType::Semantic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    ))
+    .unwrap();
     db.flush().unwrap(); // snapshot 2
 
     let snaps = db.snapshots();
@@ -1216,8 +1417,12 @@ fn compaction_collapses_history() {
 
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     for i in 0..4 {
-        db.remember(Memory::new(format!("m{i}"), MemoryType::Episodic,
-            vec4(i as f32, 0.0, 0.0, 0.0))).unwrap();
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Episodic,
+            vec4(i as f32, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
         db.flush().unwrap();
     }
     assert_eq!(db.snapshots().len(), 4);
@@ -1246,8 +1451,12 @@ fn session_turns_written_as_working() {
     let (ids, sid) = {
         let mut s = db.session("assistant-7");
         let sid = s.id().to_string();
-        let a = s.add_turn(Turn::user("hello", vec![1.0, 0.0, 0.0])).unwrap();
-        let b = s.add_turn(Turn::assistant("hi there", vec![0.0, 1.0, 0.0])).unwrap();
+        let a = s
+            .add_turn(Turn::user("hello", vec![1.0, 0.0, 0.0]))
+            .unwrap();
+        let b = s
+            .add_turn(Turn::assistant("hi there", vec![0.0, 1.0, 0.0]))
+            .unwrap();
         assert_eq!(s.turn_count(), 2);
         assert_eq!(s.agent(), "assistant-7");
         (vec![a, b], sid)
@@ -1262,7 +1471,10 @@ fn session_turns_written_as_working() {
         assert_eq!(m.session_id.as_deref(), Some(sid.as_str()));
     }
     let first = db.get(&ids[0]).unwrap();
-    assert_eq!(first.metadata.get("role").and_then(|v| v.as_str()), Some("user"));
+    assert_eq!(
+        first.metadata.get("role").and_then(|v| v.as_str()),
+        Some("user")
+    );
 }
 
 /// Closing a session consolidates its working turns into episodic memory,
@@ -1308,8 +1520,12 @@ fn session_discard_deletes_turns() {
 
     let ids = {
         let mut s = db.session("agent-x");
-        let a = s.add_turn(Turn::user("scratch", vec![1.0, 0.0, 0.0])).unwrap();
-        let b = s.add_turn(Turn::assistant("noise", vec![0.0, 1.0, 0.0])).unwrap();
+        let a = s
+            .add_turn(Turn::user("scratch", vec![1.0, 0.0, 0.0]))
+            .unwrap();
+        let b = s
+            .add_turn(Turn::assistant("noise", vec![0.0, 1.0, 0.0]))
+            .unwrap();
         let removed = s.discard().unwrap();
         assert_eq!(removed, 2);
         vec![a, b]
@@ -1329,20 +1545,25 @@ fn session_recall_is_agent_scoped() {
     let mut db = Mnemo::create(&path, "pw", fast_cfg(3)).unwrap();
 
     db.remember(
-        Memory::new("bob-private-secret", MemoryType::Semantic, vec![1.0, 0.0, 0.0])
-            .with_agent("bob"),
+        Memory::new(
+            "bob-private-secret",
+            MemoryType::Semantic,
+            vec![1.0, 0.0, 0.0],
+        )
+        .with_agent("bob"),
     )
     .unwrap();
     db.remember(
-        Memory::new("alice-fact", MemoryType::Semantic, vec![1.0, 0.0, 0.0])
-            .with_agent("alice"),
+        Memory::new("alice-fact", MemoryType::Semantic, vec![1.0, 0.0, 0.0]).with_agent("alice"),
     )
     .unwrap();
     db.flush().unwrap();
 
     let contents: Vec<String> = {
         let mut s = db.session("alice");
-        let hits = s.recall(RecallRequest::new(vec![1.0, 0.0, 0.0]).top_k(10)).unwrap();
+        let hits = s
+            .recall(RecallRequest::new(vec![1.0, 0.0, 0.0]).top_k(10))
+            .unwrap();
         hits.into_iter().map(|h| h.memory.content).collect()
     };
     assert!(contents.contains(&"alice-fact".to_string()));
@@ -1391,9 +1612,11 @@ fn writer_blocks_read_only_open_on_all_platforms() {
     let path = dir.path().join("t.mnemo");
 
     let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    w.remember(
-        Memory::new("hello", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
-    )
+    w.remember(Memory::new(
+        "hello",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
     .unwrap();
     w.flush().unwrap();
 
@@ -1427,9 +1650,11 @@ fn multiple_read_only_handles_coexist() {
 
     {
         let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-        w.remember(
-            Memory::new("seed", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
-        )
+        w.remember(Memory::new(
+            "seed",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
         w.flush().unwrap();
     } // writer dropped — exclusive lock released
@@ -1457,17 +1682,21 @@ fn read_only_handle_refuses_mutations() {
 
     {
         let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-        w.remember(
-            Memory::new("seed", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
-        )
+        w.remember(Memory::new(
+            "seed",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
         w.flush().unwrap();
     } // writer dropped here — lock released
 
     let mut r = Mnemo::open_read_only(&path, "pw").unwrap();
-    match r.remember(
-        Memory::new("nope", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
-    ) {
+    match r.remember(Memory::new(
+        "nope",
+        MemoryType::Semantic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    )) {
         Err(MnemoError::ReadOnly) => {}
         other => panic!("expected ReadOnly on remember, got {other:?}"),
     }
@@ -1509,17 +1738,21 @@ fn read_only_open_refused_when_wal_needs_recovery() {
     // half-written and the header still leased.
     {
         let mut w = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-        w.remember(
-            Memory::new("crash-victim", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
-        )
+        w.remember(Memory::new(
+            "crash-victim",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
         // Full flush first, then a dirty-only partial that leaves a
         // committed WAL transaction. The partial helper only exists to
         // produce this exact "recovery needed on next open" state.
         w.flush().unwrap();
-        w.remember(
-            Memory::new("crash-second", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
-        )
+        w.remember(Memory::new(
+            "crash-second",
+            MemoryType::Semantic,
+            vec4(0.0, 1.0, 0.0, 0.0),
+        ))
         .unwrap();
         w.__crash_partial_flush_for_testing().unwrap();
         // `Mnemo` has no `Drop` impl, so falling out of scope just
@@ -1576,8 +1809,13 @@ fn cache_put_get_roundtrip_json_text_bytes() {
         .unwrap();
     db.cache_put("prefs", "user-1", text_val, cache_opts("text", None))
         .unwrap();
-    db.cache_put("http", "GET /avatar.png", bin_val, cache_opts("bytes", None))
-        .unwrap();
+    db.cache_put(
+        "http",
+        "GET /avatar.png",
+        bin_val,
+        cache_opts("bytes", None),
+    )
+    .unwrap();
     db.flush().unwrap();
 
     let got_json = db.cache_get("llm", "prompt-42").unwrap().expect("hit");
@@ -1587,7 +1825,10 @@ fn cache_put_get_roundtrip_json_text_bytes() {
     let got_text = db.cache_get("prefs", "user-1").unwrap().expect("hit");
     assert_eq!(got_text.value, text_val);
 
-    let got_bin = db.cache_get("http", "GET /avatar.png").unwrap().expect("hit");
+    let got_bin = db
+        .cache_get("http", "GET /avatar.png")
+        .unwrap()
+        .expect("hit");
     assert_eq!(got_bin.value, bin_val);
     assert_eq!(got_bin.content_type, "bytes");
 }
@@ -1599,8 +1840,13 @@ fn cache_ttl_expiry_hides_entries_as_miss() {
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
     // 0-second TTL → immediately expired (created_at is `now`, ttl is 0,
     // now - created_at == 0 >= 0). Same convention as memory TTL.
-    db.cache_put("llm", "ephemeral", b"gone by now", cache_opts("text", Some(0)))
-        .unwrap();
+    db.cache_put(
+        "llm",
+        "ephemeral",
+        b"gone by now",
+        cache_opts("text", Some(0)),
+    )
+    .unwrap();
     db.flush().unwrap();
 
     let hit = db.cache_get("llm", "ephemeral").unwrap();
@@ -1619,8 +1865,10 @@ fn cache_stats_counters_track_hits_and_misses() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("stats.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.cache_put("llm", "k1", b"v1", cache_opts("text", None)).unwrap();
-    db.cache_put("llm", "k2", b"v2", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "k1", b"v1", cache_opts("text", None))
+        .unwrap();
+    db.cache_put("llm", "k2", b"v2", cache_opts("text", None))
+        .unwrap();
     db.flush().unwrap();
 
     // 3 hits, 2 misses on the "llm" namespace.
@@ -1654,26 +1902,36 @@ fn cache_budget_evicts_lru_on_overflow() {
     // LRU (first-inserted, never touched).
     db.set_cache_budget(
         "llm",
-        CacheBudget { max_entries: 3, max_bytes: 1 << 30 },
+        CacheBudget {
+            max_entries: 3,
+            max_bytes: 1 << 30,
+        },
     );
 
-    db.cache_put("llm", "a", b"AAA", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "a", b"AAA", cache_opts("text", None))
+        .unwrap();
     // Sleep to guarantee monotonic accessed_at deltas — `memory::now_secs()`
     // has 1-second resolution.
     std::thread::sleep(std::time::Duration::from_millis(1050));
-    db.cache_put("llm", "b", b"BBB", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "b", b"BBB", cache_opts("text", None))
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1050));
-    db.cache_put("llm", "c", b"CCC", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "c", b"CCC", cache_opts("text", None))
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1050));
     // Insert 4th → LRU (a, oldest accessed_at) evicted.
-    db.cache_put("llm", "d", b"DDD", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "d", b"DDD", cache_opts("text", None))
+        .unwrap();
     db.flush().unwrap();
 
     let s = db.cache_stats(Some("llm"));
     assert_eq!(s.entries, 3, "budget cap enforced after insert");
     assert!(s.evictions >= 1, "at least one eviction recorded");
 
-    assert!(db.cache_get("llm", "a").unwrap().is_none(), "'a' should be evicted");
+    assert!(
+        db.cache_get("llm", "a").unwrap().is_none(),
+        "'a' should be evicted"
+    );
     assert!(db.cache_get("llm", "b").unwrap().is_some());
     assert!(db.cache_get("llm", "c").unwrap().is_some());
     assert!(db.cache_get("llm", "d").unwrap().is_some());
@@ -1685,8 +1943,13 @@ fn cache_persists_across_reopen() {
     let path = dir.path().join("persist.mnemo");
     {
         let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-        db.cache_put("llm", "durable-key", b"durable-value", cache_opts("text", None))
-            .unwrap();
+        db.cache_put(
+            "llm",
+            "durable-key",
+            b"durable-value",
+            cache_opts("text", None),
+        )
+        .unwrap();
         db.flush().unwrap();
     } // writer drops → lock released
 
@@ -1700,7 +1963,8 @@ fn cache_delete_removes_entry() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("del.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.cache_put("llm", "k", b"v", cache_opts("text", None)).unwrap();
+    db.cache_put("llm", "k", b"v", cache_opts("text", None))
+        .unwrap();
     db.flush().unwrap();
     assert!(db.cache_get("llm", "k").unwrap().is_some());
     db.cache_delete("llm", "k").unwrap();
@@ -1714,8 +1978,10 @@ fn cache_purge_expired_only_leaves_fresh_entries() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("purge.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-    db.cache_put("llm", "fresh", b"stay", cache_opts("text", None)).unwrap();
-    db.cache_put("llm", "expired", b"gone", cache_opts("text", Some(0))).unwrap();
+    db.cache_put("llm", "fresh", b"stay", cache_opts("text", None))
+        .unwrap();
+    db.cache_put("llm", "expired", b"gone", cache_opts("text", Some(0)))
+        .unwrap();
     db.flush().unwrap();
 
     let n = db.cache_purge(Some("llm"), true).unwrap();
@@ -1739,15 +2005,23 @@ fn cache_batched_policy_auto_flushes_on_count_threshold() {
             max_dirty: 2,
             max_age: std::time::Duration::from_secs(3600),
         });
-        db.cache_put("llm", "b1", b"v1", cache_opts("text", None)).unwrap();
-        db.cache_put("llm", "b2", b"v2", cache_opts("text", None)).unwrap();
+        db.cache_put("llm", "b1", b"v1", cache_opts("text", None))
+            .unwrap();
+        db.cache_put("llm", "b2", b"v2", cache_opts("text", None))
+            .unwrap();
         // Do NOT call db.flush(); the batched policy should have
         // committed on the second put.
     } // drop releases lock
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert!(db.cache_get("llm", "b1").unwrap().is_some(), "b1 should have auto-committed");
-    assert!(db.cache_get("llm", "b2").unwrap().is_some(), "b2 should have auto-committed");
+    assert!(
+        db.cache_get("llm", "b1").unwrap().is_some(),
+        "b1 should have auto-committed"
+    );
+    assert!(
+        db.cache_get("llm", "b2").unwrap().is_some(),
+        "b2 should have auto-committed"
+    );
 }
 
 #[test]
@@ -1784,7 +2058,8 @@ fn cache_read_only_handle_can_read_but_not_write() {
     let path = dir.path().join("ro.mnemo");
     {
         let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
-        db.cache_put("llm", "k", b"v", cache_opts("text", None)).unwrap();
+        db.cache_put("llm", "k", b"v", cache_opts("text", None))
+            .unwrap();
         db.flush().unwrap();
     }
 
@@ -1844,7 +2119,12 @@ fn semantic_hit_above_threshold_returns_top_1() {
     // Query near v_a → high similarity → hit above threshold.
     let query = vec4(0.98, 0.20, 0.0, 0.0);
     let hit = db
-        .cache_get_semantic("llm", &query, DEFAULT_SEMANTIC_THRESHOLD, "bge-large-en-v1.5")
+        .cache_get_semantic(
+            "llm",
+            &query,
+            DEFAULT_SEMANTIC_THRESHOLD,
+            "bge-large-en-v1.5",
+        )
         .unwrap()
         .expect("expected a hit for the near-a query");
     assert_eq!(hit.0.value, b"answer-a", "top-1 should be prompt-a");
@@ -1869,7 +2149,12 @@ fn semantic_miss_below_threshold_returns_none() {
     // Query orthogonal to the stored vector → cosine = 0.0 → miss.
     let query = vec4(0.0, 1.0, 0.0, 0.0);
     let miss = db
-        .cache_get_semantic("llm", &query, DEFAULT_SEMANTIC_THRESHOLD, "bge-large-en-v1.5")
+        .cache_get_semantic(
+            "llm",
+            &query,
+            DEFAULT_SEMANTIC_THRESHOLD,
+            "bge-large-en-v1.5",
+        )
         .unwrap();
     assert!(miss.is_none(), "orthogonal query must not hit");
 
@@ -1878,7 +2163,10 @@ fn semantic_miss_below_threshold_returns_none() {
     let hit = db
         .cache_get_semantic("llm", &query, -1.0, "bge-large-en-v1.5")
         .unwrap();
-    assert!(hit.is_some(), "with threshold -1.0 the top-1 should always surface");
+    assert!(
+        hit.is_some(),
+        "with threshold -1.0 the top-1 should always surface"
+    );
 }
 
 #[test]
@@ -1901,7 +2189,12 @@ fn semantic_model_mismatch_is_a_miss() {
     // Same vector as stored → cosine would be 1.0 → definite hit if
     // the model matched. Doesn't hit because the models differ.
     let miss = db
-        .cache_get_semantic("llm", &v, DEFAULT_SEMANTIC_THRESHOLD, "text-embedding-3-small")
+        .cache_get_semantic(
+            "llm",
+            &v,
+            DEFAULT_SEMANTIC_THRESHOLD,
+            "text-embedding-3-small",
+        )
         .unwrap();
     assert!(
         miss.is_none(),
@@ -1925,16 +2218,13 @@ fn semantic_dimension_mismatch_is_rejected() {
 
     let three_dims = vec![1.0, 0.0, 0.0];
     let err = db
-        .cache_put_semantic(
-            "llm",
-            "k",
-            three_dims,
-            b"v",
-            SemanticCachePutOpts::new("m"),
-        )
+        .cache_put_semantic("llm", "k", three_dims, b"v", SemanticCachePutOpts::new("m"))
         .unwrap_err();
     match err {
-        MnemoError::DimensionMismatch { expected: 4, got: 3 } => {}
+        MnemoError::DimensionMismatch {
+            expected: 4,
+            got: 3,
+        } => {}
         other => panic!("expected DimensionMismatch, got {other:?}"),
     }
 }
@@ -1963,7 +2253,10 @@ fn exact_key_and_semantic_entries_coexist_in_same_namespace() {
     // Reopen with a fresh handle — decoding old-shape and new-shape
     // entries side by side must not error.
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    let e = db.cache_get("llm", "exact").unwrap().expect("exact-key still hits");
+    let e = db
+        .cache_get("llm", "exact")
+        .unwrap()
+        .expect("exact-key still hits");
     assert_eq!(e.value, b"exact-value");
     let s = db
         .cache_get_semantic(
@@ -2003,9 +2296,11 @@ fn v7_file_migrates_to_v8_with_empty_cache() {
         let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
         // No cache_put — the cache stays empty through the file
         // lifecycle, mirroring the v7→v8 migration state.
-        db.remember(
-            Memory::new("sanity", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
-        )
+        db.remember(Memory::new(
+            "sanity",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
         .unwrap();
         db.flush().unwrap();
     }

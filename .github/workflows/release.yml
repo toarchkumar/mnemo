@@ -164,20 +164,59 @@ jobs:
           name: wheel-${{ matrix.target }}
           path: mnemo-python/dist/*
 
+  # --- Build the Python source distribution (sdist) once. `pip install
+  #     mnemo-engine` on a platform we don't ship a wheel for (e.g. a
+  #     BSD or an aarch64 musl runner) falls back to compiling from the
+  #     sdist, so PyPI wants exactly one .tar.gz alongside the wheels.
+  #     Kept as its own single-runner job because sdist is
+  #     platform-independent and there's no point in the matrix.
+  build-sdist:
+    name: sdist
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Build sdist via maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: mnemo-python
+
+      - name: Attach sdist to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mnemo-python/dist/*.tar.gz
+
+      - name: Upload sdist artifact for PyPI publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: mnemo-python/dist/*.tar.gz
+
   # --- Optional: publish all wheels to PyPI. Runs only when PYPI_API_TOKEN
   #     is set on the repo — no-op otherwise so first-time releases just
   #     produce GitHub-attached wheels and the maintainer publishes by hand
   #     until they're ready to automate it.
   publish-pypi:
     name: publish to PyPI
-    needs: build-wheels
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
-          # Pull every wheel-* artifact this run uploaded.
-          pattern: wheel-*
+          # Pull every wheel-* artifact this run uploaded plus the
+          # single sdist. Both patterns land in the same `dist/`
+          # directory so the maturin upload picks up wheels + tarball
+          # in one shot.
+          pattern: "{wheel-*,sdist}"
           path: dist
           merge-multiple: true
 

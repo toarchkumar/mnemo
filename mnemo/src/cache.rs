@@ -166,7 +166,9 @@ impl PageCache {
 
     /// Read a page's payload **without** affecting recency order.
     pub fn peek(&self, page: u64) -> Option<&[u8]> {
-        self.map.get(&page).map(|&i| self.slots[i].payload.as_slice())
+        self.map
+            .get(&page)
+            .map(|&i| self.slots[i].payload.as_slice())
     }
 
     /// Insert or replace a page. `dirty` marks it as holding an un-flushed

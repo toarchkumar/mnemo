@@ -73,7 +73,11 @@ pub struct Turn {
 impl Turn {
     /// A turn with an explicit role.
     pub fn new(role: Role, content: impl Into<String>, vector: Vec<f32>) -> Self {
-        Self { role, content: content.into(), vector }
+        Self {
+            role,
+            content: content.into(),
+            vector,
+        }
     }
     /// Shorthand for a [`Role::User`] turn.
     pub fn user(content: impl Into<String>, vector: Vec<f32>) -> Self {

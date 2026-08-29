@@ -51,13 +51,21 @@ pub struct KdfParams {
 impl KdfParams {
     /// Sensible interactive-use defaults (~19 MiB, 2 passes).
     pub fn secure() -> Self {
-        Self { m_cost: 19_456, t_cost: 2, p_cost: 1 }
+        Self {
+            m_cost: 19_456,
+            t_cost: 2,
+            p_cost: 1,
+        }
     }
 
     /// Deliberately weak parameters — **only** for fast unit tests.
     #[doc(hidden)]
     pub fn fast() -> Self {
-        Self { m_cost: 512, t_cost: 1, p_cost: 1 }
+        Self {
+            m_cost: 512,
+            t_cost: 1,
+            p_cost: 1,
+        }
     }
 }
 
@@ -104,7 +112,13 @@ pub fn aead_encrypt(
     aad: &[u8],
 ) -> Result<Vec<u8>> {
     cipher(key)
-        .encrypt(Nonce::from_slice(nonce), Payload { msg: plaintext, aad })
+        .encrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|e| MnemoError::Crypto(e.to_string()))
 }
 
@@ -118,7 +132,13 @@ pub fn aead_decrypt(
     aad: &[u8],
 ) -> Result<Vec<u8>> {
     cipher(key)
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad })
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map_err(|_| MnemoError::Crypto("authentication failed".into()))
 }
 
@@ -177,7 +197,10 @@ pub fn unwrap_dek(
     let plain = cipher(kek)
         .decrypt(
             Nonce::from_slice(nonce),
-            Payload { msg: wrapped, aad: &[] },
+            Payload {
+                msg: wrapped,
+                aad: &[],
+            },
         )
         .map_err(|_| MnemoError::WrongPassphrase)?;
     if plain.len() != KEY_LEN {

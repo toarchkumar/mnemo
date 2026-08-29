@@ -199,7 +199,12 @@ impl PqCodebook {
     }
 
     /// Train one codebook per subspace on the sampled training vectors.
-    fn train(sub_offsets: &[usize], train: &[&[f32]], iters: usize, rng: &mut StdRng) -> PqCodebook {
+    fn train(
+        sub_offsets: &[usize],
+        train: &[&[f32]],
+        iters: usize,
+        rng: &mut StdRng,
+    ) -> PqCodebook {
         let m = sub_offsets.len() - 1;
         let mut centroids = Vec::with_capacity(m);
         let mut ks = Vec::with_capacity(m);
@@ -212,7 +217,11 @@ impl PqCodebook {
             ks.push(cs.len() / (hi - lo));
             centroids.push(cs);
         }
-        PqCodebook { sub_offsets: sub_offsets.to_vec(), centroids, ks }
+        PqCodebook {
+            sub_offsets: sub_offsets.to_vec(),
+            centroids,
+            ks,
+        }
     }
 
     /// Encode a full vector into `m` codeword indices.
@@ -402,12 +411,7 @@ impl IvfPqIndex {
     /// Run the tiered query: IVF probe → PQ scan → top-`n_rerank` candidates.
     /// Returns candidate IDs (nearest first by PQ distance) for the store to
     /// rerank exactly. `n_probe`/`n_rerank` of `None` use the build defaults.
-    pub fn query(
-        &self,
-        q: &[f32],
-        n_probe: Option<usize>,
-        n_rerank: Option<usize>,
-    ) -> Vec<u128> {
+    pub fn query(&self, q: &[f32], n_probe: Option<usize>, n_rerank: Option<usize>) -> Vec<u128> {
         let n_probe = n_probe.unwrap_or(self.n_probe).clamp(1, self.n_partitions);
         let n_rerank = n_rerank.unwrap_or(self.n_rerank).max(1);
 

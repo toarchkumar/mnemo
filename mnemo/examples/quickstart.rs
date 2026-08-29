@@ -10,7 +10,10 @@ fn main() -> Result<()> {
     let _ = std::fs::remove_file(&path);
 
     // Small dimensionality keeps the example fast.
-    let cfg = MnemoConfig { dimensions: 8, ..Default::default() };
+    let cfg = MnemoConfig {
+        dimensions: 8,
+        ..Default::default()
+    };
     let mut db = Mnemo::create(&path, "quickstart-passphrase", cfg)?;
 
     // Store a few memories of different types.

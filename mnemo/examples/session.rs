@@ -8,7 +8,10 @@ fn main() -> Result<()> {
     let path = std::env::temp_dir().join("mnemo-session.mnemo");
     let _ = std::fs::remove_file(&path);
 
-    let cfg = MnemoConfig { dimensions: 4, ..Default::default() };
+    let cfg = MnemoConfig {
+        dimensions: 4,
+        ..Default::default()
+    };
     let mut db = Mnemo::create(&path, "session-passphrase", cfg)?;
 
     // --- a conversation -------------------------------------------------
@@ -18,9 +21,18 @@ fn main() -> Result<()> {
         let mut chat = db.session("assistant");
         println!("opened session {}", chat.id());
 
-        chat.add_turn(Turn::user("my flight is on Friday", vec![1.0, 0.0, 0.0, 0.0]))?;
-        chat.add_turn(Turn::assistant("noted — Friday it is", vec![0.9, 0.1, 0.0, 0.0]))?;
-        chat.add_turn(Turn::user("book me an aisle seat", vec![0.0, 1.0, 0.0, 0.0]))?;
+        chat.add_turn(Turn::user(
+            "my flight is on Friday",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ))?;
+        chat.add_turn(Turn::assistant(
+            "noted — Friday it is",
+            vec![0.9, 0.1, 0.0, 0.0],
+        ))?;
+        chat.add_turn(Turn::user(
+            "book me an aisle seat",
+            vec![0.0, 1.0, 0.0, 0.0],
+        ))?;
 
         // Mid-conversation recall, scoped to this agent.
         let context = chat.recall(RecallRequest::new(vec![1.0, 0.0, 0.0, 0.0]).top_k(3))?;

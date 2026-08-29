@@ -118,8 +118,13 @@ mnemo cache purge agent.mnemo --ns llm --expired
 mnemo cache delete agent.mnemo --ns llm --key prompt-42
 ```
 
-MCP tools + Python `@db.cached(...)` decorator land in a follow-up
-(Phase 10.4).
+**MCP:** `mnemo serve --mcp` exposes `cache_put`, `cache_get`,
+`cache_stats`, `cache_put_semantic`, and `cache_get_semantic` as
+tools (Phase 10.4) — any MCP-compatible agent can drive the cache
+alongside the memory surface. **Python:** the `Mnemo` class carries
+matching `cache_*` methods; the ~90-line `@db.cached(...)` decorator
+recipe (with OpenAI, Anthropic, and semantic-mode examples) lives
+in `mnemo-python/README.md` — copy it into your project.
 
 #### Semantic cache (Phase 10.2)
 

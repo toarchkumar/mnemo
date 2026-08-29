@@ -42,8 +42,7 @@ fn to_py(e: mnemo_core::MnemoError) -> PyErr {
 
 /// Parse a memory-type string, raising `ValueError` on an unknown value.
 fn parse_type(s: &str) -> PyResult<MemoryType> {
-    MemoryType::parse(s)
-        .ok_or_else(|| PyValueError::new_err(format!("unknown memory_type '{s}'")))
+    MemoryType::parse(s).ok_or_else(|| PyValueError::new_err(format!("unknown memory_type '{s}'")))
 }
 
 /// Parse a ULID string, raising `ValueError` on a malformed id.
@@ -61,9 +60,7 @@ fn py_value_to_bytes(v: &pyo3::Bound<'_, pyo3::PyAny>) -> PyResult<Vec<u8>> {
     if let Ok(b) = v.extract::<Vec<u8>>() {
         return Ok(b);
     }
-    Err(PyTypeError::new_err(
-        "cache value must be str or bytes",
-    ))
+    Err(PyTypeError::new_err("cache value must be str or bytes"))
 }
 
 /// Convert a `serde_json::Value` into the equivalent Python object.
@@ -212,7 +209,9 @@ impl Mnemo {
         }
         if let Some(dict) = metadata {
             for (k, v) in dict.iter() {
-                memory.metadata.insert(k.extract::<String>()?, py_to_json(&v)?);
+                memory
+                    .metadata
+                    .insert(k.extract::<String>()?, py_to_json(&v)?);
             }
         }
         let id = self.inner.remember(memory).map_err(to_py)?;
@@ -236,10 +235,11 @@ impl Mnemo {
         agent_id: Option<String>,
         track_access: bool,
     ) -> PyResult<Vec<PyObject>> {
-        let mut req = RecallRequest::new(query).top_k(top_k).track_access(track_access);
+        let mut req = RecallRequest::new(query)
+            .top_k(top_k)
+            .track_access(track_access);
         if let Some(types) = memory_types {
-            let parsed: PyResult<Vec<MemoryType>> =
-                types.iter().map(|t| parse_type(t)).collect();
+            let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
             req = req.types(parsed?);
         }
         if let Some(a) = agent_id {
@@ -468,7 +468,9 @@ impl Mnemo {
             ttl_secs,
             cost_hint_ms: None,
         };
-        self.inner.cache_put(namespace, key, &bytes, opts).map_err(to_py)?;
+        self.inner
+            .cache_put(namespace, key, &bytes, opts)
+            .map_err(to_py)?;
         self.inner.flush().map_err(to_py)
     }
 
@@ -476,12 +478,7 @@ impl Mnemo {
     /// dict with `{value, content_type, created_at, accessed_at,
     /// access_count, ttl_secs}` on hit. `value` is always returned as
     /// `bytes`; decode with `.decode('utf-8')` if you stored text.
-    fn cache_get(
-        &mut self,
-        py: Python<'_>,
-        namespace: &str,
-        key: &str,
-    ) -> PyResult<PyObject> {
+    fn cache_get(&mut self, py: Python<'_>, namespace: &str, key: &str) -> PyResult<PyObject> {
         match self.inner.cache_get(namespace, key).map_err(to_py)? {
             Some(hit) => {
                 let d = PyDict::new_bound(py);
@@ -510,12 +507,11 @@ impl Mnemo {
     /// `expired_only=True` restricts to TTL-expired entries.
     /// Returns the count of newly tombstoned entries.
     #[pyo3(signature = (namespace=None, expired_only=false))]
-    fn cache_purge(
-        &mut self,
-        namespace: Option<&str>,
-        expired_only: bool,
-    ) -> PyResult<usize> {
-        let n = self.inner.cache_purge(namespace, expired_only).map_err(to_py)?;
+    fn cache_purge(&mut self, namespace: Option<&str>, expired_only: bool) -> PyResult<usize> {
+        let n = self
+            .inner
+            .cache_purge(namespace, expired_only)
+            .map_err(to_py)?;
         self.inner.flush().map_err(to_py)?;
         Ok(n)
     }
@@ -670,25 +666,41 @@ impl Turn {
     /// A turn with an explicit role (`"user"`, `"assistant"`, or `"system"`).
     #[new]
     fn new(role: &str, content: String, vector: Vec<f32>) -> PyResult<Self> {
-        Ok(Turn { role: check_role(role)?, content, vector })
+        Ok(Turn {
+            role: check_role(role)?,
+            content,
+            vector,
+        })
     }
 
     /// Shorthand for a user turn.
     #[staticmethod]
     fn user(content: String, vector: Vec<f32>) -> Turn {
-        Turn { role: "user".into(), content, vector }
+        Turn {
+            role: "user".into(),
+            content,
+            vector,
+        }
     }
 
     /// Shorthand for an assistant turn.
     #[staticmethod]
     fn assistant(content: String, vector: Vec<f32>) -> Turn {
-        Turn { role: "assistant".into(), content, vector }
+        Turn {
+            role: "assistant".into(),
+            content,
+            vector,
+        }
     }
 
     /// Shorthand for a system turn.
     #[staticmethod]
     fn system(content: String, vector: Vec<f32>) -> Turn {
-        Turn { role: "system".into(), content, vector }
+        Turn {
+            role: "system".into(),
+            content,
+            vector,
+        }
     }
 
     #[getter]
@@ -705,7 +717,10 @@ impl Turn {
     }
 
     fn __repr__(&self) -> String {
-        format!("<mnemo.Turn role='{}' content='{}'>", self.role, self.content)
+        format!(
+            "<mnemo.Turn role='{}' content='{}'>",
+            self.role, self.content
+        )
     }
 }
 
@@ -791,8 +806,7 @@ impl Session {
         self.ensure_open()?;
         let mut req = RecallRequest::new(query).top_k(top_k).agent(&self.agent_id);
         if let Some(types) = memory_types {
-            let parsed: PyResult<Vec<MemoryType>> =
-                types.iter().map(|t| parse_type(t)).collect();
+            let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
             req = req.types(parsed?);
         }
         let mut db = self.db.borrow_mut(py);
@@ -920,10 +934,16 @@ fn open(
         let dims = dimensions.ok_or_else(|| {
             PyValueError::new_err("dimensions is required when creating a new database")
         })?;
-        let cfg = MnemoConfig { dimensions: dims, ..Default::default() };
+        let cfg = MnemoConfig {
+            dimensions: dims,
+            ..Default::default()
+        };
         Core::create(path, passphrase, cfg).map_err(to_py)?
     };
-    Ok(Mnemo { inner, path: path.to_string() })
+    Ok(Mnemo {
+        inner,
+        path: path.to_string(),
+    })
 }
 
 /// The `mnemo` Python extension module.

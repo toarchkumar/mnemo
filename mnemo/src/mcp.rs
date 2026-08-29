@@ -51,9 +51,7 @@ use serde_json::{json, Map, Value};
 
 use crate::error::{MnemoError, Result};
 use crate::memory::{Memory, MemoryType, Metric, Scope};
-use crate::result_cache::{
-    CachePutOpts, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD,
-};
+use crate::result_cache::{CachePutOpts, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD};
 use crate::store::{Mnemo, RecallRequest};
 
 /// MCP protocol version we advertise on `initialize`.
@@ -99,7 +97,11 @@ struct RpcError {
 
 impl RpcError {
     fn new(code: i32, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), data: None }
+        Self {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 }
 
@@ -131,11 +133,7 @@ pub fn serve_stdio(path: &Path) -> Result<()> {
 /// Run the MCP loop against explicit reader/writer streams. Extracted so
 /// integration tests can pipe scripted input without touching the real
 /// stdin/stdout.
-pub fn serve_with_streams<R: Read, W: Write>(
-    path: &Path,
-    reader: R,
-    mut writer: W,
-) -> Result<()> {
+pub fn serve_with_streams<R: Read, W: Write>(path: &Path, reader: R, mut writer: W) -> Result<()> {
     let passphrase = std::env::var(PASSPHRASE_ENV).map_err(|_| {
         MnemoError::Invalid(format!(
             "{PASSPHRASE_ENV} is required to serve — set it in the shell before starting"
@@ -189,8 +187,8 @@ pub fn serve_with_streams<R: Read, W: Write>(
             },
         };
 
-        let line = serde_json::to_string(&resp)
-            .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let line =
+            serde_json::to_string(&resp).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         writeln!(writer, "{line}").map_err(MnemoError::Io)?;
         writer.flush().map_err(MnemoError::Io)?;
     }
@@ -488,7 +486,10 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
         .map(|v| v.as_f64().map(|f| f as f32))
         .collect::<Option<Vec<f32>>>()
         .ok_or_else(|| {
-            RpcError::new(INVALID_PARAMS, "remember: 'vector' must be an array of numbers")
+            RpcError::new(
+                INVALID_PARAMS,
+                "remember: 'vector' must be an array of numbers",
+            )
         })?;
 
     let mut mem = Memory::new(content, mtype, vector);
@@ -529,10 +530,17 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         .map(|v| v.as_f64().map(|f| f as f32))
         .collect::<Option<Vec<f32>>>()
         .ok_or_else(|| {
-            RpcError::new(INVALID_PARAMS, "recall: 'query' must be an array of numbers")
+            RpcError::new(
+                INVALID_PARAMS,
+                "recall: 'query' must be an array of numbers",
+            )
         })?;
     let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-    let metric = match args.get("metric").and_then(|v| v.as_str()).unwrap_or("cosine") {
+    let metric = match args
+        .get("metric")
+        .and_then(|v| v.as_str())
+        .unwrap_or("cosine")
+    {
         "cosine" => Metric::Cosine,
         "l2" => Metric::L2,
         "dot" => Metric::Dot,
@@ -583,9 +591,8 @@ fn tool_forget(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "forget: missing 'id'"))?;
-    let ulid = crate::Ulid::from_string(id_str).map_err(|_| {
-        RpcError::new(INVALID_PARAMS, format!("forget: invalid ULID '{id_str}'"))
-    })?;
+    let ulid = crate::Ulid::from_string(id_str)
+        .map_err(|_| RpcError::new(INVALID_PARAMS, format!("forget: invalid ULID '{id_str}'")))?;
     db.delete(&ulid).map_err(mnemo_err)?;
     db.flush().map_err(mnemo_err)?;
     Ok(json!({ "deleted": id_str }).to_string())
@@ -676,7 +683,8 @@ fn tool_cache_put(db: &mut Mnemo, args: &Value) -> std::result::Result<String, R
         ttl_secs,
         cost_hint_ms: None,
     };
-    db.cache_put(ns, key, value.as_bytes(), opts).map_err(mnemo_err)?;
+    db.cache_put(ns, key, value.as_bytes(), opts)
+        .map_err(mnemo_err)?;
     db.flush().map_err(mnemo_err)?;
     Ok(json!({ "cached": true, "namespace": ns, "key": key, "bytes": value.len() }).to_string())
 }
@@ -719,10 +727,7 @@ fn tool_cache_stats(db: &mut Mnemo, args: &Value) -> std::result::Result<String,
     .to_string())
 }
 
-fn tool_cache_put_semantic(
-    db: &mut Mnemo,
-    args: &Value,
-) -> std::result::Result<String, RpcError> {
+fn tool_cache_put_semantic(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
     let ns = args
         .get("namespace")
         .and_then(|v| v.as_str())
@@ -744,7 +749,10 @@ fn tool_cache_put_semantic(
         .get("vector")
         .and_then(|v| v.as_array())
         .ok_or_else(|| {
-            RpcError::new(INVALID_PARAMS, "cache_put_semantic: 'vector' must be a JSON array")
+            RpcError::new(
+                INVALID_PARAMS,
+                "cache_put_semantic: 'vector' must be a JSON array",
+            )
         })?
         .iter()
         .map(|v| v.as_f64().map(|f| f as f32))
@@ -773,10 +781,7 @@ fn tool_cache_put_semantic(
     Ok(json!({ "cached": true, "namespace": ns, "key": key, "bytes": value.len() }).to_string())
 }
 
-fn tool_cache_get_semantic(
-    db: &mut Mnemo,
-    args: &Value,
-) -> std::result::Result<String, RpcError> {
+fn tool_cache_get_semantic(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
     let ns = args
         .get("namespace")
         .and_then(|v| v.as_str())
@@ -789,7 +794,10 @@ fn tool_cache_get_semantic(
         .get("query")
         .and_then(|v| v.as_array())
         .ok_or_else(|| {
-            RpcError::new(INVALID_PARAMS, "cache_get_semantic: 'query' must be a JSON array")
+            RpcError::new(
+                INVALID_PARAMS,
+                "cache_get_semantic: 'query' must be a JSON array",
+            )
         })?
         .iter()
         .map(|v| v.as_f64().map(|f| f as f32))
@@ -805,7 +813,10 @@ fn tool_cache_get_semantic(
         .and_then(|v| v.as_f64())
         .map(|f| f as f32)
         .unwrap_or(DEFAULT_SEMANTIC_THRESHOLD);
-    match db.cache_get_semantic(ns, &query, threshold, model).map_err(mnemo_err)? {
+    match db
+        .cache_get_semantic(ns, &query, threshold, model)
+        .map_err(mnemo_err)?
+    {
         Some((hit, similarity)) => Ok(json!({
             "hit": true,
             "similarity": similarity,

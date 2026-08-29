@@ -364,9 +364,21 @@ impl Header {
             // the pre-v8 header ended at byte 269) — reading them as u64
             // yields 0/0/0 which means "no cache directory", the correct
             // migration state.
-            cache_start: if version >= 8 { rd_u64(b, HEADER_CACHE_START_OFF) } else { 0 },
-            cache_pages: if version >= 8 { rd_u64(b, HEADER_CACHE_PAGES_OFF) } else { 0 },
-            cache_len: if version >= 8 { rd_u64(b, HEADER_CACHE_LEN_OFF) } else { 0 },
+            cache_start: if version >= 8 {
+                rd_u64(b, HEADER_CACHE_START_OFF)
+            } else {
+                0
+            },
+            cache_pages: if version >= 8 {
+                rd_u64(b, HEADER_CACHE_PAGES_OFF)
+            } else {
+                0
+            },
+            cache_len: if version >= 8 {
+                rd_u64(b, HEADER_CACHE_LEN_OFF)
+            } else {
+                0
+            },
         })
     }
 
@@ -378,12 +390,8 @@ impl Header {
         if self.version < 7 {
             return Ok(());
         }
-        let nonce = self
-            .seal_nonce
-            .ok_or(MnemoError::HeaderTampered)?;
-        let tag = self
-            .seal_tag
-            .ok_or(MnemoError::HeaderTampered)?;
+        let nonce = self.seal_nonce.ok_or(MnemoError::HeaderTampered)?;
+        let tag = self.seal_tag.ok_or(MnemoError::HeaderTampered)?;
         let aad = header_seal_aad(self);
         // AES-GCM over empty plaintext yields a 16-byte tag; decryption
         // takes the tag as the ciphertext input and returns empty bytes
@@ -415,8 +423,7 @@ impl Header {
         }
         let mut tag = [0u8; TAG_LEN];
         tag.copy_from_slice(&tag_buf);
-        page[HEADER_SEAL_NONCE_OFF..HEADER_SEAL_NONCE_OFF + NONCE_LEN]
-            .copy_from_slice(&nonce);
+        page[HEADER_SEAL_NONCE_OFF..HEADER_SEAL_NONCE_OFF + NONCE_LEN].copy_from_slice(&nonce);
         page[HEADER_SEAL_TAG_OFF..HEADER_SEAL_TAG_OFF + TAG_LEN].copy_from_slice(&tag);
         self.seal_nonce = Some(nonce);
         self.seal_tag = Some(tag);

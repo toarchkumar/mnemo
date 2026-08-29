@@ -37,9 +37,8 @@ use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{self, Memory, MemoryType, Metric, Scope, ScoreWeights};
 use crate::pager::Pager;
 use crate::result_cache::{
-    self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy,
-    CachePutOpts, CacheStats, CachedValue, CounterState, DirectoryIndex,
-    SemanticCachePutOpts,
+    self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
+    CacheStats, CachedValue, CounterState, DirectoryIndex, SemanticCachePutOpts,
 };
 use crate::wal;
 
@@ -478,10 +477,7 @@ fn load_catalog_v4(
 /// `access_count` into the catalog row (the v4 record body still carries
 /// them — they're moving *from* the body *to* the catalog). Deleted
 /// entries skip the read and zero the fields.
-fn migrate_v4_catalog(
-    pager: &mut Pager,
-    v4: Vec<CatalogEntryV4>,
-) -> Result<Vec<CatalogEntry>> {
+fn migrate_v4_catalog(pager: &mut Pager, v4: Vec<CatalogEntryV4>) -> Result<Vec<CatalogEntry>> {
     let mut out = Vec::with_capacity(v4.len());
     for e in &v4 {
         let (accessed_at, access_count) = if e.deleted {
@@ -579,7 +575,11 @@ fn build_id_index(catalog: &[CatalogEntry]) -> HashMap<u128, usize> {
 
 impl Mnemo {
     /// Create a brand-new encrypted database at `path`.
-    pub fn create(path: impl Into<PathBuf>, passphrase: &str, config: MnemoConfig) -> Result<Mnemo> {
+    pub fn create(
+        path: impl Into<PathBuf>,
+        passphrase: &str,
+        config: MnemoConfig,
+    ) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
@@ -715,9 +715,12 @@ impl Mnemo {
         // Crash recovery: replay a committed-but-uncheckpointed transaction.
         // Each frame is a finished page image; the header frame, replayed to
         // page 0, supersedes the header just read.
-        if let Some(frames) =
-            wal::recover(&mut file, header.wal_start, header.wal_pages, header.wal_seq)?
-        {
+        if let Some(frames) = wal::recover(
+            &mut file,
+            header.wal_start,
+            header.wal_pages,
+            header.wal_seq,
+        )? {
             for (page_no, bytes) in &frames {
                 if bytes.len() != PAGE_SIZE {
                     return Err(MnemoError::Invalid("WAL frame is not page-sized".into()));
@@ -956,7 +959,14 @@ impl Mnemo {
 
         // Refuse if there is a committed-but-uncheckpointed transaction
         // waiting for `wal::recover` to fold it into home pages.
-        if wal::recover(&mut file, header.wal_start, header.wal_pages, header.wal_seq)?.is_some() {
+        if wal::recover(
+            &mut file,
+            header.wal_start,
+            header.wal_pages,
+            header.wal_seq,
+        )?
+        .is_some()
+        {
             return Err(MnemoError::NeedsWriteOpen {
                 reason: "pending WAL recovery",
             });
@@ -1076,8 +1086,8 @@ impl Mnemo {
 
     fn read_memory(&mut self, e: &CatalogEntry) -> Result<Memory> {
         let bytes = self.read_record(e)?;
-        let mut m: Memory = rmp_serde::from_slice(&bytes)
-            .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        let mut m: Memory =
+            rmp_serde::from_slice(&bytes).map_err(|err| MnemoError::Serialize(err.to_string()))?;
         // The catalog is the source of truth for access stats — the values
         // in the record body are a stale snapshot from when the record was
         // last written. Overwrite them here so consumers always see live
@@ -1104,7 +1114,10 @@ impl Mnemo {
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
         let (prev_accessed, prev_count) = match self.index.get(&id_u).copied() {
-            Some(idx) => (self.catalog[idx].accessed_at, self.catalog[idx].access_count),
+            Some(idx) => (
+                self.catalog[idx].accessed_at,
+                self.catalog[idx].access_count,
+            ),
             None => (m.accessed_at, m.access_count),
         };
         let entry = CatalogEntry {
@@ -1328,7 +1341,11 @@ impl Mnemo {
             let sim = memory::similarity(req.metric, &req.query, &m.vector);
             let age = (now - m.accessed_at) as f32;
             let score = req.weights.score(sim, age, m.importance, m.access_count);
-            scored.push(RecallResult { memory: m, score, similarity: sim });
+            scored.push(RecallResult {
+                memory: m,
+                score,
+                similarity: sim,
+            });
         }
         scored.sort_by(|a, b| b.score.total_cmp(&a.score));
         scored.truncate(req.top_k);
@@ -1670,9 +1687,9 @@ impl Mnemo {
         };
         let idx_bytes: Option<Vec<u8>> = if self.dirty_index {
             match &self.ann {
-                Some(ann) => Some(
-                    rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?,
-                ),
+                Some(ann) => {
+                    Some(rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?)
+                }
                 None => None,
             }
         } else {
@@ -1690,8 +1707,12 @@ impl Mnemo {
             None
         };
 
-        let cat_pc = cat_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
-        let idx_pc = idx_bytes.as_ref().map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
+        let cat_pc = cat_bytes
+            .as_ref()
+            .map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
+        let idx_pc = idx_bytes
+            .as_ref()
+            .map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
         let cache_pc = cache_bytes
             .as_ref()
             .map_or(0, |b| b.len().div_ceil(PAYLOAD).max(1));
@@ -1833,8 +1854,7 @@ impl Mnemo {
             vector: None,
             model: None,
         };
-        let bytes =
-            rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let bytes = rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         let (start_page, page_count) = self.write_record(&bytes)?;
 
         // Tombstone any prior entry for this key. Its pages remain on
@@ -1887,11 +1907,7 @@ impl Mnemo {
     /// A miss is recorded as a miss in this handle's counters even if
     /// the key was TTL-expired — from the caller's perspective the two
     /// are indistinguishable.
-    pub fn cache_get(
-        &mut self,
-        namespace: &str,
-        key: &str,
-    ) -> Result<Option<CachedValue>> {
+    pub fn cache_get(&mut self, namespace: &str, key: &str) -> Result<Option<CachedValue>> {
         let key_hash = result_cache::hash_key(key);
         let pos = match self.cache_idx.get(namespace, &key_hash) {
             Some(p) => p,
@@ -1926,16 +1942,15 @@ impl Mnemo {
             buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
         }
         buf.truncate(len as usize);
-        let entry: CacheEntry = rmp_serde::from_slice(&buf)
-            .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let entry: CacheEntry =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
 
         // Bump access stats catalog-only (v5 trick — no full record
         // rewrite on a hit). Skipped on read-only handles so a shared-lock
         // reader can't dirty the catalog.
         if !self.read_only {
             self.cache_dir[pos].accessed_at = now;
-            self.cache_dir[pos].access_count =
-                self.cache_dir[pos].access_count.saturating_add(1);
+            self.cache_dir[pos].access_count = self.cache_dir[pos].access_count.saturating_add(1);
             self.dirty_cache = true;
         }
         self.cache_counters.hits += 1;
@@ -1948,7 +1963,11 @@ impl Mnemo {
             value: entry.value,
             content_type: entry.content_type,
             created_at,
-            accessed_at: if self.read_only { entry.accessed_at } else { now },
+            accessed_at: if self.read_only {
+                entry.accessed_at
+            } else {
+                now
+            },
             access_count,
             ttl_secs,
         }))
@@ -1978,11 +1997,7 @@ impl Mnemo {
     /// `expired_only` is `true`, only TTL-expired entries are removed;
     /// otherwise every live entry in the target scope is tombstoned.
     /// Returns the number of entries newly tombstoned.
-    pub fn cache_purge(
-        &mut self,
-        namespace: Option<&str>,
-        expired_only: bool,
-    ) -> Result<usize> {
+    pub fn cache_purge(&mut self, namespace: Option<&str>, expired_only: bool) -> Result<usize> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -2171,8 +2186,7 @@ impl Mnemo {
             vector: Some(vector.clone()),
             model: Some(opts.model.clone()),
         };
-        let bytes =
-            rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let bytes = rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         let (start_page, page_count) = self.write_record(&bytes)?;
 
         if let Some(prev_pos) = self.cache_idx.get(namespace, &key_hash) {
@@ -2282,13 +2296,12 @@ impl Mnemo {
             buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
         }
         buf.truncate(len as usize);
-        let entry: CacheEntry = rmp_serde::from_slice(&buf)
-            .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        let entry: CacheEntry =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
 
         if !self.read_only {
             self.cache_dir[pos].accessed_at = now;
-            self.cache_dir[pos].access_count =
-                self.cache_dir[pos].access_count.saturating_add(1);
+            self.cache_dir[pos].access_count = self.cache_dir[pos].access_count.saturating_add(1);
             self.dirty_cache = true;
         }
         self.cache_counters.hits += 1;
@@ -2298,7 +2311,11 @@ impl Mnemo {
                 value: entry.value,
                 content_type: entry.content_type,
                 created_at,
-                accessed_at: if self.read_only { entry.accessed_at } else { now },
+                accessed_at: if self.read_only {
+                    entry.accessed_at
+                } else {
+                    now
+                },
                 access_count,
                 ttl_secs,
             },
@@ -2463,11 +2480,7 @@ impl Mnemo {
     /// Summary statistics for the open database.
     pub fn stats(&mut self) -> Result<Stats> {
         let deleted = self.catalog.iter().filter(|e| e.deleted).count();
-        let mut agents: Vec<String> = self
-            .memories()?
-            .into_iter()
-            .map(|m| m.agent_id)
-            .collect();
+        let mut agents: Vec<String> = self.memories()?.into_iter().map(|m| m.agent_id).collect();
         agents.sort();
         agents.dedup();
         let file_bytes = self.header.next_page * PAGE_SIZE as u64;
@@ -2496,7 +2509,11 @@ impl Mnemo {
         let mut new = Mnemo::create(
             &tmp,
             passphrase,
-            MnemoConfig { dimensions: dims, kdf, ..Default::default() },
+            MnemoConfig {
+                dimensions: dims,
+                kdf,
+                ..Default::default()
+            },
         )?;
         let want_index = old.ann.as_ref().map(|a| (a.n_probe(), a.n_rerank()));
         let now = memory::now_secs();

@@ -20,7 +20,11 @@ fn bin() -> &'static str {
 
 /// Cheap KDF so the tests are fast.
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
-    MnemoConfig { dimensions, kdf: KdfParams::fast(), ..Default::default() }
+    MnemoConfig {
+        dimensions,
+        kdf: KdfParams::fast(),
+        ..Default::default()
+    }
 }
 
 /// Create a tiny test database with three memories and return (path,
@@ -33,21 +37,33 @@ fn seed_db() -> (tempfile::TempDir, std::path::PathBuf, &'static str, String) {
     let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
     let semantic_id = db
         .remember(
-            Memory::new("the user prefers tea", MemoryType::Semantic, vec![1.0, 0.0, 0.0, 0.0])
-                .with_agent("assistant")
-                .with_importance(0.9),
+            Memory::new(
+                "the user prefers tea",
+                MemoryType::Semantic,
+                vec![1.0, 0.0, 0.0, 0.0],
+            )
+            .with_agent("assistant")
+            .with_importance(0.9),
         )
         .unwrap();
     db.remember(
-        Memory::new("ran the deploy script", MemoryType::Episodic, vec![0.0, 1.0, 0.0, 0.0])
-            .with_agent("assistant")
-            .with_importance(0.4),
+        Memory::new(
+            "ran the deploy script",
+            MemoryType::Episodic,
+            vec![0.0, 1.0, 0.0, 0.0],
+        )
+        .with_agent("assistant")
+        .with_importance(0.4),
     )
     .unwrap();
     db.remember(
-        Memory::new("escalate via pager", MemoryType::Procedural, vec![0.0, 0.0, 1.0, 0.0])
-            .with_agent("ops")
-            .with_importance(0.6),
+        Memory::new(
+            "escalate via pager",
+            MemoryType::Procedural,
+            vec![0.0, 0.0, 1.0, 0.0],
+        )
+        .with_agent("ops")
+        .with_importance(0.6),
     )
     .unwrap();
     db.flush().unwrap();
@@ -74,8 +90,14 @@ fn list_table_shows_three_memories() {
     let (status, stdout, stderr) =
         run_cli(&["list", path.to_str().unwrap(), "--format", "table"], pp);
     assert!(status.success(), "list failed: {stderr}");
-    assert!(stdout.contains("showing 3 of 3 memories"), "header missing: {stdout}");
-    assert!(stdout.contains("the user prefers tea"), "content missing: {stdout}");
+    assert!(
+        stdout.contains("showing 3 of 3 memories"),
+        "header missing: {stdout}"
+    );
+    assert!(
+        stdout.contains("the user prefers tea"),
+        "content missing: {stdout}"
+    );
     assert!(stdout.contains("[semantic]"), "type tag missing: {stdout}");
 }
 
@@ -102,8 +124,17 @@ fn list_filters_by_type_and_agent() {
 #[test]
 fn list_json_emits_total_and_count() {
     let (_dir, path, pp, _) = seed_db();
-    let (status, stdout, _) =
-        run_cli(&["list", path.to_str().unwrap(), "--format", "json", "--limit", "2"], pp);
+    let (status, stdout, _) = run_cli(
+        &[
+            "list",
+            path.to_str().unwrap(),
+            "--format",
+            "json",
+            "--limit",
+            "2",
+        ],
+        pp,
+    );
     assert!(status.success());
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("json output");
     assert_eq!(v["total"], 3);
@@ -111,14 +142,23 @@ fn list_json_emits_total_and_count() {
     let memories = v["memories"].as_array().expect("memories array");
     assert_eq!(memories.len(), 2);
     // Vector is stripped by default.
-    assert!(memories[0].get("vector").is_none(), "vector should be omitted");
+    assert!(
+        memories[0].get("vector").is_none(),
+        "vector should be omitted"
+    );
 }
 
 #[test]
 fn list_jsonl_with_vector_includes_embedding() {
     let (_dir, path, pp, _) = seed_db();
     let (status, stdout, _) = run_cli(
-        &["list", path.to_str().unwrap(), "--format", "jsonl", "--vector"],
+        &[
+            "list",
+            path.to_str().unwrap(),
+            "--format",
+            "jsonl",
+            "--vector",
+        ],
         pp,
     );
     assert!(status.success());
@@ -134,23 +174,37 @@ fn list_jsonl_with_vector_includes_embedding() {
 fn get_by_id_table_and_json() {
     let (_dir, path, pp, semantic_id) = seed_db();
 
-    let (status, stdout, _) =
-        run_cli(&["get", path.to_str().unwrap(), &semantic_id, "--verbose"], pp);
+    let (status, stdout, _) = run_cli(
+        &["get", path.to_str().unwrap(), &semantic_id, "--verbose"],
+        pp,
+    );
     assert!(status.success());
-    assert!(stdout.contains(&semantic_id), "id missing in table output: {stdout}");
+    assert!(
+        stdout.contains(&semantic_id),
+        "id missing in table output: {stdout}"
+    );
     assert!(stdout.contains("the user prefers tea"));
     assert!(stdout.contains("imp=0.90"));
     assert!(stdout.contains("scope"));
 
     let (status, stdout, _) = run_cli(
-        &["get", path.to_str().unwrap(), &semantic_id, "--format", "json"],
+        &[
+            "get",
+            path.to_str().unwrap(),
+            &semantic_id,
+            "--format",
+            "json",
+        ],
         pp,
     );
     assert!(status.success());
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("json from get");
     assert_eq!(v["content"], "the user prefers tea");
     assert_eq!(v["memory_type"], "Semantic");
-    assert!(v.get("vector").is_none(), "vector should be omitted by default");
+    assert!(
+        v.get("vector").is_none(),
+        "vector should be omitted by default"
+    );
 }
 
 #[test]
@@ -162,7 +216,10 @@ fn get_missing_id_fails_cleanly() {
         pp,
     );
     assert!(!status.success(), "missing id should exit non-zero");
-    assert!(stderr.contains("not found"), "expected NotFound message, got: {stderr}");
+    assert!(
+        stderr.contains("not found"),
+        "expected NotFound message, got: {stderr}"
+    );
 }
 
 #[test]
@@ -181,7 +238,10 @@ fn recall_returns_query_nearest_first() {
     );
     assert!(status.success());
     let first_line = stdout.lines().next().unwrap_or("");
-    assert!(first_line.contains("the user prefers tea"), "expected tea first: {stdout}");
+    assert!(
+        first_line.contains("the user prefers tea"),
+        "expected tea first: {stdout}"
+    );
     assert!(first_line.starts_with("score="));
 }
 
@@ -383,12 +443,18 @@ fn mcp_serve_initialize_list_and_call_tools() {
         "snapshot_list",
         "stats",
     ] {
-        assert!(names.contains(&expected), "missing tool '{expected}' in {names:?}");
+        assert!(
+            names.contains(&expected),
+            "missing tool '{expected}' in {names:?}"
+        );
     }
 
     let stats: serde_json::Value = serde_json::from_str(lines[2]).expect("stats parse");
     let content = &stats["result"]["content"][0]["text"];
-    assert!(content.is_string(), "stats content should be a text block: {stats}");
+    assert!(
+        content.is_string(),
+        "stats content should be a text block: {stats}"
+    );
     let stats_body: serde_json::Value =
         serde_json::from_str(content.as_str().unwrap()).expect("stats body parse");
     assert_eq!(
@@ -425,7 +491,10 @@ fn mcp_serve_refuses_without_passphrase() {
         .output()
         .expect("spawn failed");
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    assert!(!out.status.success(), "expected non-zero exit without passphrase");
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit without passphrase"
+    );
     assert!(
         stderr.contains("MNEMO_PASSPHRASE"),
         "stderr should mention the env var, got: {stderr}"

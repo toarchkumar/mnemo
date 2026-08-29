@@ -345,7 +345,9 @@ pub(crate) struct DirectoryIndex {
 
 impl DirectoryIndex {
     pub(crate) fn new() -> Self {
-        Self { by_ns: HashMap::new() }
+        Self {
+            by_ns: HashMap::new(),
+        }
     }
 
     /// Build an index over a directory `Vec`, skipping deleted entries.

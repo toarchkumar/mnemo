@@ -99,7 +99,8 @@ impl Pager {
     /// Write a raw, *unencrypted* page-sized buffer at `page_no`.
     /// Used only for the header (page 0).
     pub fn write_raw(&mut self, page_no: u64, data: &[u8; PAGE_SIZE]) -> Result<()> {
-        self.file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        self.file
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.write_all(data)?;
         Ok(())
     }
@@ -111,7 +112,8 @@ impl Pager {
     #[allow(dead_code)]
     pub fn read_raw(&mut self, page_no: u64) -> Result<[u8; PAGE_SIZE]> {
         let mut buf = [0u8; PAGE_SIZE];
-        self.file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        self.file
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.read_exact(&mut buf)?;
         Ok(buf)
     }
@@ -151,7 +153,8 @@ impl Pager {
     /// are written verbatim — used to checkpoint WAL frames (encrypted pages,
     /// or the plaintext header) to their home locations.
     pub fn write_sealed(&mut self, page_no: u64, bytes: &[u8; PAGE_SIZE]) -> Result<()> {
-        self.file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        self.file
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.write_all(bytes)?;
         Ok(())
     }
@@ -168,7 +171,8 @@ impl Pager {
             return Ok(p);
         }
         let mut disk = [0u8; PAGE_SIZE];
-        self.file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        self.file
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.read_exact(&mut disk)?;
 
         let mut nonce = [0u8; NONCE_LEN];
@@ -236,7 +240,8 @@ impl Pager {
             disk.extend_from_slice(&ciphertext);
             debug_assert_eq!(disk.len(), PAGE_SIZE);
 
-            self.file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+            self.file
+                .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
             self.file.write_all(&disk)?;
         }
         self.file.sync_all()?;

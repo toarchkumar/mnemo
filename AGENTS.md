@@ -28,7 +28,6 @@ test/               Dogfooding sandbox (encrypted project.mnemo + helpers)
   scripts/          project_memory.py — recall, remember, bootstrap, perf
   scripts/seed.json Canonical onboarding seed (manifest + 16 orientation memories)
 index.html          Landing page
-MNEMO_BUILD_PLAN.md Original 7-phase spec
 ```
 
 ## Build & test

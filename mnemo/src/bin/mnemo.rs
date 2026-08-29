@@ -401,9 +401,7 @@ fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
     // historical error message so existing scripts that forgot to set
     // MNEMO_PASSPHRASE get the same diagnostic they used to.
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        return Err(
-            "no passphrase: pass --passphrase or set MNEMO_PASSPHRASE".to_string()
-        );
+        return Err("no passphrase: pass --passphrase or set MNEMO_PASSPHRASE".to_string());
     }
     rpassword::prompt_password("Passphrase: ")
         .map_err(|e| format!("failed to read passphrase: {e}"))
@@ -412,10 +410,7 @@ fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
 /// Like [`passphrase`] but for *new* passphrases on `init` / `rekey`:
 /// double-prompts and rejects mismatches. Non-interactive paths (`--flag`,
 /// env var) skip the double-prompt and use the value directly.
-fn new_passphrase(
-    arg: &Option<String>,
-    env_var: &str,
-) -> std::result::Result<String, String> {
+fn new_passphrase(arg: &Option<String>, env_var: &str) -> std::result::Result<String, String> {
     if let Some(p) = arg {
         eprintln!(
             "warning: passing the passphrase as a flag is insecure; it lands \
@@ -428,9 +423,7 @@ fn new_passphrase(
         return Ok(p);
     }
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-        return Err(format!(
-            "no passphrase: pass the flag or set {env_var}"
-        ));
+        return Err(format!("no passphrase: pass the flag or set {env_var}"));
     }
     let first = rpassword::prompt_password("New passphrase: ")
         .map_err(|e| format!("failed to read passphrase: {e}"))?;
@@ -467,8 +460,7 @@ fn resolve_query(
                     .map_err(|e| format!("reading stdin: {e}"))?;
                 buf
             } else {
-                std::fs::read_to_string(&p)
-                    .map_err(|e| format!("reading {p}: {e}"))?
+                std::fs::read_to_string(&p).map_err(|e| format!("reading {p}: {e}"))?
             }
         }
         (Some(_), Some(_)) => {
@@ -497,7 +489,10 @@ fn parse_query_text(text: &str) -> std::result::Result<Vec<f32>, String> {
     trimmed
         .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty())
-        .map(|t| t.parse::<f32>().map_err(|e| format!("bad float '{t}': {e}")))
+        .map(|t| {
+            t.parse::<f32>()
+                .map_err(|e| format!("bad float '{t}': {e}"))
+        })
         .collect()
 }
 
@@ -572,7 +567,13 @@ fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector:
             let id = m.id.to_string();
             let imp = format!("imp={:.2}", m.importance);
             if verbose {
-                println!("{}  [{}]  agent={}  {}", id, m.memory_type.as_str(), m.agent_id, imp);
+                println!(
+                    "{}  [{}]  agent={}  {}",
+                    id,
+                    m.memory_type.as_str(),
+                    m.agent_id,
+                    imp
+                );
                 println!("  content : {}", m.content);
                 if let Some(sid) = &m.session_id {
                     println!("  session : {sid}");
@@ -608,11 +609,17 @@ fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector:
         }
         OutputFormat::Json => {
             let v = memory_to_json(m, include_vector);
-            println!("{}", serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into())
+            );
         }
         OutputFormat::Jsonl => {
             let v = memory_to_json(m, include_vector);
-            println!("{}", serde_json::to_string(&v).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string(&v).unwrap_or_else(|_| "{}".into())
+            );
         }
     }
 }
@@ -631,9 +638,15 @@ fn print_memories(items: &[Memory], total: usize, format: OutputFormat, include_
             }
         }
         OutputFormat::Json => {
-            let arr: Vec<_> = items.iter().map(|m| memory_to_json(m, include_vector)).collect();
+            let arr: Vec<_> = items
+                .iter()
+                .map(|m| memory_to_json(m, include_vector))
+                .collect();
             let doc = serde_json::json!({ "total": total, "count": arr.len(), "memories": arr });
-            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
+            );
         }
         OutputFormat::Jsonl => {
             for m in items {
@@ -678,7 +691,10 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
                 })
                 .collect();
             let doc = serde_json::json!({ "count": arr.len(), "hits": arr });
-            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into()));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
+            );
         }
         OutputFormat::Jsonl => {
             for h in hits {
@@ -687,7 +703,10 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
                     "similarity": h.similarity,
                     "memory": memory_to_json(&h.memory, false),
                 });
-                println!("{}", serde_json::to_string(&line).unwrap_or_else(|_| "{}".into()));
+                println!(
+                    "{}",
+                    serde_json::to_string(&line).unwrap_or_else(|_| "{}".into())
+                );
             }
         }
     }
@@ -696,14 +715,22 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Init { path, dimensions, no_manifest, passphrase: pp } => {
+        Command::Init {
+            path,
+            dimensions,
+            no_manifest,
+            passphrase: pp,
+        } => {
             // Init wraps `new_passphrase` because the passphrase chosen
             // here is irrecoverable — typoing it makes the file
             // unopenable. The double-prompt catches typos at the interactive
             // path; flag and env-var paths trust the caller (they already
             // know what they typed).
             let pp = new_passphrase(&pp, "MNEMO_PASSPHRASE")?;
-            let cfg = MnemoConfig { dimensions, ..Default::default() };
+            let cfg = MnemoConfig {
+                dimensions,
+                ..Default::default()
+            };
             let mut db = Mnemo::create(&path, &pp, cfg).map_err(fmt)?;
             if !no_manifest {
                 let manifest = Memory::scaffold_manifest(dimensions);
@@ -721,7 +748,10 @@ fn run() -> std::result::Result<(), String> {
                 println!("  → replace it with one that records your embedder and conventions");
             }
         }
-        Command::Info { path, passphrase: pp } => {
+        Command::Info {
+            path,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
@@ -762,7 +792,11 @@ fn run() -> std::result::Result<(), String> {
                 None => println!("ann index:   none (recall uses exact scan)"),
             }
         }
-        Command::Rekey { path, passphrase: pp, new_passphrase: new } => {
+        Command::Rekey {
+            path,
+            passphrase: pp,
+            new_passphrase: new,
+        } => {
             let pp = passphrase(&pp)?;
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
@@ -770,30 +804,42 @@ fn run() -> std::result::Result<(), String> {
             db.close().map_err(fmt)?;
             println!("rekeyed {path}");
         }
-        Command::Compact { path, passphrase: pp } => {
+        Command::Compact {
+            path,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let report = Mnemo::compact_file(&path, &pp).map_err(fmt)?;
-            println!("compacted {path}: {} -> {} live memories", report.before, report.after);
+            println!(
+                "compacted {path}: {} -> {} live memories",
+                report.before, report.after
+            );
         }
-        Command::Verify { path, passphrase: pp } => {
+        Command::Verify {
+            path,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let n = db.verify().map_err(fmt)?;
             println!("verified {n} records — all pages decrypt and decode");
         }
-        Command::Import { path, file, passphrase: pp } => {
+        Command::Import {
+            path,
+            file,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            let text = std::fs::read_to_string(&file)
-                .map_err(|e| format!("cannot read {file}: {e}"))?;
+            let text =
+                std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
             let mut count = 0usize;
             for (lineno, line) in text.lines().enumerate() {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
-                let m = memory_from_json(line)
-                    .map_err(|e| format!("line {}: {e}", lineno + 1))?;
+                let m = memory_from_json(line).map_err(|e| format!("line {}: {e}", lineno + 1))?;
                 db.remember(m).map_err(fmt)?;
                 count += 1;
             }
@@ -831,7 +877,13 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
-        Command::Search { path, query, query_file, top_k, passphrase: pp } => {
+        Command::Search {
+            path,
+            query,
+            query_file,
+            top_k,
+            passphrase: pp,
+        } => {
             // Search is a pure catalog scan — no access-tracking, no
             // catalog writes. Safe on a read-only handle.
             let pp = passphrase(&pp)?;
@@ -845,7 +897,12 @@ fn run() -> std::result::Result<(), String> {
                 println!("{sim:.4}  [{}]  {}", m.memory_type.as_str(), m.content);
             }
         }
-        Command::About { path, format, manifest_only, passphrase: pp } => {
+        Command::About {
+            path,
+            format,
+            manifest_only,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
@@ -897,19 +954,34 @@ fn run() -> std::result::Result<(), String> {
                         path,
                         stats.memories,
                         stats.dimensions,
-                        if stats.encrypted { "encrypted" } else { "plaintext" },
+                        if stats.encrypted {
+                            "encrypted"
+                        } else {
+                            "plaintext"
+                        },
                         snapshots,
-                        if stats.index.is_some() { " · ANN index built" } else { "" },
+                        if stats.index.is_some() {
+                            " · ANN index built"
+                        } else {
+                            ""
+                        },
                     );
                     if entries.is_empty() {
                         println!();
-                        println!("(no onboarding memories — this database has no self-description.)");
+                        println!(
+                            "(no onboarding memories — this database has no self-description.)"
+                        );
                         println!("To make a database self-describing, store a memory with");
-                        println!("  metadata = {{\"area\": \"onboarding\", \"topic\": \"manifest\"}}");
+                        println!(
+                            "  metadata = {{\"area\": \"onboarding\", \"topic\": \"manifest\"}}"
+                        );
                         println!("that introduces the project, embedder, and conventions.");
                     } else {
                         println!();
-                        println!("## Onboarding briefing ({} entries, most important first)", entries.len());
+                        println!(
+                            "## Onboarding briefing ({} entries, most important first)",
+                            entries.len()
+                        );
                         for m in &entries {
                             let topic = m
                                 .metadata
@@ -941,14 +1013,23 @@ fn run() -> std::result::Result<(), String> {
                         }
                         println!();
                         println!("## Quick start");
-                        println!("  mnemo list   {path}                 # browse all live memories");
+                        println!(
+                            "  mnemo list   {path}                 # browse all live memories"
+                        );
                         println!("  mnemo recall {path} --query VEC     # multi-signal recall");
                         println!("  mnemo get    {path} <ulid> --verbose # fetch one memory");
                     }
                 }
             }
         }
-        Command::Get { path, id, format, verbose, vector, passphrase: pp } => {
+        Command::Get {
+            path,
+            id,
+            format,
+            verbose,
+            vector,
+            passphrase: pp,
+        } => {
             // `get` is a plain catalog lookup + record read — no writes.
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
@@ -1063,7 +1144,10 @@ fn run() -> std::result::Result<(), String> {
             print_recall_hits(&hits, format);
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
-        Command::Snapshots { path, passphrase: pp } => {
+        Command::Snapshots {
+            path,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let snaps = db.snapshots();
@@ -1072,22 +1156,22 @@ fn run() -> std::result::Result<(), String> {
             } else {
                 println!("{:<8}  {:<12}  committed (unix)", "txn", "memories");
                 for s in snaps {
-                    println!(
-                        "{:<8}  {:<12}  {}",
-                        s.txn_id, s.memory_count, s.created_at
-                    );
+                    println!("{:<8}  {:<12}  {}", s.txn_id, s.memory_count, s.created_at);
                 }
             }
         }
-        Command::Restore { path, to_txn, to_time, passphrase: pp } => {
+        Command::Restore {
+            path,
+            to_txn,
+            to_time,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
             let info = match (to_txn, to_time) {
                 (Some(txn), _) => db.restore_to(txn).map_err(fmt)?,
                 (None, Some(t)) => db.restore_to_time(t).map_err(fmt)?,
-                (None, None) => {
-                    return Err("restore needs --to-txn or --to-time".to_string())
-                }
+                (None, None) => return Err("restore needs --to-txn or --to-time".to_string()),
             };
             println!(
                 "restored {path} to snapshot txn {} ({} memories)",
@@ -1096,9 +1180,7 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Serve { path, mcp } => {
             if !mcp {
-                return Err(
-                    "serve requires --mcp today (other transports may come later)".into(),
-                );
+                return Err("serve requires --mcp today (other transports may come later)".into());
             }
             // The MCP server pulls `MNEMO_PASSPHRASE` itself — passing
             // `passphrase()` here would open a TTY prompt and break the
@@ -1117,7 +1199,12 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
     use mnemo::CachePutOpts;
 
     match op {
-        CacheOp::Get { path, ns, key, passphrase: pp } => {
+        CacheOp::Get {
+            path,
+            ns,
+            key,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             // Get on a cache is a mutation (bumps access stats) unless
             // the handle is read-only. Use read-write here so the stats
@@ -1129,7 +1216,9 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
                     // asked for binary content-type, they can pipe;
                     // the CLI does not decode.
                     use std::io::Write;
-                    std::io::stdout().write_all(&v.value).map_err(|e| e.to_string())?;
+                    std::io::stdout()
+                        .write_all(&v.value)
+                        .map_err(|e| e.to_string())?;
                     // A trailing newline for terminal ergonomics when
                     // the content is text; skip if the value already
                     // ends in one to avoid double-newlines in scripts.
@@ -1157,8 +1246,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             let pp = passphrase(&pp)?;
             let bytes = match (value, file) {
                 (Some(v), None) => v.into_bytes(),
-                (None, Some(f)) => std::fs::read(&f)
-                    .map_err(|e| format!("read {f}: {e}"))?,
+                (None, Some(f)) => std::fs::read(&f).map_err(|e| format!("read {f}: {e}"))?,
                 (Some(_), Some(_)) => {
                     return Err("--value and --file are mutually exclusive".into())
                 }
@@ -1176,14 +1264,23 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             db.flush().map_err(fmt)?;
             println!("cached {} bytes at ({ns}, {key})", bytes.len());
         }
-        CacheOp::Delete { path, ns, key, passphrase: pp } => {
+        CacheOp::Delete {
+            path,
+            ns,
+            key,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
             db.cache_delete(&ns, &key).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("deleted ({ns}, {key}) (space reclaimed on next compact)");
         }
-        CacheOp::Stats { path, ns, passphrase: pp } => {
+        CacheOp::Stats {
+            path,
+            ns,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             // Read-only handle is fine — stats is a pure scan.
             let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
@@ -1199,7 +1296,12 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             });
             println!("{}", serde_json::to_string_pretty(&obj).unwrap());
         }
-        CacheOp::Purge { path, ns, expired, passphrase: pp } => {
+        CacheOp::Purge {
+            path,
+            ns,
+            expired,
+            passphrase: pp,
+        } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
             let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
@@ -1214,14 +1316,25 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
 fn memory_from_json(line: &str) -> std::result::Result<Memory, String> {
     use serde_json::Value;
     let v: Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-    let content = v.get("content").and_then(Value::as_str)
+    let content = v
+        .get("content")
+        .and_then(Value::as_str)
         .ok_or("missing string field 'content'")?;
-    let vec_json = v.get("vector").and_then(Value::as_array)
+    let vec_json = v
+        .get("vector")
+        .and_then(Value::as_array)
         .ok_or("missing array field 'vector'")?;
-    let vector: Vec<f32> = vec_json.iter()
-        .map(|x| x.as_f64().map(|f| f as f32).ok_or("vector element not a number"))
+    let vector: Vec<f32> = vec_json
+        .iter()
+        .map(|x| {
+            x.as_f64()
+                .map(|f| f as f32)
+                .ok_or("vector element not a number")
+        })
         .collect::<std::result::Result<_, _>>()?;
-    let mt = v.get("memory_type").and_then(Value::as_str)
+    let mt = v
+        .get("memory_type")
+        .and_then(Value::as_str)
         .and_then(MemoryType::parse)
         .unwrap_or(MemoryType::Semantic);
     let mut m = Memory::new(content, mt, vector);
@@ -1242,17 +1355,45 @@ fn fmt(e: mnemo::MnemoError) -> String {
 fn demo(path: &str) -> Result<()> {
     let _ = std::fs::remove_file(path);
     let pp = "demo-passphrase";
-    let cfg = MnemoConfig { dimensions: 4, ..Default::default() };
+    let cfg = MnemoConfig {
+        dimensions: 4,
+        ..Default::default()
+    };
 
     println!("creating encrypted database at {path} ...");
     let mut db = Mnemo::create(path, pp, cfg)?;
 
     let seeds = [
-        ("user prefers concise answers", MemoryType::Semantic, [0.9, 0.1, 0.0, 0.1], 0.9),
-        ("user is based in Berlin", MemoryType::Semantic, [0.8, 0.2, 0.1, 0.0], 0.7),
-        ("ran the deploy script at 14:00", MemoryType::Episodic, [0.1, 0.9, 0.1, 0.0], 0.4),
-        ("to reset state, call clear() then reload", MemoryType::Procedural, [0.0, 0.1, 0.9, 0.2], 0.6),
-        ("scratch: temp calculation result", MemoryType::Working, [0.2, 0.2, 0.2, 0.9], 0.2),
+        (
+            "user prefers concise answers",
+            MemoryType::Semantic,
+            [0.9, 0.1, 0.0, 0.1],
+            0.9,
+        ),
+        (
+            "user is based in Berlin",
+            MemoryType::Semantic,
+            [0.8, 0.2, 0.1, 0.0],
+            0.7,
+        ),
+        (
+            "ran the deploy script at 14:00",
+            MemoryType::Episodic,
+            [0.1, 0.9, 0.1, 0.0],
+            0.4,
+        ),
+        (
+            "to reset state, call clear() then reload",
+            MemoryType::Procedural,
+            [0.0, 0.1, 0.9, 0.2],
+            0.6,
+        ),
+        (
+            "scratch: temp calculation result",
+            MemoryType::Working,
+            [0.2, 0.2, 0.2, 0.9],
+            0.2,
+        ),
     ];
     for (content, mt, v, imp) in seeds {
         db.remember(
@@ -1276,7 +1417,10 @@ fn demo(path: &str) -> Result<()> {
     for h in db.recall(&req)? {
         println!(
             "  score={:.3}  sim={:.3}  [{}]  {}",
-            h.score, h.similarity, h.memory.memory_type.as_str(), h.memory.content
+            h.score,
+            h.similarity,
+            h.memory.memory_type.as_str(),
+            h.memory.content
         );
     }
 

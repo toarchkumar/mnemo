@@ -11,7 +11,7 @@ build-backend = "maturin"
 # Cargo.toml), so user code keeps writing `import mnemo` after
 # `pip install mnemo-engine`.
 name = "mnemo-engine"
-version = "0.3.2"
+version = "0.4.0"
 description = "Encrypted, portable agent-memory engine — Python bindings"
 readme = "README.md"
 requires-python = ">=3.8"

@@ -27,8 +27,7 @@ fn to_napi(e: mnemo::MnemoError) -> Error {
 
 /// Parse a memory-type string, erroring if unknown.
 fn parse_type(s: &str) -> Result<MemoryType> {
-    MemoryType::parse(s)
-        .ok_or_else(|| Error::from_reason(format!("unknown memory type '{s}'")))
+    MemoryType::parse(s).ok_or_else(|| Error::from_reason(format!("unknown memory type '{s}'")))
 }
 
 /// One scored result from [`Database::recall`].
