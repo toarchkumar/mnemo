@@ -150,8 +150,14 @@ jobs:
             mnemo/fuzz
           key: fuzz-smoke-${{ matrix.target }}
 
+      # Prebuilt binary via taiki-e/install-action — avoids compiling
+      # cargo-fuzz + rustix from source on nightly, which breaks whenever
+      # rustix's use of internal `rustc_*` attributes drifts past what
+      # nightly still exports (see PR 7 CI run #21).
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --version =0.12.0 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
 
       - name: Smoke ${{ matrix.target }} (60s)
         working-directory: mnemo
