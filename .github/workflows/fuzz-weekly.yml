@@ -47,9 +47,12 @@ jobs:
         with:
           tool: cargo-fuzz
 
+      # Force the gnu target — newer cargo-fuzz defaults to musl on
+      # Linux, which isn't installed in nightly and is incompatible
+      # with AddressSanitizer's dynamic-libc requirement.
       - name: Run ${{ matrix.target }} (10 min)
         working-directory: mnemo
-        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=600
+        run: cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=600
 
       # Upload any crash inputs libFuzzer minimized on failure so we can
       # reproduce locally without re-running the fuzzer. `if: failure()`
