@@ -1,0 +1,6 @@
+# cargo-fuzz runtime state — corpus grows unboundedly, artifacts hold
+# crash reproducers (both are per-run and per-machine).
+target
+corpus
+artifacts
+coverage

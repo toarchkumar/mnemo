@@ -1,0 +1,58 @@
+name: fuzz-weekly
+
+# Longer fuzz run — 10 minutes per target, once a week, to grow the
+# corpus and catch panics the 60s smoke on PRs would miss. Runs on
+# Sunday at 05:00 UTC (low-traffic window). Manual dispatch is also
+# supported for on-demand runs.
+on:
+  schedule:
+    - cron: "0 5 * * 0"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz-weekly ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_header
+          - fuzz_wal_replay
+          - fuzz_record_decode
+          - fuzz_cache_directory
+          - fuzz_mcp_frame
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            mnemo
+            mnemo/fuzz
+          key: fuzz-weekly-${{ matrix.target }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version =0.12.0 --locked
+
+      - name: Run ${{ matrix.target }} (10 min)
+        working-directory: mnemo
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=600
+
+      # Upload any crash inputs libFuzzer minimized on failure so we can
+      # reproduce locally without re-running the fuzzer. `if: failure()`
+      # skips upload on green runs (nothing to save).
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: mnemo/fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore

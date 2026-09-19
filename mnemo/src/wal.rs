@@ -168,7 +168,23 @@ pub fn recover(
             n => filled += n,
         }
     }
+    region.truncate(filled);
+    recover_bytes(&region, wal_seq)
+}
 
+/// Byte-slice variant of [`recover`] that skips the `File::read` step.
+/// Same frame-scan semantics; extracted so fuzz targets can drive the
+/// scan without an on-disk file. The buffer is treated as the WAL
+/// region starting at frame 0 — trailing zeros or garbage past the
+/// last committed frame end the scan cleanly, same as `recover`'s
+/// short-read behavior.
+///
+/// Marked `#[doc(hidden)]` because it's a fuzz/testability affordance,
+/// not a stable public API — callers who have a `File` should use
+/// [`recover`] instead.
+#[doc(hidden)]
+pub fn recover_bytes(region: &[u8], wal_seq: u64) -> Result<Option<Vec<Frame>>> {
+    let filled = region.len();
     let mut off = 0usize;
     let mut frames: Vec<Frame> = Vec::new();
     let mut running = 0u32;
@@ -179,10 +195,10 @@ pub fn recover(
             break; // End of valid log (zeros, or stale bytes).
         }
         let kind = region[off + 4];
-        let id = rd_u64(&region, off + 5);
-        let page_no = rd_u64(&region, off + 13);
-        let len = rd_u32(&region, off + 21) as usize;
-        let crc = rd_u32(&region, off + 25);
+        let id = rd_u64(region, off + 5);
+        let page_no = rd_u64(region, off + 13);
+        let len = rd_u32(region, off + 21) as usize;
+        let crc = rd_u32(region, off + 25);
         let body = off + FRAME_HEADER;
 
         // A transaction must be internally consistent: one txn id throughout.

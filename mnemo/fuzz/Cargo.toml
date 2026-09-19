@@ -1,0 +1,67 @@
+[package]
+# Standalone cargo-fuzz crate for MNemo (Phase 1.2). Nightly-only; not
+# a member of the parent workspace so `cargo test` / `cargo clippy` at
+# the repo root do NOT try to compile it. Drive it with:
+#
+#   cd mnemo && cargo +nightly fuzz run <target>
+#
+# Available targets are the `[[bin]]` entries at the bottom. See
+# `.github/workflows/ci.yml` for the fuzz-smoke job (60 s per target
+# on every push) and `fuzz-weekly.yml` for the 10-min scheduled job.
+name = "mnemo-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned per AGENTS.md convention (`=x.y.z`). This crate is nightly-only
+# and outside the MSRV 1.75 floor; the pin is still hygiene so the fuzz
+# CI job doesn't drift under us.
+libfuzzer-sys = "=0.4.7"
+mnemo = { path = "..", package = "mnemo-engine" }
+
+# Standalone; do NOT get absorbed into the repo-root workspace. This
+# empty `[workspace]` marks `mnemo/fuzz/` as its own workspace root.
+[workspace]
+
+# Debug info in release so libFuzzer crash artifacts symbolicate nicely.
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_header"
+path = "fuzz_targets/fuzz_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_wal_replay"
+path = "fuzz_targets/fuzz_wal_replay.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_record_decode"
+path = "fuzz_targets/fuzz_record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_cache_directory"
+path = "fuzz_targets/fuzz_cache_directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mcp_frame"
+path = "fuzz_targets/fuzz_mcp_frame.rs"
+test = false
+doc = false
+bench = false

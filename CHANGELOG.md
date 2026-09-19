@@ -8,6 +8,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Security / hardening
+
+- **PR 7 — Phase 1.2 fuzz harness.** New `mnemo/fuzz/` standalone
+  `cargo-fuzz` crate with five libFuzzer targets covering every
+  untrusted-input parser: `fuzz_header` (page-0 header, pre-passphrase
+  attack surface, v8 layout), `fuzz_wal_replay` (WAL scan on open),
+  `fuzz_record_decode` (MessagePack `Memory` + `CacheEntry` decode),
+  `fuzz_cache_directory` (`Vec<CacheDirectoryEntry>` decode incl. the
+  `#[serde(default)]`-tolerant PR 4 fields), `fuzz_mcp_frame` (MCP
+  stdio JSON-RPC request-line parse). Targets reach into the crate
+  via `mnemo::__fuzz::*` (`#[doc(hidden)]` — not part of the stable
+  API). CI runs each target for 60s on every PR (`fuzz-smoke` job,
+  nightly) and 10 min/target weekly (`fuzz-weekly.yml`, Sundays
+  05:00 UTC, uploads crash artifacts on failure). `wal::recover`
+  was refactored to delegate to a byte-slice variant
+  `recover_bytes(&[u8], u64)` so the WAL scanner fuzzes without
+  needing a `File`; behavior is unchanged for production callers.
+
 ## [0.4.0] — 2026-08-28
 
 **On-disk format v7 → v8.** Files written by v0.3.x on v4/v5/v6/v7

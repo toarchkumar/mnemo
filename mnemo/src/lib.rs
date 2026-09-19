@@ -78,3 +78,59 @@ pub use store::{
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.
 pub use ulid::Ulid;
+
+/// Internal parse surfaces exposed for cargo-fuzz targets (Phase 1.2).
+///
+/// **Not part of the stable public API.** Each function feeds an
+/// arbitrary byte slice into a parse/decode path that a hostile
+/// `.mnemo` file (or a hostile MCP client) can send us, and returns
+/// `Result<()>` so a fuzz target only asserts "no panic." Marked
+/// `#[doc(hidden)]` so `cargo doc` doesn't advertise it; do not import
+/// from application code.
+#[doc(hidden)]
+pub mod __fuzz {
+    /// Parse a `.mnemo` header page (page 0, plaintext) from arbitrary
+    /// bytes. This is the pre-passphrase attack surface — a hostile
+    /// file hits it before any DEK exists.
+    pub fn parse_header(bytes: &[u8]) -> crate::Result<()> {
+        crate::format::Header::from_page(bytes).map(|_| ())
+    }
+
+    /// Replay the WAL scan over an arbitrary byte region. Delegates
+    /// to [`crate::wal::recover_bytes`]; a corrupt / truncated /
+    /// adversarial region must return `Err` or `Ok(None/Some(_))`,
+    /// never panic.
+    pub fn wal_recover_bytes(region: &[u8], wal_seq: u64) -> crate::Result<()> {
+        crate::wal::recover_bytes(region, wal_seq).map(|_| ())
+    }
+
+    /// Decode a `Memory` record body from arbitrary bytes.
+    pub fn decode_memory(bytes: &[u8]) -> crate::Result<()> {
+        rmp_serde::from_slice::<crate::Memory>(bytes)
+            .map(|_| ())
+            .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
+    }
+
+    /// Decode a `CacheEntry` record body from arbitrary bytes. Type is
+    /// `pub(crate)`, so this wrapper hides it behind a unit return.
+    pub fn decode_cache_entry(bytes: &[u8]) -> crate::Result<()> {
+        rmp_serde::from_slice::<crate::result_cache::CacheEntry>(bytes)
+            .map(|_| ())
+            .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
+    }
+
+    /// Decode a cache-directory page-run body (a `Vec<CacheDirectoryEntry>`)
+    /// from arbitrary bytes.
+    pub fn decode_cache_directory(bytes: &[u8]) -> crate::Result<()> {
+        rmp_serde::from_slice::<Vec<crate::result_cache::CacheDirectoryEntry>>(bytes)
+            .map(|_| ())
+            .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
+    }
+
+    /// Parse a single MCP stdio JSON-RPC request line. Malformed
+    /// input returns `Err(String)`; the fuzz target only asserts
+    /// no panic and that the server would not die on this line.
+    pub fn parse_mcp_request_line(line: &str) -> Result<(), String> {
+        crate::mcp::__fuzz_parse_request_line(line)
+    }
+}

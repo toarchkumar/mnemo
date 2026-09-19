@@ -60,6 +60,17 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 /// Environment variable that supplies the database passphrase.
 const PASSPHRASE_ENV: &str = "MNEMO_PASSPHRASE";
 
+/// Fuzz-target helper: parse a single JSON-RPC line as a `Request` and
+/// discard. Panic-free — malformed input returns `Err(String)`, valid
+/// requests return `Ok(())`. Exposed only via `crate::__fuzz`; not part
+/// of the stable public API.
+#[doc(hidden)]
+pub fn __fuzz_parse_request_line(line: &str) -> std::result::Result<(), String> {
+    serde_json::from_str::<Request>(line)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 // --- JSON-RPC 2.0 wire types ---------------------------------------------
 
 /// Incoming JSON-RPC 2.0 request or notification (a notification is a

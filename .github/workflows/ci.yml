@@ -118,3 +118,41 @@ jobs:
       - name: Run Python tests
         working-directory: mnemo-python
         run: python test_mnemo.py
+
+  # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
+  #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
+  #     `continue-on-error: false` so a new panic fails the build; the
+  #     weekly job (fuzz-weekly.yml) runs longer for corpus growth.
+  fuzz-smoke:
+    name: fuzz-smoke (nightly, linux)
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_header
+          - fuzz_wal_replay
+          - fuzz_record_decode
+          - fuzz_cache_directory
+          - fuzz_mcp_frame
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            mnemo
+            mnemo/fuzz
+          key: fuzz-smoke-${{ matrix.target }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version =0.12.0 --locked
+
+      - name: Smoke ${{ matrix.target }} (60s)
+        working-directory: mnemo
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=60
