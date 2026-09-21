@@ -76,7 +76,10 @@ jobs:
 
       - name: cargo build
         working-directory: mnemo
-        run: cargo build --all-targets
+        # `--features failpoints` matches the test step below —
+        # `--all-targets` here compiles `tests/proptest_store.rs`,
+        # which references `mnemo::__failpoints` (gated by the feature).
+        run: cargo build --all-targets --features failpoints
 
       - name: cargo test (lib + integration only)
         working-directory: mnemo
