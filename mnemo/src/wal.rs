@@ -136,6 +136,11 @@ pub fn commit(
     put_u32(&mut buf, 0);
     put_u32(&mut buf, running);
 
+    // Phase 1.3 failpoint: crash-before-commit. Runs before the
+    // buffer hits the WAL region, so a triggered failure guarantees
+    // no commit frame exists on disk — reopen must recover to the
+    // pre-flush state. Zero-cost stub in production.
+    crate::pager::__failpoint_check()?;
     file.seek(SeekFrom::Start(wal_start * PAGE_SIZE as u64))?;
     file.write_all(&buf)?;
     file.sync_all()?;

@@ -10,6 +10,75 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
+/// Test-only crash injection hooks (Phase 1.3). Compiled in under
+/// `cfg(test)` and the `failpoints` feature; otherwise absent — the
+/// production build carries no runtime cost. The counter is
+/// thread-local so parallel tests do not stomp on each other.
+#[cfg(any(test, feature = "failpoints"))]
+pub(crate) mod failpoints {
+    use std::cell::Cell;
+
+    thread_local! {
+        // -1  => disabled (default).
+        // N>0 => Nth subsequent `check()` returns Ok, then check
+        //        `N+1` fails and disarms.
+        // 0   => the *next* `check()` fails, then disarms.
+        //
+        // `const { ... }` in `thread_local!` was stabilized in Rust
+        // 1.59, safely under our 1.75 MSRV floor. Const-init avoids
+        // the first-touch branch and satisfies clippy's
+        // `missing_const_for_thread_local` on stable.
+        static WRITES_UNTIL_FAIL: Cell<i64> = const { Cell::new(-1) };
+    }
+
+    /// Arm the pager (and the WAL commit writer) to fail its Nth
+    /// subsequent write with a synthetic `io::Error`. `n = 0` fails
+    /// on the very next write; `n = -1` disables. One-shot: the
+    /// counter disarms itself the moment it fires.
+    pub fn set_writes_until_fail(n: i64) {
+        WRITES_UNTIL_FAIL.with(|c| c.set(n));
+    }
+
+    /// Called by every file-writing code path in the pager and the
+    /// WAL commit. Returns `Err` when the counter reaches zero,
+    /// simulating a torn write mid-flush.
+    pub(crate) fn check() -> std::io::Result<()> {
+        WRITES_UNTIL_FAIL.with(|c| {
+            let v = c.get();
+            if v == 0 {
+                c.set(-1);
+                Err(std::io::Error::other(
+                    "injected crash (Phase 1.3 failpoint)",
+                ))
+            } else if v > 0 {
+                c.set(v - 1);
+                Ok(())
+            } else {
+                Ok(())
+            }
+        })
+    }
+}
+
+/// Zero-cost stub used everywhere the failpoint is compiled out.
+/// Kept as an `#[inline(always)] fn` so the call site reads the
+/// same in both configurations; the branch is optimized away.
+///
+/// Also re-exported to sibling modules (`wal`) that need the same
+/// hook on their own `write_all` sites — the double-underscore
+/// makes it obvious this is not a stable API.
+#[cfg(not(any(test, feature = "failpoints")))]
+#[inline(always)]
+pub(crate) fn __failpoint_check() -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(any(test, feature = "failpoints"))]
+#[inline(always)]
+pub(crate) fn __failpoint_check() -> std::io::Result<()> {
+    failpoints::check()
+}
+
 use zeroize::Zeroizing;
 
 use crate::cache::PageCache;
@@ -99,6 +168,7 @@ impl Pager {
     /// Write a raw, *unencrypted* page-sized buffer at `page_no`.
     /// Used only for the header (page 0).
     pub fn write_raw(&mut self, page_no: u64, data: &[u8; PAGE_SIZE]) -> Result<()> {
+        __failpoint_check()?;
         self.file
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.write_all(data)?;
@@ -153,6 +223,7 @@ impl Pager {
     /// are written verbatim — used to checkpoint WAL frames (encrypted pages,
     /// or the plaintext header) to their home locations.
     pub fn write_sealed(&mut self, page_no: u64, bytes: &[u8; PAGE_SIZE]) -> Result<()> {
+        __failpoint_check()?;
         self.file
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.file.write_all(bytes)?;
@@ -240,6 +311,7 @@ impl Pager {
             disk.extend_from_slice(&ciphertext);
             debug_assert_eq!(disk.len(), PAGE_SIZE);
 
+            __failpoint_check()?;
             self.file
                 .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
             self.file.write_all(&disk)?;

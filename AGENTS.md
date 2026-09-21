@@ -106,6 +106,7 @@ file. The `.gitignore` already excludes them.
 | Add an integration test | `mnemo/tests/integration.rs` (uses `KdfParams::fast()` for speed) |
 | Add a CLI smoke test | `mnemo/tests/cli_smoke.rs` (uses `CARGO_BIN_EXE_mnemo` + tempfile) |
 | Add a fuzz target | `mnemo/fuzz/fuzz_targets/<name>.rs` + `[[bin]]` in `mnemo/fuzz/Cargo.toml` + expose entry via `mnemo::__fuzz` in `mnemo/src/lib.rs` + matrix rows in `.github/workflows/ci.yml` (`fuzz-smoke`) and `.github/workflows/fuzz-weekly.yml` |
+| Add a proptest scenario | `mnemo/tests/proptest_store.rs` (add a new `proptest! { #[test] fn prop_<name>(...) { ... } }` block; use `Mnemo::create` + `KdfParams::fast()` + `tempfile` so cases stay ~ms). Run tests with `cargo test --features failpoints` so `mnemo::__failpoints` is visible across the integration-test crate boundary. For crash-injection variants, arm the pager hook via `mnemo::__failpoints::set_writes_until_fail(n)` then disarm with `-1` before reopen. |
 | Touch the on-disk format | `mnemo/src/format.rs` (bump VERSION constant + handle the migration) |
 | Change the manifest scaffold | `mnemo/src/memory.rs` (`Memory::scaffold_manifest`) |
 | Add a mutating method | must guard on `self.read_only` → `MnemoError::ReadOnly` (see `remember`, `flush`, `rekey` for the pattern) and be routed via `Mnemo::open` (not `open_read_only`) in the CLI |

@@ -25,8 +25,26 @@ Pre-1.0, the minor component carries the breaking-change signal.
   was refactored to delegate to a byte-slice variant
   `recover_bytes(&[u8], u64)` so the WAL scanner fuzzes without
   needing a `File`; behavior is unchanged for production callers.
-
-## [0.4.0] — 2026-08-28
+- **PR 8 — Phase 1.3 proptest state machine + crash injection.**
+  New `mnemo/tests/proptest_store.rs` with four properties over the
+  operation alphabet (`remember` / `delete` / `flush` / `reopen` /
+  `restore_to` / `compact_file` / `cache_put` / `cache_get` /
+  `cache_purge`) under both `CacheFlushPolicy::Strict` and
+  `Batched { max_dirty, max_age }`: (a) flush + reopen preserves
+  the observable memory set; (b) batched-policy `cache_get` never
+  surfaces a stale/wrong value across the crash boundary; (c) a
+  partial-flush crash (WAL commit not reached) reverts the reopened
+  database to the last committed state; (d) arming a fail-after-N-
+  writes hook during `flush()` yields either the pre-flush or the
+  post-flush state on reopen, never a third state (the atomicity
+  invariant). Adds `proptest = "=1.5.0"` as a dev-dep (MSRV 1.75
+  safe), a new optional `failpoints` feature exposing
+  `mnemo::__failpoints::set_writes_until_fail` (`#[doc(hidden)]`,
+  not stable API), and a `pub(crate)` `__failpoint_check()` in
+  `pager.rs` that is a zero-cost stub outside `cfg(test)` and the
+  `failpoints` feature. Hooks land in `pager::write_raw`,
+  `pager::write_sealed`, `pager::flush` (per-page), and
+  `wal::commit` — every file-writing site in the durability path.
 
 **On-disk format v7 → v8.** Files written by v0.3.x on v4/v5/v6/v7
 migrate transparently on first open under v0.4.0 (the existing

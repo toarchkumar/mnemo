@@ -79,6 +79,28 @@ pub use store::{
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.
 pub use ulid::Ulid;
 
+/// Test-only crash-injection surface used by the Phase 1.3 proptest
+/// (`mnemo/tests/proptest_store.rs`). Compiled in under `cfg(test)`
+/// and the `failpoints` feature only; absent from release builds.
+///
+/// **Not part of the stable public API.** The double-underscore
+/// convention makes the "internal" contract obvious at the call site.
+#[cfg(any(test, feature = "failpoints"))]
+#[doc(hidden)]
+pub mod __failpoints {
+    /// Arm the pager and WAL commit path to fail on the Nth
+    /// subsequent write. `n = 0` fails the very next write; `n = -1`
+    /// (or any negative) disables. One-shot — disarms on trigger.
+    ///
+    /// Every write is checked before the byte hits the file, so a
+    /// triggered failure is guaranteed torn-BEFORE, never
+    /// torn-AFTER — critical for the "either pre-flush or post-flush"
+    /// invariant the property test asserts.
+    pub fn set_writes_until_fail(n: i64) {
+        crate::pager::failpoints::set_writes_until_fail(n)
+    }
+}
+
 /// Internal parse surfaces exposed for cargo-fuzz targets (Phase 1.2).
 ///
 /// **Not part of the stable public API.** Each function feeds an

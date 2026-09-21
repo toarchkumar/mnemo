@@ -41,13 +41,19 @@ jobs:
         with:
           workspaces: mnemo
 
+      # `--features failpoints` enables the Phase 1.3 crash-injection
+      # hook the proptest state machine arms via `mnemo::__failpoints`.
+      # The hook is a zero-cost stub when the feature is off, but the
+      # integration-test crate can't see the library's own `cfg(test)`,
+      # so the feature is the only way to expose the arm helper across
+      # the crate boundary.
       - name: cargo test
         working-directory: mnemo
-        run: cargo test
+        run: cargo test --features failpoints
 
       - name: cargo clippy
         working-directory: mnemo
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --features failpoints -- -D warnings
 
   # --- MSRV check: ensure the codebase still builds against the floor
   #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
@@ -76,7 +82,9 @@ jobs:
         working-directory: mnemo
         # Skip --all-targets so we don't have to compile every test on
         # MSRV; the integration tests are the real correctness check.
-        run: cargo test --test integration --test cli_smoke
+        # `--features failpoints` needed for the proptest state machine
+        # (Phase 1.3) to see the crash-injection hook.
+        run: cargo test --features failpoints --test integration --test cli_smoke --test proptest_store
 
   # --- Python bindings: build via maturin + run mnemo-python test_mnemo
   python:
