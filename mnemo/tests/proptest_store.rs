@@ -214,38 +214,66 @@ fn value_of(byte: u8) -> Vec<u8> {
     vec![byte; 4]
 }
 
+const MAX_DIRTY: usize = 3;
+
 proptest! {
     /// Under `Batched { max_dirty: 3, max_age: 1h }`, `cache_get` for
     /// any (ns, key) returns either `None` or exactly the value most
-    /// recently `cache_put` for that (ns, key). It NEVER returns a
-    /// stale earlier value, a different key's value, or a truncated
-    /// payload — even across reopen boundaries where an unflushed
-    /// batched put may have been dropped on the floor.
+    /// recently `cache_put` for that (ns, key) *that the engine
+    /// still knows about*. Two things drop a batched put from view:
+    /// (1) a reopen before it flushed, (2) TTL / eviction (not
+    /// exercised here). The property must model both to avoid false
+    /// positives — the CI run of PR 8 caught one such false positive
+    /// on the case `Put(v0) → Flush → Put(v1, batched) → Reopen → Get`
+    /// where the model predicted v1 but the engine correctly served
+    /// the durable v0.
     #[test]
     fn prop_batched_cache_never_corrupts(ops in prop::collection::vec(arb_cache_op(), 1..=10)) {
         let (_dir, path, mut db) = fresh_db();
         db.set_cache_flush_policy(CacheFlushPolicy::Batched {
-            max_dirty: 3,
+            max_dirty: MAX_DIRTY,
             max_age: std::time::Duration::from_secs(3600),
         });
-        // Model tracks "last put ever" per (ns, key). A get may
-        // return None or this value — nothing else is acceptable.
-        let mut last_put: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
+        // Two-layer model:
+        //   `durable`: (ns, key) -> value that has flushed to disk.
+        //              Survives a reopen. Updated only on Flush (and
+        //              on Batched auto-flush).
+        //   `pending`: (ns, key) -> value put since the last flush,
+        //              in insertion order. On Batched, once the count
+        //              of *distinct pending entries* hits max_dirty
+        //              the engine auto-flushes; we mirror that here.
+        //              Dropped on Reopen.
+        // The observable value at any (ns, key) is:
+        //   pending.get(k).or_else(|| durable.get(k))
+        let mut durable: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
+        let mut pending: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
 
         for op in ops {
             match op {
                 CacheOp::Put { ns, key, value } => {
                     let (n, k, v) = (ns_of(ns), key_of(key), value_of(value));
                     db.cache_put(&n, &k, &v, cache_put_opts()).unwrap();
-                    last_put.insert((n, k), v);
+                    pending.insert((n, k), v);
+                    // Batched auto-flush: when pending distinct-key
+                    // count hits max_dirty, the engine flushes them.
+                    if pending.len() >= MAX_DIRTY {
+                        for (k, v) in std::mem::take(&mut pending) {
+                            durable.insert(k, v);
+                        }
+                    }
                 }
                 CacheOp::Get { ns, key } => {
                     let (n, k) = (ns_of(ns), key_of(key));
                     let hit = db.cache_get(&n, &k).unwrap();
-                    match (hit, last_put.get(&(n.clone(), k.clone()))) {
-                        (None, _) => {} // acceptable: batched drop or never-put
-                        (Some(v), Some(expected)) => {
-                            prop_assert_eq!(v.value, expected.clone(),
+                    // Observable value = pending overrides durable.
+                    let expected = pending
+                        .get(&(n.clone(), k.clone()))
+                        .or_else(|| durable.get(&(n.clone(), k.clone())))
+                        .cloned();
+                    match (hit, expected) {
+                        (None, _) => {} // acceptable in all cases
+                        (Some(v), Some(exp)) => {
+                            prop_assert_eq!(v.value, exp,
                                 "cache_get returned wrong value for ({}, {})", n, k);
                         }
                         (Some(_), None) => {
@@ -254,13 +282,20 @@ proptest! {
                         }
                     }
                 }
-                CacheOp::Flush => { db.flush().unwrap(); }
+                CacheOp::Flush => {
+                    db.flush().unwrap();
+                    for (k, v) in std::mem::take(&mut pending) {
+                        durable.insert(k, v);
+                    }
+                }
                 CacheOp::Reopen => {
                     db = reopen(db, &path);
                     db.set_cache_flush_policy(CacheFlushPolicy::Batched {
-                        max_dirty: 3,
+                        max_dirty: MAX_DIRTY,
                         max_age: std::time::Duration::from_secs(3600),
                     });
+                    // Reopen drops all pending writes on the floor.
+                    pending.clear();
                 }
             }
         }
