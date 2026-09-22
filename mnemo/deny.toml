@@ -1,0 +1,131 @@
+# cargo-deny configuration (Phase 1.4).
+#
+# Runs in CI on every PR via `cargo deny check` in `mnemo/`. Three
+# checks matter here:
+#   1. `advisories` — cross-references the RustSec advisory DB and
+#      fails on any unpatched vulnerability affecting a dep in the
+#      lockfile.
+#   2. `licenses` — allowlist of OSI-approved licenses compatible
+#      with the Apache-2.0 the mnemo crate itself is published under.
+#      Anything unlisted requires an explicit `exceptions` entry.
+#   3. `bans` — currently informational (`multiple-versions = "warn"`)
+#      to catch transitive duplication without blocking merges while
+#      we enumerate the necessary skip set. Follow-up PR will
+#      tighten to `deny` once CI has surfaced the real exception
+#      list.
+#
+# Run locally with:
+#     cd mnemo && cargo deny check
+#
+# For just one check:
+#     cargo deny check advisories
+#     cargo deny check licenses
+#     cargo deny check bans
+
+# ---------------------------------------------------------------------
+# Graph configuration — what crates the checks apply to.
+# ---------------------------------------------------------------------
+
+[graph]
+# Empty `targets` means "check all crates for all target triples the
+# lockfile references." Since mnemo compiles on Linux/macOS/Windows
+# x86_64+aarch64, restricting to a single target would hide license /
+# advisory hits on platform-specific transitives (e.g. `windows-sys`
+# on Windows only).
+targets = []
+all-features = false
+no-default-features = false
+
+[output]
+# Group violations by feature depth; keeps the diagnostic readable
+# on the multi-page transitive graph typical of a Rust crate.
+feature-depth = 1
+
+# ---------------------------------------------------------------------
+# Advisory DB — RustSec vulnerability + yanked-crate check.
+# ---------------------------------------------------------------------
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# `yanked` fires when Cargo.lock pins a version the author later
+# yanked from crates.io. `warn` first so we notice; upgrade to
+# `deny` once we've picked up a clean baseline.
+yanked = "warn"
+# Time-boxed / justified exceptions to the advisory check. Every
+# entry must carry a `reason` — a future worker reading this file
+# should be able to tell why the ignore was granted without leaving
+# the config.
+ignore = [
+    # `paste 1.0.15` — dtolnay archived the repo (RUSTSEC-2024-0436,
+    # "unmaintained"). NOT a vulnerability. It is pulled transitively
+    # by `rmp` / `rmp-serde` (our MessagePack layer) which have no
+    # migration path today. The advisory itself suggests `pastey` as
+    # a drop-in fork; that migration lives in `rmp`, not here. Revisit
+    # when `rmp-serde` ships a release that swaps to `pastey`.
+    { id = "RUSTSEC-2024-0436", reason = "paste (unmaintained) is a transitive dep of rmp-serde; no upstream migration path yet — track via rmp-serde issue tracker" },
+]
+
+# ---------------------------------------------------------------------
+# Licenses — SPDX allowlist. Anything not listed → build fails.
+# ---------------------------------------------------------------------
+
+[licenses]
+version = 2
+# Kept minimal — the mnemo dep graph in practice only ships crates
+# under Apache-2.0, MIT, BSD-3-Clause, and Unicode-3.0 (the newer
+# SPDX variant `unicode-ident` uses). Apache-2.0 WITH LLVM-exception
+# covers the `rustix` family. Adding an unused allow is not a security
+# hole but it's noise — cargo-deny prints an "unmatched license
+# allowance" warning for each, and drift in the allowlist becomes
+# hard to notice. Extend this list only when a new dep actually
+# ships under something not already here.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+]
+# Threshold for guessing a license from a LICENSE file's text when
+# the crate omits SPDX metadata. Default 0.8 is conservative — lower
+# it only if a specific crate needs a `[[licenses.clarify]]` entry.
+confidence-threshold = 0.8
+# Per-crate license overrides go here if a crate ships an unusual
+# LICENSE mix cargo-deny can't parse. Empty at PR 9 landing;
+# expand as CI surfaces cases.
+exceptions = []
+
+# ---------------------------------------------------------------------
+# Bans — duplicate versions, wildcard deps, per-crate allow/deny.
+# ---------------------------------------------------------------------
+
+[bans]
+# `warn` for now: transitive graphs commonly duplicate `syn 1/2`,
+# `regex-syntax 0.6/0.8`, `bitflags 1/2`, `windows-sys 0.4x/0.5x`
+# during migrations. First green CI run will list the actual
+# duplicates; follow-up PR flips to `deny` with the enumerated
+# `skip` entries.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------
+# Sources — where crates may come from.
+# ---------------------------------------------------------------------
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+# Only crates.io. No git deps in mnemo (all pinned to `=x.y.z` per
+# AGENTS.md), so this stays tight.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

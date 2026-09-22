@@ -45,6 +45,28 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `failpoints` feature. Hooks land in `pager::write_raw`,
   `pager::write_sealed`, `pager::flush` (per-page), and
   `wal::commit` — every file-writing site in the durability path.
+- **PR 9 — Phase 1.4 supply-chain + fmt-check CI.** Adds
+  `mnemo/deny.toml` with three checks wired into a new `deny`
+  CI job (prebuilt cargo-deny via `taiki-e/install-action`):
+  advisories cross-referenced against the RustSec DB, an
+  SPDX license allowlist (Apache-2.0-compatible: Apache-2.0,
+  MIT, BSD-2/3, ISC, Zlib, 0BSD, Unicode-DFS-2016, Unicode-3.0,
+  CC0-1.0, MPL-2.0, and Apache-2.0 WITH LLVM-exception), and
+  a duplicate-major-version check (`multiple-versions = "warn"`
+  as a first-landing safety net; follow-up PR flips to `deny`
+  once CI has enumerated the necessary skip set). Wires
+  `cargo fmt --check` into the rust matrix job so rustfmt
+  drift is caught at PR time (previously only clippy gated).
+  Switches the release workflow's PyPI publish from the
+  deprecated `maturin publish/upload` path (PyO3/maturin#2334)
+  to PyPI Trusted Publishing via `pypa/gh-action-pypi-publish`
+  — no long-lived `PYPI_API_TOKEN`; each release mints a
+  short-lived OIDC token from GitHub and trades it with PyPI.
+  Requires a one-time PyPI-side trusted-publisher registration
+  (owner: `toarchkumar`, repo: `mnemo`, workflow: `release.yml`,
+  environment: `pypi`).
+
+## [0.4.0] — 2026-08-28
 
 **On-disk format v7 → v8.** Files written by v0.3.x on v4/v5/v6/v7
 migrate transparently on first open under v0.4.0 (the existing

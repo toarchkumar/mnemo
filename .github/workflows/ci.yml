@@ -55,6 +55,37 @@ jobs:
         working-directory: mnemo
         run: cargo clippy --all-targets --features failpoints -- -D warnings
 
+      # `cargo fmt --check` gate. Phase 1.4 wires this into CI so
+      # rustfmt drift is caught at PR time instead of at release
+      # (which is where PR 6 first noticed a repo-wide fmt gap).
+      # Runs on every matrix OS: rustfmt's output is byte-identical
+      # across platforms, so this is functionally a redundant check
+      # on 2/3 runners — but making it a per-OS step avoids a
+      # separate job just for this and keeps the CI DAG flat.
+      - name: cargo fmt --check
+        working-directory: mnemo
+        run: cargo fmt --check
+
+  # --- cargo-deny: advisories + licenses + duplicate-version bans.
+  #     Reads `mnemo/deny.toml`. Prebuilt binary via taiki-e/install-action
+  #     (same pattern PR 7.1 used for cargo-fuzz) — no source compile.
+  #     Linux-only: license SPDX + advisory DB checks are platform-
+  #     independent, and running on 3 OSes would just triple runtime.
+  deny:
+    name: cargo-deny (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: cargo deny check
+        working-directory: mnemo
+        run: cargo deny check
+
   # --- MSRV check: ensure the codebase still builds against the floor
   #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
   #     keep job count down; toolchain drift across platforms is rare and

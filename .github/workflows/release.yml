@@ -200,33 +200,54 @@ jobs:
           name: sdist
           path: mnemo-python/dist/*.tar.gz
 
-  # --- Optional: publish all wheels to PyPI. Runs only when PYPI_API_TOKEN
-  #     is set on the repo — no-op otherwise so first-time releases just
-  #     produce GitHub-attached wheels and the maintainer publishes by hand
-  #     until they're ready to automate it.
+  # --- Publish all wheels + sdist to PyPI via Trusted Publishing (OIDC).
+  #
+  # Switched to PyPI Trusted Publishing in PR 9 (Phase 1.4) — replaces
+  # the deprecated `maturin publish/upload` path (PyO3/maturin#2334) and
+  # removes the long-lived `PYPI_API_TOKEN` secret. GitHub short-lived
+  # OIDC token is minted per run and traded with PyPI for a scoped
+  # upload credential; nothing to rotate.
+  #
+  # One-time PyPI-side setup (already done for `mnemo-engine`; here for
+  # future-worker context):
+  #   1. Log in to https://pypi.org, open the project page.
+  #   2. Publishing → Add a new pending / trusted publisher.
+  #   3. Owner: `toarchkumar`. Repository: `mnemo`. Workflow filename:
+  #      `release.yml`. Environment name: `pypi`.
+  #   4. Save. First release after the swap validates the wiring.
+  #
+  # `environment: pypi` is required — it's what PyPI matches against
+  # when it validates the OIDC claim. `id-token: write` is what lets
+  # the runner mint the OIDC token. `contents: read` is the default
+  # least-privilege setting for this job (the release itself is
+  # already created + populated by prior jobs).
   publish-pypi:
     name: publish to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mnemo-engine
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
           # Pull every wheel-* artifact this run uploaded plus the
-          # single sdist. Both patterns land in the same `dist/`
-          # directory so the maturin upload picks up wheels + tarball
-          # in one shot.
+          # single sdist. All land in `dist/`; twine (via the action
+          # below) uploads the directory in one shot.
           pattern: "{wheel-*,sdist}"
           path: dist
           merge-multiple: true
 
-      - name: Publish via maturin
-        uses: PyO3/maturin-action@v1
+      - name: Publish to PyPI (Trusted Publishing, no token)
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          command: upload
-          args: --skip-existing dist/*
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          # Idempotent on re-runs: skip files PyPI already has.
+          skip-existing: true
+          packages-dir: dist
 
   # --- Optional: publish the core Rust crate to crates.io. Gated on the
   #     `ENABLE_CRATES_PUBLISH` repo variable so first-time setup is opt-in
