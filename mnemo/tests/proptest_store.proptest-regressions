@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ec1489059c306d7f1ac532640e2e10207588e11211fcb83f53a650224d071d2c # shrinks to ops = [Put { ns: 9, key: 170, value: 0 }, Flush, Put { ns: 81, key: 202, value: 1 }, Reopen, Get { ns: 114, key: 218 }]
+cc 84c457d166283c17f8871029ab6bdedbf6e4d79aef00606421be95df815e7695 # shrinks to ops = [Put { ns: 54, key: 39, value: 0 }, Put { ns: 9, key: 183, value: 0 }, Put { ns: 53, key: 104, value: 0 }, Reopen, Get { ns: 8, key: 184 }] — model must count raw mutations, not distinct pending keys, to match engine's BatchState.dirty_count

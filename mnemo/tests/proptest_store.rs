@@ -247,6 +247,11 @@ proptest! {
         //   pending.get(k).or_else(|| durable.get(k))
         let mut durable: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
         let mut pending: BTreeMap<(String, String), Vec<u8>> = BTreeMap::new();
+        // Raw mutation counter (matches the engine's `BatchState.dirty_count`
+        // — increments on every put, even when the same key is overwritten).
+        // Reset on flush + auto-flush; NOT reset on reopen (pending is
+        // simply dropped instead).
+        let mut mutations: usize = 0;
 
         for op in ops {
             match op {
@@ -254,12 +259,15 @@ proptest! {
                     let (n, k, v) = (ns_of(ns), key_of(key), value_of(value));
                     db.cache_put(&n, &k, &v, cache_put_opts()).unwrap();
                     pending.insert((n, k), v);
-                    // Batched auto-flush: when pending distinct-key
-                    // count hits max_dirty, the engine flushes them.
-                    if pending.len() >= MAX_DIRTY {
+                    mutations += 1;
+                    // Store's `cache_put`: insert → record_dirty →
+                    // should_auto_flush → flush. So the current put IS
+                    // included in the auto-flushed batch.
+                    if mutations >= MAX_DIRTY {
                         for (k, v) in std::mem::take(&mut pending) {
                             durable.insert(k, v);
                         }
+                        mutations = 0;
                     }
                 }
                 CacheOp::Get { ns, key } => {
@@ -287,6 +295,7 @@ proptest! {
                     for (k, v) in std::mem::take(&mut pending) {
                         durable.insert(k, v);
                     }
+                    mutations = 0;
                 }
                 CacheOp::Reopen => {
                     db = reopen(db, &path);
@@ -296,6 +305,7 @@ proptest! {
                     });
                     // Reopen drops all pending writes on the floor.
                     pending.clear();
+                    mutations = 0;
                 }
             }
         }
