@@ -141,10 +141,21 @@ its own agent.
 | `cache_stats(namespace=None)` | Result-cache stats: `{entries, bytes, hits, misses, hit_rate, evictions}` |
 | `cache_put_semantic(namespace, key, vector, value, model, content_type="text", ttl_secs=None)` | Semantic cache put (Phase 10.2) — vector must match db dimensions |
 | `cache_get_semantic(namespace, query, model, threshold=0.97)` | Top-1 cosine over the namespace's vectored entries whose `model` matches |
+| `set_cache_flush_policy(policy, max_dirty=None, max_age_secs=None)` | `policy="strict"` (default; every put durable on return) or `"batched"` (engine auto-flushes at `max_dirty` puts or `max_age_secs` seconds). Under `batched`, `cache_put` and friends no longer force an eager flush — call `db.flush()` yourself if you need it before a specific boundary |
+| `set_cache_budget(namespace, max_entries, max_bytes)` | Per-namespace LRU cap (defaults 10 000 entries / 64 MiB). On the next `cache_put` the LRU is evicted until both limits are satisfied |
 | `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
+| `memories()` | Enumerate every live (non-deleted, non-expired) memory as a list of dicts |
+| `dimensions()` | Embedding dimensionality this database was created with (also on `stats()["dimensions"]`) |
+| `rekey(new_passphrase, fast=False)` | Change the passphrase. Re-derives the KEK and re-wraps the DEK; encrypted pages are not rewritten (O(1) in db size). `fast=True` uses the cheap-Argon2 test params — omit for production |
 | `stats()` | Summary statistics |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
 | `len(db)` | Live memory count |
+
+Plus one module-level function:
+
+| Function | Purpose |
+|---|---|
+| `mnemo.compact_file(path, passphrase)` | Rewrite the file out-of-place, dropping tombstoned and expired memories and reclaiming stale pages. Caller's own handle must be closed first. Returns `{"before": int, "after": int}` |
 
 `Session` methods: `add_turn(turn)`, `recall(query, top_k=10, memory_types=None)`,
 `close()`, `discard()`, `id()`, `agent()`, `turn_ids()`, `turn_count()`; also a

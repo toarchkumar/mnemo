@@ -30,7 +30,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    Memory, MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope, Ulid,
+    CacheBudget, CacheFlushPolicy, KdfParams, Memory, MemoryType, Metric, Mnemo as Core,
+    MnemoConfig, RecallRequest, Scope, Ulid,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -170,6 +171,33 @@ fn memory_to_dict(py: Python<'_>, m: &Memory) -> PyResult<PyObject> {
 struct Mnemo {
     inner: Core,
     path: String,
+    /// Mirror of the current cache flush policy so `cache_put` and
+    /// friends know whether to force an eager `flush()` (the historic
+    /// Python behavior under `Strict`) or defer to the engine's
+    /// batched auto-flush. Set by `set_cache_flush_policy`; defaults
+    /// to `false` (i.e. `Strict`, eager flush) so existing callers
+    /// see unchanged semantics.
+    batched_cache_flush: bool,
+}
+
+impl Mnemo {
+    /// Flush the store unless the caller opted into the batched
+    /// cache-flush lane (see `set_cache_flush_policy`). Called by
+    /// every cache mutation (`cache_put`, `cache_delete`,
+    /// `cache_purge`, `cache_put_semantic`) so those methods retain
+    /// their historic "durable on return" semantics under the default
+    /// `Strict` policy but let the engine's own auto-flush decide
+    /// under `Batched`.
+    fn maybe_flush_after_cache_write(&mut self) -> PyResult<()> {
+        if self.batched_cache_flush {
+            // Engine's `should_auto_flush` already fired inside the
+            // preceding cache call if the batched thresholds tripped;
+            // nothing to do here.
+            Ok(())
+        } else {
+            self.inner.flush().map_err(to_py)
+        }
+    }
 }
 
 #[pymethods]
@@ -288,9 +316,30 @@ impl Mnemo {
         self.inner.delete(&parse_id(id)?).map_err(to_py)
     }
 
+    /// Enumerate every live (non-deleted, non-expired) memory as a
+    /// list of dicts matching the shape of `get`/`recall` results.
+    /// Order matches the on-disk catalog (roughly insertion order,
+    /// minus deletions). Reads decrypt every record page — cheap
+    /// for a small store, O(n) for a large one.
+    fn memories(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let mut out = Vec::new();
+        for m in self.inner.memories().map_err(to_py)? {
+            out.push(memory_to_dict(py, &m)?);
+        }
+        Ok(out)
+    }
+
     /// Number of live (non-deleted) memories.
     fn __len__(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Embedding dimensionality this database was created with. Also
+    /// available via `stats()["dimensions"]`; exposed as its own
+    /// method for callers who only need the number and want to skip
+    /// the full stats dict.
+    fn dimensions(&self) -> usize {
+        self.inner.dimensions()
     }
 
     /// Persist all pending changes as one atomic transaction.
@@ -306,6 +355,25 @@ impl Mnemo {
     /// Decrypt and re-validate every live record; returns the count checked.
     fn verify(&mut self) -> PyResult<usize> {
         self.inner.verify().map_err(to_py)
+    }
+
+    /// Change the passphrase. Cheap: re-derives the KEK and re-wraps
+    /// the DEK; the encrypted pages themselves are never rewritten,
+    /// so this is O(1) in database size. Flushes any pending writes
+    /// before rotating.
+    ///
+    /// `fast=True` uses `KdfParams::fast()` — the cheap Argon2 params
+    /// intended for tests only. Production callers should leave it
+    /// `False` so the new KEK inherits the same protection level as
+    /// the file's original creation-time parameters.
+    #[pyo3(signature = (new_passphrase, fast=false))]
+    fn rekey(&mut self, new_passphrase: &str, fast: bool) -> PyResult<()> {
+        let kdf = if fast {
+            KdfParams::fast()
+        } else {
+            KdfParams::default()
+        };
+        self.inner.rekey(new_passphrase, kdf).map_err(to_py)
     }
 
     /// Return the database's self-describing onboarding memories (those tagged
@@ -471,7 +539,7 @@ impl Mnemo {
         self.inner
             .cache_put(namespace, key, &bytes, opts)
             .map_err(to_py)?;
-        self.inner.flush().map_err(to_py)
+        self.maybe_flush_after_cache_write()
     }
 
     /// Look up an exact-key cache entry. Returns `None` on miss or a
@@ -500,7 +568,7 @@ impl Mnemo {
     /// not exist. Space reclaimed by `compact` (external CLI).
     fn cache_delete(&mut self, namespace: &str, key: &str) -> PyResult<()> {
         self.inner.cache_delete(namespace, key).map_err(to_py)?;
-        self.inner.flush().map_err(to_py)
+        self.maybe_flush_after_cache_write()
     }
 
     /// Purge cache entries. `namespace=None` targets the whole cache.
@@ -512,8 +580,79 @@ impl Mnemo {
             .inner
             .cache_purge(namespace, expired_only)
             .map_err(to_py)?;
-        self.inner.flush().map_err(to_py)?;
+        self.maybe_flush_after_cache_write()?;
         Ok(n)
+    }
+
+    /// Select the cache flush policy for this handle.
+    ///
+    /// - `policy="strict"` (default at open): every cache mutation
+    ///   through this binding calls `flush()` before returning, so
+    ///   entries are always durable on return. Matches the historic
+    ///   Python behavior.
+    /// - `policy="batched"`: the engine buffers dirty cache entries
+    ///   and auto-flushes when either `max_dirty` mutations have
+    ///   accumulated OR `max_age_secs` has elapsed since the first
+    ///   pending write. `cache_put` and friends stop calling `flush()`
+    ///   themselves — the caller can drop the handle at any time and
+    ///   any unflushed entries appear as **misses** on reopen, never
+    ///   as corruption (guarded by the Phase 1.3 proptest).
+    ///
+    /// `max_dirty` and `max_age_secs` are ignored under `strict`;
+    /// under `batched` they default to `64` and `5.0` respectively.
+    #[pyo3(signature = (policy, max_dirty=None, max_age_secs=None))]
+    fn set_cache_flush_policy(
+        &mut self,
+        policy: &str,
+        max_dirty: Option<usize>,
+        max_age_secs: Option<f64>,
+    ) -> PyResult<()> {
+        let (rust_policy, batched) = match policy {
+            "strict" => (CacheFlushPolicy::Strict, false),
+            "batched" => {
+                let md = max_dirty.unwrap_or(64);
+                let ma = std::time::Duration::from_secs_f64(max_age_secs.unwrap_or(5.0));
+                (
+                    CacheFlushPolicy::Batched {
+                        max_dirty: md,
+                        max_age: ma,
+                    },
+                    true,
+                )
+            }
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown cache flush policy '{other}' (expected 'strict' or 'batched')"
+                )))
+            }
+        };
+        self.inner.set_cache_flush_policy(rust_policy);
+        self.batched_cache_flush = batched;
+        Ok(())
+    }
+
+    /// Set the per-namespace eviction budget. On the next `cache_put`
+    /// (or `cache_put_semantic`) into `namespace`, the LRU is evicted
+    /// until both the live-entry count is at or below `max_entries`
+    /// AND the live payload byte total is at or below `max_bytes`.
+    ///
+    /// Defaults at open (`max_entries = 10_000`, `max_bytes = 64 MiB`)
+    /// are per-namespace; call this only when you need a tighter or
+    /// looser cap for a specific namespace.
+    fn set_cache_budget(
+        &mut self,
+        namespace: &str,
+        max_entries: usize,
+        max_bytes: u64,
+    ) -> PyResult<()> {
+        self.inner.set_cache_budget(
+            namespace,
+            CacheBudget {
+                max_entries,
+                max_bytes,
+            },
+        );
+        Ok(())
     }
 
     /// Cache statistics for `namespace` (or the whole cache if
@@ -563,7 +702,7 @@ impl Mnemo {
         self.inner
             .cache_put_semantic(namespace, key, vector, &bytes, opts)
             .map_err(to_py)?;
-        self.inner.flush().map_err(to_py)
+        self.maybe_flush_after_cache_write()
     }
 
     /// Semantic recall over the cache. Returns `None` on miss or a
@@ -943,7 +1082,27 @@ fn open(
     Ok(Mnemo {
         inner,
         path: path.to_string(),
+        batched_cache_flush: false,
     })
+}
+
+/// Rewrite the file at `path` out-of-place, dropping tombstoned and
+/// expired memories and reclaiming stale pages. The compacted file
+/// atomically replaces the original via `rename`.
+///
+/// Callers must not have `path` open elsewhere — this function opens
+/// it exclusively for reads and takes the file lock for writes.
+///
+/// Returns a dict `{before, after}` with the live-memory counts on
+/// either side of the rewrite. `before - after` is how many
+/// tombstones + expired entries were dropped.
+#[pyfunction]
+fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObject> {
+    let report = Core::compact_file(path, passphrase).map_err(to_py)?;
+    let d = PyDict::new_bound(py);
+    d.set_item("before", report.before)?;
+    d.set_item("after", report.after)?;
+    Ok(d.into_any().unbind())
 }
 
 /// The `mnemo` Python extension module.
@@ -953,6 +1112,7 @@ fn mnemo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
     m.add_class::<Turn>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
+    m.add_function(wrap_pyfunction!(compact_file, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

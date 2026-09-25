@@ -65,6 +65,39 @@ Pre-1.0, the minor component carries the breaking-change signal.
   Requires a one-time PyPI-side trusted-publisher registration
   (owner: `toarchkumar`, repo: `mnemo`, workflow: `release.yml`,
   environment: `pypi`).
+- **PR BP — Python binding parity.** Additive; no format change, no
+  breaking API on the existing surface. Fills the gaps identified
+  by the 2026-09-20 audit so every user-facing method on
+  `Mnemo` in Rust is reachable from Python:
+  - `Mnemo.set_cache_flush_policy(policy, max_dirty=None, max_age_secs=None)`
+    — switches the cache-flush lane. Under `"batched"` the Python
+    binding stops calling `flush()` after every cache mutation and
+    lets the engine's auto-flush thresholds fire; matches the
+    Phase 10.3 Rust semantics. Default remains `"strict"` so
+    existing callers see unchanged behavior.
+  - `Mnemo.set_cache_budget(namespace, max_entries, max_bytes)` —
+    per-namespace LRU cap; previously Python was stuck with the
+    10 000 / 64 MiB defaults.
+  - `Mnemo.memories()` — enumerate every live memory as a list of
+    dicts (mirror of the Rust `memories()`).
+  - `Mnemo.dimensions()` — plain getter for the vector width.
+  - `Mnemo.rekey(new_passphrase, fast=False)` — change the
+    passphrase; O(1) in db size (DEK is re-wrapped, pages untouched).
+    `fast=True` selects the cheap-Argon2 test params.
+  - Module-level `mnemo.compact_file(path, passphrase)` — the
+    static rewrite that drops tombstones/expired entries. Returns
+    `{"before": int, "after": int}`.
+  - `test_mnemo.py` extends with six new checks: `memories() +
+    dimensions()`, batched auto-flush surviving reopen, batched
+    unflushed-put appearing as a miss (the Phase 1.3 invariant
+    surfaced through Python), per-namespace LRU eviction under
+    `set_cache_budget`, rekey → reopen with the new passphrase
+    (old rejected), and `compact_file` round-trip.
+  - **Deferred (logged for a future BP.1):** `build_index_with` /
+    `rebuild_index` are not exposed yet — they require thin
+    wrappers around `IndexConfig` (n_probe, n_rerank, plus the
+    subspace/partition params) that no current Python caller has
+    asked for. `build_index()` still works as-is.
 
 ## [0.4.0] — 2026-08-28
 

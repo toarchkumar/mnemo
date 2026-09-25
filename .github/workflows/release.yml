@@ -110,8 +110,10 @@ jobs:
           files: mnemo/${{ steps.stage.outputs.asset }}
 
   # --- Build Python wheels for each platform via maturin-action and attach
-  #     to the release. Optionally publish to PyPI if the maintainer set
-  #     `PYPI_API_TOKEN` as a repo secret.
+  #     to the release. The `publish-pypi` job below optionally uploads
+  #     these wheels + the sdist to PyPI when the `ENABLE_PYPI_PUBLISH`
+  #     repo variable is set to `true`; it uses PyPI Trusted Publishing
+  #     (OIDC), so no `PYPI_API_TOKEN` secret is needed anywhere.
   build-wheels:
     name: wheels (${{ matrix.target }})
     needs: create-release
