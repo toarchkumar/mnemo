@@ -8,6 +8,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-09-25
+
+Patch release. **No format change** — 0.4.1 opens any 0.4.x file, and
+files written by 0.4.1 open on 0.4.0. This is the first release
+published through PyPI Trusted Publishing (OIDC); no repo-side
+`PYPI_API_TOKEN` was used.
+
+Cumulative deltas since v0.4.0, grouped by shipping PR:
+
 ### Security / hardening
 
 - **PR 7 — Phase 1.2 fuzz harness.** New `mnemo/fuzz/` standalone
