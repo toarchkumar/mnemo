@@ -3,841 +3,823 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Memory Nemo — Encrypted Portable Agent Memory</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<title>MNemo — Encrypted memory and cache for AI agents, in one file</title>
+<meta name="description" content="MNemo is an encrypted, single-file memory engine for AI agents, written in Rust. Durable memory, a result cache, and an MCP server in one portable .mnemo file.">
+<meta property="og:title" content="MNemo — Encrypted memory and cache for AI agents">
+<meta property="og:description" content="Durable agent memory, a result cache and an MCP server inside one encrypted, portable file. Written in Rust.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://toarchkumar.github.io/mnemo/">
+<meta name="theme-color" content="#FBFAF7">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230E7C74'/%3E%3Cpath d='M9 22V11l7 7 7-7v11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root {
-  --bg-0: #0a0a0a;
-  --bg-1: #111111;
-  --bg-2: #1a1a1a;
-  --bg-card: #141414;
-  --border: #2a2a2a;
-  --text-0: #ededed;
-  --text-1: #a0a0a0;
-  --text-2: #6a6a6a;
-  --accent: #f5c518;
-  --accent-dim: rgba(245, 197, 24, 0.12);
-  --accent-glow: rgba(245, 197, 24, 0.06);
-  --green: #3ecf8e;
-  --radius: 8px;
+  --bg: #FBFAF7;
+  --surface: #FFFFFF;
+  --surface-2: #F4F2EC;
+  --ink: #15181E;
+  --ink-2: #4A5160;
+  --ink-3: #737A88;
+  --line: #E7E3DA;
+  --line-2: #D9D4C8;
+  --accent: #0E7C74;
+  --accent-ink: #0A5E58;
+  --accent-tint: #E3F2EF;
+  --amber: #B45309;
+  --amber-tint: #FDF1E3;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(21,24,30,.04), 0 6px 24px rgba(21,24,30,.06);
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-
-html { scroll-behavior: smooth; }
-
+html { scroll-behavior: smooth; scroll-padding-top: 76px; }
 body {
-  font-family: 'DM Sans', -apple-system, sans-serif;
-  background: var(--bg-0);
-  color: var(--text-0);
-  line-height: 1.65;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
+a { color: var(--accent-ink); }
+code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .05em .35em; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-/* — NAV — */
+/* ---------- NAV ---------- */
 nav {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  padding: 1rem 2rem;
-  background: rgba(10,10,10,0.8);
-  backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(251,250,247,.85);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid var(--line);
 }
-.nav-logo {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700; font-size: 1.1rem;
+.nav-inner {
+  max-width: 1120px; margin: 0 auto; padding: .8rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.brand {
+  display: inline-flex; align-items: center; gap: .55rem;
+  font-weight: 700; font-size: 1.05rem; letter-spacing: -.01em;
+  color: var(--ink); text-decoration: none;
+}
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 7px; background: var(--accent);
+  display: grid; place-items: center;
+}
+.brand-mark svg { width: 16px; height: 16px; }
+.brand small { font-family: var(--mono); font-weight: 500; font-size: .78rem; color: var(--ink-3); }
+.nav-links { display: flex; align-items: center; gap: 1.4rem; }
+.nav-links a { color: var(--ink-2); text-decoration: none; font-size: .9rem; }
+.nav-links a:hover { color: var(--ink); }
+
+/* ---------- BUTTONS ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .62rem 1.1rem; border-radius: 9px;
+  font-size: .92rem; font-weight: 600; text-decoration: none;
+  border: 1px solid transparent; cursor: pointer;
+  transition: background .15s, border-color .15s, transform .15s, box-shadow .15s;
+}
+.btn svg { width: 17px; height: 17px; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-ink); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(14,124,116,.22); }
+.btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line-2); }
+.btn-ghost:hover { border-color: var(--ink-3); transform: translateY(-1px); }
+.btn-sm { padding: .45rem .85rem; font-size: .85rem; }
+
+/* ---------- LAYOUT ---------- */
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 1.5rem; }
+section { padding: 5.5rem 0; }
+section + section { border-top: 1px solid var(--line); }
+.eyebrow {
+  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
   color: var(--accent);
-  letter-spacing: 0.08em;
-  text-decoration: none;
+  margin-bottom: .7rem;
 }
-.nav-logo span { color: var(--text-2); font-weight: 400; }
-.nav-cta {
-  display: inline-flex; align-items: center; gap: 0.5rem;
-  padding: 0.55rem 1.2rem;
-  background: var(--text-0);
-  color: var(--bg-0);
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.875rem; font-weight: 600;
-  border-radius: 6px; border: none;
-  text-decoration: none;
-  transition: background 0.2s, transform 0.15s;
-}
-.nav-cta:hover { background: #fff; transform: translateY(-1px); }
-.nav-cta svg { width: 16px; height: 16px; }
+h2.title { font-size: clamp(1.6rem, 3.2vw, 2.25rem); line-height: 1.2; letter-spacing: -.02em; margin-bottom: .9rem; }
+.lead { font-size: 1.07rem; color: var(--ink-2); max-width: 640px; }
+.head { margin-bottom: 2.8rem; }
 
-/* — HERO — */
-.hero {
-  min-height: 100vh;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 8rem 2rem 4rem;
-  text-align: center;
-  position: relative;
+/* ---------- HERO ---------- */
+.hero { padding: 4.5rem 0 5rem; border-top: none; }
+.hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3.5rem; align-items: center; }
+.pills { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.4rem; }
+.pill {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .8rem; font-weight: 600; color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: .28rem .7rem;
 }
-.hero::before {
-  content: '';
-  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 900px; height: 600px;
-  background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
-  pointer-events: none;
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.hero h1 {
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  line-height: 1.08; letter-spacing: -.035em; font-weight: 800;
+  margin-bottom: 1.2rem;
 }
+.hero h1 span { color: var(--accent); }
+.hero p.sub { font-size: 1.15rem; color: var(--ink-2); max-width: 540px; margin-bottom: 1.8rem; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-bottom: 1.6rem; }
 
-.ascii-logo {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(0.35rem, 1.1vw, 0.72rem);
-  line-height: 1.15;
-  color: var(--accent);
-  white-space: pre;
-  margin-bottom: 3rem;
-  text-shadow: 0 0 40px rgba(245,197,24,0.15);
-  animation: fadeInUp 0.8s ease-out;
-  overflow-x: auto;
-  max-width: 100%;
+.install {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); max-width: 520px; overflow: hidden;
 }
+.install-tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.install-tabs button {
+  font: 600 .8rem var(--sans); color: var(--ink-3); background: none; border: none;
+  padding: .55rem .95rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.install-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--surface); }
+.install-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .8rem .95rem; }
+.install-row code { background: none; border: none; padding: 0; font-size: .92rem; color: var(--ink); }
+.install-row code .p { color: var(--ink-3); user-select: none; }
+.copy {
+  font: 600 .78rem var(--sans); color: var(--ink-2); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 7px; padding: .3rem .6rem; cursor: pointer; flex-shrink: 0;
+}
+.copy:hover { color: var(--ink); border-color: var(--line-2); }
 
-.tagline {
-  font-size: clamp(2rem, 5vw, 3.5rem);
-  font-weight: 700;
-  line-height: 1.15;
-  max-width: 720px;
-  margin-bottom: 1.5rem;
-  animation: fadeInUp 0.8s ease-out 0.15s both;
-}
-.tagline em {
-  font-style: normal;
-  color: var(--accent);
-}
-
-.subtitle {
-  font-size: clamp(1rem, 2vw, 1.25rem);
-  color: var(--text-1);
-  max-width: 560px;
-  margin-bottom: 2.5rem;
-  animation: fadeInUp 0.8s ease-out 0.3s both;
-}
-
-.hero-cta {
-  display: inline-flex; align-items: center; gap: 0.6rem;
-  padding: 0.85rem 2rem;
-  background: var(--accent);
-  color: var(--bg-0);
-  font-family: 'DM Sans', sans-serif;
-  font-size: 1rem; font-weight: 700;
-  border-radius: var(--radius); border: none;
-  text-decoration: none;
-  transition: transform 0.2s, box-shadow 0.2s;
-  animation: fadeInUp 0.8s ease-out 0.45s both;
-}
-.hero-cta:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(245,197,24,0.25);
-}
-.hero-cta svg { width: 18px; height: 18px; }
-
-/* — INSTALL PILL — */
-.install-pill {
-  margin-top: 1.5rem;
-  display: inline-flex; align-items: center; gap: 0.75rem;
-  padding: 0.6rem 1.2rem;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-  color: var(--text-1);
-  animation: fadeInUp 0.8s ease-out 0.55s both;
-}
-.install-pill code { color: var(--green); }
-
-/* — ARCH DIAGRAM — */
-.arch-section {
-  padding: 6rem 2rem;
-  display: flex; flex-direction: column; align-items: center;
-}
-.arch-section h2 {
-  font-size: 0.8rem; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.15em;
-  color: var(--accent); margin-bottom: 2rem;
-}
-
-/* — VISUAL DIAGRAMS (Replaces ASCII) — */
-.visual-box {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 2rem 2.5rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: clamp(0.65rem, 1vw, 0.8rem);
-  color: var(--text-1);
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  margin: 0 auto;
-}
-
-/* Encryption Architecture Flow */
-.crypto-layout {
-  min-width: 650px;
-  margin-bottom: 2.5rem;
-}
-.crypto-row {
-  display: flex;
-  align-items: center;
-}
-.crypto-arrow {
-  color: var(--text-2);
-  margin: 0 0.75rem;
-}
-.crypto-link-down {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: var(--text-2);
-  line-height: 1.1;
-  margin: 0.5rem 0;
-}
-
-/* File Structure Grid */
-.file-wrapper {
-  min-width: 650px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-}
-.file-header {
-  color: var(--text-1);
-  margin-bottom: 1rem;
-}
-.file-container {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-.file-band {
-  border-bottom: 1px solid var(--border);
-  padding: 1rem;
-}
-.file-band:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-.band-title {
-  color: var(--text-0);
-  margin-bottom: 0.25rem;
-}
-.band-desc {
-  color: var(--text-2);
-}
-.file-columns {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid var(--border);
-  margin-top: 1rem;
-}
-.file-col {
-  padding: 1rem 0.5rem;
-  border-right: 1px solid var(--border);
-  text-align: center;
-}
-.file-col:last-child {
-  border-right: none;
-}
-
-/* Score Formula */
-.formula-layout {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1.5rem;
-  min-width: 700px;
-  padding: 1rem 0;
-}
-.formula-base, .formula-op {
-  color: var(--text-0);
-  padding-top: 0.1rem;
-}
-.formula-term {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-.term-math {
-  color: var(--text-0);
-  margin-bottom: 0.5rem;
-}
-.term-arrow {
-  color: var(--text-2);
-  margin-bottom: 0.25rem;
-  font-size: 0.8rem;
-}
-.term-desc {
-  color: var(--text-2);
-  line-height: 1.4;
-}
-
-/* — SECTION HEADINGS — */
-.section {
-  padding: 6rem 2rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.section-label {
-  font-size: 0.8rem; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.15em;
-  color: var(--accent); margin-bottom: 0.75rem;
-}
-.section-title {
-  font-size: clamp(1.6rem, 3.5vw, 2.4rem);
-  font-weight: 700;
-  margin-bottom: 1rem;
-}
-.section-desc {
-  font-size: 1.05rem;
-  color: var(--text-1);
-  max-width: 600px;
-  margin-bottom: 3rem;
-}
-
-/* — FEATURE GRID — */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+/* the .mnemo file card */
+.filecard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(21,24,30,.04), 0 18px 50px rgba(21,24,30,.09);
   overflow: hidden;
 }
-.feature-card {
-  background: var(--bg-card);
-  padding: 2rem;
+.filecard-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .85rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--surface-2);
 }
-.feature-icon {
-  width: 40px; height: 40px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--accent-dim);
-  border-radius: 8px;
-  margin-bottom: 1rem;
-  font-size: 1.2rem;
+.filecard-name { font-family: var(--mono); font-weight: 600; font-size: .9rem; display: flex; align-items: center; gap: .5rem; }
+.filecard-name svg { width: 16px; height: 16px; color: var(--ink-3); }
+.lockbadge {
+  display: inline-flex; align-items: center; gap: .35rem;
+  font: 600 .72rem var(--mono); color: var(--accent-ink);
+  background: var(--accent-tint); border-radius: 999px; padding: .2rem .6rem;
 }
-.feature-card h3 {
-  font-size: 1.05rem; font-weight: 600;
-  margin-bottom: 0.5rem;
+.lockbadge svg { width: 12px; height: 12px; }
+.layers { padding: .9rem; display: grid; gap: .55rem; }
+.layer {
+  display: grid; grid-template-columns: 6px 1fr; gap: .85rem; align-items: stretch;
+  border: 1px solid var(--line); border-radius: 10px; padding: .75rem .9rem .75rem .75rem;
+  background: var(--surface);
 }
-.feature-card p {
-  font-size: 0.9rem;
-  color: var(--text-1);
-  line-height: 1.6;
-}
-
-/* — CODE BLOCK — */
-.code-section {
-  padding: 5rem 2rem;
-  max-width: 800px;
-  margin: 0 auto;
-}
-.code-tabs {
-  display: flex; gap: 0; margin-bottom: 0;
-}
-.code-tab {
-  padding: 0.6rem 1.4rem;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
-  color: var(--text-2);
-  cursor: pointer;
-  border-radius: var(--radius) var(--radius) 0 0;
-  transition: color 0.2s, background 0.2s;
-}
-.code-tab.active {
-  background: var(--bg-card);
-  color: var(--accent);
-  border-color: var(--border);
-}
-.code-block {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 0 var(--radius) var(--radius) var(--radius);
-  padding: 1.5rem 2rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem;
-  line-height: 1.7;
-  color: var(--text-1);
-  overflow-x: auto;
-  display: none;
-}
-.code-block.active { display: block; }
-.code-block .kw { color: #c792ea; }
-.code-block .str { color: var(--green); }
-.code-block .num { color: #f78c6c; }
-.code-block .cmt { color: var(--text-2); }
-.code-block .fn { color: #82aaff; }
-.code-block .type { color: #ffcb6b; }
-
-/* — BENCHMARKS — */
-.bench-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-}
-.bench-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 2rem;
-  text-align: center;
-}
-.bench-value {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 2.2rem;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 0.25rem;
-}
-.bench-label {
-  font-size: 0.85rem;
-  color: var(--text-2);
+.layer i { border-radius: 4px; }
+.layer b { display: block; font-size: .92rem; }
+.layer span { font-size: .82rem; color: var(--ink-3); }
+.filecard-foot {
+  font: .75rem var(--mono); color: var(--ink-3);
+  padding: .7rem 1.1rem; border-top: 1px dashed var(--line);
 }
 
-/* — BOTTOM CTA — */
-.bottom-cta {
-  padding: 8rem 2rem;
-  text-align: center;
-  position: relative;
+/* ---------- FEATURE GRID ---------- */
+.grid { display: grid; gap: 1rem; }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.4rem 1.35rem;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
 }
-.bottom-cta::before {
-  content: '';
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 800px; height: 400px;
-  background: radial-gradient(ellipse at center bottom, var(--accent-glow) 0%, transparent 70%);
-  pointer-events: none;
+.card:hover { border-color: var(--line-2); box-shadow: var(--shadow); transform: translateY(-2px); }
+.icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: var(--accent-tint); color: var(--accent-ink);
+  margin-bottom: .9rem;
 }
-.bottom-cta h2 {
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  font-weight: 700;
-  margin-bottom: 1rem;
-  position: relative;
-}
-.bottom-cta p {
-  color: var(--text-1);
-  font-size: 1.1rem;
-  margin-bottom: 2.5rem;
-  position: relative;
-}
-
-/* — FOOTER — */
-footer {
-  padding: 2rem;
-  text-align: center;
-  border-top: 1px solid var(--border);
-  font-size: 0.82rem;
-  color: var(--text-2);
-}
-footer a { color: var(--text-1); text-decoration: none; }
-footer a:hover { color: var(--accent); }
-
-/* — DIVIDER — */
-.divider {
-  height: 1px;
-  background: var(--border);
-  max-width: 1100px;
-  margin: 0 auto;
+.icon svg { width: 20px; height: 20px; }
+.card h3 { font-size: 1rem; letter-spacing: -.01em; margin-bottom: .35rem; }
+.card p { font-size: .9rem; color: var(--ink-2); }
+.tag-new {
+  display: inline-block; margin-left: .35rem; vertical-align: 2px;
+  font: 700 .64rem var(--sans); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--amber); background: var(--amber-tint); border-radius: 5px; padding: .1rem .38rem;
 }
 
-/* — ANIMATIONS — */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+/* ---------- SPLIT ---------- */
+.split { display: grid; grid-template-columns: 1fr 1.1fr; gap: 3rem; align-items: start; }
+.chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.3rem 0 1.4rem; }
+.chip {
+  font: 500 .8rem var(--mono); color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: .22rem .55rem;
 }
+.chip.cache { color: var(--accent-ink); background: var(--accent-tint); border-color: transparent; }
+.note {
+  font-size: .88rem; color: var(--ink-2);
+  border-left: 3px solid var(--amber); background: var(--amber-tint);
+  padding: .65rem .85rem; border-radius: 0 8px 8px 0;
+}
+ul.checks { list-style: none; display: grid; gap: .6rem; margin-top: 1.2rem; }
+ul.checks li { display: grid; grid-template-columns: 20px 1fr; gap: .6rem; font-size: .95rem; color: var(--ink-2); }
+ul.checks li svg { width: 18px; height: 18px; margin-top: .2rem; color: var(--accent); }
+ul.checks li b { color: var(--ink); font-weight: 600; }
 
-/* — RESPONSIVE — */
-@media (max-width: 640px) {
-  .ascii-logo { font-size: 0.28rem; }
-  .visual-box { font-size: 0.55rem; padding: 1.5rem; }
-  nav { padding: 0.75rem 1rem; }
-  .section { padding: 4rem 1.25rem; }
-  .code-block { padding: 1rem; font-size: 0.72rem; }
+/* ---------- CODE ---------- */
+.codebox {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.codebar {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--line); background: var(--surface-2); padding-right: .6rem;
+}
+.codebar .tabs { display: flex; }
+.codebar .tabs button {
+  font: 600 .82rem var(--sans); color: var(--ink-3); background: none; border: none;
+  padding: .7rem 1.05rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.codebar .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--surface); }
+.codebar .label { font: 600 .78rem var(--mono); color: var(--ink-3); padding: .7rem 1rem; }
+pre.code {
+  font-family: var(--mono); font-size: .84rem; line-height: 1.7;
+  padding: 1.25rem 1.4rem; overflow-x: auto; color: #2B303B; background: var(--surface);
+  tab-size: 4;
+}
+pre.code[hidden] { display: none; }
+.k { color: #7C3AED; } .s { color: #0F766E; } .n { color: #B45309; }
+.c { color: #8B919C; font-style: italic; } .f { color: #1D4ED8; } .t { color: #A16207; }
+.pr { color: #9AA0AA; user-select: none; }
+
+/* ---------- RECALL FORMULA ---------- */
+.formula {
+  display: grid; grid-template-columns: auto repeat(4, 1fr); gap: .8rem; align-items: stretch;
+}
+.formula .eq {
+  font: 700 1.05rem var(--mono); align-self: center; color: var(--ink-2); padding-right: .3rem;
+}
+.term {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.1rem 1.1rem 1rem; position: relative;
+}
+.term + .term::before {
+  content: "+"; position: absolute; left: -0.62rem; top: 50%; transform: translate(-50%, -50%);
+  font: 700 1rem var(--mono); color: var(--ink-3);
+}
+.term .m { font: 600 .95rem var(--mono); color: var(--ink); margin-bottom: .35rem; }
+.term .m em { color: var(--accent); font-style: normal; }
+.term p { font-size: .85rem; color: var(--ink-2); }
+
+/* ---------- TERMINAL ---------- */
+.term-window {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.term-window .bar { display: flex; gap: 6px; padding: .7rem .9rem; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.term-window .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--line-2); }
+.term-window pre { font: .8rem/1.65 var(--mono); padding: 1.1rem 1.25rem; overflow-x: auto; color: #3A404C; }
+.term-window .h { color: var(--accent-ink); font-weight: 600; }
+
+/* ---------- SECURITY ---------- */
+.keyflow { display: grid; gap: .6rem; }
+.kf-row { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.kf-box {
+  font: 600 .82rem var(--mono); color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: .45rem .7rem;
+}
+.kf-box.a { background: var(--accent-tint); border-color: transparent; color: var(--accent-ink); }
+.kf-arrow { font: .75rem var(--mono); color: var(--ink-3); display: inline-flex; align-items: center; gap: .3rem; }
+.kf-arrow::after { content: "→"; font-size: 1rem; color: var(--ink-3); }
+.filemap { margin-top: 1.6rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.filemap div { padding: .7rem 1rem; border-bottom: 1px solid var(--line); font-size: .86rem; color: var(--ink-2); display: flex; justify-content: space-between; gap: 1rem; }
+.filemap div:last-child { border-bottom: none; }
+.filemap b { font-family: var(--mono); font-size: .8rem; color: var(--ink); font-weight: 600; }
+.filemap .enc { color: var(--accent-ink); font: 600 .74rem var(--mono); white-space: nowrap; }
+.filemap .plain { color: var(--amber); font: 600 .74rem var(--mono); white-space: nowrap; }
+.limits { margin-top: 1.6rem; font-size: .88rem; color: var(--ink-2); }
+.limits b { color: var(--ink); }
+
+/* ---------- STATS ---------- */
+.stat .v { font: 800 2.1rem/1.1 var(--sans); letter-spacing: -.03em; color: var(--ink); margin-bottom: .35rem; }
+.stat .v span { color: var(--accent); }
+.stat .l { font-size: .92rem; color: var(--ink-2); font-weight: 600; }
+.stat .d { font-size: .8rem; color: var(--ink-3); margin-top: .3rem; }
+
+/* ---------- ROADMAP ---------- */
+.road .card h3 { display: flex; align-items: center; gap: .5rem; margin-bottom: .8rem; }
+.status { font: 700 .66rem var(--sans); letter-spacing: .07em; text-transform: uppercase; border-radius: 5px; padding: .14rem .42rem; }
+.status.done { color: var(--accent-ink); background: var(--accent-tint); }
+.status.next { color: var(--amber); background: var(--amber-tint); }
+.status.later { color: var(--ink-3); background: var(--surface-2); }
+.road ul { list-style: none; display: grid; gap: .5rem; }
+.road li { font-size: .9rem; color: var(--ink-2); padding-left: 1.05rem; position: relative; }
+.road li::before { content: ""; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+.road .done-col li::before { background: var(--accent); }
+.road .next-col li::before { background: var(--amber); }
+
+/* ---------- CTA + FOOTER ---------- */
+.cta { text-align: center; padding: 5.5rem 0 6rem; }
+.cta h2 { font-size: clamp(1.7rem, 3.6vw, 2.5rem); letter-spacing: -.025em; margin-bottom: .8rem; }
+.cta p { color: var(--ink-2); font-size: 1.05rem; margin-bottom: 1.8rem; }
+.cta .hero-actions { justify-content: center; }
+footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
+.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; font-size: .85rem; color: var(--ink-3); }
+.foot nav { all: unset; display: flex; flex-wrap: wrap; gap: 1.2rem; }
+.foot a { color: var(--ink-2); text-decoration: none; }
+.foot a:hover { color: var(--ink); }
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 980px) {
+  .hero-grid, .split { grid-template-columns: 1fr; gap: 2.5rem; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .formula { grid-template-columns: 1fr 1fr; }
+  .formula .eq { grid-column: 1 / -1; padding: 0; }
+  .term + .term::before { display: none; }
+}
+@media (max-width: 760px) {
+  .nav-links a:not(.btn) { display: none; }
+  .grid-3 { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  section { padding: 4rem 0; }
+  .grid-4, .formula { grid-template-columns: 1fr; }
+  .wrap, .nav-inner { padding-left: 1.1rem; padding-right: 1.1rem; }
+  pre.code { font-size: .76rem; padding: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; }
 }
 </style>
 </head>
 <body>
 
-<nav>
-  <a href="./" class="nav-logo">mnemo <span>.mnemo</span></a>
-  <a href="https://github.com/toarchkumar/mnemo" class="nav-cta" id="nav-gh">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-    GitHub
-  </a>
+<!-- Inline icon sprite (no external requests) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 0 0-5.8 1A3 3 0 0 0 4 9.5a3 3 0 0 0 .6 4.9A3.5 3.5 0 0 0 9 19a3 3 0 0 0 3-1V5z"/><path d="M12 5a3 3 0 0 1 5.8 1A3 3 0 0 1 20 9.5a3 3 0 0 1-.6 4.9A3.5 3.5 0 0 1 15 19a3 3 0 0 1-3-1"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-rewind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 20a6.5 6.5 0 0 0-3-5.5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7M8 11h5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-gh" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.44 9.8 8.2 11.39.6.1.83-.26.83-.57v-2.24c-3.34.73-4.04-1.41-4.04-1.41-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></symbol>
+  </defs>
+</svg>
+
+<nav aria-label="Main">
+  <div class="nav-inner">
+    <a href="./" class="brand" aria-label="MNemo home">
+      <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18V7l7 7 7-7v11"/></svg></span>
+      MNemo <small>.mnemo</small>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#mcp">MCP</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#security">Security</a>
+      <a href="#roadmap">Roadmap</a>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>GitHub</a>
+    </div>
+  </div>
 </nav>
 
+<main>
+
+<!-- ================= HERO ================= -->
 <section class="hero">
-  <div class="ascii-logo" aria-hidden="true">
- ███╗   ███╗ ███████╗ ███╗   ███╗  ██████╗  ██████╗  ██╗   ██╗
- ████╗ ████║ ██╔════╝ ████╗ ████║ ██╔═══██╗ ██╔══██╗ ╚██╗ ██╔╝
- ██╔████╔██║ █████╗   ██╔████╔██║ ██║   ██║ ██████╔╝  ╚████╔╝
- ██║╚██╔╝██║ ██╔══╝   ██║╚██╔╝██║ ██║   ██║ ██╔══██╗   ╚██╔╝
- ██║ ╚═╝ ██║ ███████╗ ██║ ╚═╝ ██║ ╚██████╔╝ ██║  ██║    ██║
- ╚═╝     ╚═╝ ╚══════╝ ╚═╝     ╚═╝  ╚═════╝  ╚═╝  ╚═╝    ╚═╝
-         ███╗   ██╗ ███████╗ ███╗   ███╗  ██████╗
-         ████╗  ██║ ██╔════╝ ████╗ ████║ ██╔═══██╗
-         ██╔██╗ ██║ █████╗   ██╔████╔██║ ██║   ██║
-         ██║╚██╗██║ ██╔══╝   ██║╚██╔╝██║ ██║   ██║
-         ██║ ╚████║ ███████╗ ██║ ╚═╝ ██║ ╚██████╔╝
-         ╚═╝  ╚═══╝ ╚══════╝ ╚═╝     ╚═╝  ╚═════╝</div>
-
-  <h1 class="tagline">Give your agent a brain<br>it can <em>carry</em></h1>
-  <p class="subtitle">A <em>self-describing</em>, encrypted, single-file database that gives AI agents persistent memory they can carry between devices — and that only the user can unlock.</p>
-  <a href="https://github.com/toarchkumar/mnemo" class="hero-cta" id="hero-gh">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-    View on GitHub
-  </a>
-  <div class="install-pill">
-    <code>pip install mnemo-engine</code>
-    &nbsp;·&nbsp;
-    <code>cargo add mnemo-engine</code>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<section class="section">
-  <p class="section-label">Why MNemo</p>
-  <h2 class="section-title">The SQLite of agent memory</h2>
-  <p class="section-desc">Every other memory solution is cloud-hosted, tied to a heavyweight database, or a raw vector store with no agent-native abstractions. MNemo fills that gap.</p>
-
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon">📄</div>
-      <h3>Single file</h3>
-      <p>The entire memory store — vectors, metadata, indexes, WAL — lives in one <code>.mnemo</code> file. Copy it, back it up, email it, delete it.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔐</div>
-      <h3>Encrypted at rest</h3>
-      <p>AES-256-GCM page-level encryption with Argon2id key derivation. Two-tier key hierarchy means <code>rekey</code> never rewrites bulk data.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🧠</div>
-      <h3>Agent-native memory</h3>
-      <p>Episodic, semantic, procedural, and working memory types with multi-signal recall — similarity blended with recency, importance, and frequency.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">⚡</div>
-      <h3>Sub-linear search</h3>
-      <p>IVF + Product Quantization index for sub-linear recall at scale. Exact brute-force always available as ground truth.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">💾</div>
-      <h3>Crash-safe WAL</h3>
-      <p>Write-ahead log with single-fsync commit. Kill the process mid-write — the database recovers cleanly on next open.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">⏪</div>
-      <h3>Point-in-time recovery</h3>
-      <p>Every flush creates a snapshot. Roll back to any past transaction — restores are themselves crash-safe and reversible.</p>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- AGENTIC-FIRST -->
-<section class="section">
-  <p class="section-label">Agentic-first</p>
-  <h2 class="section-title">Designed for agents to onboard themselves</h2>
-  <p class="section-desc">Most vector stores treat AI agents as users who follow READMEs. MNemo treats agents as a first-class authoring environment — every <code>.mnemo</code> file introduces itself, every fresh database is self-describing from creation, and every entry point gives an agent the same two-command path to productivity.</p>
-
-  <div class="visual-box" style="max-width:820px;margin:0 auto 3rem;">
-<pre style="margin:0;white-space:pre;overflow-x:auto;font-family:'JetBrains Mono',monospace;color:var(--text-1);"><span style="color:var(--text-2);">$</span> mnemo about agent.mnemo
-<span style="color:var(--text-2);"># agent.mnemo  (45 memories · 384-dim · encrypted · 12 snapshots)</span>
-
-## Onboarding briefing
-
-<span style="color:var(--accent);">### MANIFEST  (importance=1.00)</span>
-MNEMO MANIFEST — This .mnemo file is the project memory for the
-Memory Nemo (MNemo) project. Embedder: sentence-transformers/
-all-MiniLM-L6-v2 (384-dim, normalized). Default agent_id:
-cursor-agent. Conventions: area in {onboarding, performance,
-decision, ...} with a topic key.
-
-<span style="color:var(--text-2);">### [onboarding/mission]  (importance=1.00)</span>
-PROJECT MISSION: An encrypted single-file Rust agent-memory
-engine. Ongoing project context lives in the file so new AI
-sessions stay aligned ...
-
-## Quick start
-  mnemo list   agent.mnemo                  <span style="color:var(--text-2);"># browse all memories</span>
-  mnemo recall agent.mnemo --query VEC      <span style="color:var(--text-2);"># multi-signal recall</span>
-  mnemo get    agent.mnemo &lt;ulid&gt; --verbose <span style="color:var(--text-2);"># fetch one</span></pre>
-  </div>
-
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon">📖</div>
-      <h3>Self-describing files</h3>
-      <p>The <code>.mnemo</code> file is its own documentation. Onboarding memories tagged <code>metadata.area="onboarding"</code> surface in one command — no sibling AGENTS.md, no external config.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🌱</div>
-      <h3>Scaffold by default</h3>
-      <p><code>mnemo init</code> auto-inserts a starter manifest so brand-new databases are agent-friendly from creation. The next agent sees the placeholder and knows what to record.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔄</div>
-      <h3>Parity across surfaces</h3>
-      <p>Same about/init pattern in the Rust API, Python binding, and CLI. An agent that learns mnemo on one entry point uses it from any other.</p>
-    </div>
-  </div>
-</section>
-
-<section class="arch-section">
-  <h2>Encryption Architecture</h2>
-  <div class="visual-box">
-    <div class="crypto-layout">
-      <div class="crypto-row" style="justify-content: flex-start; padding-left: 1rem;">
-        <span>passphrase</span>
-        <span class="crypto-arrow">──Argon2id──▶</span>
-        <span>KEK</span>
-        <span class="crypto-arrow">──AES-256-GCM──▶</span>
-        <span>wraps DEK (random 256-bit)</span>
+  <div class="wrap hero-grid">
+    <div>
+      <div class="pills">
+        <span class="pill"><span class="dot"></span>v0.4.1</span>
+        <span class="pill">Apache-2.0</span>
+        <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
-      <div class="crypto-row" style="justify-content: flex-end; padding-right: 170px;">
-        <span class="crypto-link-down">│<br>▼</span>
+      <h1>Encrypted memory and cache for AI agents, <span>in one file</span>.</h1>
+      <p class="sub">MNemo gives an agent durable memory and a cache for expensive calls, inside a single encrypted <code>.mnemo</code> file. There's no server or vector database to run. Copy the file and the memory comes with it.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#quickstart">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>View on GitHub</a>
       </div>
-      <div class="crypto-row" style="justify-content: flex-end; padding-right: 1rem;">
-        <span>every 8 KiB page</span>
-        <span class="crypto-arrow">──AES-256-GCM──▶</span>
-        <span>ciphertext</span>
-      </div>
-    </div>
 
-    <div class="file-wrapper">
-      <div class="file-header">.mnemo file</div>
-      <div class="file-container">
-        <div class="file-band">
-          <div class="band-title">Page 0 &mdash; Header (plaintext)</div>
-          <div class="band-desc">magic &middot; version &middot; KDF params &middot; salt &middot; wrapped DEK &middot; CRC</div>
+      <div class="install" role="region" aria-label="Install">
+        <div class="install-tabs" role="tablist" aria-label="Install method">
+          <button role="tab" aria-selected="true" data-install="pip">Python</button>
+          <button role="tab" aria-selected="false" data-install="cargo-add">Rust library</button>
+          <button role="tab" aria-selected="false" data-install="cargo-install">CLI</button>
         </div>
-        <div class="file-band">
-          <div class="band-title">Pages 1..W &mdash; Write-Ahead Log (encrypted)</div>
-        </div>
-        <div class="file-band">
-          <div class="band-title">Pages W+ &mdash; Encrypted Data Runs</div>
-          <div class="file-columns">
-            <div class="file-col">
-              <div class="band-title">Records</div>
-              <div class="band-desc">(memories)</div>
-            </div>
-            <div class="file-col">
-              <div class="band-title">Catalog</div>
-              <div class="band-desc">(metadata)</div>
-            </div>
-            <div class="file-col">
-              <div class="band-title">ANN Index</div>
-              <div class="band-desc">(IVF+PQ)</div>
-            </div>
-            <div class="file-col">
-              <div class="band-title">Snapshot Manifest</div>
-              <div class="band-desc">(transaction log)</div>
-            </div>
-          </div>
+        <div class="install-row">
+          <code id="install-cmd"><span class="p">$ </span><span id="install-text">pip install mnemo-engine</span></code>
+          <button class="copy" data-copy-target="install-text" type="button">Copy</button>
         </div>
       </div>
     </div>
+
+    <div class="filecard" aria-label="What's inside a .mnemo file">
+      <div class="filecard-top">
+        <span class="filecard-name"><svg><use href="#i-file"/></svg>agent.mnemo</span>
+        <span class="lockbadge"><svg><use href="#i-lock"/></svg>AES-256-GCM</span>
+      </div>
+      <div class="layers">
+        <div class="layer"><i style="background:#0E7C74"></i><div><b>Memories</b><span>episodic · semantic · procedural · working</span></div></div>
+        <div class="layer"><i style="background:#B45309"></i><div><b>Result cache</b><span>exact keys · similar prompts · TTL · size budgets</span></div></div>
+        <div class="layer"><i style="background:#1D4ED8"></i><div><b>Search index</b><span>IVF + PQ for large files, exact scan always available</span></div></div>
+        <div class="layer"><i style="background:#7C3AED"></i><div><b>Snapshots</b><span>every commit, restorable by id or by time</span></div></div>
+        <div class="layer"><i style="background:#737A88"></i><div><b>Write-ahead log</b><span>one fsync per commit, recovers after a crash</span></div></div>
+      </div>
+      <div class="filecard-foot">one file · every page encrypted · open it anywhere</div>
+    </div>
   </div>
 </section>
 
-<div class="divider"></div>
-
-<section class="code-section">
-  <p class="section-label">Quick Start</p>
-  <h2 class="section-title" style="margin-bottom:2rem;">Ten lines to persistent memory</h2>
-
-  <div class="code-tabs">
-    <button class="code-tab active" onclick="switchTab('rust')">Rust</button>
-    <button class="code-tab" onclick="switchTab('python')">Python</button>
-    <button class="code-tab" onclick="switchTab('cli')">CLI</button>
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">What you get</p>
+      <h2 class="title">Memory and a cache, without the infrastructure</h2>
+      <p class="lead">Most agent memory means running a separate vector service: another thing to deploy, and another place for secrets to leak. MNemo treats memory like SQLite treats data. It's a file.</p>
+    </div>
+    <div class="grid grid-4">
+      <div class="card">
+        <div class="icon"><svg><use href="#i-file"/></svg></div>
+        <h3>One portable file</h3>
+        <p>Memories, cache, index, write-ahead log and snapshot history all live in one <code>.mnemo</code> file. A plain copy is a complete, consistent backup.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-lock"/></svg></div>
+        <h3>Encrypted at rest</h3>
+        <p>Every 8 KiB page is sealed with AES-256-GCM under a key derived with Argon2id. Changing the passphrase re-wraps one key; the data is never rewritten.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-brain"/></svg></div>
+        <h3>Recall built for agents</h3>
+        <p>Four memory types, ranked on similarity, recency, importance and how often a memory gets used. Per-agent scoping and expiry built in.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-bolt"/></svg></div>
+        <h3>A cache for expensive calls <span class="tag-new">New</span></h3>
+        <p>Cache LLM responses, tool outputs and API calls by exact key, or match near-identical prompts by meaning. Namespaces, expiry and size limits included.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-plug"/></svg></div>
+        <h3>MCP server built in <span class="tag-new">New</span></h3>
+        <p><code>mnemo serve --mcp</code> exposes memory and cache as tools to Claude Desktop, Cursor or any MCP client.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-shield"/></svg></div>
+        <h3>Crash-safe writes</h3>
+        <p>Each commit goes through a write-ahead log with a single fsync. Kill the process mid-write and the file recovers cleanly next time it opens.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-rewind"/></svg></div>
+        <h3>Point-in-time restore</h3>
+        <p>Every commit is a snapshot. Roll back to any past transaction or moment, and roll forward again if you change your mind.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-users"/></svg></div>
+        <h3>Safe to share <span class="tag-new">New</span></h3>
+        <p>One writer, many readers, enforced with OS file locks. A second writer is turned away instead of corrupting the file.</p>
+      </div>
+    </div>
   </div>
+</section>
 
-  <pre class="code-block active" id="tab-rust"><span class="kw">use</span> mnemo::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
+<!-- ================= MCP ================= -->
+<section id="mcp">
+  <div class="wrap split">
+    <div>
+      <p class="eyebrow">For agents</p>
+      <h2 class="title">Plug it into Claude, Cursor or any MCP client</h2>
+      <p class="lead">Point your MCP client at a <code>.mnemo</code> file and the agent gets memory and caching as ordinary tools. The passphrase comes from an environment variable, never a tool argument.</p>
+      <div class="chips" aria-label="Tools exposed over MCP">
+        <span class="chip">about</span><span class="chip">remember</span><span class="chip">recall</span><span class="chip">forget</span>
+        <span class="chip">list</span><span class="chip">stats</span><span class="chip">snapshot_list</span>
+        <span class="chip cache">cache_put</span><span class="chip cache">cache_get</span><span class="chip cache">cache_stats</span>
+        <span class="chip cache">cache_put_semantic</span><span class="chip cache">cache_get_semantic</span>
+      </div>
+      <p class="note">Today the memory tools take embedding vectors. Plain-text tools, where MNemo calls your embedding model for you, arrive in v0.5.0.</p>
+    </div>
+    <div class="codebox">
+      <div class="codebar"><span class="label">claude_desktop_config.json</span><button class="copy" data-copy-target="mcp-json" type="button">Copy</button></div>
+<pre class="code" id="mcp-json">{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"mnemo"</span>: {
+      <span class="s">"command"</span>: <span class="s">"mnemo"</span>,
+      <span class="s">"args"</span>: [<span class="s">"serve"</span>, <span class="s">"--mcp"</span>, <span class="s">"/absolute/path/to/agent.mnemo"</span>],
+      <span class="s">"env"</span>: { <span class="s">"MNEMO_PASSPHRASE"</span>: <span class="s">"your-passphrase-here"</span> }
+    }
+  }
+}</pre>
+    </div>
+  </div>
+</section>
 
-<span class="kw">fn</span> <span class="fn">main</span>() -> mnemo::Result&lt;()&gt; {
-    <span class="kw">let</span> cfg = MnemoConfig { dimensions: <span class="num">768</span>, ..Default::default() };
-    <span class="kw">let mut</span> db = Mnemo::create(<span class="str">"agent.mnemo"</span>, <span class="str">"correct horse battery"</span>, cfg)?;
+<!-- ================= QUICK START ================= -->
+<section id="quickstart">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Quick start</p>
+      <h2 class="title">Memory and caching in a few lines</h2>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.4.1.</p>
+    </div>
+    <div class="codebox">
+      <div class="codebar">
+        <div class="tabs" role="tablist" aria-label="Language">
+          <button role="tab" aria-selected="true" aria-controls="code-python" data-code="python">Python</button>
+          <button role="tab" aria-selected="false" aria-controls="code-rust" data-code="rust">Rust</button>
+          <button role="tab" aria-selected="false" aria-controls="code-cli" data-code="cli">CLI</button>
+        </div>
+      </div>
+<pre class="code" id="code-python" role="tabpanel"><span class="k">import</span> mnemo
+<span class="k">from</span> sentence_transformers <span class="k">import</span> SentenceTransformer
+
+model = SentenceTransformer(<span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>)
+<span class="k">def</span> <span class="f">embed</span>(text):
+    <span class="k">return</span> model.encode(text, normalize_embeddings=<span class="k">True</span>).tolist()
+
+<span class="k">with</span> mnemo.open(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, dimensions=<span class="n">384</span>) <span class="k">as</span> db:
+    <span class="c"># Durable memory</span>
+    db.remember(<span class="s">"the user prefers dark mode"</span>, <span class="s">"semantic"</span>,
+                embed(<span class="s">"the user prefers dark mode"</span>), importance=<span class="n">0.8</span>)
+    <span class="k">for</span> hit <span class="k">in</span> db.recall(embed(<span class="s">"which theme does the user like?"</span>), top_k=<span class="n">5</span>):
+        print(round(hit[<span class="s">"score"</span>], <span class="n">3</span>), hit[<span class="s">"content"</span>])
+
+    <span class="c"># Cache an expensive call</span>
+    prompt = <span class="s">"Summarize the release notes"</span>
+    hit = db.cache_get(<span class="s">"llm"</span>, prompt)
+    <span class="k">if</span> hit <span class="k">is</span> <span class="k">None</span>:
+        answer = call_llm(prompt)                <span class="c"># your LLM call</span>
+        db.cache_put(<span class="s">"llm"</span>, prompt, answer, ttl_secs=<span class="n">3600</span>)
+    <span class="k">else</span>:
+        answer = hit[<span class="s">"value"</span>].decode()</pre>
+<pre class="code" id="code-rust" role="tabpanel" hidden><span class="k">use</span> mnemo::{CachePutOpts, Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest};
+
+<span class="k">fn</span> <span class="f">main</span>() -&gt; mnemo::<span class="t">Result</span>&lt;()&gt; {
+    <span class="k">let</span> cfg = <span class="t">MnemoConfig</span> { dimensions: <span class="n">3</span>, ..Default::default() };
+    <span class="k">let mut</span> db = <span class="t">Mnemo</span>::create(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, cfg)?;
 
     db.remember(
-        Memory::new(<span class="str">"the user prefers dark mode"</span>, MemoryType::Semantic, vec![<span class="num">0.1</span>, <span class="num">0.2</span>, <span class="num">0.9</span>])
-            .with_agent(<span class="str">"assistant-1"</span>)
-            .with_importance(<span class="num">0.8</span>),
+        <span class="t">Memory</span>::new(<span class="s">"the user prefers dark mode"</span>, <span class="t">MemoryType</span>::Semantic, vec![<span class="n">0.1</span>, <span class="n">0.2</span>, <span class="n">0.9</span>])
+            .with_agent(<span class="s">"assistant-1"</span>)
+            .with_importance(<span class="n">0.8</span>),
     )?;
-    db.flush()?; <span class="cmt">// durable + crash-safe</span>
+    db.cache_put(<span class="s">"llm"</span>, <span class="s">"prompt-42"</span>, <span class="s">br#"{"answer":"..."}"#</span>,
+        <span class="t">CachePutOpts</span> { content_type: <span class="s">"json"</span>.into(), ttl_secs: Some(<span class="n">3600</span>), cost_hint_ms: None })?;
+    db.flush()?; <span class="c">// one atomic, crash-safe commit</span>
 
-    <span class="kw">for</span> hit <span class="kw">in</span> db.recall(&amp;RecallRequest::new(vec![<span class="num">0.1</span>, <span class="num">0.2</span>, <span class="num">0.9</span>]).top_k(<span class="num">5</span>))? {
-        println!(<span class="str">"{:.3}  {}"</span>, hit.score, hit.memory.content);
+    <span class="k">for</span> hit <span class="k">in</span> db.recall(&amp;<span class="t">RecallRequest</span>::new(vec![<span class="n">0.1</span>, <span class="n">0.2</span>, <span class="n">0.9</span>]).top_k(<span class="n">5</span>))? {
+        println!(<span class="s">"{:.3}  {}"</span>, hit.score, hit.memory.content);
     }
     Ok(())
 }</pre>
+<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span><span class="k">export</span> MNEMO_PASSPHRASE=<span class="s">'a long passphrase'</span>        <span class="c"># never put it on the command line</span>
 
-  <pre class="code-block" id="tab-python"><span class="kw">import</span> mnemo
+<span class="pr">$ </span>mnemo init agent.mnemo --dimensions <span class="n">384</span>         <span class="c"># new file, self-describing from the start</span>
+<span class="pr">$ </span>mnemo about agent.mnemo                          <span class="c"># what is this file and how do I use it?</span>
+<span class="pr">$ </span>mnemo import agent.mnemo memories.jsonl          <span class="c"># bulk-load memories with vectors</span>
+<span class="pr">$ </span>mnemo recall agent.mnemo --query <span class="n">0.1</span>,<span class="n">0.2</span>,<span class="n">0.9</span> --top-k <span class="n">5</span>
 
-<span class="cmt"># Open or create an encrypted memory file</span>
-db = mnemo.open(<span class="str">"agent.mnemo"</span>, <span class="str">"passphrase"</span>, dimensions=<span class="num">768</span>)
+<span class="pr">$ </span>mnemo cache put agent.mnemo --ns llm --key prompt-42 --value <span class="s">'{"answer":"..."}'</span> --content-type json --ttl <span class="n">3600</span>
+<span class="pr">$ </span>mnemo cache get agent.mnemo --ns llm --key prompt-42
 
-<span class="cmt"># Store a memory with type, importance, and agent scope</span>
-db.remember(
-    <span class="str">"the user prefers concise answers"</span>,
-    <span class="str">"procedural"</span>,
-    embedding_model.encode(<span class="str">"the user prefers concise answers"</span>),
-    importance=<span class="num">0.8</span>,
-    agent_id=<span class="str">"assistant"</span>,
-)
+<span class="pr">$ </span>mnemo snapshots agent.mnemo                      <span class="c"># every commit is restorable</span>
+<span class="pr">$ </span>mnemo restore agent.mnemo --to-txn <span class="n">12</span>
 
-<span class="cmt"># Multi-signal recall — similarity + recency + importance + frequency</span>
-<span class="kw">for</span> hit <span class="kw">in</span> db.recall(query_embedding, top_k=<span class="num">10</span>):
-    print(hit[<span class="str">"score"</span>], hit[<span class="str">"content"</span>])
-
-db.flush()
-db.close()</pre>
-
-  <pre class="code-block" id="tab-cli"><span class="cmt"># Passphrase via env (preferred over --passphrase on the CLI)</span>
-$ <span class="kw">export</span> MNEMO_PASSPHRASE=your-secret
-
-<span class="cmt"># Create, load, and index</span>
-$ mnemo init agent.mnemo --dimensions <span class="num">768</span>
-$ mnemo import agent.mnemo memories.jsonl
-$ mnemo index agent.mnemo
-
-<span class="cmt"># Explore — browse, fetch by ULID, multi-signal recall</span>
-$ mnemo info agent.mnemo
-$ mnemo list agent.mnemo --type semantic --limit <span class="num">20</span>
-$ mnemo get agent.mnemo 01HXYZ... --verbose
-$ mnemo recall agent.mnemo --query <span class="num">0.1</span>,<span class="num">0.2</span>,<span class="num">0.9</span> --top-k <span class="num">5</span>
-
-<span class="cmt"># Exact similarity-only search (ground truth)</span>
-$ mnemo search agent.mnemo --query <span class="num">0.1</span>,<span class="num">0.2</span>,<span class="num">0.9</span> --top-k <span class="num">5</span>
-
-<span class="cmt"># Re-key without rewriting bulk data</span>
-$ mnemo rekey agent.mnemo --new-passphrase new-secret</pre>
-</section>
-
-<div class="divider"></div>
-
-<section class="section">
-  <p class="section-label">Performance</p>
-  <h2 class="section-title">Built in Rust. Fast by default.</h2>
-  <p class="section-desc">Encryption overhead under 15%. IVF+PQ indexing keeps recall sub-linear at any scale.</p>
-
-  <div class="bench-grid">
-    <div class="bench-card">
-      <div class="bench-value">&lt;5ms</div>
-      <div class="bench-label">100K memories, top-10 recall</div>
-    </div>
-    <div class="bench-card">
-      <div class="bench-value">&lt;15ms</div>
-      <div class="bench-label">1M memories, top-10 recall</div>
-    </div>
-    <div class="bench-card">
-      <div class="bench-value">10K/s</div>
-      <div class="bench-label">Insert throughput</div>
-    </div>
-    <div class="bench-card">
-      <div class="bench-value">&lt;200ms</div>
-      <div class="bench-label">Cold open, encrypted, 100K</div>
+<span class="pr">$ </span>mnemo serve --mcp agent.mnemo                    <span class="c"># expose it to MCP clients</span></pre>
     </div>
   </div>
 </section>
 
-<div class="divider"></div>
+<!-- ================= RECALL ================= -->
+<section id="recall">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Multi-signal recall</p>
+      <h2 class="title">Ranked on more than similarity</h2>
+      <p class="lead">An agent needs the right memory, not just the closest vector. Every candidate is scored on four signals, with weights you can set per query.</p>
+    </div>
+    <div class="formula">
+      <div class="eq">score =</div>
+      <div class="term"><div class="m"><em>α</em> · similarity</div><p>How close the meaning is: cosine, dot product or L2.</p></div>
+      <div class="term"><div class="m"><em>β</em> · recency</div><p>Fades exponentially, with a 7-day half-life by default.</p></div>
+      <div class="term"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored.</p></div>
+      <div class="term"><div class="m"><em>δ</em> · ln(1 + uses)</div><p>A boost for memories the agent keeps coming back to.</p></div>
+    </div>
+    <div class="grid grid-4" style="margin-top:1.4rem">
+      <div class="card"><h3>Episodic</h3><p>What happened: conversation turns and events. Sessions promote their turns here when they close.</p></div>
+      <div class="card"><h3>Semantic</h3><p>What's known: facts about the user, the project and the world.</p></div>
+      <div class="card"><h3>Procedural</h3><p>How to behave: preferences, rules and working conventions.</p></div>
+      <div class="card"><h3>Working</h3><p>Right now: the current session's scratchpad, kept or discarded when it ends.</p></div>
+    </div>
+  </div>
+</section>
 
-<section class="section">
-  <p class="section-label">Multi-Signal Recall</p>
-  <h2 class="section-title">Not just vector similarity</h2>
-  <p class="section-desc">Agents need more than cosine distance. MNemo ranks every candidate on four signals, weighted per query.</p>
+<!-- ================= SELF-DESCRIBING ================= -->
+<section id="about-files">
+  <div class="wrap split">
+    <div>
+      <p class="eyebrow">Agent-first</p>
+      <h2 class="title">Every file introduces itself</h2>
+      <p class="lead">Hand an agent a <code>.mnemo</code> file and its passphrase, and one command tells it what the file is: which embedding model it expects, the conventions used, and any notes the author left. No separate README required.</p>
+      <ul class="checks">
+        <li><svg><use href="#i-check"/></svg><span><b>Self-describing.</b> A manifest stored inside the file, printed by <code>mnemo about</code> or <code>db.about()</code>.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Ready from creation.</b> <code>mnemo init</code> adds a starter manifest so new files are never blank.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Same everywhere.</b> The Rust library, Python package, CLI and MCP server share one engine and one behaviour.</span></li>
+      </ul>
+    </div>
+    <div class="term-window" aria-label="Example mnemo about output">
+      <div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="pr">$ </span>mnemo about agent.mnemo
+<span class="c"># agent.mnemo  (66 memories · 384-dim · encrypted · 33 snapshots)</span>
 
-  <div class="visual-box" style="max-width:820px;">
-    <div class="formula-layout">
-      <div class="formula-base">score =</div>
-      <div class="formula-term">
-        <span class="term-math">&alpha; &middot; similarity</span>
-        <span class="term-arrow">▲</span>
-        <span class="term-desc">vector distance<br>(cosine/dot/L2)</span>
-      </div>
-      <div class="formula-op">+</div>
-      <div class="formula-term">
-        <span class="term-math">&beta; &middot; recency</span>
-        <span class="term-arrow">▲</span>
-        <span class="term-desc">exponential<br>decay (7-day<br>half-life)</span>
-      </div>
-      <div class="formula-op">+</div>
-      <div class="formula-term">
-        <span class="term-math">&gamma; &middot; importance</span>
-        <span class="term-arrow">▲</span>
-        <span class="term-desc">author-assigned<br>weight [0,1]</span>
-      </div>
-      <div class="formula-op">+</div>
-      <div class="formula-term">
-        <span class="term-math">&delta; &middot; ln(1 + access_count)</span>
-        <span class="term-arrow">▲</span>
-        <span class="term-desc">retrieval<br>frequency<br>boost</span>
+<span class="h">### MANIFEST</span>
+This .mnemo file is the project memory for MNemo.
+Embedder: sentence-transformers/all-MiniLM-L6-v2
+(384-dim, normalized). Default agent_id: cursor-agent.
+
+<span class="h">### onboarding / mission</span>
+Ongoing project context lives in this file, so new
+AI sessions stay aligned without relying on chat history.
+
+<span class="c">## Quick start</span>
+  mnemo list   agent.mnemo
+  mnemo recall agent.mnemo --query VEC
+  mnemo get    agent.mnemo &lt;id&gt; --verbose</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SECURITY ================= -->
+<section id="security">
+  <div class="wrap split">
+    <div>
+      <p class="eyebrow">Security &amp; reliability</p>
+      <h2 class="title">Private by default, tamper-evident on disk</h2>
+      <p class="lead">Without the passphrase the file is opaque, and changed bytes are detected rather than silently trusted.</p>
+      <ul class="checks">
+        <li><svg><use href="#i-check"/></svg><span><b>Pages are pinned to their position.</b> A valid encrypted page moved to another slot fails authentication.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>The header is sealed.</b> Pointing it at an older catalog is caught on open as tampering.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>No password oracle.</b> A wrong passphrase and a damaged key look identical.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Tested hard.</b> Fuzzed parsers, property tests with simulated crashes, and a dependency audit on every change.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>No <code>unsafe</code> code.</b> The core crate forbids it outright.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Verifiable releases.</b> PyPI packages are published from CI with signed provenance (Trusted Publishing).</span></li>
+      </ul>
+      <p class="limits"><b>Out of scope, stated plainly:</b> anyone with write access can still delete or truncate the file, swapping in an older valid copy of the whole file can't be detected from inside it, and anyone who has the passphrase is the owner. <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/README.md#security-model">Read the full security model</a>.</p>
+    </div>
+    <div>
+      <div class="card" style="padding:1.4rem">
+        <h3 style="margin-bottom:1rem">How the keys fit together</h3>
+        <div class="keyflow">
+          <div class="kf-row"><span class="kf-box">passphrase</span><span class="kf-arrow">Argon2id</span><span class="kf-box">key-encryption key</span></div>
+          <div class="kf-row"><span class="kf-box">key-encryption key</span><span class="kf-arrow">wraps</span><span class="kf-box a">random 256-bit data key</span></div>
+          <div class="kf-row"><span class="kf-box a">data key</span><span class="kf-arrow">AES-256-GCM</span><span class="kf-box">every 8 KiB page</span></div>
+        </div>
+        <div class="filemap" aria-label="File layout">
+          <div><span><b>Page 0 · header</b><br>format version, key-derivation settings, wrapped data key</span><span class="plain">plaintext + sealed</span></div>
+          <div><span><b>Write-ahead log</b><br>pending commits, replayed after a crash</span><span class="enc">encrypted</span></div>
+          <div><span><b>Records</b><br>memories and cache entries</span><span class="enc">encrypted</span></div>
+          <div><span><b>Catalog · index · cache directory</b><br>what's where, plus the IVF+PQ search index</span><span class="enc">encrypted</span></div>
+          <div><span><b>Snapshot manifest</b><br>one entry per commit, for restore</span><span class="enc">encrypted</span></div>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<div class="divider"></div>
+<!-- ================= PERFORMANCE ================= -->
+<section id="performance">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Performance</p>
+      <h2 class="title">Measured, not promised</h2>
+      <p class="lead">We only publish numbers we've measured. Today that's a small baseline; benchmarks at 100,000 and 1 million memories are the next milestone, and the results will be posted here.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card stat"><div class="v">~35<span> ms</span></div><div class="l">Open a file and run a top-10 recall</div><div class="d">Python, release build, production key derivation. Small 31-memory file, v0.1.0 baseline.</div></div>
+      <div class="card stat"><div class="v">~31<span> ms</span></div><div class="l">Store a memory and commit it to disk</div><div class="d">Includes computing the embedding. Same file and baseline.</div></div>
+      <div class="card stat"><div class="v">100K–1M</div><div class="l">Memories: benchmarks in progress</div><div class="d">Recall latency, write throughput, file size and cache speed, on a documented reference machine.</div></div>
+    </div>
+    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">Opening a file runs Argon2id on purpose: it's what makes guessing the passphrase expensive. Long-running processes such as the MCP server or a Python app open the file once, so each later call skips that cost.</p>
+  </div>
+</section>
 
-<section class="section">
-  <p class="section-label">Agent Memory Model</p>
-  <h2 class="section-title">Four types of memory</h2>
-  <p class="section-desc">Structured memory types mirror how agents actually think — not just a bag of embeddings.</p>
-
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="feature-icon">📖</div>
-      <h3>Episodic</h3>
-      <p>What happened — conversation turns, events, interactions. Consolidated from working memory at session close.</p>
+<!-- ================= ROADMAP ================= -->
+<section id="roadmap">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Roadmap</p>
+      <h2 class="title">Where MNemo is headed</h2>
+      <p class="lead">Built in the open, one reviewed release at a time. Full history in the <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">changelog</a>.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🗂️</div>
-      <h3>Semantic</h3>
-      <p>What is known — facts, entities, relationships, beliefs. Long-lived knowledge with contradiction detection.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">⚙️</div>
-      <h3>Procedural</h3>
-      <p>What to do — user preferences, behavioral patterns, rules. High-importance memories that guide agent behavior.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">💭</div>
-      <h3>Working</h3>
-      <p>Right now — current session context, scratchpad. Ephemeral until promoted by session consolidation.</p>
+    <div class="grid grid-3 road">
+      <div class="card done-col">
+        <h3>Shipped <span class="status done">v0.4.x</span></h3>
+        <ul>
+          <li>Result cache: exact keys and similar prompts</li>
+          <li>MCP server for Claude, Cursor and other clients</li>
+          <li>File locking and read-only opens</li>
+          <li>Fuzzing, property tests and dependency audits in CI</li>
+          <li>Python package caught up with the engine: cache tuning, rekey, compaction</li>
+          <li>Automated releases, with signed provenance on PyPI</li>
+        </ul>
+      </div>
+      <div class="card next-col">
+        <h3>Next <span class="status next">v0.5.0</span></h3>
+        <ul>
+          <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
+          <li>A check that the file is used with the embedding model it was built with</li>
+          <li>Rejects empty (all-zero) vectors that would pollute search</li>
+          <li>Then, in v0.5.x: an optional built-in local embedding model</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>After that <span class="status later">planned</span></h3>
+        <ul>
+          <li>Benchmarks at 100K–1M memories, then speedups</li>
+          <li>Keyword search combined with meaning-based search</li>
+          <li>Smaller files: compressed text and vectors</li>
+          <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
+          <li>A Node.js package and framework integrations</li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
 
-<section class="bottom-cta">
-  <h2>Your agent deserves a brain<br>it can carry</h2>
-  <p>Built agent-first. Self-describing by default. Open-source under Apache 2.0. Written in Rust.</p>
-  <a href="https://github.com/toarchkumar/mnemo" class="hero-cta" id="bottom-gh" style="animation:none;">
-    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-    View on GitHub
-  </a>
+<!-- ================= CTA ================= -->
+<section class="cta">
+  <div class="wrap">
+    <h2>Give your agent a memory it can carry</h2>
+    <p>Open source under Apache-2.0. Written in Rust, with Python, CLI and MCP on top.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#quickstart">Get started</a>
+      <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>Star on GitHub</a>
+    </div>
+  </div>
 </section>
+
+</main>
 
 <footer>
-  Memory Nemo (MNemo) · Apache-2.0 · Built with Rust 🦀
+  <div class="wrap foot">
+    <span>MNemo (Memory Nemo) · Apache-2.0</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/toarchkumar/mnemo">GitHub</a>
+      <a href="https://pypi.org/project/mnemo-engine/">PyPI</a>
+      <a href="https://crates.io/crates/mnemo-engine">crates.io</a>
+      <a href="https://docs.rs/mnemo-engine">Docs</a>
+      <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/toarchkumar/mnemo/releases">Releases</a>
+    </nav>
+  </div>
 </footer>
 
 <script>
-function switchTab(lang) {
-  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.code-block').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  document.getElementById('tab-' + lang).classList.add('active');
-}
+(function () {
+  // Install tabs
+  var installs = {
+    "pip": "pip install mnemo-engine",
+    "cargo-add": "cargo add mnemo-engine",
+    "cargo-install": "cargo install mnemo-engine"
+  };
+  var itabs = document.querySelectorAll("[data-install]");
+  itabs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      itabs.forEach(function (x) { x.setAttribute("aria-selected", x === b ? "true" : "false"); });
+      document.getElementById("install-text").textContent = installs[b.dataset.install];
+    });
+  });
+
+  // Code tabs
+  var ctabs = document.querySelectorAll("[data-code]");
+  ctabs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      ctabs.forEach(function (x) {
+        var on = x === b;
+        x.setAttribute("aria-selected", on ? "true" : "false");
+        document.getElementById("code-" + x.dataset.code).hidden = !on;
+      });
+    });
+  });
+
+  // Copy buttons
+  function copyText(text, btn) {
+    var done = function () {
+      var old = btn.textContent; btn.textContent = "Copied";
+      setTimeout(function () { btn.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () {});
+    } else {
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  }
+  document.querySelectorAll("[data-copy-target]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      copyText(document.getElementById(btn.dataset.copyTarget).textContent, btn);
+    });
+  });
+})();
 </script>
 </body>
 </html>
