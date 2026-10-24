@@ -551,3 +551,438 @@ fn mcp_serve_refuses_without_passphrase() {
         "stderr should mention the env var, got: {stderr}"
     );
 }
+
+// === Phase 3 PR 10b: --embed-cmd / text params ============================
+//
+// Fake-embedder choice: inline Python. All three GitHub-Actions runners
+// (ubuntu-latest, macos-latest, windows-latest) ship Python 3 by default.
+// Rust-helper-binary alternatives would need either a published `[[bin]]`
+// (clutters the shipped crate) or a `[[example]]` + hard-coded relative
+// path (brittle on parallel-test layouts). Python is one import away on
+// every supported CI target, keeps the fake embedder as a 10-line
+// readable artifact rather than another compilation unit, and matches
+// what real users will typically use (sentence-transformers in Python).
+
+/// Platform-appropriate name of the Python 3 interpreter. On Linux and
+/// macOS CI images, `python3` is on PATH. On Windows CI images,
+/// `python` is on PATH (and `python3` may or may not be).
+fn python_cmd() -> &'static str {
+    if cfg!(windows) {
+        "python"
+    } else {
+        "python3"
+    }
+}
+
+/// Write a Python script into a tempfile and return its path.
+/// Caller keeps the tempfile alive for the duration of the subprocess.
+fn write_py_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+    let p = dir.join(name);
+    std::fs::write(&p, body).unwrap();
+    p
+}
+
+/// Deterministic 4-D fake embedder, persistent read loop. Hashes each
+/// input string's byte sum onto one axis; emits a unit spike there.
+const FAKE_EMBED_PY: &str = r#"
+import sys, json
+DIMS = 4
+for line in sys.stdin:
+    s = json.loads(line)
+    axis = sum(bytearray(s.encode("utf-8"))) % DIMS
+    v = [0.0] * DIMS
+    v[axis] = 1.0
+    print(json.dumps(v), flush=True)
+"#;
+
+/// Fake embedder that reads one line, then exits non-zero — exercises
+/// the "child crashed mid-session" branch of EmbedCmd.
+const CRASHING_EMBED_PY: &str = r#"
+import sys, json
+for line in sys.stdin:
+    _ = json.loads(line)
+    sys.exit(1)
+"#;
+
+/// Fake embedder that returns the wrong width (2 dims instead of 4).
+const WRONG_WIDTH_EMBED_PY: &str = r#"
+import sys, json
+for line in sys.stdin:
+    _ = json.loads(line)
+    print(json.dumps([1.0, 2.0]), flush=True)
+"#;
+
+/// Fake embedder that touches a marker file on startup. Used to verify
+/// the child is spawned once across multiple MCP tool calls.
+const STARTUP_MARKER_EMBED_PY: &str = r#"
+import sys, json, os
+with open(os.environ["MNEMO_TEST_MARKER"], "a") as f:
+    f.write("start\n")
+DIMS = 4
+for line in sys.stdin:
+    s = json.loads(line)
+    axis = sum(bytearray(s.encode("utf-8"))) % DIMS
+    v = [0.0] * DIMS
+    v[axis] = 1.0
+    print(json.dumps(v), flush=True)
+"#;
+
+fn embed_cmd_arg(script_path: &std::path::Path) -> String {
+    // Quote the path so shlex_split in EmbedCmd parses it as one argv
+    // entry even if the tempdir contains spaces (common on Windows CI
+    // where runner paths include "runneradmin").
+    format!("{} \"{}\"", python_cmd(), script_path.display())
+}
+
+#[test]
+fn cli_remember_and_recall_text_round_trip() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em.mnemo");
+    let pp = "em-pw";
+    // Seed with the scaffold manifest so `set_embedder` has a target
+    // for the identity write.
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.flush().unwrap();
+    }
+    let script = write_py_script(dir.path(), "fake.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+
+    // mnemo remember --text "alpha" --embed-cmd '…' --embed-name fake-4d
+    let out = Command::new(bin())
+        .args([
+            "remember",
+            path.to_str().unwrap(),
+            "--text",
+            "alpha",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+            "--embed-normalize",
+            "true",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo remember");
+    assert!(
+        out.status.success(),
+        "mnemo remember failed: status={:?} stdout={} stderr={}",
+        out.status,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    // Stdout should be a ULID (one line, 26 chars).
+    let ulid = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        ulid.trim().len() >= 26,
+        "expected a ULID on stdout, got {ulid:?}"
+    );
+
+    // mnemo recall --text "alpha" ... → the just-stored memory should
+    // surface first.
+    let out = Command::new(bin())
+        .args([
+            "recall",
+            path.to_str().unwrap(),
+            "--text",
+            "alpha",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+            "--top-k",
+            "5",
+            "--format",
+            "json",
+            "--no-track",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo recall");
+    assert!(
+        out.status.success(),
+        "mnemo recall failed: status={:?} stderr={}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("alpha"),
+        "recall --text output should contain the stored content, got: {stdout}"
+    );
+}
+
+#[test]
+fn cli_recall_text_without_embed_cmd_errors_cleanly() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em-noec.mnemo");
+    let pp = "em-pw";
+    {
+        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+    }
+    let out = Command::new(bin())
+        .args([
+            "recall",
+            path.to_str().unwrap(),
+            "--text",
+            "alpha",
+            // Deliberately NO --embed-cmd / --embed-name.
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo recall");
+    assert!(
+        !out.status.success(),
+        "recall --text without --embed-cmd should fail"
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.to_lowercase().contains("embed"),
+        "error should mention embedder, got: {combined}"
+    );
+}
+
+#[test]
+fn cli_remember_text_crashing_embedder_errors_cleanly() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em-crash.mnemo");
+    let pp = "em-pw";
+    {
+        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+    }
+    let script = write_py_script(dir.path(), "crash.py", CRASHING_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let out = Command::new(bin())
+        .args([
+            "remember",
+            path.to_str().unwrap(),
+            "--text",
+            "boom",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo remember");
+    assert!(
+        !out.status.success(),
+        "remember with a crashing embedder should fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // Either the child "exited before this request" (if we noticed the
+    // first-call exit before writing) OR a protocol/read failure after.
+    // Both are acceptable; the point is a clear non-zero exit.
+    assert!(
+        stderr.to_lowercase().contains("embed-cmd") || stderr.to_lowercase().contains("embedder"),
+        "stderr should mention the embedder failure, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_remember_text_wrong_width_errors_cleanly() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em-ww.mnemo");
+    let pp = "em-pw";
+    {
+        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+    }
+    let script = write_py_script(dir.path(), "ww.py", WRONG_WIDTH_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let out = Command::new(bin())
+        .args([
+            "remember",
+            path.to_str().unwrap(),
+            "--text",
+            "two-dims",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo remember");
+    assert!(
+        !out.status.success(),
+        "remember with wrong-width embedder should fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("dim") || stderr.contains("2"),
+        "stderr should mention the dimension mismatch, got: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_serve_with_embedder_text_params_and_persistent_child() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mcp-em.mnemo");
+    let pp = "em-pw";
+    // Seed with the scaffold manifest so the embedder's identity has
+    // somewhere to land on set_embedder.
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.flush().unwrap();
+    }
+    let marker = dir.path().join("startup.marker");
+    let script = write_py_script(dir.path(), "startup.py", STARTUP_MARKER_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+
+    // Same retry-on-flock-race pattern as the plain mcp_serve test.
+    let mut out_opt = None;
+    let mut last_stderr = String::new();
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            let backoff_ms = 100u64 << (attempt - 1);
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        }
+        let mut child = Command::new(bin())
+            .args([
+                "serve",
+                path.to_str().unwrap(),
+                "--mcp",
+                "--embed-cmd",
+                &ecmd,
+                "--embed-name",
+                "fake-4d",
+            ])
+            .env("MNEMO_PASSPHRASE", pp)
+            .env("MNEMO_TEST_MARKER", &marker)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn mnemo serve --mcp");
+
+        let stdin = child.stdin.as_mut().expect("child stdin missing");
+        // Three tool/call messages that go through the embedder, plus
+        // the initialize dance. If the child is reused the marker file
+        // ends with one line; if a new child spawned per call it would
+        // have three.
+        let script = [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remember","arguments":{"content":"alpha","memory_type":"semantic","text":"alpha"}}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"remember","arguments":{"content":"beta","memory_type":"semantic","text":"beta"}}}"#,
+            r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"recall","arguments":{"text":"alpha","top_k":5}}}"#,
+        ];
+        for line in script {
+            writeln!(stdin, "{line}").unwrap();
+        }
+        drop(child.stdin.take());
+
+        let out = child.wait_with_output().expect("child wait");
+        last_stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        if out.status.success() {
+            out_opt = Some(out);
+            break;
+        }
+        if !last_stderr.contains("file already locked") {
+            panic!(
+                "mnemo serve --mcp failed (attempt {attempt}): status={:?} stderr={last_stderr}",
+                out.status
+            );
+        }
+    }
+    let out = out_opt.unwrap_or_else(|| {
+        panic!("mnemo serve --mcp never acquired the lock: stderr={last_stderr}")
+    });
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("\"id\":2"),
+        "expected a response to remember call id 2, got stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"id\":4"),
+        "expected a response to recall call id 4, got stdout: {stdout}"
+    );
+    // alpha must come back on the recall; the fake embedder is
+    // deterministic so axis-of-"alpha" matches axis-of-"alpha".
+    assert!(
+        stdout.contains("alpha"),
+        "expected 'alpha' in recall output, got: {stdout}"
+    );
+    // Marker file should have exactly ONE startup line — persistent child.
+    let marker_text = std::fs::read_to_string(&marker).unwrap_or_default();
+    let starts = marker_text.lines().filter(|l| *l == "start").count();
+    assert_eq!(
+        starts, 1,
+        "embedder child should have started once; marker file: {marker_text:?}"
+    );
+}
+
+#[test]
+fn mcp_text_param_without_embedder_returns_helpful_error() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mcp-noem.mnemo");
+    let pp = "em-pw";
+    {
+        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+    }
+
+    let mut out_opt = None;
+    let mut last_stderr = String::new();
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            let backoff_ms = 100u64 << (attempt - 1);
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        }
+        let mut child = Command::new(bin())
+            // No --embed-cmd / --embed-name.
+            .args(["serve", path.to_str().unwrap(), "--mcp"])
+            .env("MNEMO_PASSPHRASE", pp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn mnemo serve --mcp");
+        let stdin = child.stdin.as_mut().unwrap();
+        let script = [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall","arguments":{"text":"anything"}}}"#,
+        ];
+        for line in script {
+            writeln!(stdin, "{line}").unwrap();
+        }
+        drop(child.stdin.take());
+        let out = child.wait_with_output().expect("child wait");
+        last_stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        if out.status.success() {
+            out_opt = Some(out);
+            break;
+        }
+        if !last_stderr.contains("file already locked") {
+            panic!(
+                "mnemo serve --mcp failed (attempt {attempt}): status={:?} stderr={last_stderr}",
+                out.status
+            );
+        }
+    }
+    let out = out_opt.unwrap_or_else(|| {
+        panic!("mnemo serve --mcp never acquired the lock: stderr={last_stderr}")
+    });
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The recall call should surface an RPC error pointing at
+    // --embed-cmd / --embed-name.
+    assert!(
+        stdout.contains("--embed-cmd") || stdout.contains("embedder"),
+        "expected a helpful error mentioning --embed-cmd, got: {stdout}"
+    );
+}

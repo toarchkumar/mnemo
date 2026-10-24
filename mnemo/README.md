@@ -41,10 +41,34 @@ mnemo serve --mcp path/to/agent.mnemo
 
 The passphrase is read from `MNEMO_PASSPHRASE` (never a CLI flag — that
 would leak into shell history and process listings). Tools exposed:
-`about`, `remember`, `recall`, `forget`, `list`, `snapshot_list`, `stats`.
-Every mutation flushes before returning. `remember` and `recall` are
-embedder-agnostic — the caller supplies vectors; text-only variants
-land with Phase 3 of the level-up plan.
+`about`, `remember`, `recall`, `forget`, `list`, `snapshot_list`, `stats`,
+`cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
+`cache_get_semantic`. Every mutation flushes before returning.
+
+#### Text-in via `--embed-cmd` (Phase 3)
+
+`remember`, `recall`, `cache_put_semantic`, and `cache_get_semantic`
+accept **either** a caller-supplied `vector`/`query` **or** a `text`
+string that the server embeds for them. Enable the text path by passing
+an embedder command at serve start:
+
+```sh
+MNEMO_PASSPHRASE=... mnemo serve --mcp agent.mnemo \
+  --embed-cmd "python3 mnemo/examples/embedder_server.py" \
+  --embed-name "sentence-transformers/all-MiniLM-L6-v2"
+```
+
+The embedder is a **persistent child process** spawned once at serve
+start. Protocol: it reads one JSON-encoded string per line from stdin
+and writes one JSON array of floats per line to stdout, flushed after
+every reply. See `mnemo/examples/embedder_server.py` for a 10-line
+reference implementation (sentence-transformers + MiniLM, 384-dim).
+
+The `--embed-name` string is matched against (and persisted on) the
+scaffold manifest's `metadata.embedder = { name, dimensions, normalize }`
+object. Starting a server with a different `--embed-name` on an existing
+file fails loudly — mixing embedders in one file silently corrupts
+recall quality.
 
 Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
@@ -53,12 +77,38 @@ Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desk
   "mcpServers": {
     "mnemo": {
       "command": "mnemo",
-      "args": ["serve", "--mcp", "/absolute/path/to/agent.mnemo"],
+      "args": [
+        "serve", "--mcp", "/absolute/path/to/agent.mnemo",
+        "--embed-cmd", "python3 /absolute/path/to/embedder_server.py",
+        "--embed-name", "sentence-transformers/all-MiniLM-L6-v2"
+      ],
       "env": { "MNEMO_PASSPHRASE": "your-passphrase-here" }
     }
   }
 }
 ```
+
+Omit `--embed-cmd`/`--embed-name` to keep the pre-Phase-3
+embedder-agnostic behavior (`vector`/`query` only).
+
+#### CLI text path
+
+The same `--embed-cmd` + `--embed-name` pair works on the one-shot
+CLI commands:
+
+```sh
+mnemo remember agent.mnemo --text "the user prefers tea" \
+  --type semantic --importance 0.8 --agent assistant \
+  --embed-cmd "python3 embedder_server.py" \
+  --embed-name "sentence-transformers/all-MiniLM-L6-v2"
+
+mnemo recall agent.mnemo --text "what drink?" --top-k 5 \
+  --embed-cmd "python3 embedder_server.py" \
+  --embed-name "sentence-transformers/all-MiniLM-L6-v2" \
+  --no-track
+```
+
+`--text` is mutually exclusive with `--query`/`--query-file`.
 
 The server holds an exclusive write lock on the file for its lifetime
 (see [Concurrency](#concurrency--read-only-opens)), so two MCP servers

@@ -136,15 +136,36 @@ const INTERNAL_ERROR: i32 = -32603;
 /// variable. If unset, returns [`MnemoError::Invalid`] without opening
 /// the file.
 pub fn serve_stdio(path: &Path) -> Result<()> {
+    serve_stdio_with_embedder(path, None)
+}
+
+/// Variant that optionally registers an [`crate::EmbedCmd`] embedder on
+/// the handle at server start (Phase 3 PR 10b). The MCP `remember`,
+/// `recall`, `cache_put_semantic` and `cache_get_semantic` tools then
+/// accept a `text` param as an alternative to the explicit vector —
+/// the embedder runs once per request against the persistent child
+/// process. Pass `None` for the pre-Phase-3 vector-only behavior.
+///
+/// `embed_spec` tuple fields: `(command, name, normalize)`. See
+/// [`crate::EmbedCmd::new`] for the command format.
+pub fn serve_stdio_with_embedder(
+    path: &Path,
+    embed_spec: Option<(String, String, bool)>,
+) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    serve_with_streams(path, stdin.lock(), stdout.lock())
+    serve_with_streams(path, stdin.lock(), stdout.lock(), embed_spec)
 }
 
 /// Run the MCP loop against explicit reader/writer streams. Extracted so
 /// integration tests can pipe scripted input without touching the real
-/// stdin/stdout.
-pub fn serve_with_streams<R: Read, W: Write>(path: &Path, reader: R, mut writer: W) -> Result<()> {
+/// stdin/stdout. `embed_spec` is as in [`serve_stdio_with_embedder`].
+pub fn serve_with_streams<R: Read, W: Write>(
+    path: &Path,
+    reader: R,
+    mut writer: W,
+    embed_spec: Option<(String, String, bool)>,
+) -> Result<()> {
     let passphrase = std::env::var(PASSPHRASE_ENV).map_err(|_| {
         MnemoError::Invalid(format!(
             "{PASSPHRASE_ENV} is required to serve — set it in the shell before starting"
@@ -156,6 +177,16 @@ pub fn serve_with_streams<R: Read, W: Write>(path: &Path, reader: R, mut writer:
         path.display()
     );
     let mut db = Mnemo::open(path, &passphrase)?;
+    if let Some((cmd, name, normalize)) = embed_spec {
+        let identity = crate::EmbedderIdentity {
+            name,
+            dimensions: db.dimensions(),
+            normalize,
+        };
+        let embedder = crate::EmbedCmd::new(&cmd, identity)?;
+        db.set_embedder(embedder)?;
+        eprintln!("mnemo mcp: embedder ready (text params accepted)");
+    }
     eprintln!("mnemo mcp: ready ({} live memories)", db.len());
 
     let reader = BufReader::new(reader);
@@ -270,14 +301,15 @@ fn tools_list() -> Value {
             },
             {
                 "name": "remember",
-                "description": "Insert or overwrite a memory. Requires a caller-supplied embedding `vector` (this server is embedder-agnostic; text-only remember is deferred to Phase 3 of the level-up plan). Persists to disk before returning.",
+                "description": "Insert or overwrite a memory. Pass EITHER `vector` (explicit embedding) OR `text` (embedded by the server if it was started with --embed-cmd / --embed-name). Persists to disk before returning. Returns `{id}`.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["content", "memory_type", "vector"],
+                    "required": ["content", "memory_type"],
                     "properties": {
                         "content": { "type": "string" },
                         "memory_type": { "type": "string", "enum": ["episodic", "semantic", "procedural", "working"] },
-                        "vector": { "type": "array", "items": { "type": "number" } },
+                        "vector": { "type": "array", "items": { "type": "number" }, "description": "Explicit embedding; mutually exclusive with `text`." },
+                        "text": { "type": "string", "description": "Content to embed via the server's registered embedder; mutually exclusive with `vector`. Requires the server to have been started with --embed-cmd." },
                         "importance": { "type": "number", "minimum": 0, "maximum": 1 },
                         "agent_id": { "type": "string" },
                         "session_id": { "type": "string" },
@@ -290,12 +322,12 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Vector recall: score every live memory (or the ANN-narrowed candidate set) against a caller-supplied query vector and return the top-k. Does not track access on this handle.",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Does not track access on this handle.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["query"],
                     "properties": {
-                        "query": { "type": "array", "items": { "type": "number" } },
+                        "query": { "type": "array", "items": { "type": "number" }, "description": "Explicit query vector; mutually exclusive with `text`." },
+                        "text": { "type": "string", "description": "Query text; embedded by the server's registered embedder. Mutually exclusive with `query`." },
                         "top_k": { "type": "integer", "default": 10 },
                         "types": { "type": "array", "items": { "type": "string" } },
                         "agent": { "type": "string" },
@@ -387,16 +419,17 @@ fn tools_list() -> Value {
             },
             {
                 "name": "cache_put_semantic",
-                "description": "Insert an entry with an embedding vector for semantic recall (Phase 10.2). Requires a caller-supplied `vector` in the database's dimensionality and a `model` identifier — later cache_get_semantic calls under a different model won't see this entry (a different-model hit would be a semantics bug).",
+                "description": "Insert an entry with an embedding vector for semantic recall (Phase 10.2). Pass EITHER `vector` + `model` (explicit) OR `text` (embedded by the server; `model` defaults to the server embedder's identity name). Later cache_get_semantic calls under a different `model` won't see this entry (a different-model hit would be a semantics bug).",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["namespace", "key", "vector", "value", "model"],
+                    "required": ["namespace", "key", "value"],
                     "properties": {
                         "namespace": { "type": "string" },
                         "key": { "type": "string" },
-                        "vector": { "type": "array", "items": { "type": "number" } },
+                        "vector": { "type": "array", "items": { "type": "number" }, "description": "Explicit embedding; mutually exclusive with `text`. Requires `model`." },
+                        "text": { "type": "string", "description": "Content to embed via the server's registered embedder; mutually exclusive with `vector`." },
                         "value": { "type": "string" },
-                        "model": { "type": "string" },
+                        "model": { "type": "string", "description": "Required with `vector`; optional with `text` (defaults to the embedder's identity name)." },
                         "content_type": { "type": "string", "default": "text" },
                         "ttl_secs": { "type": "integer", "minimum": 0 }
                     },
@@ -405,14 +438,15 @@ fn tools_list() -> Value {
             },
             {
                 "name": "cache_get_semantic",
-                "description": "Semantic recall over the cache: top-1 cosine over live vectored entries in the namespace whose `model` matches. Returns `{hit: true, value, similarity, ...}` iff similarity >= threshold, else `{hit: false}`. Threshold defaults to 0.97 if omitted.",
+                "description": "Semantic recall over the cache: top-1 cosine over live vectored entries in the namespace whose `model` matches. Pass EITHER `query` + `model` OR `text` (which embeds via the server and defaults the model to the embedder's identity). Returns `{hit: true, value, similarity, ...}` iff similarity >= threshold, else `{hit: false}`. Threshold defaults to 0.97.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["namespace", "query", "model"],
+                    "required": ["namespace"],
                     "properties": {
                         "namespace": { "type": "string" },
-                        "query": { "type": "array", "items": { "type": "number" } },
-                        "model": { "type": "string" },
+                        "query": { "type": "array", "items": { "type": "number" }, "description": "Explicit query vector; mutually exclusive with `text`. Requires `model`." },
+                        "text": { "type": "string", "description": "Query text; embedded by the server. Mutually exclusive with `query`." },
+                        "model": { "type": "string", "description": "Required with `query`; optional with `text`." },
                         "threshold": { "type": "number", "minimum": -1.0, "maximum": 1.0 }
                     },
                     "additionalProperties": false
@@ -464,6 +498,36 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
 /// Convert a [`MnemoError`] to an [`RpcError`]. Every error becomes an
 /// `INTERNAL_ERROR` with the human-readable message — MCP clients
 /// display `error.message` verbatim to the user.
+/// Resolve a text argument into a vector via the server's registered
+/// embedder (Phase 3 PR 10b). Called by the four MCP tools that
+/// accept `text` as an alternative to the explicit vector: `remember`,
+/// `recall`, `cache_put_semantic`, `cache_get_semantic`. If no
+/// embedder was configured at server start (`mnemo serve --mcp
+/// --embed-cmd ...`) the error message tells the caller how to turn
+/// it on.
+fn embed_text_via_server(
+    db: &mut Mnemo,
+    tool: &str,
+    text: &str,
+) -> std::result::Result<Vec<f32>, RpcError> {
+    let embedder = db.embedder().ok_or_else(|| {
+        RpcError::new(
+            INVALID_PARAMS,
+            format!(
+                "{tool}: 'text' requires an embedder on the server. \
+                 Start with: mnemo serve --mcp <file> --embed-cmd '<cmd>' --embed-name <name>"
+            ),
+        )
+    })?;
+    let mut vs = embedder.embed(&[text]).map_err(mnemo_err)?;
+    vs.pop().ok_or_else(|| {
+        RpcError::new(
+            INTERNAL_ERROR,
+            format!("{tool}: embedder returned no vector for the input text"),
+        )
+    })
+}
+
 fn mnemo_err(e: MnemoError) -> RpcError {
     RpcError::new(INTERNAL_ERROR, e.to_string())
 }
@@ -489,19 +553,42 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
             format!("remember: unknown memory_type '{mtype_str}'"),
         )
     })?;
-    let vector = args
-        .get("vector")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "remember: 'vector' must be a JSON array"))?
-        .iter()
-        .map(|v| v.as_f64().map(|f| f as f32))
-        .collect::<Option<Vec<f32>>>()
-        .ok_or_else(|| {
-            RpcError::new(
+    // Accept either `vector` (explicit) or `text` (embedded via the
+    // server's registered embedder, Phase 3). Exactly one required.
+    let vector = match (args.get("vector"), args.get("text")) {
+        (Some(_), Some(_)) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "remember: 'vector' must be an array of numbers",
-            )
-        })?;
+                "remember: pass EITHER 'vector' or 'text', not both",
+            ));
+        }
+        (Some(v), None) => v
+            .as_array()
+            .ok_or_else(|| {
+                RpcError::new(INVALID_PARAMS, "remember: 'vector' must be a JSON array")
+            })?
+            .iter()
+            .map(|v| v.as_f64().map(|f| f as f32))
+            .collect::<Option<Vec<f32>>>()
+            .ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    "remember: 'vector' must be an array of numbers",
+                )
+            })?,
+        (None, Some(t)) => {
+            let text = t.as_str().ok_or_else(|| {
+                RpcError::new(INVALID_PARAMS, "remember: 'text' must be a string")
+            })?;
+            embed_text_via_server(db, "remember", text)?
+        }
+        (None, None) => {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                "remember: missing 'vector' or 'text'",
+            ))
+        }
+    };
 
     let mut mem = Memory::new(content, mtype, vector);
     if let Some(agent) = args.get("agent_id").and_then(|v| v.as_str()) {
@@ -533,19 +620,39 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
 }
 
 fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
-    let query = args
-        .get("query")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'query' must be a JSON array"))?
-        .iter()
-        .map(|v| v.as_f64().map(|f| f as f32))
-        .collect::<Option<Vec<f32>>>()
-        .ok_or_else(|| {
-            RpcError::new(
+    // Accept either `query` (explicit) or `text` (embedded).
+    let query = match (args.get("query"), args.get("text")) {
+        (Some(_), Some(_)) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "recall: 'query' must be an array of numbers",
-            )
-        })?;
+                "recall: pass EITHER 'query' or 'text', not both",
+            ))
+        }
+        (Some(v), None) => v
+            .as_array()
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'query' must be a JSON array"))?
+            .iter()
+            .map(|v| v.as_f64().map(|f| f as f32))
+            .collect::<Option<Vec<f32>>>()
+            .ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    "recall: 'query' must be an array of numbers",
+                )
+            })?,
+        (None, Some(t)) => {
+            let text = t
+                .as_str()
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'text' must be a string"))?;
+            embed_text_via_server(db, "recall", text)?
+        }
+        (None, None) => {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                "recall: missing 'query' or 'text'",
+            ))
+        }
+    };
     let top_k = args.get("top_k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
     let metric = match args
         .get("metric")
@@ -751,29 +858,69 @@ fn tool_cache_put_semantic(db: &mut Mnemo, args: &Value) -> std::result::Result<
         .get("value")
         .and_then(|v| v.as_str())
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'value'"))?;
-    let model = args
-        .get("model")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'model'"))?
-        .to_string();
-    let vector = args
-        .get("vector")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            RpcError::new(
+    // When `text` is used, derive the model name from the server's
+    // registered embedder (identity). Explicit `model` wins otherwise.
+    let (vector, model) = match (args.get("vector"), args.get("text")) {
+        (Some(_), Some(_)) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "cache_put_semantic: 'vector' must be a JSON array",
-            )
-        })?
-        .iter()
-        .map(|v| v.as_f64().map(|f| f as f32))
-        .collect::<Option<Vec<f32>>>()
-        .ok_or_else(|| {
-            RpcError::new(
+                "cache_put_semantic: pass EITHER 'vector' or 'text', not both",
+            ));
+        }
+        (Some(v), None) => {
+            let vec = v
+                .as_array()
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        "cache_put_semantic: 'vector' must be a JSON array",
+                    )
+                })?
+                .iter()
+                .map(|v| v.as_f64().map(|f| f as f32))
+                .collect::<Option<Vec<f32>>>()
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        "cache_put_semantic: 'vector' must be an array of numbers",
+                    )
+                })?;
+            let model = args
+                .get("model")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(INVALID_PARAMS, "cache_put_semantic: missing 'model'")
+                })?
+                .to_string();
+            (vec, model)
+        }
+        (None, Some(t)) => {
+            let text = t.as_str().ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    "cache_put_semantic: 'text' must be a string",
+                )
+            })?;
+            let vec = embed_text_via_server(db, "cache_put_semantic", text)?;
+            // Allow explicit model override; else derive from embedder.
+            let model = match args.get("model").and_then(|v| v.as_str()) {
+                Some(m) => m.to_string(),
+                None => {
+                    db.embedder()
+                        .expect("embed_text_via_server would have errored otherwise")
+                        .identity()
+                        .name
+                }
+            };
+            (vec, model)
+        }
+        (None, None) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "cache_put_semantic: 'vector' must be an array of numbers",
-            )
-        })?;
+                "cache_put_semantic: missing 'vector' or 'text'",
+            ))
+        }
+    };
     let content_type = args
         .get("content_type")
         .and_then(|v| v.as_str())
@@ -797,28 +944,69 @@ fn tool_cache_get_semantic(db: &mut Mnemo, args: &Value) -> std::result::Result<
         .get("namespace")
         .and_then(|v| v.as_str())
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get_semantic: missing 'namespace'"))?;
-    let model = args
-        .get("model")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "cache_get_semantic: missing 'model'"))?;
-    let query = args
-        .get("query")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            RpcError::new(
+    // When `text` is used, derive the model name from the server's
+    // registered embedder (identity). Explicit `model` wins otherwise.
+    let (query, model_owned) = match (args.get("query"), args.get("text")) {
+        (Some(_), Some(_)) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "cache_get_semantic: 'query' must be a JSON array",
-            )
-        })?
-        .iter()
-        .map(|v| v.as_f64().map(|f| f as f32))
-        .collect::<Option<Vec<f32>>>()
-        .ok_or_else(|| {
-            RpcError::new(
+                "cache_get_semantic: pass EITHER 'query' or 'text', not both",
+            ));
+        }
+        (Some(q), None) => {
+            let vec = q
+                .as_array()
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        "cache_get_semantic: 'query' must be a JSON array",
+                    )
+                })?
+                .iter()
+                .map(|v| v.as_f64().map(|f| f as f32))
+                .collect::<Option<Vec<f32>>>()
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        "cache_get_semantic: 'query' must be an array of numbers",
+                    )
+                })?;
+            let model = args
+                .get("model")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(INVALID_PARAMS, "cache_get_semantic: missing 'model'")
+                })?
+                .to_string();
+            (vec, model)
+        }
+        (None, Some(t)) => {
+            let text = t.as_str().ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    "cache_get_semantic: 'text' must be a string",
+                )
+            })?;
+            let vec = embed_text_via_server(db, "cache_get_semantic", text)?;
+            let model = match args.get("model").and_then(|v| v.as_str()) {
+                Some(m) => m.to_string(),
+                None => {
+                    db.embedder()
+                        .expect("embed_text_via_server would have errored otherwise")
+                        .identity()
+                        .name
+                }
+            };
+            (vec, model)
+        }
+        (None, None) => {
+            return Err(RpcError::new(
                 INVALID_PARAMS,
-                "cache_get_semantic: 'query' must be an array of numbers",
-            )
-        })?;
+                "cache_get_semantic: missing 'query' or 'text'",
+            ))
+        }
+    };
+    let model = model_owned.as_str();
     let threshold = args
         .get("threshold")
         .and_then(|v| v.as_f64())

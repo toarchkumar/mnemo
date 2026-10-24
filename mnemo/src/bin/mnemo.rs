@@ -89,6 +89,51 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Store a single memory from text, embedding it via an external
+    /// command (Phase 3). The command is spawned once; it reads one
+    /// JSON string per line from stdin and writes one JSON float
+    /// array per line to stdout. See `--embed-cmd` for the full
+    /// contract.
+    Remember {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Content to remember.
+        #[arg(long)]
+        text: String,
+        /// Memory type: `semantic`, `episodic`, `procedural`, or
+        /// `working`.
+        #[arg(long, default_value = "semantic")]
+        r#type: String,
+        /// Optional importance weight (0.0–1.0; defaults to 0.5).
+        #[arg(long)]
+        importance: Option<f32>,
+        /// Optional agent id to scope the memory to.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Optional JSON object of extra metadata key/values.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Embedder command. Shell-style quoted but **not** executed
+        /// via a shell — e.g. `"python3 embedder.py"` or `"my-embed
+        /// --model=foo"`. Protocol: child reads one JSON string per
+        /// line from stdin, writes one JSON array of floats per line
+        /// to stdout, flushes after each reply.
+        #[arg(long)]
+        embed_cmd: String,
+        /// Embedder identity recorded on the scaffold manifest. The
+        /// first `remember`/`recall` on a fresh file writes this
+        /// name; later calls on the same file must pass the same
+        /// name or `set_embedder` refuses with an identity mismatch.
+        #[arg(long)]
+        embed_name: String,
+        /// Whether the embedder returns unit-normalized vectors
+        /// (defaults to `true`; set `--embed-normalize=false` for
+        /// embedders that return raw dot-space vectors).
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
     /// Build, rebuild, or drop the approximate-nearest-neighbour index.
     Index {
         /// Path to the `.mnemo` file.
@@ -211,14 +256,19 @@ enum Command {
         /// Path to the `.mnemo` file.
         path: String,
         /// Query vector as comma-separated floats. Mutually exclusive with
-        /// `--query-file`. Must match the DB's dimensionality either way.
-        #[arg(long, conflicts_with = "query_file")]
+        /// `--query-file` and `--text`. Must match the DB's dimensionality.
+        #[arg(long, conflicts_with_all = ["query_file", "text"])]
         query: Option<String>,
         /// Path to a file containing the query vector (`-` for stdin).
         /// Accepts a JSON array, comma-separated floats, or one float
-        /// per line. Mutually exclusive with `--query`.
-        #[arg(long, conflicts_with = "query")]
+        /// per line. Mutually exclusive with `--query` and `--text`.
+        #[arg(long, conflicts_with_all = ["query", "text"])]
         query_file: Option<String>,
+        /// Query text to embed via `--embed-cmd` (Phase 3). Mutually
+        /// exclusive with `--query`/`--query-file`. Requires
+        /// `--embed-cmd` and `--embed-name`.
+        #[arg(long, conflicts_with_all = ["query", "query_file"])]
+        text: Option<String>,
         #[arg(long, default_value_t = 10)]
         top_k: usize,
         /// Output format.
@@ -245,6 +295,17 @@ enum Command {
         /// command can run alongside a writer holding the exclusive lock.
         #[arg(long)]
         no_track: bool,
+        /// Embedder command for `--text` (same contract as
+        /// `mnemo remember --embed-cmd`). Ignored when `--query` /
+        /// `--query-file` is used.
+        #[arg(long, requires = "text")]
+        embed_cmd: Option<String>,
+        /// Embedder identity for `--text`; must match the manifest.
+        #[arg(long, requires = "text")]
+        embed_name: Option<String>,
+        /// Whether the embedder returns unit-normalized vectors.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -287,6 +348,19 @@ enum Command {
         /// can co-opt `serve` without breaking scripts.
         #[arg(long)]
         mcp: bool,
+        /// Embedder command. When set, the MCP `remember`/`recall`/
+        /// `cache_put_semantic`/`cache_get_semantic` tools accept a
+        /// `text` param in addition to `vector`; the embedder is
+        /// started once at serve start and reused for every call.
+        /// Same contract as `mnemo remember --embed-cmd`.
+        #[arg(long, requires = "embed_name")]
+        embed_cmd: Option<String>,
+        /// Embedder identity (recorded on the scaffold manifest).
+        #[arg(long, requires = "embed_cmd")]
+        embed_name: Option<String>,
+        /// Whether the embedder returns unit-normalized vectors.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
     },
     /// Result-cache management (Phase 10.1). One `.mnemo` file is
     /// both an agent-memory store AND a durable key/value cache;
@@ -846,6 +920,69 @@ fn run() -> std::result::Result<(), String> {
             db.flush().map_err(fmt)?;
             println!("imported {count} memories into {path}");
         }
+        Command::Remember {
+            path,
+            text,
+            r#type,
+            importance,
+            agent,
+            metadata,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
+            passphrase: pp,
+        } => {
+            use mnemo::{EmbedCmd, EmbedderIdentity, Memory, Scope};
+            let pp = passphrase(&pp)?;
+            let mt = parse_memory_types(&r#type)?
+                .pop()
+                .ok_or_else(|| format!("unknown memory type: {type:?}", r#type = r#type))?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let identity = EmbedderIdentity {
+                name: embed_name,
+                dimensions: db.dimensions(),
+                normalize: embed_normalize,
+            };
+            let embedder = EmbedCmd::new(&embed_cmd, identity).map_err(fmt)?;
+            db.set_embedder(embedder).map_err(fmt)?;
+            // Embed via the registered embedder in a short-lived
+            // borrow so the subsequent `remember` can take `&mut db`.
+            // We don't call `remember_text` directly because its
+            // Rust-core signature is (content, type); here we also
+            // want importance / agent / metadata on the record.
+            let vector = {
+                let embedder_ref = db
+                    .embedder()
+                    .ok_or_else(|| "no embedder registered".to_string())?;
+                let mut vectors = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
+                vectors
+                    .pop()
+                    .ok_or_else(|| "embedder returned no vector".to_string())?
+            };
+            let mut memory = Memory::new(text, mt, vector);
+            if let Some(i) = importance {
+                memory = memory.with_importance(i);
+            }
+            if let Some(a) = agent {
+                memory = memory.with_agent(a);
+            }
+            if let Some(meta_str) = metadata {
+                let parsed: serde_json::Value = serde_json::from_str(&meta_str)
+                    .map_err(|e| format!("invalid --metadata JSON: {e}"))?;
+                let obj = parsed
+                    .as_object()
+                    .ok_or_else(|| "--metadata must be a JSON object".to_string())?;
+                for (k, v) in obj {
+                    memory.metadata.insert(k.clone(), v.clone());
+                }
+            }
+            // Scope defaults to Private; the Scope import is only
+            // needed so a future `--shared` flag has a type in scope.
+            let _ = Scope::Private;
+            let id = db.remember(memory).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("{id}");
+        }
         Command::Index {
             path,
             passphrase: pp,
@@ -1103,6 +1240,7 @@ fn run() -> std::result::Result<(), String> {
             path,
             query,
             query_file,
+            text,
             top_k,
             format,
             r#type,
@@ -1111,10 +1249,55 @@ fn run() -> std::result::Result<(), String> {
             n_probe,
             n_rerank,
             no_track,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
             passphrase: pp,
         } => {
+            use mnemo::{EmbedCmd, EmbedderIdentity};
             let pp = passphrase(&pp)?;
-            let q = resolve_query(query, query_file)?;
+            if query.is_none() && query_file.is_none() && text.is_none() {
+                return Err("recall requires one of --query / --query-file / --text".into());
+            }
+
+            // Resolve the query vector. The text branch registers an
+            // embedder on the handle and runs it; the vector branches
+            // use the existing helper.
+            let (q, mut db_opt) = match text {
+                Some(text) => {
+                    let ecmd = embed_cmd.ok_or_else(|| {
+                        "--text requires --embed-cmd and --embed-name".to_string()
+                    })?;
+                    let ename = embed_name.ok_or_else(|| {
+                        "--text requires --embed-cmd and --embed-name".to_string()
+                    })?;
+                    // Open now (read-write if we're tracking, read-only
+                    // if --no-track) so set_embedder can see the manifest.
+                    let mut db = if no_track {
+                        Mnemo::open_read_only(&path, &pp).map_err(fmt)?
+                    } else {
+                        Mnemo::open(&path, &pp).map_err(fmt)?
+                    };
+                    let identity = EmbedderIdentity {
+                        name: ename,
+                        dimensions: db.dimensions(),
+                        normalize: embed_normalize,
+                    };
+                    let embedder = EmbedCmd::new(&ecmd, identity).map_err(fmt)?;
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    let vector = {
+                        let embedder_ref = db
+                            .embedder()
+                            .ok_or_else(|| "embedder vanished after set_embedder".to_string())?;
+                        let mut vs = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
+                        vs.pop()
+                            .ok_or_else(|| "embedder returned no vector".to_string())?
+                    };
+                    (vector, Some(db))
+                }
+                None => (resolve_query(query, query_file)?, None),
+            };
+
             let metric = parse_metric(&metric)?;
             let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
             if let Some(s) = r#type {
@@ -1129,17 +1312,27 @@ fn run() -> std::result::Result<(), String> {
             if let Some(n) = n_rerank {
                 req = req.n_rerank(n);
             }
+
             // Default `recall` opens read-write so it can bump the
             // catalog access stats. `--no-track` opens read-only with a
             // shared lock and disables access-tracking on the request,
             // so it can coexist with a writer holding the exclusive lock.
-            let hits = if no_track {
-                req = req.track_access(false);
-                let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-                db.recall(&req).map_err(fmt)?
-            } else {
-                let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-                db.recall(&req).map_err(fmt)?
+            let hits = match (db_opt.take(), no_track) {
+                (Some(mut db), _) => {
+                    if no_track {
+                        req = req.track_access(false);
+                    }
+                    db.recall(&req).map_err(fmt)?
+                }
+                (None, true) => {
+                    req = req.track_access(false);
+                    let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+                    db.recall(&req).map_err(fmt)?
+                }
+                (None, false) => {
+                    let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+                    db.recall(&req).map_err(fmt)?
+                }
             };
             print_recall_hits(&hits, format);
         }
@@ -1178,7 +1371,13 @@ fn run() -> std::result::Result<(), String> {
                 info.txn_id, info.memory_count
             );
         }
-        Command::Serve { path, mcp } => {
+        Command::Serve {
+            path,
+            mcp,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
+        } => {
             if !mcp {
                 return Err("serve requires --mcp today (other transports may come later)".into());
             }
@@ -1186,7 +1385,11 @@ fn run() -> std::result::Result<(), String> {
             // `passphrase()` here would open a TTY prompt and break the
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let p = std::path::Path::new(&path);
-            mnemo::mcp::serve_stdio(p).map_err(fmt)?;
+            let embed_spec = match (embed_cmd, embed_name) {
+                (Some(c), Some(n)) => Some((c, n, embed_normalize)),
+                _ => None,
+            };
+            mnemo::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
     }

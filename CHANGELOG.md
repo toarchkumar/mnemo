@@ -22,6 +22,42 @@ Pre-1.0, the minor component carries the breaking-change signal.
   the minor bump carries the breaking signal, so this ships as v0.5.0,
   not v0.4.2.**
 
+### Phase 3 — bring-your-own-embedder (part 2: PR 10b)
+
+- **`EmbedCmd`** adapter in `mnemo/src/embed_cmd.rs`. Implements the
+  `Embedder` trait by spawning a user-supplied command as a
+  **persistent child process** (one child per `Mnemo` handle, reused
+  for every subsequent embed call). Protocol: one JSON-encoded string
+  per line in, one JSON array of floats per line out, flush after
+  each reply. Timeout per request (default 60s via
+  `DEFAULT_EMBED_TIMEOUT`). Child is reaped on handle drop. Errors
+  surface as `MnemoError::Invalid` with the command and position in
+  the batch — never a hang. No shell is invoked: the command string
+  is shell-split in Rust (quotes honored, no `~` or `$VAR` expansion).
+- **CLI `mnemo remember <file> --text "..." --embed-cmd ...
+  --embed-name ..."`** — new subcommand that fills the only path to
+  write a single memory from the CLI that previously existed (bulk
+  `mnemo import` with precomputed vectors was the only option).
+  Mirrors Python `remember_text`'s kwargs (`--type`, `--importance`,
+  `--agent`, `--metadata` JSON).
+- **CLI `mnemo recall <file> --text "..." --embed-cmd ...
+  --embed-name ...`** — `--text` is mutually exclusive with
+  `--query` / `--query-file`. Works alongside `--no-track` on a
+  read-only handle for concurrent-reader scenarios.
+- **MCP `mnemo serve --mcp <file> --embed-cmd ... --embed-name ...`**
+  — the server spawns the embedder once at startup. `remember`,
+  `recall`, `cache_put_semantic`, and `cache_get_semantic` tools now
+  accept a `text` param as an alternative to the explicit vector.
+  For the semantic cache tools, `model` defaults to the embedder's
+  identity name when `text` is used. Tool descriptions in `tools/list`
+  updated to document the new input shape. Passing `text` without
+  having started the server with `--embed-cmd` returns a JSON-RPC
+  error that spells out the fix.
+- Reference embedder in `mnemo/examples/embedder_server.py` —
+  `sentence-transformers/all-MiniLM-L6-v2`, 384-dim normalized, 15
+  lines excluding docstring.
+- Closes the Phase 4 "text path waits on Phase 3" note.
+
 ### Fixed (PR 10a.2 — Python binding only)
 
 - **`Mnemo.close()` and `Mnemo.__exit__` on read-only handles no
