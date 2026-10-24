@@ -932,7 +932,10 @@ fn run() -> std::result::Result<(), String> {
             embed_normalize,
             passphrase: pp,
         } => {
-            use mnemo::{EmbedCmd, EmbedderIdentity, Memory, Scope};
+            // `Memory` is already imported at the file top; keep only
+            // the Phase-3 bits we add here to avoid Rust 1.75's
+            // redundant-import warning (which `-D warnings` makes fatal).
+            use mnemo::{EmbedCmd, EmbedderIdentity};
             let pp = passphrase(&pp)?;
             let mt = parse_memory_types(&r#type)?
                 .pop()
@@ -976,9 +979,8 @@ fn run() -> std::result::Result<(), String> {
                     memory.metadata.insert(k.clone(), v.clone());
                 }
             }
-            // Scope defaults to Private; the Scope import is only
-            // needed so a future `--shared` flag has a type in scope.
-            let _ = Scope::Private;
+            // (Scope defaults to Private; add `--shared` later if the
+            // CLI needs to opt into Scope::Shared.)
             let id = db.remember(memory).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("{id}");
