@@ -95,6 +95,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
   Default 60s (unchanged). Mirrors the Rust `EmbedCmd::with_timeout`
   setter — set it longer than your slowest observed cold-start reply
   (sentence-transformers' first `encode()` can be 3–5s on CPU).
+- **Windows: moved the CLI dispatch onto a worker thread with 8 MiB
+  of stack.** Windows' default main-thread stack is 1 MiB, and the
+  CLI's `run()` is a single ~600-line match whose debug-mode frame
+  reserves space for every variant's locals at once. The extra
+  `embed_timeout` field on three subcommands pushed us over the
+  edge on Rust 1.95 / `windows-latest` (stack overflow in every CLI
+  test, exit code `0xC00000FD`). Spawning `run` on a named worker
+  thread sidesteps the whole class — portable, no linker flags,
+  no cfg guards. Overhead is ~1 ms, invisible against the file I/O
+  that follows.
 - Covered by six new tests in `mnemo/tests/cli_smoke.rs`: hang bounded
   by `--embed-timeout`, MCP hang-and-respawn (server survives, next
   call returns the right vector), junk-line realignment, double-line

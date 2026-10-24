@@ -1669,7 +1669,35 @@ fn demo(path: &str) -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    match run() {
+    // Windows' default main-thread stack is 1 MiB, and this CLI's
+    // `run()` is a single ~600-line match whose debug-mode frame
+    // reserves space for every variant's locals at once. Rust 1.95 +
+    // the extra `embed_timeout` field on three subcommands pushed us
+    // over the edge on `windows-latest` (stack overflow in every CLI
+    // test, exit code 0xC00000FD). Running the dispatch on a worker
+    // thread with 8 MiB of stack sidesteps the whole class — portable,
+    // no linker flags, no cfg guards. The spawn + join overhead is
+    // ~1 ms, invisible against disk I/O.
+    const RUN_STACK: usize = 8 * 1024 * 1024;
+    let handle = match std::thread::Builder::new()
+        .name("mnemo-cli".into())
+        .stack_size(RUN_STACK)
+        .spawn(run)
+    {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("error: could not start cli worker thread: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = match handle.join() {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!("error: cli worker thread panicked");
+            return ExitCode::FAILURE;
+        }
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
