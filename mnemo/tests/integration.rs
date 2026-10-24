@@ -2489,3 +2489,185 @@ fn zero_vector_embedder_remember_text_rejected() {
         other => panic!("expected Invalid for zero-vec embedder, got {other:?}"),
     }
 }
+
+// === Phase 3 PR 10a.1: nested-manifest + read-only identity check =====
+
+/// Seed a scaffold manifest with the canonical **nested** form the
+/// README documents and `test/scripts/seed.json` writes:
+/// `metadata.embedder = { name, dimensions, normalize }`.
+fn remember_nested_manifest(db: &mut Mnemo, dims: usize, name: &str, normalize: bool) {
+    let mut m = Memory::scaffold_manifest(dims);
+    let obj = serde_json::json!({
+        "name": name,
+        "dimensions": dims,
+        "normalize": normalize,
+    });
+    m.metadata.insert("embedder".into(), obj);
+    db.remember(m).unwrap();
+    db.flush().unwrap();
+}
+
+#[test]
+fn set_embedder_reads_nested_manifest_canonically() {
+    // Writer: seed the nested form, then register the SAME embedder.
+    // Must succeed without upserting any flat embedder_* keys (Bug 1).
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("nested.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        remember_nested_manifest(&mut db, 4, "sentence-transformers/all-MiniLM-L6-v2", true);
+        db.set_embedder(FakeEmbedder::new(
+            "sentence-transformers/all-MiniLM-L6-v2",
+            4,
+            true,
+        ))
+        .unwrap();
+    }
+    // Reopen: the manifest's nested identity is intact, no stray
+    // flat keys were written alongside.
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let onboarding = db.about().unwrap();
+    let manifest = &onboarding[0];
+    let nested = manifest
+        .metadata
+        .get("embedder")
+        .and_then(|v| v.as_object());
+    assert!(nested.is_some(), "nested embedder object must be present");
+    assert_eq!(
+        nested.unwrap().get("name").and_then(|v| v.as_str()),
+        Some("sentence-transformers/all-MiniLM-L6-v2")
+    );
+    assert!(
+        manifest.metadata.get("embedder_name").is_none(),
+        "flat embedder_name must NOT have been upserted alongside the nested form"
+    );
+    assert!(manifest.metadata.get("embedder_dimensions").is_none());
+    assert!(manifest.metadata.get("embedder_normalize").is_none());
+}
+
+#[test]
+fn set_embedder_nested_manifest_mismatch_rejected() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("nested-mismatch.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    remember_nested_manifest(&mut db, 4, "sentence-transformers/all-MiniLM-L6-v2", true);
+    // Register a different name at the same dimensions.
+    match db.set_embedder(FakeEmbedder::new("bge-large-en-v1.5", 4, true)) {
+        Err(MnemoError::Invalid(msg)) => {
+            assert!(msg.contains(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
+            assert!(msg.contains("sentence-transformers/all-MiniLM-L6-v2"));
+            assert!(msg.contains("bge-large-en-v1.5"));
+        }
+        other => panic!("expected Invalid identity mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn set_embedder_accepts_legacy_flat_keys() {
+    // A file that was bootstrapped by the first PR 10a dev build may
+    // have flat keys. Those still read as a valid identity; the next
+    // write path canonicalizes to nested.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("legacy.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        let mut m = Memory::scaffold_manifest(4);
+        m.metadata
+            .insert("embedder_name".into(), serde_json::json!("MiniLM"));
+        m.metadata
+            .insert("embedder_dimensions".into(), serde_json::json!(4));
+        m.metadata
+            .insert("embedder_normalize".into(), serde_json::json!(true));
+        db.remember(m).unwrap();
+        db.flush().unwrap();
+        db.set_embedder(FakeEmbedder::new("MiniLM", 4, true))
+            .unwrap();
+    }
+    // Legacy keys matched — nothing to upsert, so they stay as-is on
+    // this read path. A future `set_embedder` on a manifest where no
+    // identity is recorded would then write nested; this test just
+    // confirms the legacy-read branch keeps working.
+}
+
+#[test]
+fn set_embedder_on_read_only_handle_adopts_without_write() {
+    // Writer seeds the nested manifest + a text memory via the same
+    // embedder; drop; reopen read-only; register the embedder (Bug 2:
+    // this used to return `ReadOnly` outright). Then verify
+    // `RecallRequest::from_text` works through the read-only handle.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ro-em.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        remember_nested_manifest(&mut db, 4, "fake-4d", true);
+        db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+            .unwrap();
+        db.remember_text("alpha", MemoryType::Semantic).unwrap();
+        db.flush().unwrap();
+    }
+    let mut r = Mnemo::open_read_only(&path, "pw").unwrap();
+    // Bug 2: this call must succeed on a read-only handle.
+    r.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    // Confirm the embedder is actually usable from the reader. Must
+    // pass `track_access(false)` — `recall` on a read-only handle
+    // with access-tracking on returns `ReadOnly` (it would try to
+    // dirty the catalog); unrelated to Bug 2, that's the Phase 1.1
+    // read-only contract.
+    let fake = FakeEmbedder::new("fake-4d", 4, true);
+    let req = mnemo::RecallRequest::from_text(&fake, "alpha")
+        .unwrap()
+        .track_access(false);
+    let hits = r.recall(&req).unwrap();
+    assert!(
+        !hits.is_empty(),
+        "recall_text on read-only handle returned nothing"
+    );
+    assert_eq!(hits[0].memory.content, "alpha");
+}
+
+#[test]
+fn set_embedder_on_read_only_handle_with_no_manifest_identity_still_works() {
+    // No embedder was ever persisted on the manifest. On a read-only
+    // handle, the upsert path is skipped (readers must not mutate the
+    // file), but the embedder is still adopted so recall_text works.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ro-fresh.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        // Add a bare scaffold manifest with NO embedder metadata, so
+        // the identity check finds nothing on the read-only path.
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        // Also store one text memory so recall has something to find;
+        // we embed via a writer-registered embedder, drop, then reopen
+        // read-only.
+        db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+            .unwrap();
+        db.remember_text("beta", MemoryType::Semantic).unwrap();
+        db.flush().unwrap();
+    }
+    // Reopen read-only, but note: the writer above's set_embedder
+    // persisted the identity. So this would use the match path. To
+    // isolate the no-identity-on-manifest branch, open a fresh file
+    // with just a plain scaffold.
+    let dir2 = tempdir().unwrap();
+    let path2 = dir2.path().join("ro-fresh2.mnemo");
+    {
+        let mut db = Mnemo::create(&path2, "pw", fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.remember(Memory::new(
+            "gamma",
+            MemoryType::Semantic,
+            vec![0.0, 0.0, 1.0, 0.0],
+        ))
+        .unwrap();
+        db.flush().unwrap();
+    }
+    let mut r = Mnemo::open_read_only(&path2, "pw").unwrap();
+    r.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    // Even though nothing was persisted (read-only can't write), the
+    // embedder is in memory and usable for the lifetime of this handle.
+    assert!(r.embedder().is_some());
+}

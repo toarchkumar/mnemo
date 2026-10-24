@@ -31,10 +31,7 @@ use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 use crate::crypto::{self, KdfParams};
-use crate::embed::{
-    self, Embedder, EmbedderIdentity, MANIFEST_EMBEDDER_DIMENSIONS, MANIFEST_EMBEDDER_NAME,
-    MANIFEST_EMBEDDER_NORMALIZE,
-};
+use crate::embed::{self, Embedder};
 use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
@@ -1197,15 +1194,23 @@ impl Mnemo {
     ///    was created with). Mismatch returns
     ///    [`MnemoError::DimensionMismatch`].
     /// 2. **Manifest identity check.** If the scaffold / onboarding
-    ///    manifest already records an embedder (via the
-    ///    `embedder_name` / `embedder_dimensions` / `embedder_normalize`
-    ///    metadata keys), the new embedder's identity must match
-    ///    exactly. A different name — even at the same dimensions —
-    ///    returns [`MnemoError::Invalid`] with
+    ///    manifest already records an embedder — the canonical shape
+    ///    is `metadata.embedder = { name, dimensions, normalize }`,
+    ///    with the legacy flat `embedder_name` / `embedder_dimensions`
+    ///    / `embedder_normalize` keys accepted as an alias — the new
+    ///    embedder's identity must match exactly. A different name —
+    ///    even at the same dimensions — returns
+    ///    [`MnemoError::Invalid`] with
     ///    [`EmbedderIdentity::MISMATCH_MSG`] in the message. If the
     ///    manifest has no embedder metadata yet, this call upserts
-    ///    the three keys into the first onboarding/manifest memory
+    ///    the nested object into the first onboarding/manifest memory
     ///    (write + flush so a subsequent reopen sees the identity).
+    ///
+    /// **Read-only handles.** `set_embedder` on an `open_read_only`
+    /// handle performs both checks and adopts the embedder in memory;
+    /// it never writes. Readers (CLI `--text`, agent-side `recall_text`)
+    /// can therefore use the text path next to a writer that holds
+    /// the exclusive lock.
     ///
     /// On both failure paths the handle's embedder slot is left
     /// unchanged. On success the embedder is wrapped in an `Arc<dyn
@@ -1214,9 +1219,6 @@ impl Mnemo {
     /// fresh open must re-register (same identity, so the manifest
     /// check round-trips cleanly).
     pub fn set_embedder<E: Embedder + 'static>(&mut self, embedder: E) -> Result<()> {
-        if self.read_only {
-            return Err(MnemoError::ReadOnly);
-        }
         let identity = embedder.identity();
         if identity.dimensions != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
@@ -1228,62 +1230,35 @@ impl Mnemo {
         // Find a scaffold/onboarding manifest to inspect (or upsert
         // into). `about()` already filters + sorts the onboarding set.
         let onboarding = self.about()?;
-        let mut target_pos: Option<usize> = None;
-        for m in &onboarding {
-            let name = m
-                .metadata
-                .get(MANIFEST_EMBEDDER_NAME)
-                .and_then(|v| v.as_str());
-            let dims = m
-                .metadata
-                .get(MANIFEST_EMBEDDER_DIMENSIONS)
-                .and_then(|v| v.as_u64());
-            let norm = m
-                .metadata
-                .get(MANIFEST_EMBEDDER_NORMALIZE)
-                .and_then(|v| v.as_bool());
-            if let (Some(name), Some(dims), Some(norm)) = (name, dims, norm) {
-                let saw = EmbedderIdentity {
-                    name: name.to_string(),
-                    dimensions: dims as usize,
-                    normalize: norm,
-                };
+        let mut upsert_target: Option<usize> = None;
+        for (i, m) in onboarding.iter().enumerate() {
+            if let Some(saw) = embed::read_identity_from_metadata(&m.metadata) {
                 if saw != identity {
                     return Err(embed::identity_mismatch_err(&saw, &identity));
                 }
-                // Match — nothing to upsert; adopt the embedder and
-                // return. `target_pos` would be read on the upsert
-                // path we're now skipping, so no write-back needed.
+                // Match — nothing to persist; adopt + done. Works the
+                // same on read-only and read-write handles.
                 self.embedder = Some(std::sync::Arc::new(embedder));
                 return Ok(());
             }
-            if target_pos.is_none() {
-                // Remember the first onboarding entry — we'll upsert
-                // into it if no record has embedder metadata.
-                target_pos = Some(0); // index into `onboarding`, not catalog
+            if upsert_target.is_none() {
+                upsert_target = Some(i);
             }
         }
 
-        // No existing identity on the manifest. Upsert into the first
-        // onboarding memory (if any) so later opens see it.
-        if let Some(idx) = target_pos {
-            let mut m = onboarding[idx].clone();
-            m.metadata.insert(
-                MANIFEST_EMBEDDER_NAME.into(),
-                serde_json::Value::String(identity.name.clone()),
-            );
-            m.metadata.insert(
-                MANIFEST_EMBEDDER_DIMENSIONS.into(),
-                serde_json::Value::Number(serde_json::Number::from(identity.dimensions as u64)),
-            );
-            m.metadata.insert(
-                MANIFEST_EMBEDDER_NORMALIZE.into(),
-                serde_json::Value::Bool(identity.normalize),
-            );
-            // Reuse the memory's existing id so this is an in-place
-            // update of the scaffold manifest, not a new entry.
-            self.put(m)?;
-            self.flush()?;
+        // No existing identity on the manifest. On a read-write handle
+        // upsert into the first onboarding memory so later opens see
+        // it; on a read-only handle skip the write (readers must not
+        // mutate the file), but still adopt the embedder in memory.
+        if !self.read_only {
+            if let Some(idx) = upsert_target {
+                let mut m = onboarding[idx].clone();
+                embed::write_identity_into_metadata(&mut m.metadata, &identity);
+                // Reuse the memory's existing id so this is an in-place
+                // update of the scaffold manifest, not a new entry.
+                self.put(m)?;
+                self.flush()?;
+            }
         }
 
         self.embedder = Some(std::sync::Arc::new(embedder));

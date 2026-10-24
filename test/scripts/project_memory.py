@@ -17,7 +17,12 @@ ENV_PATH = TEST_ROOT / ".env"
 
 AGENT_ID = "cursor-agent"
 DIMENSIONS = 384
-EMBED_MODEL = "all-MiniLM-L6-v2"
+# Must match the embedder.name recorded on the dogfood manifest
+# (test/scripts/seed.json → test/project.mnemo). PR 10a.1's identity
+# check is strict exact-match on the nested metadata.embedder.name;
+# sentence-transformers accepts both the short and HF-prefixed forms
+# and loads the same weights, so vectors are unchanged.
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def load_dotenv() -> None:

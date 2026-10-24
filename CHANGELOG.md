@@ -22,6 +22,38 @@ Pre-1.0, the minor component carries the breaking-change signal.
   the minor bump carries the breaking signal, so this ships as v0.5.0,
   not v0.4.2.**
 
+### Phase 3 fixups (PR 10a.1)
+
+- **Manifest identity check now reads the canonical nested form.**
+  PR 10a wrote and read three flat keys (`embedder_name`,
+  `embedder_dimensions`, `embedder_normalize`) on the scaffold
+  manifest. The documented convention — `mnemo/README.md`,
+  `test/scripts/seed.json`, every file bootstrapped from it — is a
+  nested object: `metadata.embedder = { name, dimensions, normalize }`.
+  10a's check looked for the flat keys, never found them, treated
+  the file as having no recorded identity, and silently accepted
+  whatever embedder was passed. **Fix:** canonical read + write is the
+  nested object; flat keys are still accepted on read as a legacy alias
+  (unreleased dev builds only). Writes always canonicalize to nested
+  and remove any legacy flat keys found alongside.
+- **`set_embedder` now works on read-only handles.** PR 10a's early
+  `if self.read_only { return Err(ReadOnly) }` meant readers (CLI
+  `--read-only` commands, any `Mnemo::open_read_only` caller)
+  couldn't register an embedder at all — the whole text path was
+  gated behind write access. **Fix:** run the dimension + manifest
+  identity checks regardless of mode; skip only the manifest upsert
+  on read-only (never write from a reader).
+- **`test/scripts/project_memory.py` EMBED_MODEL** = `"sentence-
+  transformers/all-MiniLM-L6-v2"` (was `"all-MiniLM-L6-v2"`), so
+  the identity recorded on the dogfood manifest and the identity
+  the script passes to `set_embedder` match exactly under the now-
+  canonical nested read path. Same model, same weights, same
+  vectors — only the name string changes.
+- **AGENTS.md** picks up the "first vector component must be
+  non-zero" note on the integration-test row — the Phase 3 zero-
+  vector guard trips `for i in 0..N` loops that stuff `i` into the
+  first component; prefer `(i as f32) + 1.0`.
+
 ### Phase 3 — bring-your-own-embedder (part 1: PR 10a)
 
 - **`Embedder` trait + `EmbedderIdentity`** in `mnemo/src/embed.rs`

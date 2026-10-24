@@ -103,7 +103,7 @@ file. The `.gitignore` already excludes them.
 | Add a CLI command | `mnemo/src/bin/mnemo.rs` (Subcommand + match arm + README table) |
 | Add a library method | `mnemo/src/store.rs` impl Mnemo (+ re-export in `lib.rs` if needed) |
 | Add a Python method | `mnemo-python/src/lib.rs` (impl Mnemo block) + `mnemo-python/README.md` API table |
-| Add an integration test | `mnemo/tests/integration.rs` (uses `KdfParams::fast()` for speed) |
+| Add an integration test | `mnemo/tests/integration.rs` (uses `KdfParams::fast()` for speed). **Vector tip:** `Mnemo::remember` refuses all-zero vectors since PR 10a (Phase 3) — in a loop like `for i in 0..N { … vec!(i as f32, 0., 0., 0.) }`, the first iteration ships `[0, 0, 0, 0]` and panics. Prefer `(i as f32) + 1.0` on the first component, or any other scheme that keeps the vector non-zero on every iteration. |
 | Add a CLI smoke test | `mnemo/tests/cli_smoke.rs` (uses `CARGO_BIN_EXE_mnemo` + tempfile) |
 | Add a fuzz target | `mnemo/fuzz/fuzz_targets/<name>.rs` + `[[bin]]` in `mnemo/fuzz/Cargo.toml` + expose entry via `mnemo::__fuzz` in `mnemo/src/lib.rs` + matrix rows in `.github/workflows/ci.yml` (`fuzz-smoke`) and `.github/workflows/fuzz-weekly.yml` |
 | Add a proptest scenario | `mnemo/tests/proptest_store.rs` (add a new `proptest! { #[test] fn prop_<name>(...) { ... } }` block; use `Mnemo::create` + `KdfParams::fast()` + `tempfile` so cases stay ~ms). Run tests with `cargo test --features failpoints` so `mnemo::__failpoints` is visible across the integration-test crate boundary. For crash-injection variants, arm the pager hook via `mnemo::__failpoints::set_writes_until_fail(n)` then disarm with `-1` before reopen. |

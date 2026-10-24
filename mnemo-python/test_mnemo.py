@@ -437,6 +437,38 @@ def test_set_embedder_identity_mismatch_rejected_after_reopen():
     print("ok  set_embedder identity-mismatch rejected across reopen")
 
 
+def test_set_embedder_on_read_only_handle_adopts_without_write():
+    """Reader opened via `read_only=True` can still register an
+    embedder and drive `recall_text` (PR 10a.1 Bug 2 fix: `set_embedder`
+    used to return `ReadOnly` before the dim/manifest checks ran)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "ro.mnemo")
+        # Writer: seed the file with the nested manifest + a text memory.
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4, normalize=True)
+        db.remember_text("delta", "semantic")
+        db.flush()
+        db.close()
+        del db
+
+        # Reader: register embedder (no write), run recall_text.
+        # `track_access=False` is required — the default `True` dirties
+        # the catalog on hit, which `ReadOnly` refuses. That's the
+        # Phase 1.1 contract, orthogonal to the Bug 2 fix.
+        r = mnemo.open(path, "pw", read_only=True)
+        r.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4, normalize=True)
+        hits = r.recall_text("delta", top_k=1, track_access=False)
+        assert hits, "recall_text on read-only handle returned nothing"
+        assert hits[0]["content"] == "delta"
+        # Skip r.close() — the binding's close() calls flush(), which
+        # errors on a read-only handle. Dropping the handle releases
+        # the OS lock cleanly. (That `close()`-on-read-only awkwardness
+        # is a separate scope-of-10a-era wart; worth filing but not
+        # this PR's business.)
+        del r
+    print("ok  set_embedder on read-only handle + recall_text works")
+
+
 def test_remember_rejects_zero_vector():
     """`remember` refuses an all-zero vector (Phase 3 PR 10a breaking
     change). Scaffold manifest uses a sentinel spike so it still
@@ -503,6 +535,7 @@ if __name__ == "__main__":
     test_set_embedder_and_text_round_trip()
     test_set_embedder_dim_mismatch_rejected()
     test_set_embedder_identity_mismatch_rejected_after_reopen()
+    test_set_embedder_on_read_only_handle_adopts_without_write()
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     print("\nall Python binding tests passed")
