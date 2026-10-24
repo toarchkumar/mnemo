@@ -460,13 +460,46 @@ def test_set_embedder_on_read_only_handle_adopts_without_write():
         hits = r.recall_text("delta", top_k=1, track_access=False)
         assert hits, "recall_text on read-only handle returned nothing"
         assert hits[0]["content"] == "delta"
-        # Skip r.close() — the binding's close() calls flush(), which
-        # errors on a read-only handle. Dropping the handle releases
-        # the OS lock cleanly. (That `close()`-on-read-only awkwardness
-        # is a separate scope-of-10a-era wart; worth filing but not
-        # this PR's business.)
+        # PR 10a.2: `close()` on a read-only handle is now a no-op
+        # (delegates to `Mnemo::close`, which short-circuits read-only).
+        r.close()
         del r
     print("ok  set_embedder on read-only handle + recall_text works")
+
+
+def test_read_only_with_block_and_close_are_noops():
+    """PR 10a.2: `close()` and `__exit__` delegate to the Rust core's
+    `close()`, which short-circuits read-only handles. The historic
+    binding called `flush()` directly, which errored. Covers:
+      1. `with mnemo.open(..., read_only=True)` exits cleanly.
+      2. `db.close()` on a read-only handle returns without raising.
+      3. `db.export_encrypted(dest)` on a read-only handle works (no
+         flush required; the file is already fully durable)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "ro.mnemo")
+        # Seed a database so we have something to open read-only.
+        writer = mnemo.open(path, "pw", dimensions=2)
+        writer.remember("hello", "semantic", [1.0, 0.0])
+        writer.flush()
+        writer.close()
+        del writer
+
+        # 1. with-block: __exit__ must not raise on a read-only handle.
+        with mnemo.open(path, "pw", read_only=True) as r:
+            assert len(r) == 1
+        # 2. Explicit close(): no-op on read-only, no exception.
+        r2 = mnemo.open(path, "pw", read_only=True)
+        r2.close()  # Was: RuntimeError before PR 10a.2.
+        del r2
+        # 3. export_encrypted on read-only.
+        r3 = mnemo.open(path, "pw", read_only=True)
+        backup = os.path.join(d, "ro-backup.mnemo")
+        r3.export_encrypted(backup)
+        del r3
+        # Backup is a valid encrypted database.
+        with mnemo.open(backup, "pw") as b:
+            assert len(b) == 1
+    print("ok  read-only close() / __exit__ / export_encrypted no longer raise")
 
 
 def test_remember_rejects_zero_vector():
@@ -536,6 +569,7 @@ if __name__ == "__main__":
     test_set_embedder_dim_mismatch_rejected()
     test_set_embedder_identity_mismatch_rejected_after_reopen()
     test_set_embedder_on_read_only_handle_adopts_without_write()
+    test_read_only_with_block_and_close_are_noops()
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     print("\nall Python binding tests passed")

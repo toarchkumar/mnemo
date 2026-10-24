@@ -531,8 +531,11 @@ impl Mnemo {
     }
 
     /// Flush and release; the object should not be used afterwards.
+    /// On a read-only handle this is a no-op (nothing to flush), so
+    /// `close()` + `__exit__` work regardless of mode. Delegates to the
+    /// Rust core's `Mnemo::close`, which does the mode check for us.
     fn close(&mut self) -> PyResult<()> {
-        self.inner.flush().map_err(to_py)
+        self.inner.close().map_err(to_py)
     }
 
     /// Decrypt and re-validate every live record; returns the count checked.
@@ -682,10 +685,13 @@ impl Mnemo {
         Ok(d.into_any().unbind())
     }
 
-    /// Flush, then copy the encrypted file to `dest`. The file is already
-    /// encrypted, so the export is a plain byte-for-byte copy.
+    /// Flush any pending writes, then copy the encrypted file to
+    /// `dest`. The file is already encrypted, so the export is a plain
+    /// byte-for-byte copy. On a read-only handle there's nothing to
+    /// flush — the core's `close()` is a no-op in that mode — so the
+    /// copy still works without raising.
     fn export_encrypted(&mut self, dest: &str) -> PyResult<()> {
-        self.inner.flush().map_err(to_py)?;
+        self.inner.close().map_err(to_py)?;
         std::fs::copy(&self.path, dest)
             .map_err(|e| PyRuntimeError::new_err(format!("export failed: {e}")))?;
         Ok(())
@@ -998,7 +1004,12 @@ impl Mnemo {
         _exc_value: &Bound<'_, PyAny>,
         _traceback: &Bound<'_, PyAny>,
     ) -> PyResult<bool> {
-        self.inner.flush().map_err(to_py)?;
+        // Delegate to the core's `close`, which no-ops on read-only
+        // handles instead of trying to flush them. Keeps
+        // `with mnemo.open(..., read_only=True)` blocks from raising
+        // `ReadOnly` on scope exit — a since-v0.4.0 bug surfaced once
+        // read-only text recall became a promoted use case in PR 10a.
+        self.inner.close().map_err(to_py)?;
         Ok(false) // do not suppress exceptions
     }
 

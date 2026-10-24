@@ -22,6 +22,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   the minor bump carries the breaking signal, so this ships as v0.5.0,
   not v0.4.2.**
 
+### Fixed (PR 10a.2 — Python binding only)
+
+- **`Mnemo.close()` and `Mnemo.__exit__` on read-only handles no
+  longer raise `ReadOnly`.** Both now delegate to the Rust core's
+  `Mnemo::close()`, which short-circuits on read-only (nothing to
+  flush) instead of calling `flush()` directly. A latent bug since
+  v0.4.0 that only became obvious once PR 10a promoted read-only
+  text recall into a routine use case: `with mnemo.open(..., read_only=True)`
+  blocks raised on scope exit, and `db.close()` raised on readers.
+- **`Mnemo.export_encrypted(dest)` on a read-only handle no longer
+  raises.** Same root cause — switched from `flush()` to the
+  mode-aware `close()`. A reader can now take a byte-for-byte
+  backup of the file without needing to reopen read-write first.
+- Covers both with a new `test_read_only_with_block_and_close_are_noops`
+  test (with-block exit, explicit `close()`, `export_encrypted`).
+
 ### Phase 3 fixups (PR 10a.1)
 
 - **Manifest identity check now reads the canonical nested form.**
