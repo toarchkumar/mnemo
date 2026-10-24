@@ -10,6 +10,14 @@ The script runs persistently — one spawn per `Mnemo` handle, reused for
 every subsequent remember/recall/cache call. Keep heavy imports (model
 load) at module scope so the cost is paid once.
 
+**Stdout is reserved for replies only.** Any `print(...)` without
+`file=sys.stderr` — a startup banner, a "model loaded" line, a
+progress bar, a warning — shifts every subsequent reply by one line
+and mnemo's EmbedCmd will kill the child with a clear error.
+Log to stderr instead: `print("...", file=sys.stderr, flush=True)`.
+`sentence-transformers`/`transformers`/`torch` already log to stderr
+by default, so this is only a hazard for your own debug prints.
+
 Usage::
 
     # CLI, one-shot:

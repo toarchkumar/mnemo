@@ -131,6 +131,12 @@ enum Command {
         /// embedders that return raw dot-space vectors).
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// Per-request timeout for the embedder (seconds; default 60).
+        /// A silent-but-alive child trips this deadline deterministically
+        /// (PR 10b.2). A short timeout bounds CLI/MCP latency when the
+        /// embedder misbehaves.
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -306,6 +312,9 @@ enum Command {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// Per-request timeout for the embedder (seconds; default 60).
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -361,6 +370,10 @@ enum Command {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// Per-request timeout for the embedder (seconds; default 60).
+        /// Prevents a stuck child from freezing the MCP agent.
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
     },
     /// Result-cache management (Phase 10.1). One `.mnemo` file is
     /// both an agent-memory store AND a durable key/value cache;
@@ -930,6 +943,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_timeout,
             passphrase: pp,
         } => {
             // `Memory` is already imported at the file top; keep only
@@ -946,7 +960,9 @@ fn run() -> std::result::Result<(), String> {
                 dimensions: db.dimensions(),
                 normalize: embed_normalize,
             };
-            let embedder = EmbedCmd::new(&embed_cmd, identity).map_err(fmt)?;
+            let embedder = EmbedCmd::new(&embed_cmd, identity)
+                .map_err(fmt)?
+                .with_timeout(std::time::Duration::from_secs(embed_timeout));
             db.set_embedder(embedder).map_err(fmt)?;
             // Embed via the registered embedder in a short-lived
             // borrow so the subsequent `remember` can take `&mut db`.
@@ -1254,6 +1270,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_timeout,
             passphrase: pp,
         } => {
             use mnemo::{EmbedCmd, EmbedderIdentity};
@@ -1285,7 +1302,9 @@ fn run() -> std::result::Result<(), String> {
                         dimensions: db.dimensions(),
                         normalize: embed_normalize,
                     };
-                    let embedder = EmbedCmd::new(&ecmd, identity).map_err(fmt)?;
+                    let embedder = EmbedCmd::new(&ecmd, identity)
+                        .map_err(fmt)?
+                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
                     db.set_embedder(embedder).map_err(fmt)?;
                     let vector = {
                         let embedder_ref = db
@@ -1379,6 +1398,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_timeout,
         } => {
             if !mcp {
                 return Err("serve requires --mcp today (other transports may come later)".into());
@@ -1388,7 +1408,12 @@ fn run() -> std::result::Result<(), String> {
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let p = std::path::Path::new(&path);
             let embed_spec = match (embed_cmd, embed_name) {
-                (Some(c), Some(n)) => Some((c, n, embed_normalize)),
+                (Some(c), Some(n)) => Some((
+                    c,
+                    n,
+                    embed_normalize,
+                    std::time::Duration::from_secs(embed_timeout),
+                )),
                 _ => None,
             };
             mnemo::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;

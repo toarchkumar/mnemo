@@ -582,16 +582,60 @@ fn write_py_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::
     p
 }
 
-/// Deterministic 4-D fake embedder, persistent read loop. Hashes each
-/// input string's byte sum onto one axis; emits a unit spike there.
+/// Deterministic text-dependent 4-D fake embedder (PR 10b.2). The
+/// vector encodes `len(text)` on one hash-selected axis, so tests
+/// can assert that a reply was embedded from the right input and
+/// catch misalignment (if EmbedCmd ever handed back a stale leftover
+/// line, the lengths wouldn't match).
+///
+/// Also implements four special triggers for the respawn / timeout /
+/// alignment tests:
+///   - "HANG"   → block forever (never writes a reply).
+///   - "JUNK"   → emit a non-JSON line.
+///   - "DOUBLE" → emit two reply lines for one input.
+///   - everything else → the normal text-dependent reply.
 const FAKE_EMBED_PY: &str = r#"
+import sys, json, time
+DIMS = 4
+def encode(s):
+    axis = sum(bytearray(s.encode("utf-8"))) % DIMS
+    v = [0.0] * DIMS
+    v[axis] = float(len(s)) + 1.0  # non-zero, text-dependent
+    return v
+for line in sys.stdin:
+    s = json.loads(line)
+    if s == "HANG":
+        time.sleep(3600)
+    elif s == "JUNK":
+        print("not-valid-json", flush=True)
+    elif s == "DOUBLE":
+        print(json.dumps(encode(s)), flush=True)
+        print(json.dumps(encode("stowaway")), flush=True)
+    else:
+        print(json.dumps(encode(s)), flush=True)
+"#;
+
+/// Python helper that encodes a text the same way `FAKE_EMBED_PY`
+/// does, invoked from tests to compute an expected vector.
+fn fake_vector_for(text: &str) -> Vec<f32> {
+    let axis = text.bytes().map(|b| b as usize).sum::<usize>() % 4;
+    let mut v = vec![0.0f32; 4];
+    v[axis] = text.len() as f32 + 1.0;
+    v
+}
+
+/// Fake embedder that prints an unsolicited startup banner to stdout
+/// before entering the read loop (common Python-logging footgun).
+/// EmbedCmd must detect the extra line and refuse to proceed.
+const BANNER_EMBED_PY: &str = r#"
 import sys, json
+print("[banner] model loaded", flush=True)
 DIMS = 4
 for line in sys.stdin:
     s = json.loads(line)
     axis = sum(bytearray(s.encode("utf-8"))) % DIMS
     v = [0.0] * DIMS
-    v[axis] = 1.0
+    v[axis] = float(len(s)) + 1.0
     print(json.dumps(v), flush=True)
 "#;
 
@@ -614,6 +658,7 @@ for line in sys.stdin:
 
 /// Fake embedder that touches a marker file on startup. Used to verify
 /// the child is spawned once across multiple MCP tool calls.
+/// Vector is text-dependent (PR 10b.2 convention).
 const STARTUP_MARKER_EMBED_PY: &str = r#"
 import sys, json, os
 with open(os.environ["MNEMO_TEST_MARKER"], "a") as f:
@@ -623,7 +668,7 @@ for line in sys.stdin:
     s = json.loads(line)
     axis = sum(bytearray(s.encode("utf-8"))) % DIMS
     v = [0.0] * DIMS
-    v[axis] = 1.0
+    v[axis] = float(len(s)) + 1.0
     print(json.dumps(v), flush=True)
 "#;
 
@@ -984,5 +1029,308 @@ fn mcp_text_param_without_embedder_returns_helpful_error() {
     assert!(
         stdout.contains("--embed-cmd") || stdout.contains("embedder"),
         "expected a helpful error mentioning --embed-cmd, got: {stdout}"
+    );
+}
+
+// === Phase 3 PR 10b.2: timeout, respawn, alignment =======================
+
+#[test]
+fn cli_remember_text_hang_times_out_bounded() {
+    // The fake blocks forever on "HANG". With --embed-timeout 2 the
+    // CLI must error well under its default 60s. Elapsed-time bound
+    // of 20s is deliberately loose to absorb CI variance; the correct
+    // timeout fires ~2–3s in.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("hang.mnemo");
+    let pp = "em-pw";
+    {
+        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+    }
+    let script = write_py_script(dir.path(), "hang.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let start = std::time::Instant::now();
+    let out = Command::new(bin())
+        .args([
+            "remember",
+            path.to_str().unwrap(),
+            "--text",
+            "HANG",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+            "--embed-timeout",
+            "2",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo remember");
+    let elapsed = start.elapsed();
+    assert!(
+        !out.status.success(),
+        "remember on HANG should error (child never replies)"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "hang must trip the --embed-timeout bound; elapsed={elapsed:?}"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("timed out") || stderr.contains("embed-cmd"),
+        "stderr should name the timeout, got: {stderr}"
+    );
+}
+
+#[test]
+fn embed_cmd_recovers_after_junk_reply_with_correct_vector() {
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    // Call "JUNK" → fake prints an invalid-JSON line → EmbedCmd errors
+    // and kills the child. Next call for "abc" must respawn and return
+    // abc's text-dependent vector, not a leftover.
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "junk.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(5));
+    let err = em.embed(&["JUNK"]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("malformed JSON") || msg.contains("respawn"),
+        "JUNK should raise a protocol error, got: {msg}"
+    );
+    // Next call must respawn + return abc's actual vector.
+    let out = em.embed(&["abc"]).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0], fake_vector_for("abc"));
+}
+
+#[test]
+fn embed_cmd_recovers_after_double_reply_with_correct_vector() {
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    // "DOUBLE" prints TWO lines for one input. The first is read as
+    // the DOUBLE reply (fine); the second is a stale leftover. The
+    // guard in `embed()` must detect it before writing the next
+    // request OR the width check must catch the stray reply. Either
+    // way, the next call for "abc" must return abc's vector.
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "double.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(5));
+    // DOUBLE succeeds on this call (returns the first JSON line).
+    let out = em.embed(&["DOUBLE"]).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0], fake_vector_for("DOUBLE"));
+    // Give the background reader thread a moment to actually deliver
+    // the stowaway line into the channel. Without this the drain-pass
+    // on the next call can race the reader and miss it; we want to
+    // test the detection path, not the race window.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // The second (stale) line is now queued. Next call MUST either
+    // detect-and-restart OR, if it slipped through, return the right
+    // vector. Either way the result for "abc" must be abc's vector,
+    // never the stowaway's.
+    let next = em.embed(&["abc"]);
+    match next {
+        Ok(v) => {
+            assert_eq!(v.len(), 1);
+            assert_eq!(
+                v[0],
+                fake_vector_for("abc"),
+                "next call MUST return abc's vector, never a leftover"
+            );
+        }
+        Err(e) => {
+            // Error is acceptable (planner: "an error is allowed; a
+            // mismatched vector never is"). But a FOLLOWING call must
+            // then succeed and return the right vector.
+            let msg = format!("{e}");
+            assert!(
+                msg.contains("respawn") || msg.contains("outside a reply"),
+                "if first call errors it must be a clear protocol error, got: {msg}"
+            );
+            let recovery = em.embed(&["abc"]).unwrap();
+            assert_eq!(recovery[0], fake_vector_for("abc"));
+        }
+    }
+}
+
+#[test]
+fn embed_cmd_detects_stdout_banner_before_requests() {
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "banner.py", BANNER_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(5));
+    // Give the child a brief moment to print its banner before the
+    // first embed() call runs its drain-pass; otherwise the race may
+    // put the banner into the reply slot and we'd see a malformed-JSON
+    // error instead. Either outcome is correct per the planner's rule
+    // ("an error is allowed; a mismatched vector never is") but the
+    // "stdout outside a reply" message is the clearer one.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let err = em.embed(&["anything"]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("stdout") || msg.contains("outside a reply") || msg.contains("malformed"),
+        "banner should surface as a stdout-protocol error, got: {msg}"
+    );
+    // Note: we don't assert recovery here. BANNER_EMBED_PY is unusual
+    // in that every respawn also prints a banner, so a follow-up call
+    // will error again — the respawn mechanism is tested in the
+    // JUNK/DOUBLE tests, which use a well-behaved fake after the
+    // offending call. What we're pinning down here is just that a
+    // startup banner surfaces as a clear protocol error, never as a
+    // mismatched vector.
+}
+
+#[test]
+fn embed_cmd_two_thousand_text_batch_does_not_deadlock() {
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    // Pre-10b.2 (write-all-then-read-all) this would deadlock on a
+    // batch big enough to fill the child's stdout pipe buffer. The
+    // reader thread drains stdout in parallel with our stdin writes,
+    // so a 2000-line batch completes in the normal path.
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "batch.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(30));
+    // 2000 unique-ish texts so the fake doesn't short-circuit via a
+    // trigger ("HANG"/"JUNK"/"DOUBLE").
+    let texts: Vec<String> = (0..2000).map(|i| format!("text-{i:04}")).collect();
+    let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    let out = em.embed(&refs).unwrap();
+    assert_eq!(out.len(), 2000);
+    // Spot-check a few vectors line up with their inputs.
+    for i in [0, 123, 999, 1999] {
+        assert_eq!(
+            out[i],
+            fake_vector_for(&texts[i]),
+            "vector at index {i} must correspond to its input text"
+        );
+    }
+}
+
+#[test]
+fn mcp_hang_bounded_and_server_survives_for_next_call() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("mcp-hang.mnemo");
+    let pp = "em-pw";
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.flush().unwrap();
+    }
+    let script = write_py_script(dir.path(), "hang.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+
+    let mut out_opt = None;
+    let mut last_stderr = String::new();
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            let backoff_ms = 100u64 << (attempt - 1);
+            std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
+        }
+        let mut child = Command::new(bin())
+            .args([
+                "serve",
+                path.to_str().unwrap(),
+                "--mcp",
+                "--embed-cmd",
+                &ecmd,
+                "--embed-name",
+                "fake-4d",
+                "--embed-timeout",
+                "2",
+            ])
+            .env("MNEMO_PASSPHRASE", pp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn mnemo serve --mcp");
+
+        let stdin = child.stdin.as_mut().unwrap();
+        // HANG → RPC error (bounded by --embed-timeout 2). Next call
+        // for a normal text must succeed with the correct vector.
+        let script = [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"remember","arguments":{"content":"will_hang","memory_type":"semantic","text":"HANG"}}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"remember","arguments":{"content":"survives","memory_type":"semantic","text":"survives"}}}"#,
+        ];
+        for line in script {
+            writeln!(stdin, "{line}").unwrap();
+        }
+        drop(child.stdin.take());
+
+        let start = std::time::Instant::now();
+        let out = child.wait_with_output().expect("child wait");
+        let elapsed = start.elapsed();
+        last_stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        if out.status.success() {
+            assert!(
+                elapsed < std::time::Duration::from_secs(30),
+                "server should return before 30s even with a HANG; elapsed={elapsed:?}"
+            );
+            out_opt = Some(out);
+            break;
+        }
+        if !last_stderr.contains("file already locked") {
+            panic!(
+                "mnemo serve --mcp failed (attempt {attempt}): status={:?} stderr={last_stderr}",
+                out.status
+            );
+        }
+    }
+    let out = out_opt.unwrap_or_else(|| {
+        panic!("mnemo serve --mcp never acquired the lock: stderr={last_stderr}")
+    });
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The HANG call should produce an RPC error (id 2).
+    assert!(
+        stdout.contains("\"id\":2") && (stdout.contains("timed out") || stdout.contains("error")),
+        "expected an RPC error on the HANG call id 2, got stdout: {stdout}"
+    );
+    // The next call (id 3) must have succeeded — server stayed up
+    // and the child was respawned.
+    assert!(
+        stdout.contains("\"id\":3"),
+        "expected a response to call id 3 after the HANG; got: {stdout}"
+    );
+    assert!(
+        !stdout
+            .lines()
+            .any(|l| l.contains("\"id\":3") && l.contains("error")),
+        "call id 3 (post-HANG) should have succeeded, not errored: {stdout}"
     );
 }

@@ -150,7 +150,7 @@ pub fn serve_stdio(path: &Path) -> Result<()> {
 /// [`crate::EmbedCmd::new`] for the command format.
 pub fn serve_stdio_with_embedder(
     path: &Path,
-    embed_spec: Option<(String, String, bool)>,
+    embed_spec: Option<(String, String, bool, std::time::Duration)>,
 ) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -164,7 +164,7 @@ pub fn serve_with_streams<R: Read, W: Write>(
     path: &Path,
     reader: R,
     mut writer: W,
-    embed_spec: Option<(String, String, bool)>,
+    embed_spec: Option<(String, String, bool, std::time::Duration)>,
 ) -> Result<()> {
     let passphrase = std::env::var(PASSPHRASE_ENV).map_err(|_| {
         MnemoError::Invalid(format!(
@@ -177,15 +177,18 @@ pub fn serve_with_streams<R: Read, W: Write>(
         path.display()
     );
     let mut db = Mnemo::open(path, &passphrase)?;
-    if let Some((cmd, name, normalize)) = embed_spec {
+    if let Some((cmd, name, normalize, timeout)) = embed_spec {
         let identity = crate::EmbedderIdentity {
             name,
             dimensions: db.dimensions(),
             normalize,
         };
-        let embedder = crate::EmbedCmd::new(&cmd, identity)?;
+        let embedder = crate::EmbedCmd::new(&cmd, identity)?.with_timeout(timeout);
         db.set_embedder(embedder)?;
-        eprintln!("mnemo mcp: embedder ready (text params accepted)");
+        eprintln!(
+            "mnemo mcp: embedder ready (text params accepted, timeout {}s)",
+            timeout.as_secs()
+        );
     }
     eprintln!("mnemo mcp: ready ({} live memories)", db.len());
 

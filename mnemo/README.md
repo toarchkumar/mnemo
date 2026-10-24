@@ -64,6 +64,27 @@ and writes one JSON array of floats per line to stdout, flushed after
 every reply. See `mnemo/examples/embedder_server.py` for a 10-line
 reference implementation (sentence-transformers + MiniLM, 384-dim).
 
+> **Stdout is for replies only.** Any line the embedder prints to
+> stdout outside a reply — startup banners, model-load progress,
+> warnings, "model loaded" messages — is a protocol violation and
+> would shift every subsequent reply by one line. EmbedCmd detects
+> it, kills the child, and surfaces a clear error ("stdout is
+> reserved for replies only; log to stderr instead"); the next call
+> respawns the child. **Log to stderr.** Python: `print("...",
+> file=sys.stderr, flush=True)`, or configure `logging` with
+> `stream=sys.stderr`. Stderr is inherited to the parent and is
+> safe for anything you want to see while the server runs.
+
+Per-request timeout defaults to 60 seconds; override with
+`--embed-timeout <secs>` on `serve`, `remember`, and `recall`. Set
+it longer than your slowest cold-start reply (sentence-transformers'
+first `encode()` on CPU can be 3–5s). On timeout — or any other
+protocol error (malformed JSON, wrong dimensionality, zero vector,
+unexpected EOF) — the child is killed and the next call respawns a
+fresh child with the same argv/env/timeout. The guarantee is
+asymmetric and deliberate: **an error is allowed; a mismatched
+vector never is.**
+
 The `--embed-name` string is matched against (and persisted on) the
 scaffold manifest's `metadata.embedder = { name, dimensions, normalize }`
 object. Starting a server with a different `--embed-name` on an existing

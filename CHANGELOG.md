@@ -58,6 +58,52 @@ Pre-1.0, the minor component carries the breaking-change signal.
   lines excluding docstring.
 - Closes the Phase 4 "text path waits on Phase 3" note.
 
+### Fixed (PR 10b.2 — EmbedCmd correctness)
+
+- **Timeouts actually fire.** PR 10b's `read_line_with_timeout` was a
+  blocking read with a wall-clock check that only ran *after* the read
+  returned — a child that stayed silent (hang, deadlock, dead CPU,
+  model-load wedge) would block the parent forever despite
+  `--embed-timeout`. **Fix:** a background reader thread owns
+  `BufReader<ChildStdout>` and forwards each line over an `mpsc`
+  channel; `EmbedCmd::embed` reads via `recv_timeout`, so a silent-
+  but-alive child trips the deadline deterministically. Side effect:
+  stdout is drained in parallel with stdin writes, so a 2,000-text
+  batch no longer deadlocks against the child's own stdout buffer.
+- **Protocol errors can't produce mismatched vectors anymore.** PR 10b
+  returned an error on malformed JSON / wrong width / zero vector but
+  left stale replies in the pipe, so the *next* `embed()` call could
+  read a leftover line as its first reply and return the previous
+  text's vector for a new input. Silent corruption of recall quality.
+  **Fix:** any protocol error (write failure, timeout, EOF, malformed
+  JSON, wrong width, zero vector, or any line printed to stdout
+  *before* a request) now kills the child, drops the reader thread,
+  and marks the adapter for restart. The next `embed()` call spawns
+  a fresh child + reader with the same argv/env/timeout before
+  writing anything, and logs one stderr line saying it restarted and
+  why. Rule, enforced by test: *an error is allowed; a mismatched
+  vector never is.*
+- **Startup-banner footgun has a clear error.** A Python embedder
+  that prints `"[loading model...]"` to stdout before entering its
+  read loop used to shift every subsequent reply by one line.
+  EmbedCmd now detects any line waiting in the pipe before a request
+  and errors with `"stdout is reserved for replies only; log to
+  stderr instead"`. Documented in the `EmbedCmd` module docs, the
+  `mnemo serve --mcp` section of `mnemo/README.md`, and the
+  reference embedder script.
+- **CLI `--embed-timeout <secs>` on `remember`, `recall`, and `serve`.**
+  Default 60s (unchanged). Mirrors the Rust `EmbedCmd::with_timeout`
+  setter — set it longer than your slowest observed cold-start reply
+  (sentence-transformers' first `encode()` can be 3–5s on CPU).
+- Covered by six new tests in `mnemo/tests/cli_smoke.rs`: hang bounded
+  by `--embed-timeout`, MCP hang-and-respawn (server survives, next
+  call returns the right vector), junk-line realignment, double-line
+  realignment, stdout-banner surfaces as a clear error, and a direct
+  2,000-text batch call completing without deadlock. The test fake
+  embedder returns text-dependent vectors (`v[axis] = len(s) + 1.0`,
+  `axis = sum(bytes(s)) % dims`) so a misalignment is detectable at
+  the vector level, not just via `is_ok()`.
+
 ### Fixed (PR 10a.2 — Python binding only)
 
 - **`Mnemo.close()` and `Mnemo.__exit__` on read-only handles no
