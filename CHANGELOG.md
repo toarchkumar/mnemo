@@ -8,6 +8,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-24
+
+Phase 3 release — **bring-your-own-embedder**. The engine now takes
+raw text in addition to raw vectors on `remember`, `recall`, and the
+semantic cache tools; an `Embedder` trait wires any model you can
+invoke from a child process. The persistent-child `EmbedCmd` adapter
+spawns your embedder once per handle and talks a one-JSON-line-per-
+request protocol over stdio. CLI gets `remember --text` and
+`recall --text`; MCP tools pick up a `text` field; `serve --mcp`
+takes `--embed-cmd` + `--embed-name` + `--embed-timeout`. All-zero
+vectors are now refused at `remember` time (silent-noise fix; the
+breaking signal that carries the minor bump). See the entries
+below for the five PRs that got us here (10a, 10a.1, 10a.2, 10b +
+10b.1, 10b.2).
+
 ### Breaking (behavior)
 
 - **All-zero vectors are now refused by `Mnemo::remember`.** They score
@@ -823,7 +838,11 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/toarchkumar/mnemo/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/toarchkumar/mnemo/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/toarchkumar/mnemo/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/toarchkumar/mnemo/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/toarchkumar/mnemo/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/toarchkumar/mnemo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/toarchkumar/mnemo/compare/v0.1.0...v0.2.0
