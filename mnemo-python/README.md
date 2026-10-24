@@ -147,6 +147,10 @@ its own agent.
 | `memories()` | Enumerate every live (non-deleted, non-expired) memory as a list of dicts |
 | `dimensions()` | Embedding dimensionality this database was created with (also on `stats()["dimensions"]`) |
 | `rekey(new_passphrase, fast=False)` | Change the passphrase. Re-derives the KEK and re-wraps the DEK; encrypted pages are not rewritten (O(1) in db size). `fast=True` uses the cheap-Argon2 test params — omit for production |
+| `set_embedder(fn, *, name, dimensions, normalize=True)` | Register a Python callable `embed(texts: list[str]) -> list[list[float]]` as this handle's text embedder (Phase 3). Dimension-checks against the database's width; identity-checks against (and on first use upserts) the scaffold manifest's `embedder_name` / `embedder_dimensions` / `embedder_normalize` keys, so swapping embedders between opens fails loudly |
+| `remember_text(content, memory_type, **kwargs)` | Embed `content` via the registered embedder and `remember` the result. Accepts the same per-memory kwargs as `remember` (`agent_id`, `importance`, `session_id`, `ttl_secs`, `shared`, `metadata`) |
+| `recall_text(query, top_k=10, memory_types=None, agent_id=None, track_access=True)` | Embed `query` via the registered embedder and run `recall`. Same return shape as `recall` |
+| `cache_get_semantic_text(namespace, text, threshold=0.97)` | Text-side semantic cache lookup; uses the embedder's `name` as the semantic cache's `model` component |
 | `stats()` | Summary statistics |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
 | `len(db)` | Live memory count |
@@ -355,6 +359,61 @@ your embedder's output — `text-embedding-3-small` is 1536-dim,
 **Don't use this for:** multi-node fleets where the cache must be
 consistent across hosts (use Redis / DynamoDB DAX). MNemo's cache is
 optimized for a single-host agent that owns its cache file.
+
+### Recipe: `set_embedder` + text-only `remember` / `recall`
+
+Phase 3 ships a per-handle embedder hook so callers never have to
+pass vectors by hand. Register once at open time; every subsequent
+`remember_text` / `recall_text` / `cache_get_semantic_text` call on
+the handle uses it.
+
+```python
+import mnemo
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")  # 384-dim, normalized
+
+def embed(texts: list[str]) -> list[list[float]]:
+    return model.encode(texts, normalize_embeddings=True).tolist()
+
+db = mnemo.open("agent.mnemo", "pw", dimensions=384)
+db.set_embedder(embed, name="all-MiniLM-L6-v2",
+                dimensions=384, normalize=True)
+
+db.remember_text("the user prefers tea", "semantic",
+                 importance=0.8, agent_id="assistant")
+hits = db.recall_text("how does the user like their drinks?", top_k=5)
+for h in hits:
+    print(h["score"], h["content"])
+```
+
+Or with OpenAI's hosted embeddings:
+
+```python
+from openai import OpenAI
+client = OpenAI()
+
+def embed(texts: list[str]) -> list[list[float]]:
+    r = client.embeddings.create(model="text-embedding-3-small", input=texts)
+    return [item.embedding for item in r.data]
+
+db = mnemo.open("agent.mnemo", "pw", dimensions=1536)
+db.set_embedder(embed, name="text-embedding-3-small",
+                dimensions=1536, normalize=False)
+```
+
+The identity (`name`, `dimensions`, `normalize`) is persisted on the
+scaffold manifest the first time you `set_embedder`. Reopening with a
+*different* embedder — say you swap MiniLM for BGE on the same file —
+raises `RuntimeError: embedder identity mismatch: database manifest
+records embedder (name="all-MiniLM-L6-v2", …), but this handle was
+passed embedder (name="bge-large-en-v1.5", …). Mixing embedders
+silently corrupts recall quality — open the file with the original
+embedder, or create a fresh database for the new one.`
+
+Mnemo also now refuses any `remember` call with an all-zero vector,
+so a mis-wired embedder (returning `[0.0] * dims`) fails loudly on
+the first write instead of polluting recall silently.
 
 ## License
 

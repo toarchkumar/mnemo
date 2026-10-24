@@ -830,7 +830,7 @@ fn wal_crash_recovery_replays_committed_txn() {
         db.remember(Memory::new(
             format!("mem-{i}"),
             MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
     }
@@ -845,7 +845,7 @@ fn wal_crash_recovery_replays_committed_txn() {
         db.remember(Memory::new(
             format!("mem-{i}"),
             MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
     }
@@ -918,7 +918,7 @@ fn wal_discards_uncommitted_garbage() {
         db.remember(Memory::new(
             format!("g-{i}"),
             MemoryType::Working,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
     }
@@ -1238,7 +1238,7 @@ fn snapshots_record_every_flush() {
         db.remember(Memory::new(
             format!("m{i}"),
             MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
         db.flush().unwrap();
@@ -1271,7 +1271,7 @@ fn max_snapshots_prunes_oldest_entries() {
         db.remember(Memory::new(
             format!("m{i}"),
             MemoryType::Semantic,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
         db.flush().unwrap();
@@ -1306,7 +1306,7 @@ fn max_snapshots_prunes_oldest_entries() {
         db.remember(Memory::new(
             format!("more-{i}"),
             MemoryType::Working,
-            vec4(0.0, i as f32, 0.0, 0.0),
+            vec4(0.0, (i as f32) + 1.0, 0.0, 0.0),
         ))
         .unwrap();
         db.flush().unwrap();
@@ -1331,7 +1331,7 @@ fn restore_rewinds_and_rolls_forward() {
             .remember(Memory::new(
                 format!("content-{i}"),
                 MemoryType::Semantic,
-                vec4(i as f32, 0.0, 0.0, 0.0),
+                vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
             ))
             .unwrap();
         db.flush().unwrap(); // snapshot txn i+1 holds i+1 memories
@@ -1420,7 +1420,7 @@ fn compaction_collapses_history() {
         db.remember(Memory::new(
             format!("m{i}"),
             MemoryType::Episodic,
-            vec4(i as f32, 0.0, 0.0, 0.0),
+            vec4((i as f32) + 1.0, 0.0, 0.0, 0.0),
         ))
         .unwrap();
         db.flush().unwrap();
@@ -1490,8 +1490,11 @@ fn session_close_consolidates_to_episodic() {
         let mut v = Vec::new();
         for i in 0..3 {
             v.push(
-                s.add_turn(Turn::user(format!("turn-{i}"), vec![i as f32, 0.0, 0.0]))
-                    .unwrap(),
+                s.add_turn(Turn::user(
+                    format!("turn-{i}"),
+                    vec![(i as f32) + 1.0, 0.0, 0.0],
+                ))
+                .unwrap(),
             );
         }
         let promoted = s.close().unwrap();
@@ -2310,4 +2313,179 @@ fn v7_file_migrates_to_v8_with_empty_cache() {
     assert_eq!(s.bytes, 0);
     // The memory side of the file is unaffected.
     assert_eq!(db.len(), 1);
+}
+
+// === Phase 3 PR 10a: Embedder API core ==================================
+
+use mnemo::{Embedder, EmbedderIdentity};
+
+/// Deterministic 4-D fake embedder: hashes each input to pick a
+/// single axis, emits a unit spike there. Used by the Phase 3 tests
+/// below so the "embedder" is reproducible and dependency-free.
+struct FakeEmbedder {
+    identity: EmbedderIdentity,
+}
+impl FakeEmbedder {
+    fn new(name: &str, dims: usize, normalize: bool) -> Self {
+        Self {
+            identity: EmbedderIdentity {
+                name: name.into(),
+                dimensions: dims,
+                normalize,
+            },
+        }
+    }
+}
+impl Embedder for FakeEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        self.identity.clone()
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo::Result<Vec<Vec<f32>>> {
+        let dims = self.identity.dimensions;
+        let mut out = Vec::with_capacity(texts.len());
+        for t in texts {
+            let hash: usize = t.bytes().map(|b| b as usize).sum();
+            let axis = hash % dims;
+            let mut v = vec![0.0f32; dims];
+            v[axis] = 1.0;
+            out.push(v);
+        }
+        Ok(out)
+    }
+}
+
+/// Embedder that always returns a zero vector — exercises the Phase 3
+/// zero-vector rejection path independently of the embedder trait.
+struct ZeroEmbedder {
+    identity: EmbedderIdentity,
+}
+impl Embedder for ZeroEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        self.identity.clone()
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo::Result<Vec<Vec<f32>>> {
+        Ok(texts
+            .iter()
+            .map(|_| vec![0.0f32; self.identity.dimensions])
+            .collect())
+    }
+}
+
+#[test]
+fn set_embedder_dim_mismatch_is_rejected() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let wrong = FakeEmbedder::new("wrong-dim", 8, true);
+    match db.set_embedder(wrong) {
+        Err(MnemoError::DimensionMismatch { expected, got }) => {
+            assert_eq!(expected, 4);
+            assert_eq!(got, 8);
+        }
+        other => panic!("expected DimensionMismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn set_embedder_identity_mismatch_rejected_after_persist() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em.mnemo");
+    // First handle: register MiniLM — manifest absorbs its identity.
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.flush().unwrap();
+        db.set_embedder(FakeEmbedder::new("MiniLM", 4, true))
+            .unwrap();
+    }
+    // Second handle: reopen and try to register a different name.
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    match db.set_embedder(FakeEmbedder::new("bge", 4, true)) {
+        Err(MnemoError::Invalid(msg)) => {
+            assert!(msg.contains(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
+            assert!(msg.contains("MiniLM"));
+            assert!(msg.contains("bge"));
+        }
+        other => panic!("expected Invalid identity mismatch, got {other:?}"),
+    }
+    // Re-registering the SAME identity round-trips cleanly.
+    db.set_embedder(FakeEmbedder::new("MiniLM", 4, true))
+        .unwrap();
+}
+
+#[test]
+fn zero_vector_remember_rejected() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("z.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let m = Memory::new("empty", MemoryType::Semantic, vec![0.0, 0.0, 0.0, 0.0]);
+    match db.remember(m) {
+        Err(MnemoError::Invalid(msg)) => {
+            assert!(msg.contains("all-zero vector"), "msg = {msg}");
+        }
+        other => panic!("expected Invalid for zero vector, got {other:?}"),
+    }
+    // A single-axis spike passes.
+    let m = Memory::new("ok", MemoryType::Semantic, vec![1.0, 0.0, 0.0, 0.0]);
+    db.remember(m).unwrap();
+}
+
+#[test]
+fn remember_text_from_text_round_trip() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+
+    db.remember_text("alpha", MemoryType::Semantic).unwrap();
+    db.remember_text("beta", MemoryType::Episodic).unwrap();
+    db.flush().unwrap();
+
+    // Query for "alpha" via from_text; the fake embedder is
+    // deterministic so recall should surface the "alpha" memory first.
+    let fake = FakeEmbedder::new("fake-4d", 4, true);
+    let req = mnemo::RecallRequest::from_text(&fake, "alpha")
+        .unwrap()
+        .top_k(2);
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty(), "recall returned nothing");
+    assert_eq!(hits[0].memory.content, "alpha");
+}
+
+#[test]
+fn remember_text_without_embedder_fails_clearly() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ne.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    match db.remember_text("hello", MemoryType::Semantic) {
+        Err(MnemoError::Invalid(msg)) => assert!(msg.contains("no embedder")),
+        other => panic!("expected Invalid 'no embedder', got {other:?}"),
+    }
+}
+
+#[test]
+fn zero_vector_embedder_remember_text_rejected() {
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("z2.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.set_embedder(ZeroEmbedder {
+        identity: EmbedderIdentity {
+            name: "zero".into(),
+            dimensions: 4,
+            normalize: false,
+        },
+    })
+    .unwrap();
+    match db.remember_text("anything", MemoryType::Semantic) {
+        Err(MnemoError::Invalid(msg)) => {
+            assert!(msg.contains("all-zero vector"), "msg = {msg}");
+        }
+        other => panic!("expected Invalid for zero-vec embedder, got {other:?}"),
+    }
 }

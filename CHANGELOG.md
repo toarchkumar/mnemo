@@ -8,6 +8,67 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Breaking (behavior)
+
+- **All-zero vectors are now refused by `Mnemo::remember`.** They score
+  exactly `0.0` on every cosine query — they can't contribute signal,
+  but recency/importance can still pull them into top-k as noise. The
+  check lives in `store::put` and surfaces as `MnemoError::Invalid`
+  with the message `"all-zero vector refused: …"`. Mirrored to the
+  Python binding (same `RuntimeError` text). The internal
+  `Memory::scaffold_manifest` helper is updated to emit a single-axis
+  unit spike (`[1, 0, 0, …]`) so `mnemo init` and
+  `Mnemo.insert_default_manifest` still work. **Pre-1.0 convention:
+  the minor bump carries the breaking signal, so this ships as v0.5.0,
+  not v0.4.2.**
+
+### Phase 3 — bring-your-own-embedder (part 1: PR 10a)
+
+- **`Embedder` trait + `EmbedderIdentity`** in `mnemo/src/embed.rs`
+  (`pub use mnemo::{Embedder, EmbedderIdentity}`). Minimal surface:
+  `identity() -> EmbedderIdentity` + `embed(&[&str]) -> Result<Vec<Vec<f32>>>`.
+  Thread-safe (`Send + Sync`) so a handle can share one `Arc<dyn
+  Embedder>` across threads.
+- **`Mnemo::set_embedder(embedder)`** registers a text embedder on an
+  open handle. Dimension-checks against `Mnemo::dimensions()` and
+  **identity-checks against the scaffold manifest** — if the manifest
+  already records an embedder (`embedder_name` / `embedder_dimensions`
+  / `embedder_normalize` metadata keys), the new one must match
+  exactly or the call fails with `MnemoError::Invalid` carrying
+  `EmbedderIdentity::MISMATCH_MSG`. On first registration into a
+  manifest that has no embedder metadata yet, the three keys are
+  upserted so a subsequent reopen catches an embedder swap.
+- **`Mnemo::remember_text(content, memory_type)`** and
+  **`RecallRequest::from_text(&embedder, query)`** convenience paths.
+  Both validate the embedder's returned-vector width and bubble up
+  embedder failures as `MnemoError::Invalid`.
+- **`Mnemo::embedder() -> Option<&dyn Embedder>`** getter so bindings
+  can drive their own text-side wrappers without duplicating the
+  identity check.
+- **Python binding (`mnemo-python`):**
+  - `db.set_embedder(fn, name=..., dimensions=..., normalize=True)` —
+    accepts any Python callable `embed(texts: list[str]) ->
+    list[list[float]]`. Validated once, held on the handle.
+  - `db.remember_text(content, memory_type, *, agent_id=None,
+    importance=None, session_id=None, ttl_secs=None, shared=False,
+    metadata=None)` — mirrors `remember`'s full kwarg surface so
+    migration is a one-word swap.
+  - `db.recall_text(query, top_k=10, memory_types=None, agent_id=None,
+    track_access=True)` — same shape as `recall` but takes a string.
+  - `db.cache_get_semantic_text(namespace, text, threshold=0.97)` —
+    text-side semantic cache lookup, uses the embedder's `name` as
+    the semantic cache's `model` component so a different embedder's
+    entries don't match.
+- **`test/scripts/project_memory.py` moved to the text path** —
+  `set_embedder(embed_texts, name=EMBED_MODEL, dimensions=DIMENSIONS,
+  normalize=True)` at open time, then `remember_text` / `recall_text`
+  everywhere. Fixes the zero-vector dogfood footgun that produced
+  ULID `01M3ST1KRS5G7P07691SB5TNYF` on v0.4.1.
+- **Not in this PR, intentionally:** the heavy `embed-fastembed`
+  feature (PR 10c), and the `mnemo remember/recall --embed-cmd ...`
+  CLI/MCP text paths (PR 10b). This PR keeps the dep tree unchanged
+  so `cargo deny check` stays silent.
+
 ## [0.4.1] — 2026-09-25
 
 Patch release. **No format change** — 0.4.1 opens any 0.4.x file, and

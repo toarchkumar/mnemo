@@ -75,27 +75,48 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 def open_db(*, create: bool = False):
+    """Open (or create) the test database AND register the embedder on
+    the handle. Phase 3 (PR 10a) added `db.set_embedder(fn, ...)` as a
+    per-handle hook; registering once at open time means every
+    subsequent `db.remember_text(...)` / `db.recall_text(...)` call
+    uses the same embedder identity. The Rust core also persists the
+    identity on the scaffold manifest, so swapping embedders between
+    opens is caught loudly."""
     mnemo = require_mnemo()
     pp = passphrase()
     if create or not MNEMO_PATH.exists():
         if MNEMO_PATH.exists() and create:
             MNEMO_PATH.unlink()
-        return mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS)
-    return mnemo.open(str(MNEMO_PATH), pp)
+        db = mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS)
+    else:
+        db = mnemo.open(str(MNEMO_PATH), pp)
+    db.set_embedder(
+        embed_texts,
+        name=EMBED_MODEL,
+        dimensions=DIMENSIONS,
+        normalize=True,
+    )
+    return db
 
 
 def cmd_bootstrap(_: argparse.Namespace) -> None:
+    """Create a fresh database, register the embedder, insert every
+    seed entry via `remember_text`. We still export the resulting
+    JSONL (for cross-tool diffing) by running `embed_texts` once up
+    front — the Phase 3 text path moves embedding to the engine side
+    at insert time, so the JSONL is just an aid, not the input."""
     if not SEED_PATH.exists():
         sys.exit(f"seed file not found: {SEED_PATH}")
     entries = json.loads(SEED_PATH.read_text(encoding="utf-8"))
     texts = [e["content"] for e in entries]
     print(f"embedding {len(texts)} seed memories ({EMBED_MODEL}, dim={DIMENSIONS})...")
-    vectors = embed_texts(texts)
+    vectors = embed_texts(texts)  # kept only for the JSONL export below
 
     mnemo = require_mnemo()
     if MNEMO_PATH.exists():
         MNEMO_PATH.unlink()
     db = mnemo.open(str(MNEMO_PATH), passphrase(), dimensions=DIMENSIONS)
+    db.set_embedder(embed_texts, name=EMBED_MODEL, dimensions=DIMENSIONS, normalize=True)
 
     jsonl_lines: list[str] = []
     for entry, vector in zip(entries, vectors):
@@ -103,10 +124,9 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
         mt = entry.get("memory_type", "semantic")
         importance = float(entry.get("importance", 0.7))
         metadata = entry.get("metadata") or {}
-        db.remember(
+        db.remember_text(
             content,
             mt,
-            vector,
             agent_id=AGENT_ID,
             importance=importance,
             metadata=metadata,
@@ -137,12 +157,10 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
 
 
 def cmd_remember(args: argparse.Namespace) -> None:
-    vector = embed_texts([args.content])[0]
     db = open_db()
-    mid = db.remember(
+    mid = db.remember_text(
         args.content,
         args.type,
-        vector,
         agent_id=AGENT_ID,
         importance=args.importance,
         metadata=json.loads(args.metadata) if args.metadata else None,
@@ -153,10 +171,9 @@ def cmd_remember(args: argparse.Namespace) -> None:
 
 
 def cmd_recall(args: argparse.Namespace) -> None:
-    query_vec = embed_texts([args.query])[0]
     db = open_db()
-    hits = db.recall(
-        query_vec,
+    hits = db.recall_text(
+        args.query,
         top_k=args.top_k,
         agent_id=AGENT_ID,
         memory_types=args.types.split(",") if args.types else None,
@@ -209,7 +226,6 @@ def cmd_perf(args: argparse.Namespace) -> None:
     if not isinstance(entries, list) or not entries:
         sys.exit(f"{path}: expected a non-empty JSON array of perf entries")
 
-    contents: list[str] = []
     rendered: list[tuple[str, dict]] = []
     for i, e in enumerate(entries):
         if not isinstance(e, dict):
@@ -247,21 +263,14 @@ def cmd_perf(args: argparse.Namespace) -> None:
         }
         if notes:
             metadata["notes"] = notes
-        contents.append(content)
         rendered.append((content, metadata))
-
-    print(
-        f"embedding {len(contents)} perf entries ({EMBED_MODEL}, dim={DIMENSIONS})..."
-    )
-    vectors = embed_texts(contents)
 
     db = open_db()
     written: list[str] = []
-    for (content, metadata), vector in zip(rendered, vectors):
-        mid = db.remember(
+    for content, metadata in rendered:
+        mid = db.remember_text(
             content,
             "episodic",
-            vector,
             agent_id=AGENT_ID,
             importance=args.importance,
             metadata=metadata,

@@ -31,6 +31,10 @@ use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 use crate::crypto::{self, KdfParams};
+use crate::embed::{
+    self, Embedder, EmbedderIdentity, MANIFEST_EMBEDDER_DIMENSIONS, MANIFEST_EMBEDDER_NAME,
+    MANIFEST_EMBEDDER_NORMALIZE,
+};
 use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
@@ -238,6 +242,18 @@ impl RecallRequest {
             track_access: true,
         }
     }
+
+    /// Build a request by embedding `query_text` with the supplied
+    /// embedder (Phase 3). Shorthand for `embedder.embed(&[text])` +
+    /// [`RecallRequest::new`]; same defaults as `new`. Fails if the
+    /// embedder returns an empty vector list or an embedding failure.
+    pub fn from_text(embedder: &dyn Embedder, query_text: &str) -> Result<Self> {
+        let mut vectors = embedder.embed(&[query_text])?;
+        let v = vectors.pop().ok_or_else(|| {
+            MnemoError::Invalid("embedder returned no vector for the query text".into())
+        })?;
+        Ok(Self::new(v))
+    }
     /// Set the result cap.
     pub fn top_k(mut self, k: usize) -> Self {
         self.top_k = k;
@@ -375,6 +391,12 @@ pub struct Mnemo {
     cache_batch: BatchState,
     /// In-memory hit/miss/eviction counters (reset on reopen).
     cache_counters: CounterState,
+    /// Optional handle-scoped embedder (Phase 3, PR 10a). Registered
+    /// via [`Mnemo::set_embedder`]; consulted by [`Mnemo::remember_text`]
+    /// and [`RecallRequest::from_text`]. `None` means text-side APIs
+    /// return [`MnemoError::Invalid`] with a "no embedder" message.
+    /// Not persisted — the handle is re-registered after every open.
+    embedder: Option<std::sync::Arc<dyn Embedder>>,
 }
 
 /// Open a file and take an OS advisory lock, returning `Locked { path }`
@@ -667,6 +689,7 @@ impl Mnemo {
             cache_flush_policy: CacheFlushPolicy::default(),
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
+            embedder: None,
         })
     }
 
@@ -908,6 +931,7 @@ impl Mnemo {
             cache_flush_policy: CacheFlushPolicy::default(),
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
+            embedder: None,
         })
     }
 
@@ -1036,6 +1060,7 @@ impl Mnemo {
             cache_flush_policy: CacheFlushPolicy::default(),
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
+            embedder: None,
         })
     }
 
@@ -1105,6 +1130,20 @@ impl Mnemo {
                 got: m.vector.len(),
             });
         }
+        // Reject all-zero vectors (Phase 3 PR 10a; breaking vs 0.4.x).
+        // A zero vector scores exactly 0.0 on every cosine query — it
+        // can't contribute signal, but recency / importance can still
+        // pull it into top-k as noise. We'd rather fail loudly at
+        // `remember` than let a mis-embedded entry pollute recall
+        // quality for the life of the database. Scaffold manifests now
+        // use a sentinel unit vector so this check doesn't trip them.
+        if embed::is_zero_vector(&m.vector) {
+            return Err(MnemoError::Invalid(
+                "all-zero vector refused: it scores 0.0 on every cosine query and \
+                 pollutes recall; check your embedder returned a real embedding"
+                    .into(),
+            ));
+        }
         if m.id == Ulid::nil() {
             m.id = Ulid::new();
         }
@@ -1148,6 +1187,151 @@ impl Mnemo {
     }
 
     // --- public CRUD ------------------------------------------------------
+
+    /// Register a text embedder for this handle. Enables
+    /// [`Mnemo::remember_text`] and the text-side `RecallRequest`
+    /// convenience path. Does two checks before storing the embedder:
+    ///
+    /// 1. **Dimension check.** The embedder's `identity().dimensions`
+    ///    must equal [`Mnemo::dimensions`] (the width this database
+    ///    was created with). Mismatch returns
+    ///    [`MnemoError::DimensionMismatch`].
+    /// 2. **Manifest identity check.** If the scaffold / onboarding
+    ///    manifest already records an embedder (via the
+    ///    `embedder_name` / `embedder_dimensions` / `embedder_normalize`
+    ///    metadata keys), the new embedder's identity must match
+    ///    exactly. A different name — even at the same dimensions —
+    ///    returns [`MnemoError::Invalid`] with
+    ///    [`EmbedderIdentity::MISMATCH_MSG`] in the message. If the
+    ///    manifest has no embedder metadata yet, this call upserts
+    ///    the three keys into the first onboarding/manifest memory
+    ///    (write + flush so a subsequent reopen sees the identity).
+    ///
+    /// On both failure paths the handle's embedder slot is left
+    /// unchanged. On success the embedder is wrapped in an `Arc<dyn
+    /// Embedder>` and consulted by every text-side call made through
+    /// this handle. The slot is per-handle and not persisted — a
+    /// fresh open must re-register (same identity, so the manifest
+    /// check round-trips cleanly).
+    pub fn set_embedder<E: Embedder + 'static>(&mut self, embedder: E) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let identity = embedder.identity();
+        if identity.dimensions != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: identity.dimensions,
+            });
+        }
+
+        // Find a scaffold/onboarding manifest to inspect (or upsert
+        // into). `about()` already filters + sorts the onboarding set.
+        let onboarding = self.about()?;
+        let mut target_pos: Option<usize> = None;
+        for m in &onboarding {
+            let name = m
+                .metadata
+                .get(MANIFEST_EMBEDDER_NAME)
+                .and_then(|v| v.as_str());
+            let dims = m
+                .metadata
+                .get(MANIFEST_EMBEDDER_DIMENSIONS)
+                .and_then(|v| v.as_u64());
+            let norm = m
+                .metadata
+                .get(MANIFEST_EMBEDDER_NORMALIZE)
+                .and_then(|v| v.as_bool());
+            if let (Some(name), Some(dims), Some(norm)) = (name, dims, norm) {
+                let saw = EmbedderIdentity {
+                    name: name.to_string(),
+                    dimensions: dims as usize,
+                    normalize: norm,
+                };
+                if saw != identity {
+                    return Err(embed::identity_mismatch_err(&saw, &identity));
+                }
+                // Match — nothing to upsert; adopt the embedder and
+                // return. `target_pos` would be read on the upsert
+                // path we're now skipping, so no write-back needed.
+                self.embedder = Some(std::sync::Arc::new(embedder));
+                return Ok(());
+            }
+            if target_pos.is_none() {
+                // Remember the first onboarding entry — we'll upsert
+                // into it if no record has embedder metadata.
+                target_pos = Some(0); // index into `onboarding`, not catalog
+            }
+        }
+
+        // No existing identity on the manifest. Upsert into the first
+        // onboarding memory (if any) so later opens see it.
+        if let Some(idx) = target_pos {
+            let mut m = onboarding[idx].clone();
+            m.metadata.insert(
+                MANIFEST_EMBEDDER_NAME.into(),
+                serde_json::Value::String(identity.name.clone()),
+            );
+            m.metadata.insert(
+                MANIFEST_EMBEDDER_DIMENSIONS.into(),
+                serde_json::Value::Number(serde_json::Number::from(identity.dimensions as u64)),
+            );
+            m.metadata.insert(
+                MANIFEST_EMBEDDER_NORMALIZE.into(),
+                serde_json::Value::Bool(identity.normalize),
+            );
+            // Reuse the memory's existing id so this is an in-place
+            // update of the scaffold manifest, not a new entry.
+            self.put(m)?;
+            self.flush()?;
+        }
+
+        self.embedder = Some(std::sync::Arc::new(embedder));
+        Ok(())
+    }
+
+    /// Borrow the currently-registered embedder, if any. Returns
+    /// `None` when no embedder has been set via
+    /// [`Mnemo::set_embedder`]. Bindings use this to drive their own
+    /// text-side convenience methods without duplicating the identity
+    /// check.
+    pub fn embedder(&self) -> Option<&dyn Embedder> {
+        self.embedder.as_deref()
+    }
+
+    /// Embed `content` with the registered embedder and `remember` the
+    /// result. Returns the new memory's ULID. Convenience path for
+    /// callers who have a string, want it stored, and don't need any
+    /// of the per-memory options [`Memory`] exposes (agent, importance,
+    /// metadata, ttl, scope) — build a [`Memory`] by hand and call
+    /// [`Mnemo::remember`] for those.
+    ///
+    /// Fails with [`MnemoError::Invalid`] if no embedder has been
+    /// registered on this handle (call [`Mnemo::set_embedder`] first);
+    /// with [`MnemoError::DimensionMismatch`] if the embedder returned
+    /// the wrong width for this database.
+    pub fn remember_text(&mut self, content: &str, memory_type: MemoryType) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            MnemoError::Invalid(
+                "no embedder registered on this handle; call set_embedder first".into(),
+            )
+        })?;
+        let mut vectors = embedder.embed(&[content])?;
+        let vector = vectors.pop().ok_or_else(|| {
+            MnemoError::Invalid("embedder returned no vector for the input text".into())
+        })?;
+        if vector.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: vector.len(),
+            });
+        }
+        let memory = Memory::new(content.to_string(), memory_type, vector);
+        self.remember(memory)
+    }
 
     /// Store a memory. Returns its ULID. If the memory's ID is nil a fresh
     /// one is assigned; an existing ID overwrites in place.

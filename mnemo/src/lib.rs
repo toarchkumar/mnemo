@@ -51,6 +51,7 @@
 
 mod cache;
 mod crypto;
+mod embed;
 mod error;
 mod format;
 mod index;
@@ -63,6 +64,7 @@ mod store;
 mod wal;
 
 pub use crypto::KdfParams;
+pub use embed::{Embedder, EmbedderIdentity};
 pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
 pub use memory::{Memory, MemoryType, Metric, Scope, ScoreWeights};

@@ -30,8 +30,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    CacheBudget, CacheFlushPolicy, KdfParams, Memory, MemoryType, Metric, Mnemo as Core,
-    MnemoConfig, RecallRequest, Scope, Ulid,
+    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, KdfParams, Memory, MemoryType,
+    Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope, Ulid,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -164,6 +164,47 @@ fn memory_to_dict(py: Python<'_>, m: &Memory) -> PyResult<PyObject> {
     Ok(d.into_any().unbind())
 }
 
+// --- Embedder bridge (Phase 3 PR 10a) -----------------------------------
+
+/// Wraps a Python callable `fn(texts: list[str]) -> list[list[float]]`
+/// so the Rust core can treat it as any other `Embedder`. The identity
+/// is captured once at registration (so the Rust-side manifest-check
+/// path doesn't re-enter Python unnecessarily) and the callable is
+/// invoked under the GIL on each `embed`.
+///
+/// Error-path convention: a Python exception raised inside the
+/// callback is converted into `MnemoError::Invalid` with the Python
+/// error string — the engine then surfaces that as a `RuntimeError`
+/// to the next Python frame via `to_py`.
+struct PyFnEmbedder {
+    identity: EmbedderIdentity,
+    callback: Py<PyAny>,
+}
+
+impl Embedder for PyFnEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        self.identity.clone()
+    }
+
+    fn embed(&self, texts: &[&str]) -> mnemo_core::Result<Vec<Vec<f32>>> {
+        Python::with_gil(|py| {
+            // Pass a Python list of strs; keeps the common
+            // `sentence-transformers` / OpenAI shape natural.
+            let arg = pyo3::types::PyList::new_bound(py, texts);
+            let out = self
+                .callback
+                .call1(py, (arg,))
+                .map_err(|e| mnemo_core::MnemoError::Invalid(format!("embedder callback raised: {e}")))?;
+            let vecs: Vec<Vec<f32>> = out.extract(py).map_err(|e| {
+                mnemo_core::MnemoError::Invalid(format!(
+                    "embedder must return list[list[float]]; got {e}"
+                ))
+            })?;
+            Ok(vecs)
+        })
+    }
+}
+
 // --- the Mnemo class -----------------------------------------------------
 
 /// An open, encrypted Mnemo database.
@@ -244,6 +285,148 @@ impl Mnemo {
         }
         let id = self.inner.remember(memory).map_err(to_py)?;
         Ok(id.to_string())
+    }
+
+    /// Register a text embedder for this handle (Phase 3 PR 10a).
+    ///
+    /// `fn_` is any Python callable with the shape
+    /// `embed(texts: list[str]) -> list[list[float]]`. `name`,
+    /// `dimensions`, and `normalize` describe the embedder's identity;
+    /// they're validated against the scaffold manifest on registration
+    /// and persisted there on first registration so a subsequent open
+    /// catches an embedder swap.
+    ///
+    /// Raises `RuntimeError` on dimension mismatch
+    /// (`dimensions != db.dimensions()`) or on an identity mismatch
+    /// with the manifest.
+    #[pyo3(signature = (fn_, *, name, dimensions, normalize=true))]
+    fn set_embedder(
+        &mut self,
+        fn_: Py<PyAny>,
+        name: String,
+        dimensions: usize,
+        normalize: bool,
+    ) -> PyResult<()> {
+        let identity = EmbedderIdentity {
+            name,
+            dimensions,
+            normalize,
+        };
+        let embedder = PyFnEmbedder {
+            identity,
+            callback: fn_,
+        };
+        self.inner.set_embedder(embedder).map_err(to_py)
+    }
+
+    /// Embed `content` with the registered embedder and `remember` the
+    /// result. Accepts the same per-memory kwargs as `remember` so
+    /// callers can migrate code wholesale: swap `remember(content,
+    /// type, vector, …)` for `remember_text(content, type, …)` and
+    /// drop the explicit vector.
+    ///
+    /// Raises `RuntimeError` if no embedder is registered (call
+    /// `set_embedder` first), if the embedder returned the wrong
+    /// vector width, or if the callback raised a Python exception.
+    #[pyo3(signature = (content, memory_type, *, agent_id=None,
+                        importance=None, session_id=None, ttl_secs=None,
+                        shared=false, metadata=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn remember_text(
+        &mut self,
+        content: String,
+        memory_type: &str,
+        agent_id: Option<String>,
+        importance: Option<f32>,
+        session_id: Option<String>,
+        ttl_secs: Option<i64>,
+        shared: bool,
+        metadata: Option<Bound<'_, PyDict>>,
+    ) -> PyResult<String> {
+        let mt = parse_type(memory_type)?;
+        // Embed first — borrow the embedder briefly and release.
+        let vector = {
+            let embedder = self
+                .inner
+                .embedder()
+                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?;
+            let mut vs = embedder.embed(&[content.as_str()]).map_err(to_py)?;
+            vs.pop().ok_or_else(|| {
+                PyRuntimeError::new_err("embedder returned no vector for the input text")
+            })?
+        };
+        let mut memory = Memory::new(content, mt, vector);
+        if let Some(a) = agent_id {
+            memory = memory.with_agent(a);
+        }
+        if let Some(i) = importance {
+            memory = memory.with_importance(i);
+        }
+        if let Some(s) = session_id {
+            memory = memory.with_session(s);
+        }
+        if let Some(t) = ttl_secs {
+            memory = memory.with_ttl(t);
+        }
+        if shared {
+            memory = memory.with_scope(Scope::Shared);
+        }
+        if let Some(dict) = metadata {
+            for (k, v) in dict.iter() {
+                memory
+                    .metadata
+                    .insert(k.extract::<String>()?, py_to_json(&v)?);
+            }
+        }
+        let id = self.inner.remember(memory).map_err(to_py)?;
+        Ok(id.to_string())
+    }
+
+    /// Embed `query` with the registered embedder and run `recall`
+    /// against the result. Mirrors the shape of `recall(query_vector,
+    /// ...)` but takes a string. Raises if no embedder is registered.
+    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None, track_access=true))]
+    fn recall_text(
+        &mut self,
+        py: Python<'_>,
+        query: &str,
+        top_k: usize,
+        memory_types: Option<Vec<String>>,
+        agent_id: Option<String>,
+        track_access: bool,
+    ) -> PyResult<Vec<PyObject>> {
+        // Embed first (short-lived borrow of the embedder) so we can
+        // then call &mut self.inner.recall(&req) without a borrow clash.
+        let vector = {
+            let embedder = self
+                .inner
+                .embedder()
+                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?;
+            let mut vs = embedder.embed(&[query]).map_err(to_py)?;
+            vs.pop().ok_or_else(|| {
+                PyRuntimeError::new_err("embedder returned no vector for the query text")
+            })?
+        };
+        let mut req = RecallRequest::new(vector)
+            .top_k(top_k)
+            .track_access(track_access);
+        if let Some(types) = memory_types {
+            let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
+            req = req.types(parsed?);
+        }
+        if let Some(a) = agent_id {
+            req = req.agent(a);
+        }
+        let hits = self.inner.recall(&req).map_err(to_py)?;
+        let mut out = Vec::with_capacity(hits.len());
+        for h in hits {
+            let dict = memory_to_dict(py, &h.memory)?;
+            let bound = dict.bind(py);
+            bound.set_item("score", h.score)?;
+            bound.set_item("similarity", h.similarity)?;
+            out.push(dict);
+        }
+        Ok(out)
     }
 
     /// Multi-signal recall. Returns a list of result dicts, each a memory with
@@ -720,6 +903,58 @@ impl Mnemo {
         match self
             .inner
             .cache_get_semantic(namespace, &query, threshold, model)
+            .map_err(to_py)?
+        {
+            Some((hit, similarity)) => {
+                let d = PyDict::new_bound(py);
+                d.set_item("value", pyo3::types::PyBytes::new_bound(py, &hit.value))?;
+                d.set_item("similarity", similarity)?;
+                d.set_item("content_type", hit.content_type)?;
+                d.set_item("created_at", hit.created_at)?;
+                d.set_item("accessed_at", hit.accessed_at)?;
+                d.set_item("access_count", hit.access_count)?;
+                if let Some(ttl) = hit.ttl_secs {
+                    d.set_item("ttl_secs", ttl)?;
+                }
+                Ok(d.into())
+            }
+            None => Ok(py.None()),
+        }
+    }
+
+    /// Text-side semantic cache lookup (Phase 3 PR 10a). Embeds
+    /// `text` with the registered embedder and runs
+    /// `cache_get_semantic(namespace, vector, model=embedder.name,
+    /// threshold)`. Raises if no embedder is registered.
+    ///
+    /// Returns the same dict shape as `cache_get_semantic` on hit, or
+    /// `None` on miss. The `model` component of the lookup is taken
+    /// from the registered embedder's identity — so a semantic entry
+    /// put under a different embedder won't match (consistent with
+    /// the Rust-core semantic-cache contract).
+    #[pyo3(signature = (namespace, text, threshold=0.97))]
+    fn cache_get_semantic_text(
+        &mut self,
+        py: Python<'_>,
+        namespace: &str,
+        text: &str,
+        threshold: f32,
+    ) -> PyResult<PyObject> {
+        let (vector, model) = {
+            let embedder = self
+                .inner
+                .embedder()
+                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?;
+            let identity = embedder.identity();
+            let mut vs = embedder.embed(&[text]).map_err(to_py)?;
+            let v = vs.pop().ok_or_else(|| {
+                PyRuntimeError::new_err("embedder returned no vector for the query text")
+            })?;
+            (v, identity.name)
+        };
+        match self
+            .inner
+            .cache_get_semantic(namespace, &vector, threshold, &model)
             .map_err(to_py)?
         {
             Some((hit, similarity)) => {

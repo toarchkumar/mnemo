@@ -362,6 +362,99 @@ def test_rekey_and_reopen_with_new_passphrase():
     print("ok  rekey + reopen with new passphrase; old is rejected")
 
 
+def _fake_embedder(dims=4):
+    """A tiny deterministic in-test embedder: hashes a string onto one
+    axis and emits a unit spike there. Deps-free so this test file still
+    runs in a bare `maturin develop` venv."""
+    def embed(texts):
+        out = []
+        for t in texts:
+            axis = (sum(bytearray(t.encode("utf-8"))) % dims)
+            v = [0.0] * dims
+            v[axis] = 1.0
+            out.append(v)
+        return out
+    return embed
+
+
+def test_set_embedder_and_text_round_trip():
+    """set_embedder → remember_text → recall_text brings the right
+    memory back, through the deterministic fake embedder."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4, normalize=True)
+
+        db.remember_text("alpha", "semantic")
+        db.remember_text("beta", "episodic")
+        db.flush()
+
+        hits = db.recall_text("alpha", top_k=2)
+        assert hits, "recall_text returned nothing"
+        assert hits[0]["content"] == "alpha", f"got {hits[0]['content']}"
+        db.close()
+    print("ok  set_embedder + remember_text + recall_text round-trip")
+
+
+def test_set_embedder_dim_mismatch_rejected():
+    """Registering an embedder whose declared dimensions don't match
+    the database's width raises RuntimeError."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        try:
+            db.set_embedder(_fake_embedder(8), name="wrong", dimensions=8, normalize=True)
+            raise AssertionError("expected RuntimeError on dim mismatch")
+        except RuntimeError as e:
+            assert "dimension mismatch" in str(e), f"got {e}"
+        db.close()
+    print("ok  set_embedder dim-mismatch rejected")
+
+
+def test_set_embedder_identity_mismatch_rejected_after_reopen():
+    """First handle registers 'MiniLM'; manifest absorbs the identity.
+    A second handle registering a different name under the same
+    dimensions is rejected loudly."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.insert_default_manifest()
+        db.flush()
+        db.set_embedder(_fake_embedder(4), name="MiniLM", dimensions=4, normalize=True)
+        db.close()
+        del db
+
+        db2 = mnemo.open(path, "pw")
+        try:
+            db2.set_embedder(_fake_embedder(4), name="bge", dimensions=4, normalize=True)
+            raise AssertionError("expected identity mismatch")
+        except RuntimeError as e:
+            assert "embedder identity mismatch" in str(e), f"got {e}"
+        # Same identity round-trips.
+        db2.set_embedder(_fake_embedder(4), name="MiniLM", dimensions=4, normalize=True)
+        db2.close()
+        del db2
+    print("ok  set_embedder identity-mismatch rejected across reopen")
+
+
+def test_remember_rejects_zero_vector():
+    """`remember` refuses an all-zero vector (Phase 3 PR 10a breaking
+    change). Scaffold manifest uses a sentinel spike so it still
+    inserts."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=3)
+        try:
+            db.remember("empty", "semantic", [0.0, 0.0, 0.0])
+            raise AssertionError("expected RuntimeError on all-zero vector")
+        except RuntimeError as e:
+            assert "all-zero vector" in str(e), f"got {e}"
+        # A single non-zero still works.
+        db.remember("ok", "semantic", [1.0, 0.0, 0.0])
+        db.close()
+    print("ok  remember rejects all-zero vector")
+
+
 def test_compact_file_module_fn():
     """Module-level `mnemo.compact_file(path, passphrase)` rewrites the
     file, dropping tombstones. Returns `{before, after}`."""
@@ -407,5 +500,9 @@ if __name__ == "__main__":
     test_batched_cache_uncommitted_is_a_miss()
     test_cache_budget_evicts_lru()
     test_rekey_and_reopen_with_new_passphrase()
+    test_set_embedder_and_text_round_trip()
+    test_set_embedder_dim_mismatch_rejected()
+    test_set_embedder_identity_mismatch_rejected_after_reopen()
+    test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     print("\nall Python binding tests passed")

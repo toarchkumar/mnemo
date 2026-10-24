@@ -195,11 +195,23 @@ impl Memory {
             "dimensions".into(),
             Value::Number(serde_json::Number::from(dimensions as u64)),
         );
+        // Sentinel vector: a single-axis unit spike `[1, 0, 0, …]`.
+        // A zero vector would now trip the Phase 3 `put` guard
+        // (all-zero refused — see store.rs). This spike is non-zero
+        // (so it passes), unit-normalized (so it reads cleanly to any
+        // downstream inspector), and uncorrelated with any real
+        // embedder's output (so it ranks near-last on any user query —
+        // appropriate for a placeholder the user is expected to
+        // replace).
+        let mut vector = vec![0.0_f32; dimensions];
+        if dimensions > 0 {
+            vector[0] = 1.0;
+        }
         let now = now_secs();
         Memory {
             id: Ulid::new(),
             memory_type: MemoryType::Semantic,
-            vector: vec![0.0; dimensions],
+            vector,
             content,
             metadata,
             agent_id: "mnemo".to_string(),
