@@ -206,20 +206,22 @@ pub fn open_corpus_with_index(path: &Path) -> Mnemo {
     db
 }
 
-/// Open a *copy* of the cached corpus and unload its in-memory index.
-/// The cached file keeps its on-disk index intact so later runs don't
-/// rebuild. The copy is written to a tempdir the caller owns via the
-/// returned `TempDir` guard; drop it to clean up.
+/// Open the cached corpus in-place and unload its in-memory ANN index.
 ///
-/// `drop_index()` is in-memory only; we deliberately *don't* flush, so
-/// the copy on disk still has the index (it just isn't used by the
-/// returned handle). The copy itself gets removed with the TempDir.
+/// `drop_index()` is in-memory only — we deliberately *don't* flush,
+/// so the on-disk index stays intact. The ivfpq bench runs first and
+/// drops its handle before this is called, releasing the file lock;
+/// this reopens from scratch, drops the ANN in memory, and recall
+/// falls back to exact scan.
+///
+/// Earlier revisions copied the cached file into a tempdir to isolate
+/// mutations. That blew up at the 1M tier (~1.5 GB corpus; macOS
+/// per-user tempdir filled up and `fs::copy` failed mid-way). The
+/// in-place version avoids the duplication entirely — nothing writes
+/// anyway, because we never flush.
 #[allow(dead_code)]
-pub fn open_corpus_exact_only(cached: &Path) -> (tempfile::TempDir, Mnemo) {
-    let td = tempfile::TempDir::new().expect("tempdir for exact-scan corpus copy");
-    let copy = td.path().join("corpus.mnemo");
-    std::fs::copy(cached, &copy).expect("copy cached corpus");
-    let mut db = Mnemo::open(&copy, PASSPHRASE).expect("open corpus copy");
+pub fn open_corpus_exact_only(cached: &Path) -> Mnemo {
+    let mut db = Mnemo::open(cached, PASSPHRASE).expect("open corpus for exact scan");
     db.drop_index();
-    (td, db)
+    db
 }

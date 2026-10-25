@@ -31,7 +31,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use mnemo::{IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest};
+use mnemo::{
+    IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest,
+};
 use serde_json::{json, Value};
 
 const PASSPHRASE: &str = "bench-pw";

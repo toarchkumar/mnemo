@@ -72,11 +72,12 @@ fn bench_recall_pair(c: &mut Criterion, corpus_size: usize, label: &str, sample_
         group.finish();
     }
 
-    // Exact scan: copies the cached file into a tempdir and drops the
-    // in-memory ANN index, so recall falls back to brute force without
-    // mutating the cached file on disk.
+    // Exact scan: reopen the cached file (ivfpq's handle has been
+    // dropped above, releasing the lock), unload the in-memory ANN
+    // without flushing, and recall falls back to brute force. On-disk
+    // index stays intact for the next bench run.
     {
-        let (_td, mut db) = open_corpus_exact_only(&cached);
+        let mut db = open_corpus_exact_only(&cached);
         let mut group = c.benchmark_group("recall");
         group.sample_size(sample_size);
         group.throughput(criterion::Throughput::Elements(1));
