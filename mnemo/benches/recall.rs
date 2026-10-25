@@ -1,24 +1,29 @@
-//! Phase 6 speed bench: `recall` — exact scan vs IVF+PQ, at the 10K
-//! tier for now. Follow-up commits extend to 100K and 1M once the
-//! harness is proven and the maintainer confirms there's disk for it.
+//! Phase 6 speed bench: `recall` — exact scan vs IVF+PQ, at 10K, 100K
+//! and 1M tiers (the planner's spec). Each tier produces two bench
+//! entries: `ivfpq_recall_{10k|100k|1m}` and `exact_scan_{10k|100k|1m}`.
 //!
-//! Two configurations, same corpus, same queries:
+//! The ivfpq config uses `IndexConfig::default()` (n_probe=8,
+//! n_rerank=64, auto partition count ≈ √n). The exact config loads
+//! the same cached file but opens a tempdir copy with the in-memory
+//! index dropped, so the cached file keeps its index intact for the
+//! ivfpq bench's next run — see [`corpus::open_corpus_exact_only`].
 //!
-//! 1. [`exact_scan_10k`] — recall over a corpus with no ANN index
-//!    built. This is the ground truth and the fallback mnemo uses when
-//!    the index is absent or disabled.
-//! 2. [`ivfpq_recall_10k`] — recall over the same corpus with
-//!    `IndexConfig::default()` applied (n_probe=8, n_rerank=64, auto
-//!    partition count = ~sqrt(n) = 100).
+//! Query vectors are a 20-entry batch seeded with `0xDEAD_BEEF`,
+//! identical across tiers so hit/miss patterns are comparable; they
+//! share the corpus's cluster structure but use a different seed so
+//! no query is a corpus duplicate.
 //!
-//! Query vectors are a separately-seeded clustered batch so no query
-//! is identical to any corpus vector; this measures nearest-neighbour
-//! work rather than hash-key lookup.
+//! `track_access=false` so repeated iterations don't mutate the catalog
+//! — otherwise one bench run would bump every returned memory's
+//! `access_count`, which is fine for correctness but muddies the
+//! per-iteration measurement.
 //!
-//! `track_access=false` on the recall request so repeated iterations
-//! don't mutate the catalog — otherwise a single bench run would
-//! bump every top-k memory's `access_count`, which would be fine for
-//! correctness but muddies the per-iteration-cost measurement.
+//! The 100K and 1M setup is expensive: ~2 min and ~20 min respectively
+//! on first run (insert loop + IVF+PQ build with fast KDF). Subsequent
+//! runs reuse the cached `target/benches/corpus_<n>_384d.mnemo` file in
+//! milliseconds. If the reference machine is short on disk the
+//! maintainer skips a tier by not naming it on the `cargo bench`
+//! command line.
 
 use std::hint::black_box;
 
@@ -32,62 +37,84 @@ use corpus::{
     DIMENSIONS,
 };
 
-const CORPUS_SIZE: usize = 10_000;
 const QUERY_COUNT: usize = 20;
 const TOP_K: usize = 10;
 
-fn bench_exact_scan_10k(c: &mut Criterion) {
-    let cached = setup_cached_corpus(CORPUS_SIZE, DIMENSIONS);
-    // Open an in-tempdir copy with the in-memory index dropped — see
-    // `open_corpus_exact_only` for why we don't just drop_index on the
-    // cached file. _td is held so the TempDir doesn't delete the copy
-    // mid-bench.
-    let (_td, mut db) = open_corpus_exact_only(&cached);
-    // 20 pre-generated query vectors, cycled through so each iter is
-    // one query. The vectors share the corpus's cluster structure but
-    // use a different seed so no query is a corpus duplicate.
+/// Run both configurations (ivfpq + exact scan) for a single corpus
+/// tier. `label` is the suffix in the bench name (`"10k"`, `"100k"`,
+/// `"1m"`). `sample_size` is tuned per tier because exact-scan latency
+/// grows linearly with corpus size and the default 100 samples blows
+/// criterion's wall-time budget at 100K+.
+fn bench_recall_pair(c: &mut Criterion, corpus_size: usize, label: &str, sample_size: usize) {
+    let cached = setup_cached_corpus(corpus_size, DIMENSIONS);
     let queries: Vec<Vec<f32>> = gen_clustered_vectors(QUERY_COUNT, DIMENSIONS, 100, 0xDEAD_BEEF);
 
-    let mut group = c.benchmark_group("recall");
-    group.sample_size(50);
-    group.throughput(criterion::Throughput::Elements(1));
-    let mut idx = 0usize;
-    group.bench_function("exact_scan_10k", |b| {
-        b.iter(|| {
-            let q = &queries[idx % QUERY_COUNT];
-            idx += 1;
-            let req = RecallRequest::new(q.clone())
-                .top_k(TOP_K)
-                .track_access(false);
-            let hits = db.recall(&req).expect("recall");
-            black_box(hits);
+    // ivfpq first: opens the cached file directly, uses its on-disk
+    // index. Scoped {} so the handle drops (and releases the lock)
+    // before the exact-scan copy opens.
+    {
+        let mut db = open_corpus_with_index(&cached);
+        let mut group = c.benchmark_group("recall");
+        group.sample_size(sample_size);
+        group.throughput(criterion::Throughput::Elements(1));
+        let mut idx = 0usize;
+        group.bench_function(format!("ivfpq_recall_{label}"), |b| {
+            b.iter(|| {
+                let q = &queries[idx % QUERY_COUNT];
+                idx += 1;
+                let req = RecallRequest::new(q.clone())
+                    .top_k(TOP_K)
+                    .track_access(false);
+                let hits = db.recall(&req).expect("recall");
+                black_box(hits);
+            });
         });
-    });
-    group.finish();
+        group.finish();
+    }
+
+    // Exact scan: copies the cached file into a tempdir and drops the
+    // in-memory ANN index, so recall falls back to brute force without
+    // mutating the cached file on disk.
+    {
+        let (_td, mut db) = open_corpus_exact_only(&cached);
+        let mut group = c.benchmark_group("recall");
+        group.sample_size(sample_size);
+        group.throughput(criterion::Throughput::Elements(1));
+        let mut idx = 0usize;
+        group.bench_function(format!("exact_scan_{label}"), |b| {
+            b.iter(|| {
+                let q = &queries[idx % QUERY_COUNT];
+                idx += 1;
+                let req = RecallRequest::new(q.clone())
+                    .top_k(TOP_K)
+                    .track_access(false);
+                let hits = db.recall(&req).expect("recall");
+                black_box(hits);
+            });
+        });
+        group.finish();
+    }
 }
 
-fn bench_ivfpq_recall_10k(c: &mut Criterion) {
-    let path = setup_cached_corpus(CORPUS_SIZE, DIMENSIONS);
-    let mut db = open_corpus_with_index(&path);
-    let queries: Vec<Vec<f32>> = gen_clustered_vectors(QUERY_COUNT, DIMENSIONS, 100, 0xDEAD_BEEF);
-
-    let mut group = c.benchmark_group("recall");
-    group.sample_size(50);
-    group.throughput(criterion::Throughput::Elements(1));
-    let mut idx = 0usize;
-    group.bench_function("ivfpq_recall_10k", |b| {
-        b.iter(|| {
-            let q = &queries[idx % QUERY_COUNT];
-            idx += 1;
-            let req = RecallRequest::new(q.clone())
-                .top_k(TOP_K)
-                .track_access(false);
-            let hits = db.recall(&req).expect("recall");
-            black_box(hits);
-        });
-    });
-    group.finish();
+fn bench_recall_10k(c: &mut Criterion) {
+    bench_recall_pair(c, 10_000, "10k", 50);
 }
 
-criterion_group!(recall_benches, bench_ivfpq_recall_10k, bench_exact_scan_10k);
+fn bench_recall_100k(c: &mut Criterion) {
+    // 100K × 384-dim ≈ 150 MB of raw vectors. Setup: ~2 min first run.
+    bench_recall_pair(c, 100_000, "100k", 20);
+}
+
+fn bench_recall_1m(c: &mut Criterion) {
+    // 1M × 384-dim ≈ 1.5 GB of raw vectors. Setup: ~20 min first run.
+    // Exact-scan latency expected in the multi-second range.
+    bench_recall_pair(c, 1_000_000, "1m", 10);
+}
+
+criterion_group!(
+    recall_benches,
+    bench_recall_10k,
+    bench_recall_100k,
+    bench_recall_1m,
+);
 criterion_main!(recall_benches);
