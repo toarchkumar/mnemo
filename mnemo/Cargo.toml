@@ -9,6 +9,11 @@ name = "mnemo-engine"
 version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
+# `benches/corpus.rs` is a shared helper module pulled into real benches
+# via `#[path = "corpus.rs"] mod corpus;`, not a bench target. Disable
+# auto-discovery so cargo doesn't try to build it as its own bench
+# executable; the `[[bench]]` entries below list every real target.
+autobenches = false
 description = "Encrypted, single-file, portable agent memory engine with multi-signal recall, sessions, snapshots, and an IVF+PQ index"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
@@ -94,7 +99,18 @@ proptest = "=1.5.0"
 # compiles them (`cargo bench --no-run`), the maintainer runs them
 # on the reference machine (M1 Pro) and records numbers in
 # `test/scripts/perf_v0.5.0.json`.
+#
+# `rayon` and `half` are pulled transitively via `criterion -> ciborium`
+# / `criterion -> rayon`. The latest 1.1x/2.x versions each raised MSRV
+# above our 1.75 floor; pinning them as direct dev-deps forces the
+# resolver to pick MSRV-compatible releases even though we don't use
+# either crate ourselves. If `cargo bench --no-run` on the maintainer's
+# machine stops working on a newer criterion we'll revisit — the
+# benches aren't part of the shipped crate, so these pins only affect
+# the MSRV CI gate.
 criterion = { version = "=0.5.1", features = ["html_reports"] }
+rayon = "=1.10.0"
+half = "=2.4.1"
 
 [[bench]]
 name = "write"
