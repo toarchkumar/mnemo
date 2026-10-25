@@ -88,6 +88,21 @@ tempfile = "=3.10.1"
 # is Rust 1.65, well under our 1.75 floor. Kept as a dev-dep only —
 # it does not appear in the shipped library dependency set.
 proptest = "=1.5.0"
+# Phase 6 speed benchmarks. `=0.5.1` is the last 0.5.x release before
+# criterion bumped to clap v5 and raised its MSRV; stays comfortably
+# under our 1.75 floor. Benches live under `mnemo/benches/`; CI only
+# compiles them (`cargo bench --no-run`), the maintainer runs them
+# on the reference machine (M1 Pro) and records numbers in
+# `test/scripts/perf_v0.5.0.json`.
+criterion = { version = "=0.5.1", features = ["html_reports"] }
+
+[[bench]]
+name = "write"
+harness = false
+
+[[bench]]
+name = "recall"
+harness = false
 
 [features]
 # When enabled, exposes crash-injection hooks used by the Phase 1.3
