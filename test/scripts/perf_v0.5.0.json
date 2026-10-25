@@ -1,0 +1,2959 @@
+{
+  "ranking": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "python": "3.11.2",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+      "mnemo": "0.5.0"
+    },
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "dimensions": 384,
+    "normalize": true,
+    "corpus_size": 55,
+    "queries": [
+      {
+        "text": "what shipped in v0.5.0?",
+        "expected_id": "01M5RPM9795Z5QYBNAGE81SNER",
+        "expected_label": "release:v0.5.0",
+        "category": "release_semantic"
+      },
+      {
+        "text": "what's new in the latest release?",
+        "expected_id": "01M5RPM9795Z5QYBNAGE81SNER",
+        "expected_label": "release:v0.5.0",
+        "category": "release_semantic"
+      },
+      {
+        "text": "the first public release",
+        "expected_id": "01M5RPM8TE5YAG4E9ZPCYVT304",
+        "expected_label": "release:v0.1.0",
+        "category": "release_semantic"
+      },
+      {
+        "text": "MCP server added in which version?",
+        "expected_id": "01M5RPM93EYVGJTCTMBFSFSRMW",
+        "expected_label": "release:v0.4.0",
+        "category": "release_semantic"
+      },
+      {
+        "text": "file locking release",
+        "expected_id": "01M5RPM8WMQ9H6X2XY43MDYN32",
+        "expected_label": "release:v0.3.0",
+        "category": "release_semantic"
+      },
+      {
+        "text": "v0.5.0",
+        "expected_id": "01M5RPM9795Z5QYBNAGE81SNER",
+        "expected_label": "release:v0.5.0",
+        "category": "release_exact"
+      },
+      {
+        "text": "v0.4.0",
+        "expected_id": "01M5RPM93EYVGJTCTMBFSFSRMW",
+        "expected_label": "release:v0.4.0",
+        "category": "release_exact"
+      },
+      {
+        "text": "v0.3.0",
+        "expected_id": "01M5RPM8WMQ9H6X2XY43MDYN32",
+        "expected_label": "release:v0.3.0",
+        "category": "release_exact"
+      },
+      {
+        "text": "v0.1.0",
+        "expected_id": "01M5RPM8TE5YAG4E9ZPCYVT304",
+        "expected_label": "release:v0.1.0",
+        "category": "release_exact"
+      },
+      {
+        "text": "v0.3.2",
+        "expected_id": "01M5RPM92E98FXG5FXP7SEZ618",
+        "expected_label": "release:v0.3.2",
+        "category": "release_exact"
+      },
+      {
+        "text": "which PR added fuzzing?",
+        "expected_id": "01M5RPM9B958QC8X9N6XHS1Y3T",
+        "expected_label": "pr:PR-7",
+        "category": "pr_semantic"
+      },
+      {
+        "text": "the proptest state machine PR",
+        "expected_id": "01M5RPM9BJKW43SA0J0DG65892",
+        "expected_label": "pr:PR-8",
+        "category": "pr_semantic"
+      },
+      {
+        "text": "cargo-deny was added by which PR?",
+        "expected_id": "01M5RPM9CG77JD3F41KA12SCA2",
+        "expected_label": "pr:PR-9",
+        "category": "pr_semantic"
+      },
+      {
+        "text": "PR that fixed EmbedCmd timeouts",
+        "expected_id": "01M5RPM9JWT7A8CBHN84XFJD6K",
+        "expected_label": "pr:PR-10b.2",
+        "category": "pr_semantic"
+      },
+      {
+        "text": "Python binding parity PR",
+        "expected_id": "01M5RPM9DJ875RJSJXARNX7SYJ",
+        "expected_label": "pr:PR-BP",
+        "category": "pr_semantic"
+      },
+      {
+        "text": "PR 7",
+        "expected_id": "01M5RPM9B958QC8X9N6XHS1Y3T",
+        "expected_label": "pr:PR-7",
+        "category": "pr_exact"
+      },
+      {
+        "text": "PR 8",
+        "expected_id": "01M5RPM9BJKW43SA0J0DG65892",
+        "expected_label": "pr:PR-8",
+        "category": "pr_exact"
+      },
+      {
+        "text": "PR 10a",
+        "expected_id": "01M5RPM9EK6A5P2G2ZXRA5GNB8",
+        "expected_label": "pr:PR-10a",
+        "category": "pr_exact"
+      },
+      {
+        "text": "PR 10b.2",
+        "expected_id": "01M5RPM9JWT7A8CBHN84XFJD6K",
+        "expected_label": "pr:PR-10b.2",
+        "category": "pr_exact"
+      },
+      {
+        "text": "PR BP",
+        "expected_id": "01M5RPM9DJ875RJSJXARNX7SYJ",
+        "expected_label": "pr:PR-BP",
+        "category": "pr_exact"
+      },
+      {
+        "text": "how do I open a database?",
+        "expected_id": "01M5RPM9K38HQ7T9K7NVYB2P7D",
+        "expected_label": "api:Mnemo::open",
+        "category": "function_semantic"
+      },
+      {
+        "text": "flushing changes to disk",
+        "expected_id": "01M5RPM9NCZ06CXGRB0J688F54",
+        "expected_label": "api:Mnemo::flush",
+        "category": "function_semantic"
+      },
+      {
+        "text": "conversation lifecycle wrapper",
+        "expected_id": "01M5RPM9NXF0G5GF30MBH45EQ3",
+        "expected_label": "api:Session",
+        "category": "function_semantic"
+      },
+      {
+        "text": "the recall scoring coefficients",
+        "expected_id": "01M5RPM9P62ZCXJWBCAYHR2J0R",
+        "expected_label": "api:ScoreWeights",
+        "category": "function_semantic"
+      },
+      {
+        "text": "fn recall",
+        "expected_id": "01M5RPM9M10F23M0P6QXSX2E73",
+        "expected_label": "api:Mnemo::recall",
+        "category": "function_exact"
+      },
+      {
+        "text": "fn flush",
+        "expected_id": "01M5RPM9NCZ06CXGRB0J688F54",
+        "expected_label": "api:Mnemo::flush",
+        "category": "function_exact"
+      },
+      {
+        "text": "EmbedCmd",
+        "expected_id": "01M5RPM9NN9NEX156M5GXMRQDD",
+        "expected_label": "api:EmbedCmd",
+        "category": "function_exact"
+      },
+      {
+        "text": "ScoreWeights",
+        "expected_id": "01M5RPM9P62ZCXJWBCAYHR2J0R",
+        "expected_label": "api:ScoreWeights",
+        "category": "function_exact"
+      },
+      {
+        "text": "why IVF+PQ and not HNSW?",
+        "expected_id": "01M5RPM9QG3QBQP6DTWZ7GSZH0",
+        "expected_label": "decision:ivf-vs-hnsw",
+        "category": "decision_semantic"
+      },
+      {
+        "text": "all-zero vector",
+        "expected_id": "01M5RPM9SJBACKGCFA92TXZV8F",
+        "expected_label": "decision:all-zero-reject",
+        "category": "decision_exact"
+      }
+    ],
+    "configurations": {
+      "default_weights_track_true": {
+        "formula": "alpha*sim + beta*recency + gamma*importance + delta*ln(uses+1)",
+        "weights": {
+          "alpha": 1.0,
+          "beta": 0.3,
+          "gamma": 0.2,
+          "delta": 0.1,
+          "half_life_days": 7.0
+        },
+        "track_access": true,
+        "usage_loop_passes": 5,
+        "passes": [
+          {
+            "hit_at_1": 0.4333,
+            "hit_at_5": 0.7,
+            "mrr": 0.5525,
+            "misses": [
+              {
+                "query": "what shipped in v0.5.0?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.41662871837615967,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.3.2",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "noise:17",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "what's new in the latest release?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.32314085960388184,
+                "rank_of_expected": 8,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.3.2",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.5.0",
+                  "release:v0.3.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "the first public release",
+                "category": "release_semantic",
+                "expected_label": "release:v0.1.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.29659608006477356,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.3.2",
+                  "release:v0.2.0",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "v0.5.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.3019503951072693,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "v0.3.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.0",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.31700554490089417,
+                "rank_of_expected": 6,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.3.2",
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.3.0",
+                  "release:v0.2.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "PR that fixed EmbedCmd timeouts",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5134686827659607,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b.2",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "release:v0.1.0",
+                  "pr:PR-10a"
+                ]
+              },
+              {
+                "query": "Python binding parity PR",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "release:v0.4.1",
+                "top1_similarity": 0.5714932084083557,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-9",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "release:v0.1.0",
+                  "release:v0.3.0"
+                ]
+              },
+              {
+                "query": "PR 8",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-8",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.42195603251457214,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "release:v0.2.0",
+                  "pr:PR-10b"
+                ]
+              },
+              {
+                "query": "PR 10a",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10a",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.459039568901062,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "release:v0.2.0",
+                  "pr:PR-10b"
+                ]
+              },
+              {
+                "query": "PR 10b.2",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.4673859775066376,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.4.1",
+                  "release:v0.5.0",
+                  "release:v0.2.0",
+                  "pr:PR-BP",
+                  "pr:PR-10b"
+                ]
+              },
+              {
+                "query": "PR BP",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.39189136028289795,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "how do I open a database?",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::open",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.0956774428486824,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "flushing changes to disk",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::flush",
+                "top1_label": "pr:PR-3",
+                "top1_similarity": 0.13750073313713074,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "pr:PR-BP",
+                  "noise:6",
+                  "decision:format-v8"
+                ]
+              },
+              {
+                "query": "conversation lifecycle wrapper",
+                "category": "function_semantic",
+                "expected_label": "api:Session",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.1490703821182251,
+                "rank_of_expected": 6,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-7",
+                  "release:v0.1.0",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "api:Session",
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.2"
+                ]
+              },
+              {
+                "query": "the recall scoring coefficients",
+                "category": "function_semantic",
+                "expected_label": "api:ScoreWeights",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.4263565242290497,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "decision:phase2-moved-up",
+                  "api:ScoreWeights",
+                  "api:Mnemo::recall",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3"
+                ]
+              },
+              {
+                "query": "EmbedCmd",
+                "category": "function_exact",
+                "expected_label": "api:EmbedCmd",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5382924675941467,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-10b.2",
+                  "api:EmbedCmd",
+                  "pr:PR-10a",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.4.0",
+                  "decision:stdout-replies-only",
+                  "decision:no-shell-embed-cmd"
+                ]
+              },
+              {
+                "query": "all-zero vector",
+                "category": "decision_exact",
+                "expected_label": "decision:all-zero-reject",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3619671165943146,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10a",
+                  "api:Mnemo::remember",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              }
+            ],
+            "pass": 1,
+            "per_category": {
+              "release_semantic": {
+                "n": 5,
+                "hit_at_1": 0.4,
+                "hit_at_5": 0.8,
+                "mrr": 0.565
+              },
+              "release_exact": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 0.8,
+                "mrr": 0.7333
+              },
+              "pr_semantic": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 1.0,
+                "mrr": 0.8
+              },
+              "pr_exact": {
+                "n": 5,
+                "hit_at_1": 0.2,
+                "hit_at_5": 0.4,
+                "mrr": 0.2667
+              },
+              "function_semantic": {
+                "n": 4,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.25,
+                "mrr": 0.125
+              },
+              "function_exact": {
+                "n": 4,
+                "hit_at_1": 0.75,
+                "hit_at_5": 1.0,
+                "mrr": 0.8125
+              },
+              "decision_semantic": {
+                "n": 1,
+                "hit_at_1": 1.0,
+                "hit_at_5": 1.0,
+                "mrr": 1.0
+              },
+              "decision_exact": {
+                "n": 1,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.0,
+                "mrr": 0.0
+              }
+            }
+          },
+          {
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.7,
+            "mrr": 0.5293,
+            "misses": [
+              {
+                "query": "what shipped in v0.5.0?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.41662871837615967,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "pr:PR-9",
+                  "release:v0.3.2",
+                  "release:v0.3.0"
+                ]
+              },
+              {
+                "query": "what's new in the latest release?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.32314085960388184,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "release:v0.4.1",
+                  "pr:PR-9",
+                  "release:v0.5.0",
+                  "release:v0.3.2",
+                  "release:v0.3.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "the first public release",
+                "category": "release_semantic",
+                "expected_label": "release:v0.1.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.29659608006477356,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.2.0",
+                  "release:v0.5.0",
+                  "release:v0.3.2"
+                ]
+              },
+              {
+                "query": "v0.3.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.0",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3188968598842621,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "pr:PR-3",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "v0.3.2",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.2978092133998871,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.3.2",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "pr:PR-3",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "PR that fixed EmbedCmd timeouts",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5134686827659607,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b.2",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "pr:PR-10a",
+                  "pr:PR-9",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "Python binding parity PR",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "release:v0.4.1",
+                "top1_similarity": 0.5714932084083557,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "pr:PR-10b",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "PR 8",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-8",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.42195603251457214,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10a",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10a",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.459039568901062,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-10b",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10b.2",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.4673859775066376,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "pr:PR-10b",
+                  "pr:PR-BP"
+                ]
+              },
+              {
+                "query": "PR BP",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.39189136028289795,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "pr:PR-10b",
+                  "release:v0.4.1",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "how do I open a database?",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::open",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.0956774428486824,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.5.0",
+                  "pr:PR-9",
+                  "pr:PR-10b",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "flushing changes to disk",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::flush",
+                "top1_label": "pr:PR-3",
+                "top1_similarity": 0.13750073313713074,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "release:v0.3.2",
+                  "decision:format-v8",
+                  "pr:PR-BP",
+                  "noise:6"
+                ]
+              },
+              {
+                "query": "conversation lifecycle wrapper",
+                "category": "function_semantic",
+                "expected_label": "api:Session",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.1490703821182251,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-7",
+                  "pr:PR-10b",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "api:Session",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "the recall scoring coefficients",
+                "category": "function_semantic",
+                "expected_label": "api:ScoreWeights",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.4263565242290497,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "decision:phase2-moved-up",
+                  "api:ScoreWeights",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3"
+                ]
+              },
+              {
+                "query": "fn recall",
+                "category": "function_exact",
+                "expected_label": "api:Mnemo::recall",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.42440932989120483,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-7",
+                  "release:v0.1.0",
+                  "pr:PR-9",
+                  "decision:phase2-moved-up",
+                  "pr:PR-3",
+                  "release:v0.4.0"
+                ]
+              },
+              {
+                "query": "EmbedCmd",
+                "category": "function_exact",
+                "expected_label": "api:EmbedCmd",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5382924675941467,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-10b.2",
+                  "api:EmbedCmd",
+                  "pr:PR-10a",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.4.0",
+                  "decision:stdout-replies-only",
+                  "decision:no-shell-embed-cmd"
+                ]
+              },
+              {
+                "query": "all-zero vector",
+                "category": "decision_exact",
+                "expected_label": "decision:all-zero-reject",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3619671165943146,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10a",
+                  "api:Mnemo::remember",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              }
+            ],
+            "pass": 2,
+            "per_category": {
+              "release_semantic": {
+                "n": 5,
+                "hit_at_1": 0.4,
+                "hit_at_5": 0.8,
+                "mrr": 0.5686
+              },
+              "release_exact": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 0.8,
+                "mrr": 0.6952
+              },
+              "pr_semantic": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 1.0,
+                "mrr": 0.8
+              },
+              "pr_exact": {
+                "n": 5,
+                "hit_at_1": 0.2,
+                "hit_at_5": 0.4,
+                "mrr": 0.2667
+              },
+              "function_semantic": {
+                "n": 4,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.25,
+                "mrr": 0.119
+              },
+              "function_exact": {
+                "n": 4,
+                "hit_at_1": 0.5,
+                "hit_at_5": 1.0,
+                "mrr": 0.6875
+              },
+              "decision_semantic": {
+                "n": 1,
+                "hit_at_1": 1.0,
+                "hit_at_5": 1.0,
+                "mrr": 1.0
+              },
+              "decision_exact": {
+                "n": 1,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.0,
+                "mrr": 0.0
+              }
+            }
+          },
+          {
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.7,
+            "mrr": 0.5259,
+            "misses": [
+              {
+                "query": "what shipped in v0.5.0?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.41662871837615967,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "pr:PR-9",
+                  "release:v0.3.2",
+                  "release:v0.3.0"
+                ]
+              },
+              {
+                "query": "what's new in the latest release?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.32314085960388184,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "release:v0.4.1",
+                  "pr:PR-9",
+                  "release:v0.5.0",
+                  "release:v0.3.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "the first public release",
+                "category": "release_semantic",
+                "expected_label": "release:v0.1.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.29659608006477356,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.2.0",
+                  "release:v0.5.0",
+                  "release:v0.3.2"
+                ]
+              },
+              {
+                "query": "v0.3.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.0",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3188968598842621,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "pr:PR-3",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "v0.3.2",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.2978092133998871,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "PR that fixed EmbedCmd timeouts",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5134686827659607,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b.2",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "pr:PR-10a",
+                  "pr:PR-9",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "Python binding parity PR",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "release:v0.4.1",
+                "top1_similarity": 0.5714932084083557,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "pr:PR-10b",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "PR 8",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-8",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.42195603251457214,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "pr:PR-10b",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10a",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10a",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.459039568901062,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10b.2",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.4673859775066376,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "pr:PR-BP"
+                ]
+              },
+              {
+                "query": "PR BP",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.39189136028289795,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "pr:PR-10b",
+                  "release:v0.4.1",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "how do I open a database?",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::open",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.0956774428486824,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "release:v0.3.0",
+                  "pr:PR-3",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-9",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "flushing changes to disk",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::flush",
+                "top1_label": "pr:PR-3",
+                "top1_similarity": 0.13750073313713074,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "decision:format-v8",
+                  "release:v0.3.2",
+                  "pr:PR-BP",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "conversation lifecycle wrapper",
+                "category": "function_semantic",
+                "expected_label": "api:Session",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.1490703821182251,
+                "rank_of_expected": 8,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-7",
+                  "pr:PR-10b",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "api:Session",
+                  "release:v0.4.1",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "the recall scoring coefficients",
+                "category": "function_semantic",
+                "expected_label": "api:ScoreWeights",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.4263565242290497,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "decision:phase2-moved-up",
+                  "api:ScoreWeights",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3"
+                ]
+              },
+              {
+                "query": "fn recall",
+                "category": "function_exact",
+                "expected_label": "api:Mnemo::recall",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.42440932989120483,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-7",
+                  "release:v0.1.0",
+                  "pr:PR-9",
+                  "pr:PR-3",
+                  "decision:phase2-moved-up",
+                  "release:v0.4.0"
+                ]
+              },
+              {
+                "query": "EmbedCmd",
+                "category": "function_exact",
+                "expected_label": "api:EmbedCmd",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5382924675941467,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-10b.2",
+                  "api:EmbedCmd",
+                  "pr:PR-10a",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.4.0",
+                  "decision:stdout-replies-only",
+                  "decision:no-shell-embed-cmd"
+                ]
+              },
+              {
+                "query": "all-zero vector",
+                "category": "decision_exact",
+                "expected_label": "decision:all-zero-reject",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3619671165943146,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10a",
+                  "api:Mnemo::remember",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              }
+            ],
+            "pass": 3,
+            "per_category": {
+              "release_semantic": {
+                "n": 5,
+                "hit_at_1": 0.4,
+                "hit_at_5": 0.8,
+                "mrr": 0.5686
+              },
+              "release_exact": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 0.8,
+                "mrr": 0.6786
+              },
+              "pr_semantic": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 1.0,
+                "mrr": 0.8
+              },
+              "pr_exact": {
+                "n": 5,
+                "hit_at_1": 0.2,
+                "hit_at_5": 0.4,
+                "mrr": 0.2667
+              },
+              "function_semantic": {
+                "n": 4,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.25,
+                "mrr": 0.1146
+              },
+              "function_exact": {
+                "n": 4,
+                "hit_at_1": 0.5,
+                "hit_at_5": 1.0,
+                "mrr": 0.6875
+              },
+              "decision_semantic": {
+                "n": 1,
+                "hit_at_1": 1.0,
+                "hit_at_5": 1.0,
+                "mrr": 1.0
+              },
+              "decision_exact": {
+                "n": 1,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.0,
+                "mrr": 0.0
+              }
+            }
+          },
+          {
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.7,
+            "mrr": 0.525,
+            "misses": [
+              {
+                "query": "what shipped in v0.5.0?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.41662871837615967,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "pr:PR-9",
+                  "release:v0.3.2",
+                  "release:v0.3.0"
+                ]
+              },
+              {
+                "query": "what's new in the latest release?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.32314085960388184,
+                "rank_of_expected": 6,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "release:v0.4.1",
+                  "release:v0.5.0",
+                  "pr:PR-9",
+                  "release:v0.3.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "the first public release",
+                "category": "release_semantic",
+                "expected_label": "release:v0.1.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.29659608006477356,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "pr:PR-9",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "release:v0.2.0",
+                  "release:v0.5.0",
+                  "release:v0.3.2"
+                ]
+              },
+              {
+                "query": "v0.3.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.0",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3188968598842621,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "pr:PR-3",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "v0.3.2",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.2978092133998871,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "PR that fixed EmbedCmd timeouts",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5134686827659607,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b.2",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-10a",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "Python binding parity PR",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "release:v0.4.1",
+                "top1_similarity": 0.5714932084083557,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "pr:PR-10b",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "PR 8",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-8",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.42195603251457214,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "pr:PR-10b",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10a",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10a",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.459039568901062,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10b.2",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.4673859775066376,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "pr:PR-BP"
+                ]
+              },
+              {
+                "query": "PR BP",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.39189136028289795,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "pr:PR-10b",
+                  "release:v0.4.1",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "how do I open a database?",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::open",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.0956774428486824,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "release:v0.3.0",
+                  "pr:PR-3",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-9",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "flushing changes to disk",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::flush",
+                "top1_label": "pr:PR-3",
+                "top1_similarity": 0.13750073313713074,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "decision:format-v8",
+                  "pr:PR-BP",
+                  "release:v0.3.2",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "conversation lifecycle wrapper",
+                "category": "function_semantic",
+                "expected_label": "api:Session",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.1490703821182251,
+                "rank_of_expected": 8,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-7",
+                  "pr:PR-10b",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "api:Session",
+                  "release:v0.4.1",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "the recall scoring coefficients",
+                "category": "function_semantic",
+                "expected_label": "api:ScoreWeights",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.4263565242290497,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "decision:phase2-moved-up",
+                  "api:ScoreWeights",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3"
+                ]
+              },
+              {
+                "query": "fn recall",
+                "category": "function_exact",
+                "expected_label": "api:Mnemo::recall",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.42440932989120483,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-7",
+                  "release:v0.1.0",
+                  "pr:PR-9",
+                  "pr:PR-3",
+                  "decision:phase2-moved-up",
+                  "release:v0.4.0"
+                ]
+              },
+              {
+                "query": "EmbedCmd",
+                "category": "function_exact",
+                "expected_label": "api:EmbedCmd",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5382924675941467,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-10b.2",
+                  "pr:PR-10a",
+                  "api:EmbedCmd",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.4.0",
+                  "decision:stdout-replies-only",
+                  "decision:no-shell-embed-cmd"
+                ]
+              },
+              {
+                "query": "all-zero vector",
+                "category": "decision_exact",
+                "expected_label": "decision:all-zero-reject",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3619671165943146,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10a",
+                  "api:Mnemo::remember",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              }
+            ],
+            "pass": 4,
+            "per_category": {
+              "release_semantic": {
+                "n": 5,
+                "hit_at_1": 0.4,
+                "hit_at_5": 0.8,
+                "mrr": 0.5733
+              },
+              "release_exact": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 0.8,
+                "mrr": 0.6786
+              },
+              "pr_semantic": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 1.0,
+                "mrr": 0.8
+              },
+              "pr_exact": {
+                "n": 5,
+                "hit_at_1": 0.2,
+                "hit_at_5": 0.4,
+                "mrr": 0.2667
+              },
+              "function_semantic": {
+                "n": 4,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.25,
+                "mrr": 0.1146
+              },
+              "function_exact": {
+                "n": 4,
+                "hit_at_1": 0.5,
+                "hit_at_5": 1.0,
+                "mrr": 0.675
+              },
+              "decision_semantic": {
+                "n": 1,
+                "hit_at_1": 1.0,
+                "hit_at_5": 1.0,
+                "mrr": 1.0
+              },
+              "decision_exact": {
+                "n": 1,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.0,
+                "mrr": 0.0
+              }
+            }
+          },
+          {
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.7,
+            "mrr": 0.525,
+            "misses": [
+              {
+                "query": "what shipped in v0.5.0?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.41662871837615967,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0",
+                  "pr:PR-9",
+                  "release:v0.3.2",
+                  "release:v0.3.0"
+                ]
+              },
+              {
+                "query": "what's new in the latest release?",
+                "category": "release_semantic",
+                "expected_label": "release:v0.5.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.32314085960388184,
+                "rank_of_expected": 6,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "pr:PR-7",
+                  "release:v0.4.1",
+                  "release:v0.5.0",
+                  "pr:PR-9",
+                  "release:v0.3.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "the first public release",
+                "category": "release_semantic",
+                "expected_label": "release:v0.1.0",
+                "top1_label": "release:v0.4.0",
+                "top1_similarity": 0.29659608006477356,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "pr:PR-9",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "release:v0.2.0",
+                  "release:v0.5.0",
+                  "release:v0.3.2"
+                ]
+              },
+              {
+                "query": "v0.3.0",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.0",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3188968598842621,
+                "rank_of_expected": 7,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "pr:PR-3",
+                  "release:v0.2.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "v0.3.2",
+                "category": "release_exact",
+                "expected_label": "release:v0.3.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.2978092133998871,
+                "rank_of_expected": 4,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "release:v0.3.2",
+                  "release:v0.2.0",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "pr:PR-7",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "PR that fixed EmbedCmd timeouts",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5134686827659607,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b.2",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-10a",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "Python binding parity PR",
+                "category": "pr_semantic",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "release:v0.4.1",
+                "top1_similarity": 0.5714932084083557,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.4.1",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "release:v0.2.0",
+                  "release:v0.1.0"
+                ]
+              },
+              {
+                "query": "PR 8",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-8",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.42195603251457214,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.1",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "pr:PR-BP",
+                  "pr:PR-10b",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10a",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10a",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.459039568901062,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "pr:PR-BP",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "PR 10b.2",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-10b.2",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.4673859775066376,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.4.1",
+                  "pr:PR-10b",
+                  "release:v0.2.0",
+                  "pr:PR-BP"
+                ]
+              },
+              {
+                "query": "PR BP",
+                "category": "pr_exact",
+                "expected_label": "pr:PR-BP",
+                "top1_label": "pr:PR-9",
+                "top1_similarity": 0.39189136028289795,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "pr:PR-9",
+                  "pr:PR-7",
+                  "pr:PR-BP",
+                  "pr:PR-3",
+                  "release:v0.4.0",
+                  "pr:PR-10b",
+                  "release:v0.4.1",
+                  "release:v0.1.0",
+                  "release:v0.5.0",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "how do I open a database?",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::open",
+                "top1_label": "release:v0.1.0",
+                "top1_similarity": 0.0956774428486824,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.1.0",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "release:v0.3.0",
+                  "pr:PR-3",
+                  "pr:PR-10b",
+                  "release:v0.5.0",
+                  "pr:PR-9",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              },
+              {
+                "query": "flushing changes to disk",
+                "category": "function_semantic",
+                "expected_label": "api:Mnemo::flush",
+                "top1_label": "pr:PR-3",
+                "top1_similarity": 0.13750073313713074,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "pr:PR-3",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "release:v0.4.1",
+                  "release:v0.3.0",
+                  "decision:format-v8",
+                  "pr:PR-BP",
+                  "release:v0.3.2",
+                  "release:v0.5.0"
+                ]
+              },
+              {
+                "query": "conversation lifecycle wrapper",
+                "category": "function_semantic",
+                "expected_label": "api:Session",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.1490703821182251,
+                "rank_of_expected": 8,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-7",
+                  "pr:PR-10b",
+                  "release:v0.1.0",
+                  "release:v0.2.0",
+                  "release:v0.4.0",
+                  "pr:PR-3",
+                  "api:Session",
+                  "release:v0.4.1",
+                  "pr:PR-9"
+                ]
+              },
+              {
+                "query": "the recall scoring coefficients",
+                "category": "function_semantic",
+                "expected_label": "api:ScoreWeights",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.4263565242290497,
+                "rank_of_expected": 3,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "decision:phase2-moved-up",
+                  "api:ScoreWeights",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10b",
+                  "release:v0.4.0",
+                  "pr:PR-7",
+                  "pr:PR-3"
+                ]
+              },
+              {
+                "query": "fn recall",
+                "category": "function_exact",
+                "expected_label": "api:Mnemo::recall",
+                "top1_label": "release:v0.2.0",
+                "top1_similarity": 0.42440932989120483,
+                "rank_of_expected": 2,
+                "top_k_labels": [
+                  "release:v0.2.0",
+                  "api:Mnemo::recall",
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-7",
+                  "release:v0.1.0",
+                  "pr:PR-9",
+                  "pr:PR-3",
+                  "decision:phase2-moved-up",
+                  "release:v0.4.0"
+                ]
+              },
+              {
+                "query": "EmbedCmd",
+                "category": "function_exact",
+                "expected_label": "api:EmbedCmd",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.5382924675941467,
+                "rank_of_expected": 5,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "pr:PR-10b",
+                  "pr:PR-10b.2",
+                  "pr:PR-10a",
+                  "api:EmbedCmd",
+                  "release:v0.1.0",
+                  "pr:PR-7",
+                  "release:v0.4.0",
+                  "decision:stdout-replies-only",
+                  "decision:no-shell-embed-cmd"
+                ]
+              },
+              {
+                "query": "all-zero vector",
+                "category": "decision_exact",
+                "expected_label": "decision:all-zero-reject",
+                "top1_label": "release:v0.5.0",
+                "top1_similarity": 0.3619671165943146,
+                "rank_of_expected": null,
+                "top_k_labels": [
+                  "release:v0.5.0",
+                  "release:v0.1.0",
+                  "pr:PR-10a",
+                  "api:Mnemo::remember",
+                  "pr:PR-7",
+                  "pr:PR-9",
+                  "release:v0.4.0",
+                  "release:v0.3.0",
+                  "release:v0.4.1",
+                  "release:v0.2.0"
+                ]
+              }
+            ],
+            "pass": 5,
+            "per_category": {
+              "release_semantic": {
+                "n": 5,
+                "hit_at_1": 0.4,
+                "hit_at_5": 0.8,
+                "mrr": 0.5733
+              },
+              "release_exact": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 0.8,
+                "mrr": 0.6786
+              },
+              "pr_semantic": {
+                "n": 5,
+                "hit_at_1": 0.6,
+                "hit_at_5": 1.0,
+                "mrr": 0.8
+              },
+              "pr_exact": {
+                "n": 5,
+                "hit_at_1": 0.2,
+                "hit_at_5": 0.4,
+                "mrr": 0.2667
+              },
+              "function_semantic": {
+                "n": 4,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.25,
+                "mrr": 0.1146
+              },
+              "function_exact": {
+                "n": 4,
+                "hit_at_1": 0.5,
+                "hit_at_5": 1.0,
+                "mrr": 0.675
+              },
+              "decision_semantic": {
+                "n": 1,
+                "hit_at_1": 1.0,
+                "hit_at_5": 1.0,
+                "mrr": 1.0
+              },
+              "decision_exact": {
+                "n": 1,
+                "hit_at_1": 0.0,
+                "hit_at_5": 0.0,
+                "mrr": 0.0
+              }
+            }
+          }
+        ],
+        "drift_pass1_vs_last": {
+          "top1_changed_count": 4,
+          "top1_changed": [
+            {
+              "query": "v0.5.0",
+              "pass1_top1": "release:v0.1.0",
+              "last_pass_top1": "release:v0.5.0"
+            },
+            {
+              "query": "v0.3.0",
+              "pass1_top1": "release:v0.1.0",
+              "last_pass_top1": "release:v0.5.0"
+            },
+            {
+              "query": "v0.3.2",
+              "pass1_top1": "release:v0.3.2",
+              "last_pass_top1": "release:v0.5.0"
+            },
+            {
+              "query": "fn recall",
+              "pass1_top1": "api:Mnemo::recall",
+              "last_pass_top1": "release:v0.2.0"
+            }
+          ]
+        }
+      },
+      "similarity_only": {
+        "hit_at_1": 0.5667,
+        "hit_at_5": 0.8,
+        "mrr": 0.669,
+        "misses": [
+          {
+            "query": "what shipped in v0.5.0?",
+            "category": "release_semantic",
+            "expected_label": "release:v0.5.0",
+            "top1_label": "release:v0.4.0",
+            "top1_similarity": 0.41662871837615967,
+            "rank_of_expected": 8,
+            "top_k_labels": [
+              "release:v0.4.0",
+              "pr:PR-3",
+              "release:v0.1.0",
+              "release:v0.3.2",
+              "pr:PR-7",
+              "noise:17",
+              "noise:4",
+              "release:v0.5.0",
+              "noise:12",
+              "release:v0.4.1"
+            ]
+          },
+          {
+            "query": "what's new in the latest release?",
+            "category": "release_semantic",
+            "expected_label": "release:v0.5.0",
+            "top1_label": "pr:PR-3",
+            "top1_similarity": 0.3356150686740875,
+            "rank_of_expected": null,
+            "top_k_labels": [
+              "pr:PR-3",
+              "release:v0.4.0",
+              "release:v0.1.0",
+              "release:v0.3.2",
+              "pr:PR-9",
+              "release:v0.3.0",
+              "pr:PR-7",
+              "pr:PR-5",
+              "release:v0.4.1",
+              "decision:format-v8"
+            ]
+          },
+          {
+            "query": "the first public release",
+            "category": "release_semantic",
+            "expected_label": "release:v0.1.0",
+            "top1_label": "release:v0.4.0",
+            "top1_similarity": 0.29659608006477356,
+            "rank_of_expected": 3,
+            "top_k_labels": [
+              "release:v0.4.0",
+              "pr:PR-3",
+              "release:v0.1.0",
+              "decision:pypi-trusted",
+              "release:v0.3.0",
+              "pr:PR-9",
+              "release:v0.4.1",
+              "release:v0.3.2",
+              "pr:PR-7",
+              "release:v0.3.1"
+            ]
+          },
+          {
+            "query": "v0.5.0",
+            "category": "release_exact",
+            "expected_label": "release:v0.5.0",
+            "top1_label": "release:v0.3.2",
+            "top1_similarity": 0.3200742304325104,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "release:v0.3.2",
+              "release:v0.5.0",
+              "release:v0.1.0",
+              "release:v0.4.0",
+              "release:v0.2.0",
+              "release:v0.3.0",
+              "pr:PR-3",
+              "pr:PR-5",
+              "noise:9",
+              "release:v0.4.1"
+            ]
+          },
+          {
+            "query": "v0.3.0",
+            "category": "release_exact",
+            "expected_label": "release:v0.3.0",
+            "top1_label": "release:v0.3.2",
+            "top1_similarity": 0.42292651534080505,
+            "rank_of_expected": 6,
+            "top_k_labels": [
+              "release:v0.3.2",
+              "release:v0.5.0",
+              "release:v0.1.0",
+              "release:v0.4.0",
+              "pr:PR-3",
+              "release:v0.3.0",
+              "noise:9",
+              "release:v0.2.0",
+              "pr:PR-5",
+              "release:v0.3.1"
+            ]
+          },
+          {
+            "query": "Python binding parity PR",
+            "category": "pr_semantic",
+            "expected_label": "pr:PR-BP",
+            "top1_label": "release:v0.4.1",
+            "top1_similarity": 0.5714932084083557,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "release:v0.4.1",
+              "pr:PR-BP",
+              "pr:PR-5",
+              "noise:9",
+              "pr:PR-9",
+              "pr:PR-3",
+              "pr:PR-8",
+              "decision:pypi-trusted",
+              "decision:stdout-replies-only",
+              "noise:12"
+            ]
+          },
+          {
+            "query": "PR 7",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-7",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.41634801030158997,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-3",
+              "pr:PR-BP",
+              "decision:phase2-moved-up",
+              "pr:PR-4",
+              "api:ScoreWeights",
+              "pr:PR-5",
+              "pr:PR-10b",
+              "decision:format-v8"
+            ]
+          },
+          {
+            "query": "PR 8",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-8",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.42195603251457214,
+            "rank_of_expected": null,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-BP",
+              "pr:PR-3",
+              "pr:PR-5",
+              "release:v0.4.1",
+              "decision:pypi-trusted",
+              "api:ScoreWeights",
+              "decision:format-v8",
+              "pr:PR-10b"
+            ]
+          },
+          {
+            "query": "PR 10a",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-10a",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.459039568901062,
+            "rank_of_expected": 9,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-BP",
+              "pr:PR-3",
+              "decision:pypi-trusted",
+              "api:ScoreWeights",
+              "pr:PR-4",
+              "pr:PR-10b",
+              "pr:PR-10a",
+              "api:Mnemo::flush"
+            ]
+          },
+          {
+            "query": "PR 10b.2",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-10b.2",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.4673859775066376,
+            "rank_of_expected": null,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-3",
+              "pr:PR-BP",
+              "pr:PR-4",
+              "pr:PR-10b",
+              "decision:phase2-moved-up",
+              "pr:PR-10a",
+              "decision:format-v9-combine",
+              "pr:PR-5"
+            ]
+          },
+          {
+            "query": "how do I open a database?",
+            "category": "function_semantic",
+            "expected_label": "api:Mnemo::open",
+            "top1_label": "noise:3",
+            "top1_similarity": 0.15266799926757812,
+            "rank_of_expected": 4,
+            "top_k_labels": [
+              "noise:3",
+              "release:v0.3.0",
+              "noise:14",
+              "api:Mnemo::open",
+              "noise:13",
+              "pr:PR-7",
+              "release:v0.1.0",
+              "noise:4",
+              "pr:PR-3",
+              "noise:5"
+            ]
+          },
+          {
+            "query": "flushing changes to disk",
+            "category": "function_semantic",
+            "expected_label": "api:Mnemo::flush",
+            "top1_label": "noise:6",
+            "top1_similarity": 0.3765109181404114,
+            "rank_of_expected": 3,
+            "top_k_labels": [
+              "noise:6",
+              "decision:format-v8",
+              "api:Mnemo::flush",
+              "noise:5",
+              "noise:10",
+              "noise:7",
+              "noise:20",
+              "noise:8",
+              "release:v0.3.2",
+              "noise:19"
+            ]
+          },
+          {
+            "query": "all-zero vector",
+            "category": "decision_exact",
+            "expected_label": "decision:all-zero-reject",
+            "top1_label": "api:Mnemo::remember",
+            "top1_similarity": 0.43890413641929626,
+            "rank_of_expected": 4,
+            "top_k_labels": [
+              "api:Mnemo::remember",
+              "release:v0.5.0",
+              "pr:PR-10a",
+              "decision:all-zero-reject",
+              "decision:no-shell-embed-cmd",
+              "release:v0.1.0",
+              "pr:PR-9",
+              "noise:3",
+              "release:v0.3.0",
+              "noise:18"
+            ]
+          }
+        ],
+        "formula": "sim",
+        "weights": {
+          "alpha": 1.0,
+          "beta": 0.0,
+          "gamma": 0.0,
+          "delta": 0.0
+        },
+        "track_access": false,
+        "per_category": {
+          "release_semantic": {
+            "n": 5,
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.6,
+            "mrr": 0.4917
+          },
+          "release_exact": {
+            "n": 5,
+            "hit_at_1": 0.6,
+            "hit_at_5": 0.8,
+            "mrr": 0.7333
+          },
+          "pr_semantic": {
+            "n": 5,
+            "hit_at_1": 0.8,
+            "hit_at_5": 1.0,
+            "mrr": 0.9
+          },
+          "pr_exact": {
+            "n": 5,
+            "hit_at_1": 0.2,
+            "hit_at_5": 0.4,
+            "mrr": 0.3222
+          },
+          "function_semantic": {
+            "n": 4,
+            "hit_at_1": 0.5,
+            "hit_at_5": 1.0,
+            "mrr": 0.6458
+          },
+          "function_exact": {
+            "n": 4,
+            "hit_at_1": 1.0,
+            "hit_at_5": 1.0,
+            "mrr": 1.0
+          },
+          "decision_semantic": {
+            "n": 1,
+            "hit_at_1": 1.0,
+            "hit_at_5": 1.0,
+            "mrr": 1.0
+          },
+          "decision_exact": {
+            "n": 1,
+            "hit_at_1": 0.0,
+            "hit_at_5": 1.0,
+            "mrr": 0.25
+          }
+        }
+      },
+      "default_weights_track_false": {
+        "hit_at_1": 0.5667,
+        "hit_at_5": 0.8667,
+        "mrr": 0.6865,
+        "misses": [
+          {
+            "query": "what shipped in v0.5.0?",
+            "category": "release_semantic",
+            "expected_label": "release:v0.5.0",
+            "top1_label": "release:v0.4.0",
+            "top1_similarity": 0.41662871837615967,
+            "rank_of_expected": 5,
+            "top_k_labels": [
+              "release:v0.4.0",
+              "pr:PR-3",
+              "release:v0.1.0",
+              "pr:PR-7",
+              "release:v0.5.0",
+              "release:v0.3.2",
+              "release:v0.4.1",
+              "release:v0.2.0",
+              "noise:17",
+              "pr:PR-9"
+            ]
+          },
+          {
+            "query": "what's new in the latest release?",
+            "category": "release_semantic",
+            "expected_label": "release:v0.5.0",
+            "top1_label": "release:v0.4.0",
+            "top1_similarity": 0.32314085960388184,
+            "rank_of_expected": 9,
+            "top_k_labels": [
+              "release:v0.4.0",
+              "release:v0.1.0",
+              "pr:PR-3",
+              "release:v0.3.2",
+              "release:v0.3.0",
+              "release:v0.4.1",
+              "pr:PR-7",
+              "pr:PR-9",
+              "release:v0.5.0",
+              "decision:phase2-moved-up"
+            ]
+          },
+          {
+            "query": "the first public release",
+            "category": "release_semantic",
+            "expected_label": "release:v0.1.0",
+            "top1_label": "release:v0.4.0",
+            "top1_similarity": 0.29659608006477356,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "release:v0.4.0",
+              "release:v0.1.0",
+              "pr:PR-3",
+              "release:v0.3.0",
+              "release:v0.4.1",
+              "decision:pypi-trusted",
+              "pr:PR-9",
+              "pr:PR-7",
+              "release:v0.3.2",
+              "release:v0.2.0"
+            ]
+          },
+          {
+            "query": "v0.3.0",
+            "category": "release_exact",
+            "expected_label": "release:v0.3.0",
+            "top1_label": "release:v0.3.2",
+            "top1_similarity": 0.42292651534080505,
+            "rank_of_expected": 5,
+            "top_k_labels": [
+              "release:v0.3.2",
+              "release:v0.5.0",
+              "release:v0.1.0",
+              "release:v0.4.0",
+              "release:v0.3.0",
+              "pr:PR-3",
+              "release:v0.2.0",
+              "release:v0.4.1",
+              "noise:9",
+              "pr:PR-10a"
+            ]
+          },
+          {
+            "query": "Python binding parity PR",
+            "category": "pr_semantic",
+            "expected_label": "pr:PR-BP",
+            "top1_label": "release:v0.4.1",
+            "top1_similarity": 0.5714932084083557,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "release:v0.4.1",
+              "pr:PR-BP",
+              "pr:PR-5",
+              "pr:PR-9",
+              "pr:PR-3",
+              "pr:PR-10b",
+              "pr:PR-10b.2",
+              "pr:PR-8",
+              "noise:9",
+              "decision:stdout-replies-only"
+            ]
+          },
+          {
+            "query": "PR 8",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-8",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.42195603251457214,
+            "rank_of_expected": null,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-BP",
+              "pr:PR-3",
+              "release:v0.4.1",
+              "release:v0.4.0",
+              "pr:PR-10b",
+              "pr:PR-5",
+              "pr:PR-10a",
+              "api:ScoreWeights"
+            ]
+          },
+          {
+            "query": "PR 10a",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-10a",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.459039568901062,
+            "rank_of_expected": 6,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-BP",
+              "pr:PR-3",
+              "pr:PR-10b",
+              "pr:PR-10a",
+              "api:ScoreWeights",
+              "decision:pypi-trusted",
+              "release:v0.4.0",
+              "pr:PR-4"
+            ]
+          },
+          {
+            "query": "PR 10b.2",
+            "category": "pr_exact",
+            "expected_label": "pr:PR-10b.2",
+            "top1_label": "pr:PR-9",
+            "top1_similarity": 0.4673859775066376,
+            "rank_of_expected": null,
+            "top_k_labels": [
+              "pr:PR-9",
+              "pr:PR-7",
+              "pr:PR-3",
+              "pr:PR-BP",
+              "pr:PR-10b",
+              "pr:PR-10a",
+              "decision:phase2-moved-up",
+              "release:v0.4.0",
+              "release:v0.1.0",
+              "release:v0.4.1"
+            ]
+          },
+          {
+            "query": "how do I open a database?",
+            "category": "function_semantic",
+            "expected_label": "api:Mnemo::open",
+            "top1_label": "release:v0.3.0",
+            "top1_similarity": 0.14765797555446625,
+            "rank_of_expected": 3,
+            "top_k_labels": [
+              "release:v0.3.0",
+              "release:v0.1.0",
+              "api:Mnemo::open",
+              "release:v0.4.0",
+              "pr:PR-7",
+              "pr:PR-10b",
+              "noise:3",
+              "noise:14",
+              "pr:PR-3",
+              "noise:13"
+            ]
+          },
+          {
+            "query": "flushing changes to disk",
+            "category": "function_semantic",
+            "expected_label": "api:Mnemo::flush",
+            "top1_label": "noise:6",
+            "top1_similarity": 0.3765109181404114,
+            "rank_of_expected": 3,
+            "top_k_labels": [
+              "noise:6",
+              "decision:format-v8",
+              "api:Mnemo::flush",
+              "noise:5",
+              "noise:10",
+              "noise:7",
+              "noise:20",
+              "api:Mnemo::remember",
+              "pr:PR-3",
+              "pr:PR-BP"
+            ]
+          },
+          {
+            "query": "the recall scoring coefficients",
+            "category": "function_semantic",
+            "expected_label": "api:ScoreWeights",
+            "top1_label": "decision:phase2-moved-up",
+            "top1_similarity": 0.6104626059532166,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "decision:phase2-moved-up",
+              "api:ScoreWeights",
+              "api:Mnemo::recall",
+              "release:v0.2.0",
+              "api:Metric",
+              "api:Session",
+              "noise:19",
+              "release:v0.3.1",
+              "decision:all-zero-reject",
+              "pr:PR-10a"
+            ]
+          },
+          {
+            "query": "EmbedCmd",
+            "category": "function_exact",
+            "expected_label": "api:EmbedCmd",
+            "top1_label": "release:v0.5.0",
+            "top1_similarity": 0.5382924675941467,
+            "rank_of_expected": 2,
+            "top_k_labels": [
+              "release:v0.5.0",
+              "api:EmbedCmd",
+              "pr:PR-10b.2",
+              "pr:PR-10b",
+              "pr:PR-10a",
+              "decision:stdout-replies-only",
+              "decision:no-shell-embed-cmd",
+              "noise:17",
+              "pr:PR-4",
+              "decision:all-zero-reject"
+            ]
+          },
+          {
+            "query": "all-zero vector",
+            "category": "decision_exact",
+            "expected_label": "decision:all-zero-reject",
+            "top1_label": "api:Mnemo::remember",
+            "top1_similarity": 0.43890413641929626,
+            "rank_of_expected": 4,
+            "top_k_labels": [
+              "api:Mnemo::remember",
+              "release:v0.5.0",
+              "pr:PR-10a",
+              "decision:all-zero-reject",
+              "release:v0.1.0",
+              "release:v0.3.0",
+              "decision:no-shell-embed-cmd",
+              "pr:PR-7",
+              "decision:stdout-replies-only",
+              "pr:PR-9"
+            ]
+          }
+        ],
+        "formula": "alpha*sim + beta*recency + gamma*importance + delta*ln(uses+1)",
+        "weights": {
+          "alpha": 1.0,
+          "beta": 0.3,
+          "gamma": 0.2,
+          "delta": 0.1,
+          "half_life_days": 7.0
+        },
+        "track_access": false,
+        "per_category": {
+          "release_semantic": {
+            "n": 5,
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.8,
+            "mrr": 0.5622
+          },
+          "release_exact": {
+            "n": 5,
+            "hit_at_1": 0.8,
+            "hit_at_5": 1.0,
+            "mrr": 0.84
+          },
+          "pr_semantic": {
+            "n": 5,
+            "hit_at_1": 0.8,
+            "hit_at_5": 1.0,
+            "mrr": 0.9
+          },
+          "pr_exact": {
+            "n": 5,
+            "hit_at_1": 0.4,
+            "hit_at_5": 0.4,
+            "mrr": 0.4333
+          },
+          "function_semantic": {
+            "n": 4,
+            "hit_at_1": 0.25,
+            "hit_at_5": 1.0,
+            "mrr": 0.5417
+          },
+          "function_exact": {
+            "n": 4,
+            "hit_at_1": 0.75,
+            "hit_at_5": 1.0,
+            "mrr": 0.875
+          },
+          "decision_semantic": {
+            "n": 1,
+            "hit_at_1": 1.0,
+            "hit_at_5": 1.0,
+            "mrr": 1.0
+          },
+          "decision_exact": {
+            "n": 1,
+            "hit_at_1": 0.0,
+            "hit_at_5": 1.0,
+            "mrr": 0.25
+          }
+        }
+      }
+    }
+  }
+}
