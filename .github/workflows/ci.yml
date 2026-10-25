@@ -107,10 +107,14 @@ jobs:
 
       - name: cargo build
         working-directory: mnemo
-        # `--features failpoints` matches the test step below —
-        # `--all-targets` here compiles `tests/proptest_store.rs`,
-        # which references `mnemo::__failpoints` (gated by the feature).
-        run: cargo build --all-targets --features failpoints
+        # `--features failpoints` matches the test step below. We build
+        # lib / bin / tests explicitly instead of `--all-targets` so
+        # the Phase 6 criterion benches aren't part of this check:
+        # criterion pulls `half v2.7.x` transitively, which raised its
+        # MSRV to 1.81. Benches aren't part of the shipped crate, so
+        # their MSRV is pinned by whatever `rustc` the maintainer uses
+        # to run them, not by this gate.
+        run: cargo build --lib --bins --tests --features failpoints
 
       - name: cargo test (lib + integration only)
         working-directory: mnemo
