@@ -53,7 +53,12 @@ jobs:
 
       - name: cargo clippy
         working-directory: mnemo
-        run: cargo clippy --all-targets --features failpoints -- -D warnings
+        # `benches` feature pulls criterion (and its rayon / half /
+        # ciborium subtree). Scoped off from MSRV CI since those raised
+        # MSRV to 1.80+; built here on stable so the Phase 6 benches
+        # are compile-checked and linted on every PR. Mirrors what
+        # `cargo bench --no-run --features benches` would check.
+        run: cargo clippy --all-targets --features failpoints,benches -- -D warnings
 
       # `cargo fmt --check` gate. Phase 1.4 wires this into CI so
       # rustfmt drift is caught at PR time instead of at release
