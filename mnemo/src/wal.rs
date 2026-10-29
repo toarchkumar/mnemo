@@ -144,6 +144,7 @@ pub fn commit(
     file.seek(SeekFrom::Start(wal_start * PAGE_SIZE as u64))?;
     file.write_all(&buf)?;
     file.sync_all()?;
+    crate::bump_fsync();
     Ok(())
 }
 

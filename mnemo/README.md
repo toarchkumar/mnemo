@@ -699,6 +699,51 @@ against earlier baselines. Each entry records the corpus, the build, and the
 numbers — append a new entry rather than overwriting one when a change is
 expected to move them.
 
+### ARM users: enable hardware AES
+
+> This affects everyone running mnemo on Apple Silicon, AWS Graviton,
+> or any other aarch64 CPU, if you build mnemo from crates.io.
+
+The `aes` and `polyval` crates (used by `aes-gcm`, which encrypts every
+page in a `.mnemo` file) only emit ARMv8 hardware AES + PMULL instructions
+when built with two cfg flags. Without them, every aarch64 build runs a
+constant-time software fallback at roughly **5× the cost per page**
+decrypted or encrypted, dominating the exact-scan recall path and the
+per-page WAL/flush overhead on an M1.
+
+If you installed from crates.io (`cargo install mnemo-engine`), set
+RUSTFLAGS before installing:
+
+```sh
+RUSTFLAGS="--cfg aes_armv8 --cfg polyval_armv8" cargo install mnemo-engine
+```
+
+Or add to your own `~/.cargo/config.toml` so every build picks it up:
+
+```toml
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8", "--cfg", "polyval_armv8"]
+```
+
+To verify which backend your build picked up, run `mnemo info` (CLI) or
+`mnemo.build_info()` (Python) — the output names each backend explicitly:
+
+```
+aes:         armv8 hardware
+polyval:     armv8 PMULL hardware
+```
+
+If you see `armv8 software (constant-time fallback)` instead, your
+RUSTFLAGS didn't reach the build.
+
+x86_64 users don't need to do anything — the same crates runtime-detect
+AES-NI + CLMUL. The flags above are a no-op on x86_64.
+
+Mnemo's own PyPI wheels (`pip install mnemo-engine`) and GitHub Release
+binaries carry the hardware path baked in — this section only matters if
+you build from source.
+
+
 ### Sizing tips
 
 Three knobs cover most of the small-file size questions; the fourth is a
@@ -822,6 +867,7 @@ rows stay as-is so improvements (or regressions) are visible.
 |---------|----------|------------|-----------|------------|---------------|------------------------|
 | v0.1.0  | 2026-05  | 31 mems, 384-dim, no index | 1.41 MB | ~330 ms | ~35 ms | Initial dogfood baseline |
 | v0.5.0  | 2026-10  | 10K mems, 384-dim, IVF+PQ  | 82.9 MB | — (open 14.9 ms secure KDF) | 374 µs (IVF+PQ) / 623 ms (exact) | Phase 6: criterion benches + ranking harness + ANN recall@10 grid + file-size breakdown. IVF+PQ ≈ 1,660× faster than exact at 10K; 10,400× at 100K. Default `IndexConfig` recovers only 40% of exact top-10 — scoring v2 candidate. Full numbers in `test/scripts/perf_v0.5.0.json`. |
+| v0.5.1  | 2026-10  | same corpus, hardware AES on ARM | — | — | 105 ms (exact 10K) / 1.05 s (exact 100K); IVF+PQ unchanged | PR 11.0: enable `--cfg aes_armv8 --cfg polyval_armv8` so aarch64 builds use hardware AES + PMULL instead of the constant-time software fallback. **6.0×** faster exact scan at 10K, **6.1×** at 100K; 1.3× on cache_put; IVF+PQ and Argon2id-bound open unchanged. See `test/scripts/perf_v0.5.0.json`'s `speed_hw_aes` block for the full set. No API or format change. If you build from crates.io see the "ARM users" section above. |
 
 ## Scope: what is and isn't here
 

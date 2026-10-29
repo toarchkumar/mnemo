@@ -4,7 +4,7 @@
 # fields below are still useful for `cargo publish --dry-run` to lint
 # cleanly and for `cargo doc` to render coherently.
 name = "mnemo-python"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.75"
 description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-engine wheel on PyPI"
@@ -36,3 +36,13 @@ serde_json = "1.0"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Mirrors the declaration in `mnemo/Cargo.toml` — see that one for the
+# full rationale. The ARMv8 hardware-AES cfgs are set via RUSTFLAGS
+# across the whole workspace, so every crate that is compiled under
+# `-D warnings` needs this declaration.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(aes_armv8)',
+    'cfg(polyval_armv8)',
+] }

@@ -839,6 +839,14 @@ fn run() -> std::result::Result<(), String> {
             path,
             passphrase: pp,
         } => {
+            // Build info first — printed before the file open so it's
+            // visible even if the open fails (common when verifying a
+            // fresh install of mnemo). Mirrors the Python
+            // `mnemo.build_info()` shape.
+            let bi = mnemo::build_info();
+            println!("mnemo:       v{} ({})", bi.version, bi.target);
+            println!("aes:         {}", bi.aes_backend);
+            println!("polyval:     {}", bi.polyval_backend);
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
@@ -856,6 +864,14 @@ fn run() -> std::result::Result<(), String> {
             println!("created at:  {}", s.created_at);
             println!("agents:      {}", s.agents.join(", "));
             println!("snapshots:   {}", db.snapshots().len());
+            // Phase 6 instrumentation: how many fsyncs the most recent
+            // flush issued. `0` on a read-only open since open() never
+            // flushes; shown as a dash in that case for clarity.
+            if s.fsyncs_last_flush == 0 {
+                println!("fsyncs/flush: — (no flush seen on this handle)");
+            } else {
+                println!("fsyncs/flush: {}", s.fsyncs_last_flush);
+            }
             // Phase 10.1 result-cache summary — one line even when
             // the cache is empty, for symmetry with the other fields.
             {

@@ -327,6 +327,13 @@ pub struct Stats {
     pub index: Option<IndexInfo>,
     /// Current size of the write-ahead log region, in 8 KiB pages.
     pub wal_pages: u64,
+    /// Fsyncs issued by the most recent successful [`Mnemo::flush`] on
+    /// this handle. `0` on a fresh handle before any flush, or when
+    /// `flush()` short-circuited (nothing dirty). Phase 6 instrumentation
+    /// for the Phase 11.1 write-latency work — the planner wants this
+    /// before deciding whether cutting fsync count is a viable
+    /// durability-preserving fix.
+    pub fsyncs_last_flush: u32,
 }
 
 /// Result of a [`Mnemo::compact_file`] run.
@@ -394,6 +401,16 @@ pub struct Mnemo {
     /// return [`MnemoError::Invalid`] with a "no embedder" message.
     /// Not persisted — the handle is re-registered after every open.
     embedder: Option<std::sync::Arc<dyn Embedder>>,
+    /// Fsyncs issued by the most recent `flush()` call. Snapshotted
+    /// from the thread-local fsync counter in `lib.rs::fsync_counter`:
+    /// `flush()` reads it on entry, does its work (each `sync_all` the
+    /// pager / wal / recovery path makes bumps the counter), and
+    /// stores the delta here. `0` on a fresh handle before any flush,
+    /// or on a read-only handle where `flush()` short-circuits.
+    /// Exposed through [`Stats::fsyncs_last_flush`] for diagnostics —
+    /// the Phase 6 planner wants this before deciding whether cutting
+    /// fsync count is a viable write-latency win.
+    fsyncs_last_flush: u32,
 }
 
 /// Open a file and take an OS advisory lock, returning `Locked { path }`
@@ -687,6 +704,7 @@ impl Mnemo {
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
             embedder: None,
+            fsyncs_last_flush: 0,
         })
     }
 
@@ -725,6 +743,7 @@ impl Mnemo {
                     file.write_all(bytes)?;
                 }
                 file.sync_all()?;
+                crate::bump_fsync();
                 file.seek(SeekFrom::Start(0))?;
                 file.read_exact(&mut hbuf)?;
                 Header::from_page(&hbuf)?
@@ -749,6 +768,7 @@ impl Mnemo {
                 file.write_all(bytes)?;
             }
             file.sync_all()?;
+            crate::bump_fsync();
             // Re-read the now-current header from the replayed page 0.
             file.seek(SeekFrom::Start(0))?;
             file.read_exact(&mut hbuf)?;
@@ -929,6 +949,7 @@ impl Mnemo {
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
             embedder: None,
+            fsyncs_last_flush: 0,
         })
     }
 
@@ -1058,6 +1079,7 @@ impl Mnemo {
             cache_batch: BatchState::default(),
             cache_counters: CounterState::default(),
             embedder: None,
+            fsyncs_last_flush: 0,
         })
     }
 
@@ -1685,12 +1707,21 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        // Snapshot the thread-local fsync counter. Every `sync_all` the
+        // pager / wal / checkpoint path makes between here and the end
+        // of this function bumps the same counter; `delta` lands on
+        // `self.fsyncs_last_flush` so `Stats::fsyncs_last_flush` can
+        // report it. The planner wants this to decide whether cutting
+        // fsync count is a viable write-latency win before we touch
+        // the write path's durability model.
+        let fsync_before = crate::fsync_count();
         if !self.dirty_catalog && !self.dirty_index && !self.dirty_cache {
             // No control-plane changes pending. Because every `put` that
             // dirties a data page also dirties the catalog, and every
             // `cache_put` that dirties a data page also dirties
             // `dirty_cache`, there can't be dirty data pages either —
             // nothing to do.
+            self.fsyncs_last_flush = 0;
             return Ok(());
         }
 
@@ -1813,6 +1844,11 @@ impl Mnemo {
         self.dirty_cache = false;
         // Batched policy: successful flush consumes the pending batch.
         self.cache_batch.reset();
+        // Record how many fsyncs this flush issued, for Stats reporting.
+        // Thread-local counter guarantees we see only this handle's own
+        // sync_all calls between the snapshot above and this read.
+        self.fsyncs_last_flush =
+            (crate::fsync_count().wrapping_sub(fsync_before)).min(u32::MAX as u64) as u32;
         Ok(())
     }
 
@@ -2653,6 +2689,7 @@ impl Mnemo {
             created_at: self.header.created_at,
             index: self.ann.as_ref().map(|a| a.info()),
             wal_pages: self.header.wal_pages,
+            fsyncs_last_flush: self.fsyncs_last_flush,
         })
     }
 

@@ -671,6 +671,10 @@ impl Mnemo {
         d.set_item("encrypted", s.encrypted)?;
         d.set_item("created_at", s.created_at)?;
         d.set_item("wal_pages", s.wal_pages)?;
+        // Phase 6 PR 11.0: how many sync_all calls the most recent
+        // flush on this handle issued. `0` on a fresh handle before
+        // any flush. Useful for diagnosing write-latency work.
+        d.set_item("fsyncs_last_flush", s.fsyncs_last_flush)?;
         d.set_item("snapshots", self.inner.snapshots().len())?;
         match s.index {
             Some(ix) => {
@@ -1351,6 +1355,29 @@ fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObje
     Ok(d.into_any().unbind())
 }
 
+/// Report this build's cryptographic backend configuration.
+///
+/// Returns a dict with the mnemo-engine version, the target triple
+/// the wheel was built for, and the AES / PMULL backends in use. On
+/// ARMv8 builds compiled with `--cfg aes_armv8 --cfg polyval_armv8`
+/// (the default for mnemo's own CI + release wheels) the `aes` and
+/// `polyval` crates emit hardware instructions; otherwise they run a
+/// constant-time software fallback at ~5x the cost per page.
+///
+/// Call this to confirm a wheel installed from PyPI picked up the
+/// hardware path — e.g. `mnemo.build_info()["aes_backend"]` should
+/// read `"armv8 hardware"` on Apple Silicon.
+#[pyfunction]
+fn build_info(py: Python<'_>) -> PyResult<PyObject> {
+    let bi = mnemo_core::build_info();
+    let d = PyDict::new_bound(py);
+    d.set_item("version", bi.version)?;
+    d.set_item("target", bi.target)?;
+    d.set_item("aes_backend", bi.aes_backend)?;
+    d.set_item("polyval_backend", bi.polyval_backend)?;
+    Ok(d.into_any().unbind())
+}
+
 /// The `mnemo` Python extension module.
 #[pymodule]
 fn mnemo(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -1359,6 +1386,7 @@ fn mnemo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Turn>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
+    m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

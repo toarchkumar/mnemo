@@ -83,6 +83,138 @@ pub use store::{
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.
 pub use ulid::Ulid;
 
+// --- Fsync counter -----------------------------------------------------
+//
+// Instrumentation plumbing for the Phase 6 top-3 cost #2 fix: the
+// planner wants to know how many `sync_all` calls each `flush()` issues
+// before deciding whether to batch any of them. Every fsync call site
+// bumps a thread-local counter; `Mnemo::flush` snapshots it before and
+// after, exposing the delta on `Stats::fsyncs_last_flush`. Thread-local
+// so handles on separate threads don't poison each other's counts; the
+// engine's one-writer-at-a-time locking means a single handle sees a
+// coherent stream.
+
+mod fsync_counter {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Call once per `sync_all`.
+    pub(crate) fn bump() {
+        COUNT.with(|c| c.set(c.get().wrapping_add(1)));
+    }
+
+    /// Monotonic counter snapshot for this thread.
+    pub(crate) fn count() -> u64 {
+        COUNT.with(|c| c.get())
+    }
+}
+
+pub(crate) use fsync_counter::{bump as bump_fsync, count as fsync_count};
+
+/// Build-time cryptographic backend information.
+///
+/// Populated at compile time from the active `cfg` flags. On ARMv8
+/// builds compiled with `--cfg aes_armv8 --cfg polyval_armv8` (set by
+/// the repo's `.cargo/config.toml` and both CI workflows) the `aes`
+/// and `polyval` crates emit hardware AES + PMULL instructions; without
+/// those flags they fall back to a constant-time software path that
+/// runs at roughly 5× the cost per page.
+///
+/// Published through [`build_info`], exposed by `mnemo info` on the
+/// CLI and `mnemo.build_info()` from the Python binding. The point is
+/// verification — nobody should have to profile a release build to find
+/// out whether it's running software AES.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildInfo {
+    /// Package version (`CARGO_PKG_VERSION`), e.g. `"0.5.1"`.
+    pub version: &'static str,
+    /// Target triple this binary was built for, e.g.
+    /// `"aarch64-apple-darwin"`.
+    pub target: &'static str,
+    /// Human-readable AES backend. One of:
+    /// - `"armv8 hardware"` — ARM with `cfg(aes_armv8)`
+    /// - `"armv8 software"` — ARM without the cfg; constant-time fallback
+    /// - `"x86_64 AES-NI (runtime detect)"` — x86_64 with runtime
+    ///   AES-NI detection in the `aes` crate
+    /// - `"portable software"` — any other target
+    pub aes_backend: &'static str,
+    /// Human-readable PMULL/CLMUL backend used by GHASH (part of AES-GCM).
+    /// Same shape as `aes_backend` but for `polyval`.
+    pub polyval_backend: &'static str,
+}
+
+/// Report this build's cryptographic backend configuration.
+///
+/// Cheap — all fields are `&'static str` populated at compile time.
+/// Safe to call from a hot path if, for some reason, that's useful.
+pub fn build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        target: TARGET_TRIPLE,
+        aes_backend: aes_backend_name(),
+        polyval_backend: polyval_backend_name(),
+    }
+}
+
+/// Target triple baked in via the `TARGET` env var that `cargo` sets
+/// for the host compile. Falls back to `"unknown"` if the var isn't
+/// set at build time (shouldn't happen under cargo, but a build.rs-free
+/// implementation keeps this crate build-script-free, so we use a
+/// cfg-based dispatch as the second-best).
+const TARGET_TRIPLE: &str = {
+    // `env!("TARGET")` isn't set by cargo for crates; it's set by rustc
+    // only for `std` builds. We approximate from `target_arch` /
+    // `target_os` cfgs so this stays build-script-free. Good enough
+    // for an info line; precise triples are a `cargo` or build.rs job.
+    if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_arch = "aarch64", target_os = "linux")) {
+        "aarch64-unknown-linux-gnu"
+    } else if cfg!(all(target_arch = "x86_64", target_os = "macos")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(all(target_arch = "x86_64", target_os = "windows")) {
+        "x86_64-pc-windows-msvc"
+    } else {
+        "unknown"
+    }
+};
+
+const fn aes_backend_name() -> &'static str {
+    if cfg!(aes_armv8) {
+        "armv8 hardware"
+    } else if cfg!(target_arch = "aarch64") {
+        // Software fallback is the dangerous case this whole mechanism
+        // exists to surface — flag it clearly so `mnemo info` makes it
+        // easy to notice a build picked up the slow path by mistake.
+        "armv8 software (constant-time fallback)"
+    } else if cfg!(target_arch = "x86_64") {
+        // `aes` 0.8.4 on x86_64 picks AES-NI vs the software path at
+        // runtime via the `cpufeatures` crate, so we can't tell from
+        // cfg alone which path a given invocation takes. In practice
+        // every x86_64 CPU shipped since ~2010 has AES-NI.
+        "x86_64 AES-NI (runtime detect)"
+    } else {
+        "portable software"
+    }
+}
+
+const fn polyval_backend_name() -> &'static str {
+    if cfg!(polyval_armv8) {
+        "armv8 PMULL hardware"
+    } else if cfg!(target_arch = "aarch64") {
+        "armv8 software (constant-time fallback)"
+    } else if cfg!(target_arch = "x86_64") {
+        "x86_64 CLMUL (runtime detect)"
+    } else {
+        "portable software"
+    }
+}
+
 /// Test-only crash-injection surface used by the Phase 1.3 proptest
 /// (`mnemo/tests/proptest_store.rs`). Compiled in under `cfg(test)`
 /// and the `failpoints` feature only; absent from release builds.

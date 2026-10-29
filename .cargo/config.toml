@@ -1,0 +1,31 @@
+# Hardware AES + PMULL on ARM.
+#
+# `aes` 0.8.4 and `polyval` 0.6.2 (both pulled in via `aes-gcm`, which
+# we use for every page encryption) only emit ARMv8 hardware AES and
+# PMULL instructions when built with the two cfg flags below. Without
+# them, every aarch64 build runs the constant-time software fallback —
+# ~130 MB/s per the Phase 6 benches, roughly 5x below what the hardware
+# path delivers. On x86_64 the same crates auto-detect AES-NI and CLMUL
+# at runtime, so these flags are a no-op there.
+#
+# This file applies to builds launched from inside this repo. Users who
+# `cargo install mnemo-engine` from crates.io on ARM won't see it — they
+# need to set the same flags themselves, e.g.
+#
+#     RUSTFLAGS="--cfg aes_armv8 --cfg polyval_armv8" cargo install mnemo-engine
+#
+# or add a matching `[target.'cfg(target_arch = "aarch64")']` block to
+# their own `~/.cargo/config.toml`. See mnemo/README.md's "Performance"
+# section for the user-facing instructions.
+#
+# The flags are declared under `[lints.rust] unexpected_cfgs` in each
+# crate's `Cargo.toml` so `-D warnings` doesn't trip on them (Rust
+# 1.74+ feature, inside our 1.75 MSRV).
+#
+# CI and the release workflow set `RUSTFLAGS` directly in the env — an
+# env `RUSTFLAGS` fully overrides `rustflags` from this file, so the
+# workflows must include these flags themselves. See `.github/workflows/
+# ci.yml` and `.github/workflows/release.yml` for how.
+
+[target.'cfg(target_arch = "aarch64")']
+rustflags = ["--cfg", "aes_armv8", "--cfg", "polyval_armv8"]

@@ -233,6 +233,7 @@ impl Pager {
     /// Flush OS buffers to stable storage.
     pub fn sync(&mut self) -> Result<()> {
         self.file.sync_all()?;
+        crate::bump_fsync();
         Ok(())
     }
 
@@ -317,6 +318,7 @@ impl Pager {
             self.file.write_all(&disk)?;
         }
         self.file.sync_all()?;
+        crate::bump_fsync();
         // The pages just written are now clean and so evictable; settle the
         // cache back within its bound.
         self.cache.mark_all_clean();

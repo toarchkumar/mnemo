@@ -11,6 +11,17 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Hardware AES + PMULL on ARM. `aes` 0.8.4 and `polyval` 0.6.2 only
+  # emit the fast path when built with these two cfg flags; without
+  # them, every aarch64 build (including the aarch64-apple-darwin and
+  # aarch64-unknown-linux-gnu release binaries and wheels) runs the
+  # constant-time software fallback at ~5x the cost per page. x86_64
+  # ignores them. Mirrored in `.cargo/config.toml` for local builds
+  # and in `ci.yml`; env `RUSTFLAGS` overrides the config file, so the
+  # workflows have to carry the flags themselves. Declared under
+  # `[lints.rust] unexpected_cfgs` in each crate's Cargo.toml so
+  # unknown-cfg warnings don't trip `-D warnings` anywhere.
+  RUSTFLAGS: --cfg aes_armv8 --cfg polyval_armv8
 
 permissions:
   # softprops/action-gh-release needs write access to create the release
@@ -154,6 +165,12 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           args: --release --out dist
           working-directory: mnemo-python
+          # Pass RUSTFLAGS into the maturin container explicitly. The
+          # aarch64-unknown-linux-gnu wheel builds inside a manylinux
+          # docker image; the job-level `env.RUSTFLAGS` may not cross
+          # the container boundary cleanly, so we restate it here.
+          # Must match the `env.RUSTFLAGS` at the top of this file.
+          rustflags: --cfg aes_armv8 --cfg polyval_armv8
 
       - name: Attach wheels to release
         uses: softprops/action-gh-release@v2

@@ -6,7 +6,7 @@
 # below stay `mnemo`, so consumers still write `use mnemo::...` and invoke
 # `mnemo` on the command line after `cargo add mnemo-engine`.
 name = "mnemo-engine"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.75"
 # `benches/corpus.rs` is a shared helper module pulled into real benches
@@ -146,3 +146,15 @@ benches = ["dep:criterion"]
 [profile.release]
 lto = true
 codegen-units = 1
+
+# `aes` 0.8.4 and `polyval` 0.6.2 enable their ARMv8 hardware paths via
+# `--cfg aes_armv8` / `--cfg polyval_armv8` (set by `.cargo/config.toml`
+# at the repo root and by `RUSTFLAGS` in CI + release workflows). rustc
+# doesn't know those cfg names on its own, so without this declaration
+# `-D warnings` would trip on `unexpected_cfgs` and break every build.
+# Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.75.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(aes_armv8)',
+    'cfg(polyval_armv8)',
+] }

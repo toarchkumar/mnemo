@@ -2,7 +2,13 @@
 
 Walks `mnemo/target/criterion/**/estimates.json`, extracts the median
 and mean timing of every bench criterion ran, and merges the result
-into `test/scripts/perf_v0.5.0.json` under a top-level `speed` key.
+into `test/scripts/perf_v0.5.0.json` under a top-level `speed` key
+(or whichever key is passed via ``--key``).
+
+The ``--key`` flag lets a given set of criterion runs land under a
+non-default top-level block — PR 11.0 uses it to park the hardware-AES
+numbers under ``speed_hw_aes`` next to the software-AES ``speed``
+block from v0.5.0, so the before/after is reproducible from one file.
 
 Shape of a criterion `estimates.json`:
 
@@ -23,7 +29,8 @@ file_size_breakdown blocks the other harnesses write.
 
 Usage::
 
-    python test/scripts/collect_bench_results.py
+    python test/scripts/collect_bench_results.py            # merges into 'speed'
+    python test/scripts/collect_bench_results.py --key speed_hw_aes
 """
 
 from __future__ import annotations
@@ -95,6 +102,18 @@ def _collect_one(estimates_path: Path) -> dict[str, Any]:
 
 
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument(
+        "--key",
+        default="speed",
+        help="Top-level key in perf_v0.5.0.json to write under "
+             "(default: 'speed'). PR 11.0 uses 'speed_hw_aes' for the "
+             "hardware-AES rerun.",
+    )
+    args = ap.parse_args()
+    key = args.key
+
     if not CRITERION_ROOT.exists():
         print(f"[collect] no criterion dir at {CRITERION_ROOT}. "
               "Run `cargo bench --features benches` first.")
@@ -136,7 +155,7 @@ def main() -> int:
     else:
         out = {}
 
-    out["speed"] = {
+    out[key] = {
         "machine": _machine(),
         "benches": speed,
     }
@@ -145,7 +164,7 @@ def main() -> int:
     # One-screen summary — median wall time per bench, sorted by group
     # then name. Convenient for diffing against a prior run without
     # opening the JSON.
-    print(f"[collect] wrote {len(speed)} bench(es) to {PERF_PATH}")
+    print(f"[collect] wrote {len(speed)} bench(es) under '{key}' in {PERF_PATH}")
     for name in sorted(speed):
         t = speed[name]
         med = t["median_secs"]

@@ -12,7 +12,16 @@ env:
   # build-breaking errors, so a CI run going red is always something we
   # actually changed. The job below still uses `-D warnings` to enforce
   # the existing lint surface; `RUSTFLAGS` only governs the build itself.
-  RUSTFLAGS: -D warnings
+  #
+  # `--cfg aes_armv8 --cfg polyval_armv8` enables ARMv8 hardware AES +
+  # PMULL in the `aes` and `polyval` crates. No-op on x86_64 (both
+  # crates auto-detect AES-NI / CLMUL at runtime), active on aarch64
+  # runners (macos-latest, and any linux aarch64 we add later). An env
+  # `RUSTFLAGS` fully overrides `rustflags` from `.cargo/config.toml`,
+  # so the flags must appear here as well. The cfg names are declared
+  # under `[lints.rust] unexpected_cfgs` in every crate's Cargo.toml
+  # so `-D warnings` doesn't trip when they aren't recognised by rustc.
+  RUSTFLAGS: -D warnings --cfg aes_armv8 --cfg polyval_armv8
 
 jobs:
   # --- Rust core: library + CLI + integration tests + clippy -----------

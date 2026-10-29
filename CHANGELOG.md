@@ -8,6 +8,94 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-29
+
+ARM hardware-AES fix. Pure build-config change — no API, no format,
+same CHANGELOG `[0.5.0]` behavior otherwise.
+
+### Fixed (PR 11.0 — hardware AES on ARM)
+
+- **`aes` 0.8.4 and `polyval` 0.6.2 run their ARMv8 hardware paths
+  only when built with `--cfg aes_armv8 --cfg polyval_armv8`.** The
+  v0.5.0 release (and every earlier aarch64 build) didn't set them,
+  so the `aarch64-apple-darwin` CLI binary and the `aarch64-apple-
+  darwin` + `aarch64-unknown-linux-gnu` wheels ran the constant-time
+  software fallback for every page encryption — ~130 MB/s per the
+  Phase 6 bench, roughly 5× slower than the hardware path on an M1.
+  x86_64 was unaffected (both crates auto-detect AES-NI and CLMUL at
+  runtime).
+- **Fix:** `.cargo/config.toml` at the repo root sets the cfgs under
+  `[target.'cfg(target_arch = "aarch64")']`; `RUSTFLAGS` in both
+  `ci.yml` and `release.yml` carries the same flags (env `RUSTFLAGS`
+  fully overrides config `rustflags`, so the workflows have to repeat
+  them). `release.yml` also passes `rustflags:` into the
+  `PyO3/maturin-action` input so the manylinux + zigbuild aarch64
+  containers see them. Declared under `[lints.rust] unexpected_cfgs`
+  with explicit `check-cfg` in all three Cargo.tomls so `-D warnings`
+  doesn't trip on them.
+- **Verification surface:** new `mnemo::build_info() -> BuildInfo`
+  reports the AES + PMULL backend. `mnemo info` prints the result at
+  the top; Python `mnemo.build_info()` returns the same dict. On an
+  M1 ARMv8 build with the cfgs active, the output reads:
+  ```
+  aes:         armv8 hardware
+  polyval:     armv8 PMULL hardware
+  ```
+- **Users installing from crates.io on ARM:** your builds *don't* see
+  this repo's `.cargo/config.toml`. Set the cfgs yourself before
+  `cargo install mnemo-engine`:
+  ```sh
+  RUSTFLAGS="--cfg aes_armv8 --cfg polyval_armv8" cargo install mnemo-engine
+  ```
+  Or add a matching `[target.'cfg(target_arch = "aarch64")']` block to
+  your own `~/.cargo/config.toml`. The `mnemo-engine` crate on PyPI
+  (installed via `pip install mnemo-engine`) carries the hardware
+  path baked in — the fix lives in the wheel's compile step on the
+  release-workflow side.
+
+### Added (Phase 6 instrumentation, Phase 11.1 input)
+
+- **`Stats::fsyncs_last_flush: u32`** reports how many `sync_all`
+  calls the most recent successful `flush()` on this handle issued.
+  Thread-local counter is incremented at every `sync_all` call site
+  (`pager.rs` × 2, `wal.rs` × 1, `store.rs` × 2 — the WAL recovery
+  path on open); `flush()` snapshots it before and after, exposes
+  the delta. The planner wants this before scheduling the write-
+  latency work in Phase 11.1 — cutting fsync count preserves
+  durability; batching memory writes would not. Surfaced in
+  `mnemo info` as `fsyncs/flush: N`.
+
+### Numbers (M1 Pro, release build, 384-dim clustered corpus)
+
+Re-run of the Phase 6 speed benches with hardware AES active, side-by-
+side with the v0.5.0 software-AES baseline. Full set under
+`test/scripts/perf_v0.5.0.json` — the v0.5.0 numbers stay under `speed`,
+the v0.5.1 rerun lives under `speed_hw_aes`.
+
+| Bench | SW AES (v0.5.0) | HW AES (v0.5.1) | Speedup |
+|-------|-----------------|-----------------|---------|
+| `recall/exact_scan_10k` | 634.6 ms | **105.2 ms** | **6.0×** |
+| `recall/exact_scan_100k` | 6.41 s | **1.05 s** | **6.1×** |
+| `cache/cache_put_exact_strict` | 611 µs | 471 µs | 1.30× |
+| `cache/cache_put_exact_batched` | 397 µs | 295 µs | 1.35× |
+| `cache/cache_put_semantic_strict` | 652 µs | 489 µs | 1.33× |
+| `open/open_latency_fast_kdf` | 744 µs | 629 µs | 1.18× |
+
+The planner's PR 11.0 C1 call was exactly right: v0.5.0's 623 ms
+exact-scan cost at 10K was software AES, not record decryption as such.
+Unaffected (as expected):
+
+- `recall/ivfpq_recall_*` — IVF+PQ decrypts only a few partitions per
+  query, so AES throughput wasn't a bottleneck there.
+- `open/open_latency_secure_kdf` — Argon2id-bound, doesn't use AES.
+- `write/remember_*` — fsync-bound.
+
+The exact-vs-IVF+PQ gap narrows from 1,660× to 282× at 10K and from
+10,400× to 1,740× at 100K. IVF+PQ remains the right default; the exact
+fallback is now usable at smaller corpora. The 1M tier wasn't re-run
+(stale 64 s number in the `speed` block is still software AES; expect
+roughly 10-11 s on hardware AES, extrapolating from the 6× ratio).
+
 ## [0.5.0] — 2026-10-24
 
 Phase 3 release — **bring-your-own-embedder**. The engine now takes
@@ -838,7 +926,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/toarchkumar/mnemo/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/toarchkumar/mnemo/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/toarchkumar/mnemo/compare/v0.3.2...v0.4.0

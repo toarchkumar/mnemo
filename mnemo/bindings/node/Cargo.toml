@@ -1,6 +1,6 @@
 [package]
 name = "mnemo-node"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.75"
 description = "Node.js bindings for the Mnemo encrypted agent-memory engine (experimental scaffold; not yet published to npm)"
@@ -24,3 +24,12 @@ napi-derive = "2"
 
 [build-dependencies]
 napi-build = "2"
+
+# Mirrors the declaration in `../../Cargo.toml` — the ARMv8 hardware-AES
+# cfgs are set via RUSTFLAGS across the whole workspace, so every crate
+# that is compiled under `-D warnings` needs this declaration.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(aes_armv8)',
+    'cfg(polyval_armv8)',
+] }
