@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.4.1</span>
+        <span class="pill"><span class="dot"></span>v0.5.1</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -448,17 +448,17 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
       </div>
       <div class="card">
         <div class="icon"><svg><use href="#i-brain"/></svg></div>
-        <h3>Recall built for agents</h3>
-        <p>Four memory types, ranked on similarity, recency, importance and how often a memory gets used. Per-agent scoping and expiry built in.</p>
+        <h3>Text in, text out <span class="tag-new">New</span></h3>
+        <p>Hand MNemo plain text. It calls your embedding model, checks it's the one the file was built with, and ranks recall on meaning, recency, importance and use.</p>
       </div>
       <div class="card">
         <div class="icon"><svg><use href="#i-bolt"/></svg></div>
-        <h3>A cache for expensive calls <span class="tag-new">New</span></h3>
+        <h3>A cache for expensive calls</h3>
         <p>Cache LLM responses, tool outputs and API calls by exact key, or match near-identical prompts by meaning. Namespaces, expiry and size limits included.</p>
       </div>
       <div class="card">
         <div class="icon"><svg><use href="#i-plug"/></svg></div>
-        <h3>MCP server built in <span class="tag-new">New</span></h3>
+        <h3>MCP server built in</h3>
         <p><code>mnemo serve --mcp</code> exposes memory and cache as tools to Claude Desktop, Cursor or any MCP client.</p>
       </div>
       <div class="card">
@@ -473,7 +473,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
       </div>
       <div class="card">
         <div class="icon"><svg><use href="#i-users"/></svg></div>
-        <h3>Safe to share <span class="tag-new">New</span></h3>
+        <h3>Safe to share</h3>
         <p>One writer, many readers, enforced with OS file locks. A second writer is turned away instead of corrupting the file.</p>
       </div>
     </div>
@@ -493,7 +493,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
         <span class="chip cache">cache_put</span><span class="chip cache">cache_get</span><span class="chip cache">cache_stats</span>
         <span class="chip cache">cache_put_semantic</span><span class="chip cache">cache_get_semantic</span>
       </div>
-      <p class="note">Today the memory tools take embedding vectors. Plain-text tools, where MNemo calls your embedding model for you, arrive in v0.5.0.</p>
+      <p class="lead" style="font-size:.95rem">Add <code>--embed-cmd</code> and the tools accept plain text. MNemo starts your embedding program once, keeps it running, and restarts it cleanly if it misbehaves. A slow or broken embedder produces an error, never a mismatched memory.</p>
     </div>
     <div class="codebox">
       <div class="codebar"><span class="label">claude_desktop_config.json</span><button class="copy" data-copy-target="mcp-json" type="button">Copy</button></div>
@@ -501,7 +501,11 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <span class="s">"mcpServers"</span>: {
     <span class="s">"mnemo"</span>: {
       <span class="s">"command"</span>: <span class="s">"mnemo"</span>,
-      <span class="s">"args"</span>: [<span class="s">"serve"</span>, <span class="s">"--mcp"</span>, <span class="s">"/absolute/path/to/agent.mnemo"</span>],
+      <span class="s">"args"</span>: [
+        <span class="s">"serve"</span>, <span class="s">"--mcp"</span>, <span class="s">"/absolute/path/to/agent.mnemo"</span>,
+        <span class="s">"--embed-cmd"</span>, <span class="s">"python3 /absolute/path/to/embedder_server.py"</span>,
+        <span class="s">"--embed-name"</span>, <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>
+      ],
       <span class="s">"env"</span>: { <span class="s">"MNEMO_PASSPHRASE"</span>: <span class="s">"your-passphrase-here"</span> }
     }
   }
@@ -516,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.4.1.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.5.1.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -529,15 +533,17 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 <pre class="code" id="code-python" role="tabpanel"><span class="k">import</span> mnemo
 <span class="k">from</span> sentence_transformers <span class="k">import</span> SentenceTransformer
 
-model = SentenceTransformer(<span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>)
-<span class="k">def</span> <span class="f">embed</span>(text):
-    <span class="k">return</span> model.encode(text, normalize_embeddings=<span class="k">True</span>).tolist()
+MODEL = <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>
+model = SentenceTransformer(MODEL)
+<span class="k">def</span> <span class="f">embed</span>(texts):
+    <span class="k">return</span> model.encode(texts, normalize_embeddings=<span class="k">True</span>).tolist()
 
 <span class="k">with</span> mnemo.open(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, dimensions=<span class="n">384</span>) <span class="k">as</span> db:
-    <span class="c"># Durable memory</span>
-    db.remember(<span class="s">"the user prefers dark mode"</span>, <span class="s">"semantic"</span>,
-                embed(<span class="s">"the user prefers dark mode"</span>), importance=<span class="n">0.8</span>)
-    <span class="k">for</span> hit <span class="k">in</span> db.recall(embed(<span class="s">"which theme does the user like?"</span>), top_k=<span class="n">5</span>):
+    db.set_embedder(embed, name=MODEL, dimensions=<span class="n">384</span>)   <span class="c"># checked against the file</span>
+
+    <span class="c"># Durable memory, plain text in and out</span>
+    db.remember_text(<span class="s">"the user prefers dark mode"</span>, <span class="s">"semantic"</span>, importance=<span class="n">0.8</span>)
+    <span class="k">for</span> hit <span class="k">in</span> db.recall_text(<span class="s">"which theme does the user like?"</span>, top_k=<span class="n">5</span>):
         print(round(hit[<span class="s">"score"</span>], <span class="n">3</span>), hit[<span class="s">"content"</span>])
 
     <span class="c"># Cache an expensive call</span>
@@ -548,22 +554,25 @@ model = SentenceTransformer(<span class="s">"sentence-transformers/all-MiniLM-L6
         db.cache_put(<span class="s">"llm"</span>, prompt, answer, ttl_secs=<span class="n">3600</span>)
     <span class="k">else</span>:
         answer = hit[<span class="s">"value"</span>].decode()</pre>
-<pre class="code" id="code-rust" role="tabpanel" hidden><span class="k">use</span> mnemo::{CachePutOpts, Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest};
+<pre class="code" id="code-rust" role="tabpanel" hidden><span class="k">use</span> mnemo::{CachePutOpts, EmbedCmd, EmbedderIdentity, MemoryType, Mnemo, MnemoConfig, RecallRequest};
 
 <span class="k">fn</span> <span class="f">main</span>() -&gt; mnemo::<span class="t">Result</span>&lt;()&gt; {
-    <span class="k">let</span> cfg = <span class="t">MnemoConfig</span> { dimensions: <span class="n">3</span>, ..Default::default() };
+    <span class="k">let</span> cfg = <span class="t">MnemoConfig</span> { dimensions: <span class="n">384</span>, ..Default::default() };
     <span class="k">let mut</span> db = <span class="t">Mnemo</span>::create(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, cfg)?;
 
-    db.remember(
-        <span class="t">Memory</span>::new(<span class="s">"the user prefers dark mode"</span>, <span class="t">MemoryType</span>::Semantic, vec![<span class="n">0.1</span>, <span class="n">0.2</span>, <span class="n">0.9</span>])
-            .with_agent(<span class="s">"assistant-1"</span>)
-            .with_importance(<span class="n">0.8</span>),
-    )?;
+    <span class="c">// Any program that turns text into vectors (see examples/embedder_server.py)</span>
+    <span class="k">let</span> id = <span class="t">EmbedderIdentity</span> {
+        name: <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>.into(), dimensions: <span class="n">384</span>, normalize: <span class="k">true</span>,
+    };
+    db.set_embedder(<span class="t">EmbedCmd</span>::new(<span class="s">"python3 embedder_server.py"</span>, id)?)?;
+
+    db.remember_text(<span class="s">"the user prefers dark mode"</span>, <span class="t">MemoryType</span>::Semantic)?;
     db.cache_put(<span class="s">"llm"</span>, <span class="s">"prompt-42"</span>, <span class="s">br#"{"answer":"..."}"#</span>,
         <span class="t">CachePutOpts</span> { content_type: <span class="s">"json"</span>.into(), ttl_secs: Some(<span class="n">3600</span>), cost_hint_ms: None })?;
     db.flush()?; <span class="c">// one atomic, crash-safe commit</span>
 
-    <span class="k">for</span> hit <span class="k">in</span> db.recall(&amp;<span class="t">RecallRequest</span>::new(vec![<span class="n">0.1</span>, <span class="n">0.2</span>, <span class="n">0.9</span>]).top_k(<span class="n">5</span>))? {
+    <span class="k">let</span> req = <span class="t">RecallRequest</span>::from_text(db.embedder().unwrap(), <span class="s">"which theme does the user like?"</span>)?.top_k(<span class="n">5</span>);
+    <span class="k">for</span> hit <span class="k">in</span> db.recall(&amp;req)? {
         println!(<span class="s">"{:.3}  {}"</span>, hit.score, hit.memory.content);
     }
     Ok(())
@@ -572,8 +581,9 @@ model = SentenceTransformer(<span class="s">"sentence-transformers/all-MiniLM-L6
 
 <span class="pr">$ </span>mnemo init agent.mnemo --dimensions <span class="n">384</span>         <span class="c"># new file, self-describing from the start</span>
 <span class="pr">$ </span>mnemo about agent.mnemo                          <span class="c"># what is this file and how do I use it?</span>
-<span class="pr">$ </span>mnemo import agent.mnemo memories.jsonl          <span class="c"># bulk-load memories with vectors</span>
-<span class="pr">$ </span>mnemo recall agent.mnemo --query <span class="n">0.1</span>,<span class="n">0.2</span>,<span class="n">0.9</span> --top-k <span class="n">5</span>
+<span class="pr">$ </span>EMB=(--embed-cmd <span class="s">"python3 embedder_server.py"</span> --embed-name sentence-transformers/all-MiniLM-L6-v2)
+<span class="pr">$ </span>mnemo remember agent.mnemo --text <span class="s">"the user prefers dark mode"</span> --importance <span class="n">0.8</span> <span class="s">"${EMB[@]}"</span>
+<span class="pr">$ </span>mnemo recall   agent.mnemo --text <span class="s">"which theme does the user like?"</span> --top-k <span class="n">5</span> <span class="s">"${EMB[@]}"</span>
 
 <span class="pr">$ </span>mnemo cache put agent.mnemo --ns llm --key prompt-42 --value <span class="s">'{"answer":"..."}'</span> --content-type json --ttl <span class="n">3600</span>
 <span class="pr">$ </span>mnemo cache get agent.mnemo --ns llm --key prompt-42
@@ -581,7 +591,7 @@ model = SentenceTransformer(<span class="s">"sentence-transformers/all-MiniLM-L6
 <span class="pr">$ </span>mnemo snapshots agent.mnemo                      <span class="c"># every commit is restorable</span>
 <span class="pr">$ </span>mnemo restore agent.mnemo --to-txn <span class="n">12</span>
 
-<span class="pr">$ </span>mnemo serve --mcp agent.mnemo                    <span class="c"># expose it to MCP clients</span></pre>
+<span class="pr">$ </span>mnemo serve --mcp agent.mnemo <span class="s">"${EMB[@]}"</span>       <span class="c"># expose it to MCP clients, text in</span></pre>
     </div>
   </div>
 </section>
@@ -688,14 +698,17 @@ AI sessions stay aligned without relying on chat history.
     <div class="head">
       <p class="eyebrow">Performance</p>
       <h2 class="title">Measured, not promised</h2>
-      <p class="lead">We only publish numbers we've measured. Today that's a small baseline; benchmarks at 100,000 and 1 million memories are the next milestone, and the results will be posted here.</p>
+      <p class="lead">We only publish numbers we've measured. These are from v0.5.1 on an Apple M1 Pro (release build, 384-dimension vectors). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
     </div>
     <div class="grid grid-3">
-      <div class="card stat"><div class="v">~35<span> ms</span></div><div class="l">Open a file and run a top-10 recall</div><div class="d">Python, release build, production key derivation. Small 31-memory file, v0.1.0 baseline.</div></div>
-      <div class="card stat"><div class="v">~31<span> ms</span></div><div class="l">Store a memory and commit it to disk</div><div class="d">Includes computing the embedding. Same file and baseline.</div></div>
-      <div class="card stat"><div class="v">100K–1M</div><div class="l">Memories: benchmarks in progress</div><div class="d">Recall latency, write throughput, file size and cache speed, on a documented reference machine.</div></div>
+      <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
+      <div class="card stat"><div class="v">~0.4<span> ms</span></div><div class="l">Similar-prompt cache hit</div><div class="d">Matching by meaning across a 500-entry cache.</div></div>
+      <div class="card stat"><div class="v">~15<span> ms</span></div><div class="l">Open an encrypted file</div><div class="d">Almost all of it is Argon2id, on purpose: it makes guessing the passphrase expensive. Long-running apps pay it once.</div></div>
+      <div class="card stat"><div class="v">~22<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by full disk syncs. Commit 100 memories at once and each costs about 0.28 ms.</div></div>
+      <div class="card stat"><div class="v">~105<span> ms</span></div><div class="l">Check every memory, 10K-memory file</div><div class="d">Exact search with no index, every candidate decrypted. 1.05 s at 100K.</div></div>
+      <div class="card stat"><div class="v">Soon</div><div class="l">Indexed search at 100K–1M</div><div class="d">Already fast. We're raising its default accuracy before publishing speed figures, so the two are shown together.</div></div>
     </div>
-    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">Opening a file runs Argon2id on purpose: it's what makes guessing the passphrase expensive. Long-running processes such as the MCP server or a Python app open the file once, so each later call skips that cost.</p>
+    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
   </div>
 </section>
 
@@ -709,31 +722,32 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4.x</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.5</span></h3>
         <ul>
+          <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
+          <li>A check that each file is used with the embedding model it was built with</li>
           <li>Result cache: exact keys and similar prompts</li>
           <li>MCP server for Claude, Cursor and other clients</li>
           <li>File locking and read-only opens</li>
           <li>Fuzzing, property tests and dependency audits in CI</li>
-          <li>Python package caught up with the engine: cache tuning, rekey, compaction</li>
+          <li>Benchmarks at 100K–1M memories, plus a ranking-quality test</li>
+          <li>Hardware AES on ARM: 3–6× faster scans</li>
           <li>Automated releases, with signed provenance on PyPI</li>
         </ul>
       </div>
       <div class="card next-col">
-        <h3>Next <span class="status next">v0.5.0</span></h3>
+        <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
-          <li>A check that the file is used with the embedding model it was built with</li>
-          <li>Rejects empty (all-zero) vectors that would pollute search</li>
-          <li>Then, in v0.5.x: an optional built-in local embedding model</li>
+          <li>More accurate index search: raise the default from finding 40% of the true best matches to 95%</li>
+          <li>Better ranking, so frequently shown memories don't crowd out the relevant one</li>
+          <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
         </ul>
       </div>
       <div class="card">
         <h3>After that <span class="status later">planned</span></h3>
         <ul>
-          <li>Benchmarks at 100K–1M memories, then speedups</li>
-          <li>Keyword search combined with meaning-based search</li>
-          <li>Smaller files: compressed text and vectors</li>
+          <li>Speedups and smaller files, wherever the benchmarks point</li>
+          <li>An optional built-in local embedding model, no separate program needed</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
           <li>A Node.js package and framework integrations</li>
         </ul>
