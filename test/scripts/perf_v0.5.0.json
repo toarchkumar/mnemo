@@ -207,6 +207,40 @@
         "payload_share_pct": 17.9052,
         "wal_bytes": 2449408,
         "wal_share_pct": 2.8168
+      },
+      {
+        "corpus_size": 100000,
+        "dimensions": 384,
+        "effective_bytes_per_memory": 8532.951,
+        "file_bytes": 853295104,
+        "file_mib": 813.7656,
+        "has_index": true,
+        "live_memories": 100000,
+        "other_bytes": 682267872,
+        "other_share_pct": 79.9568,
+        "overhead_bytes_per_memory": 6975.951,
+        "payload_bytes": 155700000,
+        "payload_bytes_per_memory": 1557.0,
+        "payload_share_pct": 18.2469,
+        "wal_bytes": 15327232,
+        "wal_share_pct": 1.7962
+      },
+      {
+        "corpus_size": 1000000,
+        "dimensions": 384,
+        "effective_bytes_per_memory": 8512.3318,
+        "file_bytes": 8512331776,
+        "file_mib": 8117.9922,
+        "has_index": true,
+        "live_memories": 1000000,
+        "other_bytes": 6815609024,
+        "other_share_pct": 80.0675,
+        "overhead_bytes_per_memory": 6955.3318,
+        "payload_bytes": 1557000000,
+        "payload_bytes_per_memory": 1557.0,
+        "payload_share_pct": 18.2911,
+        "wal_bytes": 139722752,
+        "wal_share_pct": 1.6414
       }
     ]
   },
@@ -3169,80 +3203,15 @@
   },
   "speed": {
     "benches": {
-      "cache/cache_get_exact_hit": {
-        "mean_secs": 1.0417067990236158e-6,
-        "median_secs": 1.0420305686842506e-6,
-        "stderr_secs": 2.4931458627588632e-9
+      "recall/exact_scan_1m": {
+        "mean_secs": 64.144463504,
+        "median_secs": 64.237220396,
+        "stderr_secs": 0.09703730020348408
       },
-      "cache/cache_get_semantic_hit": {
-        "mean_secs": 0.00037393487451776856,
-        "median_secs": 0.0003683903460908414,
-        "stderr_secs": 2.46587227718781e-6
-      },
-      "cache/cache_put_exact_batched": {
-        "mean_secs": 0.00034022218045468797,
-        "median_secs": 0.00015913972471174004,
-        "stderr_secs": 0.00003802630043443779
-      },
-      "cache/cache_put_exact_strict": {
-        "mean_secs": 0.0004714041430175685,
-        "median_secs": 0.000459555352714967,
-        "stderr_secs": 0.0000361430460855115
-      },
-      "cache/cache_put_semantic_strict": {
-        "mean_secs": 0.00047953342260767464,
-        "median_secs": 0.00039909700235690233,
-        "stderr_secs": 0.00004534525251304127
-      },
-      "embed_overhead/remember_raw_vector": {
-        "mean_secs": 0.023198975395,
-        "median_secs": 0.022983151,
-        "stderr_secs": 0.0003102620368912193
-      },
-      "embed_overhead/remember_text_in_process_embedder": {
-        "mean_secs": 0.022831707325,
-        "median_secs": 0.0225162605,
-        "stderr_secs": 0.00027013294679132754
-      },
-      "open/open_latency_fast_kdf": {
-        "mean_secs": 0.000734686873322292,
-        "median_secs": 0.0007330290283653845,
-        "stderr_secs": 1.4790808715629234e-6
-      },
-      "open/open_latency_secure_kdf": {
-        "mean_secs": 0.014876636559999996,
-        "median_secs": 0.01479536007142857,
-        "stderr_secs": 0.0000492420869825138
-      },
-      "recall/exact_scan_100k": {
-        "mean_secs": 6.4067259416999995,
-        "median_secs": 6.3881168955,
-        "stderr_secs": 0.009753527040121885
-      },
-      "recall/exact_scan_10k": {
-        "mean_secs": 0.63456619498,
-        "median_secs": 0.6344569785,
-        "stderr_secs": 0.001199263319009523
-      },
-      "recall/ivfpq_recall_100k": {
-        "mean_secs": 0.0006121892387414809,
-        "median_secs": 0.0006116660740215925,
-        "stderr_secs": 1.0997089315381695e-6
-      },
-      "recall/ivfpq_recall_10k": {
-        "mean_secs": 0.0003728275000571197,
-        "median_secs": 0.0003743007972006652,
-        "stderr_secs": 1.3451379044497786e-6
-      },
-      "write/remember_1_then_flush": {
-        "mean_secs": 0.02283537916,
-        "median_secs": 0.023080973625,
-        "stderr_secs": 0.00036264536661971737
-      },
-      "write/remember_batch_100_then_flush": {
-        "mean_secs": 0.0272110628,
-        "median_secs": 0.026905486333333336,
-        "stderr_secs": 0.00027370717703825844
+      "recall/ivfpq_recall_1m": {
+        "mean_secs": 0.0022479330485515874,
+        "median_secs": 0.0022420262479114455,
+        "stderr_secs": 5.918518166891348e-6
       }
     },
     "machine": {

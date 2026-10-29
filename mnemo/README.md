@@ -821,6 +821,7 @@ rows stay as-is so improvements (or regressions) are visible.
 | Version | Date     | Corpus     | File size | CLI `info` | Python recall | Notes                  |
 |---------|----------|------------|-----------|------------|---------------|------------------------|
 | v0.1.0  | 2026-05  | 31 mems, 384-dim, no index | 1.41 MB | ~330 ms | ~35 ms | Initial dogfood baseline |
+| v0.5.0  | 2026-10  | 10K mems, 384-dim, IVF+PQ  | 82.9 MB | — (open 14.9 ms secure KDF) | 374 µs (IVF+PQ) / 623 ms (exact) | Phase 6: criterion benches + ranking harness + ANN recall@10 grid + file-size breakdown. IVF+PQ ≈ 1,660× faster than exact at 10K; 10,400× at 100K. Default `IndexConfig` recovers only 40% of exact top-10 — scoring v2 candidate. Full numbers in `test/scripts/perf_v0.5.0.json`. |
 
 ## Scope: what is and isn't here
 
