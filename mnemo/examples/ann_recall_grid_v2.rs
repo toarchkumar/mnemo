@@ -39,7 +39,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use mnemo::{IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest};
+use mnemo::{
+    IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest,
+};
 use serde_json::{json, Value};
 
 const PASSPHRASE: &str = "bench-pw";
@@ -115,7 +117,10 @@ fn ensure_corpus(n: usize) -> PathBuf {
         }
         let _ = fs::remove_file(&path);
     }
-    println!("[ann-grid-v2] building {n}-memory corpus at {}", path.display());
+    println!(
+        "[ann-grid-v2] building {n}-memory corpus at {}",
+        path.display()
+    );
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let cfg = MnemoConfig {
         dimensions: DIMENSIONS,
@@ -165,14 +170,14 @@ fn sweep_tier(n: usize) -> Value {
     let n_probe_fracs: Vec<f32> = vec![0.08, 0.16, 0.32, 0.5, 1.0];
     let n_rerank_mults: Vec<usize> = vec![5, 10, 20, 50, 100];
     // Build dial: default pq_subspaces (dims/8=48) and double (dims/4=96).
-    let pq_configs: Vec<(usize, &str)> =
-        vec![(DIMENSIONS / 8, "default_48"), (DIMENSIONS / 4, "doubled_96")];
+    let pq_configs: Vec<(usize, &str)> = vec![
+        (DIMENSIONS / 8, "default_48"),
+        (DIMENSIONS / 4, "doubled_96"),
+    ];
 
     let mut configs_out: Vec<Value> = Vec::new();
     for (pq_subspaces, pq_label) in &pq_configs {
-        println!(
-            "  pq_subspaces={pq_subspaces} ({pq_label}) — rebuilding index in memory"
-        );
+        println!("  pq_subspaces={pq_subspaces} ({pq_label}) — rebuilding index in memory");
         let mut db = Mnemo::open(&path, PASSPHRASE).unwrap();
         db.drop_index();
         let t_build = Instant::now();
@@ -286,7 +291,11 @@ fn main() {
     let mut out: Value = if perf_path.exists() {
         let txt = fs::read_to_string(&perf_path).unwrap();
         let v: Value = serde_json::from_str(&txt).unwrap();
-        if v.is_array() { json!({ "legacy_rows": v }) } else { v }
+        if v.is_array() {
+            json!({ "legacy_rows": v })
+        } else {
+            v
+        }
     } else {
         json!({})
     };

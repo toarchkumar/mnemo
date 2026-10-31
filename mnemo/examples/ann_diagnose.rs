@@ -30,7 +30,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use mnemo::{IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest};
+use mnemo::{
+    IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest,
+};
 use serde_json::{json, Value};
 
 const PASSPHRASE: &str = "bench-pw";
@@ -142,9 +144,7 @@ fn diagnose_tier(n: usize) -> Value {
     let info = db.stats().expect("stats").index.expect("index was built");
     let partitions = info.partitions;
     let subspaces = info.subspaces;
-    println!(
-        "\n[ann-diagnose] tier={n}  partitions={partitions}  pq_subspaces={subspaces}"
-    );
+    println!("\n[ann-diagnose] tier={n}  partitions={partitions}  pq_subspaces={subspaces}");
 
     let queries = gen_clustered_vectors(QUERY_COUNT, DIMENSIONS, 100, 0xDEAD_BEEF);
     let truth: Vec<HashSet<String>> = queries
