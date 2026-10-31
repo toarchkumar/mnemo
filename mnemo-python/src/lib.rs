@@ -385,7 +385,19 @@ impl Mnemo {
     /// Embed `query` with the registered embedder and run `recall`
     /// against the result. Mirrors the shape of `recall(query_vector,
     /// ...)` but takes a string. Raises if no embedder is registered.
-    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None, track_access=true))]
+    ///
+    /// `n_probe` / `n_rerank` (PR ANN-1): per-query ANN index dials,
+    /// matching the Rust `RecallRequest::n_probe` / `::n_rerank`
+    /// builder methods. `None` (default) uses the defaults the index
+    /// was built with (`IndexConfig::default` auto-formulas since
+    /// v0.6.0: `n_probe = (partitions + 1) / 2`, `n_rerank = 500`;
+    /// previously fixed `8` and `64`). Raise either dial for more
+    /// recall at the cost of latency; drop them for the inverse. Only
+    /// takes effect on a database that has an ANN index built;
+    /// unindexed recall scans every live memory exactly.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
+                        track_access=true, n_probe=None, n_rerank=None))]
     fn recall_text(
         &mut self,
         py: Python<'_>,
@@ -394,6 +406,8 @@ impl Mnemo {
         memory_types: Option<Vec<String>>,
         agent_id: Option<String>,
         track_access: bool,
+        n_probe: Option<usize>,
+        n_rerank: Option<usize>,
     ) -> PyResult<Vec<PyObject>> {
         // Embed first (short-lived borrow of the embedder) so we can
         // then call &mut self.inner.recall(&req) without a borrow clash.
@@ -417,6 +431,12 @@ impl Mnemo {
         if let Some(a) = agent_id {
             req = req.agent(a);
         }
+        if let Some(n) = n_probe {
+            req = req.n_probe(n);
+        }
+        if let Some(n) = n_rerank {
+            req = req.n_rerank(n);
+        }
         let hits = self.inner.recall(&req).map_err(to_py)?;
         let mut out = Vec::with_capacity(hits.len());
         for h in hits {
@@ -436,7 +456,13 @@ impl Mnemo {
     /// `accessed_at` / `access_count` get bumped on the returned memories
     /// — pass `False` for a fully read-only recall that doesn't dirty the
     /// catalog, useful for batch scoring or dry-runs.
-    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None, track_access=true))]
+    ///
+    /// `n_probe` / `n_rerank` (PR ANN-1): per-query ANN index dials.
+    /// `None` (default) uses the defaults the index was built with.
+    /// See [`recall_text`] for the full description.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
+                        track_access=true, n_probe=None, n_rerank=None))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -445,6 +471,8 @@ impl Mnemo {
         memory_types: Option<Vec<String>>,
         agent_id: Option<String>,
         track_access: bool,
+        n_probe: Option<usize>,
+        n_rerank: Option<usize>,
     ) -> PyResult<Vec<PyObject>> {
         let mut req = RecallRequest::new(query)
             .top_k(top_k)
@@ -455,6 +483,12 @@ impl Mnemo {
         }
         if let Some(a) = agent_id {
             req = req.agent(a);
+        }
+        if let Some(n) = n_probe {
+            req = req.n_probe(n);
+        }
+        if let Some(n) = n_rerank {
+            req = req.n_rerank(n);
         }
         let hits = self.inner.recall(&req).map_err(to_py)?;
         let mut out = Vec::with_capacity(hits.len());

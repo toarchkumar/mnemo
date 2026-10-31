@@ -41,11 +41,16 @@ const PQ_CODEWORDS: usize = 256;
 pub struct IndexConfig {
     /// Number of IVF partitions. `0` means auto (`ceil(√n)`).
     pub n_partitions: usize,
-    /// Number of PQ subspaces. `0` means auto (≈ 8 dims per subspace).
+    /// Number of PQ subspaces. `0` means auto (`dims / 4`). Previously
+    /// `dims / 8` before PR ANN-1 — see [`IndexConfig::default`] for
+    /// why the bump.
     pub pq_subspaces: usize,
     /// Partitions scanned per query (the IVF accuracy/speed dial).
+    /// `0` means auto (`(partitions + 1) / 2`). Previously a fixed `8`
+    /// before PR ANN-1.
     pub n_probe: usize,
     /// Candidates handed back for exact reranking (the PQ accuracy dial).
+    /// `0` means auto (`500`). Previously a fixed `64` before PR ANN-1.
     pub n_rerank: usize,
     /// Lloyd-iteration count for every k-means run.
     pub kmeans_iters: usize,
@@ -55,11 +60,35 @@ pub struct IndexConfig {
 
 impl Default for IndexConfig {
     fn default() -> Self {
+        // All four of n_partitions / pq_subspaces / n_probe / n_rerank
+        // default to 0, which [`IvfPqIndex::build`] interprets as "pick
+        // a sensible value from the corpus and partition count":
+        //
+        // - n_partitions → `ceil(sqrt(n))`
+        // - pq_subspaces → `dims/4` (384-dim → 96 subspaces).
+        //   Previously `dims/8` (48); PR ANN-1 bumped it after the
+        //   ann_recall_grid_v2 harness showed that 48 subspaces capped
+        //   100K recall@10 at ~0.92 even with the full-scan rerank,
+        //   while 96 subspaces lifts the knee to 0.98 at ~10 ms/query
+        //   on an M1. Costs 2x the PQ codes per vector (48 → 96 bytes,
+        //   negligible against the 1.5 KB raw vector) and ~15 % more
+        //   build time.
+        // - n_probe → `(partitions + 1) / 2` — scales with partition
+        //   count. Previously fixed at 8, which at 317 partitions
+        //   scanned 2.5 % of the index per query. The planner's
+        //   "express relative to index size" clause.
+        // - n_rerank → fixed 500. Previously 64. Decoupled from top_k
+        //   because the index is built before any query knows top_k.
+        //   500 is 50x the default top_k=10 — plenty of headroom.
+        //
+        // Explicit non-zero values still override, so callers who want
+        // the old tiny defaults can set them (useful for very small
+        // corpora where sqrt(n) partitions is overkill).
         Self {
             n_partitions: 0,
             pq_subspaces: 0,
-            n_probe: 8,
-            n_rerank: 64,
+            n_probe: 0,
+            n_rerank: 0,
             kmeans_iters: 25,
             seed: DEFAULT_SEED,
         }
@@ -308,10 +337,13 @@ impl IvfPqIndex {
         let n_partitions = centroids.len() / dims;
 
         // PQ subspaces — split `dims` into `m` near-equal contiguous spans.
+        // The auto-default is `dims/4` (PR ANN-1), where the grid shows
+        // 100K recall@10 clearing 0.98 at the knee. Earlier auto was
+        // `dims/8`; see IndexConfig::default for the trade-off.
         let m = if cfg.pq_subspaces > 0 {
             cfg.pq_subspaces
         } else {
-            (dims / 8).max(1)
+            (dims / 4).max(1)
         }
         .clamp(1, dims);
         let mut sub_offsets = Vec::with_capacity(m + 1);
@@ -320,11 +352,20 @@ impl IvfPqIndex {
         }
         let pq = PqCodebook::train(&sub_offsets, &train, cfg.kmeans_iters, &mut rng);
 
+        // Query-time dials. Zero means "pick a scale-appropriate
+        // default"; see IndexConfig::default for the formulas.
+        let n_probe = if cfg.n_probe > 0 {
+            cfg.n_probe
+        } else {
+            ((n_partitions + 1) / 2).max(1)
+        };
+        let n_rerank = if cfg.n_rerank > 0 { cfg.n_rerank } else { 500 };
+
         let mut index = IvfPqIndex {
             dims,
             n_partitions,
-            n_probe: cfg.n_probe.max(1),
-            n_rerank: cfg.n_rerank.max(1),
+            n_probe: n_probe.max(1),
+            n_rerank: n_rerank.max(1),
             centroids,
             pq,
             partitions: vec![Posting::default(); n_partitions],

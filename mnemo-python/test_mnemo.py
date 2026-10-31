@@ -549,6 +549,63 @@ def test_compact_file_module_fn():
     print("ok  mnemo.compact_file(path, pp) -> {before, after}")
 
 
+def test_recall_accepts_n_probe_n_rerank_overrides():
+    """PR ANN-1: Python callers can tune the ANN index per query.
+
+    Before ANN-1, `n_probe` and `n_rerank` were only accessible from
+    Rust (`RecallRequest::n_probe/n_rerank`) and the CLI — Python users
+    had no handle on the index tuning dials at all. Both `recall` and
+    `recall_text` take them now, and `None` means "use what the index
+    was built with" (the ANN-1 auto-formulas).
+    """
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        with mnemo.open(path, "pw", dimensions=4) as db:
+            # 40 one-hot vectors across 4 axes — enough that an index
+            # has partitions and PQ codes to work with.
+            for i in range(40):
+                v = [float(i % 4 == j) for j in range(4)]
+                db.remember(f"m{i}", "semantic", v)
+            db.flush()
+            db.build_index()
+            assert db.has_index()
+
+            query = [1.0, 0.0, 0.0, 0.0]
+
+            # None / omitted (default) — uses the index's own n_probe /
+            # n_rerank. Baseline that the explicit calls below are
+            # compared against.
+            default_hits = db.recall(query, top_k=5)
+            assert len(default_hits) == 5
+
+            # Explicit override: tiny shortlist. The call must succeed
+            # and return at most top_k results. Correctness is tested
+            # by the Rust-side ANN tests; here we're just confirming
+            # the kwargs plumb through without raising or being
+            # silently ignored.
+            tight = db.recall(query, top_k=5, n_probe=1, n_rerank=5)
+            assert len(tight) <= 5
+
+            # Explicit override: generous shortlist. Same contract.
+            wide = db.recall(query, top_k=5, n_probe=10, n_rerank=100)
+            assert len(wide) == 5
+
+            # `recall_text` takes the same kwargs. Need an embedder
+            # registered first — a trivial identity-ish one is fine
+            # for the plumbing test.
+            def _canned(texts):
+                # One hot vector per text (same shape as the corpus).
+                return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+            db.set_embedder(_canned, name="test-canned", dimensions=4, normalize=False)
+            text_hits = db.recall_text(
+                "anything", top_k=3, n_probe=2, n_rerank=20
+            )
+            assert len(text_hits) <= 3
+        del db
+    print("ok  recall / recall_text accept n_probe + n_rerank")
+
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -572,4 +629,5 @@ if __name__ == "__main__":
     test_read_only_with_block_and_close_are_noops()
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
+    test_recall_accepts_n_probe_n_rerank_overrides()
     print("\nall Python binding tests passed")

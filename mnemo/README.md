@@ -466,6 +466,17 @@ accurate, lower is faster. The index is stored *inside* the encrypted file
 Internally the index ranks by squared-L2; the exact rerank uses the
 requested metric, so for cosine queries a generous `n_rerank` is advisable.
 
+**Default auto-formulas (PR ANN-1, pending v0.6.0).** `IndexConfig::default()`
+now picks `pq_subspaces = dims/4` (was `dims/8`), `n_probe = (partitions + 1) / 2`
+(was fixed `8`), and `n_rerank = 500` (was fixed `64`). Measured on the Phase 6
+synthetic corpus with the new defaults: 10K hits recall@10 ≈ 0.98 at ~1.4 ms/query;
+100K hits ~0.98 at ~10.6 ms/query. The old `n_probe=8, n_rerank=64` capped
+100K recall@10 at ~0.40 — the harness missed this because its defaults were
+tuned for a toy corpus that happened to work. Existing files keep their old
+defaults until you `rebuild_index` or `compact`; any explicit `n_probe` /
+`n_rerank` passed per call still overrides. See the `ann_recall_grid_v2` block
+in `test/scripts/perf_v0.5.0.json` for the full grid.
+
 `Mnemo::search` always stays exact — it is the brute-force ground truth.
 
 ## Security model
@@ -685,7 +696,7 @@ cargo run --bin mnemo -- demo            # try it without any setup
 
 ```sh
 cargo build --release
-cargo test            # 34 integration + 12 CLI smoke + 2 doctests + unit tests
+cargo test            # 66 integration + 26 CLI smoke + proptest state machine + unit tests
 cargo run --example quickstart
 ```
 
@@ -853,6 +864,14 @@ append history dominate everything else). The README design targets
 (<5 ms recall at 100 K, <15 ms at 1 M, <4 KB/memory) are aspirational
 goals at scale, not yet measured here.
 
+> **Historical note (updated 2026-10).** The CLI timings in this
+> baseline were taken on a *debug* `cargo run --bin mnemo` build. The
+> v0.5.x Phase 6 harness re-measures the same operations with release
+> builds and reports them in the Performance history row + the
+> `test/scripts/perf_v0.5.0.json` artifact — on a release build with
+> production KDF the open latency settles at ~15 ms, not ~330 ms.
+> Keeping this row for history, not as a current baseline.
+
 **Knobs that should help small files.** Running `compact` collapses
 snapshot history back to a single page run; the default 64-page WAL
 reservation is fixed today and would need a config change to shrink. ANN
@@ -866,8 +885,16 @@ rows stay as-is so improvements (or regressions) are visible.
 | Version | Date     | Corpus     | File size | CLI `info` | Python recall | Notes                  |
 |---------|----------|------------|-----------|------------|---------------|------------------------|
 | v0.1.0  | 2026-05  | 31 mems, 384-dim, no index | 1.41 MB | ~330 ms | ~35 ms | Initial dogfood baseline |
-| v0.5.0  | 2026-10  | 10K mems, 384-dim, IVF+PQ  | 82.9 MB | — (open 14.9 ms secure KDF) | 374 µs (IVF+PQ) / 623 ms (exact) | Phase 6: criterion benches + ranking harness + ANN recall@10 grid + file-size breakdown. IVF+PQ ≈ 1,660× faster than exact at 10K; 10,400× at 100K. Default `IndexConfig` recovers only 40% of exact top-10 — scoring v2 candidate. Full numbers in `test/scripts/perf_v0.5.0.json`. |
+| v0.5.0  | 2026-10  | 10K mems, 384-dim, IVF+PQ  | 82.9 MB | — (open 14.9 ms secure KDF) | 374 µs (IVF+PQ†) / 623 ms (exact‡) | Phase 6: criterion benches + ranking harness + ANN recall@10 grid + file-size breakdown. IVF+PQ ≈ 1,660× faster than exact at 10K; 10,400× at 100K. Default `IndexConfig` recovers only 40% of exact top-10 — **index-quality defect, fixed in ANN-1 below** (originally mis-filed as a scoring issue). Full numbers in `test/scripts/perf_v0.5.0.json`. |
 | v0.5.1  | 2026-10  | same corpus, hardware AES on ARM | — | — | 105 ms (exact 10K) / 1.05 s (exact 100K); IVF+PQ unchanged | PR 11.0: enable `--cfg aes_armv8 --cfg polyval_armv8` so aarch64 builds use hardware AES + PMULL instead of the constant-time software fallback. **6.0×** faster exact scan at 10K, **6.1×** at 100K; 1.3× on cache_put; IVF+PQ and Argon2id-bound open unchanged. See `test/scripts/perf_v0.5.0.json`'s `speed_hw_aes` block for the full set. No API or format change. If you build from crates.io see the "ARM users" section above. |
+
+> † IVF+PQ speed at the old defaults; recall@10 was ~0.40 at those
+> defaults, not 1.0. PR ANN-1 raises the default to ≥0.95 recall@10 at
+> ~10 ms/query at 100K; see the `ann_recall_grid_v2` block in
+> `perf_v0.5.0.json`.
+> ‡ Both v0.5.0 timings were measured on software AES (the fix landed
+> in v0.5.1). On hardware AES, exact scan at 10K drops to 105 ms;
+> IVF+PQ was never AES-bound so it's unchanged.
 
 ## Scope: what is and isn't here
 

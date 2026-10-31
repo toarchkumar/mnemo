@@ -44,9 +44,28 @@ The scaffold tells the next agent what to do: replace it with one that
 records your real embedder and conventions. See the [main README](../mnemo/README.md#self-describing-databases)
 for the full pattern.
 
-## Build & install
+## Install
 
-The bindings build with [maturin](https://www.maturin.rs):
+The published wheel is the normal install path — nothing to build:
+
+```bash
+pip install mnemo-engine
+```
+
+Prebuilt wheels ship for CPython 3.8+ on macOS x86_64 + arm64, Linux
+x86_64 + aarch64 (manylinux), and Windows x86_64. If none fits (e.g. a
+BSD, aarch64 musl, or any other platform mnemo doesn't ship a wheel
+for), pip falls back to the sdist and compiles from source — that path
+needs a working Rust toolchain (`rustup`) and will take a few minutes.
+
+> ARM users building from source (sdist, or `cargo install mnemo-engine`
+> directly): set `RUSTFLAGS="--cfg aes_armv8 --cfg polyval_armv8"` before
+> install to enable hardware AES. The prebuilt wheels have this baked
+> in; your sdist build doesn't see our repo's `.cargo/config.toml`.
+> Verify afterwards with `mnemo.build_info()['aes_backend']`, which
+> should read `"armv8 hardware"` (not `"armv8 software"`).
+
+### From source (contributors)
 
 ```bash
 pip install maturin
@@ -124,7 +143,7 @@ its own agent.
 | Method | Purpose |
 |---|---|
 | `remember(content, memory_type, vector, *, agent_id, importance, session_id, ttl_secs, shared, metadata)` | Store a memory; returns its id |
-| `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall) |
+| `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True, n_probe=None, n_rerank=None)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall). `n_probe` / `n_rerank` (PR ANN-1): per-query ANN tuning — `None` uses the index's build-time defaults (ANN-1 auto-formulas: `(partitions+1)/2` and `500`) |
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
 | `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
@@ -149,17 +168,18 @@ its own agent.
 | `rekey(new_passphrase, fast=False)` | Change the passphrase. Re-derives the KEK and re-wraps the DEK; encrypted pages are not rewritten (O(1) in db size). `fast=True` uses the cheap-Argon2 test params — omit for production |
 | `set_embedder(fn, *, name, dimensions, normalize=True)` | Register a Python callable `embed(texts: list[str]) -> list[list[float]]` as this handle's text embedder (Phase 3). Dimension-checks against the database's width; identity-checks against (and on first use upserts) the scaffold manifest's `embedder_name` / `embedder_dimensions` / `embedder_normalize` keys, so swapping embedders between opens fails loudly |
 | `remember_text(content, memory_type, **kwargs)` | Embed `content` via the registered embedder and `remember` the result. Accepts the same per-memory kwargs as `remember` (`agent_id`, `importance`, `session_id`, `ttl_secs`, `shared`, `metadata`) |
-| `recall_text(query, top_k=10, memory_types=None, agent_id=None, track_access=True)` | Embed `query` via the registered embedder and run `recall`. Same return shape as `recall` |
+| `recall_text(query, top_k=10, memory_types=None, agent_id=None, track_access=True, n_probe=None, n_rerank=None)` | Embed `query` via the registered embedder and run `recall`. Same return shape and ANN-tuning kwargs as `recall` |
 | `cache_get_semantic_text(namespace, text, threshold=0.97)` | Text-side semantic cache lookup; uses the embedder's `name` as the semantic cache's `model` component |
-| `stats()` | Summary statistics |
+| `stats()` | Summary statistics — includes `fsyncs_last_flush` (count of `sync_all` the most recent `flush()` on this handle issued; `0` on a fresh handle before any flush — Phase 6 instrumentation) |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
 | `len(db)` | Live memory count |
 
-Plus one module-level function:
+Plus two module-level functions:
 
 | Function | Purpose |
 |---|---|
 | `mnemo.compact_file(path, passphrase)` | Rewrite the file out-of-place, dropping tombstoned and expired memories and reclaiming stale pages. Caller's own handle must be closed first. Returns `{"before": int, "after": int}` |
+| `mnemo.build_info()` | Returns `{"version", "target", "aes_backend", "polyval_backend"}` for the installed wheel. Lets you verify an ARM wheel picked up the hardware AES path — `aes_backend` should read `"armv8 hardware"` on Apple Silicon / Graviton (anything else, like `"armv8 software (constant-time fallback)"`, means the compile missed the fix). PR 11.0, v0.5.1+ |
 
 `Session` methods: `add_turn(turn)`, `recall(query, top_k=10, memory_types=None)`,
 `close()`, `discard()`, `id()`, `agent()`, `turn_ids()`, `turn_count()`; also a

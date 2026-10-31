@@ -8,6 +8,97 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed — PR ANN-1 (approximate index defaults)
+
+The `IndexConfig::default()` auto-formulas now scale with the index and
+query shape instead of fixed small numbers. Measured on the Phase 6
+synthetic corpus (M1 Pro, release build, hardware AES):
+
+| Corpus | Old defaults (v0.5.x) | New defaults (ANN-1) | Latency |
+|--------|-----------------------|---------------------|---------|
+| 10K    | recall@10 ≈ 0.40 (n_probe=8, n_rerank=64)  | **recall@10 ≈ 0.98** (n_probe=50, n_rerank=500) | ~2-3 ms/query |
+| 100K   | recall@10 ≈ 0.40 (same)                     | **recall@10 ≈ 0.98** (n_probe=159, n_rerank=500) | ~10 ms/query |
+
+Previously `n_probe=8, n_rerank=64` were fixed numbers tuned for a toy
+corpus; at 100K that scanned 2.5% of partitions and reranked 64 of
+~100,000 candidates. The old defaults' 0.40 recall was mis-filed in
+the v0.5.0 CHANGELOG as a "scoring v2 candidate"; the PR ANN-1
+diagnose harness (step 1 of the planner's spec) ruled out any engine
+bug — full-scan + rerank-1000 hits 0.98 at 10K and 0.92 at 100K, so
+the ceiling is tunable, not broken.
+
+Formulas:
+- `pq_subspaces` auto: `dims / 4` (was `dims / 8`). On 384-dim data,
+  96 subspaces instead of 48. Costs 2× PQ codes per vector (48 → 96
+  bytes, negligible against the 1.5 KB raw vector) and ~15 % more
+  build time. Required to lift the 100K ceiling past 0.92.
+- `n_probe` auto: `(partitions + 1) / 2` (was fixed `8`).
+- `n_rerank` auto: fixed `500` (was fixed `64`). Decoupled from `top_k`
+  because the index is built before any query knows `top_k`; 500 is
+  50× the default `top_k=10` — generous headroom.
+
+Explicit non-zero values on `IndexConfig` still override, so callers
+who want the old tiny defaults can set them explicitly (useful for
+very small corpora where sqrt(n) partitions is overkill).
+
+**No format change.** The on-disk `IvfPqIndex` schema is unchanged;
+the different `pq_subspaces` just serializes differently. Existing
+files keep their old defaults until the user calls `rebuild_index` or
+`compact_file`. Any explicit `n_probe` / `n_rerank` passed per call
+still overrides, as before.
+
+### Added — Python parity
+
+- **`Mnemo.recall(..., n_probe=None, n_rerank=None)`** and
+  **`Mnemo.recall_text(..., n_probe=None, n_rerank=None)`** — per-query
+  ANN tuning dials now reach the Python surface. `None` means "use the
+  index's build-time defaults" (the ANN-1 auto-formulas above). Rust
+  and the CLI already had this via `RecallRequest::n_probe/n_rerank`;
+  Python users had no handle on it at all. One Python-side test
+  (`test_recall_accepts_n_probe_n_rerank_overrides`).
+
+### Docs — PR ANN-1 cleanup
+
+- `mnemo/README.md`:
+  - "Approximate index (IVF + PQ)" gains a "Default auto-formulas"
+    paragraph pointing at `ann_recall_grid_v2` in `perf_v0.5.0.json`.
+  - v0.1.0 Performance-baseline block gets a note that its CLI timings
+    were **debug builds**; v0.5.x re-measured on release.
+  - v0.5.0 Performance-history row gets two footnotes: (†) the IVF+PQ
+    speed in that row was at the old defaults → recall@10 ≈ 0.40, not
+    1.0, and the ANN-1 defaults raise it to 0.98; (‡) exact-scan
+    timings were on software AES, fixed in v0.5.1.
+  - Stale test counts at build-and-test section updated (34→66
+    integration, 12→26 CLI smoke).
+- `mnemo-python/README.md`:
+  - "Install" now leads with `pip install mnemo-engine` (prebuilt
+    wheels for every common platform); the maturin steps move under
+    a "From source (contributors)" subsection.
+  - `recall()` / `recall_text()` kwargs updated for `n_probe` /
+    `n_rerank`.
+  - `stats()` row notes `fsyncs_last_flush` (shipped unmentioned in
+    v0.5.1).
+  - New module-level `mnemo.build_info()` row (shipped unmentioned in
+    v0.5.1).
+- Root `README.md` and `index.html` stay planner-owned — not touched.
+
+### Methodology
+
+Full ANN-1 numbers (diagnose cells + 2×5×5 tuning grid at 10K and
+100K) are under new top-level keys `ann_diagnose` and
+`ann_recall_grid_v2` in `test/scripts/perf_v0.5.0.json`, next to the
+earlier Phase 6 `speed`, `ranking`, `ann_recall_grid`,
+`file_size_breakdown`, and `speed_hw_aes` blocks.
+
+### Not released yet
+
+Holding on `main` to ship together with **Recall scoring v2** as
+**v0.6.0** per the planner's step-7 call (both PRs change which
+results come back; one minor-version bump covers both). No early
+v0.5.2 patch — the ANN-1 diagnose did not surface a user-visible bug
+(the pipeline is correct; the old defaults were just too small for
+realistic corpora).
+
 ## [0.5.1] — 2026-10-29
 
 ARM hardware-AES fix. Pure build-config change — no API, no format,
