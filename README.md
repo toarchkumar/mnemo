@@ -142,6 +142,20 @@ Indexed-search speeds are not listed yet; see the limitations below.
 
 See the [changelog](CHANGELOG.md) for release history.
 
+## Security advisory (fixed in v0.5.2)
+
+Versions before 0.5.2 could reuse AES-GCM nonces if a `.mnemo` file was
+copied and both copies were then written to: for example, two machines
+syncing the same file, a sync service's "conflicted copy", or restoring an
+older backup and carrying on with it. Someone holding both copies could
+recover parts of the content or forge pages. From v0.5.2, every writing
+session draws a fresh random nonce prefix, so this can't happen.
+
+If you may have written to two copies of the same file with an earlier
+version, upgrade, then run `mnemo compact` (or `compact_file` in Rust or
+Python) on the copy you keep. Compaction rewrites the file under a fresh
+data key. Details are in the [changelog](CHANGELOG.md).
+
 ## Repository layout
 
 ```

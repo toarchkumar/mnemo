@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.5.1</span>
+        <span class="pill"><span class="dot"></span>v0.5.2</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.5.1.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.5.2.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -666,6 +666,7 @@ AI sessions stay aligned without relying on chat history.
         <li><svg><use href="#i-check"/></svg><span><b>Pages are pinned to their position.</b> A valid encrypted page moved to another slot fails authentication.</span></li>
         <li><svg><use href="#i-check"/></svg><span><b>The header is sealed.</b> Pointing it at an older catalog is caught on open as tampering.</span></li>
         <li><svg><use href="#i-check"/></svg><span><b>No password oracle.</b> A wrong passphrase and a damaged key look identical.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Safe to copy and keep writing.</b> Every writing session uses a fresh random nonce prefix, so two diverged copies of a file never reuse encryption nonces (fixed in v0.5.2; <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">see the advisory</a>).</span></li>
         <li><svg><use href="#i-check"/></svg><span><b>Tested hard.</b> Fuzzed parsers, property tests with simulated crashes, and a dependency audit on every change.</span></li>
         <li><svg><use href="#i-check"/></svg><span><b>No <code>unsafe</code> code.</b> The core crate forbids it outright.</span></li>
         <li><svg><use href="#i-check"/></svg><span><b>Verifiable releases.</b> PyPI packages are published from CI with signed provenance (Trusted Publishing).</span></li>
