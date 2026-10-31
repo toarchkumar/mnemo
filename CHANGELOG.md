@@ -8,6 +8,86 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-10-31
+
+### Security — PR SEC-1 (AES-GCM nonce reuse across diverged copies)
+
+**Advisory.** Before v0.5.2, page nonces were constructed deterministically
+from `(page_no, write_counter)` under a per-file DEK that never changes
+after `create`. If you had two copies of the same `.mnemo` file and
+*both* copies received writes — scenarios include two laptops syncing
+through Dropbox (where "conflicted copies" diverge independently), a
+restored older backup resuming operation alongside the current file,
+or any workflow where `cp agent.mnemo backup.mnemo` is followed by
+writes to both — the two copies' writers would produce pages carrying
+**the same encryption nonce under the same key with different
+plaintexts**. That breaks AES-GCM's confidentiality (the XOR of the two
+plaintexts is recoverable from the two ciphertexts) and its
+tamper-evidence (the GHASH authentication key is recoverable, allowing
+page forgery with a valid tag).
+
+**What to do.**
+
+1. Upgrade to v0.5.2 (or any later release that includes SEC-1).
+2. If you've ever written to two copies of the same file, or resumed
+   operation after restoring an older backup alongside an active file,
+   you should **rotate your data-encryption-key**. The simplest path is
+   `mnemo.compact_file(path, passphrase)` (Python) or
+   `Mnemo::compact_file(path, passphrase)` (Rust) — compaction rewrites
+   the file through a fresh `random_dek`, so any prior nonce reuse under
+   the old key becomes irrelevant for the rewritten pages.
+3. Future writes from v0.5.2 don't repeat nonces across copies even
+   when `cp` + diverge happens again, because every writable open draws
+   a fresh 64-bit random prefix.
+
+**What SEC-1 does not fix.** Full rollback detection — reverting a
+`.mnemo` to a byte-identical older state and continuing to use it — is
+still out of scope. The only cure for rollback is a monotonic counter
+kept **outside** the file; a counter inside the file can itself be
+rolled back. See the Security model section of `mnemo/README.md`.
+
+### Fixed — SEC-1 implementation
+
+- Page nonces now follow NIST SP 800-38D §8.2.1 (fixed field +
+  invocation field): a **random 64-bit per-session prefix** (drawn
+  fresh on every writable open and regenerated if the counter would
+  wrap) followed by a **32-bit per-session counter**. The `page_no`
+  component of the pre-SEC-1 nonce is dropped — page position is
+  already bound through AAD since v6 (`page_no.to_le_bytes()`), so a
+  page swapped to a different slot still fails authentication.
+  Cross-copy nonce collisions now require two independent sessions
+  to draw the same 64-bit random value (birthday bound ~2^32 sessions
+  — astronomically unlikely).
+- **No format change.** Each page already stores its own 12-byte
+  nonce in bytes `[0..12]` of the on-disk image; decrypt reads the
+  stored nonce rather than recomputing one. A v0.5.1 file opens
+  cleanly on v0.5.2 and vice versa.
+- Audited every `aead_encrypt` call site: data-page writes (`pager::
+  seal_page` + `pager::flush`) switched to the new per-session scheme;
+  WAL frames reuse the same page images and inherit the fix;
+  `format::apply_seal` was already on `random_nonce()`; `crypto::
+  wrap_dek` was already on `random_nonce()` (via `store`).
+
+### Added — tests
+
+- `mnemo/tests/sec1_nonce_uniqueness.rs` — three targeted invariants:
+  (1) no nonce appears in both copies after a fork-and-write
+  sequence; (2) nonces drawn in one session don't share the 8-byte
+  prefix with nonces drawn in a later reopen of the same file;
+  (3) decrypt round-trip still works (format schema unchanged).
+- `mnemo/tests/proptest_store.rs::prop_no_page_nonce_repeats_within_file`
+  — random `remember` / `flush` / `reopen` sequences on one file;
+  every encrypted page's 12-byte nonce must be distinct.
+
+### Release mechanics
+
+Shipped from a `release/0.5.x` hotfix branch cut from the `v0.5.1`
+tag, because `main` carries unreleased PR ANN-1 behavior changes
+being held for `v0.6.0`. `ci.yml` push + pull-request triggers
+extended to cover `release/**` so the hotfix branch runs the full
+matrix + fuzz-smoke before tagging. Merged back to `main` after
+release.
+
 ## [0.5.1] — 2026-10-29
 
 ARM hardware-AES fix. Pure build-config change — no API, no format,
@@ -926,7 +1006,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/toarchkumar/mnemo/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/toarchkumar/mnemo/compare/v0.4.0...v0.4.1

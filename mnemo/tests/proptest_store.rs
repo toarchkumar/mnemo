@@ -524,3 +524,122 @@ proptest! {
         );
     }
 }
+
+// --- PR SEC-1: no page-nonce ever repeats within a file ---
+//
+// Fifth property, added for the v0.5.2 security hotfix. Random
+// Remember/Flush/Reopen sequences on one `.mnemo` file; after the run,
+// scan every encrypted page's 12-byte nonce and assert they're all
+// distinct. Together with the targeted "no cross-copy nonce" and "fresh
+// prefix per reopen" integration tests in sec1_nonce_uniqueness.rs,
+// this covers the AES-GCM uniqueness invariant across the engine's
+// actual write surface (not just a hand-rolled sequence).
+
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+
+const SEC1_PAGE_SIZE: usize = 8192;
+const SEC1_NONCE_LEN: usize = 12;
+
+fn sec1_collect_nonces(path: &Path) -> BTreeSet<[u8; SEC1_NONCE_LEN]> {
+    let mut f = File::open(path).expect("open");
+    let len = f.metadata().expect("stat").len();
+    let page_count = (len / SEC1_PAGE_SIZE as u64) as usize;
+    let mut out = BTreeSet::new();
+    // Skip page 0 (plaintext header).
+    for page_no in 1..page_count {
+        f.seek(SeekFrom::Start((page_no as u64) * SEC1_PAGE_SIZE as u64))
+            .expect("seek");
+        let mut page = [0u8; SEC1_PAGE_SIZE];
+        if f.read_exact(&mut page).is_err() {
+            break;
+        }
+        let mut nonce = [0u8; SEC1_NONCE_LEN];
+        nonce.copy_from_slice(&page[..SEC1_NONCE_LEN]);
+        if nonce != [0u8; SEC1_NONCE_LEN] {
+            out.insert(nonce);
+        }
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        max_shrink_iters: 1024,
+        ..Default::default()
+    })]
+
+    #[test]
+    fn prop_no_page_nonce_repeats_within_file(
+        ops in prop::collection::vec(
+            (
+                prop::collection::vec(any::<u8>(), 1..32), // content bytes
+                any::<bool>(),                              // flush after?
+                any::<bool>(),                              // reopen after?
+            ),
+            1..12,
+        ),
+    ) {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("prop-sec1.mnemo");
+        let dims = 4;
+        let mut db = Mnemo::create(&path, "pw", MnemoConfig {
+            dimensions: dims,
+            kdf: KdfParams::fast(),
+            ..Default::default()
+        }).unwrap();
+
+        for (i, (content, should_flush, should_reopen)) in ops.iter().enumerate() {
+            // Distinct per-op vector so the engine actually writes a page.
+            let v: Vec<f32> = (0..dims)
+                .map(|k| (i as f32 + k as f32 + 1.0) * 0.17)
+                .collect();
+            db.remember(Memory::new(
+                format!("op-{i}:{}", content.iter().map(|b| *b as u32).sum::<u32>()),
+                MemoryType::Semantic,
+                v,
+            ))
+            .unwrap();
+            if *should_flush || *should_reopen {
+                db.flush().unwrap();
+            }
+            if *should_reopen {
+                db.close().unwrap();
+                drop(db);
+                db = Mnemo::open(&path, "pw").unwrap();
+            }
+        }
+        db.flush().unwrap();
+        db.close().unwrap();
+        drop(db);
+
+        // Count stored (nonce) entries vs scanned pages. BTreeSet
+        // deduplicates — a repeat would make the set shorter than the
+        // page count. We can't know the exact page count up front
+        // (compaction, WAL frames reused for later txns, etc.), so
+        // compare set.len() to the count of non-empty page slots we
+        // actually read.
+        let mut f = File::open(&path).unwrap();
+        let total_pages = (f.metadata().unwrap().len() / SEC1_PAGE_SIZE as u64) as usize;
+        let mut non_empty = 0usize;
+        for page_no in 1..total_pages {
+            f.seek(SeekFrom::Start((page_no as u64) * SEC1_PAGE_SIZE as u64)).unwrap();
+            let mut page = [0u8; SEC1_PAGE_SIZE];
+            if f.read_exact(&mut page).is_err() {
+                break;
+            }
+            let mut nonce = [0u8; SEC1_NONCE_LEN];
+            nonce.copy_from_slice(&page[..SEC1_NONCE_LEN]);
+            if nonce != [0u8; SEC1_NONCE_LEN] {
+                non_empty += 1;
+            }
+        }
+        let unique = sec1_collect_nonces(&path).len();
+        prop_assert_eq!(
+            unique, non_empty,
+            "page-nonce repeat detected: {} unique nonces across {} non-empty pages",
+            unique, non_empty,
+        );
+    }
+}

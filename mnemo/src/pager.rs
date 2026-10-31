@@ -93,8 +93,26 @@ pub const DEFAULT_CACHE_PAGES: usize = 8192;
 pub struct Pager {
     file: File,
     dek: Zeroizing<[u8; KEY_LEN]>,
-    /// Monotonic nonce counter. Incremented for every encrypted page write.
+    /// Monotonic write counter persisted in the header (lease / replay
+    /// machinery; see `Mnemo::prepare_for_flush`). **No longer used in
+    /// the page nonce** — SEC-1 (v0.5.2) moved page nonces to a
+    /// per-session random prefix + per-session counter so copies of a
+    /// file can't collide on `(page_no, write_counter)` under the same
+    /// DEK. Still bumped per write for the existing lease machinery.
     pub write_counter: u64,
+    /// Random 64-bit "fixed field" (NIST SP 800-38D §8.2.1) stamped
+    /// into bytes 0..8 of every page nonce this pager produces. Drawn
+    /// fresh on every writable open and regenerated on counter wrap —
+    /// so cross-session nonce collisions require two independent
+    /// sessions to draw the same 64-bit random value (birthday bound
+    /// ~2^32). Unused on read-only handles.
+    session_random: u64,
+    /// Per-session monotonic counter stamped into bytes 8..12 of every
+    /// page nonce. Starts at 0, increments once per encrypted page
+    /// write via [`Pager::next_nonce`]. If about to overflow `u32::MAX`,
+    /// [`Pager::next_nonce`] regenerates `session_random` and resets to 0
+    /// so the (random, counter) pair stays unique within the session.
+    session_counter: u32,
     /// Format version this pager is currently encrypting *for*. `Pager` is
     /// version-aware because the format-bump in v6 changed page encryption
     /// to bind each page's home `page_no` as AAD on AES-GCM, making
@@ -119,9 +137,32 @@ impl Pager {
             file,
             dek,
             write_counter,
+            // Fresh 64-bit random per Pager construction = per writable
+            // open. See SEC-1 doc on `crypto::session_page_nonce`.
+            session_random: crypto::random_u64(),
+            session_counter: 0,
             version,
             cache: PageCache::new(DEFAULT_CACHE_PAGES),
         }
+    }
+
+    /// Mint the next page nonce for this session.
+    ///
+    /// Increments `session_counter` and returns
+    /// `session_random || session_counter`. If the counter would overflow
+    /// `u32::MAX`, regenerates `session_random` and resets the counter
+    /// before incrementing — so no `(session_random, session_counter)`
+    /// pair ever repeats within this session.
+    fn next_nonce(&mut self) -> [u8; NONCE_LEN] {
+        if self.session_counter == u32::MAX {
+            // Wrap guard: pick a new 64-bit prefix and reset the counter
+            // so the next write uses `(fresh_random, 1)` instead of
+            // reusing `(old_random, 0)`.
+            self.session_random = crypto::random_u64();
+            self.session_counter = 0;
+        }
+        self.session_counter += 1;
+        crypto::session_page_nonce(self.session_random, self.session_counter)
     }
 
     /// Switch the pager to a new format version. Used by [`crate::Mnemo::open`]
@@ -204,8 +245,11 @@ impl Pager {
         let mut padded = vec![0u8; PAYLOAD];
         padded[..payload.len()].copy_from_slice(payload);
 
+        // Bump the header's lease counter (unchanged — still consumed by
+        // `prepare_for_flush`); mint the actual nonce from the per-session
+        // random + counter pair (SEC-1).
         self.write_counter += 1;
-        let nonce = crypto::page_nonce(page_no, self.write_counter);
+        let nonce = self.next_nonce();
         let aad = self.page_aad(page_no);
         let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &padded, &aad)?;
 
@@ -288,9 +332,13 @@ impl Pager {
 
     /// Encrypt and write every dirty page, then fsync.
     ///
-    /// Each page gets a fresh nonce from `(page_no, write_counter)`; the
-    /// counter advances per write so a nonce is never reused. Once written,
-    /// pages become clean and the cache is trimmed back to its cap.
+    /// Each page gets a fresh nonce from the per-session random prefix +
+    /// per-session counter (`Pager::next_nonce` → `crypto::session_page_nonce`
+    /// since v0.5.2 / SEC-1). The counter advances per write; the random
+    /// prefix is drawn once per writable open and regenerated on counter
+    /// wrap, so no nonce ever repeats across writes in this session or
+    /// across copies of the file. Once written, pages become clean and
+    /// the cache is trimmed back to its cap.
     pub fn flush(&mut self) -> Result<()> {
         let pages = self.cache.dirty_pages();
         if pages.is_empty() {
@@ -303,7 +351,7 @@ impl Pager {
                 .expect("dirty page must be cached")
                 .to_vec();
             self.write_counter += 1;
-            let nonce = crypto::page_nonce(page_no, self.write_counter);
+            let nonce = self.next_nonce();
             let aad = self.page_aad(page_no);
             let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &payload, &aad)?;
 
