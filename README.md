@@ -34,6 +34,9 @@ cargo add mnemo-engine            # Rust library (use mnemo::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
+The package is `mnemo-engine` everywhere. `mnemo-db` on PyPI and `mnemo` on
+crates.io are unrelated projects.
+
 Prebuilt CLI binaries for Linux, macOS and Windows are on the
 [Releases](https://github.com/toarchkumar/mnemo/releases) page. The PyPI wheels
 and release binaries for Apple Silicon and ARM Linux use the CPU's hardware AES.

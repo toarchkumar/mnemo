@@ -1,5 +1,6 @@
-# Local planner/worker coordination file — never commit
+# Local planner/worker/reviewer coordination files — never commit
 PLAN.md
+reviewer_notes.md
 mnemo.tar
 
 .DS_Store
