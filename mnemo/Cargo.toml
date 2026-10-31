@@ -6,7 +6,7 @@
 # below stay `mnemo`, so consumers still write `use mnemo::...` and invoke
 # `mnemo` on the command line after `cargo add mnemo-engine`.
 name = "mnemo-engine"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 rust-version = "1.75"
 # `benches/corpus.rs` is a shared helper module pulled into real benches

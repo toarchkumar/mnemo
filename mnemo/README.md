@@ -541,6 +541,26 @@ The v0.2.0 format (v7) closes every "silent stale-data load" path
 flagged in the security review; rollback-replay and availability are
 acknowledged limitations.
 
+**v0.5.2 (SEC-1): AES-GCM nonces are now per-session random.** Up to
+v0.5.1, each page's encryption nonce was `(page_no, write_counter)` —
+unique within a single file, but **shared across copies of a file**
+under the same DEK (the data key never changes after `create`). If you
+had two copies of the same `.mnemo` file and both received writes
+(two laptops syncing through Dropbox and the file "conflict-copies"
+diverge; a restored older backup resuming alongside the current file;
+anything that leads to `cp agent.mnemo backup.mnemo` + writes to both),
+the two copies' writers would produce pages with the same encryption
+nonce under the same key but different plaintexts — breaking AES-GCM
+confidentiality and tamper-evidence. v0.5.2 moves to a random 64-bit
+per-session prefix + 32-bit per-session counter (NIST SP 800-38D
+§8.2.1), drawn fresh on every writable open. Cross-copy collisions
+now require two sessions to independently draw the same 64-bit value
+— astronomically unlikely. **If you ran a pre-v0.5.2 build on diverged
+copies, rotate your DEK by running `compact_file`** — it rewrites the
+file through a fresh `random_dek`, so the prior nonce reuse under the
+old key stops mattering for the rewritten pages. No format change;
+existing files open on v0.5.2 unchanged.
+
 ## Quick start (library)
 
 ```rust

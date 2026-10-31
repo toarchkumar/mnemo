@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `release/**` covers hotfix branches (e.g. `release/0.5.x`) cut
+    # from an older tag when main holds unreleased behavior changes.
+    # Added for PR SEC-1 → v0.5.2, which couldn't be cut from main
+    # because main held unreleased ANN-1 changes. Keep for future
+    # patch releases that follow the same pattern.
+    branches: [main, "release/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
 
 env:
   CARGO_TERM_COLOR: always

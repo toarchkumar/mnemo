@@ -166,13 +166,61 @@ pub fn random_nonce() -> [u8; NONCE_LEN] {
     n
 }
 
-/// Build a deterministic, unique page nonce from a page number and the
-/// monotonic write counter. `(page, counter)` never repeats, so neither does
-/// the nonce — the central safety property of the encryption scheme.
-pub fn page_nonce(page_no: u64, write_counter: u64) -> [u8; NONCE_LEN] {
+/// Generate a random `u64`, used by the pager to pick a per-session
+/// nonce prefix. See [`session_page_nonce`] for the full construction.
+pub fn random_u64() -> u64 {
+    use rand::RngCore;
+    rand::thread_rng().next_u64()
+}
+
+/// Build a per-session page nonce (PR SEC-1, v0.5.2).
+///
+/// Structure, following NIST SP 800-38D §8.2.1 (fixed field + invocation
+/// field) for AES-GCM:
+///
+/// - **Bytes 0..8** — `session_random`: a 64-bit random value drawn
+///   fresh on every writable [`crate::Mnemo::open`] / [`crate::Mnemo::create`]
+///   (and regenerated on counter wrap). This is the "fixed field".
+/// - **Bytes 8..12** — `session_counter`: a 32-bit per-session monotonic
+///   counter that advances once per encrypted page write. This is the
+///   "invocation field".
+///
+/// `page_no` is **not** encoded in the nonce. Pages were bound to their
+/// home slot through AAD since v6 (`page_no.to_le_bytes()`), so an
+/// attacker who swapped a valid page to a different slot already failed
+/// authentication — the AAD binding stays in place and does the job the
+/// `page_no` component of the pre-SEC-1 nonce was helping with.
+///
+/// # Why not deterministic any more
+///
+/// Before v0.5.2 the nonce was `page_no as u32 || write_counter as u64`,
+/// which was unique **within a file** but not **across copies of a file**.
+/// If you copied a `.mnemo` file to another host and both the original and
+/// the copy got written to (two laptops syncing a Dropbox file; a
+/// restored older backup resuming operation), each copy's writer produced
+/// pages whose nonces collided with the other's at the same `(page_no,
+/// write_counter)` coordinates, under the same DEK (`random_dek()` only
+/// at create; `rekey` keeps it). That breaks AES-GCM's confidentiality
+/// and tamper-evidence guarantee: whoever holds both ciphertexts can
+/// recover the XOR of the plaintexts and forge pages with a valid tag.
+///
+/// A fresh random 64-bit `session_random` per writable open closes that:
+/// cross-copy collision now requires two sessions to independently draw
+/// the same 64-bit value (birthday bound ~2^32 sessions, i.e.
+/// astronomically unlikely for a human-scale user). The 32-bit
+/// `session_counter` guarantees uniqueness *within* a session; the pager
+/// regenerates `session_random` and resets the counter if it would wrap.
+///
+/// # Decrypt is unaffected
+///
+/// Each page already stores its own nonce in bytes `[0..12]` of the
+/// on-disk image (see `mnemo/src/pager.rs::read_page`). Decrypt reads the
+/// stored nonce; it never recomputes one. **No format bump — a v0.5.1
+/// file opens fine on v0.5.2 and vice versa.**
+pub fn session_page_nonce(session_random: u64, session_counter: u32) -> [u8; NONCE_LEN] {
     let mut n = [0u8; NONCE_LEN];
-    n[0..4].copy_from_slice(&(page_no as u32).to_le_bytes());
-    n[4..12].copy_from_slice(&write_counter.to_le_bytes());
+    n[0..8].copy_from_slice(&session_random.to_le_bytes());
+    n[8..12].copy_from_slice(&session_counter.to_le_bytes());
     n
 }
 
