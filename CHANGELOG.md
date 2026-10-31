@@ -32,7 +32,7 @@ Formulas:
   96 subspaces instead of 48. Costs 2× PQ codes per vector (48 → 96
   bytes, negligible against the 1.5 KB raw vector) and ~15 % more
   build time. Required to lift the 100K ceiling past 0.92.
-- `n_probe` auto: `(partitions + 1) / 2` (was fixed `8`).
+- `n_probe` auto: `ceil(partitions / 2)` (was fixed `8`).
 - `n_rerank` auto: fixed `500` (was fixed `64`). Decoupled from `top_k`
   because the index is built before any query knows `top_k`; 500 is
   50× the default `top_k=10` — generous headroom.

@@ -46,7 +46,7 @@ pub struct IndexConfig {
     /// why the bump.
     pub pq_subspaces: usize,
     /// Partitions scanned per query (the IVF accuracy/speed dial).
-    /// `0` means auto (`(partitions + 1) / 2`). Previously a fixed `8`
+    /// `0` means auto (`ceil(partitions / 2)`). Previously a fixed `8`
     /// before PR ANN-1.
     pub n_probe: usize,
     /// Candidates handed back for exact reranking (the PQ accuracy dial).
@@ -73,10 +73,10 @@ impl Default for IndexConfig {
         //   on an M1. Costs 2x the PQ codes per vector (48 → 96 bytes,
         //   negligible against the 1.5 KB raw vector) and ~15 % more
         //   build time.
-        // - n_probe → `(partitions + 1) / 2` — scales with partition
-        //   count. Previously fixed at 8, which at 317 partitions
-        //   scanned 2.5 % of the index per query. The planner's
-        //   "express relative to index size" clause.
+        // - n_probe → `ceil(partitions / 2)` (ANN-1) — scales with
+        //   partition count. Previously fixed at 8, which at 317
+        //   partitions scanned 2.5 % of the index per query. The
+        //   planner's "express relative to index size" clause.
         // - n_rerank → fixed 500. Previously 64. Decoupled from top_k
         //   because the index is built before any query knows top_k.
         //   500 is 50x the default top_k=10 — plenty of headroom.
@@ -357,7 +357,9 @@ impl IvfPqIndex {
         let n_probe = if cfg.n_probe > 0 {
             cfg.n_probe
         } else {
-            ((n_partitions + 1) / 2).max(1)
+            // ceil(n_partitions / 2); on a 1-partition index this
+            // still probes 1 partition thanks to the `.max(1)` below.
+            n_partitions.div_ceil(2).max(1)
         };
         let n_rerank = if cfg.n_rerank > 0 { cfg.n_rerank } else { 500 };
 

@@ -467,7 +467,7 @@ Internally the index ranks by squared-L2; the exact rerank uses the
 requested metric, so for cosine queries a generous `n_rerank` is advisable.
 
 **Default auto-formulas (PR ANN-1, pending v0.6.0).** `IndexConfig::default()`
-now picks `pq_subspaces = dims/4` (was `dims/8`), `n_probe = (partitions + 1) / 2`
+now picks `pq_subspaces = dims/4` (was `dims/8`), `n_probe = ceil(partitions / 2)`
 (was fixed `8`), and `n_rerank = 500` (was fixed `64`). Measured on the Phase 6
 synthetic corpus with the new defaults: 10K hits recall@10 ≈ 0.98 at ~1.4 ms/query;
 100K hits ~0.98 at ~10.6 ms/query. The old `n_probe=8, n_rerank=64` capped

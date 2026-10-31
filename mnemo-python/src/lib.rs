@@ -390,7 +390,7 @@ impl Mnemo {
     /// matching the Rust `RecallRequest::n_probe` / `::n_rerank`
     /// builder methods. `None` (default) uses the defaults the index
     /// was built with (`IndexConfig::default` auto-formulas since
-    /// v0.6.0: `n_probe = (partitions + 1) / 2`, `n_rerank = 500`;
+    /// v0.6.0: `n_probe = ceil(partitions / 2)`, `n_rerank = 500`;
     /// previously fixed `8` and `64`). Raise either dial for more
     /// recall at the cost of latency; drop them for the inverse. Only
     /// takes effect on a database that has an ANN index built;
