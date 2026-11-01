@@ -273,12 +273,17 @@ to page 0; if nothing is valid the *original* error is returned, so
 non-mnemo files still report `BadMagic` cleanly. The pre-DUR-1 fixed
 `TORN_HEADER_SCAN_PAGES = 64` cap is gone.
 
-**3. Seal-mismatch heals too.** When page 0 parses but its v7+ seal
-fails to validate, the same file-wide scan runs — a torn write that
-left the CRC-covered prefix intact but zeroed the seal fields is
-recoverable from the current WAL region's last commit. Genuine
-tampering remains detected because a forged frame cannot pass both
-DEK unwrap and seal validation.
+**3. Seal failure is always `HeaderTampered`, never auto-healed**
+(Planner decision 2026-11-01, Option B; supersedes the R-002.1 part 3
+"seal-mismatch WAL fallback" draft). The entire 294-byte header lies
+inside one 512-byte sector that storage writes atomically — a surviving
+0..238 CRC with a failing 242..294 AES-GCM tag cannot be a torn write;
+only post-write tampering produces that shape. Silently loading an
+authenticated committed header frame from the WAL in that case would
+erase the tamper-evidence the seal exists to give. The scan in point 2
+is therefore gated on *parse* failures only; `header_tamper_is_
+detected_by_v7_seal` (the pre-DUR-1 security regression test) stays
+unchanged.
 
 **4. `prepare_for_flush`'s leased header write is removed.** It
 existed to close the Phase 1.1 nonce-reuse window (reopen must see a
@@ -287,24 +292,35 @@ superseded that: nonces now carry a per-session random prefix, and
 `write_counter` is no longer a nonce input, so the leased write
 bought nothing but an extra `write + fsync` on every flush.
 
+**5. `open_read_only` recognizes torn-header parse failures.** It used
+to map only `HeaderChecksum` to `NeedsWriteOpen`; a zeroed or garbled
+sector 0 came back as `BadMagic` even when the file-wide scan would
+have found a recoverable committed header frame. Now any
+parse-level failure is routed to `NeedsWriteOpen` when the scan turns
+up a valid candidate, otherwise the original parse error is returned
+unchanged. A `validate_seal` failure stays `HeaderTampered` (same
+Option B rule).
+
 **Tests.** `mnemo/tests/dur1_torn_header.rs` covers the sector-level
 shapes the spec enumerates: sector 0 zeroed, sector 0 random garbage,
-bytes 0..6 corrupted, bytes 242..294 stale, a WAL-relocated
-transaction larger than 64 pages, and failpoint sweeps across
-relocation and rekey (both the just-flushed and never-flushed
-variants). `prop_failpoint_relocation_or_rekey_yields_pre_or_post` in
+bytes 0..6 corrupted, bytes 242..294 stale with CRC intact →
+`HeaderTampered`, a sealed field altered with the CRC recomputed →
+`HeaderTampered`, a WAL-relocated transaction larger than 64 pages
+with page 0 zeroed, and failpoint sweeps across relocation and rekey
+(both the just-flushed and never-flushed variants).
+`prop_failpoint_relocation_or_rekey_yields_pre_or_post` in
 `proptest_store.rs` extends property 4 to the two new WAL-logged
 paths — the live set after a torn relocation or rekey must equal the
 pre- or post-op snapshot, never a third state, and at least one of
 the two passphrases must open the file after a torn rekey.
 
-**Durability math.** On a non-growing flush the fsync count drops by
-one (the dropped leased-header fsync). A relocating flush adds one
-fsync (invalidate-old-region) relative to the pre-DUR-1 count but
-gains crash-safety; the net is one fewer fsync on steady-state flushes
-and the same number on relocations. The crypto module's stale "nonces
-come from `(page_number, write_counter)`" doc paragraph is replaced
-with the SEC-1 description.
+**Durability math.** `Stats::fsyncs_last_flush` drops from 4 → 3 on a
+steady-state flush (data pages, WAL commit, checkpoint; the leased-
+header fsync is gone). A relocating flush adds one fsync
+(invalidate-old-region) relative to the pre-DUR-1 count but gains
+crash-safety. The crypto module's stale "nonces come from
+`(page_number, write_counter)`" doc paragraph is replaced with the
+SEC-1 description.
 
 ### Not released yet
 

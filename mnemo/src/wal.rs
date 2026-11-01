@@ -186,6 +186,91 @@ pub fn invalidate_region(file: &mut File, region_start: u64) -> Result<()> {
 /// every 8 KiB-aligned page start without reaching into this module.
 pub const FRAME_MAGIC_BYTES: &[u8; 4] = FRAME_MAGIC;
 
+/// Streaming scan of a candidate WAL region, starting at `region_start`
+/// pages, with **no size cap** on the transaction. Reads one frame
+/// header at a time (29 bytes), then the payload declared by `len`,
+/// chaining `KIND_DATA` payloads into the running CRC until a
+/// `KIND_COMMIT` frame closes the transaction.
+///
+/// Returns `Some((txn_id, frames))` only when a valid committed
+/// transaction is found: all frames carry the same `txn_id`, every
+/// payload's per-frame CRC verifies, and the `KIND_COMMIT` frame's
+/// chained CRC matches the running CRC. Returns `Ok(None)` for any
+/// other outcome — bad magic, truncated payload, CRC mismatch,
+/// different `txn_id` mid-stream, EOF before `KIND_COMMIT`.
+///
+/// Used by the torn-header scan in `Mnemo::open`, which must handle a
+/// relocated 1M-vector IVF+PQ transaction whose control plane can run
+/// well past 16 MiB — the pre-DUR-1 "read a 16 MiB window and call
+/// [`recover_bytes`]" approach would silently truncate such a
+/// transaction before its commit frame.
+pub fn scan_committed_txn(file: &mut File, region_start: u64) -> Result<Option<(u64, Vec<Frame>)>> {
+    let region_byte_offset = region_start * PAGE_SIZE as u64;
+    file.seek(SeekFrom::Start(region_byte_offset))?;
+
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut running = 0u32;
+    let mut txn: Option<u64> = None;
+    let mut header_buf = [0u8; FRAME_HEADER];
+
+    loop {
+        // Read one frame header exactly. A short read here means EOF
+        // or a truncated final frame — either way, no commit.
+        if let Err(e) = file.read_exact(&mut header_buf) {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                return Ok(None);
+            }
+            return Err(e.into());
+        }
+        if &header_buf[0..4] != FRAME_MAGIC {
+            return Ok(None);
+        }
+        let kind = header_buf[4];
+        let id = rd_u64(&header_buf, 5);
+        let page_no = rd_u64(&header_buf, 13);
+        let len = rd_u32(&header_buf, 21) as usize;
+        let crc = rd_u32(&header_buf, 25);
+
+        // Enforce single-transaction scan: every frame in a committed
+        // transaction carries the same id.
+        match txn {
+            None => txn = Some(id),
+            Some(t) if t == id => {}
+            Some(_) => return Ok(None),
+        }
+
+        match kind {
+            KIND_DATA => {
+                // Streamed payload read; a short read is a torn frame.
+                let mut payload = vec![0u8; len];
+                if let Err(e) = file.read_exact(&mut payload) {
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                        return Ok(None);
+                    }
+                    return Err(e.into());
+                }
+                if checksum(&payload) != crc {
+                    return Ok(None);
+                }
+                running = crc32(running, &payload);
+                frames.push((page_no, payload));
+            }
+            KIND_COMMIT => {
+                // Chained CRC decides whether the transaction committed.
+                if crc != running {
+                    return Ok(None);
+                }
+                let id = txn.unwrap_or(0);
+                if frames.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some((id, frames)));
+            }
+            _ => return Ok(None),
+        }
+    }
+}
+
 /// Scan the WAL region for a committed transaction newer than `wal_seq`.
 ///
 /// Returns the frames of that transaction (to be replayed to home pages) or

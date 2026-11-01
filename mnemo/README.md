@@ -350,6 +350,25 @@ region grows automatically when a transaction's control plane outgrows it.
 (`tests/integration.rs` exercises crash recovery, the torn-header heal, a
 discarded uncommitted log, and WAL growth.)
 
+**Torn-header recovery (DUR-1).** Every post-`create` page-0 change —
+WAL relocation when the control plane outgrows the current region, and
+`rekey` when the passphrase moves — now goes through the WAL first:
+commit a one-frame `(0, new_header)` transaction into the new region,
+checkpoint page 0, then invalidate the predecessor region's first
+frame header. Combined with a streaming file-wide scan on open, this
+means a torn page-0 write at *any* WAL location is recoverable: open
+walks every 8 KiB-aligned `MWAL` candidate in the file, picks the
+highest-`txn_id` committed header frame whose `wal_start` + `wal_seq`
+agree with the frame's region, whose DEK unwraps under the
+passphrase, and whose AES-GCM seal validates, then replays it. Only
+the initial `Mnemo::create` writes page 0 unlogged. **A header that
+fails its seal is reported as `HeaderTampered` and never auto-healed**
+— the entire 294-byte header lies inside one 512-byte sector that
+storage writes atomically, so a surviving CRC with a failing seal
+cannot be a torn write, and silently loading a stale authenticated
+header from the WAL would erase the tamper-evidence the seal exists
+to give.
+
 What this buys over a plain copy-on-write header swap: a single-fsync commit
 and an explicit, replayable transaction boundary.
 

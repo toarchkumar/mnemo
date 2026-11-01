@@ -4,20 +4,29 @@
 //! through the WAL first: commit a one-frame transaction `(0, header)`
 //! into the current WAL region, checkpoint page 0, and only then
 //! invalidate the predecessor region. On reopen, a page-0 that fails to
-//! parse — for any reason — triggers a file-wide scan for valid
-//! committed header frames; the highest-`txn_id` candidate that
-//! unwraps the DEK and validates the seal under the passphrase replaces
-//! page 0. The tests here cover the sector-level crash shapes the spec
-//! calls out (R-002.1 part 4):
+//! **parse** (`BadMagic`, `UnsupportedVersion`, `HeaderChecksum`)
+//! triggers a file-wide streaming scan for valid committed header
+//! frames; the highest-`txn_id` candidate that unwraps the DEK and
+//! validates the seal under the passphrase replaces page 0.
+//!
+//! Per the Planner's 2026-11-01 Option B decision, a `validate_seal`
+//! failure is **always** reported as `HeaderTampered` and never
+//! auto-healed from the WAL (healing would erase tamper-evidence; a
+//! real crash cannot produce "CRC valid + seal invalid" because the
+//! full 294-byte header lies inside one 512-byte sector).
+//!
+//! The tests here cover the sector-level crash + tamper shapes the
+//! spec calls out (R-002.1 part 4):
 //!
 //! * sector 0 zeroed
 //! * sector 0 random garbage
 //! * bytes 0..6 corrupted (MAGIC / version)
-//! * bytes 242..294 stale (v7 seal / v8 cache pointers)
+//! * bytes 242..294 stale with CRC intact → `HeaderTampered`
+//! * sealed field altered + CRC recomputed → `HeaderTampered`
 //! * torn page 0 **during** a WAL relocation
-//! * torn page 0 **after** a WAL relocation
+//! * torn page 0 **after** a WAL relocation (zeroed sector, >64-page
+//!   relocation)
 //! * torn page 0 during `rekey`, including on a never-flushed file
-//! * a relocated transaction larger than 64 pages
 //!
 //! The failpoint-driven tests arm the pager's `WRITES_UNTIL_FAIL`
 //! counter so a specific write in the relocation / rekey sequence
@@ -130,11 +139,19 @@ fn header_magic_and_version_bytes_corrupted_heal() {
 }
 
 #[test]
-fn header_seal_fields_stale_heal() {
+fn header_seal_fields_stale_report_tampering() {
     // Bytes 242..294 hold the v7 seal (nonce+tag) and v8 cache
-    // pointers. Zeroing them keeps CRC valid-looking but trips the
-    // seal check — DUR-1 (R-002.1 part 3) heals this through the
-    // file-wide scan.
+    // pointers. The CRC covers 0..238, so flipping bytes in 242..294
+    // leaves the CRC intact — `Header::from_page` succeeds and
+    // `validate_seal` is the gate that catches the tamper.
+    //
+    // DUR-1 (Planner decision 2026-11-01, Option B): a seal failure
+    // is **always** reported as tampering and never auto-healed from
+    // the WAL. The whole 294-byte header lies inside sector 0, which
+    // storage writes atomically — a real torn write breaks magic,
+    // version or CRC, not just the seal, so this state can only be
+    // post-write tampering.
+    use mnemo::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -145,23 +162,58 @@ fn header_seal_fields_stale_heal() {
     drop(db);
 
     let mut bytes = read_bytes(&path);
-    for b in &mut bytes[242..294] {
-        *b = 0;
+    // Flip one bit in the seal tag (inside 242..294, outside the CRC
+    // range). The CRC still verifies, so we exercise the seal path.
+    bytes[260] ^= 0x01;
+    write_bytes(&path, &bytes);
+
+    match Mnemo::open(&path, "pw") {
+        Err(MnemoError::HeaderTampered) => {}
+        Err(other) => panic!("expected HeaderTampered, got {other:?}"),
+        Ok(_) => panic!("expected HeaderTampered; silent heal would erase evidence"),
     }
-    // Rewrite the CRC over 0..238 so Header::from_page's CRC gate
-    // passes and we exercise the seal-mismatch recovery path.
-    let crc_input = &bytes[0..238];
-    let new_crc = mnemo_crc32_adapter(crc_input).to_le_bytes();
+}
+
+#[test]
+fn header_sealed_field_altered_with_recomputed_crc_reports_tampering() {
+    // Harder tamper: alter a CRC-covered sealed field (here
+    // `catalog_start` at offset 42), recompute the header CRC so
+    // `Header::from_page` succeeds, and confirm the AES-GCM seal
+    // still catches it. This is the scenario an attacker who learned
+    // the CRC algorithm would try — the seal (keyed MAC) is what
+    // actually keeps the file honest, and Option B says never auto-
+    // heal around it.
+    use mnemo::MnemoError;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for i in 0..4 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.close().unwrap();
+    drop(db);
+
+    let mut bytes = read_bytes(&path);
+    // `catalog_start` is a u64 at offset 42 (inside the 0..238 CRC
+    // range). Flip a bit so it points at a nonsense page.
+    bytes[42] ^= 0x01;
+    // Recompute and rewrite the CRC over bytes 0..238 so the parser
+    // waves it through to seal validation.
+    let new_crc = mnemo_crc32_adapter(&bytes[0..238]).to_le_bytes();
     bytes[238..242].copy_from_slice(&new_crc);
     write_bytes(&path, &bytes);
 
-    let db = Mnemo::open(&path, "pw").expect("stale seal must heal");
-    assert_eq!(db.len(), 4);
+    match Mnemo::open(&path, "pw") {
+        Err(MnemoError::HeaderTampered) => {}
+        Err(other) => panic!("expected HeaderTampered, got {other:?}"),
+        Ok(_) => panic!("CRC-recomputed sealed-field tamper slipped past the seal"),
+    }
 }
 
 /// Re-implements the WAL CRC-32 so the test file can rewrite the header
-/// CRC after mutating later bytes. Kept in-test (not a public mnemo API)
-/// because it only exists to exercise the HeaderTampered recovery path.
+/// CRC after mutating earlier bytes. Kept in-test (not a public mnemo
+/// API) because it only exists to drive the HeaderTampered path with a
+/// crafted-but-CRC-valid payload.
 fn mnemo_crc32_adapter(data: &[u8]) -> u32 {
     let mut c = !0u32;
     for &b in data {
@@ -177,39 +229,51 @@ fn mnemo_crc32_adapter(data: &[u8]) -> u32 {
 // ---- large relocation ---------------------------------------------------
 
 #[test]
-fn relocated_txn_larger_than_64_pages_opens() {
+fn relocated_txn_larger_than_64_pages_heals_torn_page_0() {
     // Build a catalog that forces the WAL region to grow past the old
-    // 64-page recovery window. Reopen must still find the current WAL
-    // region (no fixed cap on the scan).
+    // 64-page recovery window, then zero page 0 so reopen must heal
+    // from the relocated WAL region sitting at the file tail. The
+    // pre-DUR-1 scan would have stopped at page 1 after 64 pages and
+    // never found this region; the streaming file-wide scan does.
     let dir = tempdir().unwrap();
     let path = dir.path().join("big.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(2)).unwrap();
-    // Enough records that the catalog alone outgrows 64 pages (512 KiB).
     for i in 0..25_000 {
         db.remember(Memory::new(
             format!("rec-{i}"),
             MemoryType::Semantic,
-            // +1 on each component so no vector is all-zero (the engine
-            // rejects an all-zero vector as a sentinel for a dead
-            // embedder, which can't happen in a torn-header test).
             vec![((i % 101) + 1) as f32, ((i % 97) + 1) as f32],
         ))
         .unwrap();
     }
+    // Flush explicitly so `ensure_wal_capacity` runs and the WAL
+    // relocation actually happens before we snapshot `wal_pages`.
+    // `stats()` reads from the in-memory header, which only reflects
+    // the grown region after a flush — `close() + drop` would also
+    // flush, but then we couldn't observe `wal_pages` to assert the
+    // test is meaningful.
+    db.flush().unwrap();
+    let wal_pages_before = db.stats().unwrap().wal_pages;
     db.close().unwrap();
     drop(db);
-
-    let stats = {
-        let mut db = Mnemo::open(&path, "pw").expect("open after large relocation");
-        db.stats().unwrap()
-    };
-    assert_eq!(stats.memories, 25_000);
     assert!(
-        stats.wal_pages > 64,
+        wal_pages_before > 64,
         "the WAL must have grown past 64 pages for this test to be meaningful \
-         (observed {} pages)",
-        stats.wal_pages
+         (observed {wal_pages_before} pages)"
     );
+
+    // Zero the first 512-byte sector — real-world torn-write shape.
+    let mut bytes = read_bytes(&path);
+    for b in bytes.iter_mut().take(512) {
+        *b = 0;
+    }
+    write_bytes(&path, &bytes);
+
+    let mut db = Mnemo::open(&path, "pw")
+        .expect("torn page 0 with the WAL at the file tail must heal via the streaming scan");
+    let stats = db.stats().unwrap();
+    assert_eq!(stats.memories, 25_000);
+    assert_eq!(stats.wal_pages, wal_pages_before);
 }
 
 // ---- failpoint-driven relocation / rekey crashes ------------------------
