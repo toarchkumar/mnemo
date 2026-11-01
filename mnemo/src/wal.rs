@@ -181,11 +181,9 @@ pub fn invalidate_region(file: &mut File, region_start: u64) -> Result<()> {
     Ok(())
 }
 
-/// Fixed byte length of a single frame header (`MAGIC + kind + ...`).
-/// Exposed for the torn-header scan in `Mnemo::open`, which starts a
-/// candidate scan at any page whose first four bytes are `MWAL`.
-pub const FRAME_HEADER_LEN: usize = FRAME_HEADER;
-/// Magic prefix of a frame on disk. Four ASCII bytes `MWAL`.
+/// Magic prefix of a frame on disk. Four ASCII bytes `MWAL`. Exposed
+/// so the torn-header scan in `Mnemo::open` can test for `MWAL` at
+/// every 8 KiB-aligned page start without reaching into this module.
 pub const FRAME_MAGIC_BYTES: &[u8; 4] = FRAME_MAGIC;
 
 /// Scan the WAL region for a committed transaction newer than `wal_seq`.

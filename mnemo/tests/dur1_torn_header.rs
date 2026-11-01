@@ -189,7 +189,10 @@ fn relocated_txn_larger_than_64_pages_opens() {
         db.remember(Memory::new(
             format!("rec-{i}"),
             MemoryType::Semantic,
-            vec![(i % 101) as f32, (i % 97) as f32],
+            // +1 on each component so no vector is all-zero (the engine
+            // rejects an all-zero vector as a sentinel for a dead
+            // embedder, which can't happen in a torn-header test).
+            vec![((i % 101) + 1) as f32, ((i % 97) + 1) as f32],
         ))
         .unwrap();
     }
@@ -234,7 +237,7 @@ fn seed_up_to_relocation(path: &std::path::Path) -> Mnemo {
         db.remember(Memory::new(
             format!("seed-{i}"),
             MemoryType::Semantic,
-            vec![(i % 7) as f32, (i % 11) as f32],
+            vec![((i % 7) + 1) as f32, ((i % 11) + 1) as f32],
         ))
         .unwrap();
     }
@@ -258,7 +261,7 @@ fn relocation_crash_recovers_to_pre_or_post_state() {
             db.remember(Memory::new(
                 format!("post-{i}"),
                 MemoryType::Semantic,
-                vec![(i % 13) as f32, (i % 17) as f32],
+                vec![((i % 13) + 1) as f32, ((i % 17) + 1) as f32],
             ))
             .unwrap();
         }
@@ -302,9 +305,8 @@ fn rekey_crash_recovers_to_old_or_new_passphrase() {
             Ok(h) => Some(("new", h)),
             Err(_) => Mnemo::open(&path, "old-pw").ok().map(|h| ("old", h)),
         };
-        let (which, db) = opened.unwrap_or_else(|| {
-            panic!("rekey crash at fail_at={fail_at} left no openable file")
-        });
+        let (which, db) = opened
+            .unwrap_or_else(|| panic!("rekey crash at fail_at={fail_at} left no openable file"));
         assert_eq!(db.len(), 5, "rekey crash ({which}) lost memories");
     }
 }
