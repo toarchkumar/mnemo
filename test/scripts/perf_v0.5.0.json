@@ -1,4 +1,93 @@
 {
+  "ann_defaults_v0_6_0": {
+    "methodology": "Per-tier (10K, 100K, 1M-if-cached): rebuild the ANN index in memory under two scenarios \u2014 'fresh_install' = IndexConfig::default() with pq_subspaces=dims/4 and ANN-1.1 query-time auto formulas; 'upgrade_path' = explicit (pq=dims/8, n_probe=8, n_rerank=64) to simulate a v0.5.x-built index; ANN-1.1's legacy-sentinel detection substitutes the new auto formulas at query time. 50 queries per scenario, recall@10 against exact search, mean latency per query. Index is rebuilt in memory only \u2014 cached corpus on disk is untouched. See CHANGELOG `## [Unreleased]` \u2192 ANN-1.1.",
+    "tiers": [
+      {
+        "corpus_size": 10000,
+        "dimensions": 384,
+        "scenarios": [
+          {
+            "build_secs": 19.2415,
+            "mean_query_ms": 1.4263,
+            "n_probe_used": 100,
+            "n_rerank_used": 100,
+            "n_vectors": 10000,
+            "partitions": 100,
+            "pq_subspaces": 96,
+            "recall_at_10": 0.964,
+            "scenario": "fresh_install"
+          },
+          {
+            "build_secs": 16.1548,
+            "mean_query_ms": 0.9419,
+            "n_probe_used": 100,
+            "n_rerank_used": 100,
+            "n_vectors": 10000,
+            "partitions": 100,
+            "pq_subspaces": 48,
+            "recall_at_10": 0.764,
+            "scenario": "upgrade_path"
+          }
+        ]
+      },
+      {
+        "corpus_size": 100000,
+        "dimensions": 384,
+        "scenarios": [
+          {
+            "build_secs": 179.159,
+            "mean_query_ms": 9.3565,
+            "n_probe_used": 159,
+            "n_rerank_used": 500,
+            "n_vectors": 100000,
+            "partitions": 317,
+            "pq_subspaces": 96,
+            "recall_at_10": 0.982,
+            "scenario": "fresh_install"
+          },
+          {
+            "build_secs": 156.9823,
+            "mean_query_ms": 7.1045,
+            "n_probe_used": 159,
+            "n_rerank_used": 500,
+            "n_vectors": 100000,
+            "partitions": 317,
+            "pq_subspaces": 48,
+            "recall_at_10": 0.834,
+            "scenario": "upgrade_path"
+          }
+        ]
+      },
+      {
+        "corpus_size": 1000000,
+        "dimensions": 384,
+        "scenarios": [
+          {
+            "build_secs": 698.3352,
+            "mean_query_ms": 134.4509,
+            "n_probe_used": 500,
+            "n_rerank_used": 1000,
+            "n_vectors": 1000000,
+            "partitions": 1000,
+            "pq_subspaces": 96,
+            "recall_at_10": 0.97,
+            "scenario": "fresh_install"
+          },
+          {
+            "build_secs": 648.5595,
+            "mean_query_ms": 96.8061,
+            "n_probe_used": 500,
+            "n_rerank_used": 1000,
+            "n_vectors": 1000000,
+            "partitions": 1000,
+            "pq_subspaces": 48,
+            "recall_at_10": 0.802,
+            "scenario": "upgrade_path"
+          }
+        ]
+      }
+    ]
+  },
   "ann_diagnose": {
     "tiers": [
       {
@@ -260,7 +349,7 @@
     "top_k": 10
   },
   "ann_recall_grid_v2": {
-    "methodology": "For each (corpus_size, pq_subspaces) config: rebuild the ANN index in memory (no flush — cached file keeps its default-config index), sweep n_probe as fractions of partitions {0.08, 0.16, 0.32, 0.5, 1.0} crossed with n_rerank as multiples of top_k {5, 10, 20, 50, 100}. Report mean recall@10 against exact search + mean query latency per cell. 'Knee' per config = fastest cell meeting target_recall=0.95; falls back to the highest-recall cell when the target isn't reached (= the config's ceiling).",
+    "methodology": "For each (corpus_size, pq_subspaces) config: rebuild the ANN index in memory (no flush \u2014 cached file keeps its default-config index), sweep n_probe as fractions of partitions {0.08, 0.16, 0.32, 0.5, 1.0} crossed with n_rerank as multiples of top_k {5, 10, 20, 50, 100}. Report mean recall@10 against exact search + mean query latency per cell. 'Knee' per config = fastest cell meeting target_recall=0.95; falls back to the highest-recall cell when the target isn't reached (= the config's ceiling).",
     "tiers": [
       {
         "configs": [
@@ -4180,7 +4269,7 @@
       "recall/ivfpq_recall_1m": {
         "mean_secs": 0.0022479330485515874,
         "median_secs": 0.0022420262479114455,
-        "stderr_secs": 5.918518166891348e-6
+        "stderr_secs": 5.918518166891348e-06
       }
     },
     "machine": {
@@ -4192,29 +4281,29 @@
   "speed_hw_aes": {
     "benches": {
       "cache/cache_get_exact_hit": {
-        "mean_secs": 1.035294640676348e-6,
-        "median_secs": 1.0362042110959778e-6,
-        "stderr_secs": 1.871836828679559e-9
+        "mean_secs": 1.035294640676348e-06,
+        "median_secs": 1.0362042110959778e-06,
+        "stderr_secs": 1.871836828679559e-09
       },
       "cache/cache_get_semantic_hit": {
         "mean_secs": 0.00037619245319194,
         "median_secs": 0.000373893009920635,
-        "stderr_secs": 1.5002788757945237e-6
+        "stderr_secs": 1.5002788757945237e-06
       },
       "cache/cache_put_exact_batched": {
         "mean_secs": 0.00031888199387952076,
         "median_secs": 0.00029480470424482925,
-        "stderr_secs": 0.000022138090536458847
+        "stderr_secs": 2.2138090536458847e-05
       },
       "cache/cache_put_exact_strict": {
         "mean_secs": 0.0004767708691322049,
         "median_secs": 0.0004706515116274258,
-        "stderr_secs": 0.00003158793966931225
+        "stderr_secs": 3.158793966931225e-05
       },
       "cache/cache_put_semantic_strict": {
         "mean_secs": 0.0005213705170403226,
         "median_secs": 0.0004886123930991369,
-        "stderr_secs": 0.00002947911277033632
+        "stderr_secs": 2.947911277033632e-05
       },
       "embed_overhead/remember_raw_vector": {
         "mean_secs": 0.022710835015,
@@ -4229,12 +4318,12 @@
       "open/open_latency_fast_kdf": {
         "mean_secs": 0.0006281559327894221,
         "median_secs": 0.0006288815789473684,
-        "stderr_secs": 8.180302622948004e-7
+        "stderr_secs": 8.180302622948004e-07
       },
       "open/open_latency_secure_kdf": {
         "mean_secs": 0.01533224773428572,
         "median_secs": 0.015374571428571428,
-        "stderr_secs": 0.00007256372554137752
+        "stderr_secs": 7.256372554137752e-05
       },
       "recall/exact_scan_100k": {
         "mean_secs": 1.0501276271,
@@ -4249,12 +4338,12 @@
       "recall/ivfpq_recall_100k": {
         "mean_secs": 0.0006056233723171899,
         "median_secs": 0.0006044726191964286,
-        "stderr_secs": 3.474108548795435e-6
+        "stderr_secs": 3.474108548795435e-06
       },
       "recall/ivfpq_recall_10k": {
         "mean_secs": 0.00037205555285946127,
         "median_secs": 0.0003725946713286714,
-        "stderr_secs": 1.142580063655649e-6
+        "stderr_secs": 1.142580063655649e-06
       },
       "write/remember_1_then_flush": {
         "mean_secs": 0.02193600482,

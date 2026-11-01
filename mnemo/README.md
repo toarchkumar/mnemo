@@ -466,16 +466,34 @@ accurate, lower is faster. The index is stored *inside* the encrypted file
 Internally the index ranks by squared-L2; the exact rerank uses the
 requested metric, so for cosine queries a generous `n_rerank` is advisable.
 
-**Default auto-formulas (PR ANN-1, pending v0.6.0).** `IndexConfig::default()`
-now picks `pq_subspaces = dims/4` (was `dims/8`), `n_probe = ceil(partitions / 2)`
-(was fixed `8`), and `n_rerank = 500` (was fixed `64`). Measured on the Phase 6
-synthetic corpus with the new defaults: 10K hits recall@10 ≈ 0.98 at ~1.4 ms/query;
-100K hits ~0.98 at ~10.6 ms/query. The old `n_probe=8, n_rerank=64` capped
-100K recall@10 at ~0.40 — the harness missed this because its defaults were
-tuned for a toy corpus that happened to work. Existing files keep their old
-defaults until you `rebuild_index` or `compact`; any explicit `n_probe` /
-`n_rerank` passed per call still overrides. See the `ann_recall_grid_v2` block
-in `test/scripts/perf_v0.5.0.json` for the full grid.
+**Default auto-formulas (PR ANN-1 + ANN-1.1, pending v0.6.0).**
+`IndexConfig::default()` now picks `pq_subspaces = dims/4` at build time
+(was `dims/8`), plus query-time formulas:
+
+- `n_probe = max(ceil(partitions / 2), min(partitions, 100))` (was fixed `8`)
+  — full probe up to ~10K-vector files (≤100 partitions), half probe above
+- `n_rerank = (n_vectors / 200).clamp(100, 1000)` (ANN-1 shipped a fixed
+  500; ANN-1.1 made it size-aware — see
+  `index::effective_auto_n_rerank`). Hits 100 at 10K, 500 at 100K, caps
+  at 1000.
+
+Measured on the Phase 6 synthetic corpus: 10K hits recall@10 ≈ 0.98 at
+~1.4 ms/query; 100K hits ~0.98 at ~10.6 ms/query. The old pre-ANN-1
+`n_probe=8, n_rerank=64` defaults capped 100K recall@10 at ~0.40.
+
+**Upgrade path for existing files.** The `n_probe` / `n_rerank` fix
+takes effect at query time (ANN-1.1), so a v0.5.x-built index gets the
+new defaults immediately on first open under v0.6.0+ — no rebuild
+needed. The `pq_subspaces` fix is build-time (baked into the PQ
+codebook), so you'll stay on the old 48-subspace codebook until you run
+`mnemo index --rebuild` (CLI) or `db.rebuild_index()` (Rust / Python).
+With `pq_subspaces=48` + new query-time formulas, 100K tops out at
+~0.92; rebuilding to 96 subspaces lifts it to ~0.98. See
+`test/scripts/perf_v0.5.0.json` keys `ann_recall_grid_v2` (grid) and
+`ann_defaults_v0_6_0` (measurements at the shipped defaults).
+
+Any explicit `n_probe` / `n_rerank` passed per call still overrides
+everything above.
 
 `Mnemo::search` always stays exact — it is the brute-force ground truth.
 

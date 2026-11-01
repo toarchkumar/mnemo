@@ -1593,15 +1593,14 @@ impl Mnemo {
     /// the PQ codebook, undoing the cluster drift that accumulates as memories
     /// are inserted against fixed centroids.
     pub fn rebuild_index(&mut self) -> Result<IndexInfo> {
-        let cfg = match &self.ann {
-            Some(a) => IndexConfig {
-                n_probe: a.n_probe(),
-                n_rerank: a.n_rerank(),
-                ..Default::default()
-            },
-            None => IndexConfig::default(),
-        };
-        self.build_index_with(cfg)
+        // ANN-1.1: re-derive every parameter (partitions, subspaces,
+        // n_probe, n_rerank) for the current corpus size by passing
+        // `IndexConfig::default()`. Previously this freezed the
+        // stored `(n_probe, n_rerank)` from the current index,
+        // defeating the point of rebuilding on a grown corpus. If
+        // you really want to pin specific values, call
+        // `build_index_with(IndexConfig { … })` directly.
+        self.build_index_with(IndexConfig::default())
     }
 
     /// Drop the ANN index; recall reverts to exact scans. Persisted on flush.
@@ -2711,7 +2710,13 @@ impl Mnemo {
                 ..Default::default()
             },
         )?;
-        let want_index = old.ann.as_ref().map(|a| (a.n_probe(), a.n_rerank()));
+        // ANN-1.1: compaction is "re-tune for the current size" by
+        // default. Pass IndexConfig::default() so partitions,
+        // subspaces, n_probe and n_rerank are all re-derived from the
+        // compacted vector count. Previously we froze the pre-compact
+        // (n_probe, n_rerank), which left the new index on stale
+        // numbers for the smaller post-compact corpus.
+        let want_index = old.ann.is_some();
         let now = memory::now_secs();
         let all = old.memories()?;
         let before = all.len();
@@ -2723,15 +2728,8 @@ impl Mnemo {
             new.remember(m)?;
             after += 1;
         }
-        // Rebuild the index fresh (re-clustered) when the source had one.
-        if let Some((n_probe, n_rerank)) = want_index {
-            if after > 0 {
-                new.build_index_with(IndexConfig {
-                    n_probe,
-                    n_rerank,
-                    ..Default::default()
-                })?;
-            }
+        if want_index && after > 0 {
+            new.build_index_with(IndexConfig::default())?;
         }
         new.flush()?;
         drop(new);

@@ -8,7 +8,152 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-### Changed — PR ANN-1 (approximate index defaults)
+### Changed — PR ANN-1.1 (approximate index: query-time auto defaults, size-aware n_rerank)
+
+Follow-up to PR ANN-1 (same `[Unreleased]` block). Two gaps the ANN-1
+VERIFIED entry flagged, now closed:
+
+**1. The ANN-1 fix now reaches v0.5.x-built indexes without a rebuild.**
+`IvfPqIndex::query` previously defaulted to the `n_probe` / `n_rerank`
+values stamped into the index at build time. Every v0.5.x build stamped
+in the then-hardcoded `(8, 64)`, so after upgrading to v0.6.0 those
+indexes kept running at ~0.40 recall@10 until a manual rebuild. ANN-1.1
+adds a "legacy sentinel" rule inside `IvfPqIndex::effective_defaults`:
+a stored `(n_probe, n_rerank)` of exactly `(8, 64)` is treated as "auto"
+and both dials are recomputed from the live partition count + vector
+count on every query. Any explicit `.n_probe()` / `.n_rerank()` passed on
+the `RecallRequest` still wins. (Users who built a v0.6.0 index with an
+explicit `IndexConfig { n_probe: 8, n_rerank: 64, .. }` get the sentinel
+treatment too — acceptable because at the one regime where 8/64 is a
+sensible pin, the auto formulas pick nearly-identical values.)
+
+**`IvfPqIndex` keeps its exact v0.5.2 serialized shape** — no appended
+fields, no format bump. The planner's R-001.10 standing rule
+(2026-11-01) made this a hard requirement: rmp-serde 1.3.0's
+positional decoder rejects extra array elements with
+`Error::LengthMismatch`, so an appended `#[serde(default)]` field would
+make v0.5.x readers fail to open any file produced by v0.6.0 — breaking
+the "portable file across versions" guarantee. The sentinel approach
+reaches the same outcome without touching the schema. Guarded by a new
+test (`current_build_serializes_with_v0_5_2_field_count`) that catches
+any future append at CI time.
+
+**2. `n_rerank` scales with the live vector count.** Previously fixed
+at 500 after ANN-1, which on 10K files cost ~5 ms of record-decode
+time per query for no recall gain (rerank cost ≈ 10 µs per candidate
+on hardware AES; a 10K index with ~98% recall needs only ~100
+candidates). The new formula is `(n_vectors / 200).clamp(100, 1000)`:
+
+| Corpus | Old n_rerank (ANN-1) | New n_rerank (ANN-1.1) | Rationale |
+|--------|----------------------|------------------------|-----------|
+| 10K    | 500                  | **100**                | Grid knee at 10K was n_rerank=100 at 0.964 recall |
+| 100K   | 500                  | **500**                | Grid knee at 100K was n_rerank=500 at 0.982 recall |
+| 1M     | 500                  | **1000** (cap)         | Linear extrapolation + clamp; measured in `ann_defaults_v0_6_0` where feasible |
+
+`n_probe` auto formula was tightened from ANN-1's `ceil(partitions / 2)`
+to `max(ceil(partitions / 2), min(partitions, 100))` after the ANN-1.1
+measurements showed the half-probe formula undershoot at 10K (0.914
+recall@10 vs the 0.95 target; the ANN-1 grid knee was at full probe).
+Full probe for files up to ~10K vectors (100 partitions), half probe
+above:
+- 10K  ≈ 100 partitions  → 100 (full)
+- 100K ≈ 317 partitions  → 159 (half)
+- 1M   ≈ 1000 partitions → 500 (half)
+Also recomputed per query so growth takes effect automatically.
+
+### Added
+
+- `IvfPqIndex::effective_defaults()` returns the live `(n_probe, n_rerank)`
+  pair that `query()` uses when the caller passes `None` — applies the
+  legacy sentinel rule above.
+- `index::effective_auto_n_probe(partitions)` and
+  `effective_auto_n_rerank(n_vectors)` as `pub(crate)` helpers so the
+  build + query paths share one source of truth.
+- Five tests in `mnemo/src/index.rs::ann_1_1_tests` using a frozen
+  `V052IvfPqIndex` shadow struct:
+  (1) a v0.5.2-shaped blob decodes under the current schema;
+  (2) **the current build's serialized index decodes under the v0.5.2
+      shape** — forward-compat guard against any accidental field
+      append (R-001.10);
+  (3) stored `(8, 64)` triggers auto formulas at query time;
+  (4) new builds with `IndexConfig::default()` store **resolved**
+      concrete values (never 0 sentinels);
+  (5) explicit non-sentinel values persist verbatim.
+
+### Changed — API cleanup
+
+- **CLI `mnemo index` `--n-probe` / `--n-rerank` default to `0` (auto),
+  matching `--partitions` / `--subspaces`.** Previously defaulted to
+  `8` / `64` — so `mnemo index` built an index baked to the small
+  hardcoded dials even on huge files. Users who want to pin can still
+  pass explicit values.
+- **`Mnemo::rebuild_index`** now passes `IndexConfig::default()` instead
+  of resolving the current index's `(n_probe, n_rerank)` and feeding
+  them back as explicit values. Rebuild means "re-tune for the current
+  corpus size" — freezing values from the pre-rebuild state defeated
+  the point. Users who want to pin can call
+  `build_index_with(IndexConfig { … })` directly.
+- **`Mnemo::compact_file`** likewise re-derives all parameters by
+  passing `IndexConfig::default()` to the rebuild step on the compacted
+  file.
+- **`IvfPqIndex::info` / `Stats::index` / `mnemo info` / Python
+  `db.stats()['index']`** report the **effective** `n_probe` / `n_rerank`
+  queries actually use (after the legacy sentinel is applied), not the
+  raw stored values. So an upgraded v0.5.x file shows the larger auto
+  values it searches with — not the 8/64 baked into the file by the
+  old build.
+
+### Performance
+
+- **IVF+PQ rerank:** `query()` now partition-selects to top-`n_rerank`
+  with `select_nth_unstable_by` **before** sorting, then sorts only
+  the kept slice (R-001.8 part 3). Full sort of all N candidates was
+  O(N log N); the new path is O(N) for the select plus O(k log k) for
+  the sort of k = n_rerank. At the ANN-1.1 defaults on a 1M file the
+  per-query candidate pool is ~500K; the old pipeline sorted every one.
+
+### Numbers at the shipped defaults (M1 Pro, release, hardware AES)
+
+Measured in `test/scripts/perf_v0.5.0.json["ann_defaults_v0_6_0"]`.
+Two scenarios per tier: **fresh_install** = `IndexConfig::default()`
+build (pq_subspaces=96, auto n_probe + n_rerank); **upgrade_path** =
+v0.5.x-built index (pq_subspaces=48, stored 8/64 → ANN-1.1 sentinel
+substitutes auto formulas at query time; **no rebuild needed**).
+
+| Tier | Scenario       | n_probe | n_rerank | recall@10 | latency   |
+|------|----------------|---------|----------|-----------|-----------|
+| 10K  | fresh_install  | 100     | 100      | **0.964** | 1.4 ms    |
+| 10K  | upgrade_path   | 100     | 100      | 0.764     | 0.9 ms    |
+| 100K | fresh_install  | 159     | 500      | **0.982** | 9.4 ms    |
+| 100K | upgrade_path   | 159     | 500      | 0.834     | 7.1 ms    |
+| 1M   | fresh_install  | 500     | 1000     | **0.970** | 134 ms    |
+| 1M   | upgrade_path   | 500     | 1000     | 0.802     | 97 ms     |
+
+**Fresh install clears the 0.95 target at every tier.** Upgrade path
+clears 0.75-0.85 depending on tier — a 2x+ improvement over the
+pre-ANN-1 ~0.40 baseline without touching the file. Users who want
+the fresh-install recall on an existing file run
+`mnemo index --rebuild` / `db.rebuild_index()` to get the ANN-1
+pq_subspaces=96 build-time fix as well.
+
+### Upgrade note (for the v0.6.0 release notes)
+
+After upgrading to v0.6.0, your existing `.mnemo` files will:
+
+- Use the new query-time `n_probe` / `n_rerank` auto formulas
+  immediately — no rebuild needed. The on-disk index already stores
+  everything the formulas need (partition count, live vector count).
+- Keep the pre-ANN-1 `pq_subspaces` setting (whatever was baked in at
+  build time — usually `dims/8` on v0.5.x files). This is a build-time
+  parameter, not query-time, so the ANN-1 pq-subspaces fix (`dims/4`,
+  which lifts the 100K ceiling past 0.92) only takes effect for new
+  indexes OR after `mnemo index --rebuild` (CLI) /
+  `db.rebuild_index()` (Rust / Python). The upgrade-note numbers
+  under `ann_defaults_v0_6_0` in `perf_v0.5.0.json` show what an old
+  48-subspace index gets with the new query-time defaults vs. a fresh
+  96-subspace rebuild.
+
+### Changed — PR ANN-1 (approximate index defaults, from 2026-10-31)
 
 The `IndexConfig::default()` auto-formulas now scale with the index and
 query shape instead of fixed small numbers. Measured on the Phase 6

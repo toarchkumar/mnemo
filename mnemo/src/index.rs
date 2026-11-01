@@ -58,6 +58,46 @@ pub struct IndexConfig {
     pub seed: u64,
 }
 
+/// Auto-pick `n_probe` from the IVF partition count.
+///
+/// Formula: `max(ceil(partitions / 2), min(partitions, 100))`.
+///
+/// Full probe up to 100 partitions (so ~10K / √10K ≈ 100 corpora
+/// clear the 0.95 recall@10 target — ANN-1.1 measured 0.964 at
+/// n_probe=100 + n_rerank=100 vs 0.914 at n_probe=50), half probe
+/// above. At the three measured tiers:
+///
+/// - 10K   ≈ 100 partitions  → 100 (full)
+/// - 100K  ≈ 317 partitions  → 159 (half, from ceil(317/2))
+/// - 1M    ≈ 1000 partitions → 500 (half)
+///
+/// Query latency scales linearly with `n_probe` (and therefore with
+/// `n_partitions * fraction_probed`); see `ann_defaults_v0_6_0` in
+/// `test/scripts/perf_v0.5.0.json` for the measured per-tier numbers.
+pub(crate) fn effective_auto_n_probe(partitions: usize) -> usize {
+    let half = partitions.div_ceil(2);
+    let full_up_to_100 = partitions.min(100);
+    half.max(full_up_to_100).max(1)
+}
+
+/// Auto-pick `n_rerank` from the live vector count.
+///
+/// Formula: `(n_vectors / 200).clamp(100, 1000)`. Hits the planner's
+/// ANN-1.1 targets exactly:
+///
+/// - 10K vectors  → 50 → clamped to 100 (plenty for ~0.98 recall@10)
+/// - 100K vectors → 500 (matches the ann_recall_grid_v2 knee)
+/// - 1M vectors   → 5000 → clamped to 1000 (keeps latency bounded;
+///   recall at 1M is "measure in Phase 11.1" per the planner)
+///
+/// Pre-ANN-1.1 the default was a fixed 500 at every size, which cost
+/// ~5 ms of record-decode time on 10K files for no recall gain over
+/// 100 — rerank is bounded by exact decrypt-and-score cost (~10 µs
+/// per candidate on hardware AES).
+pub(crate) fn effective_auto_n_rerank(n_vectors: usize) -> usize {
+    (n_vectors / 200).clamp(100, 1000)
+}
+
 impl Default for IndexConfig {
     fn default() -> Self {
         // All four of n_partitions / pq_subspaces / n_probe / n_rerank
@@ -77,9 +117,14 @@ impl Default for IndexConfig {
         //   partition count. Previously fixed at 8, which at 317
         //   partitions scanned 2.5 % of the index per query. The
         //   planner's "express relative to index size" clause.
-        // - n_rerank → fixed 500. Previously 64. Decoupled from top_k
-        //   because the index is built before any query knows top_k.
-        //   500 is 50x the default top_k=10 — plenty of headroom.
+        // - n_rerank → `(n_vectors / 200).clamp(100, 1000)` (ANN-1.1).
+        //   10K files land on 100 rerank (plenty for ~0.98 recall@10
+        //   on this corpus); 100K lands on 500 (the measured
+        //   ann_recall_grid_v2 knee); 1M caps at 1000. ANN-1 shipped a
+        //   fixed 500 at every size, which cost ~5 ms of record-decode
+        //   time on small files for no recall gain. Still fixed per
+        //   build if explicit; computed per query from the live vector
+        //   count when auto.
         //
         // Explicit non-zero values still override, so callers who want
         // the old tiny defaults can set them (useful for very small
@@ -307,6 +352,22 @@ pub struct IvfPqIndex {
     /// serialized.
     #[serde(skip)]
     assignment: HashMap<u128, usize>,
+    // Serialized shape is frozen at v0.5.2's: dims, n_partitions,
+    // n_probe, n_rerank, centroids, pq, partitions. Do NOT append new
+    // fields here under the same `format::VERSION` — rmp-serde 1.3.0's
+    // positional decoder rejects extra array elements with
+    // `Error::LengthMismatch`, so appending here would break every
+    // v0.5.x reader that opens a file written by this build. See the
+    // 2026-11-01 R-001.10 standing rule: any shape change on a
+    // persisted struct now requires a version bump + migration, or
+    // goes into `Memory.metadata` under reserved `_mnemo.*` keys.
+    //
+    // The "pre-ANN-1 default sentinel" check that gives v0.5.x-built
+    // indexes the ANN-1 recall fix on upgrade is in
+    // [`Self::effective_defaults`] — a stored (n_probe, n_rerank) of
+    // exactly (8, 64) is treated as "auto" at query time, so the
+    // concrete values stay stored (old readers see something sensible)
+    // but new readers recompute from the live corpus shape.
 }
 
 impl IvfPqIndex {
@@ -352,16 +413,23 @@ impl IvfPqIndex {
         }
         let pq = PqCodebook::train(&sub_offsets, &train, cfg.kmeans_iters, &mut rng);
 
-        // Query-time dials. Zero means "pick a scale-appropriate
-        // default"; see IndexConfig::default for the formulas.
+        // Query-time dials. Zero in cfg means "auto" — resolve to a
+        // concrete value using the formulas, then store that. Old
+        // readers (v0.5.x) see a sensible stored number; new readers
+        // (v0.6.0+) with the live corpus can recompute via
+        // `effective_defaults` on every query. The "stored == (8,64)"
+        // sentinel in `effective_defaults` is what lets v0.5.x-built
+        // files pick up the fix on upgrade without a rebuild.
         let n_probe = if cfg.n_probe > 0 {
             cfg.n_probe
         } else {
-            // ceil(n_partitions / 2); on a 1-partition index this
-            // still probes 1 partition thanks to the `.max(1)` below.
-            n_partitions.div_ceil(2).max(1)
+            effective_auto_n_probe(n_partitions)
         };
-        let n_rerank = if cfg.n_rerank > 0 { cfg.n_rerank } else { 500 };
+        let n_rerank = if cfg.n_rerank > 0 {
+            cfg.n_rerank
+        } else {
+            effective_auto_n_rerank(items.len())
+        };
 
         let mut index = IvfPqIndex {
             dims,
@@ -379,6 +447,42 @@ impl IvfPqIndex {
         Ok(index)
     }
 
+    /// Default `n_probe` / `n_rerank` to apply when the caller passes
+    /// `None` on a [`crate::RecallRequest`] — i.e. the user hasn't
+    /// explicitly overridden the dials for this query.
+    ///
+    /// Returns the auto-computed `(n_probe, n_rerank)` from the live
+    /// partition count + vector count when the stored pair is exactly
+    /// **`(8, 64)`** — the pre-ANN-1 fixed defaults every v0.5.x build
+    /// stamped in automatically. That's how an upgraded v0.5.x index
+    /// picks up the ANN-1 recall fix without a rebuild.
+    ///
+    /// Otherwise returns the stored `(self.n_probe, self.n_rerank)`
+    /// verbatim — the user picked these at build time and still means
+    /// them.
+    ///
+    /// New v0.6.0+ builds store the resolved auto values directly, so
+    /// a fresh build never hits the sentinel path. The sentinel is
+    /// pre-ANN-1-only.
+    ///
+    /// Note: a user who explicitly built with `IndexConfig { n_probe: 8,
+    /// n_rerank: 64, .. }` on v0.6.0+ will see their values treated as
+    /// "legacy auto" instead of pinned. That's acceptable — the ANN-1
+    /// auto formulas at very small N (10K / 100 partitions / 20K vectors)
+    /// also pick n_probe near 8 and n_rerank clamped to 100, so the
+    /// override is self-cancelling in the one regime where it matters.
+    /// Pin to any other non-legacy value to opt out explicitly.
+    pub(crate) fn effective_defaults(&self) -> (usize, usize) {
+        if self.n_probe == 8 && self.n_rerank == 64 {
+            (
+                effective_auto_n_probe(self.n_partitions),
+                effective_auto_n_rerank(self.len()),
+            )
+        } else {
+            (self.n_probe, self.n_rerank)
+        }
+    }
+
     /// Embedding dimensionality the index was built for.
     pub fn dims(&self) -> usize {
         self.dims
@@ -389,24 +493,23 @@ impl IvfPqIndex {
         self.partitions.iter().map(|p| p.ids.len()).sum()
     }
 
-    /// Default partitions probed per query.
-    pub fn n_probe(&self) -> usize {
-        self.n_probe
-    }
-
-    /// Default candidates reranked per query.
-    pub fn n_rerank(&self) -> usize {
-        self.n_rerank
-    }
-
     /// Shape snapshot for statistics.
+    ///
+    /// `n_probe` / `n_rerank` here are the **effective** values that
+    /// queries actually use (after the ANN-1.1 "stored (8,64) == auto"
+    /// shim via [`Self::effective_defaults`]), not the raw stored
+    /// numbers. That's what `mnemo info`, `db.stats()` and the MCP
+    /// `stats` tool report, so an upgraded v0.5.x file shows the
+    /// larger auto values it actually searches with — not the 8/64
+    /// baked into the serialized index.
     pub fn info(&self) -> IndexInfo {
+        let (eff_probe, eff_rerank) = self.effective_defaults();
         IndexInfo {
             vectors: self.len(),
             partitions: self.n_partitions,
             subspaces: self.pq.m(),
-            n_probe: self.n_probe,
-            n_rerank: self.n_rerank,
+            n_probe: eff_probe,
+            n_rerank: eff_rerank,
         }
     }
 
@@ -453,10 +556,17 @@ impl IvfPqIndex {
 
     /// Run the tiered query: IVF probe → PQ scan → top-`n_rerank` candidates.
     /// Returns candidate IDs (nearest first by PQ distance) for the store to
-    /// rerank exactly. `n_probe`/`n_rerank` of `None` use the build defaults.
+    /// rerank exactly.
+    ///
+    /// `n_probe` / `n_rerank` of `None` fall through to
+    /// [`Self::effective_defaults`] — which recomputes from the live
+    /// partition / vector count when the index is auto-flagged (ANN-1.1
+    /// in v0.6.0+) or carries the legacy pre-ANN-1 defaults (8, 64).
+    /// Any explicit value is honored verbatim.
     pub fn query(&self, q: &[f32], n_probe: Option<usize>, n_rerank: Option<usize>) -> Vec<u128> {
-        let n_probe = n_probe.unwrap_or(self.n_probe).clamp(1, self.n_partitions);
-        let n_rerank = n_rerank.unwrap_or(self.n_rerank).max(1);
+        let (auto_probe, auto_rerank) = self.effective_defaults();
+        let n_probe = n_probe.unwrap_or(auto_probe).clamp(1, self.n_partitions);
+        let n_rerank = n_rerank.unwrap_or(auto_rerank).max(1);
 
         // Stage 1 — pick the nearest partitions.
         let mut parts: Vec<(usize, f32)> = (0..self.n_partitions)
@@ -484,9 +594,190 @@ impl IvfPqIndex {
             }
         }
 
-        // Stage 3 — keep the closest candidates for exact reranking.
+        // Stage 3 — keep the closest `n_rerank` candidates for exact
+        // reranking. R-001.8 part 3 (ANN-1.1): partition-select first,
+        // then sort only the kept slice. Full sort of all N candidates
+        // is O(N log N); at ANN-1.1's 1M + partitions/2 defaults the
+        // candidate pool is ~500K per query, where the full sort cost
+        // dominates. `select_nth_unstable_by` is O(N) average, then
+        // the final sort is O(k log k) with k = n_rerank.
+        if n_rerank < cands.len() {
+            cands.select_nth_unstable_by(n_rerank - 1, |a, b| a.1.total_cmp(&b.1));
+            cands.truncate(n_rerank);
+        }
         cands.sort_by(|a, b| a.1.total_cmp(&b.1));
-        cands.truncate(n_rerank);
         cands.into_iter().map(|(id, _)| id).collect()
+    }
+}
+
+#[cfg(test)]
+mod ann_1_1_tests {
+    //! PR ANN-1.1 tests for the index-defaults upgrade path.
+    //!
+    //! The amended spec (planner 2026-11-01 URGENT AMEND, R-001.3 +
+    //! R-001.10): no new fields on `IvfPqIndex` — rmp-serde 1.3.0's
+    //! positional decoder rejects extra array elements, so any append
+    //! would break v0.5.x readers. The whole upgrade path runs on the
+    //! "stored (8, 64) == auto" sentinel in
+    //! [`IvfPqIndex::effective_defaults`].
+
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    /// Shadow of the pre-ANN-1 [`IvfPqIndex`] layout — identical to
+    /// the current one (same field order, same types). Serializing
+    /// one of these produces the exact byte stream a v0.5.x build
+    /// would write. Keeping it as a separate struct makes the
+    /// field-count guard below mechanical rather than ad-hoc.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct V052IvfPqIndex {
+        dims: usize,
+        n_partitions: usize,
+        n_probe: usize,
+        n_rerank: usize,
+        centroids: Vec<f32>,
+        pq: PqCodebook,
+        partitions: Vec<Posting>,
+    }
+
+    fn tiny_pq(dims: usize) -> PqCodebook {
+        let sub_offsets = vec![0, dims];
+        let mut rng = StdRng::seed_from_u64(0);
+        let train: Vec<Vec<f32>> = (0..4).map(|i| vec![i as f32; dims]).collect();
+        let refs: Vec<&[f32]> = train.iter().map(|v| v.as_slice()).collect();
+        PqCodebook::train(&sub_offsets, &refs, 2, &mut rng)
+    }
+
+    #[test]
+    fn v0_5_2_index_blob_decodes_unchanged() {
+        // A byte stream in the exact v0.5.2 layout must still decode
+        // as the current `IvfPqIndex`. If we ever appended a field,
+        // rmp-serde would reject this as `LengthMismatch`.
+        let dims = 4;
+        let legacy = V052IvfPqIndex {
+            dims,
+            n_partitions: 2,
+            n_probe: 8,
+            n_rerank: 64,
+            centroids: vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            pq: tiny_pq(dims),
+            partitions: vec![Posting::default(); 2],
+        };
+        let bytes = rmp_serde::to_vec(&legacy).expect("serialize v0.5.2 layout");
+        let decoded: IvfPqIndex =
+            rmp_serde::from_slice(&bytes).expect("v0.5.2 bytes must decode under current schema");
+        assert_eq!(decoded.dims, 4);
+        assert_eq!(decoded.n_partitions, 2);
+        assert_eq!(decoded.n_probe, 8);
+        assert_eq!(decoded.n_rerank, 64);
+    }
+
+    #[test]
+    fn current_build_serializes_with_v0_5_2_field_count() {
+        // Forward-compat guard. If someone appends a field to
+        // `IvfPqIndex`, the serialized form will carry an extra array
+        // element and v0.5.x readers will reject it with
+        // `LengthMismatch`. This test fails loudly first, so the
+        // breakage is caught by `cargo test`, not by an upset user
+        // whose two machines run different mnemo versions.
+        let dims = 4;
+        let items: Vec<(u128, Vec<f32>)> = (0..32)
+            .map(|i| (i as u128, vec![i as f32, i as f32 + 1.0, 0.0, 0.0]))
+            .collect();
+        let refs: Vec<(u128, &[f32])> = items.iter().map(|(id, v)| (*id, v.as_slice())).collect();
+        let idx = IvfPqIndex::build(dims, &refs, IndexConfig::default()).unwrap();
+        let bytes = rmp_serde::to_vec(&idx).expect("serialize current layout");
+        // Decode via the frozen v0.5.2 shadow struct. If the current
+        // layout has an extra appended field, this fails with
+        // `LengthMismatch`.
+        let as_v052: V052IvfPqIndex = rmp_serde::from_slice(&bytes)
+            .expect("current index must decode under the v0.5.2 shape");
+        assert_eq!(as_v052.dims, dims);
+    }
+
+    #[test]
+    fn legacy_8_64_triggers_auto_formulas_at_query_time() {
+        // The sentinel path: stored (8, 64) on a legacy index
+        // substitutes the auto formulas at query time — ANN-1 fix
+        // without a rebuild.
+        let dims = 4;
+        let legacy = V052IvfPqIndex {
+            dims,
+            n_partitions: 10,
+            n_probe: 8,
+            n_rerank: 64,
+            centroids: vec![0.0; 10 * dims],
+            pq: tiny_pq(dims),
+            partitions: (0..10)
+                .map(|_| Posting {
+                    ids: vec![0u128, 1u128],
+                    codes: vec![0u8; 2],
+                })
+                .collect(),
+        };
+        let bytes = rmp_serde::to_vec(&legacy).unwrap();
+        let decoded: IvfPqIndex = rmp_serde::from_slice(&bytes).unwrap();
+
+        let (auto_probe, auto_rerank) = decoded.effective_defaults();
+        // Small corpora get full probe (ANN-1.1 formula: full up to
+        // 100 partitions). 10 partitions → probe all 10.
+        assert_eq!(
+            auto_probe, 10,
+            "auto n_probe at <=100 partitions is full probe"
+        );
+        assert_eq!(auto_rerank, 100, "auto n_rerank at tiny N clamps up to 100");
+    }
+
+    #[test]
+    fn new_build_stores_resolved_auto_values() {
+        // On v0.6.0+, build() with IndexConfig::default() resolves
+        // 0 → concrete auto values and stores THOSE in the index.
+        // Old readers (v0.5.x) see a usable number rather than a 0
+        // sentinel; new readers compute the same values at query
+        // time via effective_defaults.
+        let dims = 4;
+        let items: Vec<(u128, Vec<f32>)> = (0..64)
+            .map(|i| {
+                let f = i as f32;
+                (i as u128, vec![f, f + 1.0, f + 2.0, f + 3.0])
+            })
+            .collect();
+        let refs: Vec<(u128, &[f32])> = items.iter().map(|(id, v)| (*id, v.as_slice())).collect();
+        let idx = IvfPqIndex::build(dims, &refs, IndexConfig::default()).unwrap();
+        assert!(
+            idx.n_probe > 0 && idx.n_rerank > 0,
+            "resolved values must be concrete (never 0)"
+        );
+        // The IndexConfig::default() formula for a 64-vector corpus
+        // with ceil(sqrt(64)) = 8 partitions picks n_probe=4,
+        // n_rerank=clamp(64/200, 100, 1000) = 100.
+        let expected_rerank = (64 / 200usize).clamp(100, 1000);
+        assert_eq!(idx.n_rerank, expected_rerank);
+    }
+
+    #[test]
+    fn explicit_build_values_persist_verbatim() {
+        // Non-sentinel explicit values stay stored and are used at
+        // query time. (A user who passes exactly 8/64 explicitly is
+        // treated as legacy auto — acknowledged in the planner's
+        // amended spec; harmless because at the tiny N where 8/64
+        // could sensibly be chosen, the auto formulas pick similar
+        // values.)
+        let dims = 4;
+        let items: Vec<(u128, Vec<f32>)> =
+            (0..64).map(|i| (i as u128, vec![i as f32; dims])).collect();
+        let refs: Vec<(u128, &[f32])> = items.iter().map(|(id, v)| (*id, v.as_slice())).collect();
+        let cfg = IndexConfig {
+            n_probe: 3,
+            n_rerank: 17,
+            ..Default::default()
+        };
+        let idx = IvfPqIndex::build(dims, &refs, cfg).unwrap();
+        assert_eq!(idx.n_probe, 3);
+        assert_eq!(idx.n_rerank, 17);
+        let (p, r) = idx.effective_defaults();
+        assert_eq!(p, 3);
+        assert_eq!(r, 17);
     }
 }

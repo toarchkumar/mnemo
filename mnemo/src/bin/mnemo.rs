@@ -155,11 +155,13 @@ enum Command {
         /// PQ subspaces (0 = auto, ~8 dims each).
         #[arg(long, default_value_t = 0)]
         subspaces: usize,
-        /// Partitions probed per query.
-        #[arg(long, default_value_t = 8)]
+        /// Partitions probed per query (0 = auto; computed from the
+        /// partition count on every recall).
+        #[arg(long, default_value_t = 0)]
         n_probe: usize,
-        /// Candidates reranked exactly per query.
-        #[arg(long, default_value_t = 64)]
+        /// Candidates reranked exactly per query (0 = auto; scales
+        /// with the live vector count).
+        #[arg(long, default_value_t = 0)]
         n_rerank: usize,
     },
     /// Run an exact nearest-neighbour search.
