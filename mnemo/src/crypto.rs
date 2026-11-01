@@ -16,9 +16,13 @@
 //! This is what makes `rekey` cheap: changing the passphrase re-derives the KEK
 //! and re-wraps the DEK — the pages themselves never need re-encryption.
 //!
-//! Every page gets a unique nonce derived from `(page_number, write_counter)`,
-//! where `write_counter` is a monotonic counter persisted in the file header.
-//! Because the counter never repeats, an AES-GCM nonce is never reused.
+//! Every page gets a 96-bit nonce minted at write time from a per-session
+//! random prefix plus a per-session monotonic counter (SEC-1). The random
+//! prefix is drawn fresh when a `Mnemo` handle opens the file — it never
+//! touches the disk — and the counter resets to zero in the same step.
+//! Together they make an AES-GCM nonce reuse infeasible across the sessions
+//! that could ever share one DEK, including the "two forks of the same file
+//! after a backup" case that an on-disk `write_counter`-based scheme leaks.
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};

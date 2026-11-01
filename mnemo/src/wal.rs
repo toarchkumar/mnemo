@@ -26,6 +26,19 @@
 //! its own: a single-fsync commit and an explicit, replayable transaction
 //! boundary.
 //!
+//! # DUR-1: header changes commit through the WAL too
+//!
+//! Beyond the per-flush transaction above, every page-0 change after
+//! [`crate::Mnemo::create`] — WAL relocation (`ensure_wal_capacity`), rekey
+//! (`Mnemo::rekey`) — goes through this same commit path as a one-frame
+//! transaction `(0, new_header_page)`. The relocation path writes the frame
+//! into the *new* region first, then checkpoints page 0, then
+//! [`invalidate_region`]s the old region's first frame header. A crash
+//! anywhere in that sequence either preserves the old state (page 0 wasn't
+//! overwritten) or lets `Mnemo::open`'s torn-header scan recover the new
+//! state from the new region's committed header frame. The initial
+//! `Mnemo::create` is the only unlogged page-0 write that remains.
+//!
 //! # On-disk shape of a frame
 //!
 //! ```text
@@ -147,6 +160,33 @@ pub fn commit(
     crate::bump_fsync();
     Ok(())
 }
+
+/// Zero the first frame header at `region_start` so a scan beginning
+/// there finds no `MWAL` magic. Used by [`crate::store::Mnemo`] after a
+/// WAL relocation has been checkpointed into page 0 — the old region is
+/// now stale, and leaving its magic in place would feed garbage frames
+/// to the torn-header scan on reopen.
+///
+/// Writes a zero-filled `FRAME_HEADER` (29 bytes) and fsyncs. Only the
+/// first 4 bytes (the magic) *need* to go to make the region invalid,
+/// but zeroing the whole frame header is cheap and sidesteps any
+/// debate about what a "half-zeroed" magic means.
+pub fn invalidate_region(file: &mut File, region_start: u64) -> Result<()> {
+    crate::pager::__failpoint_check()?;
+    let zeros = [0u8; FRAME_HEADER];
+    file.seek(SeekFrom::Start(region_start * PAGE_SIZE as u64))?;
+    file.write_all(&zeros)?;
+    file.sync_all()?;
+    crate::bump_fsync();
+    Ok(())
+}
+
+/// Fixed byte length of a single frame header (`MAGIC + kind + ...`).
+/// Exposed for the torn-header scan in `Mnemo::open`, which starts a
+/// candidate scan at any page whose first four bytes are `MWAL`.
+pub const FRAME_HEADER_LEN: usize = FRAME_HEADER;
+/// Magic prefix of a frame on disk. Four ASCII bytes `MWAL`.
+pub const FRAME_MAGIC_BYTES: &[u8; 4] = FRAME_MAGIC;
 
 /// Scan the WAL region for a committed transaction newer than `wal_seq`.
 ///

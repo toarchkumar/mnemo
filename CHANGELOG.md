@@ -235,6 +235,77 @@ Full ANN-1 numbers (diagnose cells + 2×5×5 tuning grid at 10K and
 earlier Phase 6 `speed`, `ranking`, `ann_recall_grid`,
 `file_size_breakdown`, and `speed_hw_aes` blocks.
 
+### Fixed — PR DUR-1 (torn-header recovery after WAL relocation; obsolete pre-flush lease write dropped)
+
+Reviewer-triaged under REV-001 (R-001.2 "wal relocation leaves a
+torn-header window the recovery scan cannot heal", R-001.7 "the
+pre-flush leased-header write is now obsolete under SEC-1") and
+further sharpened by REV-002 (R-002.1): the Phase 1.3 recovery heals
+*only* on `HeaderChecksum`, and `Header::from_page` returns
+`BadMagic` / `UnsupportedVersion` *before* the CRC gate, so the
+realistic failure mode (the 294-byte header sits inside the first
+512-byte sector; storage either writes that sector atomically or
+leaves it zeroed / garbled) skips healing entirely. Alongside this,
+`ensure_wal_capacity` and `rekey` wrote page 0 directly — a torn
+write there was unrecoverable because the WAL region was either empty
+(relocation path) or stale (rekey path).
+
+**1. Every post-`create` page-0 write now goes through the WAL
+first.** Both `ensure_wal_capacity` (relocation) and `rekey` build the
+new header, WAL-commit a single-frame transaction `(0, new_header)`
+with `txn_id = wal_seq + 1` *into the new region*, checkpoint page 0,
+then zero the first frame header of the predecessor region. A crash
+anywhere in that sequence leaves either the old state intact (if
+page 0 wasn't overwritten) or the new state recoverable from the new
+region (if it was). The initial `create` is the only unlogged page-0
+write that remains.
+
+**2. The torn-header scan now walks the whole file.** `Mnemo::open`
+reads page 0, and on *any* `Header::from_page` error (`BadMagic`,
+`UnsupportedVersion`, `HeaderChecksum`), scans every 8 KiB-aligned
+page ≥ 1 for `MWAL` magic and tries each as a candidate WAL-region
+start. A candidate is accepted only if (a) its chained-CRC commit
+verifies, (b) it carries a `(0, header_page)` frame, (c) that
+header's `wal_start` equals the candidate page and `wal_seq` equals
+the transaction's id, (d) the DEK unwraps under the passphrase, and
+(e) the AES-GCM seal validates. The highest-`txn_id` winner replays
+to page 0; if nothing is valid the *original* error is returned, so
+non-mnemo files still report `BadMagic` cleanly. The pre-DUR-1 fixed
+`TORN_HEADER_SCAN_PAGES = 64` cap is gone.
+
+**3. Seal-mismatch heals too.** When page 0 parses but its v7+ seal
+fails to validate, the same file-wide scan runs — a torn write that
+left the CRC-covered prefix intact but zeroed the seal fields is
+recoverable from the current WAL region's last commit. Genuine
+tampering remains detected because a forged frame cannot pass both
+DEK unwrap and seal validation.
+
+**4. `prepare_for_flush`'s leased header write is removed.** It
+existed to close the Phase 1.1 nonce-reuse window (reopen must see a
+`write_counter` past any nonce this flush could produce). SEC-1
+superseded that: nonces now carry a per-session random prefix, and
+`write_counter` is no longer a nonce input, so the leased write
+bought nothing but an extra `write + fsync` on every flush.
+
+**Tests.** `mnemo/tests/dur1_torn_header.rs` covers the sector-level
+shapes the spec enumerates: sector 0 zeroed, sector 0 random garbage,
+bytes 0..6 corrupted, bytes 242..294 stale, a WAL-relocated
+transaction larger than 64 pages, and failpoint sweeps across
+relocation and rekey (both the just-flushed and never-flushed
+variants). `prop_failpoint_relocation_or_rekey_yields_pre_or_post` in
+`proptest_store.rs` extends property 4 to the two new WAL-logged
+paths — the live set after a torn relocation or rekey must equal the
+pre- or post-op snapshot, never a third state, and at least one of
+the two passphrases must open the file after a torn rekey.
+
+**Durability math.** On a non-growing flush the fsync count drops by
+one (the dropped leased-header fsync). A relocating flush adds one
+fsync (invalidate-old-region) relative to the pre-DUR-1 count but
+gains crash-safety; the net is one fewer fsync on steady-state flushes
+and the same number on relocations. The crypto module's stale "nonces
+come from `(page_number, write_counter)`" doc paragraph is replaced
+with the SEC-1 description.
+
 ### Not released yet
 
 Holding on `main` to ship together with **Recall scoring v2** as

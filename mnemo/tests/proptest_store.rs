@@ -525,6 +525,94 @@ proptest! {
     }
 }
 
+// ---------------------------------------------------------------------
+// DUR-1: torn writes under WAL relocation and rekey.
+//
+// Property 4 above sweeps `fail_at` over an ordinary flush. DUR-1 added
+// two more code paths that now also commit through the WAL: WAL
+// relocation (grown region at the file tail) and `rekey` (new wrapped
+// DEK). This property stresses both. Each case:
+//
+//   1. Builds a durable "pre" state.
+//   2. Stages either a very large transaction (forces relocation on
+//      the next flush) or a `rekey` with a possibly-different kdf.
+//   3. Arms the failpoint.
+//   4. Reopens and asserts the live set equals pre or post, never a
+//      third state, AND asserts the passphrase that opens the file is
+//      consistent with what the file now stores (so a crashed rekey
+//      can only land on old or new, never both-fail).
+// ---------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_failpoint_relocation_or_rekey_yields_pre_or_post(
+        pre in prop::collection::vec(any::<u8>(), 1..=3),
+        extra in prop::collection::vec(any::<u8>(), 1..=3),
+        // 0 → relocation (large staged txn), 1 → rekey.
+        choice in 0u8..=1,
+        fail_at in 0i64..40,
+    ) {
+        let (_dir, path, mut db) = fresh_db();
+
+        // Durable "pre" state.
+        let mut pre_set: BTreeSet<Fingerprint> = BTreeSet::new();
+        for (i, seed) in pre.iter().enumerate() {
+            let (m, f) = make_memory(*seed, i as u8);
+            db.remember(m).unwrap();
+            pre_set.insert(f);
+        }
+        db.flush().unwrap();
+
+        let (post_set, new_pw) = match choice {
+            0 => {
+                // Relocation path: stage a large transaction so flush
+                // must grow the WAL. 4000 small vectors reliably
+                // exceeds the default WAL even for pre.len() == 1.
+                let mut set = pre_set.clone();
+                for (i, seed) in extra.iter().cycle().take(4000).enumerate() {
+                    let (m, f) = make_memory(*seed, (pre.len() + i) as u8);
+                    db.remember(m).unwrap();
+                    set.insert(f);
+                }
+                mnemo::__failpoints::set_writes_until_fail(fail_at);
+                let _ = db.flush();
+                mnemo::__failpoints::set_writes_until_fail(-1);
+                (set, None)
+            }
+            _ => {
+                // Rekey path: the live set stays pre_set either way.
+                // We only care that at least one passphrase opens.
+                mnemo::__failpoints::set_writes_until_fail(fail_at);
+                let _ = db.rekey("new-pw", KdfParams::fast());
+                mnemo::__failpoints::set_writes_until_fail(-1);
+                (pre_set.clone(), Some("new-pw"))
+            }
+        };
+
+        drop(db);
+
+        // Reopen using whichever passphrase works. For the rekey case
+        // either "pw" (old) or "new-pw" (new) must open — never
+        // neither.
+        let mut reopened = Mnemo::open(&path, "pw");
+        if reopened.is_err() {
+            if let Some(np) = new_pw {
+                reopened = Mnemo::open(&path, np);
+            }
+        }
+        let mut db = reopened.unwrap_or_else(|e| {
+            panic!("reopen after choice={choice} fail_at={fail_at} failed: {e:?}")
+        });
+        let observed = observed_set(&mut db);
+        prop_assert!(
+            observed == pre_set || observed == post_set,
+            "torn relocation/rekey surfaced a third state: \
+             choice={} fail_at={} observed={:?} pre={:?} post={:?}",
+            choice, fail_at, observed, pre_set, post_set,
+        );
+    }
+}
+
 // --- PR SEC-1: no page-nonce ever repeats within a file ---
 //
 // Fifth property, added for the v0.5.2 security hotfix. Random

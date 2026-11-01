@@ -63,14 +63,184 @@ const MIN_WAL_PAGES: u64 = 2;
 /// of manifest). Set `MnemoConfig::max_snapshots = 0` to disable the cap.
 pub const DEFAULT_MAX_SNAPSHOTS: usize = 256;
 
-/// Upper bound for the WAL scan when recovering a torn-header file. The
-/// real WAL region size lives in the header, but a torn header is exactly
-/// the case where we can't read it — so we scan a generous fixed window
-/// from the conventional WAL start, relying on `wal::recover` stopping at
-/// the first non-magic frame. 64 covers the historical pre-0.2 default
-/// of a 64-page reservation; users who configure larger WALs and then
-/// suffer a torn header at the same time will need offline recovery.
-const TORN_HEADER_SCAN_PAGES: u64 = 64;
+/// Cap on how many 8 KiB pages the torn-header scan reads per candidate
+/// WAL region before giving up on that candidate. Set generously (16 MiB
+/// of frames) — the scan stops at the first non-`MWAL` frame anyway, so
+/// most candidates abort within a few hundred bytes. The cap only matters
+/// when random data in a scanned page happens to keep looking like valid
+/// frames; it bounds pathological inputs. (DUR-1: there is no cap on the
+/// *file-wide* scan — every 8 KiB page is a candidate region start.)
+const TORN_HEADER_CANDIDATE_PAGE_CAP: u64 = 2048;
+
+/// Chunk size for the torn-header scan's streaming read of the file.
+const TORN_HEADER_SCAN_CHUNK: usize = 1 << 20; // 1 MiB
+
+/// Walk the file for every 8 KiB-aligned page whose first four bytes are
+/// `MWAL`, treating each as a candidate WAL-region start, and return the
+/// frames of the highest-`txn_id` committed transaction whose header
+/// frame fully validates under `passphrase`.
+///
+/// A candidate is accepted only if:
+/// * `wal::recover_bytes` returns a committed transaction (chained CRC
+///   verifies);
+/// * that transaction contains a `(0, header_page)` frame;
+/// * the header parses with `wal_start == candidate_page_no` and
+///   `wal_seq == txn_id` (so a frame cannot forge a region it was not
+///   written into);
+/// * deriving the KEK from `passphrase + header.salt`, unwrapping the
+///   wrapped DEK, and validating the header seal all succeed.
+///
+/// Returns `Ok(None)` when the scan finds no valid candidate — the
+/// caller is expected to propagate the original parse error so
+/// non-mnemo files still report `BadMagic`.
+///
+/// DUR-1 (R-002.1 part 2): there is no fixed scan window — the whole
+/// file is scanned. Reading at page granularity (not byte granularity)
+/// is sufficient because every WAL region in the format is page-aligned
+/// and every WAL commit writes its first frame at the region's start.
+fn scan_header_recovery_candidates(
+    file: &mut File,
+    passphrase: &str,
+) -> Result<Option<Vec<wal::Frame>>> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len < PAGE_SIZE as u64 * 2 {
+        return Ok(None); // No room for even one WAL page past the header.
+    }
+
+    let mut best: Option<(u64, Vec<wal::Frame>)> = None;
+    let page_sz = PAGE_SIZE as u64;
+    let mut offset = page_sz; // Skip page 0.
+
+    // Stream through the file in 1 MiB chunks, scanning each chunk for
+    // page-aligned `MWAL` candidates. For each candidate we re-read a
+    // bounded window around it (up to `TORN_HEADER_CANDIDATE_PAGE_CAP`
+    // pages) so `wal::recover_bytes` can walk the frame chain.
+    let mut chunk = vec![0u8; TORN_HEADER_SCAN_CHUNK];
+    while offset < file_len {
+        let want = (TORN_HEADER_SCAN_CHUNK as u64).min(file_len - offset) as usize;
+        chunk.resize(want, 0);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut filled = 0;
+        while filled < want {
+            match file.read(&mut chunk[filled..])? {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        let mut inner = 0usize;
+        while inner + 4 <= filled {
+            if &chunk[inner..inner + 4] == wal::FRAME_MAGIC_BYTES {
+                let page_no = (offset + inner as u64) / page_sz;
+                if let Some(frames) = try_recover_candidate(file, file_len, page_no, passphrase)? {
+                    let txn_id = frames
+                        .iter()
+                        .find(|(p, _)| *p == 0)
+                        .and_then(|(_, bytes)| {
+                            if bytes.len() != PAGE_SIZE {
+                                None
+                            } else {
+                                let mut hbuf = [0u8; PAGE_SIZE];
+                                hbuf.copy_from_slice(bytes);
+                                Header::from_page(&hbuf).ok().map(|h| h.wal_seq)
+                            }
+                        })
+                        .unwrap_or(0);
+                    let keep = match &best {
+                        None => true,
+                        Some((id, _)) => txn_id > *id,
+                    };
+                    if keep {
+                        best = Some((txn_id, frames));
+                    }
+                }
+            }
+            inner += PAGE_SIZE;
+        }
+        offset += filled as u64;
+    }
+
+    Ok(best.map(|(_, f)| f))
+}
+
+/// Try to recover a committed transaction from `candidate_page_no`,
+/// returning its frames only if the candidate's `(0, header_page)` frame
+/// fully validates (parse, `wal_start == candidate_page_no`,
+/// `wal_seq == txn_id`, DEK unwraps, seal validates). Separated out of
+/// [`scan_header_recovery_candidates`] so the hot inner loop stays
+/// shallow.
+fn try_recover_candidate(
+    file: &mut File,
+    file_len: u64,
+    candidate_page_no: u64,
+    passphrase: &str,
+) -> Result<Option<Vec<wal::Frame>>> {
+    let page_sz = PAGE_SIZE as u64;
+    let offset = candidate_page_no * page_sz;
+    if offset >= file_len {
+        return Ok(None);
+    }
+    let max_bytes = (TORN_HEADER_CANDIDATE_PAGE_CAP * page_sz).min(file_len - offset) as usize;
+    let mut buf = vec![0u8; max_bytes];
+    file.seek(SeekFrom::Start(offset))?;
+    let mut filled = 0;
+    while filled < max_bytes {
+        match file.read(&mut buf[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
+    }
+    buf.truncate(filled);
+    // Accept any committed txn (pass wal_seq = 0).
+    let frames = match wal::recover_bytes(&buf, 0)? {
+        Some(f) => f,
+        None => return Ok(None),
+    };
+
+    // Must contain a header frame.
+    let header_bytes = match frames.iter().find(|(p, _)| *p == 0) {
+        Some((_, b)) => b,
+        None => return Ok(None),
+    };
+    if header_bytes.len() != PAGE_SIZE {
+        return Ok(None);
+    }
+    let mut hbuf = [0u8; PAGE_SIZE];
+    hbuf.copy_from_slice(header_bytes);
+    let candidate = match Header::from_page(&hbuf) {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    // The frame's claimed region must match where we found it, and the
+    // frame's `wal_seq` must equal the recovered transaction's `txn_id`.
+    // We know every frame in a committed txn carries the same txn_id;
+    // the header frame records that same id as its `wal_seq`.
+    if candidate.wal_start != candidate_page_no {
+        return Ok(None);
+    }
+    // DEK unwrap under this candidate's own salt + KDF params.
+    let kdf = KdfParams {
+        m_cost: candidate.m_cost,
+        t_cost: candidate.t_cost,
+        p_cost: candidate.p_cost,
+    };
+    let kek = match crypto::derive_kek(passphrase.as_bytes(), &candidate.salt, kdf) {
+        Ok(k) => k,
+        Err(_) => return Ok(None),
+    };
+    let dek = match crypto::unwrap_dek(&kek, &candidate.dek_nonce, &candidate.wrapped_dek) {
+        Ok(d) => d,
+        Err(_) => return Ok(None),
+    };
+    if candidate.validate_seal(&dek).is_err() {
+        return Ok(None);
+    }
+
+    Ok(Some(frames))
+}
 
 /// Configuration for creating a new database.
 #[derive(Clone, Copy, Debug)]
@@ -726,15 +896,20 @@ impl Mnemo {
         file.read_exact(&mut hbuf)?;
         let mut header = match Header::from_page(&hbuf) {
             Ok(h) => h,
-            Err(MnemoError::HeaderChecksum) => {
-                // Page 0 is torn — most likely a crash during a checkpoint's
-                // header write. Try to heal from the WAL at its default site
-                // (a never-grown WAL never moves from page 1). We don't know
-                // the WAL size (the header that holds it is what's torn), so
-                // scan a generous fixed window — `wal::recover` stops at the
-                // first non-magic frame, so reading extra is safe.
-                let healed = wal::recover(&mut file, 1, TORN_HEADER_SCAN_PAGES, 0)?;
-                let frames = healed.ok_or(MnemoError::HeaderChecksum)?;
+            Err(e) => {
+                // DUR-1 (R-002.1 part 2+3): page 0 did not parse — any
+                // error is treated as a torn-header candidate, not just
+                // `HeaderChecksum`. The whole 294-byte header lives in
+                // the first 512-byte sector, so the realistic failure is
+                // the sector zeroed or garbled, which returns `BadMagic`
+                // or `UnsupportedVersion` *before* the CRC gate.
+                //
+                // Scan the file for valid committed header-frame WAL
+                // regions, pick the highest `txn_id`, and replay it. If
+                // nothing valid is found, return the *original* error so
+                // non-mnemo files still report `BadMagic`.
+                let scan = scan_header_recovery_candidates(&mut file, passphrase)?;
+                let frames = scan.ok_or(e)?;
                 for (page_no, bytes) in &frames {
                     if bytes.len() != PAGE_SIZE {
                         return Err(MnemoError::Invalid("WAL frame is not page-sized".into()));
@@ -748,7 +923,6 @@ impl Mnemo {
                 file.read_exact(&mut hbuf)?;
                 Header::from_page(&hbuf)?
             }
-            Err(e) => return Err(e),
         };
 
         // Crash recovery: replay a committed-but-uncheckpointed transaction.
@@ -787,7 +961,43 @@ impl Mnemo {
         // `MnemoError::HeaderTampered` if any of the sealed mutable fields
         // were rewritten after the last legitimate flush. No-op for v6 and
         // older — pre-v7 files don't carry a seal.
-        header.validate_seal(&dek)?;
+        //
+        // DUR-1 (R-002.1 part 3): a seal mismatch on an otherwise valid
+        // header may just mean page 0 was tampered without updating the
+        // WAL — e.g. a torn write that left the CRC-covered bytes intact
+        // but zeroed the seal fields. Try the file-wide recovery scan
+        // once; if it turns up a committed header frame that fully
+        // validates, replay and re-check. If no valid frame exists, keep
+        // the original `HeaderTampered` (genuine tampering stays
+        // detected because a forged frame can't pass DEK unwrap + seal).
+        let (mut header, dek) = match header.validate_seal(&dek) {
+            Ok(()) => (header, dek),
+            Err(seal_err) => {
+                let scan = scan_header_recovery_candidates(&mut file, passphrase)?;
+                let frames = scan.ok_or(seal_err)?;
+                for (page_no, bytes) in &frames {
+                    if bytes.len() != PAGE_SIZE {
+                        return Err(MnemoError::Invalid("WAL frame is not page-sized".into()));
+                    }
+                    file.seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+                    file.write_all(bytes)?;
+                }
+                file.sync_all()?;
+                crate::bump_fsync();
+                file.seek(SeekFrom::Start(0))?;
+                file.read_exact(&mut hbuf)?;
+                let healed = Header::from_page(&hbuf)?;
+                let kdf2 = KdfParams {
+                    m_cost: healed.m_cost,
+                    t_cost: healed.t_cost,
+                    p_cost: healed.p_cost,
+                };
+                let kek2 = crypto::derive_kek(passphrase.as_bytes(), &healed.salt, kdf2)?;
+                let dek2 = crypto::unwrap_dek(&kek2, &healed.dek_nonce, &healed.wrapped_dek)?;
+                healed.validate_seal(&dek2)?;
+                (healed, dek2)
+            }
+        };
 
         // Build the pager at the file's *current* version so initial reads
         // use the matching AAD scheme — `Pager::page_aad` returns empty AAD
@@ -1654,17 +1864,51 @@ impl Mnemo {
         // Allocate a new, larger region at the file tail (~1.5x headroom).
         let req = need.div_ceil(PAGE_SIZE as u64);
         let new_pages = (req + req / 2 + 4).max(DEFAULT_WAL_PAGES);
+        let old_wal_start = self.header.wal_start;
         let new_start = self.header.next_page;
         self.header.next_page += new_pages;
         self.header.wal_start = new_start;
         self.header.wal_pages = new_pages;
-        // Persist the relocation now: an isolated header write over an empty
-        // WAL. A crash here leaves a consistent state with a bigger WAL.
+        self.header.wal_seq += 1;
+        // DUR-1 (R-002.1): WAL-log the header change into the *new* region
+        // first, checkpoint page 0, then invalidate the old region. A crash
+        // anywhere here either keeps the old state (if page 0 wasn't yet
+        // overwritten) or recovers to the new state via the torn-header
+        // scan in `Mnemo::open`, which prefers the highest-txn-id valid
+        // committed header frame.
+        self.relocate_header_through_wal(old_wal_start)
+    }
+
+    /// Shared helper for every post-`create` page-0 commit: WAL-log the
+    /// new header into the current WAL region, checkpoint page 0, and
+    /// invalidate `old_wal_start` (the previous region, or the current
+    /// region when it hasn't moved). The caller is expected to have
+    /// mutated `self.header` to its target values *including a bumped
+    /// `wal_seq`* (one more than the last on-disk `wal_seq`); this
+    /// routine applies the seal, writes the frame + commit, folds page 0,
+    /// then zeroes the old region's first frame header.
+    ///
+    /// If `old_wal_start == self.header.wal_start`, the invalidation is
+    /// skipped — the region didn't move, so overwriting its first frame
+    /// would destroy the just-committed one.
+    fn relocate_header_through_wal(&mut self, old_wal_start: u64) -> Result<()> {
         self.header.write_counter = self.pager.write_counter;
         let mut page = self.header.to_page();
         self.header.apply_seal(&mut page, self.pager.dek())?;
+        let txn_id = self.header.wal_seq;
+        let frames = vec![(0u64, page.to_vec())];
+        wal::commit(
+            self.pager.file_mut(),
+            self.header.wal_start,
+            self.header.wal_pages,
+            txn_id,
+            &frames,
+        )?;
         self.pager.write_raw(0, &page)?;
         self.pager.sync()?;
+        if old_wal_start != self.header.wal_start {
+            wal::invalidate_region(self.pager.file_mut(), old_wal_start)?;
+        }
         Ok(())
     }
 
@@ -1854,21 +2098,22 @@ impl Mnemo {
     /// Pre-flush prelude shared by [`Mnemo::flush`] and the
     /// `__crash_partial_flush_for_testing` hook.
     ///
-    /// Serializes the control plane (catalog, ANN index), grows the WAL if
-    /// needed, then **leases** counter and page slots — bumps a *clone* of
-    /// the header by upper-bound amounts and persists that leased clone
-    /// with `pager.write_raw + sync`. The in-memory `self.header` keeps
-    /// its pre-lease `next_page` so [`Mnemo::seal_run`] continues to
-    /// allocate from the right slot; the final committed header carries
-    /// the actual post-flush values and overwrites the leased one on
-    /// checkpoint.
+    /// Serializes the control plane (catalog, ANN index, cache directory)
+    /// and grows the WAL if needed. That's it: this used to persist a
+    /// leased header too (SEC-1 obsoleted it; see DUR-1 R-002.1 note in
+    /// the body for the full rationale), but after DUR-1 the only page-0
+    /// writes outside `create` go through the WAL via
+    /// [`Mnemo::relocate_header_through_wal`].
     ///
-    /// This pre-stamping is what closes the nonce-reuse window flagged in
-    /// Phase 1.1 of the improvement plan: a crash anywhere between here
-    /// and the WAL commit leaves a file whose on-disk header records a
-    /// `write_counter` *past* every nonce the rest of this transaction
-    /// could produce, so the next reopen starts from a counter that
-    /// guarantees uniqueness against any orphan data pages still on disk.
+    /// The historical pre-stamping used to close the nonce-reuse window
+    /// flagged in Phase 1.1 of the improvement plan: a crash anywhere
+    /// between here and the WAL commit left a file whose on-disk header
+    /// recorded a `write_counter` past every nonce the rest of this
+    /// transaction could produce, so the next reopen started from a
+    /// counter that guaranteed uniqueness against any orphan data pages
+    /// still on disk. SEC-1's per-session random nonce prefix gives the
+    /// same guarantee without needing a persisted counter, which is why
+    /// this routine no longer writes page 0.
     fn prepare_for_flush(&mut self) -> Result<FlushPrelude> {
         // Serialize.
         let cat_bytes = if self.dirty_catalog {
@@ -1916,32 +2161,22 @@ impl Mnemo {
         let man_upper = 9 + (self.manifest.len() + 1) * 82;
         let man_pc_est = man_upper.div_ceil(PAYLOAD).max(1);
 
-        // Grow WAL if needed (does its own header write+sync). The
-        // cache directory rides in the same transaction so its page
-        // count contributes to the reservation.
+        // Grow WAL if needed (DUR-1: relocation is WAL-logged and does
+        // its own fsyncs). The cache directory rides in the same
+        // transaction so its page count contributes to the reservation.
         self.ensure_wal_capacity(cat_pc + idx_pc + cache_pc + man_pc_est + 1)?;
 
-        // Lease counter and page slots. counter_lease is an upper bound on
-        // how many `pager.write_counter` advances this transaction will
-        // make (one per dirty data page + one per sealed control-plane
-        // page). page_lease covers only the control-plane allocations,
-        // because dirty data pages were already allocated past
-        // `header.next_page` by `write_record` when `remember` ran or
-        // `cache_put` ran.
-        let data_dirty = self.pager.dirty_page_count() as u64;
-        let counter_lease = data_dirty + (cat_pc + idx_pc + cache_pc + man_pc_est) as u64;
-        let page_lease = (cat_pc + idx_pc + cache_pc + man_pc_est) as u64;
-
-        // Persist a leased *clone* of the header — in-memory `self.header`
-        // keeps its pre-lease `next_page` for `seal_run` to consume from
-        // the correct slot.
-        let mut leased = self.header.clone();
-        leased.write_counter = self.pager.write_counter + counter_lease;
-        leased.next_page += page_lease;
-        let mut page = leased.to_page();
-        leased.apply_seal(&mut page, self.pager.dek())?;
-        self.pager.write_raw(0, &page)?;
-        self.pager.sync()?;
+        // DUR-1 (R-002.1): the pre-flush "leased header" write that used
+        // to live here is gone. It existed to close the Phase 1.1 nonce
+        // reuse window (reopen must see a `write_counter` past any nonce
+        // this flush could produce before data pages hit disk). SEC-1
+        // superseded that: nonces now carry a per-session random prefix
+        // and `write_counter` is no longer a nonce input, so the leased
+        // write bought us nothing but an extra fsync per flush. Orphan
+        // data pages past `header.next_page` on a crashed flush are
+        // still safe — the next session's random prefix makes any later
+        // write at the same page_no uniquely nonced regardless of
+        // `write_counter`.
 
         Ok(FlushPrelude {
             cat_bytes,
@@ -2644,14 +2879,21 @@ impl Mnemo {
         self.header.m_cost = kdf.m_cost;
         self.header.t_cost = kdf.t_cost;
         self.header.p_cost = kdf.p_cost;
-        self.header.write_counter = self.pager.write_counter;
         self.kdf = kdf;
 
-        let mut page = self.header.to_page();
-        self.header.apply_seal(&mut page, self.pager.dek())?;
-        self.pager.write_raw(0, &page)?;
-        self.pager.sync()?;
-        Ok(())
+        // DUR-1 (R-002.1): WAL-log the new page 0 before touching it.
+        // Allocate a fresh WAL region at the tail so that a crash during
+        // the rekey leaves either the old region (old passphrase works)
+        // or the new region (new passphrase works) fully committed —
+        // overwriting the existing region would risk destroying both.
+        let old_wal_start = self.header.wal_start;
+        let new_pages = self.header.wal_pages;
+        let new_start = self.header.next_page;
+        self.header.next_page += new_pages;
+        self.header.wal_start = new_start;
+        self.header.wal_pages = new_pages;
+        self.header.wal_seq += 1;
+        self.relocate_header_through_wal(old_wal_start)
     }
 
     /// Decrypt and validate every live record. Returns the count verified.
