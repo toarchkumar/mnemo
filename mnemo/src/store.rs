@@ -477,12 +477,19 @@ pub struct Stats {
 }
 
 /// Result of a [`Mnemo::compact_file`] run.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CompactReport {
     /// Live memories before compaction.
     pub before: usize,
     /// Live memories after compaction (expired ones dropped).
     pub after: usize,
+    /// Live, non-expired cache entries before compaction. FIX-1
+    /// R-001.1: compaction now preserves the result cache instead of
+    /// silently dropping it.
+    pub cache_before: usize,
+    /// Live, non-expired cache entries after compaction (tombstoned
+    /// and TTL-expired ones dropped).
+    pub cache_after: usize,
 }
 
 /// An encrypted, single-file agent memory database.
@@ -551,6 +558,16 @@ pub struct Mnemo {
     /// the Phase 6 planner wants this before deciding whether cutting
     /// fsync count is a viable write-latency win.
     fsyncs_last_flush: u32,
+    /// FIX-1 R-001.8 part 2: lazy cache of the distinct agent IDs
+    /// across every live memory, built once on first `stats()` call
+    /// per handle. `remember()` adds to it in O(1); `delete()` can't
+    /// cheaply tell whether the removed memory was the last of its
+    /// agent (the agent lives in the encrypted body, not the catalog
+    /// — pre-v9 format), so it just invalidates the set and the next
+    /// `stats()` call rebuilds. Pre-FIX-1 every `stats()` call
+    /// decrypted every live memory to collect agents, turning an
+    /// otherwise-cheap diagnostic into an O(N) decrypt.
+    agent_set: Option<std::collections::BTreeSet<String>>,
 }
 
 /// Open a file and take an OS advisory lock, returning `Locked { path }`
@@ -590,6 +607,40 @@ fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<File> {
         }),
         Err(e) => Err(MnemoError::Io(e)),
     }
+}
+
+/// Do two paths resolve to the same on-disk file? Used by
+/// [`Mnemo::export_encrypted`] to refuse overwriting the live
+/// database. On Unix we compare `(dev, ino)` via `MetadataExt`, which
+/// catches hard links and symlinks. On Windows we compare canonicalized
+/// paths, since there is no stable device+inode equivalent in `std`.
+/// Returns `None` if either side can't be stat'd / canonicalized —
+/// the caller treats that as "not the same file" so a missing `dest`
+/// (the normal export case) proceeds.
+fn paths_refer_to_same_file(a: &Path, b: &Path) -> Option<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let ma = std::fs::metadata(a).ok()?;
+        let mb = std::fs::metadata(b).ok()?;
+        Some(ma.dev() == mb.dev() && ma.ino() == mb.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let ca = std::fs::canonicalize(a).ok()?;
+        let cb = std::fs::canonicalize(b).ok()?;
+        Some(ca == cb)
+    }
+}
+
+/// A sibling temp-file path next to `dest`, suffixed with
+/// `.export-tmp`. Lives in `dest`'s own parent directory so the final
+/// [`std::fs::rename`] is same-filesystem (and therefore atomic on
+/// every platform mnemo supports).
+fn temp_sibling(dest: &Path) -> PathBuf {
+    let mut buf = dest.as_os_str().to_os_string();
+    buf.push(".export-tmp");
+    PathBuf::from(buf)
 }
 
 /// Was this I/O error the OS reporting a conflicting file lock, or a
@@ -845,6 +896,7 @@ impl Mnemo {
             cache_counters: CounterState::default(),
             embedder: None,
             fsyncs_last_flush: 0,
+            agent_set: None,
         })
     }
 
@@ -1104,6 +1156,7 @@ impl Mnemo {
             cache_counters: CounterState::default(),
             embedder: None,
             fsyncs_last_flush: 0,
+            agent_set: None,
         })
     }
 
@@ -1246,6 +1299,7 @@ impl Mnemo {
             cache_counters: CounterState::default(),
             embedder: None,
             fsyncs_last_flush: 0,
+            agent_set: None,
         })
     }
 
@@ -1367,6 +1421,20 @@ impl Mnemo {
         if let Some(ann) = &mut self.ann {
             ann.add(id_u, &m.vector);
             self.dirty_index = true;
+        }
+
+        // FIX-1 R-001.8 part 2: keep the lazy agent set in sync. If
+        // it hasn't been built yet (no `stats()` call this session),
+        // skip — the first `stats()` will build it from scratch. If
+        // it has, add this memory's agent_id. An overwrite with the
+        // same id and same agent is a no-op (BTreeSet::insert returns
+        // false); an overwrite with a *changed* agent_id adds the new
+        // agent but doesn't drop the old (we can't tell without a
+        // decrypt whether the old agent still has live memories).
+        // That's conservative in the right direction — `stats()` may
+        // over-report by one agent until the next delete invalidates.
+        if let Some(set) = &mut self.agent_set {
+            set.insert(m.agent_id.clone());
         }
         Ok(m.id)
     }
@@ -1535,6 +1603,12 @@ impl Mnemo {
             ann.remove(id.0);
             self.dirty_index = true;
         }
+        // FIX-1 R-001.8 part 2: we can't tell whether this delete
+        // removed the last memory of its agent without a decrypt
+        // (the catalog entry doesn't carry `agent_id` in format v8),
+        // so just invalidate the lazy set. The next `stats()` call
+        // rebuilds from live memories.
+        self.agent_set = None;
         Ok(())
     }
 
@@ -1924,6 +1998,17 @@ impl Mnemo {
             return Ok(());
         }
 
+        // FIX-1 R-001.8 part 3: snapshot the memory/index-dirty flags
+        // before step 3b decides whether to push a restore point.
+        // Only flushes that change the memory catalog or ANN index
+        // need a snapshot — a cache-only flush (`dirty_cache` set,
+        // `dirty_catalog` + `dirty_index` both false) must not push,
+        // because snapshots don't capture cache state and every push
+        // counts against `max_snapshots` (default 256), so a cache-
+        // heavy workload would otherwise evict every real memory
+        // restore point within ~256 cache writes.
+        let is_memory_or_index_flush = self.dirty_catalog || self.dirty_index;
+
         // 1. Serialize control plane, ensure WAL capacity, lease counter +
         //    page slots, and persist the leased header *before* any data
         //    page hits the disk.
@@ -1990,32 +2075,45 @@ impl Mnemo {
         //     holds at most `max_snapshots` entries — the most-recent N.
         //     `max_snapshots == 0` disables the cap. Pages referenced only
         //     by pruned snapshots stay on disk until `compact_file`.
+        //
+        //     FIX-1 R-001.8 part 3: skip the snapshot push on a
+        //     cache-only flush. Snapshots don't capture the cache
+        //     anyway, and every push counts against `max_snapshots`
+        //     (default 256) + rewrites the manifest run — so a
+        //     cache-heavy workload would otherwise evict every real
+        //     memory restore point within ~256 cache writes. On a
+        //     cache-only flush we reuse the current manifest
+        //     verbatim; the manifest run already lives at
+        //     `self.header.manifest_{start,pages,len}` (set by the
+        //     last memory-touching flush, or at `create` time).
         let live = self.len() as u64;
         let txn_id = self.header.wal_seq + 1;
         let mut manifest = self.manifest.clone();
-        if self.max_snapshots > 0 {
-            // Drop the oldest entries so there's room for the new one.
-            while manifest.len() >= self.max_snapshots {
-                manifest.remove(0);
+        if is_memory_or_index_flush {
+            if self.max_snapshots > 0 {
+                // Drop the oldest entries so there's room for the new one.
+                while manifest.len() >= self.max_snapshots {
+                    manifest.remove(0);
+                }
             }
+            manifest.push(Snapshot {
+                txn_id,
+                created_at: memory::now_secs(),
+                catalog_start: self.header.catalog_start,
+                catalog_pages: self.header.catalog_pages,
+                catalog_len: self.header.catalog_len,
+                index_start: self.header.index_start,
+                index_pages: self.header.index_pages,
+                index_len: self.header.index_len,
+                memory_count: live,
+            });
+            let man_bytes =
+                rmp_serde::to_vec(&manifest).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+            let (m_start, m_pages) = self.seal_run(&man_bytes, &mut frames)?;
+            self.header.manifest_start = m_start;
+            self.header.manifest_pages = m_pages as u64;
+            self.header.manifest_len = man_bytes.len() as u64;
         }
-        manifest.push(Snapshot {
-            txn_id,
-            created_at: memory::now_secs(),
-            catalog_start: self.header.catalog_start,
-            catalog_pages: self.header.catalog_pages,
-            catalog_len: self.header.catalog_len,
-            index_start: self.header.index_start,
-            index_pages: self.header.index_pages,
-            index_len: self.header.index_len,
-            memory_count: live,
-        });
-        let man_bytes =
-            rmp_serde::to_vec(&manifest).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-        let (m_start, m_pages) = self.seal_run(&man_bytes, &mut frames)?;
-        self.header.manifest_start = m_start;
-        self.header.manifest_pages = m_pages as u64;
-        self.header.manifest_len = man_bytes.len() as u64;
 
         // 3c. The header is the transaction's final frame; stamp the new id
         //     and the *actual* (post-flush) write counter, which is <= the
@@ -2293,6 +2391,17 @@ impl Mnemo {
     /// the key was TTL-expired — from the caller's perspective the two
     /// are indistinguishable.
     pub fn cache_get(&mut self, namespace: &str, key: &str) -> Result<Option<CachedValue>> {
+        // FIX-1 R-001.8 part 4: under `Batched`, honor `max_age` on
+        // reads too. Pre-FIX-1 the age check only fired on `cache_put`,
+        // so a workload that wrote a few entries and then switched to
+        // pure reads could sit with its pending batch past the
+        // nominal max_age indefinitely. `max_dirty` is already
+        // maintained per-write; this adds the symmetric time-bound
+        // check on the read path. Only runs on read-write handles —
+        // flush() returns ReadOnly for shared-lock readers.
+        if !self.read_only && self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+            self.flush()?;
+        }
         let key_hash = result_cache::hash_key(key);
         let pos = match self.cache_idx.get(namespace, &key_hash) {
             Some(p) => p,
@@ -2340,19 +2449,31 @@ impl Mnemo {
         }
         self.cache_counters.hits += 1;
         // On a mutating handle: access_count reflects the just-bumped
-        // value. On a read-only handle: the on-disk value is unchanged,
-        // so returning it verbatim is honest (the caller's reads did
-        // not, and cannot, alter the persisted counter).
+        // value. On a read-only handle: the on-disk directory value is
+        // unchanged, so returning it verbatim is honest (the caller's
+        // reads did not, and cannot, alter the persisted counter).
+        //
+        // FIX-1 R-002.2 part 1: `accessed_at` must also come from the
+        // directory on a read-only handle, not from `entry.accessed_at`
+        // in the record body. The record body is written once at insert
+        // time and never updated on a hit — every live `accessed_at`
+        // update lands in the directory (see the `!self.read_only`
+        // branch above). The pre-FIX-1 code returned
+        // `entry.accessed_at`, which is really the entry's **creation
+        // time** by then, so a read-only reader saw "last accessed =
+        // when it was inserted" even after many successful hits by
+        // concurrent writers.
         let access_count = self.cache_dir[pos].access_count;
+        let accessed_at = if self.read_only {
+            self.cache_dir[pos].accessed_at
+        } else {
+            now
+        };
         Ok(Some(CachedValue {
             value: entry.value,
             content_type: entry.content_type,
             created_at,
-            accessed_at: if self.read_only {
-                entry.accessed_at
-            } else {
-                now
-            },
+            accessed_at,
             access_count,
             ttl_secs,
         }))
@@ -2638,6 +2759,11 @@ impl Mnemo {
                 got: query_vector.len(),
             });
         }
+        // FIX-1 R-001.8 part 4: same Batched max_age check as
+        // `cache_get`. See the comment there.
+        if !self.read_only && self.cache_batch.should_auto_flush(&self.cache_flush_policy) {
+            self.flush()?;
+        }
         let now = memory::now_secs();
 
         // Scan namespace live entries, filter by model, compute
@@ -2691,16 +2817,20 @@ impl Mnemo {
         }
         self.cache_counters.hits += 1;
         let access_count = self.cache_dir[pos].access_count;
+        // FIX-1 R-002.2 part 1: same read-only `accessed_at` fix as
+        // `cache_get`. The directory carries the live value; the record
+        // body only holds the insert-time snapshot.
+        let accessed_at = if self.read_only {
+            self.cache_dir[pos].accessed_at
+        } else {
+            now
+        };
         Ok(Some((
             CachedValue {
                 value: entry.value,
                 content_type: entry.content_type,
                 created_at,
-                accessed_at: if self.read_only {
-                    entry.accessed_at
-                } else {
-                    now
-                },
+                accessed_at,
                 access_count,
                 ttl_secs,
             },
@@ -2812,6 +2942,113 @@ impl Mnemo {
         })
     }
 
+    /// Return the KDF (Argon2id) parameters this file currently uses to
+    /// wrap its DEK. Needed by callers that want to [`rekey`] while
+    /// keeping the file's original protection level (e.g. the Python
+    /// binding's `rekey(fast=False)`, whose docstring promises exactly
+    /// that). FIX-1 R-001.5.
+    pub fn kdf_params(&self) -> KdfParams {
+        self.kdf
+    }
+
+    /// Flush any pending writes, then stream the (encrypted) file to
+    /// `dest` atomically: writes to a sibling temp file in `dest`'s
+    /// parent directory, `sync_all`s it, renames onto `dest`, and
+    /// fsyncs the parent directory on Unix so a crash never leaves a
+    /// partial export.
+    ///
+    /// Refuses when `dest` resolves to the file this handle has open
+    /// — that case would otherwise `File::create`-truncate the live
+    /// database to 0 bytes (`fs::copy` on Unix reads *after* the
+    /// `O_TRUNC`, so a naive export-to-self destroys the source).
+    /// Unix: compares `(dev, ino)` of both paths via `MetadataExt`,
+    /// catching symlinks and hard links. Windows: compares
+    /// canonicalized paths; a rename onto an open file also fails on
+    /// Windows because of the mandatory lock the handle holds, so the
+    /// rename step is a second line of defense.
+    ///
+    /// Reads the bytes from the already-open file handle, not by
+    /// `fs::copy`. On Windows that matters: `LockFileEx` locks are
+    /// mandatory, so a second handle opened by `fs::copy` would fail
+    /// while this writer still holds the lock.
+    ///
+    /// FIX-1 R-001.5 + R-002.2 part 3.
+    pub fn export_encrypted(&mut self, dest: impl AsRef<Path>) -> Result<()> {
+        let dest = dest.as_ref();
+
+        // Step 1 — refuse export to the open file itself. We compare
+        // by identity, not string, so symlinks and hard links to
+        // `self.path` are caught too. The check runs before any flush
+        // so a self-targeted export is a pure no-op.
+        if paths_refer_to_same_file(&self.path, dest).unwrap_or(false) {
+            return Err(MnemoError::Invalid(format!(
+                "export_encrypted refuses to overwrite the open database at {}",
+                dest.display()
+            )));
+        }
+
+        // Step 2 — flush, so on-disk bytes match the live state.
+        if !self.read_only {
+            self.flush()?;
+        }
+
+        // Step 3 — stream from the open handle into a sibling temp.
+        // Using the open handle (instead of a second open on `self.path`)
+        // means a Windows mandatory lock can't block the copy.
+        let parent = dest.parent().ok_or_else(|| {
+            MnemoError::Invalid(format!(
+                "export_encrypted: dest {} has no parent directory",
+                dest.display()
+            ))
+        })?;
+        let tmp = temp_sibling(dest);
+        // Scope the temp handle so it closes before the rename on
+        // Windows (which refuses to rename over an open file).
+        {
+            let src = self.pager.file_mut();
+            src.seek(SeekFrom::Start(0))?;
+            let mut out = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&tmp)?;
+            let mut buf = vec![0u8; 1 << 20]; // 1 MiB
+            loop {
+                let n = src.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                out.write_all(&buf[..n])?;
+            }
+            out.sync_all()?;
+            crate::bump_fsync();
+        }
+
+        // Step 4 — atomic rename onto `dest`.
+        if let Err(e) = std::fs::rename(&tmp, dest) {
+            // Best-effort cleanup; propagate the rename error.
+            let _ = std::fs::remove_file(&tmp);
+            return Err(MnemoError::Io(e));
+        }
+
+        // Step 5 — fsync the parent directory on Unix so the rename
+        // itself is durable. On Windows directory syncs aren't
+        // supported; the rename above is atomic enough on NTFS.
+        #[cfg(unix)]
+        {
+            if let Ok(dir) = File::open(parent) {
+                let _ = dir.sync_all();
+                crate::bump_fsync();
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = parent;
+        }
+
+        Ok(())
+    }
+
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps the DEK;
     /// the encrypted pages are never rewritten.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
@@ -2852,7 +3089,11 @@ impl Mnemo {
         self.relocate_header_through_wal(old_wal_start)
     }
 
-    /// Decrypt and validate every live record. Returns the count verified.
+    /// Decrypt and validate every live record. Returns the count verified
+    /// across memories **and** cache entries (FIX-1 R-001.1: now that the
+    /// cache survives compaction, `verify()` has to walk it too — the
+    /// pre-FIX-1 implementation only checked `self.catalog`, so a
+    /// corrupted cache record went unnoticed).
     pub fn verify(&mut self) -> Result<usize> {
         let entries: Vec<CatalogEntry> = self
             .catalog
@@ -2860,11 +3101,32 @@ impl Mnemo {
             .filter(|e| !e.deleted)
             .cloned()
             .collect();
-        let n = entries.len();
+        let mut n = entries.len();
         for e in &entries {
             let bytes = self.read_record(e)?;
             let _m: Memory = rmp_serde::from_slice(&bytes)
                 .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        }
+
+        // Also decode every live cache entry. Tombstoned entries are
+        // skipped — their pages are orphan ciphertext awaiting
+        // `compact_file`, same as deleted memories. Expired entries
+        // are *still* on disk until compaction, so we verify them too.
+        let cache_positions: Vec<(u64, u32, u32)> = self
+            .cache_dir
+            .iter()
+            .filter(|e| !e.deleted)
+            .map(|e| (e.start_page, e.page_count, e.len))
+            .collect();
+        for (start_page, page_count, len) in cache_positions {
+            let mut buf = Vec::with_capacity(len as usize);
+            for i in 0..page_count as u64 {
+                buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
+            }
+            buf.truncate(len as usize);
+            let _c: CacheEntry = rmp_serde::from_slice(&buf)
+                .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+            n += 1;
         }
         Ok(n)
     }
@@ -2872,9 +3134,24 @@ impl Mnemo {
     /// Summary statistics for the open database.
     pub fn stats(&mut self) -> Result<Stats> {
         let deleted = self.catalog.iter().filter(|e| e.deleted).count();
-        let mut agents: Vec<String> = self.memories()?.into_iter().map(|m| m.agent_id).collect();
-        agents.sort();
-        agents.dedup();
+        // FIX-1 R-001.8 part 2: build the agent set lazily on first
+        // call per handle, then maintain in `put` / invalidate in
+        // `delete`. Pre-FIX-1 every `stats()` call decrypted every
+        // live memory (O(N) AES-GCM decrypts just to list a usually-
+        // tiny set of distinct agent IDs). On a 1M-memory database
+        // this was in the multi-second range on hardware AES.
+        if self.agent_set.is_none() {
+            let built: std::collections::BTreeSet<String> =
+                self.memories()?.into_iter().map(|m| m.agent_id).collect();
+            self.agent_set = Some(built);
+        }
+        let agents: Vec<String> = self
+            .agent_set
+            .as_ref()
+            .expect("agent_set just filled above")
+            .iter()
+            .cloned()
+            .collect();
         let file_bytes = self.header.next_page * PAGE_SIZE as u64;
         Ok(Stats {
             memories: self.len(),
@@ -2893,6 +3170,19 @@ impl Mnemo {
     /// Rewrite the file, dropping tombstoned and expired memories and
     /// reclaiming stale pages left by updates. Done out-of-place via a temp
     /// file and an atomic rename.
+    ///
+    /// FIX-1 R-001.1 + R-002.2 part 2: the result cache now survives
+    /// compaction. Every live, non-expired directory entry is copied
+    /// into the new file verbatim — `created_at`, `ttl_secs`,
+    /// `cost_hint_ms`, `key_preview`, `size_bytes`, `content_type`,
+    /// `vector` and `model` come from the record body; `accessed_at`
+    /// and `access_count` come from the *directory* (the record body
+    /// only holds the insert-time snapshot — the directory is the
+    /// source of truth for the live counts, as of v5's recall trick).
+    /// Tombstoned and TTL-expired entries are dropped. Pre-FIX-1
+    /// compaction kept only the memory catalog and silently emptied
+    /// the cache; the Planner's interim README caveat (c417d2e) called
+    /// that out — this PR removes the surprise.
     pub fn compact_file(path: &str, passphrase: &str) -> Result<CompactReport> {
         let mut old = Mnemo::open(path, passphrase)?;
         let dims = old.dimensions;
@@ -2929,11 +3219,107 @@ impl Mnemo {
         if want_index && after > 0 {
             new.build_index_with(IndexConfig::default())?;
         }
+
+        // Count + copy cache entries. We walk `old.cache_dir` by index
+        // so each hop reads the directory's live `accessed_at` /
+        // `access_count` directly rather than going through
+        // `cache_get` (which would also treat read-only semantics,
+        // tombstones, etc. — we want the raw, authoritative values).
+        let mut cache_before = 0usize;
+        let mut cache_after = 0usize;
+        let positions: Vec<usize> = (0..old.cache_dir.len()).collect();
+        for pos in positions {
+            let keep = {
+                let e = &old.cache_dir[pos];
+                !e.deleted && !e.is_expired(now)
+            };
+            if keep {
+                cache_before += 1;
+                new.copy_cache_entry_from(&mut old, pos)?;
+                cache_after += 1;
+            }
+        }
+
         new.flush()?;
         drop(new);
         drop(old);
 
         std::fs::rename(&tmp, path)?;
-        Ok(CompactReport { before, after })
+        Ok(CompactReport {
+            before,
+            after,
+            cache_before,
+            cache_after,
+        })
+    }
+
+    /// Copy one live cache entry from `old` at directory position
+    /// `pos` into `self` (a freshly-created compaction target).
+    /// Decrypts the old record body, substitutes the old *directory*'s
+    /// `accessed_at` + `access_count` (the record body's copies are
+    /// stale as of v5's directory-only hit path), re-encodes, writes
+    /// a fresh record run, and pushes a matching directory entry.
+    ///
+    /// Caller is expected to have already filtered out tombstoned /
+    /// expired entries and to call this on a read-write handle.
+    pub(crate) fn copy_cache_entry_from(&mut self, old: &mut Mnemo, pos: usize) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        // Snapshot the directory fields we need, so the borrow on
+        // `old.cache_dir` ends before we touch `old.pager`.
+        let (start_page, page_count, len, dir_accessed_at, dir_access_count) = {
+            let e = &old.cache_dir[pos];
+            (
+                e.start_page,
+                e.page_count,
+                e.len,
+                e.accessed_at,
+                e.access_count,
+            )
+        };
+
+        // Read + decrypt the old record body.
+        let mut buf = Vec::with_capacity(len as usize);
+        for i in 0..page_count as u64 {
+            buf.extend_from_slice(&old.pager.read_page(start_page + i)?);
+        }
+        buf.truncate(len as usize);
+        let mut entry: CacheEntry =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+
+        // Overwrite the stale body copies with the directory's live
+        // values before persisting. Everything else — `created_at`,
+        // `ttl_secs`, `cost_hint_ms`, `key_preview`, `size_bytes`,
+        // `content_type`, `value`, `vector`, `model` — stays as the
+        // body already recorded it.
+        entry.accessed_at = dir_accessed_at;
+        entry.access_count = dir_access_count;
+
+        let bytes =
+            rmp_serde::to_vec(&entry).map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        let (new_start_page, new_page_count) = self.write_record(&bytes)?;
+
+        let dir_entry = CacheDirectoryEntry {
+            namespace: entry.namespace.clone(),
+            key_hash: entry.key_hash,
+            start_page: new_start_page,
+            page_count: new_page_count,
+            len: bytes.len() as u32,
+            deleted: false,
+            accessed_at: dir_accessed_at,
+            access_count: dir_access_count,
+            size_bytes: entry.size_bytes,
+            ttl_secs: entry.ttl_secs,
+            created_at: entry.created_at,
+            vector: entry.vector.clone(),
+            model: entry.model.clone(),
+        };
+        let new_pos = self.cache_dir.len();
+        self.cache_idx
+            .insert(&entry.namespace, entry.key_hash, new_pos);
+        self.cache_dir.push(dir_entry);
+        self.dirty_cache = true;
+        Ok(())
     }
 }

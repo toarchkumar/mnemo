@@ -491,6 +491,43 @@ impl Embedder for EmbedCmd {
                     ),
                 ));
             }
+            // FIX-1 R-001.6: the module doc (Correctness guarantees)
+            // already promises "any protocol error (… zero vector …)
+            // kills the child", but the check was missing before this
+            // PR — a buggy embedder returning `[0, 0, 0, …]` or
+            // `[NaN, …]` on one text would silently poison recall
+            // (Mnemo::remember refuses all-zero itself, but a cache
+            // write via `cache_get_semantic` or a `recall --text` call
+            // happily consumed the result). Reject both shapes
+            // through the same `fail_and_restart` path as a wrong
+            // width so the child is killed, the reader thread drops,
+            // and the next call spawns a fresh child.
+            if v.iter().all(|&x| x == 0.0) {
+                return Err(self.fail_and_restart(
+                    &mut slot,
+                    format!(
+                        "embed-cmd {} returned an all-zero vector on reply {}/{} \
+                         (an all-zero vector cannot be scored by cosine or dot-product \
+                         similarity; the module docs promise this is a protocol error). \
+                         The next call will respawn.",
+                        self.cmd_display,
+                        i + 1,
+                        texts.len()
+                    ),
+                ));
+            }
+            if v.iter().any(|x| !x.is_finite()) {
+                return Err(self.fail_and_restart(
+                    &mut slot,
+                    format!(
+                        "embed-cmd {} returned a non-finite value (NaN or ±∞) on \
+                         reply {}/{}. The next call will respawn.",
+                        self.cmd_display,
+                        i + 1,
+                        texts.len()
+                    ),
+                ));
+            }
             out.push(v);
         }
         Ok(out)

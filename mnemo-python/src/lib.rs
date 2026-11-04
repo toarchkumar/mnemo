@@ -588,10 +588,16 @@ impl Mnemo {
     /// the file's original creation-time parameters.
     #[pyo3(signature = (new_passphrase, fast=false))]
     fn rekey(&mut self, new_passphrase: &str, fast: bool) -> PyResult<()> {
+        // FIX-1 R-001.5: `fast=False` now really does "inherit the
+        // file's original protection level" as the docstring promises.
+        // Pre-FIX-1 it reached for `KdfParams::default()` instead of
+        // the file's actual params, so a file created with stronger
+        // (or weaker) KDF cost silently reset to the engine defaults
+        // on every rekey.
         let kdf = if fast {
             KdfParams::fast()
         } else {
-            KdfParams::default()
+            self.inner.kdf_params()
         };
         self.inner.rekey(new_passphrase, kdf).map_err(to_py)
     }
@@ -617,7 +623,12 @@ impl Mnemo {
     /// same self-describing-by-default behavior. Returns the new memory's
     /// ULID as a string. Does not flush.
     fn insert_default_manifest(&mut self) -> PyResult<String> {
-        let dims = self.inner.stats().map_err(to_py)?.dimensions;
+        // FIX-1 R-001.8 part 1: use the O(1) `dimensions()` accessor
+        // instead of `stats().dimensions`. `stats()` historically
+        // walked every live memory to build the agent list (fixed in
+        // this PR too, but either way this call site never needed
+        // more than the dimension field).
+        let dims = self.inner.dimensions();
         let manifest = Memory::scaffold_manifest(dims);
         let id = self.inner.remember(manifest).map_err(to_py)?;
         Ok(id.to_string())
@@ -723,16 +734,22 @@ impl Mnemo {
         Ok(d.into_any().unbind())
     }
 
-    /// Flush any pending writes, then copy the encrypted file to
-    /// `dest`. The file is already encrypted, so the export is a plain
-    /// byte-for-byte copy. On a read-only handle there's nothing to
-    /// flush — the core's `close()` is a no-op in that mode — so the
-    /// copy still works without raising.
+    /// Flush any pending writes, then stream the (encrypted) file to
+    /// `dest` atomically: writes a sibling temp file in `dest`'s
+    /// parent directory, fsyncs it, renames onto `dest`, and fsyncs
+    /// the parent directory on Unix. Refuses when `dest` resolves to
+    /// the live database (would otherwise truncate the source).
+    ///
+    /// FIX-1 R-001.5 + R-002.2 part 3: delegates to the Rust core's
+    /// `Mnemo::export_encrypted`, which uses the already-open file
+    /// handle to copy bytes (so a Windows mandatory lock can't block
+    /// the export) and compares `(dev, ino)` on Unix /
+    /// canonicalized paths on Windows to catch symlinks + hard
+    /// links + rename-onto-self. Pre-FIX-1 this was `close() +
+    /// fs::copy()`, which left the handle unusable afterwards and
+    /// happily truncated the database when `dest == path`.
     fn export_encrypted(&mut self, dest: &str) -> PyResult<()> {
-        self.inner.close().map_err(to_py)?;
-        std::fs::copy(&self.path, dest)
-            .map_err(|e| PyRuntimeError::new_err(format!("export failed: {e}")))?;
-        Ok(())
+        self.inner.export_encrypted(dest).map_err(to_py)
     }
 
     /// Filesystem path of this database.

@@ -656,6 +656,33 @@ for line in sys.stdin:
     print(json.dumps([1.0, 2.0]), flush=True)
 "#;
 
+/// Fake embedder that returns an all-zero vector of the correct width —
+/// FIX-1 R-001.6: this must be rejected via `fail_and_restart` even
+/// though its length and JSON shape are both fine, because an all-zero
+/// vector cannot be scored by cosine or dot-product similarity.
+const ZERO_VECTOR_EMBED_PY: &str = r#"
+import sys, json
+for line in sys.stdin:
+    _ = json.loads(line)
+    print(json.dumps([0.0, 0.0, 0.0, 0.0]), flush=True)
+"#;
+
+/// Fake embedder that returns a vector containing a value that
+/// overflows `f32` — `1e40` is above `f32::MAX` (~3.4e38), so
+/// serde_json decodes it as `f32::INFINITY`. FIX-1 R-001.6: any
+/// non-finite value (±∞ or, through a non-standard JSON decoder,
+/// NaN) must fail-and-restart. We drive the check through +∞
+/// because standard JSON doesn't allow a bare `NaN` token —
+/// serde_json rejects that at parse time (and surfaces as
+/// "malformed JSON" on its own), so a Python `math.nan` would
+/// never reach the finiteness check we care about here.
+const NON_FINITE_VECTOR_EMBED_PY: &str = r#"
+import sys, json
+for line in sys.stdin:
+    _ = json.loads(line)
+    print(json.dumps([1.0, 1e40, 2.0, 3.0]), flush=True)
+"#;
+
 /// Fake embedder that touches a marker file on startup. Used to verify
 /// the child is spawned once across multiple MCP tool calls.
 /// Vector is text-dependent (PR 10b.2 convention).
@@ -1165,6 +1192,66 @@ fn embed_cmd_recovers_after_double_reply_with_correct_vector() {
             assert_eq!(recovery[0], fake_vector_for("abc"));
         }
     }
+}
+
+#[test]
+fn embed_cmd_rejects_all_zero_vector_and_respawns() {
+    // FIX-1 R-001.6: an all-zero reply of the correct width must trip
+    // `fail_and_restart`. Follow-up call for "abc" must spawn a fresh
+    // child and return abc's real vector, not a leftover from the
+    // offending reply.
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "zero.py", ZERO_VECTOR_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(5));
+    let err = em.embed(&["anything"]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("all-zero") && msg.contains("respawn"),
+        "zero vector must surface as the dedicated protocol error, got: {msg}"
+    );
+    // Follow-up spawns a fresh child (which will also return zeros,
+    // because the script is deterministic). The point is that we
+    // never got the zero vector *back* as a successful embed result.
+    let err2 = em.embed(&["abc"]).unwrap_err();
+    assert!(format!("{err2}").contains("all-zero"));
+}
+
+#[test]
+fn embed_cmd_rejects_non_finite_vector_and_respawns() {
+    // FIX-1 R-001.6: an ±∞ entry anywhere in the reply must trip
+    // `fail_and_restart` even though the width is correct — a non-
+    // finite similarity score poisons every ranked list it reaches.
+    // We drive the check through `+∞` (produced by serde_json's f32
+    // decoder on an overflowing JSON number like `1e40`) rather than
+    // NaN, which standard JSON doesn't allow as a bare token and
+    // serde_json rejects at parse time.
+    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    let dir = tempdir().unwrap();
+    let script = write_py_script(dir.path(), "non_finite.py", NON_FINITE_VECTOR_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+    let identity = EmbedderIdentity {
+        name: "fake-4d".into(),
+        dimensions: 4,
+        normalize: true,
+    };
+    let em = EmbedCmd::new(&ecmd, identity)
+        .unwrap()
+        .with_timeout(std::time::Duration::from_secs(5));
+    let err = em.embed(&["anything"]).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("non-finite") && msg.contains("respawn"),
+        "±∞ reply must surface as the dedicated protocol error, got: {msg}"
+    );
 }
 
 #[test]

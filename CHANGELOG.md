@@ -235,6 +235,93 @@ Full ANN-1 numbers (diagnose cells + 2×5×5 tuning grid at 10K and
 earlier Phase 6 `speed`, `ranking`, `ann_recall_grid`,
 `file_size_breakdown`, and `speed_hw_aes` blocks.
 
+### Fixed — PR FIX-1 (correctness sweep per REV-001 + REV-002)
+
+Reviewer-triaged under REV-001 (R-001.1, R-001.5, R-001.6, R-001.8
+parts 1–4) and REV-002 (R-002.2 parts 1–3). Six independent
+correctness gaps closed in one PR:
+
+**1. Compaction preserves the result cache (R-001.1 + R-002.2
+part 2).** Pre-FIX-1 `Mnemo::compact_file` copied only live memories
+and silently dropped the entire result cache — the Planner's interim
+`c417d2e` README caveat called that out. Now every live, non-expired
+directory entry is copied verbatim into the new file via a new
+`copy_cache_entry_from` helper. `accessed_at` and `access_count`
+come from the **directory** (the record body only holds the insert-
+time snapshot); `created_at`, `ttl_secs`, `cost_hint_ms`,
+`key_preview`, `size_bytes`, `content_type`, `value`, `vector` and
+`model` come from the body. Tombstoned and TTL-expired entries drop.
+`CompactReport` grows two fields (`cache_before`, `cache_after`).
+`Mnemo::verify()` now walks the cache too — pre-FIX-1 it checked only
+the memory catalog, so a corrupted cache record slipped by.
+
+**2. Read-only `cache_get` / `cache_get_semantic` return the
+directory's `accessed_at` (R-002.2 part 1).** Hits by write handles
+update only the directory (v5 "no full record rewrite on a hit"
+trick); the record body keeps its insert-time snapshot forever. A
+read-only handle used to surface that stale body snapshot, so a
+read-only reader saw "last accessed = when it was inserted" even
+after many hits by concurrent writers. The new code reads from
+`self.cache_dir[pos].accessed_at` in the read-only branch instead.
+
+**3. Safe `Mnemo::export_encrypted(dest)` (R-001.5 + R-002.2
+part 3).** Added a core method the Python binding now delegates to.
+Refuses when `dest` resolves to the open database (Unix: `(dev, ino)`
+via `MetadataExt`, catching symlinks and hard links; Windows:
+canonicalized paths) — `File::create` would otherwise `O_TRUNC` the
+live file to 0 bytes. Streams from the already-open file handle (so
+a Windows `LockFileEx` mandatory lock can't block the copy) into a
+sibling temp file, `sync_all`s it, renames onto `dest`, fsyncs the
+parent directory on Unix. Pre-FIX-1 the Python path was
+`close() + fs::copy()` — which left the handle unusable and happily
+truncated the database when `dest == path`.
+
+**4. `Mnemo::kdf_params()` + Python `rekey(fast=False)` preserves
+the file's KDF (R-001.5).** `kdf_params()` is a new O(1) accessor
+returning the file's current Argon2id params. The Python binding's
+`rekey(fast=False)` used to pass `KdfParams::default()` — so a file
+created with weaker or stronger parameters silently reset on every
+rekey, even though the docstring promised inheritance. Now it passes
+`self.inner.kdf_params()`.
+
+**5. `EmbedCmd` rejects all-zero and non-finite replies (R-001.6).**
+The module doc already promised "any protocol error (… zero vector …)
+kills the child" but the check was missing. A buggy embedder
+returning `[0, 0, 0, …]` (common on `sentence-transformers` cold
+starts) or `[NaN, …]` would silently poison recall:
+`Mnemo::remember` refuses all-zero itself, but `cache_get_semantic`
+and `recall --text` consumed the result. Both checks now route
+through `fail_and_restart` on the same path as a wrong-width reply.
+Two new `tests/cli_smoke.rs` cases drive them.
+
+**6. `stats()` / lazy agent set, dimensions over stats, no restore-
+point churn on cache flushes, Batched `max_age` on reads (R-001.8).**
+- `stats()` used to call `memories()?.into_iter().map(|m| m.agent_id).collect()`
+  — O(N) AES-GCM decrypts just to list a usually-tiny set of distinct
+  agent IDs. Now kept in a per-handle lazy `agent_set: Option<
+  BTreeSet<String>>` built once on first `stats()` call, maintained
+  in O(1) on `put`, invalidated on `delete`. (The format doesn't
+  carry `agent_id` on the catalog entry in v8; v9 will, and this
+  shim goes away.)
+- Python `insert_default_manifest` now uses `self.inner.dimensions()`
+  — a thin O(1) accessor — instead of `self.inner.stats().dimensions`
+  (which triggered the agent-set walk above).
+- `Mnemo::flush` no longer pushes a restore-point snapshot on a
+  cache-only flush. Snapshots don't capture cache state, and every
+  push counts against `max_snapshots` (default 256) + rewrites the
+  manifest run — so a cache-heavy workload previously evicted every
+  real memory restore point within ~256 cache writes.
+- `cache_get` / `cache_get_semantic` on read-write handles now
+  evaluate `BatchState::should_auto_flush` once at entry too, so
+  the `Batched` policy's `max_age` fires when a workload switches
+  from writes to pure reads (pre-FIX-1 it only fired on
+  `cache_put`).
+
+**Tests.** `mnemo/tests/fix1_correctness_sweep.rs` carries 10 new
+cases spanning all six items; `mnemo/tests/cli_smoke.rs` gains
+`embed_cmd_rejects_all_zero_vector_and_respawns` and
+`embed_cmd_rejects_non_finite_vector_and_respawns`.
+
 ### Fixed — PR DUR-1 (torn-header recovery after WAL relocation; obsolete pre-flush lease write dropped)
 
 Reviewer-triaged under REV-001 (R-001.2 "wal relocation leaves a
