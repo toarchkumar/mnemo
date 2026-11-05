@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.6.0</span>
+        <span class="pill"><span class="dot"></span>v0.6.1</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.6.0.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.6.1.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -705,7 +705,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
       <div class="card stat"><div class="v">~0.4<span> ms</span></div><div class="l">Similar-prompt cache hit</div><div class="d">Matching by meaning across a 500-entry cache.</div></div>
       <div class="card stat"><div class="v">~15<span> ms</span></div><div class="l">Open an encrypted file</div><div class="d">Almost all of it is Argon2id, on purpose: it makes guessing the passphrase expensive. Long-running apps pay it once.</div></div>
-      <div class="card stat"><div class="v">~22<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by full disk syncs. Commit 100 memories at once and each costs about 0.28 ms.</div></div>
+      <div class="card stat"><div class="v">~19<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by full disk syncs. Commit 100 memories at once and each costs about 0.25 ms.</div></div>
       <div class="card stat"><div class="v">~105<span> ms</span></div><div class="l">Check every memory, 10K-memory file</div><div class="d">Exact search with no index, every candidate decrypted. 1.05 s at 100K.</div></div>
       <div class="card stat"><div class="v">~9.4<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings (v0.6.0). ~1.4 ms at 10K, ~134 ms at 1M.</div></div>
     </div>
