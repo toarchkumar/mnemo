@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+(nothing yet; work resumes toward v0.7.0 = recall scoring v2 + Phase 12.1)
+
+## [0.6.0] — 2026-11-05
+
+**v0.6.0 ships five PRs in one minor bump** — the first is a user-
+visible behavior change (ANN defaults), which is why it's a minor
+and not a patch. Nothing else changes the API surface. Everything
+below under `[0.6.0]` was previously under `[Unreleased]` and is
+unchanged in content.
+
 ### Changed — PR ANN-1.1 (approximate index: query-time auto defaults, size-aware n_rerank)
 
 Follow-up to PR ANN-1 (same `[Unreleased]` block). Two gaps the ANN-1

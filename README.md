@@ -154,9 +154,9 @@ session draws a fresh random nonce prefix, so this can't happen.
 If you may have written to two copies of the same file with an earlier
 version, upgrade, then run `mnemo compact` (or `compact_file` in Rust or
 Python) on the copy you keep. Compaction rewrites the file under a fresh
-data key. Note: in current releases compaction keeps all memories but
-**empties the result cache**. Cached entries are simply recomputed on their
-next use, and a fix is coming. Details are in the [changelog](CHANGELOG.md).
+data key. Starting in v0.6.0 compaction also preserves the result cache
+(FIX-1); on v0.5.x the result cache was emptied by compaction and had to
+be recomputed on next use. Details are in the [changelog](CHANGELOG.md).
 
 ## Repository layout
 
