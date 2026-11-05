@@ -16,5 +16,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = mnemo::__fuzz::decode_cache_directory(data);
+    let _ = mnemo_engine::__fuzz::decode_cache_directory(data);
 });

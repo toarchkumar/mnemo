@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo run --example session`
 
-use mnemo::{Mnemo, MnemoConfig, RecallRequest, Result, Turn};
+use mnemo_engine::{Mnemo, MnemoConfig, RecallRequest, Result, Turn};
 
 fn main() -> Result<()> {
     let path = std::env::temp_dir().join("mnemo-session.mnemo");
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     let episodic = db
         .memories()?
         .into_iter()
-        .filter(|m| matches!(m.memory_type, mnemo::MemoryType::Episodic))
+        .filter(|m| matches!(m.memory_type, mnemo_engine::MemoryType::Episodic))
         .count();
     println!("\n{episodic} episodic memories persisted from the conversation");
 

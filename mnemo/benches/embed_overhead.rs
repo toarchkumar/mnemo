@@ -27,7 +27,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use mnemo::{Embedder, EmbedderIdentity, Memory, MemoryType, Mnemo, Result};
+use mnemo_engine::{Embedder, EmbedderIdentity, Memory, MemoryType, Mnemo, Result};
 use tempfile::TempDir;
 
 #[path = "corpus.rs"]

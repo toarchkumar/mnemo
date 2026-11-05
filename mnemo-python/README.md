@@ -10,10 +10,16 @@ sibling `mnemo/` crate — the storage engine, AES-256-GCM encryption, the
 write-ahead log, the IVF+PQ index, snapshots, and the agent-memory model all
 run as compiled Rust; Python only sees a small, ergonomic surface.
 
-> Distribution name on PyPI: `mnemo-engine` (both `mnemo` and `mnemo-db`
-> were already taken by unrelated projects). The import name stays
-> `mnemo`, so `pip install mnemo-engine` then `import mnemo` is the
-> full setup.
+> Distribution name on PyPI: `mnemo-engine` (both `mnemo` and
+> `mnemo-db` were already taken by unrelated projects). The import
+> name is **`mnemo_engine`** starting in v0.7.0, so the full setup is
+> `pip install mnemo-engine` then `import mnemo_engine`. The
+> pre-v0.7.0 `import mnemo` keeps working for the v0.7.x series via a
+> pure-Python shim that emits one `DeprecationWarning` on import; the
+> shim is removed in v0.8.0. Code that wants to keep its call sites
+> unchanged can `import mnemo_engine as mnemo` — same objects, no
+> warning. See the "Breaking: import name" section in the CHANGELOG
+> for the full migration.
 
 ## For AI agents
 
@@ -21,7 +27,7 @@ An agent that's been handed a `.mnemo` file and its passphrase can become
 productive in two calls — no external documentation required:
 
 ```python
-import mnemo, os
+import mnemo_engine as mnemo, os
 
 db = mnemo.open("agent.mnemo", os.environ["MNEMO_PASSPHRASE"])
 
@@ -81,7 +87,7 @@ single wheel works on CPython 3.8 and newer.
 ## Usage
 
 ```python
-import mnemo
+import mnemo_engine as mnemo
 
 # Open an existing database, or create one (dimensions required to create).
 db = mnemo.open("agent.mnemo", "passphrase", dimensions=4)
@@ -207,7 +213,7 @@ switches to semantic mode; otherwise it's an exact-key cache.
 """@db.cached — pure-Python helper on top of mnemo.Mnemo's cache API.
 
 Usage:
-    import mnemo, json, os
+    import mnemo_engine as mnemo, json, os
     from mnemo_cached import cached
 
     db = mnemo.open("agent.mnemo", os.environ["MNEMO_PASSPHRASE"])
@@ -388,7 +394,7 @@ pass vectors by hand. Register once at open time; every subsequent
 the handle uses it.
 
 ```python
-import mnemo
+import mnemo_engine as mnemo
 from sentence_transformers import SentenceTransformer
 
 model = SentenceTransformer("all-MiniLM-L6-v2")  # 384-dim, normalized

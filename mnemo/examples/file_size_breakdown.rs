@@ -34,7 +34,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use mnemo::Mnemo;
+use mnemo_engine::Mnemo;
 use serde_json::{json, Value};
 
 const PASSPHRASE: &str = "bench-pw";

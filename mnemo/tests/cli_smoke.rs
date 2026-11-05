@@ -10,7 +10,7 @@
 
 use std::process::Command;
 
-use mnemo::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
+use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 use tempfile::tempdir;
 
 /// Path to the `mnemo` binary built by Cargo for these tests.
@@ -1110,7 +1110,7 @@ fn cli_remember_text_hang_times_out_bounded() {
 
 #[test]
 fn embed_cmd_recovers_after_junk_reply_with_correct_vector() {
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     // Call "JUNK" → fake prints an invalid-JSON line → EmbedCmd errors
     // and kills the child. Next call for "abc" must respawn and return
     // abc's text-dependent vector, not a leftover.
@@ -1139,7 +1139,7 @@ fn embed_cmd_recovers_after_junk_reply_with_correct_vector() {
 
 #[test]
 fn embed_cmd_recovers_after_double_reply_with_correct_vector() {
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     // "DOUBLE" prints TWO lines for one input. The first is read as
     // the DOUBLE reply (fine); the second is a stale leftover. The
     // guard in `embed()` must detect it before writing the next
@@ -1200,7 +1200,7 @@ fn embed_cmd_rejects_all_zero_vector_and_respawns() {
     // `fail_and_restart`. Follow-up call for "abc" must spawn a fresh
     // child and return abc's real vector, not a leftover from the
     // offending reply.
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     let dir = tempdir().unwrap();
     let script = write_py_script(dir.path(), "zero.py", ZERO_VECTOR_EMBED_PY);
     let ecmd = embed_cmd_arg(&script);
@@ -1234,7 +1234,7 @@ fn embed_cmd_rejects_non_finite_vector_and_respawns() {
     // decoder on an overflowing JSON number like `1e40`) rather than
     // NaN, which standard JSON doesn't allow as a bare token and
     // serde_json rejects at parse time.
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     let dir = tempdir().unwrap();
     let script = write_py_script(dir.path(), "non_finite.py", NON_FINITE_VECTOR_EMBED_PY);
     let ecmd = embed_cmd_arg(&script);
@@ -1256,7 +1256,7 @@ fn embed_cmd_rejects_non_finite_vector_and_respawns() {
 
 #[test]
 fn embed_cmd_detects_stdout_banner_before_requests() {
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     let dir = tempdir().unwrap();
     let script = write_py_script(dir.path(), "banner.py", BANNER_EMBED_PY);
     let ecmd = embed_cmd_arg(&script);
@@ -1292,7 +1292,7 @@ fn embed_cmd_detects_stdout_banner_before_requests() {
 
 #[test]
 fn embed_cmd_two_thousand_text_batch_does_not_deadlock() {
-    use mnemo::{EmbedCmd, Embedder, EmbedderIdentity};
+    use mnemo_engine::{EmbedCmd, Embedder, EmbedderIdentity};
     // Pre-10b.2 (write-all-then-read-all) this would deadlock on a
     // batch big enough to fill the child's stdout pipe buffer. The
     // reader thread drains stdout in parallel with our stdin writes,

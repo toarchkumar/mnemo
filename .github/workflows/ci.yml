@@ -56,7 +56,7 @@ jobs:
           workspaces: mnemo
 
       # `--features failpoints` enables the Phase 1.3 crash-injection
-      # hook the proptest state machine arms via `mnemo::__failpoints`.
+      # hook the proptest state machine arms via `mnemo_engine::__failpoints`.
       # The hook is a zero-cost stub when the feature is off, but the
       # integration-test crate can't see the library's own `cfg(test)`,
       # so the feature is the only way to expose the arm helper across

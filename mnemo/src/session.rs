@@ -12,7 +12,7 @@
 //! open, the database is reached only through it.
 //!
 //! ```no_run
-//! # use mnemo::{Mnemo, MnemoConfig, Role, Turn, Result};
+//! # use mnemo_engine::{Mnemo, MnemoConfig, Role, Turn, Result};
 //! # fn main() -> Result<()> {
 //! let mut db = Mnemo::open("agent.mnemo", "passphrase")?;
 //! let mut session = db.session("assistant-1");

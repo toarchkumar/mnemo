@@ -4368,6 +4368,11 @@
       "os": "Darwin 25.6.0",
       "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
     },
+    "remeasured": [
+      "write/remember_1_then_flush",
+      "write/remember_batch_100_then_flush"
+    ],
+    "remeasured_note": "Only the benches listed in \"remeasured\" were actually re-run for v0.6.1 (DUR-1 step 5 write benches on Apple M1 Pro, hardware AES, release build). The other bench cells are copied verbatim from the v0.5.1 speed_hw_aes block \u2014 no code path touching them changed between v0.5.1 and v0.6.1. NAME-1 (2026-11-05): planner noted the ambiguity and asked for this field so the copied cells aren't mistaken for fresh measurements.",
     "benches": {
       "cache/cache_get_exact_hit": {
         "median_secs": 1.0362042110959778e-06,

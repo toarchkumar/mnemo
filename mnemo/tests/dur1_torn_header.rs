@@ -39,7 +39,7 @@
 
 #![cfg(any(test, feature = "failpoints"))]
 
-use mnemo::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
+use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 use tempfile::tempdir;
 
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
@@ -151,7 +151,7 @@ fn header_seal_fields_stale_report_tampering() {
     // storage writes atomically — a real torn write breaks magic,
     // version or CRC, not just the seal, so this state can only be
     // post-write tampering.
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -183,7 +183,7 @@ fn header_sealed_field_altered_with_recomputed_crc_reports_tampering() {
     // the CRC algorithm would try — the seal (keyed MAC) is what
     // actually keeps the file honest, and Option B says never auto-
     // heal around it.
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -286,7 +286,7 @@ fn relocated_txn_larger_than_64_pages_heals_torn_page_0() {
 // assert the invariant for every one.
 
 fn disarm() {
-    mnemo::__failpoints::set_writes_until_fail(-1);
+    mnemo_engine::__failpoints::set_writes_until_fail(-1);
 }
 
 /// Build a database just under the current WAL capacity, so the very
@@ -331,7 +331,7 @@ fn relocation_crash_recovers_to_pre_or_post_state() {
         }
         let post = pre + 20_000;
 
-        mnemo::__failpoints::set_writes_until_fail(fail_at);
+        mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
         let flush_result = db.flush();
         disarm();
         drop(db);
@@ -359,7 +359,7 @@ fn rekey_crash_recovers_to_old_or_new_passphrase() {
         }
         db.flush().unwrap();
 
-        mnemo::__failpoints::set_writes_until_fail(fail_at);
+        mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
         let _ = db.rekey("new-pw", KdfParams::fast());
         disarm();
         drop(db);
@@ -384,7 +384,7 @@ fn rekey_crash_on_never_flushed_file_keeps_dek() {
         let path = dir.path().join("t.mnemo");
         let mut db = Mnemo::create(&path, "old-pw", fast_cfg(4)).unwrap();
 
-        mnemo::__failpoints::set_writes_until_fail(fail_at);
+        mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
         let _ = db.rekey("new-pw", KdfParams::fast());
         disarm();
         drop(db);

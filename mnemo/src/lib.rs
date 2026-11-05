@@ -12,9 +12,9 @@
 //! ## Quick start
 //!
 //! ```no_run
-//! use mnemo::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
+//! use mnemo_engine::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
 //!
-//! # fn main() -> mnemo::Result<()> {
+//! # fn main() -> mnemo_engine::Result<()> {
 //! let cfg = MnemoConfig { dimensions: 3, ..Default::default() };
 //! let mut db = Mnemo::create("agent.mnemo", "correct horse battery", cfg)?;
 //!

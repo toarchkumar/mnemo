@@ -19,5 +19,5 @@ fuzz_target!(|data: &[u8]| {
     // `Header::from_page` returns `Err(BadMagic)` for buffers shorter
     // than PAGE_SIZE, so short inputs are also valid test cases — no
     // pre-length filter here.
-    let _ = mnemo::__fuzz::parse_header(data);
+    let _ = mnemo_engine::__fuzz::parse_header(data);
 });

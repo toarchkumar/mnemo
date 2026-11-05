@@ -2,9 +2,13 @@
 # Distribution name on crates.io is `mnemo-engine`. The bare `mnemo` name
 # is held by an unrelated crate, and `mnemo-db` is held by a different
 # (MCP-native, DuckDB-backed) agent-memory project — see the v0.3.2 entry
-# in CHANGELOG.md for the full rationale. The library and CLI binary names
-# below stay `mnemo`, so consumers still write `use mnemo::...` and invoke
-# `mnemo` on the command line after `cargo add mnemo-engine`.
+# in CHANGELOG.md for the full rationale. The library name becomes
+# `mnemo_engine` (Cargo's default from the package name) starting in
+# v0.7.0 per PR NAME-1; consumers write `use mnemo_engine::...`, or
+# keep `use mnemo::...` via a dependency rename:
+#     mnemo = { package = "mnemo-engine", version = "0.7" }
+# The CLI binary name stays `mnemo`, so users still invoke `mnemo` on
+# the command line after `cargo install mnemo-engine`.
 name = "mnemo-engine"
 version = "0.6.1"
 edition = "2021"
@@ -38,10 +42,20 @@ categories = ["database", "cryptography", "command-line-utilities"]
 members = ["bindings/node"]
 default-members = ["."]
 
+# NAME-1 (2026-11-05 Planner DECISION): the library/import name is now
+# `mnemo_engine` — Cargo's default from the `mnemo-engine` package name
+# (dashes become underscores). The pre-NAME-1 `[lib] name = "mnemo"`
+# override is gone because it collided with crates.io's standalone
+# `mnemo` crate (a terminal knowledge vault) and with PyPI's
+# `mnemo-db` / `mnemo` top-level `mnemo/` modules. The distribution
+# name (`mnemo-engine` on both PyPI and crates.io) is unchanged.
+# Downstream crates write `use mnemo_engine::X`, or keep `use mnemo::X`
+# via a Cargo dep rename: `mnemo = { package = "mnemo-engine" }`.
 [lib]
-name = "mnemo"
 path = "src/lib.rs"
 
+# The CLI binary name stays `mnemo` — the executable users type at the
+# shell is unchanged.
 [[bin]]
 name = "mnemo"
 path = "src/bin/mnemo.rs"
@@ -129,7 +143,7 @@ required-features = ["benches"]
 
 [features]
 # When enabled, exposes crash-injection hooks used by the Phase 1.3
-# proptest under `mnemo::__failpoints::*`. Always enabled during
+# proptest under `mnemo_engine::__failpoints::*`. Always enabled during
 # `cargo test` via `#[cfg(test)]`; the feature is here so an external
 # fault-injection consumer (or a future integration test in a sibling
 # crate) can opt into the same hooks without touching this crate's

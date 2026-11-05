@@ -30,7 +30,7 @@
 //! cheap; reopens follow the strict close → drop → `Mnemo::open`
 //! sequence so `fs4`'s exclusive lock is released cleanly on Windows.
 
-use mnemo::{
+use mnemo_engine::{
     CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, Ulid,
 };
 use proptest::prelude::*;
@@ -508,12 +508,12 @@ proptest! {
         // Arm the failpoint. Flush likely errors (torn write); if
         // `fail_at` happens to exceed the write count, flush succeeds
         // and we observe the post state — also acceptable.
-        mnemo::__failpoints::set_writes_until_fail(fail_at);
+        mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
         let _ = db.flush();
         // Disarm defensively — flush may have consumed the counter,
         // but we don't want a subsequent drop/reopen path (which
         // performs its own no-op writes) to trip a stray failpoint.
-        mnemo::__failpoints::set_writes_until_fail(-1);
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
 
         let mut db = reopen(db, &path);
         let observed = observed_set(&mut db);
@@ -574,17 +574,17 @@ proptest! {
                     db.remember(m).unwrap();
                     set.insert(f);
                 }
-                mnemo::__failpoints::set_writes_until_fail(fail_at);
+                mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
                 let _ = db.flush();
-                mnemo::__failpoints::set_writes_until_fail(-1);
+                mnemo_engine::__failpoints::set_writes_until_fail(-1);
                 (set, None)
             }
             _ => {
                 // Rekey path: the live set stays pre_set either way.
                 // We only care that at least one passphrase opens.
-                mnemo::__failpoints::set_writes_until_fail(fail_at);
+                mnemo_engine::__failpoints::set_writes_until_fail(fail_at);
                 let _ = db.rekey("new-pw", KdfParams::fast());
-                mnemo::__failpoints::set_writes_until_fail(-1);
+                mnemo_engine::__failpoints::set_writes_until_fail(-1);
                 (pre_set.clone(), Some("new-pw"))
             }
         };

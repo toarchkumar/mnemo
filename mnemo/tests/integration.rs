@@ -4,7 +4,7 @@
 //! cheap so the suite runs quickly; production code should use the default
 //! (secure) parameters.
 
-use mnemo::{
+use mnemo_engine::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Metric, Mnemo,
     MnemoConfig, RecallRequest, ScoreWeights, SemanticCachePutOpts, Turn,
     DEFAULT_SEMANTIC_THRESHOLD,
@@ -87,7 +87,7 @@ fn create_insert_search_reopen_recall() {
 /// tested here; the keyed seal is what makes the rollback attack loud.
 #[test]
 fn header_tamper_is_detected_by_v7_seal() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("tamper.mnemo");
 
@@ -130,7 +130,7 @@ fn header_tamper_is_detected_by_v7_seal() {
 /// subsequent read on either swapped page errors with PageAuthFailed.
 #[test]
 fn page_swap_attack_is_detected_by_aad() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("swap.mnemo");
 
@@ -529,7 +529,7 @@ fn agent_scoping_filters_recall() {
             vec4(1.0, 0.0, 0.0, 0.0),
         )
         .with_agent("bob")
-        .with_scope(mnemo::Scope::Shared),
+        .with_scope(mnemo_engine::Scope::Shared),
     )
     .unwrap();
     db.flush().unwrap();
@@ -1261,7 +1261,7 @@ fn snapshots_record_every_flush() {
 /// cap to 0 disables it entirely.
 #[test]
 fn max_snapshots_prunes_oldest_entries() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("cap.mnemo");
 
@@ -1586,7 +1586,7 @@ fn session_recall_is_agent_scoped() {
 
 #[test]
 fn two_writers_on_same_file_collide_with_locked() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
 
@@ -1610,7 +1610,7 @@ fn writer_blocks_read_only_open_on_all_platforms() {
     // holding the exclusive lock, regardless of platform. This test
     // pins that invariant so callers know to reach for `open_read_only`
     // only after the writer has been closed.
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
 
@@ -1679,7 +1679,7 @@ fn multiple_read_only_handles_coexist() {
 
 #[test]
 fn read_only_handle_refuses_mutations() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
 
@@ -1732,7 +1732,7 @@ fn read_only_handle_refuses_mutations() {
 
 #[test]
 fn read_only_open_refused_when_wal_needs_recovery() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
 
@@ -2072,7 +2072,7 @@ fn cache_read_only_handle_can_read_but_not_write() {
     let hit = r.cache_get("llm", "k").unwrap().expect("read still works");
     assert_eq!(hit.value, b"v");
     // Mutations refused.
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     match r.cache_put("llm", "new", b"x", cache_opts("text", None)) {
         Err(MnemoError::ReadOnly) => {}
         other => panic!("expected ReadOnly on cache_put, got {other:?}"),
@@ -2214,7 +2214,7 @@ fn semantic_model_mismatch_is_a_miss() {
 
 #[test]
 fn semantic_dimension_mismatch_is_rejected() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("dim.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2317,7 +2317,7 @@ fn v7_file_migrates_to_v8_with_empty_cache() {
 
 // === Phase 3 PR 10a: Embedder API core ==================================
 
-use mnemo::{Embedder, EmbedderIdentity};
+use mnemo_engine::{Embedder, EmbedderIdentity};
 
 /// Deterministic 4-D fake embedder: hashes each input to pick a
 /// single axis, emits a unit spike there. Used by the Phase 3 tests
@@ -2340,7 +2340,7 @@ impl Embedder for FakeEmbedder {
     fn identity(&self) -> EmbedderIdentity {
         self.identity.clone()
     }
-    fn embed(&self, texts: &[&str]) -> mnemo::Result<Vec<Vec<f32>>> {
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
         let dims = self.identity.dimensions;
         let mut out = Vec::with_capacity(texts.len());
         for t in texts {
@@ -2363,7 +2363,7 @@ impl Embedder for ZeroEmbedder {
     fn identity(&self) -> EmbedderIdentity {
         self.identity.clone()
     }
-    fn embed(&self, texts: &[&str]) -> mnemo::Result<Vec<Vec<f32>>> {
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
         Ok(texts
             .iter()
             .map(|_| vec![0.0f32; self.identity.dimensions])
@@ -2373,7 +2373,7 @@ impl Embedder for ZeroEmbedder {
 
 #[test]
 fn set_embedder_dim_mismatch_is_rejected() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("em.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2389,7 +2389,7 @@ fn set_embedder_dim_mismatch_is_rejected() {
 
 #[test]
 fn set_embedder_identity_mismatch_rejected_after_persist() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("em.mnemo");
     // First handle: register MiniLM — manifest absorbs its identity.
@@ -2417,7 +2417,7 @@ fn set_embedder_identity_mismatch_rejected_after_persist() {
 
 #[test]
 fn zero_vector_remember_rejected() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("z.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2448,7 +2448,7 @@ fn remember_text_from_text_round_trip() {
     // Query for "alpha" via from_text; the fake embedder is
     // deterministic so recall should surface the "alpha" memory first.
     let fake = FakeEmbedder::new("fake-4d", 4, true);
-    let req = mnemo::RecallRequest::from_text(&fake, "alpha")
+    let req = mnemo_engine::RecallRequest::from_text(&fake, "alpha")
         .unwrap()
         .top_k(2);
     let hits = db.recall(&req).unwrap();
@@ -2458,7 +2458,7 @@ fn remember_text_from_text_round_trip() {
 
 #[test]
 fn remember_text_without_embedder_fails_clearly() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("ne.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2470,7 +2470,7 @@ fn remember_text_without_embedder_fails_clearly() {
 
 #[test]
 fn zero_vector_embedder_remember_text_rejected() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("z2.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2547,7 +2547,7 @@ fn set_embedder_reads_nested_manifest_canonically() {
 
 #[test]
 fn set_embedder_nested_manifest_mismatch_rejected() {
-    use mnemo::MnemoError;
+    use mnemo_engine::MnemoError;
     let dir = tempdir().unwrap();
     let path = dir.path().join("nested-mismatch.mnemo");
     let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
@@ -2616,7 +2616,7 @@ fn set_embedder_on_read_only_handle_adopts_without_write() {
     // dirty the catalog); unrelated to Bug 2, that's the Phase 1.1
     // read-only contract.
     let fake = FakeEmbedder::new("fake-4d", 4, true);
-    let req = mnemo::RecallRequest::from_text(&fake, "alpha")
+    let req = mnemo_engine::RecallRequest::from_text(&fake, "alpha")
         .unwrap()
         .track_access(false);
     let hits = r.recall(&req).unwrap();

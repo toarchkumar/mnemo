@@ -16,12 +16,12 @@
 //!
 //! [napi-rs]: https://napi.rs
 
-use mnemo::{Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, Ulid};
+use mnemo_engine::{Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, Ulid};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 /// Translate a Mnemo error into a JavaScript error.
-fn to_napi(e: mnemo::MnemoError) -> Error {
+fn to_napi(e: mnemo_engine::MnemoError) -> Error {
     Error::from_reason(e.to_string())
 }
 

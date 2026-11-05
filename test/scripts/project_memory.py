@@ -50,7 +50,7 @@ def passphrase() -> str:
 
 def require_mnemo():
     try:
-        import mnemo  # noqa: PLC0415
+        import mnemo_engine as mnemo  # noqa: PLC0415
     except ImportError:
         sys.exit(
             "mnemo Python package not installed. Run:\n"

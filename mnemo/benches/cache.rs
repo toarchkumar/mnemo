@@ -30,7 +30,7 @@ use std::hint::black_box;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use mnemo::{CacheFlushPolicy, CachePutOpts, Mnemo, SemanticCachePutOpts};
+use mnemo_engine::{CacheFlushPolicy, CachePutOpts, Mnemo, SemanticCachePutOpts};
 use tempfile::TempDir;
 
 #[path = "corpus.rs"]

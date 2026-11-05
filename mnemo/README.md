@@ -145,7 +145,7 @@ memoizing LLM tool-call outputs, prompt→completion pairs, expensive HTTP
 responses — anything reconstructible on cache miss:
 
 ```rust
-use mnemo::{Mnemo, CachePutOpts};
+use mnemo_engine::{Mnemo, CachePutOpts};
 
 let mut db = Mnemo::open("agent.mnemo", "correct horse battery")?;
 
@@ -206,7 +206,7 @@ miss. Semantic caching bridges the gap by keying on an embedding
 vector and returning the closest hit above a similarity threshold:
 
 ```rust
-use mnemo::{Mnemo, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD};
+use mnemo_engine::{Mnemo, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD};
 
 let mut db = Mnemo::open("agent.mnemo", "pw")?;
 
@@ -265,8 +265,16 @@ the memory of an agent is as portable and as private as a SQLite database.
 This repository implements a real, compiling, tested **core**. See
 [Scope](#scope-what-is-and-isnt-here) for what is deliberately left as roadmap.
 
-> The product is **Memory Nemo (MNemo)**. The crate, binary, Python package,
-> and `.mnemo` file extension all use the lowercase identifier `mnemo`.
+> The product is **Memory Nemo (MNemo)**. The crate and Python package are
+> distributed as `mnemo-engine` (both `mnemo` and `mnemo-db` were already
+> taken by unrelated projects — see the "Breaking: import name" section in
+> CHANGELOG.md for the full rationale). **Starting in v0.7.0, the Rust
+> library name and Python import name are `mnemo_engine`:**
+> `use mnemo_engine::...` and `import mnemo_engine`. The pre-v0.7.0
+> `use mnemo::...` / `import mnemo` keeps working through the v0.7.x
+> series via a Cargo dep rename (`mnemo = { package = "mnemo-engine" }`)
+> and a pure-Python shim; both aliases are removed in v0.8.0. The CLI
+> command (`mnemo`) and the `.mnemo` file extension are unchanged.
 
 ---
 
@@ -601,7 +609,7 @@ existing files open on v0.5.2 unchanged.
 ## Quick start (library)
 
 ```rust
-use mnemo::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
+use mnemo_engine::{Mnemo, MnemoConfig, Memory, MemoryType, RecallRequest};
 
 fn main() -> mnemo::Result<()> {
     let cfg = MnemoConfig { dimensions: 3, ..Default::default() };

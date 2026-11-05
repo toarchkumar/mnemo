@@ -8,7 +8,113 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-(nothing yet; work resumes toward v0.7.0 = PR NAME-1 + recall scoring v2.)
+### Breaking — PR NAME-1: import name becomes `mnemo_engine`
+
+**Why.** The distribution name on PyPI and crates.io has always been
+`mnemo-engine` — the plain `mnemo` name was already taken by
+unrelated projects when we first published. The *library/import*
+name, though, was `mnemo` in both languages (`use mnemo::...`,
+`import mnemo`). That collides with:
+
+- PyPI `mnemo-db` 0.5.30 ("MCP-native memory database for AI
+  agents"), an active project targeting the same audience, which
+  installs a top-level `mnemo` module. Installing `mnemo-engine`
+  alongside writes the same `site-packages/mnemo/` — and **pip
+  doesn't warn**, so one silently clobbers the other.
+- PyPI `mnemo` 0.0.2, which also installs a `mnemo` module.
+- crates.io `mnemo` 1.0.0 (a terminal knowledge vault) with lib
+  name `mnemo`. Cargo reports this collision loudly, but it's
+  avoidable.
+
+NAME-1 moves the import name to `mnemo_engine` and ships a
+transitional alias for the whole 0.7.x series so existing code
+keeps working during the migration. The alias is removed in
+v0.8.0. The CLI command (`mnemo`), the `.mnemo` file extension, the
+MCP server key, manifest metadata, and the on-disk format are all
+unchanged.
+
+#### Python migration
+
+Both of these work in v0.7.x; pick the one that fits your codebase:
+
+```python
+# Direct new name — the recommended end state.
+import mnemo_engine
+db = mnemo_engine.open("agent.mnemo", pp, dimensions=4)
+
+# Drop-in that keeps call sites unchanged and raises no warning.
+import mnemo_engine as mnemo
+db = mnemo.open("agent.mnemo", pp, dimensions=4)
+```
+
+The pre-v0.7.0 `import mnemo` keeps working through v0.7.x via a
+pure-Python shim under `mnemo-python/python/mnemo/__init__.py`. It
+re-exports every public name from `mnemo_engine` (classes `Mnemo`,
+`Session`, `Turn`; functions `open`, `compact_file`, `build_info`;
+`__version__`) and emits exactly one `DeprecationWarning` on
+import. Follow the warning to migrate; the shim disappears in
+v0.8.0.
+
+#### Rust migration
+
+```toml
+# Direct new name — the recommended end state.
+[dependencies]
+mnemo-engine = "0.7"
+```
+
+```rust
+use mnemo_engine::{Mnemo, Memory, MemoryType, RecallRequest};
+```
+
+Code that wants to keep `use mnemo::...` unchanged can rename the
+dependency locally:
+
+```toml
+[dependencies]
+mnemo = { package = "mnemo-engine", version = "0.7" }
+```
+
+#### What actually changed on disk
+
+- `mnemo/Cargo.toml`: dropped the `[lib] name = "mnemo"` override.
+  The lib now gets Cargo's default from the package name
+  (`mnemo-engine` → `mnemo_engine`). `[[bin]] name = "mnemo"` is
+  unchanged — the executable users type is still `mnemo`.
+- `mnemo-python/Cargo.toml`: `[lib] name = "mnemo"` → `"mnemo_engine"`.
+- `mnemo-python/src/lib.rs`: `#[pymodule] fn mnemo` → `fn mnemo_engine`.
+- `mnemo-python/pyproject.toml`: switched to maturin's mixed
+  Python/Rust layout (`python-source = "python"`, `module-name =
+  "mnemo_engine"`). `python/mnemo_engine/__init__.py` re-exports
+  the compiled extension; `python/mnemo/__init__.py` is the
+  deprecation shim.
+- `mnemo/fuzz/Cargo.toml`: dep rename `mnemo` → `mnemo_engine`
+  (local alias, not a crates.io change). Fuzz targets now write
+  `mnemo_engine::__fuzz::...`.
+- `mnemo/bindings/node/Cargo.toml`: same dep rename.
+- Every `use mnemo::` in `mnemo/src/bin`, `mnemo/examples`,
+  `mnemo/tests`, `mnemo/benches` → `use mnemo_engine::`.
+- `test/scripts/project_memory.py` and
+  `test/scripts/ranking_harness.py` moved to
+  `import mnemo_engine as mnemo` so their call sites stay the
+  same and no deprecation fires.
+- `AGENTS.md` + both `README.md` code blocks updated.
+
+#### Removed in v0.8.0
+
+The Python `mnemo` alias package and the "keep `use mnemo::` via a
+Cargo dep rename" guidance both expire at v0.8.0. Ship `import
+mnemo_engine` / `use mnemo_engine::...` (or the `as mnemo` /
+`package = "mnemo-engine"` dep-rename forms) before then.
+
+### Fixed — `perf_v0.5.0.json` `speed_v0_6_0` provenance note
+
+Added a `remeasured` field + `remeasured_note` to the
+`speed_v0_6_0` block in `test/scripts/perf_v0.5.0.json` listing the
+two write benches that were actually re-run for v0.6.1 (the other
+cells were copied verbatim from the v0.5.1 `speed_hw_aes` block
+because no code touched them between v0.5.1 and v0.6.1, but the
+copy was silent — easy to misread as fresh measurement).
 
 ## [0.6.1] — 2026-11-05
 

@@ -17,7 +17,9 @@
 //! * **R-001.8 part 3** — a cache-only flush does **not** push a
 //!   restore-point snapshot; a memory flush does.
 
-use mnemo::{CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
+use mnemo_engine::{
+    CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig,
+};
 use tempfile::tempdir;
 
 fn fast_cfg(dimensions: usize) -> MnemoConfig {

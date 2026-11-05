@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 
-use mnemo::{Memory, MemoryType, Mnemo, MnemoConfig};
+use mnemo_engine::{Memory, MemoryType, Mnemo, MnemoConfig};
 use tempfile::TempDir;
 
 const PAGE_SIZE: usize = 8192;
@@ -42,7 +42,7 @@ const NONCE_LEN: usize = 12;
 fn fast_cfg(dims: usize) -> MnemoConfig {
     MnemoConfig {
         dimensions: dims,
-        kdf: mnemo::KdfParams::fast(),
+        kdf: mnemo_engine::KdfParams::fast(),
         ..Default::default()
     }
 }

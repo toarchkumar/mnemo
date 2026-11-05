@@ -21,7 +21,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mnemo::{IndexConfig, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
+use mnemo_engine::{IndexConfig, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 
 /// Passphrase used by every bench-created file. Not a secret; the files
 /// are throwaway and live in `target/`.

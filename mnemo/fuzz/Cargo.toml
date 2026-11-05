@@ -21,7 +21,7 @@ cargo-fuzz = true
 # and outside the MSRV 1.75 floor; the pin is still hygiene so the fuzz
 # CI job doesn't drift under us.
 libfuzzer-sys = "=0.4.7"
-mnemo = { path = "..", package = "mnemo-engine" }
+mnemo_engine = { path = "..", package = "mnemo-engine" }
 
 # Standalone; do NOT get absorbed into the repo-root workspace. This
 # empty `[workspace]` marks `mnemo/fuzz/` as its own workspace root.

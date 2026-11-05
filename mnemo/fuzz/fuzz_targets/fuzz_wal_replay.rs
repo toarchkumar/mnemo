@@ -23,5 +23,5 @@ fuzz_target!(|data: &[u8]| {
     }
     let wal_seq = u64::from_le_bytes(data[..8].try_into().unwrap());
     let region = &data[8..];
-    let _ = mnemo::__fuzz::wal_recover_bytes(region, wal_seq);
+    let _ = mnemo_engine::__fuzz::wal_recover_bytes(region, wal_seq);
 });

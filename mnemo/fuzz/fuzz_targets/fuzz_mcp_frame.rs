@@ -19,6 +19,6 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     for line in text.lines() {
-        let _ = mnemo::__fuzz::parse_mcp_request_line(line);
+        let _ = mnemo_engine::__fuzz::parse_mcp_request_line(line);
     }
 });

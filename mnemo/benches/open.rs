@@ -25,7 +25,7 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use mnemo::{Memory, MemoryType, Mnemo};
+use mnemo_engine::{Memory, MemoryType, Mnemo};
 
 #[path = "corpus.rs"]
 mod corpus;

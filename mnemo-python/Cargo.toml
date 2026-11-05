@@ -19,9 +19,14 @@ categories = ["database", "cryptography"]
 # artifact, not a crates.io upload.
 publish = false
 
-# The compiled extension module is imported from Python as `mnemo`.
+# NAME-1 (v0.7.0): the compiled extension module is now imported from
+# Python as `mnemo_engine`. The pre-NAME-1 `import mnemo` keeps working
+# for the whole v0.7.x series via a pure-Python shim in `python/mnemo/`
+# that re-exports this module and emits one DeprecationWarning; the
+# alias is removed in v0.8.0. Distribution name on PyPI stays
+# `mnemo-engine`.
 [lib]
-name = "mnemo"
+name = "mnemo_engine"
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -13,9 +13,16 @@ MNemo is an encrypted, single-file, portable agent-memory engine written in
 Rust. One `.mnemo` file holds vectors, content, structured metadata, the
 write-ahead log, the IVF+PQ index, and snapshot history. Distributed as
 `mnemo-engine` on PyPI and crates.io (both `mnemo` and `mnemo-db` were
-already taken by unrelated projects). The library identifier stays
-`mnemo` everywhere — `use mnemo::...` and `import mnemo` both work
-after install.
+already taken by unrelated projects — see PR NAME-1 and the v0.7.0
+CHANGELOG for the full context). The library/import identifier is
+**`mnemo_engine`** starting in v0.7.0: `use mnemo_engine::...` in Rust,
+`import mnemo_engine` in Python. The pre-v0.7.0 `use mnemo::...` /
+`import mnemo` keeps working for the v0.7.x series via a Cargo dep
+rename (`mnemo = { package = "mnemo-engine" }`) and a pure-Python
+alias package under `mnemo-python/python/mnemo/` that re-exports from
+`mnemo_engine` and emits one `DeprecationWarning`; both aliases are
+removed in v0.8.0. The CLI executable and the `.mnemo` file extension
+are unchanged.
 
 ## Repository layout
 

@@ -1607,9 +1607,14 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
     Ok(d.into_any().unbind())
 }
 
-/// The `mnemo` Python extension module.
+/// The `mnemo_engine` Python extension module. Renamed in v0.7.0 by
+/// PR NAME-1 — see the DECISION entry 2026-11-05 in PLAN.md for the
+/// rationale. The old `import mnemo` works for the whole v0.7.x
+/// series via a pure-Python shim that re-exports this module and
+/// emits one `DeprecationWarning` on import; the alias is removed in
+/// v0.8.0.
 #[pymodule]
-fn mnemo(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Mnemo>()?;
     m.add_class::<Session>()?;
     m.add_class::<Turn>()?;

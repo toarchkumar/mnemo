@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo run --example quickstart`
 
-use mnemo::{Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, Result};
+use mnemo_engine::{Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, Result};
 
 fn main() -> Result<()> {
     // Use a temporary path so the example is self-cleaning.

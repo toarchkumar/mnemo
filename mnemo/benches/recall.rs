@@ -28,7 +28,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use mnemo::RecallRequest;
+use mnemo_engine::RecallRequest;
 
 #[path = "corpus.rs"]
 mod corpus;

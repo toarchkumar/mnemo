@@ -8,7 +8,7 @@
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use mnemo::{
+use mnemo_engine::{
     Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, RecallResult, Result, Ulid,
 };
 
@@ -681,8 +681,8 @@ fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector:
                 println!(
                     "  scope   : {}",
                     match m.scope {
-                        mnemo::Scope::Private => "private",
-                        mnemo::Scope::Shared => "shared",
+                        mnemo_engine::Scope::Private => "private",
+                        mnemo_engine::Scope::Shared => "shared",
                     }
                 );
                 println!(
@@ -856,7 +856,7 @@ fn run() -> std::result::Result<(), String> {
             // visible even if the open fails (common when verifying a
             // fresh install of mnemo). Mirrors the Python
             // `mnemo.build_info()` shape.
-            let bi = mnemo::build_info();
+            let bi = mnemo_engine::build_info();
             println!("mnemo:       v{} ({})", bi.version, bi.target);
             println!("aes:         {}", bi.aes_backend);
             println!("polyval:     {}", bi.polyval_backend);
@@ -916,7 +916,8 @@ fn run() -> std::result::Result<(), String> {
             let pp = passphrase(&pp)?;
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            db.rekey(&new, mnemo::KdfParams::secure()).map_err(fmt)?;
+            db.rekey(&new, mnemo_engine::KdfParams::secure())
+                .map_err(fmt)?;
             db.close().map_err(fmt)?;
             println!("rekeyed {path}");
         }
@@ -978,7 +979,7 @@ fn run() -> std::result::Result<(), String> {
             // `Memory` is already imported at the file top; keep only
             // the Phase-3 bits we add here to avoid Rust 1.75's
             // redundant-import warning (which `-D warnings` makes fatal).
-            use mnemo::{EmbedCmd, EmbedderIdentity};
+            use mnemo_engine::{EmbedCmd, EmbedderIdentity};
             let pp = passphrase(&pp)?;
             let mt = parse_memory_types(&r#type)?
                 .pop()
@@ -1056,7 +1057,7 @@ fn run() -> std::result::Result<(), String> {
                 // parameters should use `mnemo index <file>` (without
                 // --rebuild) with the per-flag overrides.
                 if partitions != 0 || subspaces != 0 || n_probe != 0 || n_rerank != 0 {
-                    return Err(fmt(mnemo::MnemoError::Invalid(
+                    return Err(fmt(mnemo_engine::MnemoError::Invalid(
                         "--rebuild uses the auto-defaults; drop \
                          --partitions / --subspaces / --n-probe / \
                          --n-rerank, or build without --rebuild to pin \
@@ -1071,7 +1072,7 @@ fn run() -> std::result::Result<(), String> {
                     info.vectors, info.partitions, info.subspaces
                 );
             } else {
-                let cfg = mnemo::IndexConfig {
+                let cfg = mnemo_engine::IndexConfig {
                     n_partitions: partitions,
                     pq_subspaces: subspaces,
                     n_probe,
@@ -1098,7 +1099,9 @@ fn run() -> std::result::Result<(), String> {
             let pp = passphrase(&pp)?;
             let q = resolve_query(query, query_file)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-            let hits = db.search(&q, top_k, mnemo::Metric::Cosine).map_err(fmt)?;
+            let hits = db
+                .search(&q, top_k, mnemo_engine::Metric::Cosine)
+                .map_err(fmt)?;
             if hits.is_empty() {
                 println!("no results");
             }
@@ -1327,7 +1330,7 @@ fn run() -> std::result::Result<(), String> {
             embed_timeout,
             passphrase: pp,
         } => {
-            use mnemo::{EmbedCmd, EmbedderIdentity};
+            use mnemo_engine::{EmbedCmd, EmbedderIdentity};
             let pp = passphrase(&pp)?;
             if query.is_none() && query_file.is_none() && text.is_none() {
                 return Err("recall requires one of --query / --query-file / --text".into());
@@ -1470,7 +1473,7 @@ fn run() -> std::result::Result<(), String> {
                 )),
                 _ => None,
             };
-            mnemo::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;
+            mnemo_engine::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
     }
@@ -1480,7 +1483,7 @@ fn run() -> std::result::Result<(), String> {
 /// Dispatch a `mnemo cache …` subcommand. Kept out of `run()` to hold
 /// the main match down to one line per subcommand.
 fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
-    use mnemo::CachePutOpts;
+    use mnemo_engine::CachePutOpts;
 
     match op {
         CacheOp::Get {
@@ -1631,7 +1634,7 @@ fn memory_from_json(line: &str) -> std::result::Result<Memory, String> {
     Ok(m)
 }
 
-fn fmt(e: mnemo::MnemoError) -> String {
+fn fmt(e: mnemo_engine::MnemoError) -> String {
     e.to_string()
 }
 

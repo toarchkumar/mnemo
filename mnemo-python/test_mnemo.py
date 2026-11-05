@@ -8,7 +8,7 @@ import os
 import tempfile
 import time
 
-import mnemo
+import mnemo_engine as mnemo
 
 
 def test_create_remember_recall():
@@ -763,6 +763,51 @@ def test_background_thread_makes_progress_during_long_flush():
     print(f"ok  background thread ticked {during} times during blocking call")
 
 
+def test_import_mnemo_alias_still_works_with_deprecation_warning():
+    """NAME-1: the Python extension's import name moved from `mnemo`
+    to `mnemo_engine` in v0.7.0. `import mnemo` keeps working for the
+    whole 0.7.x series via the pure-Python shim in
+    `python/mnemo/__init__.py`, which re-exports every public name
+    and emits one `DeprecationWarning` on import. The shim is removed
+    in 0.8.0.
+
+    We re-import the module under `warnings.catch_warnings` so this
+    test is reliable even when some earlier test file already warmed
+    up `sys.modules['mnemo']`."""
+    import importlib
+    import sys
+    import warnings
+
+    # Force a fresh import so the shim's top-level `_warnings.warn` fires.
+    sys.modules.pop("mnemo", None)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mnemo_alias = importlib.import_module("mnemo")
+
+    deprecations = [
+        w for w in caught
+        if issubclass(w.category, DeprecationWarning)
+        and "mnemo_engine" in str(w.message)
+    ]
+    assert len(deprecations) == 1, (
+        f"expected exactly one DeprecationWarning on `import mnemo`, "
+        f"got {len(deprecations)}: {[str(w.message) for w in caught]}"
+    )
+
+    # The alias must expose the same public surface as the real module.
+    import mnemo_engine
+    for name in ("Mnemo", "Session", "Turn", "open", "compact_file",
+                 "build_info", "__version__"):
+        assert hasattr(mnemo_alias, name), (
+            f"alias missing public name `{name}` that mnemo_engine exposes"
+        )
+        assert getattr(mnemo_alias, name) is getattr(mnemo_engine, name), (
+            f"alias `{name}` must be the same object as mnemo_engine.{name}"
+        )
+    assert mnemo_alias.__version__ == mnemo_engine.__version__
+    print("ok  `import mnemo` alias re-exports mnemo_engine + emits one deprecation")
+
+
 def test_rebuild_index_reclusters_under_current_defaults():
     """BP.1: `db.rebuild_index()` re-runs `build_index_with(IndexConfig::
     default())`, so an index built under old defaults picks up the
@@ -818,4 +863,5 @@ if __name__ == "__main__":
     test_compact_file_module_fn()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()
+    test_import_mnemo_alias_still_works_with_deprecation_warning()
     print("\nall Python binding tests passed")

@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import mnemo
+import mnemo_engine as mnemo
 from sentence_transformers import SentenceTransformer
 
 # ----------------------------------------------------------------------
