@@ -699,7 +699,7 @@ AI sessions stay aligned without relying on chat history.
     <div class="head">
       <p class="eyebrow">Performance</p>
       <h2 class="title">Measured, not promised</h2>
-      <p class="lead">We only publish numbers we've measured. These are from v0.5.1 on an Apple M1 Pro (release build, 384-dimension vectors). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
+      <p class="lead">We only publish numbers we've measured. These are from an Apple M1 Pro (release build, 384-dimension vectors). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
     </div>
     <div class="grid grid-3">
       <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
@@ -707,7 +707,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card stat"><div class="v">~15<span> ms</span></div><div class="l">Open an encrypted file</div><div class="d">Almost all of it is Argon2id, on purpose: it makes guessing the passphrase expensive. Long-running apps pay it once.</div></div>
       <div class="card stat"><div class="v">~22<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by full disk syncs. Commit 100 memories at once and each costs about 0.28 ms.</div></div>
       <div class="card stat"><div class="v">~105<span> ms</span></div><div class="l">Check every memory, 10K-memory file</div><div class="d">Exact search with no index, every candidate decrypted. 1.05 s at 100K.</div></div>
-      <div class="card stat"><div class="v">Soon</div><div class="l">Indexed search at 100K–1M</div><div class="d">Already fast. We're raising its default accuracy before publishing speed figures, so the two are shown together.</div></div>
+      <div class="card stat"><div class="v">~9.4<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings (v0.6.0). ~1.4 ms at 10K, ~134 ms at 1M.</div></div>
     </div>
     <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
   </div>
@@ -723,8 +723,10 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.5</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.6</span></h3>
         <ul>
+          <li>Accurate index search: the default finds 96–98% of the true best matches, up from 40%</li>
+          <li>Stronger crash recovery: a damaged file header is rebuilt from the write-ahead log, and tampering is always reported</li>
           <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
           <li>A check that each file is used with the embedding model it was built with</li>
           <li>Result cache: exact keys and similar prompts</li>
@@ -739,8 +741,8 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>More accurate index search: raise the default from finding 40% of the true best matches to 95%</li>
           <li>Better ranking, so frequently shown memories don't crowd out the relevant one</li>
+          <li>Seamless agent memory: edit memories in place, filter recall by session or tag, and a Claude Code plugin that loads and saves memories automatically</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
         </ul>
       </div>

@@ -111,7 +111,7 @@ start. Working on this repository itself? Start at [AGENTS.md](AGENTS.md).
 
 ## Performance
 
-Measured on v0.5.1 (Apple M1 Pro, release build, 384-dimension vectors):
+Measured on an Apple M1 Pro (release build, 384-dimension vectors):
 
 | Operation | Time |
 |---|---|
@@ -119,23 +119,27 @@ Measured on v0.5.1 (Apple M1 Pro, release build, 384-dimension vectors):
 | Similar-prompt cache hit (500 entries) | ~0.4 ms |
 | Open an encrypted file (Argon2id key derivation, on purpose) | ~15 ms |
 | Store one memory durably | ~22 ms (~0.28 ms each when 100 are committed together) |
+| Indexed search, 10K / 100K / 1M memories | ~1.4 ms / ~9.4 ms / ~134 ms |
 | Exact search over every memory, 10K / 100K | ~105 ms / ~1.05 s |
 
-Full results: [`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
-Indexed-search speeds are not listed yet; see the limitations below.
+Indexed search finds 96–98% of the true top-10 matches at the default
+settings (v0.6.0: 0.964 at 10K, 0.982 at 100K, 0.970 at 1M). The store figure
+was measured on v0.5.1; v0.6.0 removed one disk sync per commit and will be
+re-measured. Full results:
+[`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
+
+**Upgrading an index from v0.5.x?** It improves automatically (about 76–83%
+of the true top-10), and rebuilding it restores the full accuracy: run
+`mnemo index <file>` again, `build_index()` in Python, or `rebuild_index()`
+in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
-- **Default index accuracy is low.** With an IVF+PQ index built, the default
-  settings return only about 40% of the true top-10 matches. Until the fix
-  lands, use exact search for small and medium files (don't build an index, or
-  call `drop_index()`). From Rust or the CLI you can raise `n_probe` and
-  `n_rerank` instead (`n_probe=32, n_rerank=256` reaches about 83%).
 - **Access tracking can skew rankings.** By default, every recall counts its
   results as "used", which boosts them in later recalls, so frequently
   returned memories can crowd out more relevant ones. Pass
   `track_access=False` (Python), `track_access(false)` (Rust) or `--no-track`
-  (CLI) to avoid it. A scoring fix is planned for v0.6.0.
+  (CLI) to avoid it. A scoring fix is planned for v0.7.0.
 - **Exact names and numbers.** Meaning-based search is weak on exact
   identifiers such as version numbers, PR numbers or function names. Keyword
   search combined with vector search is on the roadmap.
