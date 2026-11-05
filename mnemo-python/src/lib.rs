@@ -736,6 +736,29 @@ impl Mnemo {
             .map_err(to_py)
     }
 
+    /// Rebuild the ANN index from scratch using the auto-defaults for
+    /// the current corpus size — re-clusters centroids and retrains
+    /// the PQ codebook, undoing the cluster drift that accumulates as
+    /// memories are inserted against fixed centroids. This is the
+    /// command the v0.6.0 upgrade note tells users to run after
+    /// upgrading from v0.5.x so an index built under the old
+    /// `pq_subspaces=48` defaults picks up the ANN-1.1 formulas
+    /// (`pq_subspaces = dims/4`, size-aware `n_probe` / `n_rerank`).
+    ///
+    /// BP.1: new in v0.6.1 — before, Python had no rebuild command and
+    /// the CHANGELOG's `rebuild_index()` reference raised
+    /// `AttributeError`. Works the same way as the CLI's
+    /// `mnemo index <file> --rebuild`. Does not flush — call `flush()`
+    /// yourself to persist the new index.
+    ///
+    /// Releases the GIL during the rebuild, same as `build_index`.
+    fn rebuild_index(&mut self, py: Python<'_>) -> PyResult<()> {
+        let core = self.core_mut()?;
+        py.allow_threads(|| core.rebuild_index())
+            .map(|_| ())
+            .map_err(to_py)
+    }
+
     /// Drop the approximate index; recall reverts to exact scan.
     fn drop_index(&mut self) -> PyResult<()> {
         self.core_mut()?.drop_index();

@@ -8,9 +8,67 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-(nothing yet; work resumes toward v0.7.0 = recall scoring v2 + Phase 12.1)
+(nothing yet; work resumes toward v0.7.0 = PR NAME-1 + recall scoring v2.)
 
-## [0.6.0] — 2026-11-05
+## [0.6.1] — 2026-11-05
+
+**Patch release.** Additive API + doc corrections; no behavior change
+in any code path that already existed at v0.6.0.
+
+### Added — PR BP.1 (`mnemo index --rebuild` + Python `rebuild_index()`)
+
+The v0.6.0 upgrade note told users to run `mnemo index --rebuild` /
+`db.rebuild_index()` so an index built under the pre-ANN-1
+`pq_subspaces = dims/8` defaults would pick up the ANN-1.1 shipped
+numbers (`pq_subspaces = dims/4` + size-aware `n_probe` / `n_rerank`).
+Neither command actually existed:
+
+- **CLI:** `mnemo index` only had `--drop`; `mnemo index <file>`
+  without a flag already re-clustered under the current defaults,
+  but the docs promised a dedicated `--rebuild` flag.
+- **Python:** `db.build_index()` → `build_index_with(IndexConfig::
+  default())` worked, but a direct `db.rebuild_index()` call raised
+  `AttributeError`.
+
+BP.1 adds the two user-visible commands. Both call the existing core
+`Mnemo::rebuild_index` (added in ANN-1.1): re-clusters centroids +
+retrains the PQ codebook under the current `IndexConfig::default()`
+for the file's live vector count. Shipped behavior:
+
+- **`mnemo index <file> --rebuild`** (CLI) — mutually exclusive with
+  `--drop`; rejects a mix of `--rebuild` with explicit tuning knobs
+  (`--partitions` / `--subspaces` / `--n-probe` / `--n-rerank`) with
+  a clear error that points at the right command.
+- **`db.rebuild_index()`** (Python) — releases the GIL during the
+  k-means + PQ training (same pattern as `build_index`, same PY-1
+  rules). Does not flush; call `db.flush()` to persist.
+
+Three new tests in `mnemo/tests/cli_smoke.rs`
+(`cli_index_rebuild_runs_rebuild_index`,
+`cli_index_rebuild_rejects_tuning_overrides`,
+`cli_index_drop_and_rebuild_are_mutually_exclusive`) plus
+`test_rebuild_index_reclusters_under_current_defaults` in
+`mnemo-python/test_mnemo.py`.
+
+### Fixed — process house-keeping
+
+- `mnemo/bindings/node/Cargo.toml` was still pinned at `0.5.2`
+  (previous releases kept it in step). Bumped to `0.6.1` with the
+  rest of the manifests.
+
+### Measured — DUR-1 step 5 write benches
+
+Re-ran `cargo bench --features benches --bench write` on an Apple
+M1 Pro release build with hardware AES to close out DUR-1 step 5
+(not done at v0.6.0 time). Numbers landed under the new top-level
+`speed_v0_6_0` key in `test/scripts/perf_v0.5.0.json`, next to the
+pre-DUR-1 `speed_hw_aes` block from v0.5.1 for an apples-to-apples
+before/after. The DUR-1 CHANGELOG entry already explained the
+change (steady-state flush drops from 4 fsyncs to 3 — the leased-
+header fsync is gone; relocating flushes add one fsync for the
+new `invalidate_region` call but gain crash-safety). The
+`fsyncs_last_flush` field on `Stats` reports the per-flush count
+at runtime.
 
 **v0.6.0 ships five PRs in one minor bump** — the first is a user-
 visible behavior change (ANN defaults), which is why it's a minor

@@ -147,8 +147,19 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
         /// Drop the existing index instead of building one.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "rebuild")]
         drop: bool,
+        /// Rebuild the ANN index from scratch using the auto-defaults
+        /// for the current corpus size (re-clusters centroids and
+        /// retrains the PQ codebook, undoing the cluster drift that
+        /// accumulates as memories are inserted against fixed
+        /// centroids). Required to pick up the ANN-1.1 defaults on an
+        /// index built by v0.5.x — the shipped BP.1 fix wires this up
+        /// so the v0.6.0 upgrade note's `mnemo index --rebuild` /
+        /// `rebuild_index()` commands actually exist. Mutually
+        /// exclusive with `--drop`.
+        #[arg(long, conflicts_with = "drop")]
+        rebuild: bool,
         /// IVF partitions (0 = auto, ~sqrt of memory count).
         #[arg(long, default_value_t = 0)]
         partitions: usize,
@@ -1023,6 +1034,7 @@ fn run() -> std::result::Result<(), String> {
             path,
             passphrase: pp,
             drop,
+            rebuild,
             partitions,
             subspaces,
             n_probe,
@@ -1034,6 +1046,30 @@ fn run() -> std::result::Result<(), String> {
                 db.drop_index();
                 db.flush().map_err(fmt)?;
                 println!("dropped ANN index on {path}");
+            } else if rebuild {
+                // BP.1: re-cluster + retrain under the current
+                // `IndexConfig::default()` (the ANN-1.1 auto-formulas).
+                // Explicit `--partitions` / `--subspaces` / `--n-probe`
+                // / `--n-rerank` are rejected here so this flag has one
+                // clear behavior — "give me the shipped defaults for
+                // the file's current size". Users who want custom
+                // parameters should use `mnemo index <file>` (without
+                // --rebuild) with the per-flag overrides.
+                if partitions != 0 || subspaces != 0 || n_probe != 0 || n_rerank != 0 {
+                    return Err(fmt(mnemo::MnemoError::Invalid(
+                        "--rebuild uses the auto-defaults; drop \
+                         --partitions / --subspaces / --n-probe / \
+                         --n-rerank, or build without --rebuild to pin \
+                         explicit values"
+                            .into(),
+                    )));
+                }
+                let info = db.rebuild_index().map_err(fmt)?;
+                db.flush().map_err(fmt)?;
+                println!(
+                    "rebuilt ANN index on {path}: {} vectors, {} partitions, {} PQ subspaces",
+                    info.vectors, info.partitions, info.subspaces
+                );
             } else {
                 let cfg = mnemo::IndexConfig {
                     n_partitions: partitions,

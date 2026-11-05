@@ -763,6 +763,31 @@ def test_background_thread_makes_progress_during_long_flush():
     print(f"ok  background thread ticked {during} times during blocking call")
 
 
+def test_rebuild_index_reclusters_under_current_defaults():
+    """BP.1: `db.rebuild_index()` re-runs `build_index_with(IndexConfig::
+    default())`, so an index built under old defaults picks up the
+    current auto-formulas (ANN-1.1: `pq_subspaces = dims/4` etc).
+    Before BP.1 Python had no such method — the v0.6.0 CHANGELOG
+    promised it but called it raised `AttributeError`.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "r.mnemo")
+        with mnemo.open(path, "pw", dimensions=4) as db:
+            # Seed enough vectors to actually have an ANN index.
+            for i in range(40):
+                v = [float((i + k) % 7 + 1) for k in range(4)]
+                db.remember(f"m{i}", "semantic", v)
+            db.flush()
+            db.build_index()
+            db.flush()
+            # Rebuild should succeed and leave the index in place.
+            db.rebuild_index()
+            db.flush()
+            assert db.has_index(), "rebuild must leave an index behind"
+            assert len(db) == 40, "rebuild must not drop memories"
+    print("ok  db.rebuild_index() runs + persists")
+
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -792,4 +817,5 @@ if __name__ == "__main__":
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     test_recall_accepts_n_probe_n_rerank_overrides()
+    test_rebuild_index_reclusters_under_current_defaults()
     print("\nall Python binding tests passed")

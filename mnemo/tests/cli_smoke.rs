@@ -1421,3 +1421,88 @@ fn mcp_hang_bounded_and_server_survives_for_next_call() {
         "call id 3 (post-HANG) should have succeeded, not errored: {stdout}"
     );
 }
+
+// --- BP.1 ---------------------------------------------------------------
+//
+// `mnemo index <file> --rebuild` runs `rebuild_index()` on the open
+// database under the current `IndexConfig::default()` (the ANN-1.1
+// auto-formulas). Added in v0.6.1 so the v0.6.0 upgrade-note command
+// actually exists.
+
+#[test]
+fn cli_index_rebuild_runs_rebuild_index() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("rb.mnemo");
+    let pp = "bp1-pw";
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        for i in 0..40 {
+            let v = vec![((i % 4) + 1) as f32, 1.0, 2.0, 3.0];
+            db.remember(Memory::new(format!("m{i}"), MemoryType::Semantic, v))
+                .unwrap();
+        }
+        db.flush().unwrap();
+        db.build_index().unwrap();
+        db.flush().unwrap();
+        db.close().unwrap();
+    }
+
+    let (status, stdout, stderr) = run_cli(&["index", path.to_str().unwrap(), "--rebuild"], pp);
+    assert!(
+        status.success(),
+        "mnemo index --rebuild failed: status={status:?} stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("rebuilt ANN index on"),
+        "expected 'rebuilt' prefix in stdout, got: {stdout}"
+    );
+    // Reopen and confirm the index is still usable (rebuild persists).
+    let db = Mnemo::open(&path, pp).unwrap();
+    assert!(db.has_index(), "rebuilt index must persist across reopen");
+    assert_eq!(db.len(), 40);
+}
+
+#[test]
+fn cli_index_rebuild_rejects_tuning_overrides() {
+    // `--rebuild` is the "give me the shipped auto-defaults" shortcut.
+    // Mixing it with explicit tuning knobs is user-visibly ambiguous,
+    // so BP.1 rejects the combination with a clear error.
+    let (_dir, path, pp, _) = seed_db();
+    let (status, _stdout, stderr) = run_cli(
+        &[
+            "index",
+            path.to_str().unwrap(),
+            "--rebuild",
+            "--n-probe",
+            "5",
+        ],
+        pp,
+    );
+    assert!(!status.success(), "expected non-zero exit, got {status:?}");
+    assert!(
+        stderr.contains("--rebuild uses the auto-defaults"),
+        "expected the 'rebuild uses the auto-defaults' error, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_index_drop_and_rebuild_are_mutually_exclusive() {
+    // clap enforces this via `conflicts_with`; verify the error path
+    // (a wiring regression here would be silent otherwise — one flag
+    // would just win over the other).
+    let (_dir, path, pp, _) = seed_db();
+    let (status, _stdout, stderr) = run_cli(
+        &["index", path.to_str().unwrap(), "--drop", "--rebuild"],
+        pp,
+    );
+    assert!(
+        !status.success(),
+        "clap must reject --drop --rebuild together"
+    );
+    assert!(
+        stderr.contains("cannot be used with")
+            || stderr.contains("conflicts")
+            || stderr.contains("--rebuild") && stderr.contains("--drop"),
+        "expected a clap 'conflicts' message, got: {stderr}"
+    );
+}
