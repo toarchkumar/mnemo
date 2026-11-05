@@ -235,6 +235,68 @@ Full ANN-1 numbers (diagnose cells + 2×5×5 tuning grid at 10K and
 earlier Phase 6 `speed`, `ranking`, `ann_recall_grid`,
 `file_size_breakdown`, and `speed_hw_aes` blocks.
 
+### Fixed — PR PY-1 (Python binding: `close()` releases the file lock; GIL released on heavy calls; closed-aware access; re-entrant embedders)
+
+Scoped by REV-001 R-001.11 + the 2026-11-01 SEC-1 reproduction note
+("`close()` doesn't release the OS file lock"). Four independent
+improvements to the Python binding, no behavior change in the Rust
+core beyond the new `Mnemo::embedder_arc()` accessor.
+
+**1. `db.close()` releases the OS file lock synchronously.** Pre-PY-1
+`Mnemo.close()` only called `Core::close` (which flushes but holds
+the file handle); the exclusive advisory lock sat until Python's GC
+collected the object, so `db.close(); reopen(path)` in the same
+process raised `Locked`. Only `del db` released the lock. PY-1
+wraps the Rust core in `Option<Core>`; `close()` and `__exit__`
+`take()` it and drop — the `File` destructor runs synchronously,
+which releases the `flock` / `LockFileEx` in the same call. Every
+method now routes through a `core()` / `core_mut()` accessor that
+raises `RuntimeError: database is closed` after close, so a
+post-close call surfaces a clear error instead of a panic or a
+stale read. `close()` is idempotent. The matching pattern applies
+to `Session` methods, which borrow `Py<Mnemo>` mutably: they now
+inherit the closed-handle error automatically.
+
+**2. Heavy calls release the GIL.** `flush`, `recall`, `recall_text`,
+`search`, `build_index`, `verify`, `rekey`, `cache_get_semantic`,
+`cache_get_semantic_text`, the module-level `open` (Argon2id KDF)
+and `compact_file` are now wrapped in `py.allow_threads`. Another
+Python thread can tick during a long recall or a Argon2id-paced
+reopen; pre-PY-1 any of these pinned the GIL for the whole call.
+`compact_file` now also surfaces `cache_before` / `cache_after` in
+its returned dict (matching FIX-1 R-001.1's `CompactReport`).
+
+**3. Embedder callbacks are safe to re-enter the database.** R-001.11:
+pre-PY-1 the Python binding borrowed `&Core` across `embedder.embed()`,
+so a Python embedder that touched `db` from inside the callback
+(e.g. `db.dimensions()` for shape probing, or
+`db.cache_get(embed_cache_key)`) hit PyO3's "Already borrowed" at
+the next method dispatch. PY-1 adds a new
+`Mnemo::embedder_arc(&self) -> Option<Arc<dyn Embedder>>` accessor
+on the core; `remember_text`, `recall_text`, and
+`cache_get_semantic_text` clone the Arc under a short `&Core`
+borrow, drop the borrow, then call `embed()` with no `self` borrow
+held — so the callback owns the floor.
+
+**4. `rekey(fast=False)` wire-up unchanged** (FIX-1 already fixed the
+params inheritance): now runs under `allow_threads` too, so a
+production-grade rekey (~50–100 ms Argon2id) doesn't stall the GIL.
+
+**Tests.** `mnemo-python/test_mnemo.py` gains five new cases:
+`test_close_releases_lock_and_blocks_further_use` (close then
+reopen same path in-process; method on closed handle raises
+`RuntimeError: database is closed`; `close()` is idempotent),
+`test_with_block_releases_lock_on_exit` (`__exit__` releases the
+lock without `del`), `test_session_methods_fail_cleanly_after_db_close`
+(session `add_turn` / `recall` / `close` after `db.close()` →
+clean error), `test_embedder_callback_can_reenter_db_without_already_borrowed`
+(re-entrant `db.dimensions()` from inside the embedder succeeds),
+and `test_background_thread_makes_progress_during_long_flush` (a
+Python thread ticks during a `verify()` call — the GIL was
+genuinely released). The pre-PY-1 `test_persistence_and_reopen`
+test loses its `del db` workaround — proof the lock releases on
+`close()` alone.
+
 ### Fixed — PR FIX-1 (correctness sweep per REV-001 + REV-002)
 
 Reviewer-triaged under REV-001 (R-001.1, R-001.5, R-001.6, R-001.8

@@ -40,15 +40,10 @@ def test_persistence_and_reopen():
         path = os.path.join(d, "t.mnemo")
         db = mnemo.open(path, "pw", dimensions=3)
         mid = db.remember("persist me", "procedural", [0.5, 0.5, 0.5])
+        # PY-1 (2026-11-01): `close()` now releases the OS file lock
+        # synchronously — no `del db` dance required to reopen the
+        # same path in the same process.
         db.close()
-        # `close()` currently flushes but does NOT release the underlying
-        # OS lock — the Rust handle stays alive until the Python object
-        # is garbage-collected. Force a `drop` so the reopen below can
-        # acquire the exclusive lock (Phase 1.1). Follow-up: refactor
-        # the Rust wrapper to make `close()` release the handle so this
-        # `del` isn't required. See CHANGELOG's [Unreleased] Fixed
-        # section for the tracking note.
-        del db
 
         # Reopen without dimensions — must read them from the file.
         db2 = mnemo.open(path, "pw")
@@ -57,8 +52,51 @@ def test_persistence_and_reopen():
         assert got["content"] == "persist me"
         assert got["memory_type"] == "procedural"
         db2.close()
-        del db2
     print("ok  persistence / reopen / get")
+
+
+def test_close_releases_lock_and_blocks_further_use():
+    """PY-1: close() releases the file lock immediately AND makes further
+    method calls raise a clear 'database is closed' error (not silently
+    read stale state, not panic)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.remember("x", "semantic", [1.0, 0.0, 0.0, 0.0])
+        db.close()
+
+        # Reopen the same path in the same process without del / GC —
+        # pre-PY-1 this raised Locked.
+        db2 = mnemo.open(path, "pw")
+        assert len(db2) == 1
+        db2.close()
+
+        # Any method on the first (closed) handle must raise clearly.
+        try:
+            db.len = db.__len__()  # or any method; `len` is fine
+        except RuntimeError as e:
+            assert "closed" in str(e), f"wanted 'closed' in error, got {e!r}"
+        else:
+            raise AssertionError("len() on closed db should have raised RuntimeError")
+
+        # `close()` is idempotent — second call is a no-op.
+        db.close()
+    print("ok  close releases lock + closed-handle errors + idempotent close")
+
+
+def test_with_block_releases_lock_on_exit():
+    """PY-1: a `with mnemo.open(...) as db:` block's __exit__ releases
+    the lock, so immediately reopening the same path succeeds."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        with mnemo.open(path, "pw", dimensions=4) as db:
+            db.remember("y", "semantic", [0.0, 1.0, 0.0, 0.0])
+        # No `del db` — the `with` exit alone must have released the
+        # lock. Pre-PY-1 the lock sat until the next GC pass.
+        db2 = mnemo.open(path, "pw")
+        assert len(db2) == 1
+        db2.close()
+    print("ok  with-block exit releases lock")
 
 
 def test_wrong_passphrase():
@@ -606,10 +644,134 @@ def test_recall_accepts_n_probe_n_rerank_overrides():
     print("ok  recall / recall_text accept n_probe + n_rerank")
 
 
+def test_session_methods_fail_cleanly_after_db_close():
+    """PY-1 (R-001.11): a Session borrows the Mnemo it was opened
+    from. If the user closes the db while the session is still open,
+    the session's methods must surface a clean 'database is closed'
+    error (via the closed-aware core_mut() accessor), not panic or
+    silently succeed on stale state."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        session = db.session("agent")
+        db.close()
+
+        for op, call in [
+            ("add_turn", lambda: session.add_turn(mnemo.Turn(
+                role="user", content="hi", vector=[1.0, 0.0, 0.0, 0.0]))),
+            ("recall", lambda: session.recall([1.0, 0.0, 0.0, 0.0])),
+            ("close", lambda: session.close()),
+        ]:
+            try:
+                call()
+            except RuntimeError as e:
+                assert "closed" in str(e), f"{op}: wanted 'closed', got {e!r}"
+            else:
+                raise AssertionError(
+                    f"session.{op}() after db.close() should have raised RuntimeError"
+                )
+    print("ok  session methods raise cleanly after db.close()")
+
+
+def test_embedder_callback_can_reenter_db_without_already_borrowed():
+    """PY-1 (R-001.11): the Python embedder callback runs *after* we
+    drop the borrow on the Rust core (by cloning the embedder Arc under
+    a short borrow), so a callback that touches `db` itself doesn't
+    hit PyO3's 'Already borrowed' panic. Pre-PY-1 the borrow spanned
+    the callback, so the first `db.dimensions()` from inside the
+    embedder deadlocked or panicked."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        with mnemo.open(path, "pw", dimensions=4) as db:
+            saw_dims = {}
+
+            def reentrant_embedder(texts):
+                # Re-enter the Mnemo mid-callback — pre-PY-1 crash shape.
+                saw_dims["dims"] = db.dimensions()
+                return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+            db.set_embedder(reentrant_embedder, name="re", dimensions=4,
+                            normalize=False)
+            db.insert_default_manifest()
+            db.flush()
+            # Drive the embedder once.
+            db.remember_text("hello", "semantic")
+            assert saw_dims["dims"] == 4
+    print("ok  embedder callback can re-enter db.dimensions()")
+
+
+def test_background_thread_makes_progress_during_long_flush():
+    """PY-1 (R-001.11): heavy calls release the GIL. A background
+    Python thread must make progress while the main thread is in a
+    blocking recall / flush / verify. We measure "progress" by having
+    the thread tick a counter in a tight Python loop and assert its
+    tick count rises during the main thread's heavy call.
+
+    We warm up the ticker first and snapshot its count *immediately
+    before* calling the heavy op, so the assertion is "ticks rose
+    during the heavy call", not "ticks > 0 at any point" — which
+    would pass trivially from the ticker's own startup.
+
+    The threshold is deliberately generous (>= 2 extra ticks during
+    the blocking call) — the point is "any Python thread ran at all
+    during the blocking call", which pre-PY-1 was zero because the
+    GIL stayed pinned."""
+    import threading
+    import time as _time
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=64)
+        # Seed enough records that `verify()` takes tens of ms even on
+        # a hardware-AES M1 Pro. 2000 records × 64-dim f32 vectors
+        # ~= 2000 × ~500B = ~1 MB of record bodies; `verify()`
+        # decrypts every one of them.
+        for i in range(2000):
+            v = [float((i + k) % 17 + 1) for k in range(64)]
+            db.remember(f"m{i}", "semantic", v)
+        db.flush()
+
+        ticks = [0]
+        stop = threading.Event()
+
+        def ticker():
+            while not stop.is_set():
+                ticks[0] += 1
+                # Yield the GIL frequently so the ticker races the
+                # main thread fairly during the blocking call.
+                _time.sleep(0.0001)
+
+        t = threading.Thread(target=ticker)
+        t.start()
+        # Warm up: let the ticker get going before we start timing.
+        _time.sleep(0.02)
+        before = ticks[0]
+        try:
+            db.verify()  # heavy call; releases GIL on PY-1
+        finally:
+            stop.set()
+            t.join()
+        after_verify = ticks[0]
+        during = after_verify - before
+
+        db.close()
+        assert during >= 2, (
+            f"background thread made no progress during verify() — "
+            f"GIL was held (before={before}, after={after_verify}, "
+            f"during={during})"
+        )
+    print(f"ok  background thread ticked {during} times during blocking call")
+
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
     test_persistence_and_reopen()
+    test_close_releases_lock_and_blocks_further_use()
+    test_with_block_releases_lock_on_exit()
+    test_session_methods_fail_cleanly_after_db_close()
+    test_embedder_callback_can_reenter_db_without_already_borrowed()
+    test_background_thread_makes_progress_during_long_flush()
     test_wrong_passphrase()
     test_index_and_snapshots()
     test_delete_and_stats()

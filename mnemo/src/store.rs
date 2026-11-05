@@ -1530,6 +1530,18 @@ impl Mnemo {
         self.embedder.as_deref()
     }
 
+    /// Shared handle to the registered embedder, cloned so the caller
+    /// can drop the borrow on this `Mnemo` before invoking `embed()`.
+    /// FIX-1 / PY-1 (R-001.11): the Python binding needs this so an
+    /// embedder callback that re-enters `Mnemo` (e.g. a Python
+    /// embedder that calls `db.dimensions()` or `db.cache_get(...)`)
+    /// doesn't hit PyO3's "Already borrowed" — we clone the Arc under
+    /// a short `&self` borrow, release that borrow, then invoke
+    /// `embed()` with no `&mut Mnemo` held.
+    pub fn embedder_arc(&self) -> Option<std::sync::Arc<dyn Embedder>> {
+        self.embedder.clone()
+    }
+
     /// Embed `content` with the registered embedder and `remember` the
     /// result. Returns the new memory's ULID. Convenience path for
     /// callers who have a string, want it stored, and don't need any
