@@ -196,8 +196,8 @@ fast with a clear error and document the manual upgrade path (e.g.
 Solo contributors and unassigned agents follow the general codebase rules
 above. When multiple LLMs collaborate in a shared working tree, the user
 assigns each session one of three roles — **`Planner`**, **`Worker`**, or
-**`Reviewer`** — and information flows through two local, gitignored
-coordination files at the repository root:
+**`Reviewer`** — and information flows through two coordination files at the repository root,
+both tracked in git as a backup:
 
 - **`PLAN.md` (`Planner` <-> `Worker`):** Single source of truth for
   roadmap sequencing, architecture decisions, `Status`, `NEXT DISPATCH`,
@@ -207,8 +207,14 @@ coordination files at the repository root:
   `Review Log` batches (`REV-001`, `REV-002`, ...) with stable item IDs
   (`R-001.1`, `R-001.2`, ...).
 
-**Never `git add` or commit `PLAN.md` or `reviewer_notes.md`** (both are
-gitignored). If either file is absent in a fresh workspace, only its primary
+**`PLAN.md` and `reviewer_notes.md` are tracked in git, and only the
+`Worker` commits them.** It commits both by explicit path in a separate
+`chore(plan): sync coordination files` commit: after each `WORKER — DONE`
+entry and before tagging a release. Never mix them into a code commit.
+Because the repository is public, keep **unfixed security findings** out of
+both files. Write them in a gitignored `*.local.md` file (for example
+`SECURITY.local.md`) and move them into `PLAN.md` once the fix has shipped.
+If either file is absent in a fresh workspace, only its primary
 author (`Planner` for `PLAN.md`, `Reviewer` for `reviewer_notes.md`) creates
 it; other roles stop and ask the user first.
 
@@ -272,6 +278,10 @@ it; other roles stop and ask the user first.
      `PLANNER — HANDOFF` entry lists them as ready. When handed off, commit
      the exact listed paths as **their own separate commit** (never mixed
      into a PR's code commit) and cite the hash in your next `DONE` entry.
+   - Commit `PLAN.md` and `reviewer_notes.md` by explicit path, as their
+     own `chore(plan): sync coordination files` commit, after each `DONE`
+     entry and before tagging a release. Commit them as they are, including
+     another role's unfinished edits; they're logs, not code.
    - During release PRs, bump versions in Cargo/Python manifests, lockfiles,
      and `CHANGELOG.md` (the `Planner` updates version text in root
      `README.md` and `index.html` via handoff).
@@ -286,7 +296,10 @@ it; other roles stop and ask the user first.
    with `read_only=True` or `--no-track`), and never run `git add` or
    `git commit`. Write exclusively to `reviewer_notes.md` unless the user
    explicitly asks for a doc edit and routes commit authority through a
-   `Planner`/`Worker` handoff.
+   `Planner`/`Worker` handoff. (The `Worker` commits `reviewer_notes.md` as
+   a backup; that doesn't change this boundary.) Unfixed security findings
+   go in a gitignored `*.local.md` file, not in `reviewer_notes.md`, until
+   the fix ships.
 2. **Evidence-grounded findings:** Trace exact call paths and line numbers
    in live source code, uncommitted `git diff`s, `test/scripts/perf_*.json`,
    and `PLAN.md` before making quantitative or behavioral claims. Do not

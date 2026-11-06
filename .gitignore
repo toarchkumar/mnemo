@@ -1,6 +1,6 @@
-# Local planner/worker/reviewer coordination files — never commit
-PLAN.md
-reviewer_notes.md
+# PLAN.md and reviewer_notes.md are tracked (backup, decided 2026-11-06).
+# Embargoed security notes stay local until the fix ships:
+*.local.md
 mnemo.tar
 
 .DS_Store
