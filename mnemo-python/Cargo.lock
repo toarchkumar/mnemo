@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "mnemo-engine"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "mnemo-python"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "mnemo-engine",
  "pyo3",

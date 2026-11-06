@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0, the minor component carries the breaking-change signal.
 
-## [Unreleased]
+## [0.7.0] — 2026-11-06
+
+**Breaking release.** Two import-surface changes ship together: the
+Rust/Python library name became `mnemo_engine` (NAME-1), and the recall
+scoring formula moved to scoring v2 (new scale for raw `score` values).
+See each section below for migration notes. The CLI command (`mnemo`),
+the `.mnemo` file extension, the on-disk format, and every Rust /
+Python API signature are unchanged.
 
 ### Breaking — PR NAME-1: import name becomes `mnemo_engine` (no `mnemo` alias)
 
@@ -199,12 +206,31 @@ caps how much a heavily-returned memory can accumulate.
 
 Mechanics: the bump happens in-memory only (`accessed_at` /
 `access_count` + `dirty_catalog = true`) — **recall itself does not
-fsync**. The next mutating MCP tool (`remember`, `forget`,
-`cache_put_semantic`, `cache_get_semantic` on cache miss, etc.) runs
-`db.flush()` on exit, and that is when the access stats reach disk.
-On a read-only workload with no mutations, the updates live only in
-RAM and are lost on shutdown, which is the intended trade-off for a
-no-per-recall-fsync default.
+fsync**. Access stats reach disk on either (a) the next mutating MCP
+tool call's exit path (`remember`, `forget`, `cache_put_semantic`,
+`cache_get_semantic`-on-miss, etc. each end in `db.flush()`), or (b)
+the MCP server's own shutdown flush when stdin closes — so a
+read-only session that issued only recalls still persists its stats
+on clean shutdown.
+
+#### CLI tracking recall flush (R-001.4)
+
+The default `mnemo recall` (without `--no-track`) always opened the
+database read-write to bump access stats, but **never flushed before
+exit**, so the mutation lived only in the subprocess's RAM and was
+discarded at exit. Under v0.7.0's saturating `tanh(uses/5)` usage
+term, that bug would have hidden every CLI recall from the scoring
+formula. Both the `--query` / `--query-file` and `--text` branches
+now `db.flush()` after a tracking recall; the fallback / `--no-track`
+paths skip the flush (read-only handle).
+
+The `--text` branch also gained the same `MnemoError::Locked`
+read-only fallback that the vector branches got: when the exclusive
+lock isn't available, it opens read-only + sets `track_access=false`
+and prints the same one-line stderr note. Test:
+`cli_smoke.rs::recall_text_falls_back_to_read_only_when_write_lock_held`.
+Persistence regression test:
+`cli_smoke.rs::recall_tracking_flushes_access_count_to_disk`.
 
 #### CLI `recall` lock fallback
 
