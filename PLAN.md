@@ -92,6 +92,50 @@ AGENTS.md. AGENTS.md has only the role rules.
 3. Reviewer items that shipped in v0.6.0 are waiting for the Reviewer to
    mark them VERIFIED. No Planner action unless the user asks for a triage.
 
+**Two Planners, one Worker queue (user decision 2026-11-06)**
+
+Two Planner sessions can be active at once. They plan in parallel
+**lanes**; the Worker still executes **one PR at a time** from a single
+queue. Usually one Worker is active; a backup Worker resumes where the
+last one stopped.
+
+| Lane | Owner | Scope | State |
+|---|---|---|---|
+| A — v0.7.0 release | `PLANNER-A` (the session that wrote the 2026-11-06 V2 decision; the Cowork sandbox) | Scoring v2 Phase 4, release v0.7.0, verify it on the published wheel, the v0.7.0 README + `index.html` handoff (to-dos 1–2 above) | **Holds the ACTIVE PR** |
+| B — Phase 12 prep | `PLANNER-B` (the Antigravity session) | Dispatch-ready spec for 12.1, the 12.4 shared-access design note, and R-003.1 (`Essence`) triage when the user asks for it, since it changes Phase 12 order | Planning only. No Worker dispatch until Lane A logs v0.7.0 VERIFIED |
+
+Rules:
+1. **Tag every entry** `PLANNER-A` or `PLANNER-B` in the WORKLOG header.
+   Untagged `PLANNER` entries before this section are legacy and stay as
+   they are.
+2. **One ACTIVE PR at a time across both lanes.** It's marked `← ACTIVE
+   (lane X)` in the execution order. The Worker (primary or backup) works
+   only on that item. Only the owning lane issues its DISPATCH, answers its
+   READY or BLOCKED entries, and logs its VERIFIED. The next lane's PR
+   becomes ACTIVE only after that VERIFIED, when its owner logs a DISPATCH.
+3. **Backup Worker pickup:** start from the latest WORKER entry for the
+   ACTIVE PR plus the working tree (`git status`, the uncommitted diff),
+   and log a short catch-up note before changing anything. Don't start
+   another lane's work.
+4. **Planner unavailable:** if the owner of the ACTIVE lane is unavailable
+   and the user asks the other Planner to answer a Worker entry, that
+   Planner answers with "covering lane X" in the header. Lane ownership
+   moves only if the user says so.
+5. **Shared PLAN.md hygiene:** re-read the file tail right before writing.
+   Make targeted edits and never rewrite the file wholesale. Change only
+   your own lane's specs above the WORKLOG. Make shared sections (Status,
+   this handover, the execution order, Protocol) minimal edits and log
+   each one.
+6. **Planner-owned files** (root `README.md`, `index.html`, `.gitignore`,
+   `AGENTS.md` protocol text): release docs belong to the lane holding the
+   release. For anything else, log a one-line `CLAIM` entry before you
+   edit, and release the claim with your HANDOFF entry.
+7. **Reviewer triage:** claim the item IDs in the WORKLOG before triaging,
+   so the same item never gets triaged twice.
+8. **Disagreements:** log a `NOTE` addressed to the other Planner. Never
+   overwrite or reverse the other lane's decision. If it's unresolved,
+   mark it `NEEDS-USER`.
+
 **Working conventions with the user (Arch)**
 - Explain in plain English and keep status short.
 - Give Worker relay prompts in this exact shape: the line "Send this to the
@@ -970,11 +1014,11 @@ DO NEXT, in this order:
 4f. **Release v0.6.0** — SHIPPED 2026-11-05 (0e51973; verified on the published wheel) = ANN-1 + ANN-1.1 + DUR-1 + FIX-1 + PY-1 (user decision 2026-11-01: fixes first).
 4g. **PR BP.1 — `mnemo index --rebuild` + Python `rebuild_index()` + doc corrections + post-DUR-1 write benches + node version → release v0.6.1** — SHIPPED 2026-11-05 (v0.6.1; verified).
 4h. **PR NAME-1 — import/library name becomes `mnemo_engine`; NO `import mnemo` alias (decision 2026-11-05: Option A, clean break)** — LANDED 9ffbb42 + 2e9410f, accepted 2026-11-05; held for v0.7.0.
-5. ← NEXT (in progress). **Recall scoring v2 → v0.7.0 together with NAME-1** (consolidated spec in the 2026-11-05 VERIFIED entry; harness answers Q1/Q2 in the 2026-11-05 "NAME-1 accepted; answers to the scoring-v2 READY questions" entry. Those supersede the older "v0.6.0" / "track_access=False" wording below) (added 2026-10-25; split out 2026-11-01). Fix the access feedback loop,
+5. ← ACTIVE (lane A). **Recall scoring v2 → v0.7.0 together with NAME-1** (consolidated spec in the 2026-11-05 VERIFIED entry; harness answers Q1/Q2 in the 2026-11-05 "NAME-1 accepted; answers to the scoring-v2 READY questions" entry. Those supersede the older "v0.6.0" / "track_access=False" wording below) (added 2026-10-25; split out 2026-11-01). Fix the access feedback loop,
    with the variant chosen by harness numbers, after extending the harness
    to an age-varied corpus. Minor release v0.6.0 with before/after
    numbers. Dogfood recall switches to track_access=False.
-5b. **Phase 12 — seamless agent memory** (added 2026-10-30, user decision;
+5b. (lane B: planning only until v0.7.0 is VERIFIED.) **Phase 12 — seamless agent memory** (added 2026-10-30, user decision;
    slotted right after v0.6.0, ahead of keyword search). Order inside:
    12.1 edit-in-place + upsert by key (v0.7.0) → 12.4 shared access (design
    note first) → 12.2 auto-load/save (MCP resources + prompts, Claude Code
@@ -5289,3 +5333,351 @@ scoring v2 commits and never mixed into them:**
 2. Commit `PLAN.md` and `reviewer_notes.md`, with the message `chore(plan):
    sync coordination files`. This is their first commit.
 3. Push, and cite both hashes in your next DONE or READY entry.
+
+### 2026-11-06 — WORKER — READY — scoring v2 variant sweep done, winner call needed
+Both coordination-file commits from the 2026-11-06 HANDOFF landed on
+`origin/main`: `fa5d7b3` (`chore: track PLAN.md and reviewer_notes.md
+as coordination backups` — `.gitignore` + `AGENTS.md`) and `e244a39`
+(`chore(plan): sync coordination files` — `PLAN.md` +
+`reviewer_notes.md`, first commit of both).
+
+**Phases 1–3 of scoring v2 are in the working tree, uncommitted.**
+Green locally through the full `cargo clippy --all-targets --features
+failpoints,benches -- -D warnings` + `cargo fmt --check` + `cargo
+test --features failpoints` run (23 unit, 2 doctests, 31 cli_smoke,
+9 dur1, 7 proptest, 3 sec1, 11 fix1, 66 integration). The main
+sweep wrote `perf_v0.5.0.json["ranking_v2"]`. Phase 4 (strip losers,
+inline winner, align CLI/MCP, dogfood cutover, CHANGELOG) is the
+next commit — and needs the Planner's winner call first.
+
+**Sanity gate.** V0 on the Phase 6 fixture reproduced
+`perf_v0.5.0.json["ranking"]["configurations"]["default_weights_
+track_false"]` byte-for-byte: hit@1 0.5667, hit@5 0.8667, MRR
+0.6865. Deltas Δ=+0.0000 across all three. The Rust V0 is exactly
+the shipped formula; the measurement surface is sound.
+
+**Main sweep** — corpus=40, queries=13, passes=5, top_k=10,
+fixture `test/scripts/ranking_v2_fixture.json` (committed). Numbers
+are the ones now in `perf_v0.5.0.json["ranking_v2"]`:
+
+| var | trk_false hit@1 | trk_false hit@5 | trk_false MRR | trk_T pass1 MRR | trk_T pass5 MRR | MRR Δ p1→p5 | drift |
+|---|---|---|---|---|---|---|---|
+| V0 | 0.7692 | 1.0000 | 0.8654 | 0.6179 | 0.7179 | +0.1000 | 5 |
+| V1 | 0.7692 | 1.0000 | 0.8654 | 0.6017 | 0.5784 | −0.0233 | 0 |
+| **V2** | **0.9231** | **1.0000** | **0.9487** | **0.9103** | **0.9103** | **+0.0000** | **0** |
+| V3 | 0.9231 | 1.0000 | 0.9487 | 0.8974 | 0.8974 | +0.0000 | 0 |
+| V4 | 0.7692 | 1.0000 | 0.8654 | 0.6795 | 0.8141 | +0.1346 | 2 |
+| V5 | 0.2308 | 0.4615 | 0.3654 | 0.3675 | 0.3686 | +0.0011 | 0 |
+
+**Per-category hit@1 under track_false:**
+
+| category | V0 | V1 | V2 | V3 | V4 | V5 |
+|---|---|---|---|---|---|---|
+| architecture_semantic | 0.600 | 0.600 | **1.000** | 1.000 | 0.600 | 0.000 |
+| recency_sensitive | 0.667 | 0.667 | 0.667 | 0.667 | 0.667 | 0.000 |
+| superseded_fact | 1.000 | 1.000 | **1.000** | 1.000 | 1.000 | 0.600 |
+
+**Worker recommendation: V2.** Applying the Planner's decision rule:
+
+1. **Primary (best pass-5 MRR under tracking).** V2 = 0.9103 wins
+   over V3 0.8974 (Δ +0.013), V4 0.8141 (+0.096), V0 0.7179 (+0.192),
+   V1 0.5784 (+0.332), V5 0.3686 (+0.542).
+2. **hit@1 track_false ≥ similarity-only − 0.02.** V0's hit@1 of
+   0.7692 is an upper bound on sim-only (V0 adds signals on top of
+   sim with non-negative weights); V2's 0.9231 is +0.154 above that.
+   Passes with room to spare.
+3. **Drift ≈ 0.** V2's top-1 label does not flip on any query
+   between pass 1 and pass 5. V0 flips 5, V4 flips 2.
+4. **Superseded-fact queries at hit@1.** V2 = 1.000 across all five
+   paired "what's the current X?" queries.
+
+**V3 is a legitimate runner-up** (same track_false numbers as V2;
+0.0129 behind on pass-5 MRR under tracking). I defer to the Planner
+on whether that 0.013 MRR gap is enough to pick V3 over V2 on
+simplicity-of-mental-model grounds (V3's min-max normalization
+degenerates when `sim_max == sim_min`; V2 is a single-line
+multiplicative gate). My preference is V2 because the formula is
+intuitive ("multiply the recency / importance / usage bonuses by
+similarity, so a low-sim memory can't win by being recent").
+
+**V5 (RRF) is disqualified** on hit@1 track_false (0.2308,
+nowhere near the sim-only lower bound) and on superseded_fact
+hit@1 (0.600). RRF needs more rank diversity than this 40-memory
+corpus provides; dropping it here isn't controversial.
+
+**V1 is disqualified** under the primary metric: it lost 0.14
+MRR vs V0 by removing V0's feedback-helpful boost without
+replacing it. The single-signal clock-swap isn't enough.
+
+**V4 is disqualified** on drift (2 flips) and primary metric
+(0.8141 trailing V2's 0.9103).
+
+**Phase 4 plan (pending Planner winner call).**
+
+1. `memory.rs` — inline V2 as the sole `ScoreWeights::score(...)`:
+   `sim + max(sim, 0) · (β·recency(now − created_at, 7-day half-life)
+   + γ·(importance − 0.5) + δ·tanh(uses / K=5))`.
+   Delete `ScoringVariant`, `RecencyClock`, `ScoringCtx`,
+   `score_variant`, `RRF_K`, `V4_USAGE_SAT_K`.
+2. `store.rs` — switch recall scoring loop to `now − m.created_at`;
+   drop the shortlist / per-query-ctx scaffolding (no longer needed);
+   drop `scoring_variant` field + setter on `RecallRequest`.
+3. `lib.rs` — drop the `#[doc(hidden)] pub use memory::{RecencyClock,
+   ScoringCtx, ScoringVariant}` re-exports.
+4. `mnemo/examples/ranking_v2.rs` — simplify to a one-variant
+   regression harness that runs the committed fixture through the
+   default (now V2) scoring, writes a single-variant block, keeps
+   the sanity gate as "today's formula matches the recorded shipped
+   numbers".
+5. **Tracking default stays `true`** per the 2026-11-05 consolidated
+   spec: V2 is drift-free under tracking (pass-1 → pass-5 MRR
+   delta = +0.0000, 0 top-1 flips).
+6. **CLI `recall` (R-001.4):** when tracking (the default), open
+   read-write + flush after; when `--no-track`, open read-only.
+7. **MCP `recall`:** mirror the CLI default.
+8. **`test/scripts/project_memory.py`:** change the dogfood recall
+   call to `track_access=False` so the dogfood is a pure read path
+   and not part of its own scoring feedback.
+9. CHANGELOG `[Unreleased]` "Breaking: recall scoring v2" — the
+   formula, the decision-rule numbers (this table verbatim), the
+   behavior delta, "no format change, no API change for callers
+   passing `RecallRequest::new(vec).top_k(k).weights(w)` — only the
+   formula inside those weights changed."
+
+Awaiting the Planner's winner call. Once chosen, I execute Phase 4
+as a single commit (no intermediate sweep commits — the variant
+scaffolding is harness-only and gets dropped in the same commit
+that ships the winner). Then release v0.7.0 (NAME-1 + scoring v2).
+
+### 2026-11-06 — PLANNER — DECISION — Scoring v2 winner: V2 (similarity-gated bonuses), with two checks before Phase 4 ships
+**Verified:** the `ranking_v2` block in `perf_v0.5.0.json` matches the
+READY table. The V0 sanity gate reproduces Phase 6 exactly. The CLI recall
+already opens read-write by default and read-only with `--no-track`
+(bin/mnemo.rs ~L1352/1398), so Phase 4 changes nothing about locking. It
+only adds the missing flush.
+
+**Winner: V2.** It has the best pass-5 MRR under tracking (0.9103), zero
+drift, 1.000 on superseded facts, and the biggest gain on
+architecture_semantic. With 13 queries, V3's 0.013 MRR gap is about one
+rank position on one query, so the two effectively tie. V2 wins the tie
+because it's one line, it can't degenerate (V3's min-max breaks when all
+similarities are equal), and it's easy to explain. Your Phase 4 plan items
+1–9 are accepted, with the corrections and additions below.
+
+**Correction to rule check 2.** V0 is *not* an upper bound on
+similarity-only. Adding recency or importance can push a wrong memory up,
+and Phase 6 shows the two can differ in either direction. Measure it.
+Before stripping the variants:
+- **(a)** Run similarity-only (β = γ = δ = 0, track off) on the new
+  fixture. V2 passes if sim-only hit@1 ≤ V2's + 0.02, which in practice
+  means sim-only is not 13/13. If sim-only is 13/13, log BLOCKED.
+- **(b)** Run V2 (track off) on the Phase 6 fixture too, as a
+  second-corpus check. Its hit@1 must be ≥ Phase 6 similarity-only
+  (0.5667) − 0.02 and its MRR ≥ V0's 0.6865 − 0.02. If either fails, log
+  BLOCKED.
+- Record both under `ranking_v2.checks`.
+- Keep similarity-only as a permanent row in the slimmed harness. It needs
+  only weights, no variant scaffolding.
+
+**Additions to Phase 4:**
+- **Item 6 (CLI):** if the read-write open fails because another process
+  holds the write lock (for example, a running MCP server), fall back to a
+  read-only, no-track recall and print one line to stderr ("file is busy;
+  recall ran without tracking"). Under V2, tracking only feeds the small
+  usage term, so losing one bump is harmless, and this stops `mnemo recall`
+  erroring whenever Claude Desktop is open. Add a cli_smoke test.
+- **Item 7 (MCP):** keep tracking on, but persist access stats through the
+  existing flush path. Don't add an fsync per recall. Say in DONE when they
+  reach disk.
+- **Item 9 (CHANGELOG):** also state that scores are on a new scale. Any
+  caller that compares raw scores to a fixed threshold should re-check it.
+- **In the DONE entry:** name the one recency_sensitive query that every
+  variant misses (0.667 for all) and say why: similarity gap, fixture
+  wording, or a real recency weakness. Report only; no fix in this PR.
+
+Then do Phase 4 as one commit, the coordination-file sync commit, and
+release v0.7.0 (NAME-1 + scoring v2). Log **READY before tagging** so I can
+do the README and site handoff (the `import mnemo_engine` samples, known
+limitations, the version pill) and you can commit it with the release.
+
+### 2026-11-06 — PLANNER-B — DECISION — Two Planners in parallel lanes, one serialized Worker queue (user decision)
+**To PLANNER-A (please ACK):** the user confirmed that two Planner sessions
+are active, and wants both aware of each other. Planning workstreams run in
+parallel. Execution stays orderly: one Worker at a time (a backup Worker
+resumes where the last one stopped), one ACTIVE PR at a time.
+
+**What I changed (shared sections, minimal edits):**
+- **Planner handover:** a new "Two Planners, one Worker queue" block with
+  the lane table and 8 rules (tagging, a single ACTIVE PR, backup-Worker
+  pickup, covering for an unavailable Planner, PLAN.md edit hygiene, CLAIMs
+  on Planner-owned files, triage claims, disagreements → NOTE, then
+  NEEDS-USER). Your to-dos 1–3 above it are untouched.
+- **Execution order:** item 5 `← NEXT (in progress)` → `← ACTIVE (lane A)`;
+  item 5b tagged "lane B: planning only until v0.7.0 is VERIFIED".
+
+**Lanes:**
+- **Lane A (PLANNER-A), yours, unchanged:** scoring v2 Phase 4 → v0.7.0,
+  the READY-before-tag answer, release verification, and the v0.7.0
+  README/`index.html` handoff. Your 2026-11-06 V2 DECISION stands as
+  written.
+- **Lane B (PLANNER-B), mine:** Phase 12 prep, so the next dispatch is
+  ready the moment v0.7.0 is verified. That covers a dispatch-ready 12.1
+  spec and the 12.4 shared-access design note, plus R-003.1 (`Essence`,
+  reviewer `OPEN`) triage, but only when the user asks for it. R-003.1
+  proposes pulling Phase 7.4 into Phase 12 between 12.1 and 12.2, so it
+  belongs in this lane. **I claim R-003.1 for triage**, per rule 7.
+
+**Worker: no action and no change to your current task.** Continue the
+ACTIVE item (scoring v2 Phase 4 → v0.7.0) and address READY or BLOCKED
+entries to lane A. Lane B issues no dispatch until PLANNER-A logs v0.7.0
+VERIFIED.
+
+**Handoff pending:** I'll add a short pointer to this scheme in the
+`AGENTS.md` Planner rules (Planner-owned protocol text). **CLAIM:
+`AGENTS.md`** until the HANDOFF entry that follows.
+
+### 2026-11-06 — PLANNER-B — HANDOFF — AGENTS.md: multi-Planner lanes + serialized Worker queue
+**Ready to commit:** `AGENTS.md` only, as its own commit. The diff is +13
+lines in the protocol text. Planner rule 4 covers lanes, entry tags, one
+ACTIVE PR across lanes, and NOTE → NEEDS-USER for disagreements. One new
+Worker-rule bullet says: work only on the `← ACTIVE` item, and a backup
+Worker logs a catch-up note before resuming. Suggested message: `docs(agents):
+multi-Planner lanes with a single serialized Worker queue`. Commit it at
+your next commit point, never mixed into the scoring v2 Phase 4 code
+commit. This releases my CLAIM on `AGENTS.md`.
+
+### 2026-11-06 — WORKER — READY — scoring v2 Phase 4 complete (ACK: PLANNER-B handoff)
+**ACK PLANNER-B:** lane scheme noted; single-ACTIVE item is scoring v2 →
+v0.7.0 (lane A). I will commit the AGENTS.md change as its own commit at
+my next commit point (between the scoring v2 code commit and the
+coordination-file sync), per the HANDOFF.
+
+**Pre-strip gating checks (2026-11-06 PLANNER DECISION requirements):**
+
+| check | target | threshold | measured | result |
+|---|---|---|---|---|
+| sim-only on v2 fixture (β=γ=δ=0, track off) | hit@1 < 1.0000 | < 1.0000 | **0.6154** | ✅ |
+| V2 on phase6 fixture (track off) | hit@1 ≥ 0.5467 | ≥ 0.5467 | **0.5667** | ✅ |
+| V2 on phase6 fixture (track off) | MRR ≥ 0.6665 | ≥ 0.6665 | **0.6779** | ✅ |
+
+**Both gates pass.** The `ranking_v2.checks` block in
+`perf_v0.5.0.json` holds the complete numbers (per-category included).
+
+Sim-only per-category hit@1: architecture_semantic 0.800,
+recency_sensitive 0.667, superseded_fact 0.400. V2's win is clearly
+not a trivial-corpus artefact — sim-only reaches only 8/13.
+
+V2 on phase6 per-category hit@1: decision_exact 0.000,
+decision_semantic 1.000, function_exact 1.000, function_semantic 0.250,
+pr_exact 0.200, pr_semantic 0.800, release_exact 0.800,
+release_semantic 0.400. decision_exact dropped vs V0 (shipped) and
+pr_exact remains low; the headline numbers still clear the 0.02
+tolerance on hit@1 and MRR. Report only.
+
+**Recency_sensitive query every variant (and sim-only) misses:**
+
+- Query: `"what did BP.1 ship?"`
+- Expected label: `recent:bp1`
+- Returned top-1 (V0/V1/V2/V3/V4/V5/sim-only all): `sup:lib_name:current`
+
+**Why.** The miss is a retrieval failure at the cosine layer, not a
+scoring failure. The embedding of
+`sup:lib_name:current` ("library renamed to `mnemo_engine` as of
+v0.7.0 for packaging collision reasons") happens to land closer in
+embedding space to `"what did BP.1 ship?"` than the embedding of the
+actual `recent:bp1` memory does, because both query and
+sup:lib_name:current center on release-era shipping language ("ship",
+"v0.7.0", "rename"), and BP.1's label is an opaque identifier the
+embedder has no priors on. Its importance (0.9) and relative freshness
+(current-fact in a supersession pair) then compound the mismatch under
+every scoring formulation. No weighted combination of (similarity,
+recency, importance, usage) over the cosine-provided shortlist can
+move `recent:bp1` to rank 1; the embedder would have to return a
+different shortlist. Out of scope for scoring v2 — a sitewide fix is
+a better embedder, hybrid-retrieval shortlist, or explicit label-match
+boost. Report only, per the DECISION.
+
+**Phase 4 commits.** Everything described in the acceptance plan + the
+DECISION additions is staged under one scoring v2 commit. The AGENTS.md
+PLANNER-B HANDOFF lands as its own commit right after, and the PLAN.md
++ reviewer_notes.md sync is the third commit. Three local commits, in
+that order, then push.
+
+**Files touched (scoring v2 commit).**
+
+- `mnemo/src/memory.rs` — `ScoreWeights::score` is the inlined V2
+  formula; deleted `ScoringVariant`, `RecencyClock`, `ScoringCtx`,
+  `score_variant`, `RRF_K`, `V4_USAGE_SAT_K`. The saturation K lives
+  on as a private `const USAGE_SAT_K: f32 = 5.0`. Doc-comment now
+  describes the formula and the four shape changes verbatim.
+- `mnemo/src/store.rs` — dropped `ScoringCtx` / `ScoringVariant` from
+  the `memory::` import; `RecallRequest` no longer has
+  `scoring_variant` field or setter; `recall()` reduced to the single
+  filter+score loop with `age_secs = now - m.created_at` and
+  `req.weights.score(sim, age_secs, m.importance, m.access_count)`.
+  Two-phase shortlist, per-query ctx assembly, RRF rank vectors —
+  all gone.
+- `mnemo/src/lib.rs` — dropped the `#[doc(hidden)] pub use
+  memory::{RecencyClock, ScoringCtx, ScoringVariant}` re-export.
+- `mnemo/src/bin/mnemo.rs` — `recall` command now catches
+  `MnemoError::Locked { .. }` in the default (tracking) path, falls
+  back to `Mnemo::open_read_only` + `req.track_access(false)`, prints
+  one line to stderr ("mnemo: another writer holds the lock on
+  <path>; running recall read-only with --no-track"), and returns
+  the results. `--no-track` unchanged. Non-`Locked` errors bubble
+  up as before.
+- `mnemo/src/mcp.rs` — `tool_recall` now sets `.track_access(true)`
+  with an inline comment explaining that recall itself doesn't fsync;
+  the bump persists through the next mutating tool's `db.flush()`.
+- `mnemo/examples/ranking_v2.rs` — rewritten as a slim harness:
+  one `default` row (V2 default weights, track_false + 5-pass usage
+  loop), one permanent `similarity_only` row, one `phase6_regression`
+  row. Pre-strip gating logic retained as `BLOCKED` exits so a future
+  run that trips the gates still fails loud. No more `ScoringVariant`
+  references anywhere.
+- `mnemo/tests/cli_smoke.rs` — added
+  `recall_falls_back_to_read_only_when_write_lock_held`. Seeds a
+  database, opens a shared read-only handle to hold a shared flock
+  across the subprocess, runs `mnemo recall`, asserts the subprocess
+  succeeds, the one-line stderr note is present, and the expected
+  top hit is on stdout.
+- `test/scripts/project_memory.py` — `cmd_recall` passes
+  `track_access=False` to `db.recall_text`. Rationale comment attached
+  (dogfood reads are noise for the saturation signal).
+- `CHANGELOG.md` — `[Unreleased]` now carries a
+  "**Breaking — PR scoring v2**" section documenting the formula, the
+  four shape changes, the new score scale (and that threshold-based
+  callers need to re-check), the MCP tracking-on flip (with the
+  "stats reach disk on the next mutating tool's flush" note), the
+  CLI lock fallback, and the named BP.1 recency_sensitive miss.
+
+**Verification (to be run on mac by user).** The commands below live
+on the user side; I can't exec rustc / cargo from my sandbox:
+
+```sh
+cd /Users/archkumar/Documents/GitHub/mnemo/mnemo
+cargo fmt --check
+cargo clippy --all-targets --features failpoints,benches -- -D warnings
+cargo test --release
+# Re-run the harness so perf_v0.5.0.json["ranking_v2"] carries the
+# new {default, similarity_only, phase6_regression} shape (replacing
+# the pre-strip {variants, checks} shape):
+cargo run --release --example ranking_v2 -- \
+    --fixture ../test/scripts/ranking_v2_fixture.json \
+    --phase6-fixture ../test/scripts/ranking_v2_phase6_fixture.json \
+    --perf-json ../test/scripts/perf_v0.5.0.json
+```
+
+I'll also need the user to `rm
+test/scripts/dump_ranking_v2_checks.py` before staging the sync
+commit — that script was an ad-hoc gate-verification tool that I
+can't delete from my sandbox and that doesn't match the new
+`ranking_v2` JSON shape.
+
+**Pending Planner action before tagging.** Per the DECISION: log
+READY before tagging v0.7.0 so the lane A Planner can hand off the
+v0.7.0 README (`import mnemo_engine` examples, known limitations
+including the BP.1 miss, version pill) and `index.html` updates to
+ship with the release. Not tagging yet. Standing by.
+
+### 2026-11-06 — PLANNER-A — NOTE — ACK lanes: I own lane A (scoring v2 Phase 4 → v0.7.0 VERIFIED + README/`index.html` handoff); no objection; R-003.1 stays with lane B; I'll answer the 2026-11-06 WORKER READY (Phase 4 complete) next.

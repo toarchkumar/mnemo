@@ -1,14 +1,14 @@
 # reviewer_notes.md — Independent Review & Product Advisory Log
 
-> **Local coordination file (Reviewer ↔ Planner). Never `git add` or commit this file.**
-> Excluded from git via `.gitignore` (commit `4634866`) and `.git/info/exclude`.
+> **Coordination file (Reviewer ↔ Planner), tracked in git as a backup (since 2026-11-06). Only the `Worker` commits this file (`chore(plan): sync coordination files`).**
+> **The repository is public: unfixed security findings go in a gitignored `*.local.md` file (e.g. `SECURITY.local.md`), not here, until the fix ships.**
 
 ## Protocol
 
 Three LLM roles collaborate on this repository, with strict file boundaries so active execution is never disrupted:
 
 1. **Reviewer** (independent read-only auditor & product advisor):
-   - **Never edits** tracked code, `PLAN.md`, or `test/project.mnemo` (inspects `test/project.mnemo` strictly with `read_only=True` / `--no-track`).
+   - **Never edits** tracked code, `PLAN.md`, or `test/project.mnemo` (inspects `test/project.mnemo` strictly with `read_only=True` / `--no-track`), and **never runs `git add` or `git commit`**. Writes exclusively to `reviewer_notes.md` (except unfixed security findings, which go in a gitignored `*.local.md` file until the fix ships).
    - Grounds every finding in live source code, uncommitted working-tree diffs, `test/scripts/perf_*.json`, and `PLAN.md` (no stale-doc recommendations for already-shipped or already-queued work unless refining or challenging an active spec).
    - Appends review batches (`REV-001`, `REV-002`, …) with stable item IDs (`R-001.1`, `R-001.2`, …), adds each item to the **Decision Ledger** below with status `OPEN`, and leaves implementation scheduling to the Planner.
    - Before each new review pass, reads prior Planner dispositions: never re-raises `REJECTED` items unless new code/benchmark evidence invalidates the rationale, and marks shipped `ACCEPTED` items `VERIFIED (<commit/tag>)` once confirmed in code.
@@ -22,8 +22,8 @@ Three LLM roles collaborate on this repository, with strict file boundaries so a
      - `NEEDS-USER` — trade-off surfaced to the maintainer for a decision.
    - Logs a brief `REVIEW` entry in `PLAN.md`'s `WORKLOG` referencing the item IDs (e.g. `Triaged REV-001: accepted R-001.1 -> PR ..., rejected R-001.X`) if it changes `PLAN.md`.
 
-3. **Worker** (PR executor):
-   - **Ignores this file.** `PLAN.md` and `AGENTS.md` remain the sole authoritative execution instructions for the Worker, ensuring untriaged review notes never derail an in-flight PR.
+3. **Worker** (PR executor & sole committer):
+   - **Ignores the content of this file** during PR execution — `PLAN.md` and `AGENTS.md` remain the sole authoritative execution instructions for the Worker, ensuring untriaged review notes never derail an in-flight PR. As sole committer, the Worker commits `PLAN.md` and `reviewer_notes.md` by explicit path in a separate `chore(plan): sync coordination files` commit after each `DONE` entry and before tagging a release.
 
 ### Status Lifecycle
 
@@ -54,25 +54,26 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 
 | ID | Date | Category | Pri | Title | Status | Disposition / Target (`PLAN.md`) |
 |---|---|---|---|---|---|---|
-| `R-001.1` | 2026-10-31 | `CORRECTNESS` | `HIGH` | `Mnemo::compact_file` silently destroys the entire Result Cache (`cache_dir` + entries) | `ACCEPTED` | PR FIX-1 (v0.6.0 batch) + interim README caveat |
-| `R-001.2` | 2026-10-31 | `CORRECTNESS` | `HIGH` | Torn-header WAL recovery replays ancient page-1 WAL after relocation + unlogged page-0 writes | `ACCEPTED` | NEW PR DUR-1, ships in v0.6.0 (user: fixes first, no hotfix) |
-| `R-001.3` | 2026-10-31 | `CORRECTNESS` | `HIGH` | In-flight `PR ANN-1.1` auto-defaults bypassed by CLI `mnemo index`, lost on `rebuild_index`/`compact_file`, stale in `IndexInfo` | `VERIFIED` | Verified in amended PR ANN-1.1 working tree (`c417d2e`+) |
+| `R-001.1` | 2026-10-31 | `CORRECTNESS` | `HIGH` | `Mnemo::compact_file` silently destroys the entire Result Cache (`cache_dir` + entries) | `VERIFIED` | Shipped in PR FIX-1 (`8e09e60`, `v0.6.0`) |
+| `R-001.2` | 2026-10-31 | `CORRECTNESS` | `HIGH` | Torn-header WAL recovery replays ancient page-1 WAL after relocation + unlogged page-0 writes | `VERIFIED` | Shipped in PR DUR-1 (`4f1edc1`, `v0.6.0`) |
+| `R-001.3` | 2026-10-31 | `CORRECTNESS` | `HIGH` | In-flight `PR ANN-1.1` auto-defaults bypassed by CLI `mnemo index`, lost on `rebuild_index`/`compact_file`, stale in `IndexInfo` | `VERIFIED` | Shipped in PR ANN-1.1 (`190a407`, `v0.6.0`) |
 | `R-001.4` | 2026-10-31 | `CORRECTNESS` | `MEDIUM` | CLI `mnemo recall` (default tracking mode) takes exclusive lock but drops without flushing stats or manifest | `ACCEPTED` | Recall scoring v2 (CLI follows the tracking decision) |
-| `R-001.5` | 2026-10-31 | `CORRECTNESS` | `MEDIUM` | Windows mandatory-lock failure in Python `export_encrypted` & `rekey(fast=False)` clobbering custom KDF params | `ACCEPTED` | PR FIX-1 |
-| `R-001.6` | 2026-10-31 | `CORRECTNESS` | `MEDIUM` | `EmbedCmd::embed` omits zero-vector protocol check on `recall` and `cache_get_semantic` | `ACCEPTED` | PR FIX-1 |
-| `R-001.7` | 2026-10-31 | `PERF` | `HIGH` | `SEC-1` made pre-flush page-0 nonce-lease `sync_all` obsolete: cut `flush()` from 4 fsyncs to 2 (~35–50% faster writes) | `ACCEPTED` | Lease-write removal -> PR DUR-1; fsync merge -> Phase 11.1 |
-| `R-001.8` | 2026-10-31 | `PERF` | `HIGH` | `Mnemo::stats()` is `O(N)` full-DB decrypt; cache/access flushes evict 256-slot PITR snapshots; `O(M log M)` sort in ANN search | `ACCEPTED` | Part 3 `VERIFIED` in amended ANN-1.1; Parts 1-2 -> PR FIX-1 |
+| `R-001.5` | 2026-10-31 | `CORRECTNESS` | `MEDIUM` | Windows mandatory-lock failure in Python `export_encrypted` & `rekey(fast=False)` clobbering custom KDF params | `VERIFIED` | Shipped in PR FIX-1 (`8e09e60`, `93e2620`, `v0.6.0`) |
+| `R-001.6` | 2026-10-31 | `CORRECTNESS` | `MEDIUM` | `EmbedCmd::embed` omits zero-vector protocol check on `recall` and `cache_get_semantic` | `VERIFIED` | Shipped in PR FIX-1 (`8e09e60`, `v0.6.0`) |
+| `R-001.7` | 2026-10-31 | `PERF` | `HIGH` | `SEC-1` made pre-flush page-0 nonce-lease `sync_all` obsolete: cut `flush()` from 4 fsyncs to 2 (~35–50% faster writes) | `ACCEPTED` | Lease-write removal `VERIFIED` in PR DUR-1 (`4f1edc1`, `v0.6.0`); fsync merge -> Phase 11.1 |
+| `R-001.8` | 2026-10-31 | `PERF` | `HIGH` | `Mnemo::stats()` is `O(N)` full-DB decrypt; cache/access flushes evict 256-slot PITR snapshots; `O(M log M)` sort in ANN search | `VERIFIED` | Part 3 in ANN-1.1 (`190a407`); Parts 1-2 in PR FIX-1 (`8e09e60`, `v0.6.0`) |
 | `R-001.9` | 2026-10-31 | `PERF` | `MEDIUM` | ANN 1M-tier `n_probe = 50%` scaling ceiling & Residual IVF-PQ (`IVF-RPQ`) opportunity in format v9 | `DEFERRED` | Start of Phase 2 + 11.2 (v9) evaluation |
 | `R-001.10` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | Positional MessagePack (`rmp_serde::to_vec`) forward-compatibility hazard on `format::VERSION = 8` | `VERIFIED` | Standing rule in PLAN.md + `V052IvfPqIndex` field-count guard in ANN-1.1 |
-| `R-001.11` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR PY-1` (`py.allow_threads` + `Option<Core>`): avoid `PyFnEmbedder` re-entrant borrow panic & cover `Session` | `ACCEPTED` | PR PY-1 spec |
-| `R-001.12` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `Recall scoring v2`: similarity-gated boosts, `created_at` vs `accessed_at` recency split, and `ranking_harness.py` timestamp variance | `ACCEPTED` | Recall scoring v2 candidates + harness requirements |
+| `R-001.11` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR PY-1` (`py.allow_threads` + `Option<Core>`): avoid `PyFnEmbedder` re-entrant borrow panic & cover `Session` | `VERIFIED` | Shipped in PR PY-1 (`abfaff3`, `v0.6.0`) |
+| `R-001.12` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `Recall scoring v2`: similarity-gated boosts, `created_at` vs `accessed_at` recency split, and `ranking_harness.py` timestamp variance | `ACCEPTED` | Recall scoring v2 (V2 selected 2026-11-06 -> `v0.7.0`) |
 | `R-001.13` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `Phase 12.4` Shared Access (`--shared`): `try_lock` contention & `compact_file` `rename` hazards on Windows/Unix | `ACCEPTED` | Phase 12.4 design-note requirements |
 | `R-001.14` | 2026-10-31 | `PRODUCT` | `HIGH` | Pre-top-k structured metadata & `session_id` predicate filtering in `RecallRequest`, CLI, Python, and MCP | `ACCEPTED` | NEW Phase 12.6 filtered recall |
 | `R-001.15` | 2026-10-31 | `PRODUCT` | `MEDIUM` | Token-budgeted context packing & Maximal Marginal Relevance (MMR) diversity in `recall` | `DEFERRED` | Phase 7.5 (harness-evaluated) |
 | `R-001.16` | 2026-10-31 | `PRODUCT` | `MEDIUM` | Cognitive consolidation on `Session::close` & transactional brain diffing (`mnemo diff <txn_a> [txn_b]`) | `ACCEPTED` | diff -> Phase 12.5; consolidation -> Phase 7.4; Session text methods -> Phase 12.1 |
 | `R-001.17` | 2026-10-31 | `PRODUCT` | `IDEA` | Portable encrypted Knowledge Packs: read-only federated mounts (`attach_pack`) & scoped encrypted fork/merge | `DEFERRED` | After Phase 12.4 + v9; trigger: real multi-file use |
-| `R-002.1` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR DUR-1` recovery design: 3 crash/truncation windows (relocation zero-before-write gap, 64-page scan cap, torn bytes outside `0..238` CRC) | `ACCEPTED` | PR DUR-1 spec amended (REV-002 entry); item-3 seal-heal fallback WITHDRAWN 2026-11-01 (tamper-evidence wins) |
-| `R-002.2` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `PR FIX-1` details: sync directory `accessed_at`/`access_count` on cache compaction (+ read-only `cache_get` bug) & guard `export_encrypted` self-truncation | `ACCEPTED` | PR FIX-1 spec amended (REV-002 entry in PLAN.md) |
+| `R-002.1` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR DUR-1` recovery design: 3 crash/truncation windows (relocation zero-before-write gap, 64-page scan cap, torn bytes outside `0..238` CRC) | `VERIFIED` | Shipped in PR DUR-1 (`4f1edc1`, `6bb5a84`, `22b4c1e`, `v0.6.0`) |
+| `R-002.2` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `PR FIX-1` details: sync directory `accessed_at`/`access_count` on cache compaction (+ read-only `cache_get` bug) & guard `export_encrypted` self-truncation | `VERIFIED` | Shipped in PR FIX-1 (`8e09e60`, `93e2620`, `v0.6.0`) |
+| `R-003.1` | 2026-11-06 | `PRODUCT` | `HIGH` | First-class `Essence` object & seamless conversation compaction (`Session::compact` / MCP `compact_conversation` / `mnemo essence`) | `OPEN` | _(pending)_ |
 
 ---
 
@@ -88,7 +89,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 ---
 
 #### R-001.1 — [CORRECTNESS] [HIGH] `Mnemo::compact_file` silently destroys the entire Result Cache (`cache_dir` + entries)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR FIX-1 @ 8e09e60, v0.6.0)`
 - **Context / Evidence:** `mnemo/src/store.rs:2699-2742` (`Mnemo::compact_file`), `mnemo/src/store.rs:2018, 2172`, `mnemo-python/src/lib.rs:795`, `mnemo/src/bin/mnemo.rs:431, 1523`, `README.md` (`v0.5.2` security advisory).
 - **Finding:** `Mnemo::compact_file` opens `old`, creates `new`, copies live `old.memories()` (`store.rs:2716-2725`), and rebuilds the ANN index (`store.rs:2727-2735`), then atomically `rename`s `tmp` over `path`. It **never copies `old.cache_dir` or any `CacheEntry` (neither `Exact` nor `Semantic`)**. This causes silent 100% cache data loss whenever `compact_file` / `mnemo compact` runs. Worse: (1) `cache_delete` / `cache_purge` docs explicitly instruct users to run `compact_file` / `mnemo compact` to reclaim tombstoned cache pages, and (2) the `v0.5.2` security advisory instructs users to run `mnemo compact` to rotate the DEK on copied files. Additionally, `Mnemo::verify` (`store.rs:2659-2673`) only decrypts/verifies `self.catalog` records and skips `self.cache_dir` records.
 - **Recommendation:**
@@ -98,7 +99,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) → PR FIX-1. Verified: `compact_file` copies only `old.memories()` into the new file and drops every cache entry; `verify()` checks only the memory catalog. FIX-1 copies live exact+semantic cache entries (with their metadata), reports cache counts and extends `verify()`. The planner added an interim caveat to the root README's v0.5.2 advisory, since it tells users to run `mnemo compact`.
 
 #### R-001.2 — [CORRECTNESS] [HIGH] Torn-header WAL recovery replays ancient page-1 WAL after relocation + unlogged page-0 writes
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR DUR-1 @ 4f1edc1, v0.6.0)`
 - **Context / Evidence:** `mnemo/src/store.rs:73, 729-750, 1650-1670, 1939-1945, 2653`, `mnemo/src/wal.rs:146-210`.
 - **Finding:** Two interacting page-0 durability hazards exist:
   1. **Stale WAL replay after WAL relocation:** When `Header::from_page` returns `Err(MnemoError::HeaderChecksum)` (a torn page-0 write), `Mnemo::open` (`store.rs:736`) calls `wal::recover(&mut file, 1, TORN_HEADER_SCAN_PAGES, 0)` — hardcoding `wal_start = 1` and `wal_seq = 0`. Since `DEFAULT_WAL_PAGES` was lowered to `8` (64 KiB), any DB whose control plane (catalog + ANN index + cache dir + manifest) grows past ~56 KiB triggers `ensure_wal_capacity` (`store.rs:1650-1670`), which relocates `wal_start` to `header.next_page` at the file tail **without clearing the old WAL frames at pages `1..9`**. Pages `1..9` still retain a valid `MWAL` frame + `KIND_COMMIT` CRC from early in the file's life (`txn_id >= 1 > 0`). If page 0 is ever torn later, `Mnemo::open` scans page 1, sees a valid committed txn with `id > 0`, and **replays the ancient page-0 header and catalog**, silently rolling back and corrupting the database.
@@ -130,7 +131,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) — (partly correct) -> Recall scoring v2. Verified: the CLI's tracking `recall` opens read-write and drops the handle without flushing, discarding access-stat updates. Incorrect sub-claim: the manifest identity write is NOT lost, because `set_embedder` flushes its own upsert. Scoring v2 decides the tracking default; the CLI then flushes (if tracking) or opens read-only (if not).
 
 #### R-001.5 — [CORRECTNESS] [MEDIUM] Windows mandatory-lock failure in Python `export_encrypted` & `rekey(fast=False)` clobbering custom KDF params
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR FIX-1 @ 8e09e60, 93e2620, v0.6.0)`
 - **Context / Evidence:** `mnemo-python/src/lib.rs:580-597, 710-740`, `mnemo/src/pager.rs:102-115`.
 - **Finding:**
   1. **`export_encrypted` on Windows read-write handles:** `Mnemo.export_encrypted` calls `self.inner.close()` (`lib.rs:731`, which flushes `Core` in place while keeping its `File` handle and exclusive `LockFileEx` lock open) and then calls `std::fs::copy(&self.path, dest)` (`lib.rs:734`). Because Windows `LockFileEx` byte-range locks (`0..u64::MAX`) are **mandatory**, opening `self.path` via a second file descriptor inside `std::fs::copy` while holding an exclusive lock fails with `ERROR_LOCK_VIOLATION` (OS error 33). Existing tests in `mnemo-python/test_mnemo.py` only exercised `export_encrypted` on a `read_only=True` shared lock.
@@ -141,7 +142,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) → PR FIX-1: a core `Mnemo::export_encrypted` streaming from the open handle (Python delegates; Rust test on the 3-OS matrix, since Python CI is Linux-only) and a `kdf_params()` accessor so `rekey(fast=False)` keeps the file's current KDF params. Impact of the KDF point is low (`KdfParams::default()` == `secure()` == the creation default), but the docstring is wrong.
 
 #### R-001.6 — [CORRECTNESS] [MEDIUM] `EmbedCmd::embed` omits zero-vector protocol check on `recall` and `cache_get_semantic`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR FIX-1 @ 8e09e60, v0.6.0)`
 - **Context / Evidence:** `mnemo/src/embed_cmd.rs:53, 402, 464-495`, `mnemo/src/embed.rs:89-91`.
 - **Finding:** Both `embed_cmd.rs` module docs (lines 53, 402) and `CHANGELOG.md` state that an all-zero vector reply from `--embed-cmd` is treated as a protocol violation that kills and respawns the child process. In reality, `EmbedCmd::embed` checks dimension width (`embed_cmd.rs:465`) and `x.is_finite()` (`embed_cmd.rs:474`), but **never checks `crate::embed::is_zero_vector(&vec)`**. While `remember` later rejects zero vectors inside `store::put` (leaving the wedged child alive instead of restarting it), `recall --text` and `cache_get_semantic` do not reject zero vectors at all — silently returning 0-similarity results.
 - **Recommendation:** Add an `is_zero_vector(&vec)` check right after the `is_finite()` check in `EmbedCmd::embed` (`embed_cmd.rs:480`), routing through `fail_and_restart` with a clear `"all-zero vector"` protocol error, plus a unit test in `embed_cmd.rs`.
@@ -165,7 +166,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) — (partly correct). Confirmed: since SEC-1, `write_counter` feeds no nonce, so `prepare_for_flush`'s page-0 lease write + fsync is obsolete -> removed in PR DUR-1 (4 -> 3 fsyncs). Incorrect sub-claims: `wal::commit` issues ONE `sync_all` and `wal::clear` does not exist, so a flush is 4 fsyncs (the counter is accurate), not 6. The data+WAL fsync merge / lazy checkpoint (~2 fsyncs) -> Phase 11.1 with crash tests.
 
 #### R-001.8 — [PERF] [HIGH] `Mnemo::stats()` is `O(N)` full-DB decrypt; cache/access flushes evict 256-slot PITR snapshots; `O(M log M)` sort in ANN search
-- **Status:** `ACCEPTED (Part 3 VERIFIED in amended ANN-1.1; Parts 1-2 pending PR FIX-1)`
+- **Status:** `VERIFIED (Part 3 in ANN-1.1 @ 190a407; Parts 1-2 in PR FIX-1 @ 8e09e60, v0.6.0)`
 - **Context / Evidence:** `mnemo/src/store.rs:1794-1820, 2146-2150, 2497-2501, 2676-2694`, `mnemo-python/src/lib.rs:620`, `mnemo/src/index.rs:593-595`.
 - **Finding:** Three engine bottlenecks that degrade scaling and PITR usability:
   1. **`Mnemo::stats()` decrypts every live record (`O(N)`):** `stats()` (`store.rs:2679`) calls `self.memories()?` solely to compute distinct `agents: Vec<String>`. At 100K–1M memories, `mnemo info`, `mnemo about`, or `db.stats()` takes 1–64 seconds of AES-GCM decryption + MessagePack decoding. Worse, Python's `Mnemo.insert_default_manifest` (`mnemo-python/src/lib.rs:620`) calls `self.inner.stats()` just to read `dimensions` instead of `self.inner.dimensions()`.
@@ -196,7 +197,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) — Verified in rmp-serde 1.3.0 source: excess array elements -> `Error::LengthMismatch` (decode.rs ~L571-574). New standing rule: no appended positional fields under the same `format::VERSION`; either bump VERSION with a migration or use reserved `_mnemo.*` keys in `Memory.metadata`. Applied: ANN-1.1 drops its new field; the Phase 12.1 spec now uses metadata keys; v9 adds `min_reader_version`.
 
 #### R-001.11 — [PLAN-REFINEMENT] [HIGH] `PR PY-1` (`py.allow_threads` + `Option<Core>`): avoid `PyFnEmbedder` re-entrant borrow panic & cover `Session`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR PY-1 @ abfaff3, v0.6.0)`
 - **Context / Evidence:** `PLAN.md:3258-3288, 3655-3672` (`PR PY-1`), `mnemo-python/src/lib.rs:145-195, 345-450, 980-1033, 1157-1319`.
 - **Finding:** Two PyO3 subtleties in `PR PY-1`'s current spec:
   1. **Re-entrant `PyRefMut` borrow panic if `PyFnEmbedder` runs inside `py.allow_threads` on a `&mut self` method:** When a `#[pymethods]` function takes `&mut self`, PyO3 holds the `PyCell`/`PyRefMut` mutable borrow flag for the **entire duration of the Rust method, even while the GIL is released inside `py.allow_threads`**. That protects against concurrent threads mutating `db`, *but* if `py.allow_threads` invokes a Rust method that calls back into `PyFnEmbedder::embed` (re-acquiring the GIL on the *same* thread) and the user's Python embedder callback touches `db` (e.g. `db.dimensions()`, `db.cache_get("embeddings", text)`, or `len(db)`), PyO3 immediately raises `RuntimeError: Already borrowed`!
@@ -289,7 +290,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 ---
 
 #### R-002.1 — [PLAN-REFINEMENT] [HIGH] `PR DUR-1` recovery design: 3 crash/truncation windows (relocation zero-before-write gap, 64-page scan cap, torn bytes outside `0..238` CRC)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR DUR-1 @ 4f1edc1, 6bb5a84, 22b4c1e, v0.6.0)`
 - **Context / Evidence:** `PLAN.md:3798-3812` (`PR DUR-1` spec), `mnemo/src/store.rs:73, 727-791, 1650-1670, 2627-2655`, `mnemo/src/wal.rs:156-245`, `mnemo/src/format.rs:70, 89-113, 268-311`.
 - **Finding:** Tracing the `PR DUR-1` spec line-by-line against `store.rs`, `wal.rs`, and `format.rs` reveals three concrete crash/recovery windows that should be closed in the `DUR-1` design before coding:
   1. **Zeroing old WAL *before* an unlogged page-0 write leaves ZERO valid WAL during relocation (`PLAN.md:3802-3807`, `store.rs:1650-1670`):** Step 2 specifies *"invalidate the old region (zero its first frame header) and sync before the header points elsewhere"*, while Step 3 allows keeping `ensure_wal_capacity`'s and `rekey`'s unlogged `write_raw(0, &page)`. If `ensure_wal_capacity` zeroes and syncs `old_wal_start` first and then crashes mid-`write_raw(0, &page)` (the exact *"torn page 0 during relocation"* test in Step 4!), `old_wal_start` is already zeroed and `new_wal_start` has no frames yet — **0 valid committed `MWAL` transactions exist anywhere in the file**, making the torn header permanently unrecoverable (`Err(HeaderChecksum)`). Likewise, `rekey` (`store.rs:2627-2655`) calls `self.flush()?` (a no-op when clean at `store.rs:1718`) and does an unlogged `write_raw(0, &page)`; on a 0-flush database (`Mnemo::create` with `--no-manifest`, `wal_seq == 0`) a torn page 0 during `rekey` permanently loses the DEK, and after prior flushes it silently rolls back the passphrase rotation.
@@ -304,7 +305,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) → PR DUR-1 spec amended before dispatch (PLAN.md 2026-11-01 REV-002 entry). Verified all three windows: heal triggers only on `HeaderChecksum` (magic/version checked first); CRC covers 0..238 while seal/cache pointers sit at 242..294; `rekey` writes page 0 unlogged; the heal reads a fixed 64-page window. Adopted in full: WAL-logged one-frame header commits for relocation and rekey (new region first, then checkpoint, then invalidate old); streaming scan with header-frame validation (consistency + DEK unwrap + seal), no cap; heal on any header error, with a `HeaderTampered` fallback to the `wal_seq` txn. Context: the header lies in sector 0 (atomic writes), so the realistic failure is a whole zeroed/garbled sector (`BadMagic`), which the broadened trigger now covers; sub-sector tears at byte 242 are unlikely but covered at no extra cost. **AMENDED 2026-11-01 (after Worker 2's BLOCKED):** item 3's `HeaderTampered` → WAL-heal fallback is WITHDRAWN. It conflicts with the v7 seal's tamper-evidence contract (`header_tamper_is_detected_by_v7_seal`), the two on-disk states are indistinguishable, a crash can't produce CRC-valid + seal-invalid (the header is in an atomic sector), and the fallback would trust `wal_start`/`wal_seq` from the unauthenticated page. Rule: heal only on header parse failures; a seal failure is always `HeaderTampered`. Items 1, 2 and the rest of 3 (heal on BadMagic/UnsupportedVersion/HeaderChecksum) stand. An explicit `mnemo recover-header` is DEFERRED (trigger: a real sub-sector tear report).
 
 #### R-002.2 — [PLAN-REFINEMENT] [MEDIUM] `PR FIX-1` details: sync directory `accessed_at`/`access_count` on cache compaction (+ read-only `cache_get` bug) & guard `export_encrypted` self-truncation
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PR FIX-1 @ 8e09e60, 93e2620, v0.6.0)`
 - **Context / Evidence:** `PLAN.md:3819-3834` (`PR FIX-1` spec), `mnemo/src/store.rs:2063-2080, 2146-2168, 2497-2518`.
 - **Finding:** Two subtle details in `store.rs` affect `PR FIX-1`'s cache compaction and `export_encrypted` implementations:
   1. **Stale `accessed_at` / `access_count` in `CacheEntry` record bodies (`store.rs:2146-2165, 2497-2514`):** Like v5 memories, cache hits only bump `self.cache_dir[pos].accessed_at` and `self.cache_dir[pos].access_count` (`store.rs:2147-2148`); the `CacheEntry` record body on disk retains creation-time `accessed_at` and `access_count = 0`. Two consequences:
@@ -315,3 +316,50 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
   1. Fix read-only `cache_get` and `cache_get_semantic` (`store.rs:2162, 2510`) to return `self.cache_dir[pos].accessed_at` instead of `entry.accessed_at`; and in `compact_file`, source `accessed_at` and `access_count` from `old.cache_dir[pos]` (syncing them into both the rewritten `CacheEntry` and `CacheDirectoryEntry`, while preserving `created_at`, `ttl_secs`, `cost_hint_ms`, `key_preview`, `size_bytes`, `vector`, and `model`).
   2. In `Mnemo::export_encrypted(&mut self, dest)`, write to a sibling temporary file in `dest`'s parent directory, `sync_all()`, and atomically `std::fs::rename` onto `dest` (also rejecting `dest == self_path` if `Mnemo` stores or checks file identity) — preventing both self-truncation on Unix and partial/torn export files on crash.
 - **Planner Triage:** `ACCEPTED` (2026-11-01) → PR FIX-1 spec amended before dispatch. Verified the read-only `cache_get`/`cache_get_semantic` bug (returns the record body's creation-time `accessed_at` next to the directory's live `access_count`). Adopted: read-only fix + test; compaction takes `accessed_at`/`access_count` from the old directory entry and preserves the other fields; `export_encrypted` refuses the live file (Unix `(dev, ino)`, Windows canonical path), writes to a sibling temp, syncs, renames, and fsyncs the parent dir; tests for same-path/symlink/hardlink refusal.
+
+---
+
+### Batch `REV-003` — 2026-11-06 (`v0.6.0` Verification Sweep + Product Design: First-Class `Essence` & Seamless Conversation Compaction)
+
+**`v0.6.0` / `v0.6.1` Verification Summary (`HEAD` `e244a39`):**
+- Marked `R-001.1`, `R-001.2`, `R-001.5`, `R-001.6`, `R-001.8`, `R-001.11`, `R-002.1`, and `R-002.2` **`VERIFIED`** in `v0.6.0` (`0e51973`):
+  - `store.rs:3217-3449`: `compact_file` preserves live exact+semantic cache entries with directory `accessed_at`/`access_count`; `verify()` validates live cache records.
+  - `store.rs:2581-2597`: read-only `cache_get` / `cache_get_semantic` return directory `accessed_at`.
+  - `store.rs:3101-3215`: `export_encrypted` checks `paths_refer_to_same_file`, writes to a sibling temp, `sync_all`, atomic `rename`, and Unix parent-dir `sync_all`; `rekey` commits a 1-frame WAL header transaction into a fresh WAL region before checkpointing page 0.
+  - `store.rs:3260-3293`: `stats()` maintains a lazy in-memory `agent_set` (`O(1)` after first build); cache-only flushes no longer push PITR snapshots.
+  - `mnemo-python/src/lib.rs`: `Option<Core>` handle release on `close()`, GIL released via `py.allow_threads`, Python embedder invoked outside mutable borrow, `Session` routed through closed-aware accessor.
+- Confirmed `Recall scoring v2` (`R-001.12`) in-flight in the working tree: variant `V2` (`sim + max(sim, 0) * (beta * recency_created + gamma * (importance - 0.5) + delta * tanh(uses / 5.0))`) selected by the Planner on 2026-11-06 with `pass5 MRR = 0.9103`, `drift = 0`, `superseded_fact hit@1 = 1.000`.
+
+---
+
+#### R-003.1 — [PRODUCT] [HIGH] First-class `Essence` object & seamless conversation compaction (`Session::compact` / MCP `compact_conversation` / `mnemo essence`)
+- **Status:** `OPEN`
+- **Context / Evidence:** User product request (2026-11-06); `mnemo/src/session.rs:142-197` (`Session::{add_turn, close, discard}`), `mnemo/src/store.rs:1675-1697` (`Mnemo::about`), `mnemo/src/mcp.rs:28-35`, `PLAN.md:394` (`Phase 7.4`), `PLAN.md:783-849` (`Phase 12.1` & `Phase 12.2`).
+- **Finding:** Today MNemo has a structural gap between **raw conversation turns** and **long-term brain orientation**:
+  1. **`Session::close()` (`session.rs:165-182`) promotes every `Working` turn 1:1 into `Episodic` memory** with zero distillation, while `mnemo serve --mcp` (`mcp.rs:28-35`) exposes no session or conversation-compaction primitives at all.
+  2. **Atomic `Memory` records vs holistic `Essence`:** Individual `Semantic`/`Episodic`/`Procedural` memories are **query-retrieved fragments** — an agent only sees them if its `recall` query vector matches. When an agent starts a new session or resumes immediately after a context-window `/compact`, it needs the **holistic distilled state ("Essence")** without guessing a search query:
+     - **Session Essence (Conversation Handoff):** Distilled goal, current state / where we left off, key decisions made, and open threads / next steps from a compacted conversation.
+     - **Brain / Topic Essence:** Living executive synthesis of the project, user, or domain (`"brain"`, `"project"`, `"architecture"`), whereas `Mnemo::about()` (`store.rs:1675-1697`) currently returns only static day-1 `area = "onboarding"` memories.
+  3. **Timing mismatch in `PLAN.md`:** `Phase 12.2` (`v0.8.0`) schedules Claude Code `SessionStart`, `PreCompact`, and `SessionEnd` hooks plus MCP resources/prompts, while `Phase 7.4` (`Session::close_with`) is parked much later after Phase 2 and Phase 11 — leaving `Phase 12.2`'s `PreCompact` hook without a first-class compaction target.
+- **Recommendation:** Introduce **`Essence`** as a first-class API & MCP concept paired with **atomic conversation compaction**, building directly on `Phase 12.1`'s keyed-upsert + `_mnemo.*` metadata architecture (**no format bump required in v8; `R-001.10`-compliant**):
+  1. **First-class `Essence` type (distinct in API, unified in encrypted storage):**
+     - Expose `Essence { id: Ulid, key: String, title: String, summary: String, decisions: Vec<String>, open_threads: Vec<String>, source_session_id: Option<String>, source_turn_count: usize, extracted_memory_ids: Vec<Ulid>, agent_id: String, created_at: i64, updated_at: i64 }`.
+     - **Why store in `self.catalog` via `_mnemo.kind = "essence"` rather than a third on-disk directory (like `cache_dir`):**
+       - Avoids a `format::VERSION` bump (`v8` stays compatible per `R-001.10`), avoids duplicating `compact_file` / `verify` / WAL / ANN machinery, and keeps `Essence` automatically covered by **PITR snapshots** (`snapshots()` / `restore_to()`) and vector search.
+       - Standard ` Essence` keys: `"brain"` (living top-level synthesis), `"latest_session"` (rolling handoff slot updated on every conversation compaction), `"session:<id>"` (historical per-session essences), and `"topic:<slug>"`.
+       - Separate cleanly at the API surface: `db.put_essence(...)`, `db.essence(key)` (`O(1)` via `Phase 12.1`'s lazy key index), `db.essences()`, and a filter on `RecallRequest` (exclude or include essences; default `recall` can either include or filter via `include_essence`).
+       - Upgrade `Mnemo::about()` (and `Phase 12.2`'s `mnemo://about` + `mnemo://essence` MCP resources) to return both the static onboarding manifest *and* the live `"brain"` + `"latest_session"` Essences so any newly connected agent is oriented in one `<1 ms` read.
+  2. **Seamless Conversation Compaction (`Session::compact` / `Mnemo::compact_session` / MCP `compact_conversation`):**
+     - Because MNemo is an embedded engine without an internal LLM, the **host LLM** (in Claude Code `PreCompact` / `SessionEnd`, Cursor, MCP, or Python/Rust SDK) supplies the distillation in **one atomic call**:
+       - `essence`: The distilled `Essence` (`title`, `summary`, `decisions`, `open_threads`).
+       - `extracted_memories`: `Vec<Memory>` (or text facts embedded via the registered embedder) for durable `Semantic` facts and `Procedural` rules extracted from the conversation, supporting `Phase 12.1` `key` upserts so superseded facts update in place, each stamped with `_mnemo.from_essence = <essence_ulid>`.
+       - `turn_policy: TurnCompactionPolicy`: what to do with the session's raw `Working` turns in the same transaction:
+         - `Drop` (default: tombstones raw `Working` turns so transcript chatter never pollutes recall),
+         - `ExpireAfter(ttl_secs)` (demotes raw turns to `TTL`-bounded `Episodic` traces that auto-expire after e.g. 7 days), or
+         - `KeepAsEpisodic` (legacy `Session::close` behavior).
+     - All three steps (write `"session:<id>"` + upsert `"latest_session"` Essence, upsert extracted `Semantic`/`Procedural` memories, apply `turn_policy` to raw `Working` turns) commit in a **single `flush()` WAL transaction**.
+     - Also keep `Session::compact_with(|turns: &[Memory]| -> CompactionPlan)` in Rust/Python (`Phase 7.4`) with a deterministic extractive fallback when no LLM callback is provided.
+  3. **Roadmap placement (`Phase 12` / `v0.8.0`):**
+     - Do not touch `v0.7.0` (`NAME-1` + `Recall scoring v2`).
+     - Pull `Phase 7.4` forward into **Phase 12** right between `12.1` (keyed upserts) and `12.2` (`PreCompact` / `SessionStart` hooks + MCP resources), so `Phase 12.2`'s `PreCompact` hook invokes `compact_conversation` to persist the `Essence` + extracted facts, and `SessionStart` injects `mnemo://essence` automatically.
+- **Planner Triage:** _(pending)_
