@@ -80,13 +80,13 @@ The Planner's working memory lives here and in the WORKLOG, not in
 AGENTS.md. AGENTS.md has only the role rules.
 
 **Open Planner to-dos**
-1. At the v0.7.0 release, hand off for the Worker to commit:
+1. DONE 2026-11-06 (63e0f63). At the v0.7.0 release, hand off for the Worker to commit:
    - root `README.md`: line 51 `import mnemo` → `import mnemo_engine`; the
      install comments (`import mnemo_engine`, `use mnemo_engine::...`);
      known limitations rewritten for scoring v2's result;
    - `index.html`: version pill, the Quick Start samples (`import
      mnemo_engine`, `use mnemo_engine::`), and the roadmap.
-2. When the scoring v2 READY entry arrives: check the `ranking_v2` numbers
+2. DONE 2026-11-06 (v0.7.0 VERIFIED). When the scoring v2 READY entry arrives: check the `ranking_v2` numbers
    against the decision rule in the 2026-11-05 VERIFIED spec before you
    approve the release.
 3. Reviewer items that shipped in v0.6.0 are waiting for the Reviewer to
@@ -1123,7 +1123,7 @@ DO NEXT, in this order:
 4f. **Release v0.6.0** — SHIPPED 2026-11-05 (0e51973; verified on the published wheel) = ANN-1 + ANN-1.1 + DUR-1 + FIX-1 + PY-1 (user decision 2026-11-01: fixes first).
 4g. **PR BP.1 — `mnemo index --rebuild` + Python `rebuild_index()` + doc corrections + post-DUR-1 write benches + node version → release v0.6.1** — SHIPPED 2026-11-05 (v0.6.1; verified).
 4h. **PR NAME-1 — import/library name becomes `mnemo_engine`; NO `import mnemo` alias (decision 2026-11-05: Option A, clean break)** — LANDED 9ffbb42 + 2e9410f, accepted 2026-11-05; held for v0.7.0.
-5. ← ACTIVE (lane A). **Recall scoring v2 → v0.7.0 together with NAME-1** (consolidated spec in the 2026-11-05 VERIFIED entry; harness answers Q1/Q2 in the 2026-11-05 "NAME-1 accepted; answers to the scoring-v2 READY questions" entry. Those supersede the older "v0.6.0" / "track_access=False" wording below) (added 2026-10-25; split out 2026-11-01). Fix the access feedback loop,
+5. SHIPPED 2026-11-06 as v0.7.0 (tag v0.7.0 → 2d47f9f; PLANNER-A VERIFIED on the published wheel). **Recall scoring v2 → v0.7.0 together with NAME-1** (consolidated spec in the 2026-11-05 VERIFIED entry; harness answers Q1/Q2 in the 2026-11-05 "NAME-1 accepted; answers to the scoring-v2 READY questions" entry. Those supersede the older "v0.6.0" / "track_access=False" wording below) (added 2026-10-25; split out 2026-11-01). Fix the access feedback loop,
    with the variant chosen by harness numbers, after extending the harness
    to an age-varied corpus. Minor release v0.6.0 with before/after
    numbers. Dogfood recall switches to track_access=False.
@@ -6067,3 +6067,103 @@ visual on the landing page.
 and log v0.7.0 VERIFIED so lane B can start dispatching Phase 12.
 When you log VERIFIED I'll make the follow-up coordination sync.
 Marking the "Release v0.7.0 = NAME-1 + scoring v2" task completed.
+
+### 2026-11-06 — PLANNER-A — VERIFIED — v0.7.0 accepted on the published artifacts; lane A closed, the Worker queue passes to lane B
+**Repo:** `main` matches `origin/main` (0b734b0). The `v0.7.0` tag points
+at 2d47f9f. Every manifest says 0.7.0. The fix, release, docs and sync
+commits are in the order I asked for. crates.io `mnemo-engine` max_version
+is 0.7.0.
+
+**Published wheel** (`pip install mnemo-engine==0.7.0`, aarch64 Linux):
+- `build_info()` reports 0.7.0 with hardware AES and PMULL.
+- The wheel ships only `mnemo_engine/`, and `import mnemo` raises
+  ModuleNotFoundError. NAME-1 confirmed.
+- **Upgrade path:** a file created by 0.6.1 (`import mnemo`) opens and
+  recalls under 0.7.0. No format change, as specified.
+- **The V2 formula is exact:**
+  - exact match, fresh, importance 0.5, 0 uses → 1.300;
+  - sim 0.95 → 1.235;
+  - sim 0.80 → 1.040;
+  - a sim-0 memory with importance 0 → 0.000, so the gate works and
+    there's no negative bonus.
+- **Feedback loop fixed:** after 60 tracked recalls pumping the sim-0.80
+  memory, its score only goes to 1.120 (the tanh cap), and A and B still
+  rank first and second. Under the v0.6 formula it would have reached about
+  1.61 and taken first place.
+- **Tracking persists:** `access_count` = 60 after `close()` and a
+  read-only reopen.
+
+**CLI and MCP (code read; no cargo in this sandbox):**
+- The `open_recall` closure serves both `--text` and vector queries, with
+  the `Locked` → read-only fallback.
+- A tracking recall calls `db.flush()`, and read-only paths skip it.
+- The MCP server flushes after the stdin loop.
+- New cli_smoke tests cover the tracking flush and the `--text` fallback;
+  CI is green.
+- **R-001.4 is fixed in 39a7f7d.** The Reviewer can mark it VERIFIED.
+
+**Lane A is closed.** Execution-order item 5 is marked SHIPPED, and Planner
+to-dos 1–2 are marked DONE. **The Worker queue is free for lane B.** Per
+lane rule 2, item 5b becomes ACTIVE when PLANNER-B logs its DISPATCH. Until
+then the Worker has no active PR. Worker: make the coordination sync commit
+for this entry, then stand by.
+
+### 2026-11-06 — PLANNER-A — NOTE — Comments for PLANNER-B on its Phase 12 draft (12.1 amendment, 12.6–12.8, design principles, R-003.1/.2 triage)
+Read-only review. Lane B owns these sections and I edited none of them.
+Overall: the direction is sound. The write path (delta items,
+supersession, `commit_deltas`) fits the engine well, needs no format
+change, and plays well with scoring v2's `created_at` recency. Comments,
+most important first:
+
+**Gaps in the draft to close before you DISPATCH:**
+1. **No PLANNER-B worklog entry yet.** The spec edits (design principles,
+   the 12.1 amendment, 12.6–12.8, revised releases) are already committed
+   in sync commits 2d47f9f and 0b734b0. Your `reviewer_notes.md` triage of
+   R-003.1/.2 is still uncommitted. Please log a `PLANNER-B — REVIEW` entry
+   citing R-003.1 and R-003.2.
+2. **Item 5b in the execution order is stale.** It still says "12.1 …
+   (v0.7.0)" and doesn't list 12.6/12.7/12.8. The old "**Releases:** 12.1 →
+   **v0.7.0**" line under Phase 12 is still there, next to your revised
+   one. Strike it or mark it superseded, so the Worker sees one ordering.
+3. **The R-003.2 AGENTS.md handoff** ("Where the philosophy lives") hasn't
+   been written. Log a CLAIM on `AGENTS.md` before editing it.
+
+**Technical comments:**
+4. **Supersession: make retries no-ops.** If a keyed write's content and
+   metadata equal the live version's, do nothing: no new record, no flush.
+   Otherwise every retry, or an extractor re-emitting the same fact, grows
+   the history chain without bound. Also add a retention knob (keep the
+   last N versions or a history TTL); deferring it is fine, but name it.
+5. **Supersession and filters vs the ANN index.** Superseded records and
+   12.6 filters are excluded by `_mnemo.*` metadata, which is only known
+   after a record is decrypted. On the indexed path, filtering the rerank
+   shortlist can return fewer than `top_k` hits. Spec it: widen
+   `n_rerank`, or fall back to an exact scan, until `top_k` survive the
+   filter or the scan ends. Add a test with a selective filter (under 5% of
+   memories) on an indexed file.
+6. **Essence (the NEEDS-USER fork): one tool, not four.** I agree with
+   Option C's data model (task state, separate from facts, sectioned,
+   with a lifecycle, rendered to a budget). But four new MCP tools
+   (`essence_add/update/resolve/remove`) add to every client's tool list
+   and context cost. Suggest one MCP tool `essence` with an `op` field
+   (add / update / resolve / remove), the `mnemo://essence` resource for
+   reads, and essence ops also accepted inside `commit_deltas`. Rust and
+   Python can keep separate methods. This is a cheaper middle ground to put
+   to the user next to the Reviewer's pinboard option.
+7. **12.8 `max_bytes`: define what counts.** Count the UTF-8 bytes of the
+   `content` field only, not the JSON envelope, so CLI, MCP and Python
+   agree. Always return at least one hit, even when it alone is over budget.
+8. **The v0.8.0 scope is large.** It's 12.1 + 12.6 + 12.8 + 12.7(b), plus
+   maybe 12.7(a). Each is its own PR, so v0.8.0 is 4–5 PRs before any
+   release. Meanwhile the strongest measured quality gap is exact
+   identifiers: the BP.1 miss, and Phase 6's `decision_exact` hit@1 of
+   0.000 and `pr_exact` of 0.200 under V2. That's Phase 2 (BM25, v9),
+   which this pushes further back. Not an objection. Raise it with the user
+   as a sequencing choice: either keep v0.8.0 to 12.1 + 12.6 + 12.8 and
+   ship 12.7 as v0.8.x, or accept the later BM25.
+
+**Agreed as written:** validate and embed everything before staging
+anything in `commit_deltas` (matches `put()`'s no-rollback behaviour);
+`turn_policy` defaulting to `ExpireAfter(7d)`; essence excluded from
+default recall; deferring the 7.3 graph (R-001.10); and the KDF caveat on
+"millisecond reads".
