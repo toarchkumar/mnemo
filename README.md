@@ -29,12 +29,13 @@ Site: **https://toarchkumar.github.io/mnemo/**
 ## Install
 
 ```sh
-pip install mnemo-engine          # Python (import mnemo)
-cargo add mnemo-engine            # Rust library (use mnemo::...)
+pip install mnemo-engine          # Python (import mnemo_engine)
+cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-The package is `mnemo-engine` everywhere. `mnemo-db` on PyPI and `mnemo` on
+The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
+Rust library are `mnemo_engine` too. `mnemo-db` on PyPI and `mnemo` on
 crates.io are unrelated projects.
 
 Prebuilt CLI binaries for Linux, macOS and Windows are on the
@@ -48,14 +49,14 @@ If you build from crates.io on ARM yourself, see
 Python, with any embedding model:
 
 ```python
-import mnemo
+import mnemo_engine
 from sentence_transformers import SentenceTransformer
 
 MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 model = SentenceTransformer(MODEL)
 embed = lambda texts: model.encode(texts, normalize_embeddings=True).tolist()
 
-with mnemo.open("agent.mnemo", "a long passphrase", dimensions=384) as db:
+with mnemo_engine.open("agent.mnemo", "a long passphrase", dimensions=384) as db:
     db.set_embedder(embed, name=MODEL, dimensions=384)
     db.remember_text("the user prefers dark mode", "semantic", importance=0.8)
     for hit in db.recall_text("which theme does the user like?", top_k=5):
@@ -122,6 +123,11 @@ Measured on an Apple M1 Pro (release build, 384-dimension vectors):
 | Indexed search, 10K / 100K / 1M memories | ~1.4 ms / ~9.4 ms / ~134 ms |
 | Exact search over every memory, 10K / 100K | ~105 ms / ~1.05 s |
 
+**Ranking quality (v0.7.0).** On a small age-varied test set (13
+questions), the right memory comes first for 92% of them, up from 77% in
+v0.6 and 62% when ranking on similarity alone. The ranking stays the same
+however often the memories are recalled.
+
 Indexed search finds 96–98% of the true top-10 matches at the default
 settings (v0.6.0: 0.964 at 10K, 0.982 at 100K, 0.970 at 1M). Storing got about
 14% faster in v0.6.1, after one disk sync per commit was removed. Full results:
@@ -132,16 +138,24 @@ of the true top-10), and rebuilding it restores the full accuracy: run
 `mnemo index <file>` again, `build_index()` in Python, or `rebuild_index()`
 in Rust. Each re-clusters the index with the new defaults.
 
+## Upgrading to v0.7.0
+
+- **New import name.** In Python, `import mnemo` becomes `import mnemo_engine`;
+  in Rust, `use mnemo::...` becomes `use mnemo_engine::...`. The package
+  name, the `mnemo` CLI, the `.mnemo` file format and existing files are
+  unchanged.
+- **New ranking.** Recency now counts from when a memory was stored, not
+  when it was last recalled. The bonuses for recency, importance and use
+  are scaled by similarity, so an unrelated memory can't win on being new
+  or popular. Scores are on a new scale: if you compare `score` to a fixed
+  threshold, check it again.
+
 ## Known limitations (being fixed)
 
-- **Access tracking can skew rankings.** By default, every recall counts its
-  results as "used", which boosts them in later recalls, so frequently
-  returned memories can crowd out more relevant ones. Pass
-  `track_access=False` (Python), `track_access(false)` (Rust) or `--no-track`
-  (CLI) to avoid it. A scoring fix is planned for v0.7.0.
 - **Exact names and numbers.** Meaning-based search is weak on exact
-  identifiers such as version numbers, PR numbers or function names. Keyword
-  search combined with vector search is on the roadmap.
+  identifiers such as version numbers, PR numbers or function names (a
+  question about "BP.1" can surface the wrong memory). Keyword search
+  combined with vector search is on the roadmap.
 
 See the [changelog](CHANGELOG.md) for release history.
 

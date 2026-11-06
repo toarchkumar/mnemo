@@ -244,7 +244,7 @@ pre.code[hidden] { display: none; }
 
 /* ---------- RECALL FORMULA ---------- */
 .formula {
-  display: grid; grid-template-columns: auto repeat(4, 1fr); gap: .8rem; align-items: stretch;
+  display: grid; grid-template-columns: auto 1fr auto repeat(3, 1fr) auto; gap: .8rem; align-items: stretch;
 }
 .formula .eq {
   font: 700 1.05rem var(--mono); align-self: center; color: var(--ink-2); padding-right: .3rem;
@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.6.1</span>
+        <span class="pill"><span class="dot"></span>v0.7.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.6.1.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.7.0.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -530,7 +530,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
           <button role="tab" aria-selected="false" aria-controls="code-cli" data-code="cli">CLI</button>
         </div>
       </div>
-<pre class="code" id="code-python" role="tabpanel"><span class="k">import</span> mnemo
+<pre class="code" id="code-python" role="tabpanel"><span class="k">import</span> mnemo_engine
 <span class="k">from</span> sentence_transformers <span class="k">import</span> SentenceTransformer
 
 MODEL = <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>
@@ -538,7 +538,7 @@ model = SentenceTransformer(MODEL)
 <span class="k">def</span> <span class="f">embed</span>(texts):
     <span class="k">return</span> model.encode(texts, normalize_embeddings=<span class="k">True</span>).tolist()
 
-<span class="k">with</span> mnemo.open(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, dimensions=<span class="n">384</span>) <span class="k">as</span> db:
+<span class="k">with</span> mnemo_engine.open(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, dimensions=<span class="n">384</span>) <span class="k">as</span> db:
     db.set_embedder(embed, name=MODEL, dimensions=<span class="n">384</span>)   <span class="c"># checked against the file</span>
 
     <span class="c"># Durable memory, plain text in and out</span>
@@ -554,9 +554,9 @@ model = SentenceTransformer(MODEL)
         db.cache_put(<span class="s">"llm"</span>, prompt, answer, ttl_secs=<span class="n">3600</span>)
     <span class="k">else</span>:
         answer = hit[<span class="s">"value"</span>].decode()</pre>
-<pre class="code" id="code-rust" role="tabpanel" hidden><span class="k">use</span> mnemo::{CachePutOpts, EmbedCmd, EmbedderIdentity, MemoryType, Mnemo, MnemoConfig, RecallRequest};
+<pre class="code" id="code-rust" role="tabpanel" hidden><span class="k">use</span> mnemo_engine::{CachePutOpts, EmbedCmd, EmbedderIdentity, MemoryType, Mnemo, MnemoConfig, RecallRequest};
 
-<span class="k">fn</span> <span class="f">main</span>() -&gt; mnemo::<span class="t">Result</span>&lt;()&gt; {
+<span class="k">fn</span> <span class="f">main</span>() -&gt; mnemo_engine::<span class="t">Result</span>&lt;()&gt; {
     <span class="k">let</span> cfg = <span class="t">MnemoConfig</span> { dimensions: <span class="n">384</span>, ..Default::default() };
     <span class="k">let mut</span> db = <span class="t">Mnemo</span>::create(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, cfg)?;
 
@@ -602,14 +602,16 @@ model = SentenceTransformer(MODEL)
     <div class="head">
       <p class="eyebrow">Multi-signal recall</p>
       <h2 class="title">Ranked on more than similarity</h2>
-      <p class="lead">An agent needs the right memory, not just the closest vector. Every candidate is scored on four signals, with weights you can set per query.</p>
+      <p class="lead">An agent needs the right memory, not just the closest vector. Every candidate is scored on four signals, with weights you can set per query. The three bonuses are scaled by similarity, so an unrelated memory can't win by being new, important or popular.</p>
     </div>
     <div class="formula">
       <div class="eq">score =</div>
       <div class="term"><div class="m"><em>α</em> · similarity</div><p>How close the meaning is: cosine, dot product or L2.</p></div>
-      <div class="term"><div class="m"><em>β</em> · recency</div><p>Fades exponentially, with a 7-day half-life by default.</p></div>
-      <div class="term"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored.</p></div>
-      <div class="term"><div class="m"><em>δ</em> · ln(1 + uses)</div><p>A boost for memories the agent keeps coming back to.</p></div>
+      <div class="eq">+ similarity<br>× (</div>
+      <div class="term"><div class="m"><em>β</em> · recency</div><p>Counted from when the memory was stored. Fades with a 7-day half-life by default.</p></div>
+      <div class="term"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored, centred on 0.5.</p></div>
+      <div class="term"><div class="m"><em>δ</em> · uses</div><p>A capped boost for memories the agent keeps coming back to, so popular memories can't snowball.</p></div>
+      <div class="eq">)</div>
     </div>
     <div class="grid grid-4" style="margin-top:1.4rem">
       <div class="card"><h3>Episodic</h3><p>What happened: conversation turns and events. Sessions promote their turns here when they close.</p></div>
@@ -723,8 +725,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.6</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.7</span></h3>
         <ul>
+          <li>Better ranking: the right memory comes first more often, and frequently shown memories no longer crowd out the relevant one</li>
           <li>Accurate index search: the default finds 96–98% of the true best matches, up from 40%</li>
           <li>Stronger crash recovery: a damaged file header is rebuilt from the write-ahead log, and tampering is always reported</li>
           <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
@@ -741,7 +744,6 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Better ranking, so frequently shown memories don't crowd out the relevant one</li>
           <li>Seamless agent memory: edit memories in place, filter recall by session or tag, and a Claude Code plugin that loads and saves memories automatically</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
         </ul>
