@@ -166,6 +166,20 @@ Rules:
   healed.
 - Bench claims cite `test/scripts/perf_v0.5.0.json`; only cells with
   `remeasured` are current.
+- **Design principles (R-003.2, accepted 2026-11-06), on top of the
+  single-file invariant:**
+  1. *Extract, don't re-summarize.* State is written as small discrete items
+     through deltas (add / update / resolve / remove). No API asks an LLM to
+     rewrite a stored blob wholesale; that's where drift comes from.
+  2. *Supersede, don't erase.* A newer version of a fact appends a new record
+     and marks the old one invalid (`_mnemo.superseded_by`, `_mnemo.invalid_at`).
+     History stays queryable, and conflicts resolve by key, not by a graph
+     schema.
+  3. *Small context first.* Every read surface (recall, about, essence) takes
+     a byte budget, and exact identifiers must survive a round trip (Phase 2
+     BM25 is the retrieval half of this). Motivating workloads are local SLMs
+     and optimizer loops such as DSPy GEPA. Only long-lived handles give
+     millisecond reads, since each open pays the KDF.
 
 ---
 
@@ -852,6 +866,16 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   calling LLM to prefer `key` for facts that supersede earlier ones.
 - Phase 7.1 (similarity-based dedup) stays in Phase 7; 12.1 covers explicit
   edits and keyed upserts only.
+- **Amendment (R-003.1/R-003.2, PLANNER-B 2026-11-06): two write verbs, not
+  one.** `update(id, patch)` is a *correction*: same id, in place, as above.
+  A keyed `remember(…, key=K)` is a *supersession*: it appends a **new**
+  record (new id, fresh `created_at`, so scoring v2's recency term sees it as
+  new) with `_mnemo.supersedes = <old id>`, and rewrites the old record with
+  `_mnemo.superseded_by = <new id>` and `_mnemo.invalid_at = now`. Superseded
+  records drop out of default `recall`, `about` and the key index. They stay
+  readable through `history(key)` (walk the chain) and survive
+  `compact_file`. All in one flush. No format change: everything is
+  `_mnemo.*` metadata.
 
 ### 12.4 Shared access (several agents, sessions and tools on one file)
 - New `serve --mcp --shared` (consider making it the default later): the
@@ -914,6 +938,91 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   path]`: a decrypted, human-readable view for review. It goes to stdout by
   default, prints a stderr warning that the output is plaintext, and only
   writes a file with an explicit `-o`.
+
+### 12.6 Filtered recall (R-001.14; spec in the 2026-11-01 REV-001 triage entry)
+A shared `Filter` (session_id, metadata equality / `$in` / ranges /
+key-exists), applied before top-k. 12.7 relies on it to select `_mnemo.kind`.
+
+### 12.7 Essence + one-call compaction (R-003.1, drafted by PLANNER-B 2026-11-06; the Essence half is NEEDS-USER)
+Three tiers, each with a different job:
+
+| Tier | What it holds | How it's read | Example |
+|---|---|---|---|
+| Episodes | raw turns or events | provenance only; expire | "user: the test fails on Windows" |
+| Facts (memories) | what is true, atomic, keyed, superseding | by relevance (`recall`) | "MSRV is 1.75" |
+| **Essence** | **where we are**: task state with a lifecycle | **by scope, always loaded, budgeted** | "open: Windows lock test flaky (cli_smoke.rs:212)" |
+
+**(a) Essence items. Recommended ("Option C"); pending the user.**
+- An item is a normal memory record with `_mnemo.kind = "essence"`,
+  `_mnemo.scope` (default `"project"`; also `"session:<id>"`,
+  `"topic:<slug>"`, `"user"`), `_mnemo.section` (`goal | state | decision |
+  open | next | constraint`), `_mnemo.status` (`open | resolved`), and
+  optional `_mnemo.refs` (memory ids, session id, file paths). Content is
+  one short line, hard-capped (proposal: 280 bytes; rejected, not
+  truncated, so identifiers are never cut). It's embedded like any memory,
+  so a resolved decision is still findable later. No format change. Covered
+  by PITR and `compact_file`.
+- **Ops, applied by the engine:** `essence_add(scope, section, text,
+  refs?)`, `essence_update(id, text)`, `essence_resolve(id, note?)`,
+  `essence_remove(id)`. An LLM never rewrites the whole thing, so it can't
+  drift. Concurrent agents adding items don't conflict, because each item is
+  its own record.
+- **Read:** `essence(scope, max_bytes = 2048)` renders deterministic markdown
+  (or JSON), grouped by section, open items first, newest first, with a
+  "+N more" line when the budget truncates. Resolved items leave the render
+  but stay in the file. Sessions are provenance, not containers: open items
+  carry across `/compact` and new sessions automatically, so there's no
+  separate `latest_session` copy.
+- **Recall:** essence items are excluded from default `recall` (opt in with
+  `include_essence`), so fact retrieval stays clean.
+- **Surfaces:** Rust and Python methods; the MCP tools `essence_add`,
+  `essence_update`, `essence_resolve` and `essence_remove`, whose
+  descriptions tell the model to update as it works ("when the goal,
+  a decision, an open problem or the next step changes"); the MCP resource
+  `mnemo://essence` (12.2); CLI `mnemo essence <file> [--scope] [--budget]`;
+  and `about()` appends the render after the manifest.
+
+**(b) `commit_deltas`. Accepted; doesn't depend on (a).** One call:
+`{ facts: [{content, type, key?, importance?, metadata?}], essence_ops: […],
+turn_policy? }`.
+- Embed every text in **one** `Embedder::embed` call, and validate everything
+  (dims, non-zero, finite, keys) **before staging anything**. `remember`
+  stages immediately and there's no rollback, so a mid-batch error must
+  leave nothing staged.
+- Apply keyed facts as supersessions (12.1 amendment), then the essence ops,
+  then the turn policy, then **one** `flush()`.
+- `turn_policy` (SDK `Session` only; MCP clients don't store turns):
+  `ExpireAfter(secs)` by default (7 days, a recovery window, since
+  extraction is lossy), `Drop`, or `KeepAsEpisodic` (today's `close()`).
+  `Session::compact(deltas)` wraps this for the session's own turns.
+- MCP tool `commit_deltas`; Python `db.commit_deltas(...)`; Rust
+  `Mnemo::commit_deltas`.
+- **Optional later:** `mnemo extract --extract-cmd <cmd> --transcript <path>`
+  runs a user-supplied extractor (for example a local SLM) that emits deltas
+  JSON, in the same pattern as `--embed-cmd`. This is the path for a
+  `PreCompact` hook, which can't drive the main model.
+
+**Tests:** atomicity (an injected failure mid-batch leaves nothing; the
+proptest model gains `commit_deltas`); the render is deterministic and
+honours the budget; supersession chains; a file written by this build opens
+on v0.7.x and older readers carry `_mnemo.*` through untouched; and an
+end-to-end MCP test: add items, simulate `/compact`, and check the
+`mnemo://essence` render.
+
+### 12.8 Budgeted recall (R-001.15, promoted from Phase 7.5 by R-003.2)
+`RecallRequest::max_bytes(n)`: stop adding hits once the rendered content
+would exceed `n` bytes (document roughly 4 bytes per token). There's no
+tokenizer in the engine; callers can pass a smaller budget. Optional MMR
+diversity (`mmr_lambda`) ships **only** if the ranking_v2 harness shows hit@1
+doesn't drop by more than 0.02. Expose it through Python, CLI
+`--max-bytes` and the MCP `max_bytes` param. The Essence render (12.7) reuses
+the same budget code.
+
+**Releases (revised 2026-11-06, PLANNER-B; supersedes the line below):**
+v0.8.0 = 12.1 (with supersession) + 12.6 + 12.8 + 12.7(b) `commit_deltas`,
+plus 12.7(a) Essence if the user approves it. v0.9.0 = 12.4 + 12.2 (shared
+mode + plugin; the `SessionStart` hook injects the essence render). 12.3 and
+12.5 follow as minors.
 
 **Releases:** 12.1 → **v0.7.0** (new API surface). 12.4 + 12.2 → **v0.8.0**
 (shared mode + plugin). 12.3 and 12.5 ship as minors or patches when ready.
@@ -5889,3 +5998,72 @@ cargo run --release --example ranking_v2 -- \
 
 If all four are clean (no BLOCKED, drift 0, gates pass), proceed to
 the commit + push + CI + tag sequence above.
+
+### 2026-11-06 — WORKER — DONE — v0.7.0 shipped: NAME-1 + scoring v2, lane A review satisfied
+**Everything green and published.** Four commits + tag pushed, CI
+green on main, release workflow green, both artifacts on PyPI and
+crates.io. Over to lane A for wheel verification.
+
+**Commits (on `origin/main`, in order):**
+
+| hash | subject |
+|---|---|
+| `39a7f7d` | `fix(scoring): CLI tracking flush + --text lock fallback + MCP shutdown flush` |
+| `d631317` | `chore(release): v0.7.0 — bump manifests and Cargo.lock; cut CHANGELOG` |
+| `63e0f63` | `docs(v0.7.0): import name, ranking v2, upgrade notes` |
+| `2d47f9f` | `chore(plan): sync coordination files` |
+
+Tag **`v0.7.0`** points at `2d47f9f`.
+
+**CI + release runs:**
+
+- **ci.yml on `2d47f9f`:** ✓ green —
+  <https://github.com/toarchkumar/mnemo/actions/runs/42252847171>
+- **release.yml on `v0.7.0`:** ✓ green —
+  <https://github.com/toarchkumar/mnemo/actions/runs/42265621021>
+  (one `wheels (aarch64-apple-darwin)` cell was cancelled by GH after
+  15 minutes of macOS arm64 queue time — "the job was not acquired by
+  Runner of type hosted" — GitHub macOS arm64 capacity incident, not a
+  bug on our side. Re-run via `gh run rerun --failed` picked up on the
+  retry and both publish jobs ran clean from there.)
+
+**Published artifacts:**
+
+- **PyPI:** <https://pypi.org/project/mnemo-engine/0.7.0/>
+- **crates.io (core engine):** <https://crates.io/crates/mnemo-engine/0.7.0>
+- **crates.io (Node binding):** <https://crates.io/crates/mnemo-node/0.7.0>
+
+**Lane A checklist from the REVIEW entry — status:**
+
+1. R-001.4 CLI tracking recall flush — done in `39a7f7d`
+   (`bin/mnemo.rs::Command::Recall`: single `open_recall` closure,
+   `db.flush()` on the tracking path; new regression test
+   `recall_tracking_flushes_access_count_to_disk`).
+2. `--text` branch `Locked` fallback — done in `39a7f7d`
+   (same `open_recall` closure serves both branches; new regression
+   test `recall_text_falls_back_to_read_only_when_write_lock_held`).
+3. MCP shutdown flush — done in `39a7f7d`
+   (`mcp.rs::serve_with_streams` calls `db.flush()` after the stdin
+   loop exits; comment at the top of `tool_recall` and the CHANGELOG
+   MCP section rewritten accordingly).
+4. `mnemo/README.md` L449+ V2 formula + scale note — done in `39a7f7d`.
+   `test/scripts/ranking_harness.py` module docstring and both
+   `"formula"` JSON labels updated to the V2 shape (same commit).
+   `mnemo-python/README.md` has no formula to update.
+
+Release commit (`d631317`): manifests `0.6.1 → 0.7.0`
+(`mnemo/Cargo.toml`, `mnemo/bindings/node/Cargo.toml`,
+`mnemo-python/Cargo.toml`, `mnemo-python/pyproject.toml`), both
+`Cargo.lock`s refreshed, `CHANGELOG.md` `[Unreleased]` → `[0.7.0] —
+2026-11-06` with a short "two breaking changes ship together" header
+tying NAME-1 and scoring v2 to one release.
+
+Docs commit (`63e0f63`, Planner-A's handoff): top-level `README.md` +
+`index.html` — `mnemo_engine` import, ranking-v2 quality paragraph,
+upgrade section, known-limitations update, version pill, formula
+visual on the landing page.
+
+**Over to lane A (PLANNER-A).** Please verify on the published wheel
+and log v0.7.0 VERIFIED so lane B can start dispatching Phase 12.
+When you log VERIFIED I'll make the follow-up coordination sync.
+Marking the "Release v0.7.0 = NAME-1 + scoring v2" task completed.
