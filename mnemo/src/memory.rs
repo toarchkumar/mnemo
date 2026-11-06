@@ -275,18 +275,53 @@ fn euclidean(a: &[f32], b: &[f32]) -> f32 {
         .sqrt()
 }
 
-/// Weights for the multi-signal recall score.
+/// Weights for the multi-signal recall score (scoring v2, shipped in
+/// v0.7.0).
 ///
-/// `score = α·similarity + β·recency + γ·importance + δ·ln(access_count + 1)`
+/// ```text
+/// score = similarity
+///       + max(similarity, 0)
+///         · ( β · recency
+///           + γ · (importance − 0.5)
+///           + δ · tanh(access_count / 5) )
+///
+/// recency = exp( -ln(2) · age_secs / half_life_secs )
+/// age_secs = now - memory.created_at
+/// ```
+///
+/// Design notes (from the 2026-11-06 scoring-v2 bake-off; see the
+/// `ranking_v2` harness at `mnemo/examples/ranking_v2.rs`):
+/// * **Similarity-gated.** The recency / importance / usage terms are
+///   multiplied by `max(similarity, 0)`, so a stale-but-semantically-off
+///   memory can't ride recency or importance past a semantically-on-point
+///   one. Pre-v0.7.0 scoring was purely additive.
+/// * **Importance is centered at 0.5.** A default-importance memory
+///   contributes zero importance bonus; importance only pushes a score up
+///   or down from that reference point.
+/// * **Usage is saturating.** `tanh(uses/5)` caps the feedback bonus so
+///   a heavily-returned memory can't keep accumulating weight past a
+///   plateau. At 5 uses the bonus is ~76% of its asymptote; at 10, ~96%.
+/// * **Recency is decoupled from the feedback loop.** Age is measured
+///   from `created_at`, not `accessed_at`, so a `recall()` call does not
+///   bump its own results' recency scores on later queries.
+///
+/// The output of this scorer is on a **different scale** from the
+/// pre-v0.7.0 formula. Callers that compared raw scores to a fixed
+/// threshold should re-pick the threshold against the new scale.
 #[derive(Clone, Copy, Debug)]
 pub struct ScoreWeights {
-    /// Weight on semantic similarity.
+    /// Weight on semantic similarity. Kept in the struct for calibration
+    /// hooks and symmetry with the other weights; scoring v2 always uses
+    /// it as `1.0` because the leading `similarity` term is ungated and
+    /// the whole score sits on the cosine-similarity scale by design.
     pub alpha: f32,
-    /// Weight on recency decay.
+    /// Weight on the recency bonus (multiplied by `max(sim, 0)`).
     pub beta: f32,
-    /// Weight on the importance score.
+    /// Weight on the importance bonus `(importance − 0.5)`, centered at
+    /// the default-importance 0.5 (multiplied by `max(sim, 0)`).
     pub gamma: f32,
-    /// Weight on access frequency.
+    /// Weight on the saturating usage bonus `tanh(access_count / 5)`
+    /// (multiplied by `max(sim, 0)`).
     pub delta: f32,
     /// Half-life of the recency term, in seconds.
     pub half_life_secs: f32,
@@ -294,8 +329,8 @@ pub struct ScoreWeights {
 
 impl Default for ScoreWeights {
     fn default() -> Self {
-        // Tuned for conversational agents: similarity dominates, with a
-        // meaningful recency nudge. Half-life of 7 days.
+        // Tuned on the Phase 6 corpus + the ranking_v2 age-spread
+        // fixture; see `ranking_v2.checks` in perf_v0.5.0.json.
         Self {
             alpha: 1.0,
             beta: 0.3,
@@ -306,14 +341,26 @@ impl Default for ScoreWeights {
     }
 }
 
+/// Saturation constant K for the usage term `tanh(access_count / K)`.
+/// K = 5 means ~76% of the asymptote at 5 uses and ~96% at 10 — matches
+/// the "a few repeats is signal; past that it's a habit" intuition.
+const USAGE_SAT_K: f32 = 5.0;
+
 impl ScoreWeights {
-    /// Combine the four signals into a single score.
+    /// Combine the four signals into a single score. See the struct docs
+    /// for the full formula and the scoring-v2 rationale.
     pub fn score(&self, similarity: f32, age_secs: f32, importance: f32, access_count: u32) -> f32 {
+        // Recency is in [0, 1]: 1.0 at age 0, 0.5 at one half-life, etc.
         let recency = (-std::f32::consts::LN_2 * age_secs.max(0.0) / self.half_life_secs).exp();
-        let frequency = ((access_count as f32) + 1.0).ln();
+        // Saturating usage in [0, 1); tanh caps feedback-loop drift.
+        let usage = (access_count as f32 / USAGE_SAT_K).tanh();
+        // Gate the non-similarity bonuses by `max(sim, 0)` so a
+        // negative-cosine candidate (should be rare after the metric
+        // layer, but possible with `Metric::Dot` or short-text L2)
+        // can't collect positive bonuses, and a zero-similarity
+        // candidate collects no bonus either.
+        let gate = similarity.max(0.0);
         self.alpha * similarity
-            + self.beta * recency
-            + self.gamma * importance
-            + self.delta * frequency
+            + gate * (self.beta * recency + self.gamma * (importance - 0.5) + self.delta * usage)
     }
 }

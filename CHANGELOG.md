@@ -115,6 +115,129 @@ mnemo = { package = "mnemo-engine", version = "0.7" }
   remains.
 - `AGENTS.md` + both `README.md` code blocks updated.
 
+### Breaking — PR scoring v2: recall scoring formula + MCP tracking default
+
+**TL;DR.** `db.recall(...)` and `db.recall_text(...)` return the same
+set of memories, but each result's raw `score` now sits on a different
+scale — anything comparing raw scores to a fixed threshold needs to
+re-pick the threshold. Ranking quality on the bake-off corpus is higher
+(MRR 0.9487 vs 0.8654 under tracking-off; drift 0 vs 5), the
+no-op-but-measurable feedback-loop drift that the prior formula had is
+gone, and MCP recall now feeds its own usage back into later queries
+(flushed through the next mutating tool call, not per-recall).
+
+#### What the scorer does now
+
+```text
+score = similarity
+      + max(similarity, 0)
+        · ( β · recency
+          + γ · (importance − 0.5)
+          + δ · tanh(access_count / 5) )
+
+recency = exp( -ln(2) · age_secs / half_life_secs )
+age_secs = now - memory.created_at
+```
+
+Four deliberate shape changes from pre-v0.7.0 (see the
+`ranking_v2` block of `test/scripts/perf_v0.5.0.json` for the full
+measurement; the harness is `mnemo/examples/ranking_v2.rs`):
+
+1. **Similarity-gated bonuses.** Recency / importance / usage are
+   multiplied by `max(similarity, 0)`, so a stale-but-off-topic memory
+   can't ride recency past a semantically-on-point one. Pre-v0.7.0
+   scoring was purely additive.
+2. **Importance centered at 0.5.** A default-importance memory
+   contributes zero importance bonus; importance only pushes a score
+   up or down from the reference point (pre-v0.7.0: strictly additive,
+   so default-importance memories always got `γ · 0.5` for free).
+3. **Saturating usage.** `tanh(access_count / 5)` caps the feedback
+   bonus — a heavily-returned memory stops accumulating weight past a
+   plateau (~76% of asymptote at 5 uses, ~96% at 10). Pre-v0.7.0:
+   `δ · ln(access_count + 1)`, unbounded.
+4. **Recency reads `created_at`, not `accessed_at`.** A `recall` no
+   longer bumps the recency score of its own results on later queries.
+   Pre-v0.7.0 drift (top-1 flips between pass 1 and pass 5 under
+   tracking): 5/13 queries on the bake-off corpus. Post-v0.7.0: 0.
+
+#### New score scale (important for threshold-based callers)
+
+The raw `RecallResult.score` sits on the cosine-similarity scale with a
+small gated bonus added — for a normalized-embedding recall, typical
+top-1 scores land in roughly `[0.5, 1.3]`, where pre-v0.7.0 they
+clustered around `[1.0, 1.4]` because every memory got the additive
+`β · recency + γ · importance + δ · ln(uses+1)` bonus added on top of
+`α · sim` regardless of similarity. **Any caller comparing
+`RecallResult.score` to a fixed cutoff must re-pick the cutoff.**
+The *ranking* (ordering of results) is still the single thing recall
+guarantees; `score` is advisory.
+
+Known failure mode in the shipped scorer that none of the bake-off
+candidates fix: on the `ranking_v2` fixture, the query
+`"what did BP.1 ship?"` goes to `sup:lib_name:current` (the
+"library renamed to `mnemo_engine`" memory) instead of the labeled
+`recent:bp1` memory, across V0, V1, V2, V3, V4, V5, and
+similarity-only. The rename-current memory has both high similarity
+to "ship / release" phrasing and high importance (0.9), and the
+BP.1 memory's embedding is slightly further from "what did BP.1
+ship?" than the rename memory's. This is a retrieval/embedding
+failure, not a scoring failure — no weighted combination of
+(similarity, recency, importance, usage) over the shortlist that
+cosine returns can fix it. Report only; the sitewide fix is a
+better embedder or a hybrid-retrieval shortlist, which is out of
+scope for scoring v2.
+
+#### MCP tracking default
+
+Recalls issued through the MCP server (`mnemo serve --mcp`) now
+**track access** by default: a recall increments its hits'
+`access_count` and updates their `accessed_at`, in memory. Pre-v0.7.0
+MCP forced `track_access=false` on every recall. Why the flip: the
+feedback-loop drift that made tracking risky before is gone (recency
+no longer reads `accessed_at`), and the saturating-tanh usage term
+caps how much a heavily-returned memory can accumulate.
+
+Mechanics: the bump happens in-memory only (`accessed_at` /
+`access_count` + `dirty_catalog = true`) — **recall itself does not
+fsync**. The next mutating MCP tool (`remember`, `forget`,
+`cache_put_semantic`, `cache_get_semantic` on cache miss, etc.) runs
+`db.flush()` on exit, and that is when the access stats reach disk.
+On a read-only workload with no mutations, the updates live only in
+RAM and are lost on shutdown, which is the intended trade-off for a
+no-per-recall-fsync default.
+
+#### CLI `recall` lock fallback
+
+`mnemo recall <file>` defaults to opening read-write so it can bump
+access stats. When that fails because another holder has taken a
+shared or exclusive lock (e.g. a second concurrent `mnemo recall`, or
+a long-running writer), it now falls back automatically to
+`--no-track` read-only mode, prints one line to stderr —
+
+```
+mnemo: another writer holds the lock on <path>; running recall read-only with --no-track
+```
+
+— and exits successfully with the recall output on stdout.
+Pre-v0.7.0: `MnemoError::Locked` and exit non-zero. See the
+`cli_smoke.rs::recall_falls_back_to_read_only_when_write_lock_held`
+regression test.
+
+#### Python migration
+
+The `recall` / `recall_text` signatures and `track_access` kwarg
+default (`True`) are unchanged; the kwarg was already there.
+
+The repo's dogfood runbook at `test/scripts/project_memory.py` was
+updated to pass `track_access=False` on its own `cmd_recall` path:
+the CLI operator re-queries the same planner/worker coordination
+memories many times a day, and the saturation term is informative
+only for real agent writes, not for how often the human greps the
+memory. Projects using the Python binding should make the same
+call about their own `recall` sites: default `True` matches an
+agent actually learning from what it retrieves; override to `False`
+for developer / tooling reads.
+
 ### Fixed — `perf_v0.5.0.json` `speed_v0_6_0` provenance note
 
 Added a `remeasured` field + `remeasured_note` to the

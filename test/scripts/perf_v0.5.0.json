@@ -1,6 +1,6 @@
 {
   "ann_defaults_v0_6_0": {
-    "methodology": "Per-tier (10K, 100K, 1M-if-cached): rebuild the ANN index in memory under two scenarios \u2014 'fresh_install' = IndexConfig::default() with pq_subspaces=dims/4 and ANN-1.1 query-time auto formulas; 'upgrade_path' = explicit (pq=dims/8, n_probe=8, n_rerank=64) to simulate a v0.5.x-built index; ANN-1.1's legacy-sentinel detection substitutes the new auto formulas at query time. 50 queries per scenario, recall@10 against exact search, mean latency per query. Index is rebuilt in memory only \u2014 cached corpus on disk is untouched. See CHANGELOG `## [Unreleased]` \u2192 ANN-1.1.",
+    "methodology": "Per-tier (10K, 100K, 1M-if-cached): rebuild the ANN index in memory under two scenarios — 'fresh_install' = IndexConfig::default() with pq_subspaces=dims/4 and ANN-1.1 query-time auto formulas; 'upgrade_path' = explicit (pq=dims/8, n_probe=8, n_rerank=64) to simulate a v0.5.x-built index; ANN-1.1's legacy-sentinel detection substitutes the new auto formulas at query time. 50 queries per scenario, recall@10 against exact search, mean latency per query. Index is rebuilt in memory only — cached corpus on disk is untouched. See CHANGELOG `## [Unreleased]` → ANN-1.1.",
     "tiers": [
       {
         "corpus_size": 10000,
@@ -349,7 +349,7 @@
     "top_k": 10
   },
   "ann_recall_grid_v2": {
-    "methodology": "For each (corpus_size, pq_subspaces) config: rebuild the ANN index in memory (no flush \u2014 cached file keeps its default-config index), sweep n_probe as fractions of partitions {0.08, 0.16, 0.32, 0.5, 1.0} crossed with n_rerank as multiples of top_k {5, 10, 20, 50, 100}. Report mean recall@10 against exact search + mean query latency per cell. 'Knee' per config = fastest cell meeting target_recall=0.95; falls back to the highest-recall cell when the target isn't reached (= the config's ceiling).",
+    "methodology": "For each (corpus_size, pq_subspaces) config: rebuild the ANN index in memory (no flush — cached file keeps its default-config index), sweep n_probe as fractions of partitions {0.08, 0.16, 0.32, 0.5, 1.0} crossed with n_rerank as multiples of top_k {5, 10, 20, 50, 100}. Report mean recall@10 against exact search + mean query latency per cell. 'Knee' per config = fastest cell meeting target_recall=0.95; falls back to the highest-recall cell when the target isn't reached (= the config's ceiling).",
     "tiers": [
       {
         "configs": [
@@ -4259,6 +4259,396 @@
       }
     ]
   },
+  "ranking_v2": {
+    "corpus_size": 40,
+    "default": {
+      "drift_top1_pass1_to_last": 0,
+      "track_false": {
+        "hit_at_1": 0.9231,
+        "hit_at_5": 1.0,
+        "mrr": 0.9487,
+        "per_category": {
+          "architecture_semantic": {
+            "hit_at_1": 1.0,
+            "hit_at_5": 1.0,
+            "mrr": 1.0,
+            "n": 5
+          },
+          "recency_sensitive": {
+            "hit_at_1": 0.6667,
+            "hit_at_5": 1.0,
+            "mrr": 0.7778,
+            "n": 3
+          },
+          "superseded_fact": {
+            "hit_at_1": 1.0,
+            "hit_at_5": 1.0,
+            "mrr": 1.0,
+            "n": 5
+          }
+        },
+        "top1_labels": [
+          "sup:release:current",
+          "sup:ann_default:current",
+          "sup:lib_name:current",
+          "sup:fsyncs:current",
+          "sup:compact_cache:current",
+          "fresh:planner_dispatch",
+          "sup:lib_name:current",
+          "recent:write_bench",
+          "mid:wal_semantics",
+          "mid:ann_arch",
+          "mid:crypto_layers",
+          "mid:session_api",
+          "mid:mcp_server"
+        ]
+      },
+      "track_true_passes": [
+        {
+          "hit_at_1": 0.8462,
+          "hit_at_5": 1.0,
+          "mrr": 0.9103,
+          "per_category": {
+            "architecture_semantic": {
+              "hit_at_1": 0.8,
+              "hit_at_5": 1.0,
+              "mrr": 0.9,
+              "n": 5
+            },
+            "recency_sensitive": {
+              "hit_at_1": 0.6667,
+              "hit_at_5": 1.0,
+              "mrr": 0.7778,
+              "n": 3
+            },
+            "superseded_fact": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            }
+          },
+          "top1_labels": [
+            "sup:release:current",
+            "sup:ann_default:current",
+            "sup:lib_name:current",
+            "sup:fsyncs:current",
+            "sup:compact_cache:current",
+            "fresh:planner_dispatch",
+            "sup:lib_name:current",
+            "recent:write_bench",
+            "mid:wal_semantics",
+            "mid:ann_arch",
+            "old:why_encryption",
+            "mid:session_api",
+            "mid:mcp_server"
+          ]
+        },
+        {
+          "hit_at_1": 0.9231,
+          "hit_at_5": 1.0,
+          "mrr": 0.9487,
+          "per_category": {
+            "architecture_semantic": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            },
+            "recency_sensitive": {
+              "hit_at_1": 0.6667,
+              "hit_at_5": 1.0,
+              "mrr": 0.7778,
+              "n": 3
+            },
+            "superseded_fact": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            }
+          },
+          "top1_labels": [
+            "sup:release:current",
+            "sup:ann_default:current",
+            "sup:lib_name:current",
+            "sup:fsyncs:current",
+            "sup:compact_cache:current",
+            "fresh:planner_dispatch",
+            "sup:lib_name:current",
+            "recent:write_bench",
+            "mid:wal_semantics",
+            "mid:ann_arch",
+            "mid:crypto_layers",
+            "mid:session_api",
+            "mid:mcp_server"
+          ]
+        },
+        {
+          "hit_at_1": 0.9231,
+          "hit_at_5": 1.0,
+          "mrr": 0.9487,
+          "per_category": {
+            "architecture_semantic": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            },
+            "recency_sensitive": {
+              "hit_at_1": 0.6667,
+              "hit_at_5": 1.0,
+              "mrr": 0.7778,
+              "n": 3
+            },
+            "superseded_fact": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            }
+          },
+          "top1_labels": [
+            "sup:release:current",
+            "sup:ann_default:current",
+            "sup:lib_name:current",
+            "sup:fsyncs:current",
+            "sup:compact_cache:current",
+            "fresh:planner_dispatch",
+            "sup:lib_name:current",
+            "recent:write_bench",
+            "mid:wal_semantics",
+            "mid:ann_arch",
+            "mid:crypto_layers",
+            "mid:session_api",
+            "mid:mcp_server"
+          ]
+        },
+        {
+          "hit_at_1": 0.9231,
+          "hit_at_5": 1.0,
+          "mrr": 0.9487,
+          "per_category": {
+            "architecture_semantic": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            },
+            "recency_sensitive": {
+              "hit_at_1": 0.6667,
+              "hit_at_5": 1.0,
+              "mrr": 0.7778,
+              "n": 3
+            },
+            "superseded_fact": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            }
+          },
+          "top1_labels": [
+            "sup:release:current",
+            "sup:ann_default:current",
+            "sup:lib_name:current",
+            "sup:fsyncs:current",
+            "sup:compact_cache:current",
+            "fresh:planner_dispatch",
+            "sup:lib_name:current",
+            "recent:write_bench",
+            "mid:wal_semantics",
+            "mid:ann_arch",
+            "mid:crypto_layers",
+            "mid:session_api",
+            "mid:mcp_server"
+          ]
+        },
+        {
+          "hit_at_1": 0.8462,
+          "hit_at_5": 1.0,
+          "mrr": 0.9103,
+          "per_category": {
+            "architecture_semantic": {
+              "hit_at_1": 0.8,
+              "hit_at_5": 1.0,
+              "mrr": 0.9,
+              "n": 5
+            },
+            "recency_sensitive": {
+              "hit_at_1": 0.6667,
+              "hit_at_5": 1.0,
+              "mrr": 0.7778,
+              "n": 3
+            },
+            "superseded_fact": {
+              "hit_at_1": 1.0,
+              "hit_at_5": 1.0,
+              "mrr": 1.0,
+              "n": 5
+            }
+          },
+          "top1_labels": [
+            "sup:release:current",
+            "sup:ann_default:current",
+            "sup:lib_name:current",
+            "sup:fsyncs:current",
+            "sup:compact_cache:current",
+            "fresh:planner_dispatch",
+            "sup:lib_name:current",
+            "recent:write_bench",
+            "mid:wal_semantics",
+            "mid:ann_arch",
+            "old:why_encryption",
+            "mid:session_api",
+            "mid:mcp_server"
+          ]
+        }
+      ]
+    },
+    "fixture_meta": {
+      "dimensions": 384,
+      "generator": "test/scripts/gen_ranking_v2_fixture.py",
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "normalize": true,
+      "purpose": "Age-spread corpus for scoring v2 measurement. Each memory carries created_at_offset_secs; the Rust harness backdates Memory.created_at / accessed_at by that amount before remember so the recency clock has something to decay. SUPERSEDED_FACT_PAIRS guarantee each 'what's the current X' query has a single unambiguous correct answer.",
+      "superseded_fact_pair_count": 5
+    },
+    "generator": "mnemo/examples/ranking_v2.rs",
+    "notes": "default = ScoreWeights::default() (scoring v2 shipped). similarity_only = β=γ=δ=0 baseline, kept as a permanent row per the 2026-11-06 Planner DECISION so the next release can tell if the corpus has become trivially similarity-solvable. phase6_regression = default scoring run on the pre-scoring-v2 corpus; gates hit@1 ≥ 0.5467 and MRR ≥ 0.6665 (V0 shipped − 0.02). Scoring v2 is on a new scale from the pre-v0.7.0 formula: raw scores sit on the cosine-similarity scale plus small gated bonuses; threshold-based callers need to re-check their cutoffs.",
+    "phase6_min_hit_at_1": 0.5467,
+    "phase6_min_mrr": 0.6665,
+    "phase6_regression": {
+      "hit_at_1": 0.5667,
+      "hit_at_5": 0.8,
+      "mrr": 0.6779,
+      "per_category": {
+        "decision_exact": {
+          "hit_at_1": 0.0,
+          "hit_at_5": 1.0,
+          "mrr": 0.25,
+          "n": 1
+        },
+        "decision_semantic": {
+          "hit_at_1": 1.0,
+          "hit_at_5": 1.0,
+          "mrr": 1.0,
+          "n": 1
+        },
+        "function_exact": {
+          "hit_at_1": 1.0,
+          "hit_at_5": 1.0,
+          "mrr": 1.0,
+          "n": 4
+        },
+        "function_semantic": {
+          "hit_at_1": 0.25,
+          "hit_at_5": 1.0,
+          "mrr": 0.5417,
+          "n": 4
+        },
+        "pr_exact": {
+          "hit_at_1": 0.2,
+          "hit_at_5": 0.4,
+          "mrr": 0.3222,
+          "n": 5
+        },
+        "pr_semantic": {
+          "hit_at_1": 0.8,
+          "hit_at_5": 1.0,
+          "mrr": 0.9,
+          "n": 5
+        },
+        "release_exact": {
+          "hit_at_1": 0.8,
+          "hit_at_5": 0.8,
+          "mrr": 0.8333,
+          "n": 5
+        },
+        "release_semantic": {
+          "hit_at_1": 0.4,
+          "hit_at_5": 0.6,
+          "mrr": 0.5286,
+          "n": 5
+        }
+      },
+      "top1_labels": [
+        "release:v0.4.0",
+        "pr:PR-3",
+        "release:v0.4.0",
+        "release:v0.4.0",
+        "release:v0.3.0",
+        "release:v0.5.0",
+        "release:v0.4.0",
+        "release:v0.3.2",
+        "release:v0.1.0",
+        "release:v0.3.2",
+        "pr:PR-7",
+        "pr:PR-8",
+        "pr:PR-9",
+        "pr:PR-10b.2",
+        "release:v0.4.1",
+        "pr:PR-9",
+        "pr:PR-9",
+        "pr:PR-9",
+        "pr:PR-9",
+        "pr:PR-BP",
+        "release:v0.3.0",
+        "noise:6",
+        "api:Session",
+        "decision:phase2-moved-up",
+        "api:Mnemo::recall",
+        "api:Mnemo::flush",
+        "api:EmbedCmd",
+        "api:ScoreWeights",
+        "decision:ivf-vs-hnsw",
+        "api:Mnemo::remember"
+      ]
+    },
+    "query_count": 13,
+    "similarity_only": {
+      "hit_at_1": 0.6154,
+      "hit_at_5": 1.0,
+      "mrr": 0.7885,
+      "per_category": {
+        "architecture_semantic": {
+          "hit_at_1": 0.8,
+          "hit_at_5": 1.0,
+          "mrr": 0.9,
+          "n": 5
+        },
+        "recency_sensitive": {
+          "hit_at_1": 0.6667,
+          "hit_at_5": 1.0,
+          "mrr": 0.75,
+          "n": 3
+        },
+        "superseded_fact": {
+          "hit_at_1": 0.4,
+          "hit_at_5": 1.0,
+          "mrr": 0.7,
+          "n": 5
+        }
+      },
+      "top1_labels": [
+        "old:v0_1_0",
+        "mid:ann_arch",
+        "sup:lib_name:past",
+        "sup:fsyncs:current",
+        "sup:compact_cache:current",
+        "fresh:planner_dispatch",
+        "sup:lib_name:current",
+        "recent:write_bench",
+        "mid:wal_semantics",
+        "mid:ann_arch",
+        "old:why_encryption",
+        "mid:session_api",
+        "mid:mcp_server"
+      ]
+    },
+    "top_k": 10,
+    "usage_loop_passes": 5
+  },
   "speed": {
     "benches": {
       "recall/exact_scan_1m": {
@@ -4269,7 +4659,7 @@
       "recall/ivfpq_recall_1m": {
         "mean_secs": 0.0022479330485515874,
         "median_secs": 0.0022420262479114455,
-        "stderr_secs": 5.918518166891348e-06
+        "stderr_secs": 5.918518166891348e-6
       }
     },
     "machine": {
@@ -4281,29 +4671,29 @@
   "speed_hw_aes": {
     "benches": {
       "cache/cache_get_exact_hit": {
-        "mean_secs": 1.035294640676348e-06,
-        "median_secs": 1.0362042110959778e-06,
-        "stderr_secs": 1.871836828679559e-09
+        "mean_secs": 1.035294640676348e-6,
+        "median_secs": 1.0362042110959778e-6,
+        "stderr_secs": 1.871836828679559e-9
       },
       "cache/cache_get_semantic_hit": {
         "mean_secs": 0.00037619245319194,
         "median_secs": 0.000373893009920635,
-        "stderr_secs": 1.5002788757945237e-06
+        "stderr_secs": 1.5002788757945237e-6
       },
       "cache/cache_put_exact_batched": {
         "mean_secs": 0.00031888199387952076,
         "median_secs": 0.00029480470424482925,
-        "stderr_secs": 2.2138090536458847e-05
+        "stderr_secs": 0.000022138090536458847
       },
       "cache/cache_put_exact_strict": {
         "mean_secs": 0.0004767708691322049,
         "median_secs": 0.0004706515116274258,
-        "stderr_secs": 3.158793966931225e-05
+        "stderr_secs": 0.00003158793966931225
       },
       "cache/cache_put_semantic_strict": {
         "mean_secs": 0.0005213705170403226,
         "median_secs": 0.0004886123930991369,
-        "stderr_secs": 2.947911277033632e-05
+        "stderr_secs": 0.00002947911277033632
       },
       "embed_overhead/remember_raw_vector": {
         "mean_secs": 0.022710835015,
@@ -4318,12 +4708,12 @@
       "open/open_latency_fast_kdf": {
         "mean_secs": 0.0006281559327894221,
         "median_secs": 0.0006288815789473684,
-        "stderr_secs": 8.180302622948004e-07
+        "stderr_secs": 8.180302622948004e-7
       },
       "open/open_latency_secure_kdf": {
         "mean_secs": 0.01533224773428572,
         "median_secs": 0.015374571428571428,
-        "stderr_secs": 7.256372554137752e-05
+        "stderr_secs": 0.00007256372554137752
       },
       "recall/exact_scan_100k": {
         "mean_secs": 1.0501276271,
@@ -4338,12 +4728,12 @@
       "recall/ivfpq_recall_100k": {
         "mean_secs": 0.0006056233723171899,
         "median_secs": 0.0006044726191964286,
-        "stderr_secs": 3.474108548795435e-06
+        "stderr_secs": 3.474108548795435e-6
       },
       "recall/ivfpq_recall_10k": {
         "mean_secs": 0.00037205555285946127,
         "median_secs": 0.0003725946713286714,
-        "stderr_secs": 1.142580063655649e-06
+        "stderr_secs": 1.142580063655649e-6
       },
       "write/remember_1_then_flush": {
         "mean_secs": 0.02193600482,
@@ -4363,6 +4753,83 @@
     }
   },
   "speed_v0_6_0": {
+    "benches": {
+      "cache/cache_get_exact_hit": {
+        "mean_secs": 1.035294640676348e-6,
+        "median_secs": 1.0362042110959778e-6,
+        "stderr_secs": 1.871836828679559e-9
+      },
+      "cache/cache_get_semantic_hit": {
+        "mean_secs": 0.00037619245319194,
+        "median_secs": 0.000373893009920635,
+        "stderr_secs": 1.5002788757945237e-6
+      },
+      "cache/cache_put_exact_batched": {
+        "mean_secs": 0.00031888199387952076,
+        "median_secs": 0.00029480470424482925,
+        "stderr_secs": 0.000022138090536458847
+      },
+      "cache/cache_put_exact_strict": {
+        "mean_secs": 0.0004767708691322049,
+        "median_secs": 0.0004706515116274258,
+        "stderr_secs": 0.00003158793966931225
+      },
+      "cache/cache_put_semantic_strict": {
+        "mean_secs": 0.0005213705170403226,
+        "median_secs": 0.0004886123930991369,
+        "stderr_secs": 0.00002947911277033632
+      },
+      "embed_overhead/remember_raw_vector": {
+        "mean_secs": 0.022710835015,
+        "median_secs": 0.022739245,
+        "stderr_secs": 0.0003082050961419022
+      },
+      "embed_overhead/remember_text_in_process_embedder": {
+        "mean_secs": 0.022460089865,
+        "median_secs": 0.0216398385,
+        "stderr_secs": 0.0004340632698725473
+      },
+      "open/open_latency_fast_kdf": {
+        "mean_secs": 0.0006281559327894221,
+        "median_secs": 0.0006288815789473684,
+        "stderr_secs": 8.180302622948004e-7
+      },
+      "open/open_latency_secure_kdf": {
+        "mean_secs": 0.01533224773428572,
+        "median_secs": 0.015374571428571428,
+        "stderr_secs": 0.00007256372554137752
+      },
+      "recall/exact_scan_100k": {
+        "mean_secs": 1.0501276271,
+        "median_secs": 1.051506375,
+        "stderr_secs": 0.005816585473096464
+      },
+      "recall/exact_scan_10k": {
+        "mean_secs": 0.11559830078,
+        "median_secs": 0.105218687,
+        "stderr_secs": 0.0034265949790269444
+      },
+      "recall/ivfpq_recall_100k": {
+        "mean_secs": 0.0006056233723171899,
+        "median_secs": 0.0006044726191964286,
+        "stderr_secs": 3.474108548795435e-6
+      },
+      "recall/ivfpq_recall_10k": {
+        "mean_secs": 0.00037205555285946127,
+        "median_secs": 0.0003725946713286714,
+        "stderr_secs": 1.142580063655649e-6
+      },
+      "write/remember_1_then_flush": {
+        "mean_secs": 0.019607672085,
+        "median_secs": 0.018919322875,
+        "stderr_secs": 0.0003140867944839011
+      },
+      "write/remember_batch_100_then_flush": {
+        "mean_secs": 0.024877705855,
+        "median_secs": 0.024698380125,
+        "stderr_secs": 0.00032279830137746206
+      }
+    },
     "machine": {
       "cpu": "Apple M1 Pro",
       "os": "Darwin 25.6.0",
@@ -4372,83 +4839,6 @@
       "write/remember_1_then_flush",
       "write/remember_batch_100_then_flush"
     ],
-    "remeasured_note": "Only the benches listed in \"remeasured\" were actually re-run for v0.6.1 (DUR-1 step 5 write benches on Apple M1 Pro, hardware AES, release build). The other bench cells are copied verbatim from the v0.5.1 speed_hw_aes block \u2014 no code path touching them changed between v0.5.1 and v0.6.1. NAME-1 (2026-11-05): planner noted the ambiguity and asked for this field so the copied cells aren't mistaken for fresh measurements.",
-    "benches": {
-      "cache/cache_get_exact_hit": {
-        "median_secs": 1.0362042110959778e-06,
-        "mean_secs": 1.0352946406763479e-06,
-        "stderr_secs": 1.8718368286795593e-09
-      },
-      "cache/cache_get_semantic_hit": {
-        "median_secs": 0.00037389300992063493,
-        "mean_secs": 0.00037619245319194,
-        "stderr_secs": 1.5002788757945237e-06
-      },
-      "cache/cache_put_exact_batched": {
-        "median_secs": 0.00029480470424482925,
-        "mean_secs": 0.00031888199387952076,
-        "stderr_secs": 2.2138090536458847e-05
-      },
-      "cache/cache_put_exact_strict": {
-        "median_secs": 0.0004706515116274258,
-        "mean_secs": 0.0004767708691322049,
-        "stderr_secs": 3.158793966931225e-05
-      },
-      "cache/cache_put_semantic_strict": {
-        "median_secs": 0.0004886123930991369,
-        "mean_secs": 0.0005213705170403226,
-        "stderr_secs": 2.947911277033632e-05
-      },
-      "embed_overhead/remember_raw_vector": {
-        "median_secs": 0.022739245,
-        "mean_secs": 0.022710835015,
-        "stderr_secs": 0.0003082050961419022
-      },
-      "embed_overhead/remember_text_in_process_embedder": {
-        "median_secs": 0.0216398385,
-        "mean_secs": 0.022460089864999998,
-        "stderr_secs": 0.0004340632698725473
-      },
-      "open/open_latency_fast_kdf": {
-        "median_secs": 0.0006288815789473684,
-        "mean_secs": 0.0006281559327894221,
-        "stderr_secs": 8.180302622948004e-07
-      },
-      "open/open_latency_secure_kdf": {
-        "median_secs": 0.015374571428571428,
-        "mean_secs": 0.01533224773428572,
-        "stderr_secs": 7.256372554137752e-05
-      },
-      "recall/exact_scan_100k": {
-        "median_secs": 1.051506375,
-        "mean_secs": 1.0501276271,
-        "stderr_secs": 0.005816585473096464
-      },
-      "recall/exact_scan_10k": {
-        "median_secs": 0.105218687,
-        "mean_secs": 0.11559830078,
-        "stderr_secs": 0.0034265949790269444
-      },
-      "recall/ivfpq_recall_100k": {
-        "median_secs": 0.0006044726191964286,
-        "mean_secs": 0.0006056233723171899,
-        "stderr_secs": 3.474108548795435e-06
-      },
-      "recall/ivfpq_recall_10k": {
-        "median_secs": 0.00037259467132867133,
-        "mean_secs": 0.00037205555285946127,
-        "stderr_secs": 1.1425800636556493e-06
-      },
-      "write/remember_1_then_flush": {
-        "median_secs": 0.018919322875,
-        "mean_secs": 0.019607672085,
-        "stderr_secs": 0.0003140867944839011
-      },
-      "write/remember_batch_100_then_flush": {
-        "median_secs": 0.024698380125,
-        "mean_secs": 0.024877705855,
-        "stderr_secs": 0.00032279830137746206
-      }
-    }
+    "remeasured_note": "Only the benches listed in \"remeasured\" were actually re-run for v0.6.1 (DUR-1 step 5 write benches on Apple M1 Pro, hardware AES, release build). The other bench cells are copied verbatim from the v0.5.1 speed_hw_aes block — no code path touching them changed between v0.5.1 and v0.6.1. NAME-1 (2026-11-05): planner noted the ambiguity and asked for this field so the copied cells aren't mistaken for fresh measurements."
   }
 }

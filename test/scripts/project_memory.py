@@ -177,11 +177,20 @@ def cmd_remember(args: argparse.Namespace) -> None:
 
 def cmd_recall(args: argparse.Namespace) -> None:
     db = open_db()
+    # Scoring v2 (v0.7.0) made recall's own observation count toward
+    # the usage saturation term on later queries. For the dogfood
+    # runbook that reads the planner/worker coordination memories
+    # dozens of times a day, that feedback is noise, not signal:
+    # every recall would "vote for" the memories it just surfaced.
+    # Keep tracking off here — the CLI operator still gets exact
+    # scoring, but the recency / usage signals stay driven by real
+    # writes, not by how often we grep our own memory.
     hits = db.recall_text(
         args.query,
         top_k=args.top_k,
         agent_id=AGENT_ID,
         memory_types=args.types.split(",") if args.types else None,
+        track_access=False,
     )
     db.close()
 

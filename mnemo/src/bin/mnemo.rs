@@ -1395,6 +1395,14 @@ fn run() -> std::result::Result<(), String> {
             // catalog access stats. `--no-track` opens read-only with a
             // shared lock and disables access-tracking on the request,
             // so it can coexist with a writer holding the exclusive lock.
+            //
+            // Lock fallback (scoring v2, v0.7.0): when the default
+            // read-write open fails because another writer holds the
+            // exclusive lock, fall back to a read-only, no-track recall
+            // with a one-line stderr note. A read-only recall is strictly
+            // more useful than exiting non-zero on a transient lock
+            // contention. `--no-track` already opens read-only, so this
+            // only affects the default (tracking) path.
             let hits = match (db_opt.take(), no_track) {
                 (Some(mut db), _) => {
                     if no_track {
@@ -1407,10 +1415,19 @@ fn run() -> std::result::Result<(), String> {
                     let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
                     db.recall(&req).map_err(fmt)?
                 }
-                (None, false) => {
-                    let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-                    db.recall(&req).map_err(fmt)?
-                }
+                (None, false) => match Mnemo::open(&path, &pp) {
+                    Ok(mut db) => db.recall(&req).map_err(fmt)?,
+                    Err(mnemo_engine::MnemoError::Locked { .. }) => {
+                        eprintln!(
+                            "mnemo: another writer holds the lock on {path}; \
+                             running recall read-only with --no-track"
+                        );
+                        req = req.track_access(false);
+                        let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+                        db.recall(&req).map_err(fmt)?
+                    }
+                    Err(e) => return Err(fmt(e)),
+                },
             };
             print_recall_hits(&hits, format);
         }

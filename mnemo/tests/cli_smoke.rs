@@ -1506,3 +1506,60 @@ fn cli_index_drop_and_rebuild_are_mutually_exclusive() {
         "expected a clap 'conflicts' message, got: {stderr}"
     );
 }
+
+#[test]
+fn recall_falls_back_to_read_only_when_write_lock_held() {
+    // Scoring v2 lock fallback (v0.7.0): the default `mnemo recall`
+    // tries read-write first (so it can bump access stats). If that
+    // open fails because another holder blocks the exclusive lock,
+    // recall must fall back to a read-only, no-track recall with a
+    // one-line stderr note, not exit non-zero.
+    //
+    // We simulate the fallback's useful path: another reader (shared
+    // lock) holds the file, so the subprocess's exclusive-lock attempt
+    // fails (LOCK_EX is blocked by LOCK_SH). The fallback then takes
+    // its own shared lock, which coexists with the existing one and
+    // succeeds. This is the real-world case — two concurrent CLI
+    // recalls against the same file — that the fallback is for.
+    let (_dir, path, pp, _) = seed_db();
+
+    // Hold a shared read-only handle for the duration of the recall.
+    // Keeping it alive across the CLI invocation forces the
+    // subprocess's `Mnemo::open` (exclusive lock) to fail.
+    let reader = Mnemo::open_read_only(&path, pp).expect("open read-only reader");
+
+    let (status, stdout, stderr) = run_cli(
+        &[
+            "recall",
+            path.to_str().unwrap(),
+            "--query",
+            "[1.0,0.0,0.0,0.0]",
+            "--top-k",
+            "1",
+        ],
+        pp,
+    );
+
+    // Keep the shared handle alive until after the subprocess returns
+    // so the lock really is held for the duration of the subprocess's
+    // open attempt.
+    drop(reader);
+
+    assert!(
+        status.success(),
+        "recall must succeed via read-only fallback when the exclusive lock \
+         is unavailable; got status={status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    );
+    assert!(
+        stderr.contains("another writer holds the lock")
+            && stderr.contains("read-only")
+            && stderr.contains("--no-track"),
+        "expected the one-line stderr fallback note, got stderr:\n{stderr}",
+    );
+    // The recall itself must have produced an output row (the tea
+    // memory's vector is `[1,0,0,0]`, so it's a guaranteed hit).
+    assert!(
+        stdout.contains("the user prefers tea"),
+        "expected recall output to include the top hit; got:\n{stdout}",
+    );
+}

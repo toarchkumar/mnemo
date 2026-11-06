@@ -672,13 +672,21 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
             ))
         }
     };
-    // Deliberately track_access(false) so the MCP server never mutates
-    // catalog state on a read-only-shaped tool call. Flushing after
-    // every mutating tool call keeps the file durable.
+    // Scoring v2 (v0.7.0) flipped the default: MCP recalls DO track
+    // access, so an agent's own retrievals contribute to the usage
+    // saturation term on later queries. The bump happens in-memory
+    // (`accessed_at` / `access_count` + `dirty_catalog`), and persists
+    // through the next flush — recall itself does not fsync, so there
+    // is no per-tool-call write-amplification cost. The next mutating
+    // tool call (remember / forget / cache_put_semantic / etc.) runs
+    // `db.flush()` on exit and that is when the access stats reach
+    // disk; on a read-only workload with no mutations, the updates
+    // live only in RAM and are lost on shutdown, which is fine (the
+    // scorer never persists this signal on a read-only MCP session).
     let mut req = RecallRequest::new(query)
         .top_k(top_k)
         .metric(metric)
-        .track_access(false);
+        .track_access(true);
     if let Some(types) = args.get("types").and_then(|v| v.as_array()) {
         let parsed: Vec<MemoryType> = types
             .iter()

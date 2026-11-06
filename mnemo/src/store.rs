@@ -1752,19 +1752,23 @@ impl Mnemo {
                 .collect()
         };
 
-        let mut scored: Vec<RecallResult> = Vec::new();
+        // Scoring v2 (shipped v0.7.0). Single-pass filter + score:
+        //   * `age_secs = now - m.created_at`, so a recall doesn't bump
+        //     its own results' recency on later queries.
+        //   * `ScoreWeights::score` applies the similarity-gated,
+        //     importance-centered, saturating-usage formula documented
+        //     on `ScoreWeights`.
+        let mut scored: Vec<RecallResult> = Vec::with_capacity(entries.len());
         for e in &entries {
             let m = self.read_memory(e)?;
             if m.is_expired(now) {
                 continue;
             }
-            // Type filter.
             if let Some(types) = &req.memory_types {
                 if !types.contains(&m.memory_type) {
                     continue;
                 }
             }
-            // Agent-scoping: an agent sees its own memories plus shared ones.
             if let Some(agent) = &req.agent_id {
                 let visible = m.agent_id == *agent || m.scope == Scope::Shared;
                 if !visible {
@@ -1772,8 +1776,10 @@ impl Mnemo {
                 }
             }
             let sim = memory::similarity(req.metric, &req.query, &m.vector);
-            let age = (now - m.accessed_at) as f32;
-            let score = req.weights.score(sim, age, m.importance, m.access_count);
+            let age_secs = (now - m.created_at) as f32;
+            let score = req
+                .weights
+                .score(sim, age_secs, m.importance, m.access_count);
             scored.push(RecallResult {
                 memory: m,
                 score,
