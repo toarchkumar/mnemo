@@ -763,49 +763,61 @@ def test_background_thread_makes_progress_during_long_flush():
     print(f"ok  background thread ticked {during} times during blocking call")
 
 
-def test_import_mnemo_alias_still_works_with_deprecation_warning():
-    """NAME-1: the Python extension's import name moved from `mnemo`
-    to `mnemo_engine` in v0.7.0. `import mnemo` keeps working for the
-    whole 0.7.x series via the pure-Python shim in
-    `python/mnemo/__init__.py`, which re-exports every public name
-    and emits one `DeprecationWarning` on import. The shim is removed
-    in 0.8.0.
+def test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package():
+    """NAME-1 (Option A, 2026-11-05 Planner DECISION): the v0.7.0
+    rename **drops** the `import mnemo` alias instead of shipping it
+    as a pure-Python shim alongside the extension. Rationale: while
+    our wheel wrote a top-level `mnemo/` package, it still silently
+    clobbered (or was clobbered by) PyPI `mnemo-db` and the old
+    `mnemo` 0.0.2 — exactly the collision NAME-1 exists to end.
+    Users migrate with one edit: `import mnemo_engine as mnemo`.
 
-    We re-import the module under `warnings.catch_warnings` so this
-    test is reliable even when some earlier test file already warmed
-    up `sys.modules['mnemo']`."""
-    import importlib
-    import sys
-    import warnings
+    This test enforces both halves of that decision:
 
-    # Force a fresh import so the shim's top-level `_warnings.warn` fires.
-    sys.modules.pop("mnemo", None)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        mnemo_alias = importlib.import_module("mnemo")
-
-    deprecations = [
-        w for w in caught
-        if issubclass(w.category, DeprecationWarning)
-        and "mnemo_engine" in str(w.message)
-    ]
-    assert len(deprecations) == 1, (
-        f"expected exactly one DeprecationWarning on `import mnemo`, "
-        f"got {len(deprecations)}: {[str(w.message) for w in caught]}"
-    )
-
-    # The alias must expose the same public surface as the real module.
-    import mnemo_engine
+    (a) `import mnemo_engine as mnemo` works end-to-end — same
+        objects as the direct `import mnemo_engine`, full public
+        API surface exposed under the local alias.
+    (b) The installed wheel ships **no** top-level `mnemo` package,
+        checked against `importlib.metadata.files("mnemo-engine")`.
+        This is robust even when some other `mnemo` package happens
+        to be installed in the same environment; it also guards
+        against the alias accidentally sneaking back in via a
+        `[tool.maturin] python-packages = ["mnemo"]` setting at some
+        future refactor."""
+    # Part (a): `import mnemo_engine as mnemo` is the recommended
+    # drop-in — same objects as the direct form, full public API.
+    import mnemo_engine as mnemo
+    import mnemo_engine as direct
     for name in ("Mnemo", "Session", "Turn", "open", "compact_file",
                  "build_info", "__version__"):
-        assert hasattr(mnemo_alias, name), (
-            f"alias missing public name `{name}` that mnemo_engine exposes"
+        assert hasattr(mnemo, name), (
+            f"`import mnemo_engine as mnemo` missing public name `{name}`"
         )
-        assert getattr(mnemo_alias, name) is getattr(mnemo_engine, name), (
-            f"alias `{name}` must be the same object as mnemo_engine.{name}"
+        assert getattr(mnemo, name) is getattr(direct, name), (
+            f"`as` alias should be the same object as the direct import "
+            f"for `{name}`"
         )
-    assert mnemo_alias.__version__ == mnemo_engine.__version__
-    print("ok  `import mnemo` alias re-exports mnemo_engine + emits one deprecation")
+
+    # Part (b): our wheel must ship no `mnemo/` top-level package.
+    # `importlib.metadata.files` gives the paths the wheel installed
+    # under site-packages; any entry at `mnemo/...` would mean the
+    # alias snuck back in (or we picked up an unrelated wheel).
+    import importlib.metadata
+    import pathlib
+    files = importlib.metadata.files("mnemo-engine") or []
+    mnemo_owned = [
+        str(pathlib.PurePath(str(f))) for f in files
+        if pathlib.PurePath(str(f)).parts[:1] == ("mnemo",)
+    ]
+    assert not mnemo_owned, (
+        f"mnemo-engine wheel shipped files under `mnemo/`, which would "
+        f"clash with mnemo-db and the old mnemo PyPI package — the exact "
+        f"collision NAME-1 exists to end. Offending paths: {mnemo_owned}"
+    )
+    print(
+        "ok  `import mnemo_engine as mnemo` works + wheel ships no `mnemo/` "
+        "package (NAME-1 Option A)"
+    )
 
 
 def test_rebuild_index_reclusters_under_current_defaults():
@@ -863,5 +875,5 @@ if __name__ == "__main__":
     test_compact_file_module_fn()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()
-    test_import_mnemo_alias_still_works_with_deprecation_warning()
+    test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package()
     print("\nall Python binding tests passed")

@@ -8,52 +8,65 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-### Breaking — PR NAME-1: import name becomes `mnemo_engine`
+### Breaking — PR NAME-1: import name becomes `mnemo_engine` (no `mnemo` alias)
 
-**Why.** The distribution name on PyPI and crates.io has always been
-`mnemo-engine` — the plain `mnemo` name was already taken by
-unrelated projects when we first published. The *library/import*
-name, though, was `mnemo` in both languages (`use mnemo::...`,
-`import mnemo`). That collides with:
+**The one-line Python migration:**
+
+```python
+import mnemo_engine as mnemo   # keeps every call site unchanged
+# ...or, as the recommended end state:
+import mnemo_engine
+```
+
+**Why.** The distribution name on PyPI and crates.io has always
+been `mnemo-engine` — the plain `mnemo` name was already taken by
+unrelated projects when we first published. The pre-v0.7.0
+*library/import* name, though, was `mnemo` in both languages
+(`use mnemo::...`, `import mnemo`). On Python that silently
+collided with:
 
 - PyPI `mnemo-db` 0.5.30 ("MCP-native memory database for AI
   agents"), an active project targeting the same audience, which
-  installs a top-level `mnemo` module. Installing `mnemo-engine`
-  alongside writes the same `site-packages/mnemo/` — and **pip
-  doesn't warn**, so one silently clobbers the other.
-- PyPI `mnemo` 0.0.2, which also installs a `mnemo` module.
-- crates.io `mnemo` 1.0.0 (a terminal knowledge vault) with lib
-  name `mnemo`. Cargo reports this collision loudly, but it's
-  avoidable.
+  installs a top-level `mnemo/` module. Installing `mnemo-engine`
+  alongside wrote the same `site-packages/mnemo/` — and **pip
+  doesn't warn**, so one silently clobbered the other depending on
+  install order.
+- PyPI `mnemo` 0.0.2, which also installs a `mnemo/` module.
 
-NAME-1 moves the import name to `mnemo_engine` and ships a
-transitional alias for the whole 0.7.x series so existing code
-keeps working during the migration. The alias is removed in
-v0.8.0. The CLI command (`mnemo`), the `.mnemo` file extension, the
-MCP server key, manifest metadata, and the on-disk format are all
-unchanged.
+On Rust, crates.io `mnemo` 1.0.0 (a terminal knowledge vault) also
+holds the lib name `mnemo`; Cargo reports that clash loudly, but
+it's still avoidable.
+
+**v0.7.0 ends the collision by renaming the import name to
+`mnemo_engine` and shipping no `mnemo` alias.** We considered a
+pure-Python deprecation shim at `python/mnemo/__init__.py` that
+would re-export `mnemo_engine` for the v0.7.x series. Dropped: as
+long as our wheel wrote a top-level `mnemo/`, it kept clashing with
+`mnemo-db` and `mnemo` 0.0.2 — exactly the collision the rename
+exists to end. One short edit at every call site (`import
+mnemo_engine as mnemo`) is cheaper than one more release of the
+silent-clobber surface.
+
+Unchanged on purpose: the CLI command (`mnemo`), the `.mnemo` file
+extension, the product name MNemo, the MCP server key in client
+configs, manifest metadata, and the on-disk format.
 
 #### Python migration
 
-Both of these work in v0.7.x; pick the one that fits your codebase:
+Pick the form that fits your codebase:
 
 ```python
-# Direct new name — the recommended end state.
-import mnemo_engine
-db = mnemo_engine.open("agent.mnemo", pp, dimensions=4)
-
-# Drop-in that keeps call sites unchanged and raises no warning.
+# Drop-in: keep every call site unchanged.
 import mnemo_engine as mnemo
 db = mnemo.open("agent.mnemo", pp, dimensions=4)
+
+# Direct: the recommended end state.
+import mnemo_engine
+db = mnemo_engine.open("agent.mnemo", pp, dimensions=4)
 ```
 
-The pre-v0.7.0 `import mnemo` keeps working through v0.7.x via a
-pure-Python shim under `mnemo-python/python/mnemo/__init__.py`. It
-re-exports every public name from `mnemo_engine` (classes `Mnemo`,
-`Session`, `Turn`; functions `open`, `compact_file`, `build_info`;
-`__version__`) and emits exactly one `DeprecationWarning` on
-import. Follow the warning to migrate; the shim disappears in
-v0.8.0.
+`import mnemo` raises `ModuleNotFoundError` at v0.7.0 — there is
+no shim.
 
 #### Rust migration
 
@@ -68,7 +81,8 @@ use mnemo_engine::{Mnemo, Memory, MemoryType, RecallRequest};
 ```
 
 Code that wants to keep `use mnemo::...` unchanged can rename the
-dependency locally:
+dependency locally; this stays supported indefinitely because it's
+a Cargo-side local alias, not a global namespace grab:
 
 ```toml
 [dependencies]
@@ -80,14 +94,14 @@ mnemo = { package = "mnemo-engine", version = "0.7" }
 - `mnemo/Cargo.toml`: dropped the `[lib] name = "mnemo"` override.
   The lib now gets Cargo's default from the package name
   (`mnemo-engine` → `mnemo_engine`). `[[bin]] name = "mnemo"` is
-  unchanged — the executable users type is still `mnemo`.
+  unchanged — the executable users type at the shell is still
+  `mnemo`.
 - `mnemo-python/Cargo.toml`: `[lib] name = "mnemo"` → `"mnemo_engine"`.
 - `mnemo-python/src/lib.rs`: `#[pymodule] fn mnemo` → `fn mnemo_engine`.
 - `mnemo-python/pyproject.toml`: switched to maturin's mixed
   Python/Rust layout (`python-source = "python"`, `module-name =
   "mnemo_engine"`). `python/mnemo_engine/__init__.py` re-exports
-  the compiled extension; `python/mnemo/__init__.py` is the
-  deprecation shim.
+  the compiled extension; no `python/mnemo/` package (Option A).
 - `mnemo/fuzz/Cargo.toml`: dep rename `mnemo` → `mnemo_engine`
   (local alias, not a crates.io change). Fuzz targets now write
   `mnemo_engine::__fuzz::...`.
@@ -97,15 +111,9 @@ mnemo = { package = "mnemo-engine", version = "0.7" }
 - `test/scripts/project_memory.py` and
   `test/scripts/ranking_harness.py` moved to
   `import mnemo_engine as mnemo` so their call sites stay the
-  same and no deprecation fires.
+  same and no reference to the old top-level `mnemo` package
+  remains.
 - `AGENTS.md` + both `README.md` code blocks updated.
-
-#### Removed in v0.8.0
-
-The Python `mnemo` alias package and the "keep `use mnemo::` via a
-Cargo dep rename" guidance both expire at v0.8.0. Ship `import
-mnemo_engine` / `use mnemo_engine::...` (or the `as mnemo` /
-`package = "mnemo-engine"` dep-rename forms) before then.
 
 ### Fixed — `perf_v0.5.0.json` `speed_v0_6_0` provenance note
 

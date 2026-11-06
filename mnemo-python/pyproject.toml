@@ -9,12 +9,11 @@ build-backend = "maturin"
 # project — see the v0.3.2 entry in CHANGELOG.md for the full
 # rationale. Both of those install a top-level `mnemo` module, which
 # would silently clobber ours; NAME-1 (v0.7.0) moves the import name
-# to `mnemo_engine` to end the collision. The old `import mnemo` is
-# supported for the whole v0.7.x series via a pure-Python shim under
-# `python/mnemo/__init__.py` that re-exports every public name from
-# `mnemo_engine` and emits one `DeprecationWarning` on import; the
-# shim is removed in v0.8.0. See the "Breaking: import name" section
-# in CHANGELOG.md for the full migration.
+# from `mnemo` to `mnemo_engine` to end the collision. No deprecation
+# alias ships — the wheel installs **only** `mnemo_engine`; users
+# migrate with one edit (`import mnemo_engine as mnemo` keeps call
+# sites unchanged). See the "Breaking: import name" section in
+# CHANGELOG.md for the full migration.
 name = "mnemo-engine"
 version = "0.6.1"
 description = "Encrypted, portable agent-memory engine — Python bindings"
@@ -32,12 +31,14 @@ Homepage = "https://github.com/toarchkumar/mnemo"
 Repository = "https://github.com/toarchkumar/mnemo"
 
 [tool.maturin]
-# NAME-1: mixed layout. The Rust extension (`[lib] name = "mnemo_engine"`
-# in Cargo.toml) is the primary artifact; the pure-Python `mnemo/`
-# package under `python/` ships alongside it in the same wheel and
-# acts as a deprecated-import shim for v0.7.x. `module-name` pins
-# the extension's import name; `python-source = "python"` tells
-# maturin to pick up the pure-Python package root.
+# NAME-1 (Option A): the wheel ships one package, the Rust extension
+# `mnemo_engine` (from `[lib] name = "mnemo_engine"` in Cargo.toml).
+# No pure-Python alias package — a `mnemo` sibling would reintroduce
+# the clash with PyPI `mnemo-db` and old PyPI `mnemo` that NAME-1
+# exists to end. The `mnemo-python/python/mnemo_engine/__init__.py`
+# shim is kept purely so maturin's mixed layout has the required
+# `<python-source>/<module-name>/` directory; its only job is to
+# re-export everything from the compiled submodule.
 module-name = "mnemo_engine"
 python-source = "python"
 features = ["pyo3/extension-module"]

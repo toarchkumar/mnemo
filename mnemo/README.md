@@ -270,11 +270,15 @@ This repository implements a real, compiling, tested **core**. See
 > taken by unrelated projects — see the "Breaking: import name" section in
 > CHANGELOG.md for the full rationale). **Starting in v0.7.0, the Rust
 > library name and Python import name are `mnemo_engine`:**
-> `use mnemo_engine::...` and `import mnemo_engine`. The pre-v0.7.0
-> `use mnemo::...` / `import mnemo` keeps working through the v0.7.x
-> series via a Cargo dep rename (`mnemo = { package = "mnemo-engine" }`)
-> and a pure-Python shim; both aliases are removed in v0.8.0. The CLI
-> command (`mnemo`) and the `.mnemo` file extension are unchanged.
+> `use mnemo_engine::...` and `import mnemo_engine` (or `import
+> mnemo_engine as mnemo` if you want call sites unchanged). Rust code
+> that wants to keep writing `use mnemo::...` can rename the dependency
+> locally via `mnemo = { package = "mnemo-engine", version = "0.7" }` —
+> that stays supported indefinitely because it's a Cargo-side alias.
+> Python has no `import mnemo` shim: the old top-level `mnemo` module
+> would still clash with `mnemo-db` and PyPI `mnemo`, which is exactly
+> what the rename exists to end. The CLI command (`mnemo`) and the
+> `.mnemo` file extension are unchanged.
 
 ---
 

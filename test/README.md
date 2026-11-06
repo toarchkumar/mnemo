@@ -9,7 +9,7 @@ secrets. Runtime files are gitignored; `test/scripts/` and this README are track
 source test/.venv/bin/activate
 # Orient first — manifest + onboarding briefing, sourced from the .mnemo file itself
 mnemo about test/project.mnemo
-# (or: python -c "import mnemo, os; print(mnemo.open('test/project.mnemo', os.environ['MNEMO_PASSPHRASE']).about())")
+# (or: python -c "import mnemo_engine as mnemo, os; print(mnemo.open('test/project.mnemo', os.environ['MNEMO_PASSPHRASE']).about())")
 
 # Then pull task-specific context
 python test/scripts/project_memory.py recall "project goals architecture dogfooding"

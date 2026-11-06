@@ -16,13 +16,14 @@ write-ahead log, the IVF+PQ index, and snapshot history. Distributed as
 already taken by unrelated projects — see PR NAME-1 and the v0.7.0
 CHANGELOG for the full context). The library/import identifier is
 **`mnemo_engine`** starting in v0.7.0: `use mnemo_engine::...` in Rust,
-`import mnemo_engine` in Python. The pre-v0.7.0 `use mnemo::...` /
-`import mnemo` keeps working for the v0.7.x series via a Cargo dep
-rename (`mnemo = { package = "mnemo-engine" }`) and a pure-Python
-alias package under `mnemo-python/python/mnemo/` that re-exports from
-`mnemo_engine` and emits one `DeprecationWarning`; both aliases are
-removed in v0.8.0. The CLI executable and the `.mnemo` file extension
-are unchanged.
+`import mnemo_engine` in Python (or `import mnemo_engine as mnemo` if
+you want to keep existing call sites unchanged). Rust callers can
+alternatively keep `use mnemo::...` via a Cargo-side dep rename —
+`mnemo = { package = "mnemo-engine", version = "0.7" }` — which stays
+supported indefinitely. **Python does not ship an `import mnemo`
+alias**; shipping one would reintroduce the clash with `mnemo-db` and
+PyPI `mnemo` that the rename exists to end. The CLI executable
+(`mnemo`) and the `.mnemo` file extension are unchanged.
 
 ## Repository layout
 
