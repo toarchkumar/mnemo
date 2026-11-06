@@ -249,6 +249,15 @@ it; other roles stop and ask the user first.
    trigger/phase), `REJECTED` (with a 1-2 sentence technical/product
    rationale), or `NEEDS-USER`, and log a `PLANNER — REVIEW` entry in
    `PLAN.md` citing the triaged IDs whenever `PLAN.md` changes.
+4. **More than one `Planner` session at once:** each Planner owns a
+   **lane**. Read the lane table and rules in `PLAN.md`'s "Planner
+   handover" section before acting, and tag your `WORKLOG` entries
+   `PLANNER-A`, `PLANNER-B`, and so on. Lanes plan in parallel, but the
+   `Worker` queue stays serialized: exactly one PR is ACTIVE across all
+   lanes, and only its lane answers its `READY` or `BLOCKED` entries and
+   logs its `VERIFIED`. Never overwrite or reverse another lane's
+   decision. Log a `NOTE` to that Planner instead, and escalate to the user
+   (`NEEDS-USER`) if it isn't resolved.
 
 ### `Worker` rules
 
@@ -288,6 +297,10 @@ it; other roles stop and ask the user first.
    - Never `git reset`, `git rebase`, `git commit --amend`, or
      `git push --force` over commits you did not make. If `.git/index.lock`
      exists, wait and retry; check `git log origin/main..HEAD` before pushing.
+   - Work only on the PR marked `← ACTIVE` in `PLAN.md`'s execution order.
+     A backup `Worker` resuming someone else's in-flight PR starts from the
+     latest `WORKER` entry plus `git status` and the uncommitted diff, and
+     logs a short catch-up note before changing anything.
 
 ### `Reviewer` rules
 
