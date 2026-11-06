@@ -335,3 +335,25 @@ file or external configuration is suspect. The recent self-describing
 manifest pattern (`mnemo about`, `Memory::scaffold_manifest`) is the model
 to follow: put metadata that agents need *inside* the `.mnemo` file, not
 beside it.
+
+Three engineering rules sit on top of it (R-003.2, accepted 2026-11-06):
+
+1. **Keep the raw flow; derive state by deltas.** A thread's turns are kept
+   losslessly. Anything derived from them (facts, essence sections,
+   timeline entries) is written as small discrete items through
+   add / update / resolve / remove / append. No API asks a model to rewrite
+   a stored blob wholesale, because that's where summaries drift.
+2. **Supersede, don't erase.** A newer version of a fact is a new record,
+   and the old one is marked `_mnemo.superseded_by` / `_mnemo.invalid_at`.
+   History stays queryable, and conflicts resolve by key, not by a graph
+   schema. Writing an identical value again is a no-op.
+3. **Small context first.** Every read surface (recall, about, essence)
+   takes a byte budget, and exact identifiers must survive a round trip.
+   Small local models and optimizer loops are the motivating workloads.
+   Only long-lived handles get millisecond reads, because every open pays
+   the passphrase KDF.
+
+Memory and essence are different things. **Memory** is key knowledge that
+gets retrieved. **Essence** is the continuous flow of a working thread,
+kept so that a new session carries on where the last one stopped (PLAN.md
+Phase 12.7).
