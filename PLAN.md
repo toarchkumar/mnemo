@@ -5722,3 +5722,170 @@ land I'll:
 **Housekeeping:** `test/scripts/dump_ranking_v2_checks.py` was never
 committed (it was an ad-hoc gate-verification helper) and was
 `rm`'d locally before staging. Not in any commit.
+
+### 2026-11-06 — PLANNER-A — REVIEW + HANDOFF — scoring v2 checked against origin/main: 4 fixes before tagging v0.7.0; README + index.html ready
+**Repo state, verified:** `main` matches `origin/main` at 2dc69db, and the
+tree is clean apart from my two doc files. Since cd91c27 the commits are
+fa5d7b3 and e244a39 (tracking the coordination files), 3eb687c (scoring
+v2), b1a5055 (AGENTS.md lanes), and the syncs 9c7c252 and 2dc69db. No
+v0.7.0 tag exists. The gate numbers in the READY entries are good:
+sim-only 0.6154, Phase 6 hit@1 0.5667 and MRR 0.6779. `ScoreWeights::score`
+in memory.rs is exactly the V2 formula. The BP.1 miss explanation is
+accepted (a cosine-shortlist limit, which Phase 2 hybrid search fixes).
+
+**Fix before tagging. One commit, `fix(scoring): CLI tracking flush + --text
+lock fallback + MCP shutdown flush`:**
+1. **R-001.4 is still open.** The CLI's default tracking recall opens
+   read-write, bumps stats and exits without `flush()`; `Mnemo` has no
+   `Drop` flush. Phase 4 item 6 ("open read-write + flush after") wasn't
+   done. Call `db.flush()` after a tracking recall, in both the `--text`
+   and the vector branches. Add a cli_smoke test: a tracking recall, then
+   a read-only reopen shows `access_count` went up.
+2. **The lock fallback skips `--text`.** bin/mnemo.rs ~L1352 still does
+   `Mnemo::open(&path, &pp).map_err(fmt)?` in the `--text` branch, which is
+   the path every doc example uses. Apply the same `Locked` → read-only,
+   no-track fallback and stderr note there. Extend the cli_smoke test to
+   the `--text` path. The existing test only covers `--query`.
+3. **MCP flush on clean shutdown.** After the stdin loop ends (mcp.rs
+   ~L240, "stdin closed"), call `db.flush()` if anything is dirty. One
+   line. It means a read-only MCP session keeps its usage stats. Update
+   the comment at ~L676 and the CHANGELOG note to match.
+4. **`mnemo/README.md` L452 still shows the old formula**
+   (`δ·ln(1 + access_count)`, recency from access). Replace it with the V2
+   formula and the created_at note. Also check L730's `accessed_at`
+   wording, and look for the old formula in `mnemo-python/README.md` and
+   the Python docstrings.
+
+**Release commit (you missed this in the READY plan):** every manifest still
+says `0.6.1` (mnemo/Cargo.toml, mnemo-python/Cargo.toml + pyproject.toml,
+bindings/node/Cargo.toml). Bump them all and the lockfiles to `0.7.0`, and
+turn CHANGELOG `[Unreleased]` into `[0.7.0] — <date>`. A v0.7.0 tag on
+0.6.1 manifests would fail on crates.io.
+
+**HANDOFF. Commit separately, as `Docs: v0.7.0 import name, ranking v2,
+upgrade notes on README and landing page`:**
+- `README.md`:
+  - `mnemo_engine` in the install comments and the Python quick start;
+  - a "Ranking quality (v0.7.0)" paragraph: 92% vs 77% (v0.6) vs 62%
+    (similarity-only) on the 13-query set, drift 0;
+  - a new "Upgrading to v0.7.0" section covering the import rename and the
+    new ranking and score scale;
+  - known limitations: dropped the access-tracking bullet, and the exact
+    identifiers bullet now mentions BP.1.
+- `index.html`:
+  - version pill and Quick Start text say v0.7.0;
+  - `import mnemo_engine` / `mnemo_engine.open` / `use mnemo_engine::` /
+    `mnemo_engine::Result`;
+  - the recall formula now shows `α·similarity + similarity × (β·recency +
+    γ·importance + δ·uses)`, with a CSS grid tweak, checked rendered on
+    desktop and mobile;
+  - roadmap: "Better ranking" moved to Shipped (v0.4–v0.7).
+
+**Order:**
+1. fix commit;
+2. release commit (versions + CHANGELOG);
+3. this docs HANDOFF commit;
+4. coordination-file sync commit;
+5. push, check CI is green, tag `v0.7.0`, push the tag;
+6. log DONE with the hashes, the CI run, and the PyPI and crates.io URLs.
+
+Then I verify on the published wheel and log v0.7.0 VERIFIED, which
+releases lane B.
+
+### 2026-11-06 — WORKER — READY — scoring v2 four-fix round + v0.7.0 release commits staged
+**ACK the four lane A fixes.** All applied; three Rust commits + one
+coordination sync are staged locally; nothing pushed yet (push waits
+until the sync commit lands and local `cargo fmt --check` / clippy /
+test / harness all stay green).
+
+**Fix #1 — R-001.4: CLI tracking recall never flushed.**
+- `bin/mnemo.rs::Command::Recall` now funnels both the `--text` and
+  vector branches through a single inline closure `open_recall(path,
+  pp, no_track) → Result<(Mnemo, bool), MnemoError>`, which tries RW
+  first (unless `no_track`), falls back to RO + `track_access=false`
+  on `MnemoError::Locked`, and prints the one-line stderr note.
+- After `db.recall(&req)`, the command calls `db.flush()` iff
+  `effective_no_track == false`. Read-only / fallback paths skip
+  the flush (no mutations to persist; avoids the `ReadOnly` error).
+- New cli_smoke test `recall_tracking_flushes_access_count_to_disk`:
+  seeds the tea memory, runs a CLI tracking recall, re-opens read-only,
+  and asserts `access_count` bumped by exactly 1 (and the stderr note
+  is NOT present on the no-contention path).
+
+**Fix #2 — `--text` branch lock fallback.** Same `open_recall` helper
+is used for the embedder-handle open at the top of the `--text` arm,
+so a `Locked` error there demotes to RO + no-track with the same
+stderr note. New cli_smoke test
+`recall_text_falls_back_to_read_only_when_write_lock_held`: seeds a
+db + `FAKE_EMBED_PY` + "alpha" memory, holds a shared read-only flock
+from the parent, runs `mnemo recall --text "alpha" --embed-cmd …
+--embed-name fake-4d`, and asserts success + the one-line stderr +
+the expected top hit. (The subprocess's exclusive-lock attempt is
+blocked by the parent's shared flock, forcing the fallback path.)
+
+**Fix #3 — MCP flush on stdin close.** `mcp::serve_with_streams`
+now calls `db.flush()` right after the main read loop exits
+("stdin closed, shutting down"). On failure it `eprintln!`s a
+non-fatal warning and continues to the shutdown line. The
+`tool_recall` comment at the top of its body is updated to say
+"stats reach disk on either (a) the next mutating tool's exit
+`db.flush()` or (b) the server's own shutdown flush". CHANGELOG's
+MCP tracking section is rewritten accordingly.
+
+**Fix #4 — README formula.** `mnemo/README.md` L449+ is rewritten:
+- new "v0.7.0 scoring-v2 formula" code block with the actual V2
+  shape (similarity-gated, importance − 0.5, tanh(uses/5), age
+  from `created_at`),
+- a four-bullet summary of the shape changes vs pre-v0.7.0,
+- the "raw `score` is on a new scale, re-pick thresholds" note.
+`mnemo-python/README.md` has no formula to update (its recall line
+is abstract: "similarity blended with recency, importance,
+frequency"); no Python docstrings carry the formula either.
+`test/scripts/ranking_harness.py` module docstring and the two
+`"formula"` strings in its JSON output are updated to the V2 form
+(the harness still runs against today's code, so the labels now
+match the implementation again).
+
+**Release commit staging.** All four manifests bumped `0.6.1 → 0.7.0`
+(`mnemo/Cargo.toml`, `mnemo/bindings/node/Cargo.toml`,
+`mnemo-python/Cargo.toml`, `mnemo-python/pyproject.toml`), and both
+`Cargo.lock` files updated (`mnemo-engine`, `mnemo-node`,
+`mnemo-python` entries). `mnemo/fuzz/Cargo.toml` stays at `0.0.0`
+(fuzz target, not published).
+`CHANGELOG.md`: `[Unreleased]` → `[0.7.0] — 2026-11-06` with a short
+"two breaking changes ship together" header pulling NAME-1 and
+scoring v2 into one release note.
+
+**Commit order, staged locally (4 commits):**
+1. `fix(scoring): CLI tracking flush + --text lock fallback + MCP shutdown flush` — `bin/mnemo.rs`, `mcp.rs`, `tests/cli_smoke.rs`, `mnemo/README.md`, `test/scripts/ranking_harness.py`.
+2. `chore(release): v0.7.0 — bump manifests and Cargo.lock; cut CHANGELOG` — all four manifests, both `Cargo.lock`s, `CHANGELOG.md`.
+3. `docs(v0.7.0): import name, ranking v2, upgrade notes` — top-level `README.md` + `index.html` (Planner-A's handoff).
+4. `chore(plan): sync coordination files` — `PLAN.md` + `reviewer_notes.md`.
+
+Then: push, wait for CI green on all three OS matrices + Python
+builds, tag `v0.7.0`, push the tag. CI triggers PyPI Trusted
+Publishing + crates.io publish. Once the wheel lands I'll log DONE
+in a follow-up sync commit with the three new commit hashes
+(fix / release / docs), the CI run URL, the PyPI URL
+(`mnemo-engine 0.7.0`), and the crates.io URLs
+(`mnemo-engine 0.7.0`, `mnemo-node 0.7.0`). Lane A then verifies
+the published wheel and logs v0.7.0 VERIFIED, releasing lane B.
+
+**Verification still owed on the user side before push.** The
+sandbox can't run cargo. Please run:
+
+```sh
+cd /Users/archkumar/Documents/GitHub/mnemo/mnemo
+cargo fmt --check
+cargo clippy --all-targets --features failpoints,benches -- -D warnings
+cargo test --features failpoints --release
+
+# Harness still passes both gates on the bumped build:
+cargo run --release --example ranking_v2 -- \
+    --fixture ../test/scripts/ranking_v2_fixture.json \
+    --phase6-fixture ../test/scripts/ranking_v2_phase6_fixture.json \
+    --perf-json ../test/scripts/perf_v0.5.0.json
+```
+
+If all four are clean (no BLOCKED, drift 0, gates pass), proceed to
+the commit + push + CI + tag sequence above.

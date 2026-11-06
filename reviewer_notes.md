@@ -73,7 +73,8 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `R-001.17` | 2026-10-31 | `PRODUCT` | `IDEA` | Portable encrypted Knowledge Packs: read-only federated mounts (`attach_pack`) & scoped encrypted fork/merge | `DEFERRED` | After Phase 12.4 + v9; trigger: real multi-file use |
 | `R-002.1` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR DUR-1` recovery design: 3 crash/truncation windows (relocation zero-before-write gap, 64-page scan cap, torn bytes outside `0..238` CRC) | `VERIFIED` | Shipped in PR DUR-1 (`4f1edc1`, `6bb5a84`, `22b4c1e`, `v0.6.0`) |
 | `R-002.2` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `PR FIX-1` details: sync directory `accessed_at`/`access_count` on cache compaction (+ read-only `cache_get` bug) & guard `export_encrypted` self-truncation | `VERIFIED` | Shipped in PR FIX-1 (`8e09e60`, `93e2620`, `v0.6.0`) |
-| `R-003.1` | 2026-11-06 | `PRODUCT` | `HIGH` | First-class `Essence` object & seamless conversation compaction (`Session::compact` / MCP `compact_conversation` / `mnemo essence`) | `OPEN` | _(pending)_ |
+| `R-003.1` | 2026-11-06 | `PRODUCT` | `HIGH` | Semantic Extraction Compaction (`Session::compact` / `commit_deltas`): discrete atomic deltas over rolling summaries | `OPEN` | _(pending — claimed by PLANNER-B)_ |
+| `R-003.2` | 2026-11-06 | `PLAN-REFINEMENT` | `HIGH` | Codify Semantic Extraction / SLM / DSPy GEPA philosophy in `AGENTS.md` & `PLAN.md` (narrow Phase 7.3 graph, prioritize token-budgeted recall) | `OPEN` | _(pending — claimed by PLANNER-B)_ |
 
 ---
 
@@ -319,47 +320,48 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 
 ---
 
-### Batch `REV-003` — 2026-11-06 (`v0.6.0` Verification Sweep + Product Design: First-Class `Essence` & Seamless Conversation Compaction)
+### Batch `REV-003` — 2026-11-06 (`v0.6.0` Verification Sweep + Semantic Extraction Compaction & SLM / DSPy GEPA Architectural Alignment)
 
-**`v0.6.0` / `v0.6.1` Verification Summary (`HEAD` `e244a39`):**
-- Marked `R-001.1`, `R-001.2`, `R-001.5`, `R-001.6`, `R-001.8`, `R-001.11`, `R-002.1`, and `R-002.2` **`VERIFIED`** in `v0.6.0` (`0e51973`):
-  - `store.rs:3217-3449`: `compact_file` preserves live exact+semantic cache entries with directory `accessed_at`/`access_count`; `verify()` validates live cache records.
-  - `store.rs:2581-2597`: read-only `cache_get` / `cache_get_semantic` return directory `accessed_at`.
-  - `store.rs:3101-3215`: `export_encrypted` checks `paths_refer_to_same_file`, writes to a sibling temp, `sync_all`, atomic `rename`, and Unix parent-dir `sync_all`; `rekey` commits a 1-frame WAL header transaction into a fresh WAL region before checkpointing page 0.
-  - `store.rs:3260-3293`: `stats()` maintains a lazy in-memory `agent_set` (`O(1)` after first build); cache-only flushes no longer push PITR snapshots.
-  - `mnemo-python/src/lib.rs`: `Option<Core>` handle release on `close()`, GIL released via `py.allow_threads`, Python embedder invoked outside mutable borrow, `Session` routed through closed-aware accessor.
-- Confirmed `Recall scoring v2` (`R-001.12`) in-flight in the working tree: variant `V2` (`sim + max(sim, 0) * (beta * recency_created + gamma * (importance - 0.5) + delta * tanh(uses / 5.0))`) selected by the Planner on 2026-11-06 with `pass5 MRR = 0.9103`, `drift = 0`, `superseded_fact hit@1 = 1.000`.
+**`v0.6.0` / `v0.6.1` Verification Summary (`HEAD` `2dc69db`):**
+- Marked `R-001.1`, `R-001.2`, `R-001.5`, `R-001.6`, `R-001.8`, `R-001.11`, `R-002.1`, and `R-002.2` **`VERIFIED`** in `v0.6.0` (`0e51973`).
+- Confirmed `Recall scoring v2` (`R-001.12`) landed in `3eb687c` (with pre-tag fixes queued by `PLANNER-A` in `PLAN.md:5736-5757`).
 
 ---
 
-#### R-003.1 — [PRODUCT] [HIGH] First-class `Essence` object & seamless conversation compaction (`Session::compact` / MCP `compact_conversation` / `mnemo essence`)
+#### R-003.1 — [PRODUCT] [HIGH] Semantic Extraction Compaction (`Session::compact` / `commit_deltas`): discrete atomic deltas over rolling summaries
 - **Status:** `OPEN`
-- **Context / Evidence:** User product request (2026-11-06); `mnemo/src/session.rs:142-197` (`Session::{add_turn, close, discard}`), `mnemo/src/store.rs:1675-1697` (`Mnemo::about`), `mnemo/src/mcp.rs:28-35`, `PLAN.md:394` (`Phase 7.4`), `PLAN.md:783-849` (`Phase 12.1` & `Phase 12.2`).
-- **Finding:** Today MNemo has a structural gap between **raw conversation turns** and **long-term brain orientation**:
-  1. **`Session::close()` (`session.rs:165-182`) promotes every `Working` turn 1:1 into `Episodic` memory** with zero distillation, while `mnemo serve --mcp` (`mcp.rs:28-35`) exposes no session or conversation-compaction primitives at all.
-  2. **Atomic `Memory` records vs holistic `Essence`:** Individual `Semantic`/`Episodic`/`Procedural` memories are **query-retrieved fragments** — an agent only sees them if its `recall` query vector matches. When an agent starts a new session or resumes immediately after a context-window `/compact`, it needs the **holistic distilled state ("Essence")** without guessing a search query:
-     - **Session Essence (Conversation Handoff):** Distilled goal, current state / where we left off, key decisions made, and open threads / next steps from a compacted conversation.
-     - **Brain / Topic Essence:** Living executive synthesis of the project, user, or domain (`"brain"`, `"project"`, `"architecture"`), whereas `Mnemo::about()` (`store.rs:1675-1697`) currently returns only static day-1 `area = "onboarding"` memories.
-  3. **Timing mismatch in `PLAN.md`:** `Phase 12.2` (`v0.8.0`) schedules Claude Code `SessionStart`, `PreCompact`, and `SessionEnd` hooks plus MCP resources/prompts, while `Phase 7.4` (`Session::close_with`) is parked much later after Phase 2 and Phase 11 — leaving `Phase 12.2`'s `PreCompact` hook without a first-class compaction target.
-- **Recommendation:** Introduce **`Essence`** as a first-class API & MCP concept paired with **atomic conversation compaction**, building directly on `Phase 12.1`'s keyed-upsert + `_mnemo.*` metadata architecture (**no format bump required in v8; `R-001.10`-compliant**):
-  1. **First-class `Essence` type (distinct in API, unified in encrypted storage):**
-     - Expose `Essence { id: Ulid, key: String, title: String, summary: String, decisions: Vec<String>, open_threads: Vec<String>, source_session_id: Option<String>, source_turn_count: usize, extracted_memory_ids: Vec<Ulid>, agent_id: String, created_at: i64, updated_at: i64 }`.
-     - **Why store in `self.catalog` via `_mnemo.kind = "essence"` rather than a third on-disk directory (like `cache_dir`):**
-       - Avoids a `format::VERSION` bump (`v8` stays compatible per `R-001.10`), avoids duplicating `compact_file` / `verify` / WAL / ANN machinery, and keeps `Essence` automatically covered by **PITR snapshots** (`snapshots()` / `restore_to()`) and vector search.
-       - Standard ` Essence` keys: `"brain"` (living top-level synthesis), `"latest_session"` (rolling handoff slot updated on every conversation compaction), `"session:<id>"` (historical per-session essences), and `"topic:<slug>"`.
-       - Separate cleanly at the API surface: `db.put_essence(...)`, `db.essence(key)` (`O(1)` via `Phase 12.1`'s lazy key index), `db.essences()`, and a filter on `RecallRequest` (exclude or include essences; default `recall` can either include or filter via `include_essence`).
-       - Upgrade `Mnemo::about()` (and `Phase 12.2`'s `mnemo://about` + `mnemo://essence` MCP resources) to return both the static onboarding manifest *and* the live `"brain"` + `"latest_session"` Essences so any newly connected agent is oriented in one `<1 ms` read.
-  2. **Seamless Conversation Compaction (`Session::compact` / `Mnemo::compact_session` / MCP `compact_conversation`):**
-     - Because MNemo is an embedded engine without an internal LLM, the **host LLM** (in Claude Code `PreCompact` / `SessionEnd`, Cursor, MCP, or Python/Rust SDK) supplies the distillation in **one atomic call**:
-       - `essence`: The distilled `Essence` (`title`, `summary`, `decisions`, `open_threads`).
-       - `extracted_memories`: `Vec<Memory>` (or text facts embedded via the registered embedder) for durable `Semantic` facts and `Procedural` rules extracted from the conversation, supporting `Phase 12.1` `key` upserts so superseded facts update in place, each stamped with `_mnemo.from_essence = <essence_ulid>`.
-       - `turn_policy: TurnCompactionPolicy`: what to do with the session's raw `Working` turns in the same transaction:
-         - `Drop` (default: tombstones raw `Working` turns so transcript chatter never pollutes recall),
-         - `ExpireAfter(ttl_secs)` (demotes raw turns to `TTL`-bounded `Episodic` traces that auto-expire after e.g. 7 days), or
-         - `KeepAsEpisodic` (legacy `Session::close` behavior).
-     - All three steps (write `"session:<id>"` + upsert `"latest_session"` Essence, upsert extracted `Semantic`/`Procedural` memories, apply `turn_policy` to raw `Working` turns) commit in a **single `flush()` WAL transaction**.
-     - Also keep `Session::compact_with(|turns: &[Memory]| -> CompactionPlan)` in Rust/Python (`Phase 7.4`) with a deterministic extractive fallback when no LLM callback is provided.
+- **Context / Evidence:** User architectural context & product evaluation (2026-11-06); `mnemo/src/session.rs:142-197` (`Session::{add_turn, close, discard}`), `mnemo/src/mcp.rs:28-35`, `PLAN.md:394` (`Phase 7.4`), `PLAN.md:783-849` (`Phase 12.1` & `Phase 12.2`).
+- **Finding:** Evaluating conversation compaction and the concept of "Essence" against MNemo's core **Semantic Extraction Philosophy** exposes a critical distinction between **what to avoid (Rolling Narrative Summaries)** and **what MNemo actually needs (Atomic Delta Extraction)**:
+  1. **Why Rolling Narrative Summaries ("Text-based Compaction") are an anti-pattern for MNemo:**
+     - Storing a paragraph-style `Essence { summary: String }` or injecting rolling conversation summaries into `mnemo about` causes **Summary Drift** (smoothing away exact identifiers, file paths, ULIDs, and hard constraints over multi-session horizons) and **bloats the active context window** (increasing prefill latency for local SLMs and DSPy GEPA loops).
+  2. **Why `Session::close()` (`session.rs:165-182`) today is also broken:**
+     - `Session::close()` currently promotes every raw `Working` turn 1:1 into `Episodic` memory. A 50-turn dialogue injects 50 noisy, conversational chunks into the vector store, diluting retrieval precision and wasting prefill tokens.
+  3. **What "Essence" and Conversation Compaction mean under Semantic Extraction:**
+     - The "essence" of a conversation is **not** a narrative summary — it is the **extracted delta of discrete, atomic, identifier-preserving facts** (`Semantic` facts/constraints, `Procedural` rules, `Episodic` state changes) distilled from the dialogue before the raw turns are discarded.
+- **Recommendation (Revised 2026-11-06 to align strictly with Semantic Extraction & Small-Context SLMs):**
+  1. **Reject narrative summary objects; build Batched Atomic Delta Compaction (`Mnemo::commit_deltas` / `Session::compact` / MCP `compact_session`):**
+     - Input: `deltas: Vec<FactDelta>` where each `FactDelta` is a discrete, isolated statement (`content`, `memory_type: Semantic | Procedural | Episodic`, `key: Option<String>`, `importance: f32`, `metadata`), plus `turn_policy: TurnCompactionPolicy` (`Drop` [default], `ExpireAfter(ttl_secs)`, or `KeepAsEpisodic`).
+     - **Single-batch embedding + single-WAL-commit execution:**
+       - In text mode (`commit_deltas_text` / Python `db.commit_deltas` / MCP `compact_session`), embed all `K` delta strings in **one batched `Embedder::embed(&texts)` call** (critical for local ONNX / SLM latency in DSPy GEPA loops).
+       - Upsert each discrete fact into the append-only WAL catalog: when `key` is supplied (`Phase 12.1`), deterministically supersede the prior constraint holding that `key` (`_mnemo.supersedes = <old_ulid>`) so state transitions resolve conflicts without a mutable graph.
+       - Atomically delete (or TTL-expire) the session's raw `Working` turns in the **same `flush()` transaction**.
+  2. **If `essence` is exposed as a read surface (`db.essence()` / `mnemo essence` / MCP `mnemo://essence`):**
+     - Define it strictly as a **token-budgeted Pinboard of Active Keyed Constraints** (e.g., live keyed `Semantic`/`Procedural` facts above an importance floor, capped to a strict token/byte budget such as `<= 256 tokens`), **never** an unindexed rolling prose summary.
   3. **Roadmap placement (`Phase 12` / `v0.8.0`):**
-     - Do not touch `v0.7.0` (`NAME-1` + `Recall scoring v2`).
-     - Pull `Phase 7.4` forward into **Phase 12** right between `12.1` (keyed upserts) and `12.2` (`PreCompact` / `SessionStart` hooks + MCP resources), so `Phase 12.2`'s `PreCompact` hook invokes `compact_conversation` to persist the `Essence` + extracted facts, and `SessionStart` injects `mnemo://essence` automatically.
+     - Fold `commit_deltas` / `Session::compact` into **Phase 12** right alongside `12.1` (keyed upserts) and `12.2` (`PreCompact` / `SessionEnd` hooks), pulling `Phase 7.4` forward and replacing `7.4`'s generic summarization wording with discrete delta extraction.
+- **Planner Triage:** _(pending)_
+
+#### R-003.2 — [PLAN-REFINEMENT] [HIGH] Codify Semantic Extraction / SLM / DSPy GEPA philosophy in `AGENTS.md` & `PLAN.md` (narrow Phase 7.3 graph, prioritize token-budgeted recall)
+- **Status:** `OPEN`
+- **Context / Evidence:** User architectural context (2026-11-06); `AGENTS.md:287-294` (`## Where the philosophy lives`), `PLAN.md:361-397` (`Phase 7`), `PLAN.md:5577-5598` (`BP.1` exact-identifier cosine miss in `scoring v2`).
+- **Finding:** The maintainer's **Architectural Context** establishes three load-bearing operating assumptions that should govern `AGENTS.md` and `PLAN.md` phase specs:
+  1. **Semantic Extraction over Rolling Summaries** (discrete atomic deltas, zero summary drift).
+  2. **Append-Only Atomic Log over Rigid Context Graphs** (state changes handled by appending new keyed constraints in the WAL, resolving conflicts deterministically without brittle relational schemas).
+  3. **Aggressively Small Context Windows & Exact Identifier Durability** (built for local SLMs and DSPy GEPA loops that swap discrete constraints in/out in milliseconds to minimize prefill compute, while preserving exact IDs, paths, and rules).
+- **Recommendation:**
+  1. **Update `AGENTS.md` (`## Where the philosophy lives`) and `PLAN.md`:** Document these three operating assumptions alongside the single-file invariant so every Planner, Worker, and Reviewer designs against them.
+  2. **De-scope / narrow `Phase 7.3` (Memory links graph) & `Phase 7.2`'s graph-degree dependency:** `Phase 7.3` (`relations: Vec<(Ulid, RelationKind)>` on `Memory` + live in-degree traversal) edges toward the *Pure Persistent Context Graph* anti-pattern and violates `R-001.10` if appended to `Memory` under v8. Instead, rely on `Phase 12.1`'s deterministic **keyed supersession (`metadata.key` + `_mnemo.supersedes`)** in the append-only WAL; if lightweight provenance is needed, `_mnemo.supersedes` (already planned in `12.1`) suffices without a general relational graph.
+  3. **Elevate Token-Budgeted Recall (`R-001.15`: `max_bytes` / `token_budget` + MMR diversity) and `Phase 2` (BM25 + Vector Hybrid):**
+     - Local SLMs and GEPA loops with tiny context windows need `RecallRequest` to enforce a hard byte/token ceiling and MMR diversity so prefill never bloats with redundant hits.
+     - `Phase 2`'s BM25 lexical leg directly enforces Assumption 3 (*exact identifiers preserved and retrieved*), fixing the exact `"what did BP.1 ship?"` cosine miss proven in the `v0.7.0` harness (`PLAN.md:5577-5598`).
 - **Planner Triage:** _(pending)_
