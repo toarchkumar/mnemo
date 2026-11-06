@@ -1336,10 +1336,47 @@ fn run() -> std::result::Result<(), String> {
                 return Err("recall requires one of --query / --query-file / --text".into());
             }
 
-            // Resolve the query vector. The text branch registers an
-            // embedder on the handle and runs it; the vector branches
-            // use the existing helper.
-            let (q, mut db_opt) = match text {
+            // Open the `.mnemo` file for recall:
+            //
+            // * `--no-track` → `open_read_only` (shared flock,
+            //   `track_access=false` on the request). Compatible with
+            //   other readers, blocked only by exclusive writers.
+            //
+            // * default (tracking) → try `open` (exclusive flock) so
+            //   recall can bump `accessed_at` / `access_count` in the
+            //   catalog. If that fails because another holder has the
+            //   shared or exclusive lock, print one line to stderr
+            //   and fall back to `open_read_only` + `track_access=false`.
+            //
+            // Returns `(db, effective_no_track)` so the caller can
+            // decide whether to flush after `recall`.
+            let open_recall =
+                |path: &str,
+                 pp: &str,
+                 no_track: bool|
+                 -> std::result::Result<(Mnemo, bool), mnemo_engine::MnemoError> {
+                    if no_track {
+                        return Mnemo::open_read_only(path, pp).map(|db| (db, true));
+                    }
+                    match Mnemo::open(path, pp) {
+                        Ok(db) => Ok((db, false)),
+                        Err(mnemo_engine::MnemoError::Locked { .. }) => {
+                            eprintln!(
+                                "mnemo: another writer holds the lock on {path}; \
+                                 running recall read-only with --no-track"
+                            );
+                            Mnemo::open_read_only(path, pp).map(|db| (db, true))
+                        }
+                        Err(e) => Err(e),
+                    }
+                };
+
+            // Resolve the query vector. The `--text` branch opens the
+            // database up front so it can register an embedder on the
+            // handle (`set_embedder`) and run it; it uses the same
+            // lock-fallback as the vector branch. The vector branches
+            // defer the open until after we've built `req`.
+            let (q, mut db_opt, mut effective_no_track) = match text {
                 Some(text) => {
                     let ecmd = embed_cmd.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
@@ -1347,13 +1384,8 @@ fn run() -> std::result::Result<(), String> {
                     let ename = embed_name.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
                     })?;
-                    // Open now (read-write if we're tracking, read-only
-                    // if --no-track) so set_embedder can see the manifest.
-                    let mut db = if no_track {
-                        Mnemo::open_read_only(&path, &pp).map_err(fmt)?
-                    } else {
-                        Mnemo::open(&path, &pp).map_err(fmt)?
-                    };
+                    let (mut db, effective_no_track) =
+                        open_recall(&path, &pp, no_track).map_err(fmt)?;
                     let identity = EmbedderIdentity {
                         name: ename,
                         dimensions: db.dimensions(),
@@ -1371,9 +1403,9 @@ fn run() -> std::result::Result<(), String> {
                         vs.pop()
                             .ok_or_else(|| "embedder returned no vector".to_string())?
                     };
-                    (vector, Some(db))
+                    (vector, Some(db), effective_no_track)
                 }
-                None => (resolve_query(query, query_file)?, None),
+                None => (resolve_query(query, query_file)?, None, no_track),
             };
 
             let metric = parse_metric(&metric)?;
@@ -1391,44 +1423,30 @@ fn run() -> std::result::Result<(), String> {
                 req = req.n_rerank(n);
             }
 
-            // Default `recall` opens read-write so it can bump the
-            // catalog access stats. `--no-track` opens read-only with a
-            // shared lock and disables access-tracking on the request,
-            // so it can coexist with a writer holding the exclusive lock.
-            //
-            // Lock fallback (scoring v2, v0.7.0): when the default
-            // read-write open fails because another writer holds the
-            // exclusive lock, fall back to a read-only, no-track recall
-            // with a one-line stderr note. A read-only recall is strictly
-            // more useful than exiting non-zero on a transient lock
-            // contention. `--no-track` already opens read-only, so this
-            // only affects the default (tracking) path.
-            let hits = match (db_opt.take(), no_track) {
-                (Some(mut db), _) => {
-                    if no_track {
-                        req = req.track_access(false);
-                    }
-                    db.recall(&req).map_err(fmt)?
+            // If the vector branch didn't pre-open, open now with the
+            // same fallback semantics.
+            let mut db = match db_opt.take() {
+                Some(db) => db,
+                None => {
+                    let (db, eff_no_track) = open_recall(&path, &pp, no_track).map_err(fmt)?;
+                    effective_no_track = eff_no_track;
+                    db
                 }
-                (None, true) => {
-                    req = req.track_access(false);
-                    let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-                    db.recall(&req).map_err(fmt)?
-                }
-                (None, false) => match Mnemo::open(&path, &pp) {
-                    Ok(mut db) => db.recall(&req).map_err(fmt)?,
-                    Err(mnemo_engine::MnemoError::Locked { .. }) => {
-                        eprintln!(
-                            "mnemo: another writer holds the lock on {path}; \
-                             running recall read-only with --no-track"
-                        );
-                        req = req.track_access(false);
-                        let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-                        db.recall(&req).map_err(fmt)?
-                    }
-                    Err(e) => return Err(fmt(e)),
-                },
             };
+            if effective_no_track {
+                req = req.track_access(false);
+            }
+            let hits = db.recall(&req).map_err(fmt)?;
+            // R-001.4: a tracking recall mutates the catalog's
+            // `accessed_at` / `access_count` in memory. Flush before
+            // exit so the bumps reach disk — otherwise the usage
+            // saturation signal is reset to zero on the next CLI
+            // invocation. The read-only / fallback path doesn't
+            // mutate, so skip the flush and avoid the needless
+            // `ReadOnly` error from a read-only handle.
+            if !effective_no_track {
+                db.flush().map_err(fmt)?;
+            }
             print_recall_hits(&hits, format);
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,

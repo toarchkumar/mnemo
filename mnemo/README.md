@@ -446,16 +446,41 @@ list over a slab of indices, so it stays within the crate's
 
 ### Recall
 
-`recall` scores each candidate with
+`recall` scores each candidate with the v0.7.0 scoring-v2 formula:
 
 ```
-score = α·similarity + β·recency + γ·importance + δ·ln(1 + access_count)
+score = similarity
+      + max(similarity, 0)
+        · ( β · recency
+          + γ · (importance − 0.5)
+          + δ · tanh(access_count / 5) )
+
+recency = exp( -ln(2) · age_secs / half_life_secs )
+age_secs = now - memory.created_at      # not accessed_at
 ```
 
-where `recency` decays exponentially (default 7-day half-life). It also
-filters by memory type and by agent scope (an agent sees its own memories
-plus any marked `Shared`), and skips TTL-expired entries. Weights and the
-similarity metric (cosine / dot / L2) are per-request.
+Four deliberate shape changes from the pre-v0.7.0 additive formula
+(`α·sim + β·recency + γ·importance + δ·ln(1 + uses)`):
+
+- **Similarity-gated bonuses.** Recency / importance / usage are
+  multiplied by `max(similarity, 0)`, so a stale-but-off-topic memory
+  can't ride recency past a semantically-on-point one.
+- **Importance centered at 0.5.** A default-importance memory
+  contributes zero importance bonus; importance only pushes a score
+  up or down from that reference point.
+- **Saturating usage.** `tanh(access_count / 5)` caps the feedback
+  bonus so a heavily-returned memory stops accumulating weight past
+  ~5 uses.
+- **Recency from `created_at`.** A `recall()` no longer bumps its own
+  results' recency on later queries.
+
+`recency` still decays exponentially (default 7-day half-life).
+`recall` also filters by memory type and by agent scope (an agent
+sees its own memories plus any marked `Shared`), and skips
+TTL-expired entries. Weights and the similarity metric (cosine /
+dot / L2) are per-request. The raw `RecallResult.score` sits on
+a different scale than pre-v0.7.0 — callers comparing raw scores
+to a fixed threshold should re-pick the threshold.
 
 ### Sessions
 

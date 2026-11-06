@@ -1563,3 +1563,151 @@ fn recall_falls_back_to_read_only_when_write_lock_held() {
         "expected recall output to include the top hit; got:\n{stdout}",
     );
 }
+
+#[test]
+fn recall_text_falls_back_to_read_only_when_write_lock_held() {
+    // Scoring v2 lock fallback (v0.7.0): the `--text` branch of the
+    // `recall` command also opens the database up front (so it can
+    // register an embedder on the handle). It uses the same read-only
+    // fallback as the vector branch when the exclusive lock can't be
+    // taken. This test exercises the --text path end-to-end.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em-rot.mnemo");
+    let pp = "em-pw";
+    // Seed with the scaffold manifest + a single text memory so the
+    // recall has something to return.
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.remember(
+            Memory::new("alpha", MemoryType::Semantic, fake_vector_for("alpha"))
+                .with_importance(0.5),
+        )
+        .unwrap();
+        db.flush().unwrap();
+    }
+    let script = write_py_script(dir.path(), "fake-rot.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&script);
+
+    // Hold a shared (read-only) flock so the subprocess's exclusive
+    // open in the --text branch fails and falls back.
+    let reader = Mnemo::open_read_only(&path, pp).expect("open read-only reader");
+
+    let out = Command::new(bin())
+        .args([
+            "recall",
+            path.to_str().unwrap(),
+            "--text",
+            "alpha",
+            "--embed-cmd",
+            &ecmd,
+            "--embed-name",
+            "fake-4d",
+            "--embed-normalize",
+            "true",
+            "--top-k",
+            "1",
+        ])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo recall --text");
+
+    drop(reader);
+
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(
+        out.status.success(),
+        "recall --text must succeed via read-only fallback; got status={:?}\n\
+         stdout:\n{stdout}\nstderr:\n{stderr}",
+        out.status,
+    );
+    assert!(
+        stderr.contains("another writer holds the lock")
+            && stderr.contains("read-only")
+            && stderr.contains("--no-track"),
+        "expected the one-line stderr fallback note (--text), got stderr:\n{stderr}",
+    );
+    assert!(
+        stdout.contains("alpha"),
+        "expected recall --text output to include the top hit; got stdout:\n{stdout}",
+    );
+}
+
+#[test]
+fn recall_tracking_flushes_access_count_to_disk() {
+    // R-001.4 (v0.7.0): a tracking CLI recall mutates the catalog's
+    // `accessed_at` / `access_count` fields in memory. Scoring v2
+    // flushes before exit so those bumps survive across CLI calls.
+    // Before this fix, the bumps lived only in the subprocess's RAM
+    // and were lost at exit, meaning the usage-saturation term in
+    // the new scoring formula never saw CLI usage.
+    let (dir, path, pp, _) = seed_db();
+
+    // Inspect `access_count` for the tea memory before the recall.
+    let before = {
+        let mut db = Mnemo::open_read_only(&path, pp).expect("open-ro before");
+        let mems = db.memories().expect("memories before");
+        let mem = mems
+            .into_iter()
+            .find(|m| m.content == "the user prefers tea")
+            .expect("tea memory missing in seed");
+        mem.access_count
+    };
+
+    // Default (tracking) recall via the CLI.
+    let (status, stdout, stderr) = run_cli(
+        &[
+            "recall",
+            path.to_str().unwrap(),
+            "--query",
+            "[1.0,0.0,0.0,0.0]",
+            "--top-k",
+            "1",
+        ],
+        pp,
+    );
+    assert!(
+        status.success(),
+        "tracking recall failed: status={status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    );
+    assert!(
+        stdout.contains("the user prefers tea"),
+        "expected recall output to include the tea memory; got:\n{stdout}",
+    );
+    // The lock-fallback stderr note must NOT fire here — tracking
+    // recall takes the exclusive lock cleanly in the no-contention
+    // case.
+    assert!(
+        !stderr.contains("another writer holds the lock"),
+        "unexpected lock-fallback note on a tracking recall with no contention: {stderr}",
+    );
+
+    // Re-open after the subprocess exits and confirm the bump reached
+    // disk.
+    let after = {
+        let mut db = Mnemo::open_read_only(&path, pp).expect("open-ro after");
+        let mems = db.memories().expect("memories after");
+        let mem = mems
+            .into_iter()
+            .find(|m| m.content == "the user prefers tea")
+            .expect("tea memory missing after recall");
+        mem.access_count
+    };
+
+    assert!(
+        after > before,
+        "tracking recall must persist an access_count bump to disk; \
+         before={before}, after={after}",
+    );
+    assert_eq!(
+        after,
+        before + 1,
+        "exactly one access_count increment expected after one top-1 recall; \
+         before={before}, after={after}",
+    );
+
+    // Keep `dir` alive until the end so the tempfile isn't reaped
+    // before the second open completes.
+    drop(dir);
+}

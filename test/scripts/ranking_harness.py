@@ -14,15 +14,17 @@ right answers, including a handful of exact-identifier queries (versions,
 PR numbers, function names) that embeddings notoriously handle poorly, and
 scores three configurations:
 
-- ``default_weights_track_true`` — the current default. Weighted combination
-  of similarity, recency, importance and ln(uses+1); every recall mutates
-  access_count and accessed_at on the memories it returns. Run as a 5-pass
-  simulated-usage loop to catch the feedback drift the planner observed.
+- ``default_weights_track_true`` — the current default scoring-v2 formula
+  (v0.7.0). Similarity-gated bonuses on recency (from created_at),
+  importance (centered at 0.5), and saturating tanh(uses/5). Every recall
+  mutates access_count and accessed_at on the memories it returns. Run as
+  a 5-pass simulated-usage loop. Since recency reads created_at under v2,
+  track-true drift is 0 by construction — the loop stays for signal
+  continuity with pre-v0.7.0 runs.
 - ``similarity_only`` — α=1, β=γ=δ=0. Rebuilt in Python by re-ranking the
   raw ``search()`` output; no engine change required.
 - ``default_weights_track_false`` — same formula as the first config, but
-  with ``track_access=False`` so the feedback loop is disabled. Lets us
-  attribute damage between "the formula" and "the feedback loop".
+  with ``track_access=False`` so the feedback loop is disabled.
 
 Each configuration reports hit@1, hit@5, MRR and (for the track-true loop)
 drift of the top-1 answer between pass 1 and pass 5.
@@ -197,8 +199,9 @@ CORPUS: list[tuple[str, str, float]] = [
      0.55),
     ("api:Mnemo::recall",
      "fn recall(req: &RecallRequest) -> Result<Vec<RecallResult>>. "
-     "Multi-signal recall: top_k by α·similarity + β·recency + "
-     "γ·importance + δ·ln(uses+1).",
+     "Multi-signal recall (scoring v2, v0.7.0): top_k by sim + "
+     "max(sim,0)·(β·recency + γ·(importance−0.5) + δ·tanh(uses/5)), "
+     "age measured from created_at.",
      0.7),
     ("api:Mnemo::remember",
      "fn remember(m: Memory) -> Result<Ulid>. Writes one memory into the "
@@ -221,8 +224,9 @@ CORPUS: list[tuple[str, str, float]] = [
     ("api:ScoreWeights",
      "ScoreWeights {alpha, beta, gamma, delta, half_life_secs} — the "
      "four coefficients and the half-life that combine the recall "
-     "signals into a single score. Defaults tuned for conversational "
-     "agents.",
+     "signals into a single score under the v0.7.0 scoring-v2 formula: "
+     "similarity-gated multiplicative bonuses, importance centered at 0.5, "
+     "saturating tanh usage. Defaults tuned on the ranking_v2 corpus.",
      0.6),
     ("api:Metric",
      "Metric — recall distance function. Cosine (the default, used by "
@@ -611,7 +615,7 @@ def _config_default_track_true(
     ]
 
     return {
-        "formula": "alpha*sim + beta*recency + gamma*importance + delta*ln(uses+1)",
+        "formula": "sim + max(sim,0)*(beta*recency(created_at) + gamma*(importance-0.5) + delta*tanh(uses/5))",
         "weights": DEFAULT_WEIGHTS,
         "track_access": True,
         "usage_loop_passes": USAGE_LOOP_PASSES,
@@ -701,7 +705,7 @@ def _config_default_track_false(
         scores.append(s)
 
     summary = _summarize(per_query, scores)
-    summary["formula"] = "alpha*sim + beta*recency + gamma*importance + delta*ln(uses+1)"
+    summary["formula"] = "sim + max(sim,0)*(beta*recency(created_at) + gamma*(importance-0.5) + delta*tanh(uses/5))"
     summary["weights"] = DEFAULT_WEIGHTS
     summary["track_access"] = False
     return summary

@@ -237,6 +237,20 @@ pub fn serve_with_streams<R: Read, W: Write>(
         writeln!(writer, "{line}").map_err(MnemoError::Io)?;
         writer.flush().map_err(MnemoError::Io)?;
     }
+    // Scoring v2 (v0.7.0) flipped `tool_recall` to `track_access(true)`:
+    // every recall bumps `accessed_at` / `access_count` in the catalog
+    // in memory (no per-call fsync). The previous `db.flush()` only
+    // fired on each mutating tool call's exit path, so a session that
+    // issued only `recall` / `about` / `stats` / `list` /
+    // `cache_get_semantic`-on-hit calls (read-shaped) would exit with
+    // every one of its access-stat bumps still in RAM, discarded on
+    // shutdown. Flush at shutdown so a read-only session persists its
+    // access stats too — the write is cheap (catalog page only; the
+    // record bodies aren't dirty) and guarantees the usage-saturation
+    // signal survives across sessions.
+    if let Err(e) = db.flush() {
+        eprintln!("mnemo mcp: flush on shutdown failed: {e}");
+    }
     eprintln!("mnemo mcp: stdin closed, shutting down");
     Ok(())
 }
@@ -677,12 +691,13 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     // saturation term on later queries. The bump happens in-memory
     // (`accessed_at` / `access_count` + `dirty_catalog`), and persists
     // through the next flush — recall itself does not fsync, so there
-    // is no per-tool-call write-amplification cost. The next mutating
-    // tool call (remember / forget / cache_put_semantic / etc.) runs
-    // `db.flush()` on exit and that is when the access stats reach
-    // disk; on a read-only workload with no mutations, the updates
-    // live only in RAM and are lost on shutdown, which is fine (the
-    // scorer never persists this signal on a read-only MCP session).
+    // is no per-tool-call write-amplification cost. Access stats reach
+    // disk on either (a) the next mutating tool call's exit path (every
+    // one of `remember` / `forget` / `cache_put_semantic` /
+    // `cache_get_semantic`-on-miss ends in `db.flush()`), or (b) the
+    // server's own shutdown flush when stdin closes (see
+    // `serve_with_streams`), so a read-only session that issued only
+    // recalls still persists its stats.
     let mut req = RecallRequest::new(query)
         .top_k(top_k)
         .metric(metric)
