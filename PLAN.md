@@ -5681,3 +5681,44 @@ including the BP.1 miss, version pill) and `index.html` updates to
 ship with the release. Not tagging yet. Standing by.
 
 ### 2026-11-06 — PLANNER-A — NOTE — ACK lanes: I own lane A (scoring v2 Phase 4 → v0.7.0 VERIFIED + README/`index.html` handoff); no objection; R-003.1 stays with lane B; I'll answer the 2026-11-06 WORKER READY (Phase 4 complete) next.
+
+### 2026-11-06 — WORKER — READY — scoring v2 Phase 4 pushed; hashes cited; not tagged
+**Three commits landed on `main` and were pushed to origin:**
+
+- **`3eb687c`** `feat(scoring)!: ship scoring v2 — similarity-gated bonuses, created_at recency, MCP tracking on, CLI lock fallback` — the Phase 4 code (12 files: memory.rs, store.rs, lib.rs, bin/mnemo.rs, mcp.rs, examples/ranking_v2.rs, tests/cli_smoke.rs, CHANGELOG.md, project_memory.py, perf JSON, gen_ranking_v2_fixture.py, both fixture JSONs).
+- **`b1a5055`** `docs(agents): multi-Planner lanes with a single serialized Worker queue` — PLANNER-B's AGENTS.md handoff, committed on its own per the HANDOFF, right after the code commit.
+- **`9c7c252`** `chore(plan): sync coordination files` — PLAN.md + reviewer_notes.md sync for everything above through "Phase 4 complete".
+
+**Push:** `e244a39..9c7c252 main -> main`.
+
+**Local verification before push:** `cargo fmt --check`, `cargo clippy
+--all-targets --features failpoints,benches -- -D warnings`, `cargo test
+--features failpoints --release`, and
+`cargo run --release --example ranking_v2 --` all clean.
+
+- Harness: default track_false MRR 0.9487, drift 0; similarity_only
+  hit@1 0.6154 (gate 1 clears); phase6_regression hit@1 0.5667 and
+  MRR 0.6779 (gate 2 clears).
+- `perf_v0.5.0.json["ranking_v2"]` now carries the slim post-strip
+  shape (`default` / `similarity_only` / `phase6_regression` +
+  thresholds + notes), replacing the pre-strip
+  `variants` / `checks` shape.
+
+**Not tagged v0.7.0 yet**, per the DECISION. Standing by for the lane A
+Planner to hand off the v0.7.0 README (`import mnemo_engine` samples,
+known limitations including the named BP.1 recency_sensitive miss, the
+new-scale note for `RecallResult.score` threshold callers, version
+pill) and `index.html` updates to ship with the release. Once those
+land I'll:
+
+1. Make the sync commit for this PLAN.md READY entry + any Planner edits
+   above.
+2. Tag `v0.7.0` locally and push the tag.
+3. Watch CI → PyPI Trusted Publishing → verify the wheel installs
+   under `import mnemo_engine` only; confirm crates.io publish.
+4. Log DONE with the tag's commit hash + CI run link + PyPI /
+   crates.io URLs.
+
+**Housekeeping:** `test/scripts/dump_ranking_v2_checks.py` was never
+committed (it was an ad-hoc gate-verification helper) and was
+`rm`'d locally before staging. Not in any commit.
