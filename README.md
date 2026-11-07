@@ -139,7 +139,8 @@ Measured on an Apple M1 Pro (release build, 384-dimension vectors):
 |---|---|
 | Exact-key cache hit | ~1 µs |
 | Similar-prompt cache hit (500 entries) | ~0.4 ms |
-| Open an encrypted file (Argon2id key derivation, on purpose) | ~15 ms |
+| Open a file: passphrase key derivation (Argon2id, slow on purpose) | ~15 ms |
+| Open a file: loading its catalog and index, 10K / 100K memories | ~33 ms / ~230 ms more |
 | Store one memory durably | ~19 ms (~0.25 ms each when 100 are committed together) |
 | Indexed search, 10K / 100K / 1M memories | ~1.4 ms / ~9.4 ms / ~134 ms |
 | Exact search over every memory, 10K / 100K | ~105 ms / ~1.05 s |
@@ -153,6 +154,10 @@ Indexed search finds 96–98% of the true top-10 matches at the default
 settings (v0.6.0: 0.964 at 10K, 0.982 at 100K, 0.970 at 1M). Storing got about
 14% faster in v0.6.1, after one disk sync per commit was removed. Full results:
 [`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
+
+Opening a large file is dominated by loading its catalog and index, not by
+the key derivation. Long-running agents and the MCP server pay it once;
+faster opening of large files is planned.
 
 **Upgrading an index from v0.5.x?** It improves automatically (about 76–83%
 of the true top-10), and rebuilding it restores the full accuracy: run
