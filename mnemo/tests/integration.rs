@@ -4254,3 +4254,388 @@ fn default_recall_excludes_turn_essence_and_thread_link_records() {
         );
     }
 }
+
+// ---------- Phase 12.7d: batch embedding, export shape, about essence ----
+
+/// FakeEmbedder that counts its `embed` calls, for the
+/// one-embed-call-per-batch check.
+struct CountingEmbedder {
+    inner: FakeEmbedder,
+    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Embedder for CountingEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        self.inner.identity()
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.embed(texts)
+    }
+}
+
+fn with_counting_embedder(
+    path: &std::path::Path,
+) -> (Mnemo, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut db = Mnemo::create(path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(CountingEmbedder {
+        inner: FakeEmbedder::new("fake-4d", 4, true),
+        calls: calls.clone(),
+    })
+    .unwrap();
+    (db, calls)
+}
+
+fn text_fact(content: &str) -> KeyedMemory {
+    KeyedMemory {
+        memory: Memory::new(content, MemoryType::Semantic, Vec::new()),
+        key: None,
+    }
+}
+
+#[test]
+fn commit_deltas_embeds_text_only_facts_essence_and_turns_in_one_call() {
+    let dir = tempdir().unwrap();
+    let (mut db, calls) = with_counting_embedder(&dir.path().join("embed1.mnemo"));
+    let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+
+    let batch = CommitBatch {
+        facts: vec![
+            text_fact("fact one"),
+            text_fact("fact two"),
+            KeyedMemory {
+                memory: Memory::new("fact three", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
+                key: None,
+            },
+        ],
+        essence_ops: vec![
+            EssenceOp {
+                kind: EssenceOpKind::Add,
+                scope: Some(EssenceScope::Thread("tE".into())),
+                section: Some(EssenceSection::Intent),
+                id: None,
+                text: Some("ship 12.7d".into()),
+                refs: None,
+            },
+            EssenceOp {
+                kind: EssenceOpKind::AppendTimeline,
+                scope: Some(EssenceScope::Thread("tE".into())),
+                section: None,
+                id: None,
+                text: Some("first milestone".into()),
+                refs: None,
+            },
+        ],
+        turns: vec![tt("u-1", "user", "hello"), tt("u-2", "assistant", "hi")],
+        thread_id: Some("tE".into()),
+        turn_policy: TurnPolicy::Archive,
+    };
+    let report = db.commit_deltas(batch).unwrap();
+    assert_eq!(report.facts_added, 3);
+    assert_eq!(report.essence_ops_applied, 2);
+    assert_eq!(report.turns_added, 2);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst) - before,
+        1,
+        "commit_deltas must embed the whole batch in exactly one call"
+    );
+
+    // Text-only facts carry the embedder's vector for their content.
+    let expected = FakeEmbedder::new("fake-4d", 4, true)
+        .embed(&["fact one"])
+        .unwrap()
+        .remove(0);
+    let stored = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.content == "fact one")
+        .expect("text-only fact was written");
+    assert_eq!(stored.vector, expected);
+
+    // A batch with nothing to embed makes no call at all.
+    let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+    let batch = CommitBatch {
+        facts: vec![KeyedMemory {
+            memory: Memory::new("fact four", MemoryType::Semantic, vec4(0.0, 0.0, 1.0, 0.0)),
+            key: None,
+        }],
+        ..Default::default()
+    };
+    db.commit_deltas(batch).unwrap();
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), before);
+}
+
+#[test]
+fn commit_deltas_text_only_fact_without_embedder_writes_nothing() {
+    let dir = tempdir().unwrap();
+    let mut db = Mnemo::create(dir.path().join("noembed.mnemo"), "pw", fast_cfg(4)).unwrap();
+    let before = db.stats().unwrap().memories;
+    let batch = CommitBatch {
+        facts: vec![
+            KeyedMemory {
+                memory: Memory::new(
+                    "has a vector",
+                    MemoryType::Semantic,
+                    vec4(1.0, 0.0, 0.0, 0.0),
+                ),
+                key: None,
+            },
+            text_fact("needs an embedder"),
+        ],
+        ..Default::default()
+    };
+    let err = db.commit_deltas(batch).unwrap_err();
+    assert!(
+        err.to_string().contains("no embedder"),
+        "expected a no-embedder error, got: {err}"
+    );
+    assert_eq!(
+        db.stats().unwrap().memories,
+        before,
+        "nothing may be staged"
+    );
+}
+
+#[test]
+fn commit_deltas_rejects_bad_essence_targets_before_writing() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("badtarget.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    let item = db
+        .essence_add(
+            EssenceScope::Thread("t1".into()),
+            EssenceSection::Open,
+            "an open item",
+            None,
+        )
+        .unwrap();
+    let milestone = db
+        .essence_append_timeline(EssenceScope::Thread("t1".into()), "a milestone", None)
+        .unwrap();
+    let fact_id = db
+        .remember(Memory::new(
+            "plain fact",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+    db.flush().unwrap();
+    let before = db.stats().unwrap().memories;
+
+    let op = |kind: EssenceOpKind, id: mnemo_engine::Ulid, text: Option<&str>| EssenceOp {
+        kind,
+        scope: None,
+        section: None,
+        id: Some(id),
+        text: text.map(String::from),
+        refs: None,
+    };
+    let cases: Vec<(&str, Vec<EssenceOp>)> = vec![
+        (
+            "unknown id",
+            vec![op(
+                EssenceOpKind::Update,
+                mnemo_engine::Ulid::new(),
+                Some("x"),
+            )],
+        ),
+        (
+            "not an essence record",
+            vec![op(EssenceOpKind::Resolve, fact_id, None)],
+        ),
+        (
+            "update on a timeline entry",
+            vec![op(EssenceOpKind::Update, milestone, Some("edited"))],
+        ),
+        (
+            "update over the section cap",
+            vec![op(
+                EssenceOpKind::Update,
+                item,
+                Some("z".repeat(281).as_str()),
+            )],
+        ),
+        (
+            "op after a remove of the same id",
+            vec![
+                op(EssenceOpKind::Remove, item, None),
+                op(EssenceOpKind::Resolve, item, None),
+            ],
+        ),
+    ];
+    for (name, essence_ops) in cases {
+        let batch = CommitBatch {
+            facts: vec![text_fact("would be written first")],
+            essence_ops,
+            ..Default::default()
+        };
+        assert!(
+            db.commit_deltas(batch).is_err(),
+            "case `{name}` should fail"
+        );
+        assert_eq!(
+            db.stats().unwrap().memories,
+            before,
+            "case `{name}` staged a write"
+        );
+    }
+}
+
+#[test]
+fn commit_deltas_expire_after_stamps_only_the_new_turns() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ttl.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    db.ingest_thread("tT", &[tt("u-1", "user", "kept forever")])
+        .unwrap();
+    let batch = CommitBatch {
+        turns: vec![
+            tt("u-1", "user", "kept forever"),
+            tt("u-2", "user", "short-lived"),
+        ],
+        thread_id: Some("tT".into()),
+        turn_policy: TurnPolicy::ExpireAfter(3600),
+        ..Default::default()
+    };
+    let report = db.commit_deltas(batch).unwrap();
+    assert_eq!(report.turns_added, 1);
+    assert_eq!(report.turns_skipped, 1);
+    let records = db.thread_export("tT").unwrap();
+    let ttl_of = |content: &str| {
+        records
+            .iter()
+            .find(|m| m.content == content)
+            .map(|m| m.ttl_secs)
+            .expect("record exists")
+    };
+    assert_eq!(
+        ttl_of("kept forever"),
+        None,
+        "an already-archived turn keeps no TTL"
+    );
+    assert_eq!(ttl_of("short-lived"), Some(3600));
+}
+
+#[test]
+fn thread_export_turns_is_ingest_shape_in_seq_order_and_round_trips() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("export.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    let long = "é".repeat(5_000); // 10 KB of 2-byte chars: chunked at 8 KB
+    let tool = "t".repeat(20_000); // over the 16 KB tool cap: truncated
+    let mut turns = vec![
+        tt("b", "user", "first, despite sorting second"),
+        tt("a", "assistant", &long),
+        tt("c", "tool", &tool),
+    ];
+    for (i, t) in turns.iter_mut().enumerate() {
+        t.timestamp = Some(1_700_000_000 + i as i64);
+    }
+    let r = db.ingest_thread("tX", &turns).unwrap();
+    assert_eq!(r.chunked_turns, 1);
+    assert_eq!(r.truncated_turns, 1);
+
+    let exported = db.thread_export_turns("tX").unwrap();
+    let ids: Vec<&str> = exported.iter().map(|t| t.turn_id.as_str()).collect();
+    assert_eq!(ids, ["b", "a", "c"], "turns must come back in ingest order");
+    assert_eq!(
+        exported[1].content, long,
+        "chunks are joined back into one turn"
+    );
+    assert_eq!(exported[1].role, "assistant");
+    assert_eq!(exported[0].timestamp, 1_700_000_000);
+    assert!(exported[0].sha256.is_none());
+    assert_eq!(exported[2].original_length, Some(20_000));
+    assert!(exported[2].sha256.as_deref().is_some_and(|h| h.len() == 64));
+    let json = exported[2].to_json();
+    assert_eq!(json["turn_id"], "c");
+    assert_eq!(json["original_length"], 20_000);
+
+    let back: Vec<mnemo_engine::ThreadTurn> = exported
+        .iter()
+        .map(|t| mnemo_engine::ThreadTurn {
+            turn_id: t.turn_id.clone(),
+            role: t.role.clone(),
+            content: t.content.clone(),
+            timestamp: Some(t.timestamp),
+        })
+        .collect();
+    // Same thread: every turn is already there.
+    let again = db.ingest_thread("tX", &back).unwrap();
+    assert_eq!(again.added_records, 0);
+    assert_eq!(again.skipped_existing_turns, 3);
+    // A new thread: the export re-creates the same turns. (The stored
+    // tool text is already at the 16 KB cap, so the copy isn't truncated
+    // again and carries no sha256 / original_length.)
+    db.ingest_thread("tX-copy", &back).unwrap();
+    let shape = |ts: &[mnemo_engine::ExportedTurn]| -> Vec<(String, String, String, i64)> {
+        ts.iter()
+            .map(|t| {
+                (
+                    t.turn_id.clone(),
+                    t.role.clone(),
+                    t.content.clone(),
+                    t.timestamp,
+                )
+            })
+            .collect()
+    };
+    let copy = db.thread_export_turns("tX-copy").unwrap();
+    assert_eq!(shape(&copy), shape(&exported));
+}
+
+#[test]
+fn about_essence_renders_open_project_items_only() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("about-ess.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    assert_eq!(
+        db.about_essence().unwrap(),
+        None,
+        "fresh file has no essence"
+    );
+
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Intent,
+        "thread-only intent",
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        db.about_essence().unwrap(),
+        None,
+        "thread-scope items don't make a project essence"
+    );
+
+    let id = db
+        .essence_add(
+            EssenceScope::Project,
+            EssenceSection::Conventions,
+            "repeat relay prompts verbatim",
+            None,
+        )
+        .unwrap();
+    let render = db
+        .about_essence()
+        .unwrap()
+        .expect("project essence present");
+    assert!(render.contains("repeat relay prompts verbatim"), "{render}");
+    assert!(!render.contains("thread-only intent"), "{render}");
+    assert!(render.len() <= mnemo_engine::ESSENCE_DEFAULT_RENDER_BYTES);
+
+    db.essence_resolve(&id).unwrap();
+    assert_eq!(
+        db.about_essence().unwrap(),
+        None,
+        "only resolved project items: nothing to brief"
+    );
+    // about() itself still returns just the records.
+    assert!(db
+        .about()
+        .unwrap()
+        .iter()
+        .all(|m| m.metadata.get(MNEMO_META_KIND).is_none()));
+}

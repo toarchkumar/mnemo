@@ -695,8 +695,16 @@ knowledge. The `about` command surfaces that introduction:
 cargo run --bin mnemo -- about agent.mnemo
 # Prints a one-line stats header, then every memory tagged
 # metadata.area = "onboarding" sorted with the canonical manifest first,
-# then by importance descending, ending with a quick-start footer.
+# then by importance descending, then the project essence (if any),
+# ending with a quick-start footer.
 ```
+
+Since v0.9.1 the briefing also carries the file's **project essence**: the
+render of its project-scope essence items (conventions, lasting decisions,
+open items), at the default 6 KB budget, after the manifest and onboarding
+memories. `Mnemo::about_essence()` returns it (`None` when there is none),
+`mnemo about --format json` adds it as `"essence"`, and the MCP `about` tool
+appends it as a final `{"kind": "essence", "render": …}` element.
 
 The convention is two metadata keys on ordinary memories — no new schema, no
 extra file:

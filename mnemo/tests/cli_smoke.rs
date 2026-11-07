@@ -1810,3 +1810,219 @@ fn cli_history_rejects_agent_with_shared() {
         "expected a clap 'conflicts' message, got: {stderr}"
     );
 }
+
+// === Phase 12.7d: end-to-end MCP threads + essence ========================
+
+/// Run one scripted MCP session against `path` with the fake 4-D
+/// embedder, retrying only on the MSRV fork/flock race (see the note in
+/// `mcp_serve_initialize_list_and_call_tools`). Returns each response's
+/// tool text, keyed by JSON-RPC id.
+fn run_mcp_session_with_embedder(
+    path: &std::path::Path,
+    pp: &str,
+    script_dir: &std::path::Path,
+    calls: &[(u64, &str, serde_json::Value)],
+) -> std::collections::BTreeMap<u64, String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let embed = write_py_script(script_dir, "fake_embed_e2e.py", FAKE_EMBED_PY);
+    let ecmd = embed_cmd_arg(&embed);
+    let mut lines = vec![
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#.to_string(),
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#.to_string(),
+    ];
+    for (id, name, args) in calls {
+        lines.push(
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": { "name": name, "arguments": args },
+            })
+            .to_string(),
+        );
+    }
+
+    let mut last_stderr = String::new();
+    for attempt in 0..5u32 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(100u64 << (attempt - 1)));
+        }
+        let mut child = Command::new(bin())
+            .args([
+                "serve",
+                path.to_str().unwrap(),
+                "--mcp",
+                "--embed-cmd",
+                &ecmd,
+                "--embed-name",
+                "fake-4d",
+            ])
+            .env("MNEMO_PASSPHRASE", pp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn mnemo serve --mcp");
+        {
+            let stdin = child.stdin.as_mut().expect("child stdin missing");
+            for line in &lines {
+                writeln!(stdin, "{line}").unwrap();
+            }
+        }
+        drop(child.stdin.take());
+        let out = child.wait_with_output().expect("child wait");
+        last_stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        if !out.status.success() {
+            if last_stderr.contains("file already locked") {
+                continue;
+            }
+            panic!(
+                "mnemo serve --mcp failed: status={:?} stderr={last_stderr}",
+                out.status
+            );
+        }
+        let mut texts = std::collections::BTreeMap::new();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let Some(id) = v["id"].as_u64() else { continue };
+            if let Some(err) = v.get("error") {
+                panic!("call {id} returned an RPC error: {err}");
+            }
+            if let Some(text) = v["result"]["content"][0]["text"].as_str() {
+                if v["result"]["isError"].as_bool() == Some(true) {
+                    panic!("call {id} returned a tool error: {text}");
+                }
+                texts.insert(id, text.to_string());
+            }
+        }
+        return texts;
+    }
+    panic!("mnemo serve --mcp never acquired the lock: stderr={last_stderr}");
+}
+
+/// The 12.7 flow over MCP: essence ops, a `commit_deltas` with a
+/// text-only fact (embedded by the server's `--embed-cmd`), a simulated
+/// compaction (`thread_ingest`), a new thread `--from` the old one, and
+/// its render, plus `thread_export` and `about`.
+#[test]
+fn mcp_end_to_end_threads_essence_and_commit_deltas() {
+    use serde_json::json;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("e2e.mnemo");
+    let pp = "e2e-pw";
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        db.flush().unwrap();
+    }
+    let transcript = dir.path().join("t1.jsonl");
+    std::fs::write(
+        &transcript,
+        concat!(
+            r#"{"turn_id":"u-2","role":"user","content":"please ship 12.7d","timestamp":1700000000}"#,
+            "\n",
+            r#"{"turn_id":"u-1","role":"assistant","content":"on it","timestamp":1700000001}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let texts = run_mcp_session_with_embedder(
+        &path,
+        pp,
+        dir.path(),
+        &[
+            (
+                2,
+                "essence",
+                json!({"op": "add", "thread": "t1", "section": "open", "text": "finish 12.7d"}),
+            ),
+            (
+                3,
+                "essence",
+                json!({"op": "add", "thread": "t1", "section": "next", "text": "release v0.9.1"}),
+            ),
+            (
+                4,
+                "essence",
+                json!({"op": "append", "thread": "t1", "text": "batch embedding landed"}),
+            ),
+            (
+                5,
+                "commit_deltas",
+                json!({
+                    "facts": [{"content": "the user prefers tea", "memory_type": "semantic"}],
+                    "essence_ops": [{"kind": "add", "project": true, "section": "conventions",
+                                     "text": "repeat relay prompts verbatim"}],
+                }),
+            ),
+            (
+                6,
+                "thread_ingest",
+                json!({"thread": "t1", "transcript_path": transcript.to_str().unwrap()}),
+            ),
+            (7, "thread_start", json!({"new": "t2", "from": "t1"})),
+            (8, "essence", json!({"op": "render", "thread": "t2"})),
+            (9, "thread_export", json!({"thread": "t1"})),
+            (10, "about", json!({})),
+            (
+                11,
+                "recall",
+                json!({"text": "the user prefers tea", "top_k": 3}),
+            ),
+        ],
+    );
+
+    let report: serde_json::Value = serde_json::from_str(&texts[&5]).unwrap();
+    assert_eq!(
+        report["facts_added"], 1,
+        "text-only fact embedded and written: {report}"
+    );
+    assert_eq!(report["essence_ops_applied"], 1);
+
+    let ingest: serde_json::Value = serde_json::from_str(&texts[&6]).unwrap();
+    assert_eq!(ingest["added_records"], 2);
+
+    let render = &texts[&8];
+    for want in [
+        "continued from",
+        "finish 12.7d",
+        "release v0.9.1",
+        "batch embedding landed",
+        "repeat relay prompts verbatim",
+    ] {
+        assert!(
+            render.contains(want),
+            "t2 render is missing `{want}`:\n{render}"
+        );
+    }
+
+    let exported: Vec<serde_json::Value> = serde_json::from_str(&texts[&9]).unwrap();
+    let ids: Vec<&str> = exported
+        .iter()
+        .map(|t| t["turn_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["u-2", "u-1"], "thread_export keeps ingest order");
+    assert_eq!(exported[0]["content"], "please ship 12.7d");
+    assert_eq!(exported[0]["timestamp"], 1700000000);
+    assert!(exported[0].get("vector").is_none(), "export has no vectors");
+
+    let about: Vec<serde_json::Value> = serde_json::from_str(&texts[&10]).unwrap();
+    let essence = about.last().expect("about returned entries");
+    assert_eq!(essence["kind"], "essence");
+    assert!(essence["render"]
+        .as_str()
+        .unwrap()
+        .contains("repeat relay prompts verbatim"));
+
+    assert!(
+        texts[&11].contains("the user prefers tea"),
+        "recall should find the text-only fact: {}",
+        texts[&11]
+    );
+}

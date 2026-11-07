@@ -731,3 +731,238 @@ proptest! {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// Phase 12.7d: `commit_deltas` is all-or-nothing.
+//
+// Random batches mix valid items (facts with or without a vector,
+// essence adds / timeline entries / a resolve of an existing item,
+// archive turns) with invalid ones (a wrong-width vector, an oversized
+// essence item, an update of a missing id, an empty turn id, turns
+// without a thread id). The model predicts whether the batch is valid:
+//
+// * invalid → `commit_deltas` errors, the live handle shows exactly the
+//   pre-batch set (nothing staged), and so does a reopen;
+// * valid → the live handle and a reopen show pre ∪ the batch's records;
+// * valid with a write failpoint armed → the single flush fails or not,
+//   and a reopen shows either the pre set or the post set, never a mix.
+// ---------------------------------------------------------------------
+
+use mnemo_engine::{
+    CommitBatch, Embedder, EmbedderIdentity, EssenceOp, EssenceOpKind, EssenceScope,
+    EssenceSection, KeyedMemory, ThreadTurn, TurnPolicy,
+};
+
+/// Deterministic text embedder for the batch property: the byte sum of
+/// the text picks a `seed_vec`, which is never all-zero.
+struct SeedEmbedder;
+impl Embedder for SeedEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: "seed-4d".into(),
+            dimensions: DIMS,
+            normalize: false,
+        }
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        Ok(texts
+            .iter()
+            .map(|t| seed_vec(t.bytes().fold(0u8, |a, b| a.wrapping_add(b))))
+            .collect())
+    }
+}
+
+#[derive(Clone, Debug)]
+enum BatchItem {
+    FactWithVector(u8),
+    FactTextOnly(u8),
+    FactWrongWidth,
+    EssenceAdd(u8),
+    EssenceAddOversized,
+    TimelineEntry(u8),
+    ResolveExisting,
+    UpdateMissing,
+    Turn(u8),
+    TurnEmptyId,
+}
+
+fn arb_batch_item() -> impl Strategy<Value = BatchItem> {
+    prop_oneof![
+        3 => any::<u8>().prop_map(BatchItem::FactWithVector),
+        3 => any::<u8>().prop_map(BatchItem::FactTextOnly),
+        1 => Just(BatchItem::FactWrongWidth),
+        2 => any::<u8>().prop_map(BatchItem::EssenceAdd),
+        1 => Just(BatchItem::EssenceAddOversized),
+        2 => any::<u8>().prop_map(BatchItem::TimelineEntry),
+        1 => Just(BatchItem::ResolveExisting),
+        1 => Just(BatchItem::UpdateMissing),
+        3 => any::<u8>().prop_map(BatchItem::Turn),
+        1 => Just(BatchItem::TurnEmptyId),
+    ]
+}
+
+fn arb_turn_policy() -> impl Strategy<Value = TurnPolicy> {
+    prop_oneof![
+        3 => Just(TurnPolicy::Archive),
+        1 => Just(TurnPolicy::ExpireAfter(3600)),
+        1 => Just(TurnPolicy::Drop),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn prop_commit_deltas_is_all_or_nothing(
+        items in prop::collection::vec(arb_batch_item(), 1..=8),
+        policy in arb_turn_policy(),
+        omit_thread_id in prop::bool::weighted(0.1),
+        fail_at in prop::option::weighted(0.3, 0i64..40),
+    ) {
+        let (_dir, path, mut db) = fresh_db();
+        db.remember(Memory::scaffold_manifest(DIMS)).unwrap();
+        db.set_embedder(SeedEmbedder).unwrap();
+        let (m, _) = make_memory(7, 0);
+        db.remember(m).unwrap();
+        let open_item = db
+            .essence_add(EssenceScope::Project, EssenceSection::Open, "pre-existing open item", None)
+            .unwrap();
+        db.flush().unwrap();
+        let pre_set = observed_set(&mut db);
+
+        // Build the batch and the model's prediction side by side.
+        let mut batch = CommitBatch {
+            thread_id: (!omit_thread_id).then(|| "thread-p".to_string()),
+            turn_policy: policy,
+            ..Default::default()
+        };
+        let mut valid = true;
+        let mut post_set = pre_set.clone();
+        let archives = !matches!(policy, TurnPolicy::Drop);
+        let essence_fp = |text: &str| (text.to_string(), format!("{:?}", MemoryType::Semantic));
+        for (i, item) in items.iter().enumerate() {
+            let essence_op = |kind, section, text: String| EssenceOp {
+                kind,
+                scope: Some(EssenceScope::Thread("thread-p".into())),
+                section,
+                id: None,
+                text: Some(text),
+                refs: None,
+            };
+            match item {
+                BatchItem::FactWithVector(seed) => {
+                    let (mut m, f) = make_memory(*seed, i as u8);
+                    m.content = format!("{}-v{i}", m.content);
+                    post_set.insert((m.content.clone(), f.1));
+                    batch.facts.push(KeyedMemory { memory: m, key: None });
+                }
+                BatchItem::FactTextOnly(seed) => {
+                    let content = format!("text-fact-{seed}-{i}");
+                    post_set.insert((content.clone(), format!("{:?}", MemoryType::Semantic)));
+                    batch.facts.push(KeyedMemory {
+                        memory: Memory::new(content, MemoryType::Semantic, Vec::new()),
+                        key: None,
+                    });
+                }
+                BatchItem::FactWrongWidth => {
+                    valid = false;
+                    batch.facts.push(KeyedMemory {
+                        memory: Memory::new(format!("bad-{i}"), MemoryType::Semantic, vec![1.0, 0.0]),
+                        key: None,
+                    });
+                }
+                BatchItem::EssenceAdd(seed) => {
+                    let text = format!("essence-{seed}-{i}");
+                    post_set.insert(essence_fp(&text));
+                    batch.essence_ops.push(essence_op(EssenceOpKind::Add, Some(EssenceSection::Next), text));
+                }
+                BatchItem::EssenceAddOversized => {
+                    valid = false;
+                    batch.essence_ops.push(essence_op(EssenceOpKind::Add, Some(EssenceSection::Next), "x".repeat(300)));
+                }
+                BatchItem::TimelineEntry(seed) => {
+                    let text = format!("milestone-{seed}-{i}");
+                    post_set.insert(essence_fp(&text));
+                    batch.essence_ops.push(essence_op(EssenceOpKind::AppendTimeline, None, text));
+                }
+                BatchItem::ResolveExisting => {
+                    batch.essence_ops.push(EssenceOp {
+                        kind: EssenceOpKind::Resolve,
+                        scope: None,
+                        section: None,
+                        id: Some(open_item),
+                        text: None,
+                        refs: None,
+                    });
+                }
+                BatchItem::UpdateMissing => {
+                    valid = false;
+                    batch.essence_ops.push(EssenceOp {
+                        kind: EssenceOpKind::Update,
+                        scope: None,
+                        section: None,
+                        id: Some(Ulid::new()),
+                        text: Some("never applied".into()),
+                        refs: None,
+                    });
+                }
+                BatchItem::Turn(seed) => {
+                    let content = format!("turn-{seed}-{i}");
+                    if archives {
+                        post_set.insert((content.clone(), format!("{:?}", MemoryType::Episodic)));
+                    }
+                    batch.turns.push(ThreadTurn {
+                        turn_id: format!("t{i}"),
+                        role: "user".into(),
+                        content,
+                        timestamp: None,
+                    });
+                }
+                BatchItem::TurnEmptyId => {
+                    // Only an archived turn reaches the turn-id check.
+                    if archives {
+                        valid = false;
+                    }
+                    batch.turns.push(ThreadTurn {
+                        turn_id: String::new(),
+                        role: "user".into(),
+                        content: format!("orphan-{i}"),
+                        timestamp: None,
+                    });
+                }
+            }
+        }
+        if !batch.turns.is_empty() && omit_thread_id {
+            valid = false;
+        }
+
+        if !valid {
+            prop_assert!(db.commit_deltas(batch).is_err(), "invalid batch was accepted");
+            prop_assert_eq!(observed_set(&mut db), pre_set.clone(),
+                "a rejected batch left records staged on the handle");
+            let mut db = reopen(db, &path);
+            prop_assert_eq!(observed_set(&mut db), pre_set, "a rejected batch reached the file");
+            return Ok(());
+        }
+
+        match fail_at {
+            None => {
+                db.commit_deltas(batch).unwrap();
+                prop_assert_eq!(observed_set(&mut db), post_set.clone(),
+                    "live handle disagrees with the model after a valid batch");
+                let mut db = reopen(db, &path);
+                prop_assert_eq!(observed_set(&mut db), post_set, "reopen disagrees with the model");
+            }
+            Some(n) => {
+                mnemo_engine::__failpoints::set_writes_until_fail(n);
+                let _ = db.commit_deltas(batch);
+                mnemo_engine::__failpoints::set_writes_until_fail(-1);
+                let mut db = reopen(db, &path);
+                let observed = observed_set(&mut db);
+                prop_assert!(
+                    observed == pre_set || observed == post_set,
+                    "torn commit_deltas surfaced a third state: fail_at={} observed={:?} pre={:?} post={:?}",
+                    n, observed, pre_set, post_set,
+                );
+            }
+        }
+    }
+}

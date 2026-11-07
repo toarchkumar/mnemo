@@ -161,14 +161,13 @@ fn parse_commit_batch(py: Python<'_>, batch: &Bound<'_, PyDict>) -> PyResult<Com
                 })?
                 .extract()?;
             let memory_type = parse_type(&memory_type_str)?;
-            let vector: Vec<f32> = d
-                .get_item("vector")?
-                .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "facts[{i}]: missing required key 'vector' (bindings carry no server-side embedder for batch; embed first)"
-                    ))
-                })?
-                .extract()?;
+            // 12.7d: `vector` is optional. Without one (or with None) the
+            // engine embeds `content` with the registered embedder, in the
+            // same batched call as the rest of the batch.
+            let vector: Vec<f32> = match d.get_item("vector")? {
+                Some(v) if !v.is_none() => v.extract()?,
+                _ => Vec::new(),
+            };
             let mut mem = Memory::new(content, memory_type, vector);
             if let Some(v) = d.get_item("agent_id")? {
                 mem = mem.with_agent(v.extract::<String>()?);
@@ -1009,18 +1008,21 @@ impl Mnemo {
         Ok(out.into_any().unbind())
     }
 
-    /// Phase 12.7a: export a thread's archive back as a list of
-    /// `Memory` dicts, sorted by `_mnemo.seq` then `_mnemo.part`.
-    /// Multi-part turns come out as separate entries — the CLI's
-    /// `mnemo thread export` collapses them; Python callers are
-    /// expected to walk `_mnemo.part` themselves when they need the
-    /// per-chunk shape.
+    /// Export a thread's archive in the ingest shape (12.7d): a list of
+    /// `{turn_id, role, content, timestamp}` dicts in turn order, one per
+    /// turn (a long turn's chunks joined), plus `sha256` and
+    /// `original_length` on a truncated tool result. The same shape as
+    /// MCP `thread_export` and `mnemo thread export`, so
+    /// `db.ingest_thread(t, db.thread_export(t))` adds nothing.
     #[pyo3(signature = (thread_id))]
     fn thread_export(&mut self, py: Python<'_>, thread_id: &str) -> PyResult<PyObject> {
-        let records = self.core_mut()?.thread_export(thread_id).map_err(to_py)?;
+        let turns = self
+            .core_mut()?
+            .thread_export_turns(thread_id)
+            .map_err(to_py)?;
         let list = PyList::empty_bound(py);
-        for m in &records {
-            list.append(memory_to_dict(py, m)?)?;
+        for t in &turns {
+            list.append(json_to_py(py, &t.to_json())?)?;
         }
         Ok(list.into_any().unbind())
     }
@@ -1164,7 +1166,7 @@ impl Mnemo {
     /// db.commit_deltas({
     ///     "facts": [{
     ///         "content": "...", "memory_type": "semantic",
-    ///         "vector": [...],  # required: no server-side embedder here
+    ///         "vector": [...],  # optional: omitted -> embedded via set_embedder
     ///         "agent_id": "a", "session_id": "s", "importance": 0.7,
     ///         "shared": False, "metadata": {...}, "key": "note:1",
     ///     }],
@@ -1524,6 +1526,14 @@ impl Mnemo {
             out.push(memory_to_dict(py, &m)?);
         }
         Ok(out)
+    }
+
+    /// The project essence for the `about` briefing (12.7d): the markdown
+    /// render of the file's project-scope essence at the default budget,
+    /// or `None` when there is none. `mnemo about` and MCP `about` append
+    /// it after the manifest; this returns it on its own.
+    fn about_essence(&mut self) -> PyResult<Option<String>> {
+        self.core_mut()?.about_essence().map_err(to_py)
     }
 
     /// Insert the canonical scaffold manifest into this database. Mirrors what

@@ -72,8 +72,8 @@ pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
 pub use memory::{
     status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind, EssenceScope,
-    EssenceSection, Filter, FilterTerm, IngestReport, KeyScope, KeyedMemory, Memory, MemoryPatch,
-    MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome,
+    EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, KeyedMemory, Memory,
+    MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome,
     CONTINUATION_TIMELINE_ENTRIES, ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_SECTION_MAX_BYTES,
     ESSENCE_TIMELINE_MAX_BYTES, ESSENCE_TRANSITIONS, FINDING_TRANSITIONS, MNEMO_META_CONTINUES,
     MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND, MNEMO_META_KIND_ESSENCE,

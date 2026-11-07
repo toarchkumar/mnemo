@@ -4889,5 +4889,40 @@
       "open/fresh_handle_loop_n200"
     ],
     "remeasured_note": "Both cells measured fresh for v0.9.0 (MEM-1 close-out) after fixing the swapped gen_clustered_vectors arguments in open_rss.rs. RSS climbs about 4.7 MB per cycle until it peaks at 359 MB (roughly the first 60 cycles, estimated from the slope), then levels off (second-half slope -0.27 MB per cycle over 200 cycles): bounded allocator retention, not a per-handle leak. The 50-cycle cell ends before the plateau, so read its slope together with the 200-cycle cell. The earlier ~500 MB-per-100K-handle reading did not reproduce."
+  },
+  "speed_v0_9_1": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "methodology": "benches/thread.rs (Criterion, release build, --features benches), 384-dim vectors, a trivial in-process embedder returning a canned vector, so the cells measure engine cost, not a model. ingest: 1,000 ~200-byte turns into an empty thread plus the flush. render: essence(thread, 6144) over 1,000 items (700 section items across the seven sections, 300 timeline entries). about: about() plus about_essence() on a file with a manifest and 1,000 project-scope essence items.",
+    "benches": {
+      "thread/ingest_1000_turns": {
+        "mean_secs": 0.03189488815505953,
+        "median_secs": 0.032139474125,
+        "stderr_secs": 0.0004429671771612513,
+        "throughput": {
+          "Elements": 1000
+        },
+        "turns_per_sec_median": 31114
+      },
+      "thread/essence_render_1000_items": {
+        "mean_secs": 0.006325629586607992,
+        "median_secs": 0.00627963725625,
+        "stderr_secs": 3.190619551957749e-05
+      },
+      "thread/about_with_essence_1000_items": {
+        "mean_secs": 0.006065552645107867,
+        "median_secs": 0.006111056986111111,
+        "stderr_secs": 2.8030469470625255e-05
+      }
+    },
+    "remeasured": [
+      "thread/ingest_1000_turns",
+      "thread/essence_render_1000_items",
+      "thread/about_with_essence_1000_items"
+    ],
+    "remeasured_note": "All three cells are new in v0.9.1 (12.7d) and measured fresh. Render and about both decrypt every live record once per call to find the essence items, so their cost grows with the file's total record count, not only with the number of essence items."
   }
 }

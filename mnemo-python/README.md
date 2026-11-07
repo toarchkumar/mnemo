@@ -153,6 +153,7 @@ its own agent.
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
 | `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
+| `about_essence()` | The project essence render for the briefing (markdown), or `None` when the file has none |
 | `insert_default_manifest()` | Insert the canonical scaffold manifest (same one `mnemo init` adds); returns its id |
 | `session(agent_id)` | Begin a conversation `Session` |
 | `flush()` / `close()` | Persist pending changes |

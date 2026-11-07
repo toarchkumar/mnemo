@@ -1002,6 +1002,86 @@ def test_commit_deltas_validation_is_atomic():
     print("ok  commit_deltas validation is atomic (12.7c)")
 
 
+
+def test_commit_deltas_text_only_facts_use_one_embed_call():
+    """12.7d: facts without `vector` are embedded with the registered
+    embedder, together with essence texts and turns, in one call."""
+    calls = []
+    inner = _fake_embedder(4)
+
+    def counting(texts):
+        calls.append(len(texts))
+        return inner(texts)
+
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "embed.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.insert_default_manifest()
+            db.set_embedder(counting, name="fake-4d", dimensions=4, normalize=True)
+            calls.clear()
+            report = db.commit_deltas({
+                "facts": [
+                    {"content": "the user prefers tea", "memory_type": "semantic"},
+                    {"content": "explicit", "memory_type": "semantic",
+                     "vector": [0.0, 1.0, 0.0, 0.0]},
+                ],
+                "essence_ops": [{"kind": "add", "thread": "t", "section": "intent",
+                                 "text": "ship 12.7d"}],
+                "turns": [{"turn_id": "u1", "role": "user", "content": "hello"}],
+                "thread_id": "t",
+            })
+            assert report["facts_added"] == 2, report
+            assert report["essence_ops_applied"] == 1, report
+            assert report["turns_added"] == 1, report
+            assert calls == [3], f"expected one embed call of 3 texts, got {calls}"
+            hits = db.recall_text("the user prefers tea", top_k=1)
+            assert hits and hits[0]["content"] == "the user prefers tea", hits
+        finally:
+            db.close()
+    print("ok  commit_deltas embeds text-only facts in one call (12.7d)")
+
+
+def test_thread_export_is_ingest_shape_and_round_trips():
+    """12.7d: thread_export returns {turn_id, role, content, timestamp}
+    dicts in order; re-ingesting them skips every turn."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "export.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.insert_default_manifest()
+            db.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4, normalize=True)
+            long_text = "x" * 10_000  # chunked at 8 KB
+            db.ingest_thread("t", [
+                {"turn_id": "b", "role": "user", "content": "first", "timestamp": 1700000000},
+                {"turn_id": "a", "role": "assistant", "content": long_text},
+            ])
+            exported = db.thread_export("t")
+            assert [t["turn_id"] for t in exported] == ["b", "a"], exported
+            assert exported[0] == {"turn_id": "b", "role": "user", "content": "first",
+                                   "timestamp": 1700000000}, exported[0]
+            assert exported[1]["content"] == long_text
+            assert "vector" not in exported[1] and "metadata" not in exported[1]
+            again = db.ingest_thread("t", exported)
+            assert again["added_records"] == 0, again
+            assert again["skipped_existing_turns"] == 2, again
+        finally:
+            db.close()
+    print("ok  thread_export ingest shape + no-op round trip (12.7d)")
+
+
+def test_about_essence():
+    """12.7d: about_essence() renders the project essence, or None."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "about.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.insert_default_manifest()
+            assert db.about_essence() is None
+            db.essence_add("conventions", "repeat relay prompts verbatim", project=True)
+            render = db.about_essence()
+            assert render and "repeat relay prompts verbatim" in render, render
+        finally:
+            db.close()
+    print("ok  about_essence (12.7d)")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1037,4 +1117,7 @@ if __name__ == "__main__":
     test_thread_start_and_essence_continuation()
     test_commit_deltas_end_to_end()
     test_commit_deltas_validation_is_atomic()
+    test_commit_deltas_text_only_facts_use_one_embed_call()
+    test_thread_export_is_ingest_shape_and_round_trips()
+    test_about_essence()
     print("\nall Python binding tests passed")

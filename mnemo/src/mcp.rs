@@ -309,7 +309,7 @@ fn tools_list() -> Value {
         "tools": [
             {
                 "name": "about",
-                "description": "Read-only briefing for this .mnemo file: manifest scaffold plus any memories tagged as onboarding. Run this first to learn how the file expects to be used.",
+                "description": "Read-only briefing for this .mnemo file: manifest scaffold plus any memories tagged as onboarding, then the project essence (conventions, decisions, open items) as a final `{kind: \"essence\", render}` element when the file has one. Run this first to learn how the file expects to be used.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},
@@ -391,7 +391,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "commit_deltas",
-                "description": "Phase 12.7c: atomic batch write — facts (12.1), essence ops (12.7b), and thread archive turns (12.7a) in one call, with validate-everything-before-staging and a single `flush()` on success. Use when a session end wants to persist a burst of updates without making N round trips. `turn_policy` defaults to `archive`; `expire_after` takes a seconds TTL; `drop` discards turns. Returns a counts summary.",
+                "description": "Atomic batch write: facts, essence ops and thread archive turns in one call. Every item is checked before anything is written, so an invalid item writes nothing; one flush on success. Facts may omit `vector`: the server embeds every fact `content`, essence text and turn in one batched call with its embedder (`--embed-cmd` or builtin). Use at a session end to save a burst of updates in one round trip. `turn_policy` defaults to `archive`; `expire_after` takes a TTL in seconds; `drop` discards turns. Returns a counts summary.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -403,7 +403,7 @@ fn tools_list() -> Value {
                                 "properties": {
                                     "content": { "type": "string" },
                                     "memory_type": { "type": "string", "enum": ["episodic", "semantic", "procedural", "working"] },
-                                    "vector": { "type": "array", "items": { "type": "number" } },
+                                    "vector": { "type": "array", "items": { "type": "number" }, "description": "Optional. Omit it to have the server embed `content`." },
                                     "importance": { "type": "number", "minimum": 0, "maximum": 1 },
                                     "agent_id": { "type": "string" },
                                     "session_id": { "type": "string" },
@@ -459,6 +459,18 @@ fn tools_list() -> Value {
                         "thread": { "type": "string", "description": "Thread id to append under." },
                         "transcript_path": { "type": "string", "description": "Local path to the transcript file." },
                         "format": { "type": "string", "enum": ["jsonl", "claude-code-jsonl"], "default": "jsonl" }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "thread_export",
+                "description": "Return a thread's archive in the ingest shape: `[{turn_id, role, content, timestamp}]` in order, one entry per turn (long turns' chunks joined), plus `sha256` and `original_length` on a truncated tool result. Feeding it back to ingest for the same thread adds nothing.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["thread"],
+                    "properties": {
+                        "thread": { "type": "string", "description": "Thread id to export." }
                     },
                     "additionalProperties": false
                 }
@@ -641,6 +653,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
         "thread_ingest" => tool_thread_ingest(db, args)?,
+        "thread_export" => tool_thread_export(db, args)?,
         "thread_start" => tool_thread_start(db, args)?,
         "commit_deltas" => tool_commit_deltas(db, args)?,
         "essence" => tool_essence(db, args)?,
@@ -707,8 +720,23 @@ fn mnemo_err(e: MnemoError) -> RpcError {
 
 fn tool_about(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
     let mems = db.about().map_err(mnemo_err)?;
-    let arr: Vec<Value> = mems.iter().map(memory_to_json).collect();
+    let mut arr: Vec<Value> = mems.iter().map(memory_to_json).collect();
+    // Phase 12.7d: the project essence follows the manifest and the
+    // onboarding memories, as one tagged element.
+    if let Some(render) = db.about_essence().map_err(mnemo_err)? {
+        arr.push(json!({ "kind": "essence", "scope": "project", "render": render }));
+    }
     Ok(serde_json::to_string_pretty(&arr).unwrap_or_else(|_| "[]".into()))
+}
+
+fn tool_thread_export(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let thread = args
+        .get("thread")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "thread_export: missing 'thread'"))?;
+    let turns = db.thread_export_turns(thread).map_err(mnemo_err)?;
+    let arr: Vec<Value> = turns.iter().map(|t| t.to_json()).collect();
+    Ok(Value::Array(arr).to_string())
 }
 
 fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
@@ -942,24 +970,25 @@ fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
                     format!("commit_deltas: facts[{i}] unknown memory_type '{mtype_str}'"),
                 )
             })?;
-            let vector = obj
-                .get("vector")
-                .and_then(|v| v.as_array())
-                .ok_or_else(|| {
-                    RpcError::new(
-                        INVALID_PARAMS,
-                        format!("commit_deltas: facts[{i}] missing 'vector' (MCP carries no server-side embedder for batch)"),
-                    )
-                })?
-                .iter()
-                .map(|v| v.as_f64().map(|f| f as f32))
-                .collect::<Option<Vec<f32>>>()
-                .ok_or_else(|| {
-                    RpcError::new(
-                        INVALID_PARAMS,
-                        format!("commit_deltas: facts[{i}] vector must be numbers"),
-                    )
-                })?;
+            // 12.7d: `vector` is optional. Without one the engine embeds
+            // `content` with the server's embedder, batched with the rest
+            // of the call.
+            let vector = match obj.get("vector") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(v) => v
+                    .as_array()
+                    .and_then(|a| {
+                        a.iter()
+                            .map(|x| x.as_f64().map(|f| f as f32))
+                            .collect::<Option<Vec<f32>>>()
+                    })
+                    .ok_or_else(|| {
+                        RpcError::new(
+                            INVALID_PARAMS,
+                            format!("commit_deltas: facts[{i}] vector must be an array of numbers"),
+                        )
+                    })?,
+            };
             let mut mem = Memory::new(content, mtype, vector);
             if let Some(a) = obj.get("agent_id").and_then(|v| v.as_str()) {
                 mem = mem.with_agent(a);

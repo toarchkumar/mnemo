@@ -1523,6 +1523,21 @@ fn run() -> std::result::Result<(), String> {
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
             let mut entries = db.about().map_err(fmt)?;
+            // 12.7d: the project essence follows the manifest and the
+            // onboarding memories (skipped with --manifest-only).
+            let essence = if manifest_only {
+                None
+            } else {
+                db.about_essence().map_err(fmt)?
+            };
+            let print_essence = || {
+                if let Some(render) = &essence {
+                    println!();
+                    println!("## Project essence");
+                    println!();
+                    print!("{render}");
+                }
+            };
             if manifest_only {
                 entries.retain(|m| {
                     m.metadata
@@ -1556,6 +1571,7 @@ fn run() -> std::result::Result<(), String> {
                             .iter()
                             .map(|m| memory_to_json(m, false))
                             .collect::<Vec<_>>(),
+                        "essence": essence.as_deref(),
                     });
                     println!(
                         "{}",
@@ -1591,6 +1607,7 @@ fn run() -> std::result::Result<(), String> {
                             "  metadata = {{\"area\": \"onboarding\", \"topic\": \"manifest\"}}"
                         );
                         println!("that introduces the project, embedder, and conventions.");
+                        print_essence();
                     } else {
                         println!();
                         println!(
@@ -1626,6 +1643,7 @@ fn run() -> std::result::Result<(), String> {
                             println!("### {head}");
                             println!("{}", m.content);
                         }
+                        print_essence();
                         println!();
                         println!("## Quick start");
                         println!(
@@ -2260,10 +2278,7 @@ fn fmt(e: mnemo_engine::MnemoError) -> String {
 /// into its own function because the three subcommands share nothing
 /// with the top-level dispatch beyond passphrase resolution.
 fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
-    use mnemo_engine::{
-        read_transcript, EmbedCmd, EmbedderIdentity, TranscriptFormat, MNEMO_META_LENGTH,
-        MNEMO_META_ROLE, MNEMO_META_SHA256, MNEMO_META_TURN_ID,
-    };
+    use mnemo_engine::{read_transcript, EmbedCmd, EmbedderIdentity, TranscriptFormat};
     use std::io::{Read, Write};
     match cmd {
         ThreadCmd::Ingest {
@@ -2324,50 +2339,14 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-            let records = db.thread_export(&thread).map_err(fmt)?;
-            // Collapse chunked records back into one line per turn
-            // where the turn fit in the 8 KB chunk boundary (single
-            // record → single JSON object). A truncated tool-result
-            // round-trips with `_mnemo.sha256` + `_mnemo.length` in
-            // the output so a consumer can detect the truncation and
-            // recover the original out-of-band.
-            let mut lines: Vec<String> = Vec::with_capacity(records.len());
-            // Group multi-part turns by `_mnemo.turn_id`.
-            use std::collections::BTreeMap;
-            let mut grouped: BTreeMap<String, Vec<&mnemo_engine::Memory>> = BTreeMap::new();
-            for m in &records {
-                let tid = m
-                    .metadata
-                    .get(MNEMO_META_TURN_ID)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                grouped.entry(tid.to_string()).or_default().push(m);
-            }
-            for (tid, parts) in &grouped {
-                let mut combined = String::new();
-                for p in parts {
-                    combined.push_str(&p.content);
-                }
-                let first = parts.first().expect("group has at least one record");
-                let role = first
-                    .metadata
-                    .get(MNEMO_META_ROLE)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let mut obj = serde_json::json!({
-                    "turn_id": tid,
-                    "role": role,
-                    "content": combined,
-                    "timestamp": first.created_at,
-                });
-                if let Some(sha) = first.metadata.get(MNEMO_META_SHA256) {
-                    obj["sha256"] = sha.clone();
-                }
-                if let Some(len) = first.metadata.get(MNEMO_META_LENGTH) {
-                    obj["original_length"] = len.clone();
-                }
-                lines.push(serde_json::to_string(&obj).unwrap_or_else(|_| "{}".into()));
-            }
+            // 12.7d: the shared ingest-shape export (seq order, chunks
+            // joined), so the JSONL matches Python and MCP `thread_export`
+            // and re-ingests cleanly.
+            let turns = db.thread_export_turns(&thread).map_err(fmt)?;
+            let lines: Vec<String> = turns
+                .iter()
+                .map(|t| serde_json::to_string(&t.to_json()).unwrap_or_else(|_| "{}".into()))
+                .collect();
             let body = lines.join("\n") + "\n";
             match output {
                 Some(p) => {
@@ -2377,7 +2356,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                         .map_err(|e| format!("writing {p}: {e}"))?;
                     println!(
                         "exported {} turn(s) from thread '{thread}' to {p}",
-                        grouped.len()
+                        turns.len()
                     );
                 }
                 None => {

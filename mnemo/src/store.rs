@@ -37,16 +37,16 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, status as essence_status, CommitBatch, CommitReport, EssenceOpKind, EssenceScope,
-    EssenceSection, Filter, IngestReport, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope,
-    ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome, CONTINUATION_TIMELINE_ENTRIES,
-    ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS, MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT,
-    MNEMO_META_KEY, MNEMO_META_KIND, MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_THREAD_LINK,
-    MNEMO_META_KIND_TURN, MNEMO_META_LENGTH, MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE,
-    MNEMO_META_SECTION, MNEMO_META_SEQ, MNEMO_META_SHA256, MNEMO_META_STATUS,
-    MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD,
-    MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
-    THREAD_TURN_CHUNK_BYTES,
+    self, status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind,
+    EssenceScope, EssenceSection, ExportedTurn, Filter, IngestReport, KeyScope, Memory,
+    MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome,
+    CONTINUATION_TIMELINE_ENTRIES, ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS,
+    MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
+    MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_THREAD_LINK, MNEMO_META_KIND_TURN, MNEMO_META_LENGTH,
+    MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE, MNEMO_META_SECTION, MNEMO_META_SEQ,
+    MNEMO_META_SHA256, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY,
+    MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
+    THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
 use crate::pager::Pager;
 use crate::result_cache::{
@@ -910,6 +910,42 @@ fn build_id_index(catalog: &[CatalogEntry]) -> HashMap<u128, usize> {
 // ---------------------------------------------------------------------------
 // Phase 12.7a helpers used by `ingest_thread`.
 // ---------------------------------------------------------------------------
+
+/// One incoming turn after chunking or truncation, ready to embed and
+/// write (Phase 12.7a, split out for 12.7d's batch embed).
+struct PendingTurn {
+    turn_id: String,
+    role: String,
+    created_at: i64,
+    parts: Vec<String>,
+    /// Hex sha256 + original length, set only for a truncated
+    /// tool-result turn. Applied to the single chunk the truncation
+    /// yielded.
+    truncation: Option<(String, u64)>,
+}
+
+/// Output of `Mnemo::plan_ingest`: the turns to write, the first free
+/// `_mnemo.seq`, and the counts gathered so far (skips, chunking,
+/// truncation).
+struct IngestPlan {
+    pending: Vec<PendingTurn>,
+    next_seq: u64,
+    report: IngestReport,
+}
+
+impl IngestPlan {
+    /// Every text to embed, in write order (turns, then parts).
+    fn texts(&self) -> Vec<&str> {
+        self.pending
+            .iter()
+            .flat_map(|p| p.parts.iter().map(String::as_str))
+            .collect()
+    }
+
+    fn text_count(&self) -> usize {
+        self.pending.iter().map(|p| p.parts.len()).sum()
+    }
+}
 
 /// Hex-encode a byte slice. Low-dependency alternative to pulling in a
 /// hex crate for the lone call site in `ingest_thread`'s SHA-256
@@ -2287,6 +2323,66 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        let plan = self.plan_ingest(thread_id, turns)?;
+        if plan.pending.is_empty() {
+            return Ok(plan.report);
+        }
+        // Batched embed: one round trip to the embedder for the whole
+        // ingest, whatever the turn count.
+        let vectors = {
+            let embedder = self.embedder.as_ref().ok_or_else(|| {
+                MnemoError::Invalid(
+                    "ingest_thread: no embedder registered on this handle; call set_embedder first"
+                        .into(),
+                )
+            })?;
+            embedder.embed(&plan.texts())?
+        };
+        self.check_vectors("ingest_thread", &vectors, plan.text_count())?;
+        self.apply_ingest(thread_id, plan, vectors, None)
+    }
+
+    /// Check a batch of embedder output before anything is written:
+    /// one vector per input, the file's width, finite and non-zero.
+    fn check_vectors(&self, ctx: &str, vectors: &[Vec<f32>], expected: usize) -> Result<()> {
+        if vectors.len() != expected {
+            return Err(MnemoError::Invalid(format!(
+                "{ctx}: embedder returned {} vectors for {expected} texts",
+                vectors.len()
+            )));
+        }
+        for v in vectors {
+            self.check_vector(ctx, v)?;
+        }
+        Ok(())
+    }
+
+    /// The checks `put` applies to one vector, run up front so a batch
+    /// can't fail half-way through its writes.
+    fn check_vector(&self, ctx: &str, v: &[f32]) -> Result<()> {
+        if v.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: v.len(),
+            });
+        }
+        if embed::is_zero_vector(v) {
+            return Err(MnemoError::Invalid(format!(
+                "{ctx}: all-zero vector refused"
+            )));
+        }
+        if v.iter().any(|x| !x.is_finite()) {
+            return Err(MnemoError::Invalid(format!(
+                "{ctx}: vector contains a non-finite value"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Planning half of [`Mnemo::ingest_thread`]: validate the turns, skip
+    /// the ones already archived, and chunk or truncate the rest. Reads
+    /// only; nothing is written.
+    fn plan_ingest(&mut self, thread_id: &str, turns: &[ThreadTurn]) -> Result<IngestPlan> {
         if thread_id.is_empty() {
             return Err(MnemoError::Invalid(
                 "ingest_thread: 'thread_id' must not be empty".into(),
@@ -2294,7 +2390,11 @@ impl Mnemo {
         }
         let mut report = IngestReport::default();
         if turns.is_empty() {
-            return Ok(report);
+            return Ok(IngestPlan {
+                pending: Vec::new(),
+                next_seq: 0,
+                report,
+            });
         }
 
         // Build the set of turn_ids already in this thread so the
@@ -2305,24 +2405,12 @@ impl Mnemo {
         let existing_turn_ids = self.collect_turn_ids_in_thread(thread_id)?;
         // Also figure out the next `_mnemo.seq` value so a repeat
         // ingest continues the sequence instead of restarting at 0.
-        let mut next_seq = self.max_seq_in_thread(thread_id)?.map_or(0, |n| n + 1);
+        let next_seq = self.max_seq_in_thread(thread_id)?.map_or(0, |n| n + 1);
 
         // Determine each incoming turn's final text pieces (post-
-        // chunking / truncation) before any writes. We embed the
-        // whole batch in a single `embed()` call so the engine side
-        // is one round trip to the embedder regardless of turn count.
-        struct Pending {
-            turn_id: String,
-            role: String,
-            created_at: i64,
-            parts: Vec<String>,
-            /// Hex sha256 + original length, set only for a
-            /// truncated tool-result turn. Applied to the single
-            /// chunk the truncation yielded.
-            truncation: Option<(String, u64)>,
-        }
-        let mut pending: Vec<Pending> = Vec::new();
-        let mut all_parts: Vec<String> = Vec::new();
+        // chunking / truncation) before any writes, so the caller can
+        // embed the whole batch in one `embed()` call.
+        let mut pending: Vec<PendingTurn> = Vec::new();
         let now = memory::now_secs();
         for t in turns {
             if t.turn_id.is_empty() {
@@ -2352,10 +2440,7 @@ impl Mnemo {
                 } else {
                     (vec![t.content.clone()], None)
                 };
-            for p in &parts {
-                all_parts.push(p.clone());
-            }
-            pending.push(Pending {
+            pending.push(PendingTurn {
                 turn_id: t.turn_id.clone(),
                 role: t.role.clone(),
                 created_at: t.timestamp.unwrap_or(now),
@@ -2363,49 +2448,44 @@ impl Mnemo {
                 truncation,
             });
         }
+        Ok(IngestPlan {
+            pending,
+            next_seq,
+            report,
+        })
+    }
 
-        if pending.is_empty() {
-            return Ok(report);
-        }
-
-        // Batched embed — one round trip to the embedder for the
-        // whole ingest.
-        let embedder = self.embedder.as_ref().ok_or_else(|| {
-            MnemoError::Invalid(
-                "ingest_thread: no embedder registered on this handle; call set_embedder first"
-                    .into(),
-            )
-        })?;
-        let as_refs: Vec<&str> = all_parts.iter().map(|s| s.as_str()).collect();
-        let vectors = embedder.embed(&as_refs)?;
-        if vectors.len() != all_parts.len() {
-            return Err(MnemoError::Invalid(format!(
-                "ingest_thread: embedder returned {} vectors for {} parts",
-                vectors.len(),
-                all_parts.len()
-            )));
-        }
-        for v in &vectors {
-            if v.len() != self.dimensions {
-                return Err(MnemoError::DimensionMismatch {
-                    expected: self.dimensions,
-                    got: v.len(),
-                });
-            }
-        }
-
-        // Write records. Order: each pending turn's chunks in part
-        // order; each turn gets a single `_mnemo.seq` slot, so
-        // `_mnemo.part` disambiguates chunks of the same turn.
-        let mut vec_cursor = 0usize;
+    /// Write half of [`Mnemo::ingest_thread`]. `vectors` holds one vector
+    /// per text of `plan.texts()`, already checked. `ttl` stamps every
+    /// new record (the `commit_deltas` `ExpireAfter` policy).
+    fn apply_ingest(
+        &mut self,
+        thread_id: &str,
+        plan: IngestPlan,
+        vectors: Vec<Vec<f32>>,
+        ttl: Option<i64>,
+    ) -> Result<IngestReport> {
+        let IngestPlan {
+            pending,
+            mut next_seq,
+            mut report,
+        } = plan;
+        // Order: each pending turn's chunks in part order; each turn
+        // gets a single `_mnemo.seq` slot, so `_mnemo.part`
+        // disambiguates chunks of the same turn.
+        let mut vectors = vectors.into_iter();
         for p in &pending {
             let this_seq = next_seq;
             next_seq += 1;
             for (part_idx, part_text) in p.parts.iter().enumerate() {
-                let vec = vectors[vec_cursor].clone();
-                vec_cursor += 1;
+                let vec = vectors.next().ok_or_else(|| {
+                    MnemoError::Invalid("ingest_thread: ran out of vectors".into())
+                })?;
                 let mut m =
                     Memory::new(part_text.clone(), MemoryType::Episodic, vec).with_importance(0.5);
+                if let Some(t) = ttl {
+                    m = m.with_ttl(t);
+                }
                 m.created_at = p.created_at;
                 m.accessed_at = p.created_at;
                 m.metadata.insert(
@@ -2541,6 +2621,52 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// Export a thread's archive in the **ingest shape** (Phase 12.7d):
+    /// one [`ExportedTurn`] per source turn, in `_mnemo.seq` order, with
+    /// a chunked turn's parts joined back into one `content`. Passing
+    /// the result back to [`Mnemo::ingest_thread`] for the same thread
+    /// skips every turn; for a new thread it re-creates the same records.
+    /// This is what Python `db.thread_export`, MCP `thread_export` and
+    /// `mnemo thread export` return; [`Mnemo::thread_export`] still
+    /// returns the raw records.
+    pub fn thread_export_turns(&mut self, thread_id: &str) -> Result<Vec<ExportedTurn>> {
+        let records = self.thread_export(thread_id)?;
+        let mut out: Vec<ExportedTurn> = Vec::new();
+        let mut last_seq: Option<u64> = None;
+        for m in records {
+            let meta_str = |k: &str| {
+                m.metadata
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let seq = m.metadata.get(MNEMO_META_SEQ).and_then(|v| v.as_u64());
+            // Records are sorted by (seq, part), so the parts of one turn
+            // are adjacent and share a seq.
+            if seq.is_some() && seq == last_seq {
+                if let Some(prev) = out.last_mut() {
+                    prev.content.push_str(&m.content);
+                    continue;
+                }
+            }
+            last_seq = seq;
+            out.push(ExportedTurn {
+                turn_id: meta_str(MNEMO_META_TURN_ID),
+                role: meta_str(MNEMO_META_ROLE),
+                timestamp: m.created_at,
+                sha256: m
+                    .metadata
+                    .get(MNEMO_META_SHA256)
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                original_length: m.metadata.get(MNEMO_META_LENGTH).and_then(|v| v.as_u64()),
+                content: m.content,
+            });
+        }
+        Ok(out)
+    }
+
     /// Soft-delete every record in the archive layer of `thread_id`.
     /// Returns the number of records marked deleted. Permanent
     /// removal still requires a subsequent `compact_file`, same as
@@ -2601,6 +2727,12 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        Self::check_essence_add(section, text)?;
+        self.essence_add_with(scope, section, text, refs, None)
+    }
+
+    /// Validation shared by [`Mnemo::essence_add`] and `commit_deltas`.
+    fn check_essence_add(section: EssenceSection, text: &str) -> Result<()> {
         if section == EssenceSection::Timeline {
             return Err(MnemoError::Invalid(
                 "essence_add: use essence_append_timeline for the timeline section".into(),
@@ -2619,10 +2751,21 @@ impl Mnemo {
                 text.len()
             )));
         }
+        Ok(())
+    }
+
+    /// Write half of `essence_add`, with an optional precomputed vector.
+    fn essence_add_with(
+        &mut self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: &str,
+        refs: Option<Vec<String>>,
+        vector: Option<Vec<f32>>,
+    ) -> Result<Ulid> {
         let now = memory::now_secs();
-        let mem = self.build_essence_record(scope, section, text, refs, Some(now))?;
-        let id = self.put(mem)?;
-        Ok(id)
+        let mem = self.build_essence_record(scope, section, text, refs, Some(now), vector)?;
+        self.put(mem)
     }
 
     /// Phase 12.7b: append a new timeline entry (append-only
@@ -2638,6 +2781,13 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        Self::check_essence_append(text)?;
+        self.essence_append_with(scope, text, refs, None)
+    }
+
+    /// Validation shared by [`Mnemo::essence_append_timeline`] and
+    /// `commit_deltas`.
+    fn check_essence_append(text: &str) -> Result<()> {
         if text.is_empty() {
             return Err(MnemoError::Invalid(
                 "essence_append_timeline: text must not be empty".into(),
@@ -2650,9 +2800,21 @@ impl Mnemo {
                 text.len()
             )));
         }
-        let mem = self.build_essence_record(scope, EssenceSection::Timeline, text, refs, None)?;
-        let id = self.put(mem)?;
-        Ok(id)
+        Ok(())
+    }
+
+    /// Write half of `essence_append_timeline`, with an optional
+    /// precomputed vector.
+    fn essence_append_with(
+        &mut self,
+        scope: EssenceScope,
+        text: &str,
+        refs: Option<Vec<String>>,
+        vector: Option<Vec<f32>>,
+    ) -> Result<Ulid> {
+        let mem =
+            self.build_essence_record(scope, EssenceSection::Timeline, text, refs, None, vector)?;
+        self.put(mem)
     }
 
     /// Phase 12.7b: update an existing essence section item in place.
@@ -2910,6 +3072,12 @@ impl Mnemo {
 
     // --- essence internal helpers ----------------------------------
 
+    /// Build an essence record. `vector` is a precomputed embedding (the
+    /// 12.7d `commit_deltas` batch path); `None` embeds `text` with the
+    /// registered embedder, or falls back to an axis-neutral unit vector
+    /// when there is none. Essence records are read by `_mnemo.kind` and
+    /// scope, not by similarity, so the fallback costs no retrieval
+    /// quality; it only has to pass `put`'s non-zero guard.
     fn build_essence_record(
         &self,
         scope: EssenceScope,
@@ -2917,88 +3085,55 @@ impl Mnemo {
         text: &str,
         refs: Option<Vec<String>>,
         status_at: Option<i64>,
+        vector: Option<Vec<f32>>,
     ) -> Result<Memory> {
-        if let Some(e) = self.embedder.as_ref() {
-            let mut vs = e.embed(&[text])?;
-            let v = vs.pop().ok_or_else(|| {
+        let v = match (vector, self.embedder.as_ref()) {
+            (Some(v), _) => v,
+            (None, Some(e)) => e.embed(&[text])?.pop().ok_or_else(|| {
                 MnemoError::Invalid("essence: embedder returned no vector".into())
-            })?;
-            let mut m = Memory::new(text.to_string(), MemoryType::Semantic, v).with_importance(0.5);
-            m.metadata.insert(
-                MNEMO_META_KIND.into(),
-                Value::String(MNEMO_META_KIND_ESSENCE.into()),
-            );
-            m.metadata.insert(
-                MNEMO_META_SECTION.into(),
-                Value::String(section.as_str().into()),
-            );
-            if let EssenceScope::Thread(t) = &scope {
-                m.metadata
-                    .insert(MNEMO_META_THREAD.into(), Value::String(t.clone()));
-            }
-            if let Some(r) = refs {
-                m.metadata.insert(
-                    MNEMO_META_REFS.into(),
-                    Value::Array(r.into_iter().map(Value::String).collect()),
-                );
-            }
-            if let Some(at) = status_at {
-                m.metadata.insert(
-                    MNEMO_META_STATUS.into(),
-                    Value::String(essence_status::OPEN.into()),
-                );
-                m.metadata.insert(
-                    MNEMO_META_STATUS_HISTORY.into(),
-                    Value::Array(vec![serde_json::json!({
-                        "status": essence_status::OPEN,
-                        "at": at,
-                    })]),
-                );
-            }
-            Ok(m)
-        } else {
-            // No embedder: use an axis-neutral all-equal vector
-            // scaled to unit magnitude. Essence records are retrieved
-            // by `_mnemo.kind` filter, not by similarity, so the
-            // concrete vector doesn't matter for retrieval; but we
-            // need something non-zero to pass `put`'s guard.
-            let dims = self.dimensions.max(1);
-            let scale = 1.0 / (dims as f32).sqrt();
-            let v = vec![scale; dims];
-            let mut m = Memory::new(text.to_string(), MemoryType::Semantic, v).with_importance(0.5);
-            m.metadata.insert(
-                MNEMO_META_KIND.into(),
-                Value::String(MNEMO_META_KIND_ESSENCE.into()),
-            );
-            m.metadata.insert(
-                MNEMO_META_SECTION.into(),
-                Value::String(section.as_str().into()),
-            );
-            if let EssenceScope::Thread(t) = &scope {
-                m.metadata
-                    .insert(MNEMO_META_THREAD.into(), Value::String(t.clone()));
-            }
-            if let Some(r) = refs {
-                m.metadata.insert(
-                    MNEMO_META_REFS.into(),
-                    Value::Array(r.into_iter().map(Value::String).collect()),
-                );
-            }
-            if let Some(at) = status_at {
-                m.metadata.insert(
-                    MNEMO_META_STATUS.into(),
-                    Value::String(essence_status::OPEN.into()),
-                );
-                m.metadata.insert(
-                    MNEMO_META_STATUS_HISTORY.into(),
-                    Value::Array(vec![serde_json::json!({
-                        "status": essence_status::OPEN,
-                        "at": at,
-                    })]),
-                );
-            }
-            Ok(m)
+            })?,
+            (None, None) => self.sentinel_vector(),
+        };
+        let mut m = Memory::new(text.to_string(), MemoryType::Semantic, v).with_importance(0.5);
+        m.metadata.insert(
+            MNEMO_META_KIND.into(),
+            Value::String(MNEMO_META_KIND_ESSENCE.into()),
+        );
+        m.metadata.insert(
+            MNEMO_META_SECTION.into(),
+            Value::String(section.as_str().into()),
+        );
+        if let EssenceScope::Thread(t) = &scope {
+            m.metadata
+                .insert(MNEMO_META_THREAD.into(), Value::String(t.clone()));
         }
+        if let Some(r) = refs {
+            m.metadata.insert(
+                MNEMO_META_REFS.into(),
+                Value::Array(r.into_iter().map(Value::String).collect()),
+            );
+        }
+        if let Some(at) = status_at {
+            m.metadata.insert(
+                MNEMO_META_STATUS.into(),
+                Value::String(essence_status::OPEN.into()),
+            );
+            m.metadata.insert(
+                MNEMO_META_STATUS_HISTORY.into(),
+                Value::Array(vec![serde_json::json!({
+                    "status": essence_status::OPEN,
+                    "at": at,
+                })]),
+            );
+        }
+        Ok(m)
+    }
+
+    /// Axis-neutral unit vector (every component `1/sqrt(dims)`), used by
+    /// essence records without an embedder and by thread-link markers.
+    fn sentinel_vector(&self) -> Vec<f32> {
+        let dims = self.dimensions.max(1);
+        vec![1.0 / (dims as f32).sqrt(); dims]
     }
 
     fn load_essence_record(&mut self, id: &Ulid) -> Result<Memory> {
@@ -3104,12 +3239,9 @@ impl Mnemo {
             ));
         }
         // Store a tiny marker record so the continuation chain is
-        // queryable from a fresh handle. Vector is the sentinel
-        // all-equal-axis unit spike (same as the scaffold manifest
-        // path) so `put`'s zero-vector guard accepts it.
-        let dims = self.dimensions.max(1);
-        let scale = 1.0 / (dims as f32).sqrt();
-        let v = vec![scale; dims];
+        // queryable from a fresh handle. The sentinel vector passes
+        // `put`'s zero-vector guard; default recall skips link records.
+        let v = self.sentinel_vector();
         let content = format!("thread link: {new_thread_id} continues from {from_thread_id}");
         let mut m = Memory::new(content, MemoryType::Semantic, v).with_importance(0.1);
         m.metadata.insert(
@@ -3273,37 +3405,47 @@ impl Mnemo {
     }
 
     /// Atomic batch write combining 12.1 facts, 12.7b essence ops,
-    /// and 12.7a archive turns in one flush (Phase 12.7c).
+    /// and 12.7a archive turns in one flush (Phase 12.7c; batch
+    /// embedding added in 12.7d).
     ///
-    /// **Validation up front.** Every op in the batch is validated
-    /// before any write runs: missing required fields in an
-    /// [`EssenceOp`], an invalid `thread_id` for turns, a fact
-    /// whose vector has the wrong dimensionality, a timeline entry
-    /// over the 600-byte cap, etc. Any validation error returns
-    /// `Err(MnemoError::Invalid)` and the file is untouched.
+    /// The batch runs in four steps:
     ///
-    /// **One flush.** On success, every sub-write runs in order
-    /// (facts → essence ops → turns per `turn_policy`) and the
-    /// method calls `self.flush()` exactly once on exit. On a
-    /// failure that lands past validation (e.g. an I/O error mid-
-    /// batch), the file reflects whatever had already been written
-    /// — the batch is atomic at the "validation gate" but not
-    /// crash-atomic. Callers that need crash atomicity should use
-    /// snapshots.
-    pub fn commit_deltas(&mut self, mut batch: CommitBatch) -> Result<CommitReport> {
+    /// 1. **Structural checks** on every item: required fields, size
+    ///    caps, empty keys, `thread_id` for turns, and that every
+    ///    `Update` / `Resolve` / `Remove` targets a live essence record
+    ///    the op can apply to.
+    /// 2. **One `Embedder::embed` call** for every text that needs a
+    ///    vector: facts whose `vector` is empty, essence `Add` /
+    ///    `AppendTimeline` texts (when an embedder is registered;
+    ///    without one, essence keeps its sentinel vector), and the
+    ///    archive turns' chunks.
+    /// 3. **Vector checks** (width, non-zero, finite) on supplied and
+    ///    embedded vectors alike.
+    /// 4. **Writes**: facts, then essence ops, then turns per
+    ///    `turn_policy`, then exactly one `flush()`.
+    ///
+    /// A failure in steps 1–3 returns an error with nothing staged. A
+    /// text-only fact, or any turn to archive, with no embedder
+    /// registered is a step-1 error. `put` has no rollback, so an I/O
+    /// error during step 4 can leave the batch's earlier writes staged
+    /// on the handle; steps 1–3 exist so nothing else can fail that
+    /// late.
+    pub fn commit_deltas(&mut self, batch: CommitBatch) -> Result<CommitReport> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
-        // --- Validation gate (no writes yet) ----------------------
-        // Facts: vectors must match the handle's dimensionality.
-        for (i, f) in batch.facts.iter().enumerate() {
-            if f.memory.vector.len() != self.dimensions {
-                return Err(MnemoError::Invalid(format!(
-                    "commit_deltas: facts[{i}] vector has {} dims; this file is {}",
-                    f.memory.vector.len(),
-                    self.dimensions
-                )));
-            }
+        let CommitBatch {
+            mut facts,
+            essence_ops,
+            turns,
+            thread_id,
+            turn_policy,
+        } = batch;
+        let has_embedder = self.embedder.is_some();
+        let in_ctx = |ctx: &str, e: MnemoError| MnemoError::Invalid(format!("{ctx}: {e}"));
+
+        // --- 1. Structural checks (reads only) ----------------------
+        for (i, f) in facts.iter().enumerate() {
             if let Some(k) = &f.key {
                 if k.is_empty() {
                     return Err(MnemoError::Invalid(format!(
@@ -3311,92 +3453,182 @@ impl Mnemo {
                     )));
                 }
             }
+            if f.memory.vector.is_empty() {
+                if f.memory.content.is_empty() {
+                    return Err(MnemoError::Invalid(format!(
+                        "commit_deltas: facts[{i}] has neither a vector nor content to embed"
+                    )));
+                }
+                if !has_embedder {
+                    return Err(MnemoError::Invalid(format!(
+                        "commit_deltas: facts[{i}] has no vector and no embedder is registered \
+                         on this handle; pass a vector or call set_embedder first"
+                    )));
+                }
+            }
         }
-        // Essence ops: per-kind field presence + text size caps.
-        for (i, op) in batch.essence_ops.iter().enumerate() {
+        let mut removed_in_batch: std::collections::HashSet<u128> =
+            std::collections::HashSet::new();
+        for (i, op) in essence_ops.iter().enumerate() {
+            let ctx = format!("commit_deltas: essence_ops[{i}]");
             match op.kind {
                 EssenceOpKind::Add => {
                     if op.scope.is_none() {
-                        return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Add missing 'scope'"
-                        )));
+                        return Err(MnemoError::Invalid(format!("{ctx} Add missing 'scope'")));
                     }
                     let section = op.section.ok_or_else(|| {
-                        MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Add missing 'section'"
-                        ))
+                        MnemoError::Invalid(format!("{ctx} Add missing 'section'"))
                     })?;
-                    if section == EssenceSection::Timeline {
-                        return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Add on Timeline; use AppendTimeline"
-                        )));
-                    }
-                    let text = op.text.as_deref().ok_or_else(|| {
-                        MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Add missing 'text'"
-                        ))
-                    })?;
-                    if text.is_empty() || text.len() > section.item_max_bytes() {
-                        return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Add text length invalid (0 or > {})",
-                            section.item_max_bytes()
-                        )));
-                    }
+                    let text = op
+                        .text
+                        .as_deref()
+                        .ok_or_else(|| MnemoError::Invalid(format!("{ctx} Add missing 'text'")))?;
+                    Self::check_essence_add(section, text).map_err(|e| in_ctx(&ctx, e))?;
                 }
                 EssenceOpKind::AppendTimeline => {
                     if op.scope.is_none() {
                         return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] AppendTimeline missing 'scope'"
+                            "{ctx} AppendTimeline missing 'scope'"
                         )));
                     }
                     let text = op.text.as_deref().ok_or_else(|| {
-                        MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] AppendTimeline missing 'text'"
-                        ))
+                        MnemoError::Invalid(format!("{ctx} AppendTimeline missing 'text'"))
                     })?;
-                    if text.is_empty() || text.len() > EssenceSection::Timeline.item_max_bytes() {
+                    Self::check_essence_append(text).map_err(|e| in_ctx(&ctx, e))?;
+                }
+                EssenceOpKind::Update | EssenceOpKind::Resolve | EssenceOpKind::Remove => {
+                    let id = op
+                        .id
+                        .ok_or_else(|| MnemoError::Invalid(format!("{ctx} needs 'id'")))?;
+                    if removed_in_batch.contains(&id.0) {
                         return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] AppendTimeline text length invalid (0 or > {})",
-                            EssenceSection::Timeline.item_max_bytes()
+                            "{ctx}: record {id} is removed earlier in this batch"
                         )));
                     }
-                }
-                EssenceOpKind::Update => {
-                    if op.id.is_none() || op.text.is_none() {
-                        return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] Update needs 'id' and 'text'"
-                        )));
-                    }
-                }
-                EssenceOpKind::Resolve | EssenceOpKind::Remove => {
-                    if op.id.is_none() {
-                        return Err(MnemoError::Invalid(format!(
-                            "commit_deltas: essence_ops[{i}] needs 'id'"
-                        )));
+                    let existing = self.load_essence_record(&id).map_err(|e| in_ctx(&ctx, e))?;
+                    let section = self.section_of(&existing).map_err(|e| in_ctx(&ctx, e))?;
+                    match op.kind {
+                        EssenceOpKind::Update => {
+                            let text = op.text.as_deref().ok_or_else(|| {
+                                MnemoError::Invalid(format!("{ctx} Update needs 'text'"))
+                            })?;
+                            if section == EssenceSection::Timeline {
+                                return Err(MnemoError::Invalid(format!(
+                                    "{ctx}: timeline entries are append-only"
+                                )));
+                            }
+                            if text.is_empty() || text.len() > section.item_max_bytes() {
+                                return Err(MnemoError::Invalid(format!(
+                                    "{ctx}: '{}' items must be 1..={} bytes; got {}",
+                                    section.as_str(),
+                                    section.item_max_bytes(),
+                                    text.len()
+                                )));
+                            }
+                        }
+                        EssenceOpKind::Resolve => {
+                            if !section.has_status_lifecycle() {
+                                return Err(MnemoError::Invalid(format!(
+                                    "{ctx}: '{}' section has no status lifecycle",
+                                    section.as_str()
+                                )));
+                            }
+                        }
+                        _ => {
+                            removed_in_batch.insert(id.0);
+                        }
                     }
                 }
             }
         }
-        // Turns: thread_id required when non-empty.
-        if !batch.turns.is_empty() && batch.thread_id.is_none() {
+        if !turns.is_empty() && thread_id.is_none() {
             return Err(MnemoError::Invalid(
                 "commit_deltas: 'turns' non-empty but 'thread_id' missing".into(),
             ));
         }
+        let archive_turns = !turns.is_empty() && !matches!(turn_policy, TurnPolicy::Drop);
+        if archive_turns && !has_embedder {
+            return Err(MnemoError::Invalid(
+                "commit_deltas: archiving 'turns' needs an embedder registered on this handle; \
+                 call set_embedder first or use turn_policy Drop"
+                    .into(),
+            ));
+        }
+        let plan = match (&thread_id, archive_turns) {
+            (Some(t), true) => Some(self.plan_ingest(t, &turns)?),
+            _ => None,
+        };
 
-        // --- Apply, in planner-specified order --------------------
+        // --- 2. One batched embed -----------------------------------
+        let embeds_essence = |op: &EssenceOp| {
+            has_embedder && matches!(op.kind, EssenceOpKind::Add | EssenceOpKind::AppendTimeline)
+        };
+        let (vectors, n_texts) = {
+            let mut texts: Vec<&str> = Vec::new();
+            for f in &facts {
+                if f.memory.vector.is_empty() {
+                    texts.push(f.memory.content.as_str());
+                }
+            }
+            for op in essence_ops.iter().filter(|op| embeds_essence(op)) {
+                texts.push(op.text.as_deref().expect("checked in step 1"));
+            }
+            if let Some(p) = &plan {
+                texts.extend(p.texts());
+            }
+            let vectors = match (texts.is_empty(), self.embedder.as_ref()) {
+                (true, _) => Vec::new(),
+                (false, Some(e)) => e.embed(&texts)?,
+                (false, None) => unreachable!("texts need an embedder; checked in step 1"),
+            };
+            (vectors, texts.len())
+        };
+
+        // --- 3. Vector checks ---------------------------------------
+        self.check_vectors("commit_deltas", &vectors, n_texts)?;
+        for (i, f) in facts.iter().enumerate() {
+            let v = &f.memory.vector;
+            if v.is_empty() {
+                continue;
+            }
+            if v.len() != self.dimensions {
+                return Err(MnemoError::Invalid(format!(
+                    "commit_deltas: facts[{i}] vector has {} dims; this file is {}",
+                    v.len(),
+                    self.dimensions
+                )));
+            }
+            let ctx = format!("commit_deltas: facts[{i}]");
+            self.check_vector(&ctx, v)?;
+        }
+
+        // Hand the embedded vectors back out, in the order they were
+        // requested: facts, then essence ops, then turn chunks.
+        let mut vectors = vectors.into_iter();
+        for f in facts.iter_mut() {
+            if f.memory.vector.is_empty() {
+                f.memory.vector = vectors.next().expect("one vector per text");
+            }
+        }
+        let essence_vectors: Vec<Option<Vec<f32>>> = essence_ops
+            .iter()
+            .map(|op| embeds_essence(op).then(|| vectors.next().expect("one vector per text")))
+            .collect();
+        let turn_vectors: Vec<Vec<f32>> = vectors.collect();
+
+        // --- 4. Writes ----------------------------------------------
         let mut report = CommitReport::default();
 
-        // 1) facts
-        for f in batch.facts.drain(..) {
+        for f in facts {
             match f.key {
                 Some(k) => {
                     let (_id, outcome) = self.remember_keyed(f.memory, &k)?;
                     match outcome {
                         WriteOutcome::Added => report.facts_added += 1,
-                        WriteOutcome::Superseded => report.facts_superseded += 1,
+                        WriteOutcome::Superseded | WriteOutcome::Updated => {
+                            report.facts_superseded += 1
+                        }
                         WriteOutcome::Unchanged => report.facts_unchanged += 1,
-                        WriteOutcome::Updated => report.facts_superseded += 1,
                     }
                 }
                 None => {
@@ -3406,110 +3638,56 @@ impl Mnemo {
             }
         }
 
-        // 2) essence ops
-        for op in batch.essence_ops.drain(..) {
-            match op.kind {
+        for (op, vector) in essence_ops.into_iter().zip(essence_vectors) {
+            let outcome = match op.kind {
                 EssenceOpKind::Add => {
-                    self.essence_add(
-                        op.scope.expect("validated"),
-                        op.section.expect("validated"),
-                        op.text.as_deref().expect("validated"),
+                    self.essence_add_with(
+                        op.scope.expect("checked in step 1"),
+                        op.section.expect("checked in step 1"),
+                        op.text.as_deref().expect("checked in step 1"),
                         op.refs,
+                        vector,
                     )?;
-                    report.essence_ops_applied += 1;
+                    WriteOutcome::Added
                 }
                 EssenceOpKind::AppendTimeline => {
-                    self.essence_append_timeline(
-                        op.scope.expect("validated"),
-                        op.text.as_deref().expect("validated"),
+                    self.essence_append_with(
+                        op.scope.expect("checked in step 1"),
+                        op.text.as_deref().expect("checked in step 1"),
                         op.refs,
+                        vector,
                     )?;
-                    report.essence_ops_applied += 1;
+                    WriteOutcome::Added
                 }
-                EssenceOpKind::Update => {
-                    let outcome = self.essence_update(
-                        op.id.as_ref().expect("validated"),
-                        op.text.as_deref().expect("validated"),
-                        op.refs,
-                    )?;
-                    match outcome {
-                        WriteOutcome::Updated | WriteOutcome::Added | WriteOutcome::Superseded => {
-                            report.essence_ops_applied += 1
-                        }
-                        WriteOutcome::Unchanged => report.essence_ops_unchanged += 1,
-                    }
-                }
+                EssenceOpKind::Update => self.essence_update(
+                    op.id.as_ref().expect("checked in step 1"),
+                    op.text.as_deref().expect("checked in step 1"),
+                    op.refs,
+                )?,
                 EssenceOpKind::Resolve => {
-                    let outcome = self.essence_resolve(op.id.as_ref().expect("validated"))?;
-                    match outcome {
-                        WriteOutcome::Updated | WriteOutcome::Added | WriteOutcome::Superseded => {
-                            report.essence_ops_applied += 1
-                        }
-                        WriteOutcome::Unchanged => report.essence_ops_unchanged += 1,
-                    }
+                    self.essence_resolve(op.id.as_ref().expect("checked in step 1"))?
                 }
                 EssenceOpKind::Remove => {
-                    self.essence_remove(op.id.as_ref().expect("validated"))?;
-                    report.essence_ops_applied += 1;
+                    self.essence_remove(op.id.as_ref().expect("checked in step 1"))?;
+                    WriteOutcome::Updated
                 }
+            };
+            match outcome {
+                WriteOutcome::Unchanged => report.essence_ops_unchanged += 1,
+                _ => report.essence_ops_applied += 1,
             }
         }
 
-        // 3) turns per turn_policy
-        match batch.turn_policy {
-            TurnPolicy::Archive => {
-                if !batch.turns.is_empty() {
-                    let thread_id = batch.thread_id.as_deref().expect("validated above");
-                    let r = self.ingest_thread(thread_id, &batch.turns)?;
-                    report.turns_added += r.added_records;
-                    report.turns_skipped += r.skipped_existing_turns;
-                    report.turns_truncated += r.truncated_turns;
-                    report.turns_chunked += r.chunked_turns;
-                }
-            }
-            TurnPolicy::ExpireAfter(ttl) => {
-                if !batch.turns.is_empty() {
-                    let thread_id = batch.thread_id.as_deref().expect("validated above");
-                    // Reuse ingest, then apply TTL via `update` on
-                    // the newly-written records. Simpler than a
-                    // dedicated path — the TTL is advisory anyway
-                    // (compact + is_expired do the work).
-                    let r = self.ingest_thread(thread_id, &batch.turns)?;
-                    report.turns_added += r.added_records;
-                    report.turns_skipped += r.skipped_existing_turns;
-                    report.turns_truncated += r.truncated_turns;
-                    report.turns_chunked += r.chunked_turns;
-                    // Walk the just-ingested records and stamp TTL.
-                    // We can identify them by `(thread, seq >=
-                    // next_seq_before)`; simplest: pull the whole
-                    // thread, and for turns whose turn_id is in the
-                    // input set but wasn't already there (handled
-                    // by ingest_thread's idempotence check), set TTL.
-                    let want_ids: std::collections::HashSet<String> =
-                        batch.turns.iter().map(|t| t.turn_id.clone()).collect();
-                    let records = self.thread_export(thread_id)?;
-                    for rec in records {
-                        if let Some(tid) = rec
-                            .metadata
-                            .get(MNEMO_META_TURN_ID)
-                            .and_then(|v| v.as_str())
-                        {
-                            if want_ids.contains(tid) && rec.ttl_secs.is_none() {
-                                let _ = self.update(
-                                    &rec.id,
-                                    MemoryPatch {
-                                        ttl_secs: Some(Some(ttl)),
-                                        ..Default::default()
-                                    },
-                                )?;
-                            }
-                        }
-                    }
-                }
-            }
-            TurnPolicy::Drop => {
-                // No-op: nothing goes to the archive.
-            }
+        if let (Some(plan), Some(t)) = (plan, thread_id.as_deref()) {
+            let ttl = match turn_policy {
+                TurnPolicy::ExpireAfter(secs) => Some(secs),
+                _ => None,
+            };
+            let r = self.apply_ingest(t, plan, turn_vectors, ttl)?;
+            report.turns_added += r.added_records;
+            report.turns_skipped += r.skipped_existing_turns;
+            report.turns_truncated += r.truncated_turns;
+            report.turns_chunked += r.chunked_turns;
         }
 
         self.flush()?;
@@ -3568,6 +3746,37 @@ impl Mnemo {
                 .then_with(|| a.created_at.cmp(&b.created_at))
         });
         Ok(out)
+    }
+
+    /// The project essence for the `about` briefing (Phase 12.7d): the
+    /// [`EssenceScope::Project`] render at the default budget
+    /// ([`ESSENCE_DEFAULT_RENDER_BYTES`]), or `None` when the file has no
+    /// open project-scope item or timeline entry. The CLI and MCP `about`
+    /// append it after the manifest and onboarding memories; [`Mnemo::about`]
+    /// itself keeps returning records.
+    pub fn about_essence(&mut self) -> Result<Option<String>> {
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut any = false;
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            let is_project_essence = m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                == Some(MNEMO_META_KIND_ESSENCE)
+                && !m.metadata.contains_key(MNEMO_META_THREAD);
+            if is_project_essence && status_of(&m) != Some(essence_status::RESOLVED) {
+                any = true;
+                break;
+            }
+        }
+        if !any {
+            return Ok(None);
+        }
+        self.essence(EssenceScope::Project, ESSENCE_DEFAULT_RENDER_BYTES)
+            .map(Some)
     }
 
     // --- retrieval --------------------------------------------------------

@@ -489,7 +489,9 @@ pub enum EssenceScope {
     /// thread's render only.
     Thread(String),
     /// Shared across every thread in the file. Shows up in every
-    /// thread's render, and in the `about()` append.
+    /// thread's render, and in the `about` briefing: the CLI and MCP
+    /// `about` append the project render after the manifest, from
+    /// `Mnemo::about_essence()` (12.7d).
     Project,
 }
 
@@ -616,7 +618,9 @@ pub struct EssenceOp {
 /// One keyed fact inside a [`CommitBatch`] (Phase 12.7c).
 #[derive(Debug, Clone)]
 pub struct KeyedMemory {
-    /// The memory to store.
+    /// The memory to store. An **empty `vector`** means "embed
+    /// `content` with the registered embedder" (12.7d): every such fact
+    /// in a batch is embedded together in one `Embedder::embed` call.
     pub memory: Memory,
     /// Optional 12.1 upsert key.
     pub key: Option<String>,
@@ -733,6 +737,55 @@ pub struct ThreadTurn {
     /// that carry a per-turn timestamp should pass it through so a
     /// future `thread export --by-time` can honour it.
     pub timestamp: Option<i64>,
+}
+
+/// One turn of a thread's archive in the **ingest shape** (Phase 12.7d),
+/// as returned by [`crate::Mnemo::thread_export_turns`] and by Python
+/// `db.thread_export`, MCP `thread_export` and `mnemo thread export`.
+///
+/// Turns come back in `_mnemo.seq` order, one entry per source turn: the
+/// 8 KB chunks of a long turn are joined back into one `content`, so
+/// feeding the list to `ingest_thread` (same thread: every turn is
+/// skipped; a new thread: the turns are re-chunked identically) round
+/// trips. A tool result that was truncated at 16 KB carries `sha256` and
+/// `original_length` of the original content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportedTurn {
+    /// Source `turn_id` (`_mnemo.turn_id`).
+    pub turn_id: String,
+    /// Author role (`_mnemo.role`).
+    pub role: String,
+    /// Stored text, with chunks joined in `_mnemo.part` order.
+    pub content: String,
+    /// The turn's timestamp (unix seconds; the record's `created_at`).
+    pub timestamp: i64,
+    /// Hex SHA-256 of the original content, set only for a truncated
+    /// tool result.
+    pub sha256: Option<String>,
+    /// Byte length of the original content, set only for a truncated
+    /// tool result.
+    pub original_length: Option<u64>,
+}
+
+impl ExportedTurn {
+    /// The JSON object shared by the MCP tool and the CLI JSONL export:
+    /// `{turn_id, role, content, timestamp}` plus `sha256` and
+    /// `original_length` when the turn was truncated.
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut obj = serde_json::json!({
+            "turn_id": self.turn_id,
+            "role": self.role,
+            "content": self.content,
+            "timestamp": self.timestamp,
+        });
+        if let Some(sha) = &self.sha256 {
+            obj["sha256"] = serde_json::Value::String(sha.clone());
+        }
+        if let Some(len) = self.original_length {
+            obj["original_length"] = serde_json::Value::Number(len.into());
+        }
+        obj
+    }
 }
 
 /// Result of one [`crate::Mnemo::ingest_thread`] call (Phase 12.7a).
