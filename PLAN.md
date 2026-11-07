@@ -7117,3 +7117,98 @@ ordinary memories, so upgrade every tool that reads the file."
 
 **Next after v0.8.1: 12.7 (threads and essence) waits for the user's
 sign-off on its design.** Don't start it.
+
+### 2026-11-07 — WORKER — READY — v0.8.1 code + bench numbers in; holding before tag for lane A README refresh
+**Code is on `origin/main`, CI green on each push.** Five commits
+since the v0.8.0 VERIFIED entry:
+
+| hash | subject |
+|---|---|
+| `29a9ec4` | `fix(history): default slot matches keyed remember (12.1.1); add KeyScope + history_in + shared opt-in; add 10k/100k open benches` |
+| `3d6485d` | `chore(release): v0.8.1 — bump manifests and Cargo.lock; cut CHANGELOG` |
+| `15406fa` | `docs: v0.7 shows superseded versions as ordinary memories — upgrade readers` (the one-sentence HANDOFF from the v0.8.0 REVIEW, landing with v0.8.1) |
+| `6f60be6` | `chore(plan): sync coordination files` |
+| `32c86a6` | `style: cargo fmt integration.rs (CI Windows runner caught a diff)` |
+
+CI on `32c86a6`: ✓ green —
+<https://github.com/toarchkumar/mnemo/actions/runs/42353859255>
+
+**Lane-A asks — status:**
+
+1. **`history` default slot bugfix** — done in `29a9ec4`. `KeyScope::
+   {Private(String), Shared}` + `KeyScope::private_default()` +
+   `Mnemo::history_in(key, scope)`. `Mnemo::history(key, agent_id)`
+   now routes `None` → `KeyScope::private_default()` so the obvious
+   call matches keyed `remember`'s default slot. `shared=True`
+   (Python), `--shared` (CLI, mutually exclusive with `--agent`),
+   and `shared` (MCP, mutually exclusive with `agent`) opt into
+   the shared slot. New tests across every surface:
+   - Rust: `history_default_slot_matches_remember_default_slot`,
+     `history_in_shared_and_private_are_separate_chains` (updated
+     the pre-existing 12.1
+     `history_walks_the_supersession_chain_newest_first` to
+     explicitly use `history_in(_, KeyScope::Shared)` since it
+     writes shared-scope records).
+   - CLI: `cli_history_defaults_to_private_slot_after_keyed_remember`,
+     `cli_history_rejects_agent_with_shared`.
+   - Python: `test_history_default_slot_matches_remember_default_slot`
+     (covers the private default, the shared slot, a named-agent
+     slot, and the `shared=True` + `agent_id=...` conflict).
+2. **Remeasured bench cells** — done in `29a9ec4`. Added
+   `bench_open_latency_indexed_10k` and
+   `bench_open_latency_indexed_100k` in `mnemo/benches/open.rs`;
+   the v0.8.0 `bench_first_recall_fresh_handle_100k` is unchanged.
+3. **Release + compat-sentence docs** — `3d6485d` + `15406fa`.
+   Manifests `0.8.0 → 0.8.1` across `mnemo/Cargo.toml`,
+   `mnemo/bindings/node/Cargo.toml`, `mnemo-python/Cargo.toml`,
+   `mnemo-python/pyproject.toml`; both `Cargo.lock`s refreshed.
+   `CHANGELOG.md` cut a new `[0.8.1] — 2026-11-06` section with the
+   fix + benches.
+
+**Bench numbers (M1 Pro, release build, fast KDF, cached corpora):**
+
+| cell | median | 95% range |
+|---|---|---|
+| `open_latency_indexed_10k` | **33.5 ms** | 33.3 – 33.8 ms |
+| `open_latency_indexed_100k` | **232 ms** | 229 – 237 ms |
+
+For context, the existing cells on the same machine are:
+- `open_latency_fast_kdf` (100 memories, no index) ≈ KDF + header
+  only. Published number was "~15 ms" in the README.
+- `open_latency_secure_kdf` ≈ secure Argon2id cost.
+- `bench_first_recall_fresh_handle_100k` (v0.8.0): bounded by the
+  ANN shortlist + per-hit decrypt (no key-cache scan after the
+  v0.8.0 fix).
+
+The 100K number matches what PLANNER-A measured in her sandbox
+("about 115 ms" at 20K; 232 ms at 100K is the same slope, same
+"loading the catalog + index dominates" mechanism). No regression
+vs v0.7 — the number was never on the README accurately.
+
+**README refresh asked for (lane A HANDOFF):** replace the "open
+~15 ms" line with one that distinguishes the KDF cost from the
+catalog-+-index load, roughly:
+
+> * **KDF only (fresh file, 100 memories):** ~15 ms (fast KDF).
+> * **Open an indexed file:** 34 ms at 10K memories, 232 ms at 100K
+>   (M1 Pro, release build, fast KDF; catalog + ANN index load
+>   dominates). A follow-up (Phase 11.1) will land lazy index load
+>   to drop the latter.
+
+Phrasing is yours to pick. The Phase-11.1 pointer is the one already
+in the REVIEW entry.
+
+**Order from here (lane-A DISPATCH):**
+
+1. Lane A edits `README.md` with the two open-latency numbers above.
+2. I commit as `docs(v0.8.1): refresh open-latency numbers from
+   remeasured benches` on its own.
+3. Coordination-file sync for this READY entry + any Planner-A edits
+   in PLAN.md / reviewer_notes.md.
+4. Push. Wait for CI green.
+5. Tag `v0.8.1` and push the tag → `release.yml` publishes to PyPI
+   + crates.io.
+6. Log DONE with hashes + CI run + release run + PyPI / crates.io
+   URLs.
+
+Standing by for the README edit.
