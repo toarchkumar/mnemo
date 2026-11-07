@@ -264,6 +264,73 @@ pub const MNEMO_META_INVALID_AT: &str = "_mnemo.invalid_at";
 /// that has been edited in place. Not interpreted by the scorer.
 pub const MNEMO_META_UPDATED_AT: &str = "_mnemo.updated_at";
 
+// ---------------------------------------------------------------------------
+// Phase 12.7a: thread archive (ingest / export / forget). Reserved
+// `_mnemo.*` keys that identify thread-turn records. All records with
+// `_mnemo.kind = "turn"` are:
+//   * excluded from default recall (opt in with a 12.6
+//     `_mnemo.kind = "turn"` filter or the `--thread` CLI flag),
+//   * written by `Mnemo::ingest_thread` + the `mnemo thread ingest`
+//     CLI from a transcript file in either a generic JSONL shape or
+//     Claude Code's JSONL (`~/.claude/projects/<p>/<s>.jsonl`),
+//   * grouped by `_mnemo.thread = <id>` for `thread export` /
+//     `thread forget` and the 12.7b essence render.
+// ---------------------------------------------------------------------------
+
+/// Record kind for thread-archive turns (Phase 12.7a). Value: `"turn"`.
+pub const MNEMO_META_KIND: &str = "_mnemo.kind";
+
+/// Thread identifier the record belongs to (Phase 12.7a). Value: a
+/// caller-supplied string, typically the Claude Code session uuid or
+/// the planner-chosen thread slug.
+pub const MNEMO_META_THREAD: &str = "_mnemo.thread";
+
+/// Monotonically increasing sequence number within the thread
+/// (Phase 12.7a). Value: unsigned integer, 0-based. Lets
+/// `thread export` reconstruct the transcript in order.
+pub const MNEMO_META_SEQ: &str = "_mnemo.seq";
+
+/// Role of the turn's author (Phase 12.7a). Value: `"user"`,
+/// `"assistant"`, `"system"`, `"tool"`, or any other string the
+/// source transcript used.
+pub const MNEMO_META_ROLE: &str = "_mnemo.role";
+
+/// Opaque per-turn identifier from the source transcript
+/// (Phase 12.7a). Value: typically a uuid4. Used for idempotence —
+/// `ingest_thread` skips any turn whose `turn_id` already exists on a
+/// record in the target thread.
+pub const MNEMO_META_TURN_ID: &str = "_mnemo.turn_id";
+
+/// Zero-based part number for a turn that was chunked at the 8 KB
+/// boundary during ingest (Phase 12.7a). Absent → the turn fits in a
+/// single record.
+pub const MNEMO_META_PART: &str = "_mnemo.part";
+
+/// Hex-encoded SHA-256 of the original tool-result content
+/// (Phase 12.7a). Set when the content exceeded the 16 KB truncation
+/// cap during ingest; absent otherwise.
+pub const MNEMO_META_SHA256: &str = "_mnemo.sha256";
+
+/// Byte length of the original tool-result content (Phase 12.7a). Set
+/// alongside `_mnemo.sha256` when truncation happened; absent
+/// otherwise.
+pub const MNEMO_META_LENGTH: &str = "_mnemo.length";
+
+/// Marker value for `_mnemo.kind` on thread-turn records.
+pub const MNEMO_META_KIND_TURN: &str = "turn";
+
+/// Maximum content size for a single turn record before chunking kicks
+/// in (Phase 12.7a). 8 KB per chunk keeps each record small enough
+/// that the per-record page cost dominates — and so that a thread of
+/// mostly short messages ingests as one record each.
+pub const THREAD_TURN_CHUNK_BYTES: usize = 8 * 1024;
+
+/// Maximum content size for a tool-result turn before truncation
+/// (Phase 12.7a). Tool results frequently run tens of kilobytes;
+/// stored truncated with `_mnemo.sha256` + `_mnemo.length` so the
+/// original can be recovered (or verified) out-of-band.
+pub const THREAD_TOOL_RESULT_TRUNCATE_BYTES: usize = 16 * 1024;
+
 /// Patch body for [`crate::Mnemo::update`] (Phase 12.1): every field is
 /// optional, and only the `Some(...)` fields overwrite the corresponding
 /// field on the target memory. All fields can be set independently.
@@ -300,6 +367,58 @@ pub struct MemoryPatch {
     /// Change the TTL. Outer `None` → leave unchanged; `Some(Some(s))` →
     /// set TTL to `s`; `Some(None)` → clear any existing TTL.
     pub ttl_secs: Option<Option<i64>>,
+}
+
+/// One turn fed into [`crate::Mnemo::ingest_thread`] (Phase 12.7a).
+///
+/// The caller supplies `turn_id` (opaque, for idempotence), `role`
+/// (the transcript's author tag; no interpretation), and `content`
+/// (UTF-8 text; chunked at 8 KB, or truncated at 16 KB when `role ==
+/// "tool"`). The ingest path assigns `_mnemo.seq` monotonically within
+/// the destination thread and embeds through the registered embedder.
+///
+/// Tool messages whose content exceeds [`THREAD_TOOL_RESULT_TRUNCATE_BYTES`]
+/// are stored truncated. Other roles over [`THREAD_TURN_CHUNK_BYTES`]
+/// are chunked.
+#[derive(Debug, Clone)]
+pub struct ThreadTurn {
+    /// Opaque per-turn id from the source transcript (e.g. a Claude
+    /// Code message uuid). Used for `ingest_thread`'s idempotence
+    /// check: a turn whose `turn_id` already exists in the target
+    /// thread is skipped.
+    pub turn_id: String,
+    /// Author role verbatim from the transcript (`"user"`,
+    /// `"assistant"`, `"system"`, `"tool"`, …). `"tool"` triggers
+    /// the 16 KB truncation branch; all other roles go through the
+    /// 8 KB chunking branch.
+    pub role: String,
+    /// UTF-8 message content.
+    pub content: String,
+    /// Optional caller-supplied creation timestamp (unix seconds).
+    /// If `None`, the ingest path uses `now_secs()` so the record's
+    /// `created_at` still sorts the thread in order. Transcripts
+    /// that carry a per-turn timestamp should pass it through so a
+    /// future `thread export --by-time` can honour it.
+    pub timestamp: Option<i64>,
+}
+
+/// Result of one [`crate::Mnemo::ingest_thread`] call (Phase 12.7a).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IngestReport {
+    /// Number of **new** records written (turn chunks after chunking
+    /// / truncation). A long turn counts as however many chunks it
+    /// produced.
+    pub added_records: usize,
+    /// Number of **source turns** that already had a record in the
+    /// target thread and were skipped by the idempotence check.
+    pub skipped_existing_turns: usize,
+    /// Number of turns whose content was truncated at the 16 KB cap.
+    /// Only `role == "tool"` turns can trigger this branch.
+    pub truncated_turns: usize,
+    /// Number of turns that were split into multiple chunks at the
+    /// 8 KB boundary. A truncated turn counts as 0 here even if its
+    /// pre-truncation content would have chunked.
+    pub chunked_turns: usize,
 }
 
 /// Scope selector for a keyed slot (Phase 12.1.1). A keyed
@@ -469,6 +588,25 @@ impl Filter {
     /// check entirely.
     pub fn is_empty(&self) -> bool {
         self.session_id.is_none() && self.terms.is_empty()
+    }
+
+    /// Phase 12.7a: `true` iff the filter mentions any reserved
+    /// `_mnemo.*` metadata key. Used by `recall` to decide whether
+    /// to default-exclude thread-archive turns
+    /// (`_mnemo.kind = "turn"`). A caller that wants turns in the
+    /// result opts in by adding any `_mnemo.*` term to the filter
+    /// — equality, `$in`, `$exists`, or range — because those are the
+    /// only queries that can usefully target turn records.
+    pub fn mentions_mnemo_meta(&self) -> bool {
+        self.terms.iter().any(|term| {
+            let key = match term {
+                FilterTerm::Exists(k) => k,
+                FilterTerm::Eq(k, _) => k,
+                FilterTerm::In(k, _) => k,
+                FilterTerm::Range { key, .. } => key,
+            };
+            key.starts_with(MNEMO_META_NS)
+        })
     }
 
     /// Evaluate the filter against one memory. Returns `true` if the

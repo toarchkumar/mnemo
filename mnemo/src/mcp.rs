@@ -358,6 +358,20 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "thread_ingest",
+                "description": "Phase 12.7a: ingest a transcript file into a thread's archive layer. Idempotent per `turn_id` — re-running on a longer transcript appends only the new turns. Requires an embedder on the server (`--embed-cmd` at serve start) because every turn is embedded. Returns `{added_records, skipped_existing_turns, chunked_turns, truncated_turns}`.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["thread", "transcript_path"],
+                    "properties": {
+                        "thread": { "type": "string", "description": "Thread id to append under." },
+                        "transcript_path": { "type": "string", "description": "Local path to the transcript file." },
+                        "format": { "type": "string", "enum": ["jsonl", "claude-code-jsonl"], "default": "jsonl" }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
                 "name": "history",
                 "description": "Walk the full chain for a keyed slot (Phase 12.1), newest first. Entry 0 is the live record (or empty if the slot is empty); subsequent entries are the superseded history. Slot resolution matches keyed `remember`: with no `agent` and `shared=false`, walks the default agent's private slot (v0.8.1 bugfix — pre-v0.8.1 this walked the shared slot by accident and returned empty for the common case). Pass `shared: true` for the shared slot; `agent` + `shared=true` is rejected.",
                 "inputSchema": {
@@ -534,6 +548,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "remember" => tool_remember(db, args)?,
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
+        "thread_ingest" => tool_thread_ingest(db, args)?,
         "recall" => tool_recall(db, args)?,
         "forget" => tool_forget(db, args)?,
         "list" => tool_list(db, args)?,
@@ -779,6 +794,45 @@ fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         WriteOutcome::Superseded => "updated",
     };
     Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+}
+
+fn tool_thread_ingest(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let thread = args
+        .get("thread")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "thread_ingest: missing 'thread'"))?;
+    let path = args
+        .get("transcript_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "thread_ingest: missing 'transcript_path'"))?;
+    let format_str = args
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("jsonl");
+    let format = crate::TranscriptFormat::parse(format_str).ok_or_else(|| {
+        RpcError::new(
+            INVALID_PARAMS,
+            format!(
+                "thread_ingest: unknown format '{format_str}' (want 'jsonl' or 'claude-code-jsonl')"
+            ),
+        )
+    })?;
+    let file = std::fs::File::open(path).map_err(|e| {
+        RpcError::new(
+            INVALID_PARAMS,
+            format!("thread_ingest: cannot open {path}: {e}"),
+        )
+    })?;
+    let turns = crate::read_transcript(file, format).map_err(mnemo_err)?;
+    let report = db.ingest_thread(thread, &turns).map_err(mnemo_err)?;
+    db.flush().map_err(mnemo_err)?;
+    Ok(json!({
+        "added_records": report.added_records,
+        "skipped_existing_turns": report.skipped_existing_turns,
+        "chunked_turns": report.chunked_turns,
+        "truncated_turns": report.truncated_turns,
+    })
+    .to_string())
 }
 
 fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {

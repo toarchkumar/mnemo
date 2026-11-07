@@ -448,6 +448,14 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Phase 12.7a thread archive: ingest a transcript into a
+    /// thread's archive layer, export it back, or forget it. The
+    /// archive is encrypted at rest like any record; `thread forget`
+    /// soft-deletes (compact to reclaim space permanently).
+    Thread {
+        #[command(subcommand)]
+        cmd: ThreadCmd,
+    },
     /// List the restorable snapshots (one per committed flush).
     Snapshots {
         /// Path to the `.mnemo` file.
@@ -505,6 +513,70 @@ enum Command {
     Cache {
         #[command(subcommand)]
         op: CacheOp,
+    },
+}
+
+/// Subcommands under `mnemo thread` (Phase 12.7a archive layer).
+#[derive(Subcommand)]
+enum ThreadCmd {
+    /// Ingest a transcript file into a thread's archive. Idempotent
+    /// by per-turn `turn_id`: running it again on a longer transcript
+    /// appends only the new turns. Requires an embedder (`--embed-cmd`
+    /// + `--embed-name`) because the ingest batch-embeds every turn.
+    Ingest {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Thread id to append under. New if no prior ingest used it.
+        #[arg(long)]
+        thread: String,
+        /// Transcript file (one JSON object per line). `-` reads stdin.
+        #[arg(long)]
+        transcript: String,
+        /// Transcript format: `jsonl` (the generic shape) or
+        /// `claude-code-jsonl` (`~/.claude/projects/<p>/<s>.jsonl`).
+        #[arg(long, default_value = "jsonl")]
+        format: String,
+        /// Embedder command (same contract as `mnemo remember --embed-cmd`).
+        #[arg(long)]
+        embed_cmd: String,
+        /// Embedder identity recorded on the scaffold manifest.
+        #[arg(long)]
+        embed_name: String,
+        /// Whether the embedder returns unit-normalized vectors.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
+        /// Per-request embedder timeout in seconds.
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Export a thread's archive back to a JSON-lines transcript. The
+    /// output shape matches the generic `--format jsonl` input, so a
+    /// round trip (ingest → export) is byte-equal for turns that
+    /// weren't truncated or chunked.
+    Export {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Thread id to export.
+        #[arg(long)]
+        thread: String,
+        /// Output file. Default: stdout.
+        #[arg(long, short = 'o')]
+        output: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Soft-delete every record in a thread's archive. Compact later
+    /// to reclaim space permanently.
+    Forget {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Thread id to forget.
+        #[arg(long)]
+        thread: String,
+        #[arg(long)]
+        passphrase: Option<String>,
     },
 }
 
@@ -1840,6 +1912,7 @@ fn run() -> std::result::Result<(), String> {
                 }
             }
         }
+        Command::Thread { cmd } => handle_thread_cmd(cmd)?,
         Command::Snapshots {
             path,
             passphrase: pp,
@@ -2061,6 +2134,153 @@ fn memory_from_json(line: &str) -> std::result::Result<Memory, String> {
 
 fn fmt(e: mnemo_engine::MnemoError) -> String {
     e.to_string()
+}
+
+/// Phase 12.7a: handle `mnemo thread {ingest|export|forget}`. Split
+/// into its own function because the three subcommands share nothing
+/// with the top-level dispatch beyond passphrase resolution.
+fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
+    use mnemo_engine::{
+        read_transcript, EmbedCmd, EmbedderIdentity, TranscriptFormat, MNEMO_META_LENGTH,
+        MNEMO_META_ROLE, MNEMO_META_SHA256, MNEMO_META_TURN_ID,
+    };
+    use std::io::{Read, Write};
+    match cmd {
+        ThreadCmd::Ingest {
+            path,
+            thread,
+            transcript,
+            format,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
+            embed_timeout,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let fmt_enum = TranscriptFormat::parse(&format).ok_or_else(|| {
+                format!("unknown --format '{format}' (want 'jsonl' or 'claude-code-jsonl')")
+            })?;
+            // Read the transcript (stdin with `-`, else the file).
+            let turns = if transcript == "-" {
+                let mut buf = Vec::new();
+                std::io::stdin()
+                    .read_to_end(&mut buf)
+                    .map_err(|e| format!("reading stdin: {e}"))?;
+                read_transcript(&buf[..], fmt_enum).map_err(fmt)?
+            } else {
+                let file = std::fs::File::open(&transcript)
+                    .map_err(|e| format!("opening {transcript}: {e}"))?;
+                read_transcript(file, fmt_enum).map_err(fmt)?
+            };
+
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let identity = EmbedderIdentity {
+                name: embed_name,
+                dimensions: db.dimensions(),
+                normalize: embed_normalize,
+            };
+            let embedder = EmbedCmd::new(&embed_cmd, identity)
+                .map_err(fmt)?
+                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+            db.set_embedder(embedder).map_err(fmt)?;
+            let report = db.ingest_thread(&thread, &turns).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!(
+                "thread {thread}: added {added} record(s) ({chunked} chunked, {truncated} truncated); \
+                 skipped {skipped} already-stored turn(s)",
+                added = report.added_records,
+                chunked = report.chunked_turns,
+                truncated = report.truncated_turns,
+                skipped = report.skipped_existing_turns,
+            );
+            Ok(())
+        }
+        ThreadCmd::Export {
+            path,
+            thread,
+            output,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let records = db.thread_export(&thread).map_err(fmt)?;
+            // Collapse chunked records back into one line per turn
+            // where the turn fit in the 8 KB chunk boundary (single
+            // record → single JSON object). A truncated tool-result
+            // round-trips with `_mnemo.sha256` + `_mnemo.length` in
+            // the output so a consumer can detect the truncation and
+            // recover the original out-of-band.
+            let mut lines: Vec<String> = Vec::with_capacity(records.len());
+            // Group multi-part turns by `_mnemo.turn_id`.
+            use std::collections::BTreeMap;
+            let mut grouped: BTreeMap<String, Vec<&mnemo_engine::Memory>> = BTreeMap::new();
+            for m in &records {
+                let tid = m
+                    .metadata
+                    .get(MNEMO_META_TURN_ID)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                grouped.entry(tid.to_string()).or_default().push(m);
+            }
+            for (tid, parts) in &grouped {
+                let mut combined = String::new();
+                for p in parts {
+                    combined.push_str(&p.content);
+                }
+                let first = parts.first().expect("group has at least one record");
+                let role = first
+                    .metadata
+                    .get(MNEMO_META_ROLE)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let mut obj = serde_json::json!({
+                    "turn_id": tid,
+                    "role": role,
+                    "content": combined,
+                    "timestamp": first.created_at,
+                });
+                if let Some(sha) = first.metadata.get(MNEMO_META_SHA256) {
+                    obj["sha256"] = sha.clone();
+                }
+                if let Some(len) = first.metadata.get(MNEMO_META_LENGTH) {
+                    obj["original_length"] = len.clone();
+                }
+                lines.push(serde_json::to_string(&obj).unwrap_or_else(|_| "{}".into()));
+            }
+            let body = lines.join("\n") + "\n";
+            match output {
+                Some(p) => {
+                    let mut f =
+                        std::fs::File::create(&p).map_err(|e| format!("opening {p}: {e}"))?;
+                    f.write_all(body.as_bytes())
+                        .map_err(|e| format!("writing {p}: {e}"))?;
+                    println!(
+                        "exported {} turn(s) from thread '{thread}' to {p}",
+                        grouped.len()
+                    );
+                }
+                None => {
+                    print!("{body}");
+                }
+            }
+            Ok(())
+        }
+        ThreadCmd::Forget {
+            path,
+            thread,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let n = db.thread_forget(&thread).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!(
+                "forgot {n} record(s) in thread '{thread}' (run `mnemo compact {path}` to reclaim space)"
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Self-contained end-to-end demonstration.

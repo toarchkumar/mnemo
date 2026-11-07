@@ -37,9 +37,12 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, Filter, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights,
-    WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY,
-    MNEMO_META_SUPERSEDES, MNEMO_META_UPDATED_AT,
+    self, Filter, IngestReport, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope,
+    ScoreWeights, ThreadTurn, WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
+    MNEMO_META_KIND_TURN, MNEMO_META_LENGTH, MNEMO_META_PART, MNEMO_META_ROLE, MNEMO_META_SEQ,
+    MNEMO_META_SHA256, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD,
+    MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
+    THREAD_TURN_CHUNK_BYTES,
 };
 use crate::pager::Pager;
 use crate::result_cache::{
@@ -898,6 +901,62 @@ fn build_id_index(catalog: &[CatalogEntry]) -> HashMap<u128, usize> {
         m.insert(e.id, i);
     }
     m
+}
+
+// ---------------------------------------------------------------------------
+// Phase 12.7a helpers used by `ingest_thread`.
+// ---------------------------------------------------------------------------
+
+/// Hex-encode a byte slice. Low-dependency alternative to pulling in a
+/// hex crate for the lone call site in `ingest_thread`'s SHA-256
+/// recording.
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Return the longest UTF-8 prefix of `s` whose byte length is `<=
+/// max_bytes`. Always lands on a `char` boundary.
+fn take_utf8_prefix(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    // Walk forward through char indices; the last index whose byte
+    // offset fits inside `max_bytes` tells us where to cut.
+    let mut cut = 0usize;
+    for (idx, _) in s.char_indices() {
+        if idx > max_bytes {
+            break;
+        }
+        cut = idx;
+    }
+    s[..cut].to_string()
+}
+
+/// Split `s` into chunks, each with `<= max_bytes` of UTF-8 content,
+/// landing on `char` boundaries. Preserves original ordering; a trailing
+/// chunk may be shorter than `max_bytes`.
+fn chunk_utf8(s: &str, max_bytes: usize) -> Vec<String> {
+    if s.len() <= max_bytes {
+        return vec![s.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut rest = s;
+    while rest.len() > max_bytes {
+        let head = take_utf8_prefix(rest, max_bytes);
+        let head_bytes = head.len();
+        out.push(head);
+        rest = &rest[head_bytes..];
+    }
+    if !rest.is_empty() {
+        out.push(rest.to_string());
+    }
+    out
 }
 
 impl Mnemo {
@@ -2144,6 +2203,335 @@ impl Mnemo {
         Ok(out)
     }
 
+    // --- Phase 12.7a: thread archive --------------------------------
+
+    /// Ingest a batch of turns into the archive layer of `thread_id`.
+    ///
+    /// Each [`ThreadTurn`] becomes one or more `Episodic` records
+    /// tagged with the usual thread-archive reserved-metadata set
+    /// (`_mnemo.kind = "turn"`, `_mnemo.thread`, `_mnemo.turn_id`,
+    /// `_mnemo.seq`, `_mnemo.role`). The ingest path is
+    /// **idempotent** per `turn_id`: a turn whose `turn_id` already
+    /// appears on a record in this thread is skipped, so re-running
+    /// `ingest_thread` with an extended transcript appends only
+    /// what's new.
+    ///
+    /// **Chunking.** A non-tool turn whose UTF-8 content exceeds
+    /// [`THREAD_TURN_CHUNK_BYTES`] (8 KB) is split into chunks at
+    /// char boundaries, each stored as its own record with
+    /// `_mnemo.part = 0, 1, …` under the same `turn_id`.
+    ///
+    /// **Truncation.** A `role = "tool"` turn whose content exceeds
+    /// [`THREAD_TOOL_RESULT_TRUNCATE_BYTES`] (16 KB) is stored
+    /// truncated — the first 16 KB of UTF-8 goes into the record,
+    /// and `_mnemo.sha256` + `_mnemo.length` capture the original
+    /// hash and byte length so the full content can be recovered
+    /// (or verified) out-of-band.
+    ///
+    /// **Embedding.** An embedder must be registered
+    /// ([`Mnemo::set_embedder`]); the content strings (one per
+    /// resulting chunk / truncated record) are batched into a single
+    /// `embed()` call.
+    ///
+    /// Call `self.flush()` after a successful ingest to persist.
+    pub fn ingest_thread(&mut self, thread_id: &str, turns: &[ThreadTurn]) -> Result<IngestReport> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if thread_id.is_empty() {
+            return Err(MnemoError::Invalid(
+                "ingest_thread: 'thread_id' must not be empty".into(),
+            ));
+        }
+        let mut report = IngestReport::default();
+        if turns.is_empty() {
+            return Ok(report);
+        }
+
+        // Build the set of turn_ids already in this thread so the
+        // idempotence check is O(1) per incoming turn. First-pass
+        // cost: one decrypt per existing thread record. A future v9
+        // format bump can move `_mnemo.turn_id` into the catalog row
+        // and drop this scan.
+        let existing_turn_ids = self.collect_turn_ids_in_thread(thread_id)?;
+        // Also figure out the next `_mnemo.seq` value so a repeat
+        // ingest continues the sequence instead of restarting at 0.
+        let mut next_seq = self.max_seq_in_thread(thread_id)?.map_or(0, |n| n + 1);
+
+        // Determine each incoming turn's final text pieces (post-
+        // chunking / truncation) before any writes. We embed the
+        // whole batch in a single `embed()` call so the engine side
+        // is one round trip to the embedder regardless of turn count.
+        struct Pending {
+            turn_id: String,
+            role: String,
+            created_at: i64,
+            parts: Vec<String>,
+            /// Hex sha256 + original length, set only for a
+            /// truncated tool-result turn. Applied to the single
+            /// chunk the truncation yielded.
+            truncation: Option<(String, u64)>,
+        }
+        let mut pending: Vec<Pending> = Vec::new();
+        let mut all_parts: Vec<String> = Vec::new();
+        let now = memory::now_secs();
+        for t in turns {
+            if t.turn_id.is_empty() {
+                return Err(MnemoError::Invalid(
+                    "ingest_thread: turn_id must not be empty".into(),
+                ));
+            }
+            if existing_turn_ids.contains(&t.turn_id) {
+                report.skipped_existing_turns += 1;
+                continue;
+            }
+            let content_bytes = t.content.len();
+            let is_tool = t.role == "tool";
+            let (parts, truncation) =
+                if is_tool && content_bytes > THREAD_TOOL_RESULT_TRUNCATE_BYTES {
+                    report.truncated_turns += 1;
+                    let hash = {
+                        use sha2::{Digest, Sha256};
+                        let h = Sha256::digest(t.content.as_bytes());
+                        hex_encode(&h)
+                    };
+                    let truncated = take_utf8_prefix(&t.content, THREAD_TOOL_RESULT_TRUNCATE_BYTES);
+                    (vec![truncated], Some((hash, content_bytes as u64)))
+                } else if content_bytes > THREAD_TURN_CHUNK_BYTES {
+                    report.chunked_turns += 1;
+                    (chunk_utf8(&t.content, THREAD_TURN_CHUNK_BYTES), None)
+                } else {
+                    (vec![t.content.clone()], None)
+                };
+            for p in &parts {
+                all_parts.push(p.clone());
+            }
+            pending.push(Pending {
+                turn_id: t.turn_id.clone(),
+                role: t.role.clone(),
+                created_at: t.timestamp.unwrap_or(now),
+                parts,
+                truncation,
+            });
+        }
+
+        if pending.is_empty() {
+            return Ok(report);
+        }
+
+        // Batched embed — one round trip to the embedder for the
+        // whole ingest.
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            MnemoError::Invalid(
+                "ingest_thread: no embedder registered on this handle; call set_embedder first"
+                    .into(),
+            )
+        })?;
+        let as_refs: Vec<&str> = all_parts.iter().map(|s| s.as_str()).collect();
+        let vectors = embedder.embed(&as_refs)?;
+        if vectors.len() != all_parts.len() {
+            return Err(MnemoError::Invalid(format!(
+                "ingest_thread: embedder returned {} vectors for {} parts",
+                vectors.len(),
+                all_parts.len()
+            )));
+        }
+        for v in &vectors {
+            if v.len() != self.dimensions {
+                return Err(MnemoError::DimensionMismatch {
+                    expected: self.dimensions,
+                    got: v.len(),
+                });
+            }
+        }
+
+        // Write records. Order: each pending turn's chunks in part
+        // order; each turn gets a single `_mnemo.seq` slot, so
+        // `_mnemo.part` disambiguates chunks of the same turn.
+        let mut vec_cursor = 0usize;
+        for p in &pending {
+            let this_seq = next_seq;
+            next_seq += 1;
+            for (part_idx, part_text) in p.parts.iter().enumerate() {
+                let vec = vectors[vec_cursor].clone();
+                vec_cursor += 1;
+                let mut m =
+                    Memory::new(part_text.clone(), MemoryType::Episodic, vec).with_importance(0.5);
+                m.created_at = p.created_at;
+                m.accessed_at = p.created_at;
+                m.metadata.insert(
+                    MNEMO_META_KIND.into(),
+                    Value::String(MNEMO_META_KIND_TURN.into()),
+                );
+                m.metadata.insert(
+                    MNEMO_META_THREAD.into(),
+                    Value::String(thread_id.to_string()),
+                );
+                m.metadata
+                    .insert(MNEMO_META_TURN_ID.into(), Value::String(p.turn_id.clone()));
+                m.metadata
+                    .insert(MNEMO_META_SEQ.into(), Value::Number(this_seq.into()));
+                m.metadata
+                    .insert(MNEMO_META_ROLE.into(), Value::String(p.role.clone()));
+                if p.parts.len() > 1 {
+                    m.metadata.insert(
+                        MNEMO_META_PART.into(),
+                        Value::Number((part_idx as u64).into()),
+                    );
+                }
+                if let Some((sha, len)) = &p.truncation {
+                    m.metadata
+                        .insert(MNEMO_META_SHA256.into(), Value::String(sha.clone()));
+                    m.metadata
+                        .insert(MNEMO_META_LENGTH.into(), Value::Number((*len).into()));
+                }
+                self.put(m)?;
+                report.added_records += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    /// Phase 12.7a helper: collect every `_mnemo.turn_id` already
+    /// stored in `thread_id`. One decrypt per record in the thread.
+    fn collect_turn_ids_in_thread(
+        &mut self,
+        thread_id: &str,
+    ) -> Result<std::collections::HashSet<String>> {
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut out = std::collections::HashSet::new();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
+                continue;
+            }
+            if let Some(tid) = m.metadata.get(MNEMO_META_TURN_ID).and_then(|v| v.as_str()) {
+                out.insert(tid.to_string());
+            }
+        }
+        Ok(out)
+    }
+
+    /// Phase 12.7a helper: find the largest `_mnemo.seq` in a thread,
+    /// so a resumed ingest continues the sequence.
+    fn max_seq_in_thread(&mut self, thread_id: &str) -> Result<Option<u64>> {
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut best: Option<u64> = None;
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
+                continue;
+            }
+            if let Some(n) = m.metadata.get(MNEMO_META_SEQ).and_then(|v| v.as_u64()) {
+                best = Some(best.map_or(n, |cur| cur.max(n)));
+            }
+        }
+        Ok(best)
+    }
+
+    /// Export the archive layer for `thread_id` in `_mnemo.seq`
+    /// order. Each entry is the Memory as stored; chunks of a
+    /// multi-part turn come out in `_mnemo.part` order within their
+    /// `_mnemo.seq`. The record `.content` is the text that was
+    /// stored (post-chunking / post-truncation); callers that need
+    /// the pre-truncation original should round-trip via
+    /// `_mnemo.sha256` + `_mnemo.length`.
+    pub fn thread_export(&mut self, thread_id: &str) -> Result<Vec<Memory>> {
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut out: Vec<Memory> = Vec::new();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
+                continue;
+            }
+            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                != Some(MNEMO_META_KIND_TURN)
+            {
+                continue;
+            }
+            out.push(m);
+        }
+        out.sort_by(|a, b| {
+            let seq_a = a
+                .metadata
+                .get(MNEMO_META_SEQ)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let seq_b = b
+                .metadata
+                .get(MNEMO_META_SEQ)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let part_a = a
+                .metadata
+                .get(MNEMO_META_PART)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let part_b = b
+                .metadata
+                .get(MNEMO_META_PART)
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            seq_a.cmp(&seq_b).then_with(|| part_a.cmp(&part_b))
+        });
+        Ok(out)
+    }
+
+    /// Soft-delete every record in the archive layer of `thread_id`.
+    /// Returns the number of records marked deleted. Permanent
+    /// removal still requires a subsequent `compact_file`, same as
+    /// any `Mnemo::delete`.
+    ///
+    /// Does **not** touch `_mnemo.kind = "essence"` records or other
+    /// non-turn metadata the thread may carry — only `_mnemo.kind =
+    /// "turn"` records matching the thread id.
+    pub fn thread_forget(&mut self, thread_id: &str) -> Result<usize> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        // Collect first, then delete — can't hold catalog borrows
+        // across `self.delete`.
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut victims: Vec<Ulid> = Vec::new();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
+                continue;
+            }
+            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                != Some(MNEMO_META_KIND_TURN)
+            {
+                continue;
+            }
+            victims.push(m.id);
+        }
+        let n = victims.len();
+        for id in &victims {
+            self.delete(id)?;
+        }
+        Ok(n)
+    }
+
     /// Return every live memory (used by tooling and compaction).
     pub fn memories(&mut self) -> Result<Vec<Memory>> {
         let entries: Vec<CatalogEntry> = self
@@ -2321,6 +2709,19 @@ impl Mnemo {
             // conditions). Cheap when `req.filter.is_empty()`; the
             // filter struct's `matches` is a short-circuit AND.
             if !req.filter.is_empty() && !req.filter.matches(&m) {
+                continue;
+            }
+            // Phase 12.7a: default-exclude thread-archive turns. A
+            // caller that wants turns opts in by placing any
+            // `_mnemo.*` term in the filter (equality, `$in`,
+            // `$exists`, or a range on `_mnemo.thread` /
+            // `_mnemo.kind` / `_mnemo.seq`). Without such a term, we
+            // skip `_mnemo.kind = "turn"` records so the archive
+            // layer doesn't pollute default recall.
+            if !req.filter.mentions_mnemo_meta()
+                && m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                    == Some(MNEMO_META_KIND_TURN)
+            {
                 continue;
             }
             let sim = memory::similarity(req.metric, &req.query, &m.vector);

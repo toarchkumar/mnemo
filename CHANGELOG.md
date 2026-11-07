@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0, the minor component carries the breaking-change signal.
 
+## [Unreleased]
+
+### Added — PR 12.7a: thread archive (ingest / export / forget)
+
+**The backup layer for long working threads.** Every turn of a
+transcript lands as an `Episodic` record with `_mnemo.kind = "turn"`
++ `_mnemo.thread = <id>` + `_mnemo.seq` + `_mnemo.role` +
+`_mnemo.turn_id`. The archive is encrypted at rest like any other
+record, excluded from default `recall`, and queryable through the
+12.6 filter when an agent wants drill-down ("what did we say about
+the V2 decision?") or through `recall --thread <id>`.
+
+**New Rust API:**
+- `Mnemo::ingest_thread(thread_id, turns)` — batched embed, idempotent
+  per `turn_id`. Chunking at 8 KB (`THREAD_TURN_CHUNK_BYTES`) for
+  non-tool turns; truncation at 16 KB (`THREAD_TOOL_RESULT_TRUNCATE_BYTES`)
+  for `role == "tool"` with `_mnemo.sha256` + `_mnemo.length` capturing
+  the original. Returns an `IngestReport { added_records,
+  skipped_existing_turns, chunked_turns, truncated_turns }`.
+- `Mnemo::thread_export(thread_id) -> Result<Vec<Memory>>` — records
+  in `_mnemo.seq` then `_mnemo.part` order.
+- `Mnemo::thread_forget(thread_id) -> Result<usize>` — soft-delete
+  every `_mnemo.kind = "turn"` record in the thread; compact later
+  to reclaim space.
+- `TranscriptFormat::{JsonlGeneric, ClaudeCodeJsonl}` + `read_transcript`:
+  parse a generic one-object-per-line JSONL shape or Claude Code's
+  `~/.claude/projects/<p>/<s>.jsonl` (walks `type: "user"` / `"assistant"`
+  messages, flattens `content` blocks — text verbatim, `tool_use` /
+  `tool_result` / `image` rendered as `[tool_use name=Bash]` /
+  `[tool_result ok] …` / `[image]`; skips unknown `type` lines so new
+  upstream types don't break ingest).
+
+**Default recall now excludes turn records.** A caller opts in to
+seeing them by adding any `_mnemo.*` term to the 12.6 filter —
+equality, `$in`, `$exists`, or a range on `_mnemo.thread` /
+`_mnemo.kind` / `_mnemo.seq`. The hot path checks `Filter::
+mentions_mnemo_meta()` once per request.
+
+**Surfaces:**
+- **CLI:** `mnemo thread ingest <file> --thread <id> --transcript <path>
+  [--format jsonl|claude-code-jsonl] --embed-cmd … --embed-name …`,
+  `mnemo thread export <file> --thread <id> [-o out.jsonl]`,
+  `mnemo thread forget <file> --thread <id>`.
+- **MCP:** `thread_ingest {thread, transcript_path, format}` tool,
+  returning `{added_records, skipped_existing_turns, chunked_turns,
+  truncated_turns}`.
+- **Python:** `db.ingest_thread(thread_id, turns)` (turns is
+  `list[dict]` with `turn_id` / `role` / `content` / optional
+  `timestamp`), `db.thread_export(thread_id) -> list[dict]`,
+  `db.thread_forget(thread_id) -> int`.
+
+**Privacy.** Transcripts can carry pasted secrets. Everything is
+encrypted at rest; `thread forget <id>` plus `compact_file` is the
+documented permanent-removal path. Only synthetic fixtures live in
+the test tree — the Claude Code parser is validated against
+hand-crafted JSONL that mirrors a real `.jsonl` without carrying
+any real transcript content.
+
+**Tests.** Integration suite grows by six: round-trip
+(`thread_ingest_then_export_round_trip_for_short_turns`), idempotence
+(`thread_ingest_is_idempotent_per_turn_id`), chunking at 20 KB /
+reassembly (`thread_ingest_chunks_long_non_tool_turns`), truncation
+with sha256 + length (`thread_ingest_truncates_oversized_tool_results`),
+default-exclusion + filter opt-in (`default_recall_excludes_turn_records`),
+and scope-correct forget (`thread_forget_removes_only_archive_records_for_thread`).
+Transcript parser unit tests cover the generic shape, Claude Code
+skip-unknown behavior, and tool-use / tool-result flattening.
+
 ## [0.8.1] — 2026-11-06
 
 **Patch release.** Fixes one usability bug landed in v0.8.0 and adds

@@ -3443,6 +3443,227 @@ fn recall_wrapper_still_returns_hits_vec() {
 // slot of the default agent, with KeyScope::Shared as an explicit opt-in.
 // ===========================================================================
 
+// ===========================================================================
+// Phase 12.7a: thread archive — ingest / export / forget + default recall
+// ===========================================================================
+
+fn with_embedder(path: &std::path::Path, pp: &str) -> Mnemo {
+    let mut db = Mnemo::create(path, pp, fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    db
+}
+
+fn tt(id: &str, role: &str, content: &str) -> mnemo_engine::ThreadTurn {
+    mnemo_engine::ThreadTurn {
+        turn_id: id.into(),
+        role: role.into(),
+        content: content.into(),
+        timestamp: None,
+    }
+}
+
+#[test]
+fn thread_ingest_then_export_round_trip_for_short_turns() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    let report = db
+        .ingest_thread(
+            "chat-1",
+            &[
+                tt("u-1", "user", "hi"),
+                tt("a-1", "assistant", "hello back"),
+                tt("u-2", "user", "bye"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(report.added_records, 3);
+    assert_eq!(report.skipped_existing_turns, 0);
+    assert_eq!(report.truncated_turns, 0);
+    assert_eq!(report.chunked_turns, 0);
+
+    let exported = db.thread_export("chat-1").unwrap();
+    assert_eq!(exported.len(), 3);
+    assert_eq!(exported[0].content, "hi");
+    assert_eq!(exported[1].content, "hello back");
+    assert_eq!(exported[2].content, "bye");
+    // _mnemo.seq must be monotonic.
+    for (i, m) in exported.iter().enumerate() {
+        let seq = m
+            .metadata
+            .get("_mnemo.seq")
+            .and_then(|v| v.as_u64())
+            .expect("seq");
+        assert_eq!(seq as usize, i);
+    }
+}
+
+#[test]
+fn thread_ingest_is_idempotent_per_turn_id() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr-idem.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    let turns = vec![tt("u-1", "user", "hi"), tt("a-1", "assistant", "hello")];
+    let r1 = db.ingest_thread("chat-1", &turns).unwrap();
+    assert_eq!(r1.added_records, 2);
+    // Second ingest with the same turn_ids is a no-op.
+    let r2 = db.ingest_thread("chat-1", &turns).unwrap();
+    assert_eq!(r2.added_records, 0);
+    assert_eq!(r2.skipped_existing_turns, 2);
+
+    // Extend the transcript — only the new turn gets ingested.
+    let r3 = db
+        .ingest_thread(
+            "chat-1",
+            &[
+                tt("u-1", "user", "hi"),
+                tt("a-1", "assistant", "hello"),
+                tt("u-2", "user", "next"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(r3.added_records, 1);
+    assert_eq!(r3.skipped_existing_turns, 2);
+
+    let exported = db.thread_export("chat-1").unwrap();
+    assert_eq!(exported.len(), 3);
+    assert_eq!(exported[2].content, "next");
+}
+
+#[test]
+fn thread_ingest_chunks_long_non_tool_turns() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr-chunk.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    // Build a 20 KB message so it splits into three 8 KB chunks.
+    let big = "x".repeat(20 * 1024);
+    let report = db
+        .ingest_thread("chat-1", &[tt("u-1", "user", &big)])
+        .unwrap();
+    assert_eq!(report.added_records, 3, "20 KB → 3 × 8 KB chunks");
+    assert_eq!(report.chunked_turns, 1);
+    assert_eq!(report.truncated_turns, 0);
+
+    let exported = db.thread_export("chat-1").unwrap();
+    assert_eq!(exported.len(), 3);
+    // Parts reassemble to the original.
+    let reassembled: String = exported.iter().map(|m| m.content.clone()).collect();
+    assert_eq!(reassembled, big);
+    // Each part carries `_mnemo.part` in order.
+    for (i, m) in exported.iter().enumerate() {
+        let part = m
+            .metadata
+            .get("_mnemo.part")
+            .and_then(|v| v.as_u64())
+            .expect("part");
+        assert_eq!(part as usize, i);
+    }
+}
+
+#[test]
+fn thread_ingest_truncates_oversized_tool_results() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr-trunc.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    let big = "a".repeat(20 * 1024);
+    let report = db
+        .ingest_thread("chat-1", &[tt("tool-1", "tool", &big)])
+        .unwrap();
+    assert_eq!(report.added_records, 1, "truncated to one record");
+    assert_eq!(report.truncated_turns, 1);
+    assert_eq!(report.chunked_turns, 0);
+
+    let exported = db.thread_export("chat-1").unwrap();
+    assert_eq!(exported.len(), 1);
+    assert_eq!(exported[0].content.len(), 16 * 1024);
+    let sha = exported[0]
+        .metadata
+        .get("_mnemo.sha256")
+        .and_then(|v| v.as_str())
+        .expect("sha256 should be present on a truncated turn");
+    assert_eq!(sha.len(), 64, "hex SHA-256 is 64 chars");
+    let orig_len = exported[0]
+        .metadata
+        .get("_mnemo.length")
+        .and_then(|v| v.as_u64())
+        .expect("length");
+    assert_eq!(orig_len as usize, 20 * 1024);
+}
+
+#[test]
+fn default_recall_excludes_turn_records() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr-excl.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    db.remember(Memory::new(
+        "a durable fact",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    db.ingest_thread("chat-1", &[tt("u-1", "user", "transient question")])
+        .unwrap();
+    db.flush().unwrap();
+
+    // Plain recall must NOT surface the turn.
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false);
+    let hits = db.recall(&req).unwrap();
+    assert!(
+        hits.iter()
+            .all(|h| h.memory.content != "transient question"),
+        "default recall must exclude `_mnemo.kind = turn` records"
+    );
+
+    // Opt in via a _mnemo.* filter → turns included.
+    let req2 = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .filter(Filter::default().metadata_eq("_mnemo.kind", json!("turn")));
+    let hits2 = db.recall(&req2).unwrap();
+    assert!(
+        hits2
+            .iter()
+            .any(|h| h.memory.content == "transient question"),
+        "filter with `_mnemo.kind = turn` must include turn records; got {:?}",
+        hits2.iter().map(|h| &h.memory.content).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn thread_forget_removes_only_archive_records_for_thread() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("thr-forget.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    db.remember(Memory::new(
+        "fact that should stay",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    db.ingest_thread(
+        "chat-A",
+        &[tt("a-1", "user", "A1"), tt("a-2", "user", "A2")],
+    )
+    .unwrap();
+    db.ingest_thread("chat-B", &[tt("b-1", "user", "B1")])
+        .unwrap();
+
+    let n = db.thread_forget("chat-A").unwrap();
+    assert_eq!(n, 2, "only chat-A's 2 turn records go");
+
+    // chat-B survives.
+    let b = db.thread_export("chat-B").unwrap();
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].content, "B1");
+    // The durable fact survives.
+    let mems = db.memories().unwrap();
+    assert!(mems.iter().any(|m| m.content == "fact that should stay"));
+}
+
 #[test]
 fn history_default_slot_matches_remember_default_slot() {
     // v0.8.1 bugfix (lane A): `remember(key=K)` with no explicit agent

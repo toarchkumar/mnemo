@@ -32,7 +32,7 @@ use pyo3::types::{PyDict, PyList};
 use mnemo_core::{
     CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, Filter as CoreFilter, KdfParams,
     Memory, MemoryPatch, MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope,
-    Ulid, WriteOutcome,
+    ThreadTurn, Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -726,6 +726,89 @@ impl Mnemo {
             list.append(d)?;
         }
         Ok(list.into_any().unbind())
+    }
+
+    /// Phase 12.7a: ingest a batch of turns into `thread_id`'s archive.
+    ///
+    /// `turns` is a list of dicts; each dict needs `turn_id` (str),
+    /// `role` (str), `content` (str) and may carry `timestamp` (int).
+    /// Idempotent per `turn_id`. Returns a dict `{added_records,
+    /// skipped_existing_turns, chunked_turns, truncated_turns}`.
+    /// Requires `set_embedder` first.
+    #[pyo3(signature = (thread_id, turns))]
+    fn ingest_thread(
+        &mut self,
+        py: Python<'_>,
+        thread_id: &str,
+        turns: Vec<Bound<'_, PyDict>>,
+    ) -> PyResult<PyObject> {
+        let mut rust_turns: Vec<ThreadTurn> = Vec::with_capacity(turns.len());
+        for (i, d) in turns.iter().enumerate() {
+            let turn_id: String = d
+                .get_item("turn_id")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "turns[{i}]: missing required key 'turn_id'"
+                    ))
+                })?
+                .extract()?;
+            let role: String = d
+                .get_item("role")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'role'"))
+                })?
+                .extract()?;
+            let content: String = d
+                .get_item("content")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "turns[{i}]: missing required key 'content'"
+                    ))
+                })?
+                .extract()?;
+            let timestamp: Option<i64> =
+                d.get_item("timestamp")?.and_then(|t| t.extract().ok());
+            rust_turns.push(ThreadTurn {
+                turn_id,
+                role,
+                content,
+                timestamp,
+            });
+        }
+        let report = self
+            .core_mut()?
+            .ingest_thread(thread_id, &rust_turns)
+            .map_err(to_py)?;
+        let out = PyDict::new_bound(py);
+        out.set_item("added_records", report.added_records)?;
+        out.set_item("skipped_existing_turns", report.skipped_existing_turns)?;
+        out.set_item("chunked_turns", report.chunked_turns)?;
+        out.set_item("truncated_turns", report.truncated_turns)?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Phase 12.7a: export a thread's archive back as a list of
+    /// `Memory` dicts, sorted by `_mnemo.seq` then `_mnemo.part`.
+    /// Multi-part turns come out as separate entries — the CLI's
+    /// `mnemo thread export` collapses them; Python callers are
+    /// expected to walk `_mnemo.part` themselves when they need the
+    /// per-chunk shape.
+    #[pyo3(signature = (thread_id))]
+    fn thread_export(&mut self, py: Python<'_>, thread_id: &str) -> PyResult<PyObject> {
+        let records = self.core_mut()?.thread_export(thread_id).map_err(to_py)?;
+        let list = PyList::empty_bound(py);
+        for m in &records {
+            list.append(memory_to_dict(py, m)?)?;
+        }
+        Ok(list.into_any().unbind())
+    }
+
+    /// Phase 12.7a: soft-delete every record in a thread's archive.
+    /// Returns the number of records marked deleted. `db.compact()`
+    /// (or `mnemo compact`) reclaims the space permanently.
+    #[pyo3(signature = (thread_id))]
+    fn thread_forget(&mut self, thread_id: &str) -> PyResult<usize> {
+        self.core_mut()?.thread_forget(thread_id).map_err(to_py)
     }
 
     /// Embed `query` with the registered embedder and run `recall`

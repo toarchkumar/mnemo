@@ -62,6 +62,7 @@ mod pager;
 mod result_cache;
 mod session;
 mod store;
+mod transcript;
 mod wal;
 
 pub use crypto::KdfParams;
@@ -70,9 +71,12 @@ pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};
 pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
 pub use memory::{
-    Filter, FilterTerm, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights,
-    WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_NS, MNEMO_META_SUPERSEDED_BY,
-    MNEMO_META_SUPERSEDES, MNEMO_META_UPDATED_AT,
+    Filter, FilterTerm, IngestReport, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope,
+    ScoreWeights, ThreadTurn, WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
+    MNEMO_META_KIND_TURN, MNEMO_META_LENGTH, MNEMO_META_NS, MNEMO_META_PART, MNEMO_META_ROLE,
+    MNEMO_META_SEQ, MNEMO_META_SHA256, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
+    MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
+    THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,
@@ -84,6 +88,7 @@ pub use store::{
     CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResponse, RecallResult, SnapshotInfo,
     Stats,
 };
+pub use transcript::{read_transcript, TranscriptFormat};
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.
 pub use ulid::Ulid;
