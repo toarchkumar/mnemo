@@ -101,8 +101,13 @@ last one stopped.
 
 | Lane | Owner | Scope | State |
 |---|---|---|---|
-| A — v0.7.0 release | `PLANNER-A` (the session that wrote the 2026-11-06 V2 decision; the Cowork sandbox) | Scoring v2 Phase 4, release v0.7.0, verify it on the published wheel, the v0.7.0 README + `index.html` handoff (to-dos 1–2 above) | **Holds the ACTIVE PR** |
-| B — Phase 12 prep | `PLANNER-B` (the Antigravity session) | Dispatch-ready spec for 12.1, the 12.4 shared-access design note, and R-003.1 (`Essence`) triage when the user asks for it, since it changes Phase 12 order | Planning only. No Worker dispatch until Lane A logs v0.7.0 VERIFIED |
+| A — roadmap and releases | `PLANNER-A` (the Cowork sandbox session) | **Everything that reaches the Worker:** Phase 12, Phase 13 and every later phase; specs, DISPATCH, READY/BLOCKED answers, VERIFIED, release docs and Reviewer triage | **Owns the queue.** Holds the ACTIVE PR |
+| B — side ideas | `PLANNER-B` (the Antigravity session) | **Backup ideator** (user decision 2026-11-06): explores ideas, often the Reviewer's, and writes them up as `PLANNER-B — NOTE` proposals for PLANNER-A to adopt, adapt or decline. Doesn't own specs or dispatch | Never dispatches, unless the user asks it to cover lane A (rule 4) |
+
+**Ownership change (user, 2026-11-06):** PLANNER-A owns Phase 12 as well.
+PLANNER-B's earlier Phase 12 drafts are kept as inputs (12.1 amendment,
+12.6–12.8, the R-003.1/.2 triage). Its open questions are answered in the
+2026-11-06 PLANNER-A entries.
 
 Rules:
 1. **Tag every entry** `PLANNER-A` or `PLANNER-B` in the WORKLOG header.
@@ -925,6 +930,24 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   sign-off, then implement. Tests: two processes interleaving
   remember/update/recall/cache_put with crash injection; a proptest model
   extension; lock-contention timeouts that never hang (same rule as 10b.2).
+- **The design note must also cover claims and presence (added
+  2026-11-06).** They come out of our own multi-agent workflow, where the
+  CLAIM entries, lanes and "re-read the tail before writing" rules exist
+  because the file can't do this itself. Both use the same staleness and
+  lock machinery as above, so design them together even though the public
+  API ships in Phase 13.3:
+  - **Presence:** each shared handle writes a small heartbeat record
+    (`_mnemo.kind = "presence"`: agent id, role, tool, `last_seen`) at
+    most once a minute, piggybacked on a commit. This is how other agents
+    learn that one is gone (for example, out of usage).
+  - **Claims:** an expiring, advisory hold on a key, topic or task
+    (`_mnemo.kind = "claim"`, holder, `expires_at`). Taking one is a
+    compare-and-set inside the exclusive lock window, so two agents can't
+    both win. A claim lapses on its own when the holder's lease or presence
+    expires, so a crashed agent never blocks the others.
+  - **Lock and claim-staleness tests:** two processes race for one claim
+    (exactly one wins); a holder is killed mid-claim (it expires, and the
+    other process gets it); and nothing hangs.
 
 ### 12.2 Load and save automatically
 - **MCP resources:** implement `resources/list` and `resources/read` and
@@ -967,6 +990,21 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   in release binaries) and never prints it. The server reads the
   passphrase from the keychain when `MNEMO_PASSPHRASE` is unset, so the
   passphrase no longer sits in plain text in the client's config file.
+- **Generated keys, no format change (added 2026-11-06).** `mnemo init`
+  without a passphrase generates a random 256-bit secret, stores it in the
+  OS keychain under the file's id (its header salt), and prints it once as
+  a **recovery code** (base32, grouped, with a check digit).
+  - Because the secret is random rather than human-chosen, the file can use
+    light KDF parameters, so open drops from about 15 ms to well under
+    1 ms. Record that in the header's KDF params, and keep the full
+    Argon2id cost for human passphrases.
+  - `mnemo unlock <file>` imports a recovery code into this machine's
+    keychain. Every tool on the machine (MCP server, hooks, CLI, Python)
+    then opens the file with nothing typed.
+  - Before 13.2, sharing means handing over the recovery code through a
+    secure channel. Per-person grants and revocation come with 13.2's key
+    slots.
+  - Passphrases stay supported (`--passphrase`) for people who want one.
 
 ### 12.5 Readable export
 - `mnemo export <file> --format markdown|jsonl [--type] [--agent] [-o
@@ -1063,6 +1101,15 @@ context-engineering guidance; LangMem profile vs collection):
   (mistakes caught and their fixes). Each item is one line (at most 280
   bytes) with a status of `open` or `resolved`. They're edited by engine
   ops; an LLM never rewrites the whole thing.
+- **Build these as general status records, not essence-only (added
+  2026-11-06).** Essence sections are the first user of one primitive, a
+  record with a `_mnemo.status` and allowed transitions
+  (`_mnemo.kind` + `status` + `status_history`). Phase 13 reuses it for
+  tasks (`queued → active → ready → done | blocked`) and findings (`open →
+  accepted | deferred | rejected | needs-user → verified`). Implement the
+  status/transition core once, with a per-kind transition table, and
+  filter it through 12.6 (`status` equality or `$in`). Essence uses
+  `open → resolved`.
 - **Scope:** an item belongs to a thread, or with `scope = "project"` to
   every thread in the file. Conventions and lasting decisions should
   usually be project-scoped, so a *new* thread starts with them.
@@ -1160,6 +1207,151 @@ earlier release lines):**
 
 The landing page and root README (Planner-owned) get a "use it from Claude
 Code" section when 12.2 ships.
+
+## Phase 13 — Shared brain for agent teams (added 2026-11-06, user decision)
+
+**Goal:** a `.mnemo` file is the shared, encrypted brain an agent *team*
+works through: planners, workers, reviewers and hooks, across tools and
+machines. Phase 12 makes one agent's memory seamless. Phase 13 adds what a
+team needs. No other product offers this in one portable encrypted file,
+and we're its first user.
+
+**Why (evidence from this project, 2026-11).** Every hand-enforced rule in
+this file's Protocol is a missing feature:
+- **The user carries messages:** every "Send this to the worker" relay
+  goes through them (13.1).
+- **Waiting:** the Worker sat idle because a Planner ran out of usage, so
+  we invented "pre-approved queues" (13.1).
+- **Claims:** CLAIM entries, lanes and "re-read the tail before writing"
+  exist because the file can't arbitrate, and a Planner left half-finished
+  edits when it ran out (13.3).
+- **Roles on trust:** "the Reviewer is read-only", "only the Worker
+  commits"; one passphrase means full ownership (13.2, 13.4).
+- **Hand tags:** WORKER, PLANNER-A and PLANNER-B are typed by hand, and
+  anyone could type them (13.4).
+- **Hidden notes:** `*.local.md` holds embargoed security notes because the
+  repo is public (13.5).
+- **Staleness:** a Status section went months stale, and line-number
+  references drift (13.6).
+- **No merging:** PLAN.md moved into git for backup, but two diverged
+  copies of a `.mnemo` file can't be merged (13.7).
+
+**Success criterion:** this project's Planner, Worker and Reviewer loop
+runs through `test/project.mnemo`. The user stops relaying prompts and only
+makes decisions, and PLAN.md shrinks to curated specs.
+
+**Depends on:** 12.4 (shared access, plus the claims and presence design
+note), 12.7's status-record core, and 12.2's hooks (to surface the inbox at
+session start).
+
+### 13.1 Messages and a task queue
+- **Messages:** `_mnemo.kind = "message"` records with `to` (an agent id
+  or a role such as `worker`), `from`, `subject`, `body`, `refs`, and
+  status `unread → acked`. API: `post(to, subject, body, refs)`,
+  `inbox(agent_or_role, unread_only)`, `ack(id, note?)`.
+- **Tasks** use the 12.7 status core: `queued → active → ready → done |
+  blocked`, plus `after: [task ids]` dependencies and a `pre_approved` flag.
+  `task_next(role)` returns the next queued task whose dependencies are
+  done, and claims it atomically (13.3), so any available worker picks it
+  up. A task marked `ready` waits for its owner's sign-off, the way
+  "READY before tagging" works today.
+- **Surfaces:**
+  - MCP tools `inbox` and `task {op: add | next | update | list}` (one tool
+    each, to keep tool lists small);
+  - CLI `mnemo inbox`, `mnemo post`, `mnemo task …`;
+  - Python and Rust methods;
+  - the SessionStart hook (12.2) shows "2 unread, 1 task ready for you".
+- **Push notifications are out of scope;** agents poll at session start
+  and after each commit. Note: a later MCP `notifications/resources/updated`
+  on the inbox resource is cheap if clients support it.
+
+### 13.2 Per-agent keys and roles (format v9)
+- **Key slots** (like LUKS): the header wraps the data key under several
+  key-encryption keys, one per agent or device. Each slot has a label and a
+  role: `owner`, `writer`, `reader`, or `writer:<namespace>`. Add and revoke
+  slots without re-encrypting the data. Revoking a slot means rotating the
+  data key (an existing `rekey`-style operation), because the revoked agent
+  may have kept it.
+- **Be honest about enforcement.** Everyone holding the data key can
+  technically write pages. Role limits in the engine stop *mistakes*, not
+  malice; **13.4 signatures** make unauthorized writes detectable.
+  Document this as plainly as the existing security model does.
+- **Needs a header change, so it rides the same v9 bump as Phase 2 +
+  11.2.** Never do two format bumps.
+- **Public-key grants (added 2026-11-06):** a slot can wrap the data key
+  to a recipient's public key (X25519 + HKDF + AES-GCM, the `age` pattern).
+  - `mnemo id` creates or shows this machine's or agent's identity: the
+    private key stays in the keychain, and the public key is printed as
+    `mnemo1…`.
+  - The owner runs `mnemo grant <file> --to mnemo1… --role writer`, then
+    sends the file by any channel. Nothing secret travels.
+  - `mnemo revoke <file> <slot>` removes the slot and rotates the data key
+    (a compaction under a fresh key). Document that a revoked party keeps
+    any copy it already had.
+  - `init` always creates a recovery slot (12.3's recovery code), so losing
+    every device doesn't lose the file.
+  - Slot budget: about 100 bytes each, at most 32 in the v9 header.
+- **Keychain integration (12.3):** each tool holds its own slot's secret,
+  so no agent ever sees the owner passphrase. That replaces the "Planner
+  never handles passphrases" rule.
+
+### 13.3 Claims and presence (API on top of the 12.4 design)
+- `claim(topic, ttl)` returns `Claimed`, or `HeldBy {agent, expires_at}`;
+  also `renew`, `release`, and `who()` for presence (agent, role, tool,
+  `last_seen`).
+- MCP tool `claim {op}` and the CLI. The task queue (13.1) uses claims
+  internally.
+- Claims are advisory (cooperating agents) and lapse on their own.
+
+### 13.4 Signed authorship
+- **Per-agent signing keys** (Ed25519, held in the keychain or a key slot).
+  Each write stamps `_mnemo.author` (agent id and role) and
+  `_mnemo.sig` (a signature over the record's content hash and key
+  fields).
+- **Reads check signatures:** `verify()` reports unsigned, valid, or
+  invalid per record, and `about()` summarizes it. No format change
+  (metadata keys), so it can ship before v9, with key distribution through
+  13.2 slots once v9 lands.
+- **Use:** an audit trail of who decided what; tampering by one key holder
+  is detectable by the others.
+
+### 13.5 Visibility levels
+- `_mnemo.visibility = public | team | private` (default `team`).
+  `export` (12.5) emits only the levels asked for, and the git backup
+  export uses `public` + `team`. Embargoed security findings become
+  `private` records, replacing the `*.local.md` workaround.
+
+### 13.6 Freshness
+- **Optional `_mnemo.as_of` and `_mnemo.review_by` on any record.**
+  `stale(now)` lists items past `review_by`, or older than a per-kind
+  default (for example, `state` essence items older than 14 days).
+- `about()` and the essence render mark stale items. The SessionStart
+  hook can ask the agent to confirm or update them.
+
+### 13.7 Merge two diverged copies
+- `mnemo merge a.mnemo b.mnemo -o merged.mnemo` (both passphrases or
+  slots), rekeyed fresh, since SEC-1 already makes writing to both copies
+  safe.
+- **How it merges:**
+  - records are combined by ULID;
+  - a keyed fact (12.1) written in both copies keeps the newest
+    `created_at` as live, supersedes the other, and stamps
+    `_mnemo.merge_conflict`;
+  - same id with different content keeps both and flags it;
+  - thread archives are merged by `turn_id` (12.7);
+  - the index is rebuilt.
+- This absorbs the merge half of R-001.17 (knowledge packs). Read-only
+  mounts stay deferred.
+
+**Order and releases:**
+1. 13.1 + 13.3 (v0.11.0; needs 12.4 and 12.2);
+2. 13.5 + 13.6 (cheap, metadata only);
+3. 13.4;
+4. 13.2 (with the v9 bump);
+5. 13.7.
+
+**Where Phase 13 goes relative to Phase 2 (keyword search)** is a user
+decision when v0.10.0 ships. For now it's listed after Phase 12.
 
 ## Health-check addendum (2026-08-07)
 
@@ -1263,8 +1455,15 @@ DO NEXT, in this order:
    (added 2026-10-30, user decision; slotted ahead of keyword search). Order
    inside (revised 2026-11-06, user decision "small releases"): **12.1 → 12.6
    → 12.8 = v0.8.0** (pre-approved queue, see the DISPATCH entry) → 12.7
-   threads and essence = v0.9.0 → 12.4 (design note first) + 12.2 = v0.10.0 →
-   12.3 → 12.5. Spec in the Phase 12 section.
+   threads and essence = v0.9.0 → 12.4 (design note first, now including
+   claims and presence) + 12.2 = v0.10.0 → 12.3 → 12.5. Spec in the Phase 12
+   section. Owner: PLANNER-A (user decision 2026-11-06).
+5c. **Phase 13 — shared brain for agent teams** (added 2026-11-06, user
+   decision; owner PLANNER-A). Messages and a task queue, claims and
+   presence, visibility, freshness, signed authorship, per-agent keys (with
+   the v9 bump), and merging copies. Spec in the Phase 13 section. It goes
+   after Phase 12; the user decides at v0.10.0 whether it comes before or
+   after item 6.
 6. **Phase 2 + Phase 11.2 together, one format bump (v9)** (MOVED UP
    2026-10-25 by user decision: correct answers before faster answers).
    Hybrid BM25 + vector recall, plus **record packing** (several small
@@ -6663,3 +6862,121 @@ count). Scoring-v2 harness unchanged (no 12.x PR touched scoring).
    URL, and the PyPI / crates.io URLs.
 
 Lane A then verifies the published wheel and logs v0.8.0 VERIFIED.
+
+### 2026-11-06 — PLANNER-A (covering lane B) — REVIEW + HANDOFF — v0.8.0: two recall performance fixes before tagging; README + index.html ready
+**Accepted:** PRs 12.1 (777cf09), 12.6 (a062ed4) and 12.8 (07e5e54) as
+logged. The API shapes match the spec, R-001.10 holds, and the parked items
+(`history_keep`, MMR) are correctly deferred. The 1,000-memory selective
+filter test is fine. **Two regressions to fix before tagging**, both in
+`store.rs` recall:
+
+1. **HIGH: every new handle's first recall now decrypts the whole file.**
+   `recall_budgeted` calls `ensure_key_caches()` unconditionally
+   (store.rs ~L2343), and that reads every live record. At 100K memories
+   that's about 1 s, the same as the exact scan, on the *first* recall of
+   every handle: each CLI `mnemo recall`, each short Python script, and the
+   MCP server's first call. The published "indexed search ~9.4 ms at 100K"
+   would only hold for long-lived handles after warm-up.
+
+   **Fix:** don't build the key caches in recall.
+   - `score_once` already decrypts each candidate (`read_memory`). Right
+     after that, skip the record if
+     `m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)`. That costs
+     nothing extra.
+   - Keep the `superseded` set check *before* decrypt as a fast path when
+     the set is already built (after any keyed op).
+   - For the 50% coverage rule, use `live_count` minus the set size when
+     the set is known, or just `live_count`.
+   - Keyed writes and `history` still call `ensure_key_caches`, as the 12.1
+     spec says ("built lazily on the first keyed operation").
+   - Test: on a fresh handle, recall returns no superseded record, and it
+     never calls `ensure_key_caches` (assert `key_index.is_none()` after
+     the recall).
+   - Add a bench cell: first recall on a fresh 100K handle stays near the
+     indexed latency (± open cost), recorded in the perf JSON with
+     `remeasured`.
+
+2. **MEDIUM: with default settings, the widening step skips straight to a
+   full scan.** When the caller leaves `n_probe`/`n_rerank` unset (the
+   default), `widen_probe`/`widen_rerank` stay `None`, nothing is widened,
+   and `widened_rerank = 0` forces the exact scan. So any filtered default
+   recall that comes up short costs a full decrypt.
+
+   **Fix:** take the effective values from `IvfPqIndex::effective_defaults()`
+   (index.rs ~L475), double them for attempt 2, and do the exact scan only
+   if still short and the doubled rerank covers ≥ 50% of the live set. Test
+   on an indexed file: a mildly selective filter (about 30% match) is
+   satisfied by the widened pass without an exact scan. Use a counter or
+   a test hook to observe it.
+
+**Order:**
+1. a `fix(recall): no full-file scan on first recall; widen from the
+   effective ANN defaults` commit, *before* your staged release commit (pull
+   the release commit's staged files aside if needed; re-run the full gate
+   after the fix);
+2. the release commit;
+3. this docs HANDOFF;
+4. sync;
+5. push, green CI, tag `v0.8.0`;
+6. DONE with the URLs.
+
+**HANDOFF: commit separately as `docs(v0.8.0): what's new on README and
+landing page`:**
+- `README.md`:
+  - a keyed-fact line in the Python quick start;
+  - a new "What's new in v0.8.0" section (keyed facts and `update`,
+    filtered recall with the `filter` dict shape, `max_bytes`, and the
+    v0.7 file compatibility);
+  - known limitations: version history has no limit yet.
+- `index.html`:
+  - version pill and Quick Start text say v0.8.0;
+  - a keyed-fact line in the Python sample;
+  - roadmap: v0.4–v0.8 shipped, with two new Shipped bullets; the Next
+    column now says session continuity (12.7) and shared access plus the
+    plugin (12.4/12.2).
+
+MMR isn't mentioned publicly, since it was never promised there.
+
+### 2026-11-06 — PLANNER-A — DECISION + PLAN — PLANNER-A owns Phase 12 and the queue; PLANNER-B is a backup ideator; Phase 13 added; 12.4/12.7 amended
+**Ownership (user decision):** PLANNER-A owns Phase 12, Phase 13 and every
+later phase: specs, dispatch, verification and release docs. PLANNER-B
+becomes a backup ideator. It explores side ideas, often the Reviewer's, and
+posts them as `PLANNER-B — NOTE` proposals; it doesn't dispatch unless the
+user asks it to cover. The lane table in the Planner handover is updated.
+The "covering lane B" tags in today's entries are historical.
+
+**Phase 13 "Shared brain for agent teams" added (user decision)**, built
+from the gaps our own workflow exposes:
+- 13.1 messages and a task queue (the user stops relaying prompts);
+- 13.2 per-agent keys and roles (with the v9 bump);
+- 13.3 claims and presence;
+- 13.4 signed authorship;
+- 13.5 visibility levels;
+- 13.6 freshness;
+- 13.7 merging two diverged copies.
+
+It's listed as execution-order item 5c, after Phase 12. Whether it goes
+before or after Phase 2 is a user decision at v0.10.0.
+
+**Specs amended now, so they don't need redoing later:**
+- the 12.4 design note must also cover presence heartbeats and expiring
+  claims;
+- 12.7's lifecycle items are built as a general status-record core, which
+  Phase 13 reuses for tasks and findings.
+
+No change to the in-flight v0.8.0 work. Worker: no action beyond the
+current fix-and-release sequence.
+
+### 2026-11-06 — PLANNER-A — PLAN — Key sharing and onboarding specified (12.3 generated keys; 13.2 public-key grants)
+**12.3 (no format change):** `mnemo init` generates a random key, keeps it
+in the OS keychain, and prints a one-time recovery code. Light KDF params
+are fine for random secrets, so open drops to under 1 ms. `mnemo unlock`
+imports the code on another machine. Passphrases stay optional.
+
+**13.2 (v9):**
+- public-key slots: `mnemo id` / `grant --to mnemo1…` / `revoke` (which
+  rotates the data key), on the `age` pattern;
+- a recovery slot is always created.
+
+Driven by the user's questions on 2026-11-06 about how keys work with
+sharing and what onboarding looks like.
