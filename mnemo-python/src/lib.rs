@@ -724,7 +724,7 @@ impl Mnemo {
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
-                        filter=None))]
+                        filter=None, max_bytes=None))]
     fn recall_text(
         slf: Py<Self>,
         py: Python<'_>,
@@ -736,7 +736,8 @@ impl Mnemo {
         n_probe: Option<usize>,
         n_rerank: Option<usize>,
         filter: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<Vec<PyObject>> {
+        max_bytes: Option<usize>,
+    ) -> PyResult<PyObject> {
         // PY-1 (R-001.11): take `slf: Py<Self>` so the Python-level
         // borrow drops before the embedder callback runs — same
         // pattern as `remember_text`, see the comment there.
@@ -771,25 +772,49 @@ impl Mnemo {
         if let Some(fd) = filter {
             req = req.filter(filter_from_py_dict(&fd)?);
         }
+        let budgeted = max_bytes.is_some();
+        if let Some(b) = max_bytes {
+            req = req.max_bytes(b);
+        }
         // PY-1 (R-001.11): release the GIL around the heavy recall
         // (ANN probe + rerank + per-hit decrypt). The subsequent
         // `memory_to_dict` loop re-enters Python so it stays outside
         // the `allow_threads` region.
         let mut s = slf.borrow_mut(py);
-        let hits = {
+        let resp = {
             let core = s.core_mut()?;
-            py.allow_threads(|| core.recall(&req)).map_err(to_py)?
+            py.allow_threads(|| core.recall_budgeted(&req))
+                .map_err(to_py)?
         };
         drop(s);
-        let mut out = Vec::with_capacity(hits.len());
-        for h in hits {
+        let mut out = Vec::with_capacity(resp.hits.len());
+        for h in resp.hits {
             let dict = memory_to_dict(py, &h.memory)?;
             let bound = dict.bind(py);
             bound.set_item("score", h.score)?;
             bound.set_item("similarity", h.similarity)?;
             out.push(dict);
         }
-        Ok(out)
+        // Phase 12.8: when `max_bytes` was set, return the wrapped
+        // envelope `{hits, truncated}` so callers can tell whether
+        // the budget cut anything; otherwise keep the pre-12.8 list
+        // shape for backward compatibility.
+        if budgeted {
+            let wrap = PyDict::new_bound(py);
+            let list = PyList::empty_bound(py);
+            for h in out {
+                list.append(h)?;
+            }
+            wrap.set_item("hits", list)?;
+            wrap.set_item("truncated", resp.truncated)?;
+            Ok(wrap.into_any().unbind())
+        } else {
+            let list = PyList::empty_bound(py);
+            for h in out {
+                list.append(h)?;
+            }
+            Ok(list.into_any().unbind())
+        }
     }
 
     /// Multi-signal recall. Returns a list of result dicts, each a memory with
@@ -806,7 +831,7 @@ impl Mnemo {
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
-                        filter=None))]
+                        filter=None, max_bytes=None))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -818,7 +843,8 @@ impl Mnemo {
         n_probe: Option<usize>,
         n_rerank: Option<usize>,
         filter: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<Vec<PyObject>> {
+        max_bytes: Option<usize>,
+    ) -> PyResult<PyObject> {
         let mut req = RecallRequest::new(query)
             .top_k(top_k)
             .track_access(track_access);
@@ -838,20 +864,40 @@ impl Mnemo {
         if let Some(fd) = filter {
             req = req.filter(filter_from_py_dict(&fd)?);
         }
+        let budgeted = max_bytes.is_some();
+        if let Some(b) = max_bytes {
+            req = req.max_bytes(b);
+        }
         // PY-1 (R-001.11): same GIL release as `recall_text`.
-        let hits = {
+        let resp = {
             let core = self.core_mut()?;
-            py.allow_threads(|| core.recall(&req)).map_err(to_py)?
+            py.allow_threads(|| core.recall_budgeted(&req))
+                .map_err(to_py)?
         };
-        let mut out = Vec::with_capacity(hits.len());
-        for h in hits {
+        let mut out = Vec::with_capacity(resp.hits.len());
+        for h in resp.hits {
             let dict = memory_to_dict(py, &h.memory)?;
             let bound = dict.bind(py);
             bound.set_item("score", h.score)?;
             bound.set_item("similarity", h.similarity)?;
             out.push(dict);
         }
-        Ok(out)
+        if budgeted {
+            let wrap = PyDict::new_bound(py);
+            let list = PyList::empty_bound(py);
+            for h in out {
+                list.append(h)?;
+            }
+            wrap.set_item("hits", list)?;
+            wrap.set_item("truncated", resp.truncated)?;
+            Ok(wrap.into_any().unbind())
+        } else {
+            let list = PyList::empty_bound(py);
+            for h in out {
+                list.append(h)?;
+            }
+            Ok(list.into_any().unbind())
+        }
     }
 
     /// Exact nearest-neighbour search; returns `(memory_dict, similarity)`

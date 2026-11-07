@@ -343,6 +343,15 @@ enum Command {
         /// or MCP APIs.
         #[arg(long = "filter", value_name = "EXPR")]
         filter: Vec<String>,
+        /// Phase 12.8: cap the total UTF-8 bytes of returned `content`
+        /// fields. Stops adding hits once the running sum would exceed
+        /// this many bytes. The top-1 hit is always returned, even if
+        /// it alone is over budget. A trailing "(truncated: N hits
+        /// dropped by --max-bytes)" line goes to stderr whenever the
+        /// budget cuts something. Roughly 4 bytes per token for
+        /// English text.
+        #[arg(long)]
+        max_bytes: Option<usize>,
         /// Embedder command for `--text` (same contract as
         /// `mnemo remember --embed-cmd`). Ignored when `--query` /
         /// `--query-file` is used.
@@ -1521,6 +1530,7 @@ fn run() -> std::result::Result<(), String> {
             no_track,
             session,
             filter,
+            max_bytes,
             embed_cmd,
             embed_name,
             embed_normalize,
@@ -1630,6 +1640,9 @@ fn run() -> std::result::Result<(), String> {
                 f = parse_filter_expr(&expr, f)?;
             }
             req = req.filter(f);
+            if let Some(b) = max_bytes {
+                req = req.max_bytes(b);
+            }
 
             // If the vector branch didn't pre-open, open now with the
             // same fallback semantics.
@@ -1644,7 +1657,7 @@ fn run() -> std::result::Result<(), String> {
             if effective_no_track {
                 req = req.track_access(false);
             }
-            let hits = db.recall(&req).map_err(fmt)?;
+            let resp = db.recall_budgeted(&req).map_err(fmt)?;
             // R-001.4: a tracking recall mutates the catalog's
             // `accessed_at` / `access_count` in memory. Flush before
             // exit so the bumps reach disk — otherwise the usage
@@ -1655,7 +1668,17 @@ fn run() -> std::result::Result<(), String> {
             if !effective_no_track {
                 db.flush().map_err(fmt)?;
             }
-            print_recall_hits(&hits, format);
+            print_recall_hits(&resp.hits, format);
+            // Phase 12.8: if the max_bytes budget cut anything, say
+            // so on stderr so pipelines / scripts know the result is
+            // bounded. The stdout format stays unchanged so existing
+            // parsers keep working.
+            if resp.truncated {
+                eprintln!(
+                    "(truncated: hits dropped by --max-bytes; rerun with a larger \
+                     budget or smaller --top-k to see more)"
+                );
+            }
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
         Command::Update {

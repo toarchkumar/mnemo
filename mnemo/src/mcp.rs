@@ -372,7 +372,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear.",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -382,6 +382,7 @@ fn tools_list() -> Value {
                         "types": { "type": "array", "items": { "type": "string" } },
                         "agent": { "type": "string" },
                         "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" },
+                        "max_bytes": { "type": "integer", "minimum": 1, "description": "Phase 12.8 budget: stop adding hits once the UTF-8 bytes of their `content` fields would exceed N. Always returns at least the top hit. When set, the response is `{hits, truncated}` instead of a bare array." },
                         "filter": {
                             "type": "object",
                             "description": "Phase 12.6 pre-scoring filter. All conditions AND together. Shape: `{\"session_id\": \"...\", \"metadata\": {key: value | {\"$in\": [...]} | {\"$exists\": true} | {\"$gte\": n, \"$lte\": n}}}`.",
@@ -894,9 +895,15 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     if let Some(filter_obj) = args.get("filter").and_then(|v| v.as_object()) {
         req = req.filter(parse_mcp_filter(filter_obj)?);
     }
+    // Phase 12.8: `max_bytes` opts into the budgeted response shape.
+    let has_max_bytes = args.get("max_bytes").is_some();
+    if let Some(n) = args.get("max_bytes").and_then(|v| v.as_u64()) {
+        req = req.max_bytes(n as usize);
+    }
 
-    let hits = db.recall(&req).map_err(mnemo_err)?;
-    let out: Vec<Value> = hits
+    let resp = db.recall_budgeted(&req).map_err(mnemo_err)?;
+    let out: Vec<Value> = resp
+        .hits
         .into_iter()
         .map(|h| {
             let mut obj = memory_to_json(&h.memory);
@@ -907,7 +914,17 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
             obj
         })
         .collect();
-    Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()))
+    if has_max_bytes {
+        // Phase 12.8 wrapped shape so callers can tell whether the
+        // budget cut anything.
+        let wrapped = json!({
+            "hits": out,
+            "truncated": resp.truncated,
+        });
+        Ok(serde_json::to_string_pretty(&wrapped).unwrap_or_else(|_| "{}".into()))
+    } else {
+        Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()))
+    }
 }
 
 /// Phase 12.6: parse an MCP `filter` object into a [`crate::Filter`].

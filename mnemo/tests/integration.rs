@@ -3190,3 +3190,135 @@ fn filter_selective_still_returns_top_k_on_indexed_file() {
         );
     }
 }
+
+// ===========================================================================
+// Phase 12.8: budgeted recall (max_bytes + truncated flag)
+// ===========================================================================
+
+#[test]
+fn budgeted_recall_without_max_bytes_matches_plain_recall() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("b-noop.mnemo");
+    seed_filter_corpus(&path, "pw", 20);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(5)
+        .track_access(false);
+    let resp = db.recall_budgeted(&req).unwrap();
+    assert!(!resp.truncated, "no max_bytes → truncated must be false");
+    assert_eq!(resp.hits.len(), 5, "no budget → full top_k");
+}
+
+#[test]
+fn budgeted_recall_drops_hits_past_budget() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("b-cut.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    // Three memories, each with 100-byte content. A 220-byte budget
+    // keeps the first two (100 + 100 = 200 ≤ 220) and drops the third.
+    for i in 0..3 {
+        let mut v = vec![0.0; 4];
+        v[0] = 1.0; // all three identical vectors, so rank is ULID order.
+        let content = "x".repeat(100);
+        let mut m = Memory::new(content, MemoryType::Semantic, v).with_importance(0.5);
+        m.metadata.insert("idx".into(), json!(i as i64));
+        db.remember(m).unwrap();
+    }
+    db.flush().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .max_bytes(220);
+    let resp = db.recall_budgeted(&req).unwrap();
+    assert!(
+        resp.truncated,
+        "budget of 220 bytes should cut the 3rd 100-byte hit"
+    );
+    assert_eq!(resp.hits.len(), 2);
+}
+
+#[test]
+fn budgeted_recall_always_returns_top_hit_even_over_budget() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("b-one.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    // One oversized memory + one small one. A 10-byte budget cuts the
+    // small one but must keep the top-1 hit even though it alone is
+    // 500 bytes (>> 10).
+    db.remember(
+        Memory::new(
+            "y".repeat(500),
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        )
+        .with_importance(0.9),
+    )
+    .unwrap();
+    db.remember(
+        Memory::new("small", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)).with_importance(0.5),
+    )
+    .unwrap();
+    db.flush().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .max_bytes(10);
+    let resp = db.recall_budgeted(&req).unwrap();
+    assert_eq!(resp.hits.len(), 1, "top-1 must survive even if over budget");
+    assert!(resp.truncated, "the cut 'small' hit sets truncated=true");
+    assert_eq!(resp.hits[0].memory.content.len(), 500);
+}
+
+#[test]
+fn budgeted_recall_truncated_false_when_everything_fits() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("b-fits.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for _ in 0..3 {
+        db.remember(Memory::new(
+            "tiny",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+    }
+    db.flush().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .max_bytes(10_000);
+    let resp = db.recall_budgeted(&req).unwrap();
+    assert_eq!(resp.hits.len(), 3);
+    assert!(
+        !resp.truncated,
+        "budget larger than total content → not truncated"
+    );
+}
+
+#[test]
+fn recall_wrapper_still_returns_hits_vec() {
+    // The thin `recall` wrapper must keep its pre-12.8 signature
+    // (`Result<Vec<RecallResult>>`) so pre-12.8 callers don't break.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("b-wrapper.mnemo");
+    seed_filter_corpus(&path, "pw", 10);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(3)
+        .track_access(false)
+        .max_bytes(1); // aggressive budget
+    let hits = db.recall(&req).unwrap();
+    // `recall` discards the truncated flag; it still returns ≥1 hit
+    // (the always-keep-top-1 rule).
+    assert!(!hits.is_empty());
+    assert!(hits.len() <= 3);
+}

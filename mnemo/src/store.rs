@@ -374,6 +374,23 @@ pub struct RecallRequest {
     /// below `top_k`, Phase 12.1's widen-then-exact-scan logic kicks
     /// in so the result still carries up to `top_k` correct hits.
     pub filter: Filter,
+    /// Phase 12.8 post-scoring budget: stop adding hits once the UTF-8
+    /// bytes of their `content` fields (not the serialized record
+    /// body) would exceed this many bytes. `None` (default) means no
+    /// budget and every hit through `top_k` is returned. If the top-1
+    /// hit is already over budget it is still returned — callers that
+    /// need an absolute cap should also pre-size `top_k`.
+    ///
+    /// Counts only the UTF-8 `content` bytes so the number is stable
+    /// across the Rust / Python / CLI / MCP surfaces; the JSON or
+    /// MessagePack envelope is excluded. Roughly 4 bytes per BPE
+    /// token for English text — a 4 KB budget comfortably holds ~1K
+    /// tokens.
+    ///
+    /// Observable through [`RecallResponse::truncated`]
+    /// ([`Mnemo::recall_budgeted`]): `true` iff at least one scored
+    /// hit was dropped by this budget, `false` otherwise.
+    pub max_bytes: Option<usize>,
 }
 
 impl RecallRequest {
@@ -390,6 +407,7 @@ impl RecallRequest {
             n_rerank: None,
             track_access: true,
             filter: Filter::default(),
+            max_bytes: None,
         }
     }
 
@@ -397,6 +415,13 @@ impl RecallRequest {
     /// [`FilterTerm`] for term shapes.
     pub fn filter(mut self, filter: Filter) -> Self {
         self.filter = filter;
+        self
+    }
+
+    /// Phase 12.8: cap the total UTF-8 bytes of returned `content`
+    /// fields. See [`RecallRequest::max_bytes`].
+    pub fn max_bytes(mut self, n: usize) -> Self {
+        self.max_bytes = Some(n);
         self
     }
 
@@ -464,6 +489,21 @@ pub struct RecallResult {
     pub score: f32,
     /// The bare similarity component (before other signals).
     pub similarity: f32,
+}
+
+/// Phase 12.8 budgeted-recall envelope returned by
+/// [`Mnemo::recall_budgeted`]. Wraps the `Vec<RecallResult>` the
+/// legacy [`Mnemo::recall`] returns so callers can tell whether
+/// [`RecallRequest::max_bytes`] cut anything.
+#[derive(Clone, Debug)]
+pub struct RecallResponse {
+    /// Scored hits, best first, truncated to at most `top_k` and then
+    /// to fit the `max_bytes` budget if set.
+    pub hits: Vec<RecallResult>,
+    /// `true` iff the `max_bytes` budget dropped at least one hit
+    /// that would otherwise have been returned (i.e. the result is
+    /// shorter than what `top_k` alone would produce).
+    pub truncated: bool,
 }
 
 /// Summary statistics for a database.
@@ -2252,23 +2292,39 @@ impl Mnemo {
     }
 
     /// Phase-5 multi-signal recall under the v0.7.0 scoring-v2 formula
-    /// (see [`crate::ScoreWeights`]). Ranks by
-    /// `sim + max(sim, 0) · (β·recency + γ·(importance − 0.5) + δ·tanh(uses/5))`,
-    /// with type / agent / supersession / TTL filters applied before the
-    /// scorer. Updates `accessed_at` / `access_count` on the returned
-    /// memories (persisted on the next `flush`).
-    ///
-    /// When an ANN index has been built ([`Mnemo::build_index`]), recall
-    /// runs the tiered IVF→PQ→rerank pipeline. If the filters
-    /// (type / agent / supersession / TTL) reduce the ANN shortlist
-    /// below `top_k`, Phase 12.1's short-results-on-indexed-path fix
-    /// kicks in: the query is retried with `n_probe` and `n_rerank`
-    /// doubled, and if that would already touch half or more of the
-    /// live non-superseded records, the ANN pass is skipped for an
-    /// exact scan.
-    ///
-    /// Without an index, recall scores every live non-superseded memory.
+    /// (see [`crate::ScoreWeights`]). Thin wrapper over
+    /// [`Mnemo::recall_budgeted`] that drops the `truncated` flag;
+    /// use the budgeted form if you need to know whether
+    /// [`RecallRequest::max_bytes`] cut anything.
     pub fn recall(&mut self, req: &RecallRequest) -> Result<Vec<RecallResult>> {
+        Ok(self.recall_budgeted(req)?.hits)
+    }
+
+    /// Phase 12.8 budgeted recall: scoring v2 (see [`crate::ScoreWeights`])
+    /// with an optional UTF-8-content byte cap. Ranks by
+    /// `sim + max(sim, 0) · (β·recency + γ·(importance − 0.5) + δ·tanh(uses/5))`,
+    /// with type / agent / supersession / TTL filters and the 12.6
+    /// `Filter` applied before the scorer. Updates `accessed_at` /
+    /// `access_count` on the returned memories (persisted on the next
+    /// `flush`).
+    ///
+    /// When an ANN index has been built ([`Mnemo::build_index`]),
+    /// recall runs the tiered IVF→PQ→rerank pipeline. If the filters
+    /// (type / agent / supersession / TTL / 12.6) reduce the ANN
+    /// shortlist below `top_k`, Phase 12.1's short-results-on-indexed-
+    /// path fix kicks in: the query is retried with `n_probe` and
+    /// `n_rerank` doubled, and if that would already touch half or
+    /// more of the live non-superseded records, the ANN pass is
+    /// skipped for an exact scan. Without an index, recall scores
+    /// every live non-superseded memory.
+    ///
+    /// Phase 12.8: after `top_k` is applied, if
+    /// [`RecallRequest::max_bytes`] is set, hits are dropped in rank
+    /// order once the running sum of `content` UTF-8 bytes would
+    /// exceed the budget. The top-1 hit is always kept even if it
+    /// alone exceeds the budget. [`RecallResponse::truncated`] is
+    /// `true` iff at least one hit was dropped by the budget.
+    pub fn recall_budgeted(&mut self, req: &RecallRequest) -> Result<RecallResponse> {
         if req.query.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -2357,7 +2413,43 @@ impl Mnemo {
                 self.dirty_catalog = true;
             }
         }
-        Ok(scored)
+
+        // Phase 12.8: apply the `max_bytes` budget *after* tracking has
+        // seen the full top-k list. Access stats record what the scorer
+        // chose; the byte budget shouldn't suppress the signal.
+        let truncated = if let Some(budget) = req.max_bytes {
+            let orig_len = scored.len();
+            let mut running = 0usize;
+            let mut cut_at: Option<usize> = None;
+            for (i, r) in scored.iter().enumerate() {
+                let w = r.memory.content.len();
+                if i == 0 {
+                    // Always keep the top hit, even if it's over budget
+                    // on its own. Avoid "I asked for top_k results and
+                    // got zero" when a single memory exceeds the cap.
+                    running += w;
+                    continue;
+                }
+                if running.saturating_add(w) > budget {
+                    cut_at = Some(i);
+                    break;
+                }
+                running += w;
+            }
+            if let Some(idx) = cut_at {
+                scored.truncate(idx);
+                scored.len() < orig_len
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Ok(RecallResponse {
+            hits: scored,
+            truncated,
+        })
     }
 
     // --- approximate index ------------------------------------------------

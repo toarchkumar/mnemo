@@ -81,7 +81,8 @@ pub use result_cache::{
 };
 pub use session::{Role, Session, Turn};
 pub use store::{
-    CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResult, SnapshotInfo, Stats,
+    CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResponse, RecallResult, SnapshotInfo,
+    Stats,
 };
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.

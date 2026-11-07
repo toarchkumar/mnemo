@@ -8,6 +8,58 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added — PR 12.8: budgeted recall (`max_bytes`)
+
+`RecallRequest::max_bytes(n)` caps the total UTF-8 bytes of the
+`content` fields returned by one recall. Hits are dropped in rank
+order once the running sum would exceed `n`. The top-1 hit is
+**always** returned, even if it alone exceeds the budget — callers
+that need a strict cap should also pre-size `top_k`. The budget
+counts only `content` bytes so the number is identical across the
+Rust / Python / CLI / MCP surfaces (no JSON or MessagePack envelope,
+no metadata). English text runs roughly 4 bytes per BPE token.
+
+**New Rust API:** `Mnemo::recall_budgeted(req) -> Result<RecallResponse>`.
+`RecallResponse { hits: Vec<RecallResult>, truncated: bool }` — the
+`truncated` flag is `true` iff the budget dropped at least one
+hit. The pre-12.8 `Mnemo::recall(req) -> Result<Vec<RecallResult>>`
+is now a thin wrapper that discards the flag, so every pre-12.8
+caller stays source-compatible.
+
+**Surfaces:**
+* **Python:** `db.recall(..., max_bytes=N)` and
+  `db.recall_text(..., max_bytes=N)`. Without `max_bytes` the return
+  value is still a `list[dict]` (unchanged); with `max_bytes` it
+  wraps as `{"hits": [...], "truncated": bool}`.
+* **CLI:** `mnemo recall ... --max-bytes N`. The hit stdout format
+  is unchanged; a trailing `"(truncated: hits dropped by
+  --max-bytes; rerun with a larger budget or smaller --top-k to see
+  more)"` line goes to stderr whenever the budget cut anything.
+* **MCP:** `recall` tool gains `max_bytes` (positive integer). When
+  set, the response is `{hits, truncated}` instead of the bare JSON
+  array of hits, mirroring the Python shape.
+
+**MMR (`mmr_lambda`) — deferred.** The DISPATCH gated the optional
+MMR diversity knob on a ranking_v2 harness check ("hit@1 drops by no
+more than 0.02"). The harness isn't wired for an MMR variant yet,
+so I'm leaving MMR out of v0.8.0 per the planner's instruction
+("otherwise leave it out and say so"). The budget code is already
+structured so a future `recall_budgeted` can re-rank hits with an
+MMR pass before truncating — the API knob can land in a later PR
+after the harness run.
+
+The essence render (12.7) is specified to reuse this same budget
+code — it will call `recall_budgeted` directly or re-use the
+`max_bytes` plumbing. No cross-PR coupling in v0.8.0.
+
+**Tests.** 86 → 91 integration tests pass (5 new):
+`budgeted_recall_without_max_bytes_matches_plain_recall`,
+`budgeted_recall_drops_hits_past_budget`,
+`budgeted_recall_always_returns_top_hit_even_over_budget`,
+`budgeted_recall_truncated_false_when_everything_fits`,
+`recall_wrapper_still_returns_hits_vec` (checks the shim keeps
+pre-12.8 callers source-compatible).
+
 ### Added — PR 12.6: filtered recall
 
 `RecallRequest::filter(Filter)` restricts candidates before scoring.
