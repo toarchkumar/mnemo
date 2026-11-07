@@ -37,7 +37,7 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, WriteOutcome,
+    self, Filter, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, WriteOutcome,
     MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
     MNEMO_META_UPDATED_AT,
 };
@@ -367,6 +367,13 @@ pub struct RecallRequest {
     /// observation to perturb the database. With `false`, recall does not
     /// dirty the catalog and the next `flush` is a no-op.
     pub track_access: bool,
+    /// Phase 12.6 pre-scoring filter: `session_id` + AND-ed metadata
+    /// conditions applied before the candidate is scored. Default is
+    /// [`Filter::default`] (no constraints). When the ANN index is on
+    /// and this filter is selective enough to starve the shortlist
+    /// below `top_k`, Phase 12.1's widen-then-exact-scan logic kicks
+    /// in so the result still carries up to `top_k` correct hits.
+    pub filter: Filter,
 }
 
 impl RecallRequest {
@@ -382,7 +389,15 @@ impl RecallRequest {
             n_probe: None,
             n_rerank: None,
             track_access: true,
+            filter: Filter::default(),
         }
+    }
+
+    /// Phase 12.6: attach a pre-scoring filter. See [`Filter`] and
+    /// [`FilterTerm`] for term shapes.
+    pub fn filter(mut self, filter: Filter) -> Self {
+        self.filter = filter;
+        self
     }
 
     /// Build a request by embedding `query_text` with the supplied
@@ -2215,6 +2230,12 @@ impl Mnemo {
                 if !visible {
                     continue;
                 }
+            }
+            // Phase 12.6: pre-scoring filter (session_id + metadata
+            // conditions). Cheap when `req.filter.is_empty()`; the
+            // filter struct's `matches` is a short-circuit AND.
+            if !req.filter.is_empty() && !req.filter.matches(&m) {
+                continue;
             }
             let sim = memory::similarity(req.metric, &req.query, &m.vector);
             let age_secs = (now - m.created_at) as f32;

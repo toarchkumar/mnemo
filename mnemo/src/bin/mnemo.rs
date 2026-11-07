@@ -325,6 +325,24 @@ enum Command {
         /// command can run alongside a writer holding the exclusive lock.
         #[arg(long)]
         no_track: bool,
+        /// Phase 12.6: restrict recall to this session_id.
+        #[arg(long)]
+        session: Option<String>,
+        /// Phase 12.6: repeatable metadata filter, applied before
+        /// scoring. Shorthand forms, matched left-to-right:
+        ///
+        /// * `key=value`           — metadata[key] equals value
+        /// * `key:exists`          — metadata[key] is present
+        /// * `key:in=a,b,c`        — metadata[key] is one of the comma-split values
+        /// * `key:gte=NUM` / `key:lte=NUM` — numeric lower / upper bound
+        ///
+        /// Values are parsed as JSON when the leading char is one of
+        /// `[`, `{`, `"`, `-`, `0..9`, `t`, `f`, or `n` (true / false /
+        /// null); otherwise treated as a string. Multiple `--filter`s
+        /// AND together. For complex / nested filters, use the Python
+        /// or MCP APIs.
+        #[arg(long = "filter", value_name = "EXPR")]
+        filter: Vec<String>,
         /// Embedder command for `--text` (same contract as
         /// `mnemo remember --embed-cmd`). Ignored when `--query` /
         /// `--query-file` is used.
@@ -674,6 +692,82 @@ fn parse_query_text(text: &str) -> std::result::Result<Vec<f32>, String> {
 
 fn parse_ulid(s: &str) -> std::result::Result<Ulid, String> {
     Ulid::from_string(s.trim()).map_err(|e| format!("bad ULID '{s}': {e}"))
+}
+
+/// Phase 12.6: parse one `--filter` expression and append it to `f`.
+///
+/// Grammar (left-to-right first match wins):
+///
+/// * `key:exists`           → [`FilterTerm::Exists`]
+/// * `key:in=a,b,c`         → [`FilterTerm::In`] over the comma-split values
+/// * `key:gte=NUM`          → [`FilterTerm::Range`] with `min = Some(NUM)`
+/// * `key:lte=NUM`          → [`FilterTerm::Range`] with `max = Some(NUM)`
+/// * `key=value`            → [`FilterTerm::Eq`] with the value parsed below
+///
+/// Values are tried as JSON first (so numbers, booleans, null, arrays
+/// and quoted strings round-trip through serde cleanly); anything else
+/// is treated as a plain string.
+fn parse_filter_expr(
+    expr: &str,
+    f: mnemo_engine::Filter,
+) -> std::result::Result<mnemo_engine::Filter, String> {
+    // `key:exists` — no `=` at all.
+    if let Some(key) = expr.strip_suffix(":exists") {
+        if key.is_empty() {
+            return Err(format!("empty key in --filter '{expr}'"));
+        }
+        return Ok(f.metadata_exists(key.to_string()));
+    }
+    // Everything else needs a `=`.
+    let (lhs, rhs) = expr
+        .split_once('=')
+        .ok_or_else(|| format!("bad --filter '{expr}': expected key=value or key:op=value"))?;
+
+    // Split off a `:op` suffix on the lhs (e.g. `score:gte`).
+    let (key, op) = match lhs.split_once(':') {
+        Some((k, o)) => (k, Some(o)),
+        None => (lhs, None),
+    };
+    if key.is_empty() {
+        return Err(format!("empty key in --filter '{expr}'"));
+    }
+
+    match op {
+        Some("in") => {
+            let values: Vec<serde_json::Value> = rhs
+                .split(',')
+                .map(|s| parse_filter_value(s.trim()))
+                .collect();
+            Ok(f.metadata_in(key.to_string(), values))
+        }
+        Some("gte") => {
+            let n: f64 = rhs
+                .parse()
+                .map_err(|e| format!("bad :gte number in --filter '{expr}': {e}"))?;
+            Ok(f.metadata_range(key.to_string(), Some(n), None))
+        }
+        Some("lte") => {
+            let n: f64 = rhs
+                .parse()
+                .map_err(|e| format!("bad :lte number in --filter '{expr}': {e}"))?;
+            Ok(f.metadata_range(key.to_string(), None, Some(n)))
+        }
+        Some(other) => Err(format!(
+            "unknown operator ':{other}' in --filter '{expr}' (want :exists, :in, :gte, :lte)"
+        )),
+        None => Ok(f.metadata_eq(key.to_string(), parse_filter_value(rhs))),
+    }
+}
+
+/// Parse one filter value. Try JSON first so numbers, booleans, null and
+/// quoted strings deserialize cleanly; otherwise fall back to a plain
+/// string.
+fn parse_filter_value(s: &str) -> serde_json::Value {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+        v
+    } else {
+        serde_json::Value::String(s.to_string())
+    }
 }
 
 fn parse_memory_types(s: &str) -> std::result::Result<Vec<MemoryType>, String> {
@@ -1425,6 +1519,8 @@ fn run() -> std::result::Result<(), String> {
             n_probe,
             n_rerank,
             no_track,
+            session,
+            filter,
             embed_cmd,
             embed_name,
             embed_normalize,
@@ -1523,6 +1619,17 @@ fn run() -> std::result::Result<(), String> {
             if let Some(n) = n_rerank {
                 req = req.n_rerank(n);
             }
+            // Phase 12.6: parse --session and the repeatable --filter
+            // expressions into a single `Filter`. Empty filter == no
+            // constraints.
+            let mut f = mnemo_engine::Filter::default();
+            if let Some(s) = session {
+                f = f.with_session(s);
+            }
+            for expr in filter {
+                f = parse_filter_expr(&expr, f)?;
+            }
+            req = req.filter(f);
 
             // If the vector branch didn't pre-open, open now with the
             // same fallback semantics.

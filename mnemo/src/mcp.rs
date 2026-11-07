@@ -372,7 +372,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Does not track access on this handle.",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -381,7 +381,16 @@ fn tools_list() -> Value {
                         "top_k": { "type": "integer", "default": 10 },
                         "types": { "type": "array", "items": { "type": "string" } },
                         "agent": { "type": "string" },
-                        "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" }
+                        "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" },
+                        "filter": {
+                            "type": "object",
+                            "description": "Phase 12.6 pre-scoring filter. All conditions AND together. Shape: `{\"session_id\": \"...\", \"metadata\": {key: value | {\"$in\": [...]} | {\"$exists\": true} | {\"$gte\": n, \"$lte\": n}}}`.",
+                            "properties": {
+                                "session_id": { "type": "string" },
+                                "metadata": { "type": "object" }
+                            },
+                            "additionalProperties": false
+                        }
                     },
                     "additionalProperties": false
                 }
@@ -876,6 +885,15 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     if let Some(agent) = args.get("agent").and_then(|v| v.as_str()) {
         req = req.agent(agent.to_string());
     }
+    // Phase 12.6: filter object. Shape:
+    //   { "session_id": "...",
+    //     "metadata": { "k": v,
+    //                   "k2": {"$in": [v1, v2]},
+    //                   "k3": {"$exists": true},
+    //                   "k4": {"$gte": 5, "$lte": 10} } }
+    if let Some(filter_obj) = args.get("filter").and_then(|v| v.as_object()) {
+        req = req.filter(parse_mcp_filter(filter_obj)?);
+    }
 
     let hits = db.recall(&req).map_err(mnemo_err)?;
     let out: Vec<Value> = hits
@@ -890,6 +908,107 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         })
         .collect();
     Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Phase 12.6: parse an MCP `filter` object into a [`crate::Filter`].
+///
+/// Values under `metadata.<key>`:
+/// * plain scalar / array / string → [`crate::FilterTerm::Eq`]
+/// * `{"$exists": true}` → [`crate::FilterTerm::Exists`]
+/// * `{"$in": [...]}` → [`crate::FilterTerm::In`]
+/// * `{"$gte": n, "$lte": n}` → [`crate::FilterTerm::Range`] (either bound
+///   optional)
+/// * `{"$exists": false}` is rejected (use the absence of a term instead)
+fn parse_mcp_filter(
+    obj: &serde_json::Map<String, Value>,
+) -> std::result::Result<crate::Filter, RpcError> {
+    let mut f = crate::Filter::default();
+    if let Some(sid) = obj.get("session_id").and_then(|v| v.as_str()) {
+        f = f.with_session(sid.to_string());
+    }
+    if let Some(meta) = obj.get("metadata").and_then(|v| v.as_object()) {
+        for (k, v) in meta {
+            match v {
+                // Nested operator object.
+                Value::Object(ops) => {
+                    for (op_key, op_val) in ops {
+                        match op_key.as_str() {
+                            "$exists" => match op_val.as_bool() {
+                                Some(true) => {
+                                    f = f.metadata_exists(k.clone());
+                                }
+                                Some(false) => {
+                                    return Err(RpcError::new(
+                                        INVALID_PARAMS,
+                                        format!(
+                                            "filter.metadata.{k}.$exists=false isn't supported; \
+                                             drop the filter term instead"
+                                        ),
+                                    ));
+                                }
+                                None => {
+                                    return Err(RpcError::new(
+                                        INVALID_PARAMS,
+                                        format!("filter.metadata.{k}.$exists must be a boolean"),
+                                    ));
+                                }
+                            },
+                            "$in" => {
+                                let arr = op_val.as_array().ok_or_else(|| {
+                                    RpcError::new(
+                                        INVALID_PARAMS,
+                                        format!("filter.metadata.{k}.$in must be an array"),
+                                    )
+                                })?;
+                                f = f.metadata_in(k.clone(), arr.clone());
+                            }
+                            "$gte" | "$lte" => {
+                                let mut min = None;
+                                let mut max = None;
+                                for (bound, bound_val) in ops {
+                                    let n = bound_val.as_f64().ok_or_else(|| {
+                                        RpcError::new(
+                                            INVALID_PARAMS,
+                                            format!("filter.metadata.{k}.{bound} must be a number"),
+                                        )
+                                    })?;
+                                    match bound.as_str() {
+                                        "$gte" => min = Some(n),
+                                        "$lte" => max = Some(n),
+                                        other => {
+                                            return Err(RpcError::new(
+                                                INVALID_PARAMS,
+                                                format!(
+                                                    "filter.metadata.{k}: unsupported range \
+                                                     operator '{other}' (want $gte, $lte)"
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                }
+                                f = f.metadata_range(k.clone(), min, max);
+                                break; // All operator entries consumed in one pass.
+                            }
+                            other => {
+                                return Err(RpcError::new(
+                                    INVALID_PARAMS,
+                                    format!(
+                                        "filter.metadata.{k}: unknown operator '{other}' \
+                                         (want $exists, $in, $gte, $lte)"
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+                // Plain scalar / array / string → equality.
+                other => {
+                    f = f.metadata_eq(k.clone(), other.clone());
+                }
+            }
+        }
+    }
+    Ok(f)
 }
 
 fn tool_forget(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {

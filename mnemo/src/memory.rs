@@ -328,6 +328,162 @@ pub enum WriteOutcome {
     Updated,
 }
 
+// ---------------------------------------------------------------------------
+// Phase 12.6: recall filters (session_id + per-metadata-key conditions)
+// ---------------------------------------------------------------------------
+
+/// One AND-ed condition applied to a candidate memory's metadata during
+/// filtered recall (Phase 12.6). Terms are combined conjunctively — a
+/// memory passes the filter only if *every* term evaluates true against
+/// its `metadata` map. See [`Filter`] for the surface API.
+///
+/// Values use `serde_json::Value` so the same term shape serializes
+/// cleanly through the MCP / Python / CLI bridges without a parallel
+/// enum per surface.
+#[derive(Debug, Clone)]
+pub enum FilterTerm {
+    /// The memory's `metadata[key]` must be set to any value.
+    Exists(String),
+    /// `metadata[key]` must equal this JSON value (strict JSON equality:
+    /// strings compare case-sensitively, numbers compare as f64).
+    Eq(String, Value),
+    /// `metadata[key]` must equal one of these JSON values.
+    In(String, Vec<Value>),
+    /// `metadata[key]` must be a number in `[min, max]` (inclusive on
+    /// both ends; `None` on either bound means "no bound on that side").
+    /// A non-numeric metadata value fails the term.
+    Range {
+        /// Metadata key.
+        key: String,
+        /// Lower bound (inclusive) — `None` means unbounded below.
+        min: Option<f64>,
+        /// Upper bound (inclusive) — `None` means unbounded above.
+        max: Option<f64>,
+    },
+}
+
+/// Pre-scoring filter applied by [`crate::Mnemo::recall`] (Phase 12.6).
+///
+/// `session_id` restricts candidates to a single session (when the
+/// memory's `session_id` is set). The `terms` are AND-ed metadata
+/// conditions evaluated against each candidate's `metadata` map; see
+/// [`FilterTerm`] for the shapes.
+///
+/// When an ANN index is present, the filter is applied *after* the ANN
+/// shortlist step, so a selective filter can starve the result below
+/// `top_k`. Recall handles that automatically via the Phase 12.1
+/// short-results-on-indexed-path fix (widen 2×, then exact scan).
+#[derive(Debug, Clone, Default)]
+pub struct Filter {
+    /// Only candidates whose `Memory.session_id` equals this value.
+    /// Candidates without a session_id are excluded when this is set.
+    pub session_id: Option<String>,
+    /// AND-ed metadata conditions. Empty → no metadata constraints.
+    pub terms: Vec<FilterTerm>,
+}
+
+impl Filter {
+    /// Builder helper: a filter that keeps only memories in `session`.
+    pub fn new_session(session: impl Into<String>) -> Self {
+        Self {
+            session_id: Some(session.into()),
+            terms: Vec::new(),
+        }
+    }
+
+    /// Restrict to one session_id (builder form).
+    pub fn with_session(mut self, session: impl Into<String>) -> Self {
+        self.session_id = Some(session.into());
+        self
+    }
+
+    /// Require `metadata[key]` to exist (any value).
+    pub fn metadata_exists(mut self, key: impl Into<String>) -> Self {
+        self.terms.push(FilterTerm::Exists(key.into()));
+        self
+    }
+
+    /// Require `metadata[key]` to equal `value`.
+    pub fn metadata_eq(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.terms.push(FilterTerm::Eq(key.into(), value));
+        self
+    }
+
+    /// Require `metadata[key]` to be one of `values`.
+    pub fn metadata_in(mut self, key: impl Into<String>, values: Vec<Value>) -> Self {
+        self.terms.push(FilterTerm::In(key.into(), values));
+        self
+    }
+
+    /// Require `metadata[key]` to be a number in `[min, max]`.
+    pub fn metadata_range(
+        mut self,
+        key: impl Into<String>,
+        min: Option<f64>,
+        max: Option<f64>,
+    ) -> Self {
+        self.terms.push(FilterTerm::Range {
+            key: key.into(),
+            min,
+            max,
+        });
+        self
+    }
+
+    /// `true` iff the filter has no terms and no `session_id`. The
+    /// recall hot path uses this to skip the per-candidate filter
+    /// check entirely.
+    pub fn is_empty(&self) -> bool {
+        self.session_id.is_none() && self.terms.is_empty()
+    }
+
+    /// Evaluate the filter against one memory. Returns `true` if the
+    /// memory passes every term.
+    pub fn matches(&self, m: &Memory) -> bool {
+        if let Some(s) = &self.session_id {
+            match &m.session_id {
+                Some(ms) if ms == s => {}
+                _ => return false,
+            }
+        }
+        for term in &self.terms {
+            if !term_matches(term, &m.metadata) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn term_matches(term: &FilterTerm, metadata: &Map<String, Value>) -> bool {
+    match term {
+        FilterTerm::Exists(key) => metadata.contains_key(key),
+        FilterTerm::Eq(key, v) => metadata.get(key).is_some_and(|got| values_equal(got, v)),
+        FilterTerm::In(key, options) => metadata
+            .get(key)
+            .is_some_and(|got| options.iter().any(|opt| values_equal(got, opt))),
+        FilterTerm::Range { key, min, max } => metadata
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .is_some_and(|n| min.map_or(true, |m_| n >= m_) && max.map_or(true, |m_| n <= m_)),
+    }
+}
+
+/// JSON value equality for filter terms. serde_json's `Value: PartialEq`
+/// compares numbers by exact representation (integer vs float). The
+/// filter surface should treat `5` and `5.0` as equal, so we compare
+/// numbers through `as_f64` when both sides are numbers; everything
+/// else falls back to structural equality.
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => match (x.as_f64(), y.as_f64()) {
+            (Some(xf), Some(yf)) => (xf - yf).abs() < f64::EPSILON,
+            _ => x == y,
+        },
+        (x, y) => x == y,
+    }
+}
+
 /// Distance/similarity metric for vector comparison.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Metric {

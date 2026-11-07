@@ -8,6 +8,65 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added — PR 12.6: filtered recall
+
+`RecallRequest::filter(Filter)` restricts candidates before scoring.
+A `Filter` combines an optional `session_id` with a conjunction of
+per-metadata-key terms:
+
+* `Exists(key)` — `metadata[key]` must be present
+* `Eq(key, value)` — strict JSON equality (numbers compare as f64 so
+  `5` and `5.0` match)
+* `In(key, [v1, v2, …])` — `metadata[key]` must be one of the listed
+  values
+* `Range { key, min, max }` — `metadata[key]` must be a number in
+  `[min, max]` (either bound optional)
+
+Supersession + 12.6 compose cleanly: a superseded record never survives
+to the filter stage, and a filter-starved ANN shortlist reuses Phase
+12.1's widen-then-exact-scan path so a selective filter still returns
+`top_k` correct hits on an indexed file.
+
+Surfaces across every binding:
+
+* **Rust:** `Filter` / `FilterTerm` with a builder (`.metadata_eq`,
+  `.metadata_in`, `.metadata_exists`, `.metadata_range`,
+  `.with_session`).
+* **Python:** `db.recall(..., filter={...})` and
+  `db.recall_text(..., filter={...})` accept a MongoDB-shaped dict:
+  ```python
+  filter={
+      "session_id": "sess-1",
+      "metadata": {
+          "area": "onboarding",
+          "tag":  {"$in": ["a", "b"]},
+          "notes": {"$exists": True},
+          "score": {"$gte": 5, "$lte": 10},
+      },
+  }
+  ```
+* **CLI:** a repeatable `--filter` flag on `mnemo recall` with four
+  shorthand forms (`key=value`, `key:exists`, `key:in=a,b,c`,
+  `key:gte=NUM`, `key:lte=NUM`); plain values are parsed as JSON when
+  they look like JSON, otherwise treated as strings. `--session` is a
+  convenience for the `session_id` filter.
+* **MCP:** a new `filter` object on the `recall` tool, same shape as
+  the Python kwarg.
+
+12.7 relies on this to select `_mnemo.kind` / `_mnemo.thread` on the
+thread archive; nothing in v0.8.0 depends on it yet.
+
+**Tests.** 80 → 86 integration tests pass (6 new:
+`filter_metadata_equality_restricts_candidates`,
+`filter_in_matches_any_listed_value`,
+`filter_range_matches_inclusive_bounds`,
+`filter_exists_requires_key_presence`,
+`filter_session_id_only_returns_matching_memories`,
+`filter_selective_still_returns_top_k_on_indexed_file` — the last one
+runs a 4%-selective filter against a 1 000-memory indexed corpus and
+asserts the result still carries `top_k=10` correct hits via the
+widen-then-exact-scan fix).
+
 ### Added — PR 12.1: edit in place + keyed supersession
 
 **Two new write verbs** on top of `remember`:

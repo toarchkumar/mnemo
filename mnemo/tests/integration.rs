@@ -5,11 +5,12 @@
 //! (secure) parameters.
 
 use mnemo_engine::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryPatch, MemoryType,
-    Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights, SemanticCachePutOpts, Turn,
-    WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD, MNEMO_META_INVALID_AT, MNEMO_META_KEY,
-    MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, Filter, KdfParams, Memory, MemoryPatch,
+    MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights,
+    SemanticCachePutOpts, Turn, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD, MNEMO_META_INVALID_AT,
+    MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
 };
+use serde_json::json;
 use tempfile::tempdir;
 
 /// Config with cheap KDF params for fast tests.
@@ -2962,7 +2963,8 @@ fn file_written_with_12_1_opens_under_v0_7_layout() {
         db.flush().unwrap();
     }
 
-    // Read the header directly and assert the format version byte.
+    // (see the inline note below the test setup for how we validate
+    // the on-disk layout stayed at v8.)
     // Mnemo uses format version `v8` since Phase FIX-1; `_mnemo.*`
     // metadata rides along as ordinary `Memory.metadata` serde, so a
     // v0.7.0 reader against the same on-disk bytes is unchanged.
@@ -2987,4 +2989,204 @@ fn file_written_with_12_1_opens_under_v0_7_layout() {
         has_superseded_mark,
         "the superseded record's `_mnemo.superseded_by` marker should survive flush + reopen"
     );
+}
+
+// ===========================================================================
+// Phase 12.6: filtered recall (session_id + metadata conditions)
+// ===========================================================================
+
+/// Helper that seeds `path` with `n` memories carrying predictable
+/// `metadata.idx` (the integer index) and alternating `metadata.area`
+/// / `metadata.tag` values. The vector is a simple axis spike keyed
+/// off `idx % 4` so similarity ranks the first N uniformly.
+fn seed_filter_corpus(path: &std::path::Path, pp: &str, n: usize) -> Vec<mnemo_engine::Ulid> {
+    let mut db = Mnemo::create(path, pp, fast_cfg(4)).unwrap();
+    let mut ids = Vec::with_capacity(n);
+    for i in 0..n {
+        let axis = i % 4;
+        let mut v = vec![0.0; 4];
+        v[axis] = 1.0;
+        let mut m = Memory::new(format!("entry-{i}"), MemoryType::Semantic, v)
+            .with_importance(0.5)
+            .with_agent("alice");
+        if i % 10 == 0 {
+            m = m.with_session(format!("sess-{}", i % 3));
+        }
+        m.metadata.insert("idx".into(), json!(i as i64));
+        m.metadata.insert(
+            "area".into(),
+            json!(if i % 2 == 0 { "onboarding" } else { "misc" }),
+        );
+        m.metadata.insert(
+            "tag".into(),
+            json!(match i % 5 {
+                0 => "alpha",
+                1 => "beta",
+                2 => "gamma",
+                3 => "delta",
+                _ => "epsilon",
+            }),
+        );
+        m.metadata.insert("score".into(), json!(i % 100));
+        if i % 7 == 0 {
+            m.metadata.insert("notes".into(), json!("has-notes"));
+        }
+        ids.push(db.remember(m).unwrap());
+    }
+    db.flush().unwrap();
+    drop(db); // release the exclusive flock before the test re-opens
+    ids
+}
+
+#[test]
+fn filter_metadata_equality_restricts_candidates() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-eq.mnemo");
+    seed_filter_corpus(&path, "pw", 50);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::default().metadata_eq("area", json!("onboarding")));
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty(), "should match at least one");
+    for h in &hits {
+        assert_eq!(
+            h.memory.metadata.get("area").and_then(|v| v.as_str()),
+            Some("onboarding")
+        );
+    }
+}
+
+#[test]
+fn filter_in_matches_any_listed_value() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-in.mnemo");
+    seed_filter_corpus(&path, "pw", 50);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::default().metadata_in("tag", vec![json!("alpha"), json!("beta")]));
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty());
+    for h in &hits {
+        let tag = h.memory.metadata.get("tag").and_then(|v| v.as_str());
+        assert!(tag == Some("alpha") || tag == Some("beta"), "tag={tag:?}");
+    }
+}
+
+#[test]
+fn filter_range_matches_inclusive_bounds() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-range.mnemo");
+    seed_filter_corpus(&path, "pw", 50);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::default().metadata_range("score", Some(10.0), Some(20.0)));
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty());
+    for h in &hits {
+        let n = h.memory.metadata.get("score").and_then(|v| v.as_f64());
+        let n = n.expect("score should be numeric");
+        assert!((10.0..=20.0).contains(&n), "score {n} out of range");
+    }
+}
+
+#[test]
+fn filter_exists_requires_key_presence() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-exists.mnemo");
+    seed_filter_corpus(&path, "pw", 50);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::default().metadata_exists("notes"));
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty());
+    for h in &hits {
+        assert!(h.memory.metadata.contains_key("notes"));
+    }
+    // Sanity: without the filter, the "notes" subset is strictly smaller
+    // than the total (we tag only every 7th memory).
+    let req_all = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false);
+    let all_hits = db.recall(&req_all).unwrap();
+    assert!(hits.len() < all_hits.len());
+}
+
+#[test]
+fn filter_session_id_only_returns_matching_memories() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-sess.mnemo");
+    seed_filter_corpus(&path, "pw", 60);
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::new_session("sess-1"));
+    let hits = db.recall(&req).unwrap();
+    assert!(!hits.is_empty());
+    for h in &hits {
+        assert_eq!(
+            h.memory.session_id.as_deref(),
+            Some("sess-1"),
+            "session filter must restrict to one session_id",
+        );
+    }
+}
+
+#[test]
+fn filter_selective_still_returns_top_k_on_indexed_file() {
+    // DISPATCH requirement: a filter that matches under ~5% of the
+    // corpus on an indexed file must still return `top_k` correct hits.
+    // We exercise the Phase 12.1 short-results-on-indexed-path widening
+    // logic through the 12.6 filter path.
+    //
+    // We use 1000 memories (fast enough for a unit test; the mechanism
+    // is identical to the 10K case) and a filter matching 40 of them.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("f-selective.mnemo");
+    let n = 1000;
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for i in 0..n {
+        let axis = i % 4;
+        let mut v = vec![0.0; 4];
+        v[axis] = 1.0;
+        let mut m = Memory::new(format!("m-{i}"), MemoryType::Semantic, v)
+            .with_importance(0.5)
+            .with_agent("alice");
+        // Only ~4% of memories get the rare marker.
+        if i % 25 == 0 {
+            m.metadata.insert("rare".into(), json!(true));
+        }
+        db.remember(m).unwrap();
+    }
+    db.build_index().unwrap();
+    db.flush().unwrap();
+    drop(db); // release the exclusive flock before the test re-opens
+
+    let mut db = Mnemo::open_read_only(&path, "pw").unwrap();
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .filter(Filter::default().metadata_exists("rare"));
+    let hits = db.recall(&req).unwrap();
+    assert_eq!(
+        hits.len(),
+        10,
+        "selective filter on an indexed file must still return top_k hits \
+         (widen-then-exact-scan); got {} hits",
+        hits.len()
+    );
+    for h in &hits {
+        assert!(
+            h.memory.metadata.contains_key("rare"),
+            "every returned hit should carry the `rare` marker"
+        );
+    }
 }

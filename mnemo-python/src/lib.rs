@@ -30,8 +30,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, KdfParams, Memory, MemoryPatch,
-    MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope, Ulid, WriteOutcome,
+    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, Filter as CoreFilter, KdfParams,
+    Memory, MemoryPatch, MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope,
+    Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -39,6 +40,101 @@ use mnemo_core::{
 /// Map a core error onto a Python exception.
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
+}
+
+/// Phase 12.6: parse a Python filter dict into a core [`CoreFilter`].
+///
+/// Shape (same as the MCP tool):
+/// ```python
+/// filter={
+///     "session_id": "sess-1",
+///     "metadata": {
+///         "area": "onboarding",                 # equality
+///         "tag":  {"$in": ["a", "b"]},
+///         "notes": {"$exists": True},
+///         "score": {"$gte": 5, "$lte": 10},
+///     },
+/// }
+/// ```
+fn filter_from_py_dict(d: &Bound<'_, PyDict>) -> PyResult<CoreFilter> {
+    let mut f = CoreFilter::default();
+    if let Some(v) = d.get_item("session_id")? {
+        let s: String = v.extract()?;
+        f = f.with_session(s);
+    }
+    if let Some(meta) = d.get_item("metadata")? {
+        let meta: Bound<'_, PyDict> = meta.downcast_into::<PyDict>().map_err(|_| {
+            PyTypeError::new_err("filter.metadata must be a dict")
+        })?;
+        for (k, v) in meta.iter() {
+            let key: String = k.extract()?;
+            // Nested operator dict? Extract and dispatch.
+            if let Ok(op_dict) = v.downcast::<PyDict>() {
+                let mut saw_known = false;
+                let mut min: Option<f64> = None;
+                let mut max: Option<f64> = None;
+                let mut range_pending = false;
+                for (ok, ov) in op_dict.iter() {
+                    let op: String = ok.extract()?;
+                    match op.as_str() {
+                        "$exists" => {
+                            saw_known = true;
+                            let b: bool = ov.extract()?;
+                            if b {
+                                f = f.metadata_exists(key.clone());
+                            } else {
+                                return Err(PyValueError::new_err(format!(
+                                    "filter.metadata.{key}.$exists=False isn't supported; \
+                                     drop the term instead"
+                                )));
+                            }
+                        }
+                        "$in" => {
+                            saw_known = true;
+                            let v_json = py_to_json(&ov)?;
+                            let arr = match v_json {
+                                serde_json::Value::Array(a) => a,
+                                _ => {
+                                    return Err(PyValueError::new_err(format!(
+                                        "filter.metadata.{key}.$in must be a list"
+                                    )));
+                                }
+                            };
+                            f = f.metadata_in(key.clone(), arr);
+                        }
+                        "$gte" => {
+                            saw_known = true;
+                            range_pending = true;
+                            min = Some(ov.extract()?);
+                        }
+                        "$lte" => {
+                            saw_known = true;
+                            range_pending = true;
+                            max = Some(ov.extract()?);
+                        }
+                        other => {
+                            return Err(PyValueError::new_err(format!(
+                                "filter.metadata.{key}: unknown operator '{other}' \
+                                 (want $exists, $in, $gte, $lte)"
+                            )));
+                        }
+                    }
+                }
+                if range_pending {
+                    f = f.metadata_range(key.clone(), min, max);
+                }
+                if !saw_known {
+                    // Empty operator dict — fall back to equality against
+                    // an empty dict (unlikely but well-defined).
+                    f = f.metadata_eq(key.clone(), py_to_json(&v)?);
+                }
+            } else {
+                // Plain scalar / list / string → equality.
+                f = f.metadata_eq(key.clone(), py_to_json(&v)?);
+            }
+        }
+    }
+    Ok(f)
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
@@ -627,7 +723,8 @@ impl Mnemo {
     /// unindexed recall scans every live memory exactly.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
-                        track_access=true, n_probe=None, n_rerank=None))]
+                        track_access=true, n_probe=None, n_rerank=None,
+                        filter=None))]
     fn recall_text(
         slf: Py<Self>,
         py: Python<'_>,
@@ -638,6 +735,7 @@ impl Mnemo {
         track_access: bool,
         n_probe: Option<usize>,
         n_rerank: Option<usize>,
+        filter: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Vec<PyObject>> {
         // PY-1 (R-001.11): take `slf: Py<Self>` so the Python-level
         // borrow drops before the embedder callback runs — same
@@ -669,6 +767,9 @@ impl Mnemo {
         }
         if let Some(n) = n_rerank {
             req = req.n_rerank(n);
+        }
+        if let Some(fd) = filter {
+            req = req.filter(filter_from_py_dict(&fd)?);
         }
         // PY-1 (R-001.11): release the GIL around the heavy recall
         // (ANN probe + rerank + per-hit decrypt). The subsequent
@@ -704,7 +805,8 @@ impl Mnemo {
     /// See [`recall_text`] for the full description.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
-                        track_access=true, n_probe=None, n_rerank=None))]
+                        track_access=true, n_probe=None, n_rerank=None,
+                        filter=None))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -715,6 +817,7 @@ impl Mnemo {
         track_access: bool,
         n_probe: Option<usize>,
         n_rerank: Option<usize>,
+        filter: Option<Bound<'_, PyDict>>,
     ) -> PyResult<Vec<PyObject>> {
         let mut req = RecallRequest::new(query)
             .top_k(top_k)
@@ -731,6 +834,9 @@ impl Mnemo {
         }
         if let Some(n) = n_rerank {
             req = req.n_rerank(n);
+        }
+        if let Some(fd) = filter {
+            req = req.filter(filter_from_py_dict(&fd)?);
         }
         // PY-1 (R-001.11): same GIL release as `recall_text`.
         let hits = {
