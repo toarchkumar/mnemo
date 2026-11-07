@@ -168,8 +168,10 @@ Rules:
   `remeasured` are current.
 - **Design principles (R-003.2, accepted 2026-11-06), on top of the
   single-file invariant:**
-  1. *Extract, don't re-summarize.* State is written as small discrete items
-     through deltas (add / update / resolve / remove). No API asks an LLM to
+  1. *Keep the raw flow; derive state by deltas.* A thread's turns are
+     archived losslessly (12.7). Anything derived from them (facts, essence
+     sections, timeline entries) is written as small discrete items through
+     deltas (add / update / resolve / remove / append). No API asks an LLM to
      rewrite a stored blob wholesale; that's where drift comes from.
   2. *Supersede, don't erase.* A newer version of a fact appends a new record
      and marks the old one invalid (`_mnemo.superseded_by`, `_mnemo.invalid_at`).
@@ -832,7 +834,8 @@ session, CLI call or hook can touch the file while it runs. Text mode needs a
 separate Python embedding process, and the MCP config holds the passphrase
 in plain text.
 
-**Order inside the phase:** 12.1 → 12.4 → 12.2 → 12.3 → 12.5. Shared access
+**Order inside the phase (revised 2026-11-06):** 12.1 → 12.6 → 12.8
+(v0.8.0) → 12.7 (v0.9.0) → 12.4 → 12.2 (v0.10.0) → 12.3 → 12.5. Shared access
 (12.4) must come before the auto-load hooks (12.2): a hook running `mnemo
 recall` while the MCP server holds the exclusive lock gets `Locked`
 (read-only shared locks are refused while an exclusive lock is held; see
@@ -876,6 +879,33 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   readable through `history(key)` (walk the chain) and survive
   `compact_file`. All in one flush. No format change: everything is
   `_mnemo.*` metadata.
+- **Additions (PLANNER-A covering lane B, 2026-11-06; final for DISPATCH):**
+  - **Identical writes are no-ops** (Mem0's NOOP). If a keyed write's
+    content, type, importance and user metadata equal the live version's,
+    return the live id. Don't append, don't mark anything, and don't dirty
+    the file. Retries and extractors that re-emit the same fact must not
+    grow the chain. Return whether a write was `added`, `superseded` or
+    `unchanged` (Rust enum; Python/MCP string).
+  - **Retention is named but deferred:** `history_keep` (keep the last N
+    superseded versions per key; default unlimited). It's a 12.5/Phase 7
+    follow-up; don't build it now.
+  - **Superseded-id set in memory:** the lazy key scan (above) also builds
+    the set of superseded ids. Recall drops them before decrypting
+    anything, and the set is maintained incrementally.
+  - **Short results on the indexed path:** recall already filters
+    `memory_types`/`agent_id`/expired *after* the ANN shortlist (store.rs
+    `recall`, the `entries` block). That can return fewer than `top_k` hits,
+    and supersession makes it more likely. Fix it here because 12.1 makes it
+    worse: if fewer than `top_k` candidates survive the filters and the
+    index has more, re-query with `n_rerank` doubled (and `n_probe` doubled
+    where that's set), and once that covers half the live memories, do an
+    exact scan. Test: an indexed file where 90% of memories are superseded
+    or filtered out still returns `top_k` hits, the correct ones.
+  - **Supersession by key needs the same scope.** A key identifies one slot
+    per `(agent_id, key)` for `Scope::Private` memories, and one slot per
+    `key` across the file for `Scope::Shared` ones (`Memory.scope`,
+    memory.rs). A private write never supersedes a shared one, and the
+    reverse is also true.
 
 ### 12.4 Shared access (several agents, sessions and tools on one file)
 - New `serve --mcp --shared` (consider making it the default later): the
@@ -911,6 +941,11 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   durable facts before context is lost; and a SKILL.md on when to
   remember, update (key) or recall. All hook calls are read-only or
   shared-mode, so they never collide with the server.
+- **Threads and essence (12.7(d), added 2026-11-06):** PreCompact and
+  SessionEnd also run `mnemo thread ingest --transcript "$transcript_path"
+  --thread <session or project thread>`, which is lossless and needs no
+  model. SessionStart (all sources, including `compact` and `resume`)
+  injects `mnemo essence --thread <id>` ahead of the recall.
 - **Dogfood it:** switch this repo's AGENTS.md workflow from
   `test/scripts/project_memory.py` to the plugin. Success criterion: the
   worker's dogfood entries happen without anyone asking.
@@ -941,92 +976,189 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
 
 ### 12.6 Filtered recall (R-001.14; spec in the 2026-11-01 REV-001 triage entry)
 A shared `Filter` (session_id, metadata equality / `$in` / ranges /
-key-exists), applied before top-k. 12.7 relies on it to select `_mnemo.kind`.
+key-exists), applied before top-k. 12.7 relies on it to select `_mnemo.kind`
+and `_mnemo.thread`. On the indexed path it reuses 12.1's shortlist-widening
+rule, so a selective filter still returns `top_k` correct hits. Add a test
+with a filter matching under 5% of memories on an indexed 10K file. Surfaces:
+`RecallRequest::filter`, Python `filter={...}`, MCP `filter` object, CLI
+`--filter key=value` (repeatable) and `--session`.
 
-### 12.7 Essence + one-call compaction (R-003.1, drafted by PLANNER-B 2026-11-06; the Essence half is NEEDS-USER)
-Three tiers, each with a different job:
+### 12.7 Threads and essence: keep the continuous flow of a long session (R-003.1; user-directed 2026-11-06; supersedes PLANNER-B's Option C draft)
+**What the user asked for (2026-11-06):** memory is "key knowledge that is
+retrieved and used". Essence is different: it's the *continuous flow* of a
+long working thread (like the Planner thread that produced this plan), and
+it has to be preserved and backed up, so a new thread (another Planner, a
+new session, a different tool) carries on with the same experience. Neither
+of the earlier options did that. A pinboard of keyed facts (the Reviewer's
+proposal) and task-state items (PLANNER-B's Option C) capture *where we
+are*, but not *how we got here*.
 
-| Tier | What it holds | How it's read | Example |
-|---|---|---|---|
-| Episodes | raw turns or events | provenance only; expire | "user: the test fails on Windows" |
-| Facts (memories) | what is true, atomic, keyed, superseding | by relevance (`recall`) | "MSRV is 1.75" |
-| **Essence** | **where we are**: task state with a lifecycle | **by scope, always loaded, budgeted** | "open: Windows lock test flaky (cli_smoke.rs:212)" |
+**What the research says** (Mem0 arXiv 2504.19413; Zep/Graphiti arXiv
+2501.13956; ACE arXiv 2510.04618; Factory's compression evaluation, Dec
+2025; Letta core memory blocks; Anthropic's memory tool and
+context-engineering guidance; LangMem profile vs collection):
+- **Rewriting one summary from scratch each time drifts and shrinks.** ACE
+  calls this "context collapse" and "brevity bias". Factory found that
+  merging each new span into a persistent *structured* summary beats
+  regenerating it, and that artifact and identifier tracking is the weakest
+  area for every method, so raw history still matters.
+- **Always-loaded state works best as small, sectioned, capped blocks the
+  agent edits through tools** (Letta blocks, about 2,000 characters each;
+  Anthropic's memory tool writes a progress file before context is
+  cleared). One big profile document gets error-prone as it grows
+  (LangChain docs), which argues for items, not one document.
+- **Facts work best as a collection,** updated by add / update / delete /
+  no-op (Mem0), with invalidation rather than deletion (Graphiti, whose
+  gains are biggest on knowledge-update and temporal questions). That's
+  12.1.
+- **This very Planner thread is the proof of the pattern.** It survived a
+  context reset by being resumed from a structured summary (intent, key
+  concepts, decisions, errors and fixes, all user messages, pending work,
+  next step) *plus* a pointer to the full transcript for detail. 12.7 makes
+  that durable, encrypted, portable, and shared between Planners and tools,
+  instead of buried in one tool's session folder.
 
-**(a) Essence items. Recommended ("Option C"); pending the user.**
-- An item is a normal memory record with `_mnemo.kind = "essence"`,
-  `_mnemo.scope` (default `"project"`; also `"session:<id>"`,
-  `"topic:<slug>"`, `"user"`), `_mnemo.section` (`goal | state | decision |
-  open | next | constraint`), `_mnemo.status` (`open | resolved`), and
-  optional `_mnemo.refs` (memory ids, session id, file paths). Content is
-  one short line, hard-capped (proposal: 280 bytes; rejected, not
-  truncated, so identifiers are never cut). It's embedded like any memory,
-  so a resolved decision is still findable later. No format change. Covered
-  by PITR and `compact_file`.
-- **Ops, applied by the engine:** `essence_add(scope, section, text,
-  refs?)`, `essence_update(id, text)`, `essence_resolve(id, note?)`,
-  `essence_remove(id)`. An LLM never rewrites the whole thing, so it can't
-  drift. Concurrent agents adding items don't conflict, because each item is
-  its own record.
-- **Read:** `essence(scope, max_bytes = 2048)` renders deterministic markdown
-  (or JSON), grouped by section, open items first, newest first, with a
-  "+N more" line when the budget truncates. Resolved items leave the render
-  but stay in the file. Sessions are provenance, not containers: open items
-  carry across `/compact` and new sessions automatically, so there's no
-  separate `latest_session` copy.
-- **Recall:** essence items are excluded from default `recall` (opt in with
-  `include_essence`), so fact retrieval stays clean.
-- **Surfaces:** Rust and Python methods; the MCP tools `essence_add`,
-  `essence_update`, `essence_resolve` and `essence_remove`, whose
-  descriptions tell the model to update as it works ("when the goal,
-  a decision, an open problem or the next step changes"); the MCP resource
-  `mnemo://essence` (12.2); CLI `mnemo essence <file> [--scope] [--budget]`;
-  and `about()` appends the render after the manifest.
+**Design: three layers in the one file, all with `_mnemo.thread = <id>`.**
 
-**(b) `commit_deltas`. Accepted; doesn't depend on (a).** One call:
-`{ facts: [{content, type, key?, importance?, metadata?}], essence_ops: […],
-turn_policy? }`.
-- Embed every text in **one** `Embedder::embed` call, and validate everything
-  (dims, non-zero, finite, keys) **before staging anything**. `remember`
-  stages immediately and there's no rollback, so a mid-batch error must
-  leave nothing staged.
-- Apply keyed facts as supersessions (12.1 amendment), then the essence ops,
-  then the turn policy, then **one** `flush()`.
-- `turn_policy` (SDK `Session` only; MCP clients don't store turns):
-  `ExpireAfter(secs)` by default (7 days, a recovery window, since
-  extraction is lossy), `Drop`, or `KeepAsEpisodic` (today's `close()`).
-  `Session::compact(deltas)` wraps this for the session's own turns.
-- MCP tool `commit_deltas`; Python `db.commit_deltas(...)`; Rust
-  `Mnemo::commit_deltas`.
-- **Optional later:** `mnemo extract --extract-cmd <cmd> --transcript <path>`
-  runs a user-supplied extractor (for example a local SLM) that emits deltas
-  JSON, in the same pattern as `--embed-cmd`. This is the path for a
-  `PreCompact` hook, which can't drive the main model.
+| Layer | What it holds | Written by | Read as | Lossy? |
+|---|---|---|---|---|
+| **Archive** | every turn of the thread, verbatim, in order | ingestion (no LLM) | drill-down recall ("why did we pick V2?") and `thread export` | **No.** This is the backup |
+| **Essence** | the flow: an append-only **timeline** of milestones, plus current **sections** | the agent, as it works (MCP tool); optionally an extractor at compaction | always loaded at thread start, within a budget | Derived, but never rewritten wholesale |
+| **Facts** | key knowledge (12.1) | `remember` / `commit_deltas` | `recall` | n/a |
 
-**Tests:** atomicity (an injected failure mid-batch leaves nothing; the
-proptest model gains `commit_deltas`); the render is deterministic and
-honours the budget; supersession chains; a file written by this build opens
-on v0.7.x and older readers carry `_mnemo.*` through untouched; and an
-end-to-end MCP test: add items, simulate `/compact`, and check the
-`mnemo://essence` render.
+**(a) Archive: lossless thread ingestion.**
+- `Mnemo::ingest_thread(thread_id, turns)` and CLI `mnemo thread ingest
+  <file> --thread <id> --transcript <path> [--format claude-code-jsonl |
+  jsonl]`.
+- Each turn becomes an `Episodic` record with `_mnemo.kind = "turn"`,
+  `_mnemo.thread`, `_mnemo.seq`, `_mnemo.role` and `_mnemo.turn_id` (the
+  source's message uuid). Content longer than 8 KB is split into chunks
+  with `_mnemo.part`. Tool-result bodies over 16 KB are stored truncated,
+  with `_mnemo.sha256` and the original length.
+- **Idempotent:** turns already stored (same `turn_id`) are skipped, so
+  ingesting the same transcript again appends only what's new. This is what
+  makes repeated PreCompact and SessionEnd ingestion safe.
+- Turns are embedded through the registered embedder, in batches, so
+  drill-down recall works. They're excluded from default `recall` (opt in
+  with `kind: "turn"` through the 12.6 filter, or `recall --thread <id>`).
+- `mnemo thread export <file> --thread <id> -o out.jsonl` rebuilds the
+  transcript in order. Round-trip test: ingest, export, byte-equal for
+  turns under the size caps.
+- **Privacy:** transcripts can contain secrets someone pasted. Everything is
+  encrypted at rest like any record, and `thread forget <id>` removes a
+  thread's archive (`Mnemo::delete` / MCP `forget` per record, then
+  `compact_file` for permanent removal). Document both.
+
+**(b) Essence: the flow, kept current by deltas.**
+- **Timeline:** append-only entries (`_mnemo.kind = "essence"`, `section =
+  "timeline"`). Each is 1–3 sentences (at most 600 bytes; longer is
+  rejected, not truncated), with a date, plus optional `refs` (turn ids,
+  memory ids, commits, paths). Examples: "Chose V2 scoring: best MRR under
+  tracking, drift 0", "User: relay prompts use the 'Send this to the
+  worker' blockquote format". Entries are **never edited**, only appended.
+  That's what keeps the narrative from drifting.
+- **Sections** (current state, edited as items with a lifecycle, which was
+  PLANNER-B's useful part): `intent`, `conventions` (how this user works),
+  `decisions` (with why and a ref), `state`, `open`, `next`, `lessons`
+  (mistakes caught and their fixes). Each item is one line (at most 280
+  bytes) with a status of `open` or `resolved`. They're edited by engine
+  ops; an LLM never rewrites the whole thing.
+- **Scope:** an item belongs to a thread, or with `scope = "project"` to
+  every thread in the file. Conventions and lasting decisions should
+  usually be project-scoped, so a *new* thread starts with them.
+- **Continuation:** `thread start <new> --from <old>` (and MCP
+  `thread_start {from}`) links the new thread to the old one
+  (`_mnemo.continues`). The new thread's essence render includes the old
+  thread's open items, `next`, and its last N timeline entries. This is the
+  "new thread, same experience" path.
+- **Render:** `essence(thread, max_bytes = 6144)` produces deterministic
+  markdown in this order: intent, conventions, decisions (newest first),
+  state, open, next, lessons, then the timeline (newest first, the oldest
+  entries folded into a "+N earlier milestones" line). Every section is
+  budgeted, and the render ends with a pointer such as "full history:
+  `mnemo thread export …` or `recall --thread …`". It reuses the 12.8 budget
+  code.
+- **One MCP tool,** `essence {op: add | update | resolve | remove | append,
+  thread?, section, text, refs?}`, not four, to keep client tool lists
+  small. Its description tells the model when to call it: "when the goal, a
+  decision, an open problem, the next step or the user's way of working
+  changes, and append a timeline entry at each milestone". Reads go through
+  the MCP resource `mnemo://essence/<thread>` (12.2), CLI `mnemo essence
+  <file> [--thread] [--budget]`, and `about()`, which appends the project
+  essence after the manifest.
+
+**(c) `commit_deltas`: one-call batch write** (accepted from R-003.1; as
+PLANNER-B specified, with essence ops included). It takes `{ facts: [...],
+essence_ops: [...], turns: [...]?, turn_policy? }`.
+- Embed everything in one batched call, then validate **everything** before
+  staging **anything**, because `put()` has no rollback. Apply the 12.1
+  supersession and no-op rules, then the essence ops, then the turns
+  (archive), then `turn_policy`, then **one** `flush()`.
+- `turn_policy` applies only to SDK `Session` working turns. It defaults to
+  `Archive`, which moves them into the thread archive (this replaces both
+  today's 1:1 episodic promotion and PLANNER-B's `ExpireAfter(7d)` default,
+  since the archive is the recovery window). Other values are
+  `ExpireAfter(secs)` and `Drop`.
+
+**(d) Automatic capture comes in 12.2 (and needs 12.4).** Claude Code hooks
+receive the session's `transcript_path`, so:
+- the **PreCompact** and **SessionEnd** hooks run `mnemo thread ingest …`.
+  That's lossless and needs no model, so it works even though a shell hook
+  can't drive the main model;
+- **SessionStart** (all sources, including `compact` and `resume`) injects
+  `mnemo essence --thread <id>`.
+
+The hooks run while the MCP server is up, so they need 12.4's shared mode
+first. Until then, ingestion runs when no server holds the file, or through
+an MCP `thread_ingest {transcript_path}` tool call. Optional later:
+`--extract-cmd` (a local SLM) that proposes essence ops from the new
+archive span at compaction, in the same pattern as `--embed-cmd`.
+
+**Tests:**
+- archive round trip, and idempotent re-ingest;
+- the essence render is deterministic and honours its budget;
+- timeline entries can't be edited (`update` on one is an error);
+- continuation pulls the old thread's open items;
+- `commit_deltas` atomicity (an injected failure mid-batch leaves nothing
+  staged; the proptest model gains `commit_deltas`);
+- the format stays v8, and v0.7.x carries the `_mnemo.*` keys through;
+- an end-to-end MCP test: essence ops, then simulated compaction (ingest),
+  then a new thread with `--from` gets the right render.
+
+**Dogfood success criterion (the user's own test):** this repo's Planner
+threads are ingested into `test/project.mnemo` (user-run, since the user
+holds the passphrase). A fresh Planner session started with only `mnemo
+essence --thread planner` plus drill-down recall answers "what's next, why
+did we choose X, and how does the user want relay prompts formatted"
+correctly, without reading this file's WORKLOG.
 
 ### 12.8 Budgeted recall (R-001.15, promoted from Phase 7.5 by R-003.2)
-`RecallRequest::max_bytes(n)`: stop adding hits once the rendered content
-would exceed `n` bytes (document roughly 4 bytes per token). There's no
+`RecallRequest::max_bytes(n)`: stop adding hits once the **UTF-8 bytes of the
+`content` fields** returned so far would exceed `n` (not the JSON or
+metadata envelope, so Rust, Python, CLI and MCP agree; document roughly 4
+bytes per token). Always return at least the top hit, even if it alone is
+over budget; set `truncated: true` in the CLI and MCP output when the budget
+cut anything. There's no
 tokenizer in the engine; callers can pass a smaller budget. Optional MMR
 diversity (`mmr_lambda`) ships **only** if the ranking_v2 harness shows hit@1
 doesn't drop by more than 0.02. Expose it through Python, CLI
 `--max-bytes` and the MCP `max_bytes` param. The Essence render (12.7) reuses
 the same budget code.
 
-**Releases (revised 2026-11-06, PLANNER-B; supersedes the line below):**
-v0.8.0 = 12.1 (with supersession) + 12.6 + 12.8 + 12.7(b) `commit_deltas`,
-plus 12.7(a) Essence if the user approves it. v0.9.0 = 12.4 + 12.2 (shared
-mode + plugin; the `SessionStart` hook injects the essence render). 12.3 and
-12.5 follow as minors.
+**Releases (user decision 2026-11-06: small releases; this replaces the
+earlier release lines):**
+- **v0.8.0** = 12.1 (edit + keyed supersession) → 12.6 (filtered recall) →
+  12.8 (budgeted recall). Three PRs, one release.
+- **v0.9.0** = 12.7 (threads and essence, plus `commit_deltas`). The 12.7
+  design is user-directed and gets a final user look before its DISPATCH.
+- **v0.10.0** = 12.4 (design note first) + 12.2 (shared mode, plugin and
+  hooks: automatic ingestion and the essence render at session start).
+- 12.3 and 12.5 follow as minors.
+- Phase 2 + 11.2 (keyword search, format v9) stays after Phase 12, as
+  ordered on 2026-10-30. The user saw the trade-off on 2026-11-06 (it's the
+  biggest measured quality gap) and kept the order.
 
-**Releases:** 12.1 → **v0.7.0** (new API surface). 12.4 + 12.2 → **v0.8.0**
-(shared mode + plugin). 12.3 and 12.5 ship as minors or patches when ready.
-The landing page and root README (planner-owned) get a "use it from Claude
+The landing page and root README (Planner-owned) get a "use it from Claude
 Code" section when 12.2 ships.
 
 ## Health-check addendum (2026-08-07)
@@ -1127,13 +1259,12 @@ DO NEXT, in this order:
    with the variant chosen by harness numbers, after extending the harness
    to an age-varied corpus. Minor release v0.6.0 with before/after
    numbers. Dogfood recall switches to track_access=False.
-5b. (lane B: planning only until v0.7.0 is VERIFIED.) **Phase 12 — seamless agent memory** (added 2026-10-30, user decision;
-   slotted right after v0.6.0, ahead of keyword search). Order inside:
-   12.1 edit-in-place + upsert by key (v0.7.0) → 12.4 shared access (design
-   note first) → 12.2 auto-load/save (MCP resources + prompts, Claude Code
-   plugin with hooks) (v0.8.0) → 12.3 built-in embedder (absorbs PR 10c) +
-   `mnemo mcp install` + keychain → 12.5 readable export. Spec in the Phase
-   12 section.
+5b. ← ACTIVE (lane B; dispatched 2026-11-06 by PLANNER-A covering lane B). **Phase 12 — seamless agent memory**
+   (added 2026-10-30, user decision; slotted ahead of keyword search). Order
+   inside (revised 2026-11-06, user decision "small releases"): **12.1 → 12.6
+   → 12.8 = v0.8.0** (pre-approved queue, see the DISPATCH entry) → 12.7
+   threads and essence = v0.9.0 → 12.4 (design note first) + 12.2 = v0.10.0 →
+   12.3 → 12.5. Spec in the Phase 12 section.
 6. **Phase 2 + Phase 11.2 together, one format bump (v9)** (MOVED UP
    2026-10-25 by user decision: correct answers before faster answers).
    Hybrid BM25 + vector recall, plus **record packing** (several small
@@ -6167,3 +6298,161 @@ anything in `commit_deltas` (matches `put()`'s no-rollback behaviour);
 `turn_policy` defaulting to `ExpireAfter(7d)`; essence excluded from
 default recall; deferring the 7.3 graph (R-001.10); and the KDF caveat on
 "millisecond reads".
+
+### 2026-11-06 — WORKER — NOTE — coordination-file sync after v0.7.0 VERIFIED
+Synced in `668be20` (`chore(plan): sync coordination files`), pushed to
+`origin/main`, CI green. Nothing ACTIVE; standing by for PLANNER-B's
+DISPATCH on item 5b.
+
+### 2026-11-06 — PLANNER-A (covering lane B) — CLAIM — Phase 12 spec sections, execution-order item 5b, R-003.1/.2 triage fields, AGENTS.md "Where the philosophy lives"
+At the user's request I'm covering lane B while PLANNER-B is out of usage
+(lane rule 4). Lane ownership doesn't move. I'm finishing the REV-003
+triage from PLANNER-B's draft and my 2026-11-06 comments, folding in two
+user decisions taken today, and dispatching. CLAIM held until the REVIEW +
+DISPATCH entries that follow.
+
+### 2026-11-06 — PLANNER-A (covering lane B) — REVIEW + DECISION + HANDOFF + DISPATCH — REV-003 triaged; essence redefined by the user; v0.8.0 queue dispatched
+**REV-003 triage (R-003.1, R-003.2), both updated in `reviewer_notes.md`:**
+- **R-003.1: ACCEPTED, modified by user decision.** Asked to choose
+  between the pinboard and Option C, the user redefined essence. Memory is
+  "key knowledge that is retrieved and used"; essence is "this continuous
+  flow that has to be preserved and backed up", so a new thread (Planner B,
+  Planner C, a new session) has the same experience. I researched it (Mem0,
+  Zep/Graphiti, ACE, Factory's compression evaluation, Letta blocks,
+  Anthropic's memory tool and context-engineering guidance, LangMem) and
+  rewrote **12.7 as "Threads and essence"**:
+  - a lossless, idempotent turn archive (the backup);
+  - an append-only timeline plus delta-edited sections, including
+    `conventions` and `lessons`, with project scope and continuation from
+    an old thread;
+  - `commit_deltas` with `turn_policy = Archive`;
+  - one MCP `essence` tool;
+  - automatic capture from Claude Code's PreCompact/SessionEnd
+    `transcript_path` in 12.2.
+
+  PLANNER-B's write-path triage stands. No format change.
+- **R-003.2: ACCEPTED** as PLANNER-B triaged. I reworded principle 1 to
+  "keep the raw flow; derive state by deltas" to match the user's
+  definition.
+
+**Folded into the spec** (my 2026-11-06 comments 4–7):
+- 12.1: no-op identical writes with an `added`/`superseded`/`unchanged`
+  result; `history_keep` named but deferred; an in-memory superseded-id
+  set; shortlist widening when filters starve the ANN path (that's an
+  existing bug for type and agent filters too); key slots per scope;
+- 12.6: surfaces and a selective-filter test;
+- 12.8: `max_bytes` counts `content` bytes only, always returns ≥ 1 hit,
+  and flags `truncated`.
+
+**User decision, small releases:** v0.8.0 = 12.1 + 12.6 + 12.8; v0.9.0 =
+12.7; v0.10.0 = 12.4 + 12.2. Phase 2 (keyword search) stays after Phase 12.
+I marked the old release lines superseded and updated execution-order item
+5b. I also added the R-003.2 rules to AGENTS.md.
+
+**HANDOFF:** commit `AGENTS.md` on its own (the R-003.2 rules plus the
+memory-vs-essence line in "Where the philosophy lives") with the message
+`docs(agents): engineering rules for memory and essence (R-003.2)`. Make it
+your first commit, before any 12.1 code. This releases my CLAIM on
+AGENTS.md. My CLAIM on the Phase 12 sections and item 5b is released by
+this entry.
+
+**DISPATCH: pre-approved queue for v0.8.0 (item 5b is now ACTIVE, lane
+B).** To cut Planner round-trips, run the three PRs back to back. Log a DONE
+after each and go straight to the next, unless a gate fails or the spec
+conflicts with the code; then log BLOCKED and stop.
+1. **PR 12.1: edit in place plus keyed supersession.** Spec: PLAN.md 12.1,
+   including PLANNER-B's amendment and my additions. Key acceptance points:
+   - `update` keeps the id, `created_at` and access stats;
+   - a keyed `remember` supersedes (a new record, the old one marked) or is
+     a no-op if identical;
+   - superseded records leave default `recall` and `about`, and
+     `history(key)` walks the chain;
+   - indexed recall returns `top_k` correct hits under heavy supersession
+     or filtering;
+   - all of it ships on Rust, Python, the CLI and MCP, with tool
+     descriptions that steer the model to `key`;
+   - a file written by this build still opens under v0.7.0.
+2. **PR 12.6: filtered recall** (spec 12.6 and the 2026-11-01 REV-001
+   triage entry).
+3. **PR 12.8: budgeted recall** (spec 12.8; MMR only if the ranking_v2
+   harness shows hit@1 drops by no more than 0.02, otherwise leave it out
+   and say so).
+4. **Release v0.8.0:** bump the versions, cut the CHANGELOG, and log
+   **READY before tagging** so the Planner can hand off the README and
+   site.
+
+Standing rules apply: R-001.10 (only `_mnemo.*` metadata, no persisted
+field changes), dogfood update in each DONE, and the coordination-file sync
+after each DONE. **Don't start 12.7.** Its design is user-directed and gets
+a final user look before its own DISPATCH.
+
+### 2026-11-06 — WORKER — DONE — PR 12.1 landed on origin/main (edit in place + keyed supersession)
+**Commit:** `777cf09` `feat(12.1): edit in place + keyed supersession
+(update/remember_keyed/history)`. CI green on all three OS matrices +
+Python jobs (same workflow that ships v0.7.0). No version bump — v0.8.0
+rolls after 12.8 per the DISPATCH.
+
+**What shipped (all R-001.10-compliant: no catalog format change):**
+- `Mnemo::update(id, patch)` → in-place edit, preserves ULID,
+  `created_at` and access stats; NOOP when the patch matches the live
+  record; stamps `_mnemo.updated_at` on real changes; rejects a bare
+  `content` change without a matching `vector` (text/embedding drift
+  guard) — use `update_text` to re-embed.
+- `Mnemo::remember_keyed(memory, key)` → `(Ulid, WriteOutcome)` with
+  outcomes `Added` / `Superseded` / `Unchanged`. Keys slot by
+  `(scope_owner, key)`: `Private` scope → `Some(agent_id)`, `Shared` →
+  `None`. A private write never supersedes a shared one and vice
+  versa. Supersession writes a fresh record with `_mnemo.supersedes`
+  and marks the prior with `_mnemo.superseded_by` +
+  `_mnemo.invalid_at`. Identical re-writes return the existing live id
+  with no file I/O (idempotent extractors don't grow the chain).
+- `Mnemo::history(key, agent_id)` → newest-first chain (live record at
+  index 0, superseded records after).
+- Recall drops superseded records before any decrypt, via a lazy
+  in-memory `superseded` set built once per handle on the first keyed
+  op (`ensure_key_caches`). `about()` filters the same way. Record
+  bodies stay in `memories()` and snapshot history.
+- Short-results-on-indexed-path fix (also helps pre-existing type /
+  agent / TTL filters): if the ANN-narrowed shortlist comes back with
+  fewer than `top_k` surviving hits, recall widens `n_probe` /
+  `n_rerank` 2× and, if the widened pass would already cover ≥50% of
+  the live non-superseded set, skips the index for an exact scan.
+- Surfaces across every binding: Rust (`update`, `update_text`,
+  `remember_keyed`, `remember_keyed_text`, `history`, plus
+  `MemoryPatch` / `WriteOutcome` / the reserved-key constants); Python
+  (`db.update(id, …)`, `db.update_text(id, new_text, …)`,
+  `db.history(key, agent_id=None)`, `key=` kwarg on `remember` /
+  `remember_text` returning a `{"id", "outcome"}` dict); CLI
+  (`mnemo update`, `mnemo history`, `--key` on `mnemo remember`); MCP
+  (`update` and `history` tools, `key` param on `remember`, tool
+  descriptions steer the model to `key`).
+
+**Tests.** 73 → 80 integration tests pass under
+`cargo test --features failpoints --release`. New cases:
+`update_in_place_preserves_id_and_created_at`,
+`update_with_identical_patch_is_noop`,
+`update_content_without_vector_is_rejected`,
+`remember_keyed_added_then_superseded_then_noop`,
+`recall_drops_superseded_records`,
+`history_walks_the_supersession_chain_newest_first`,
+`private_and_shared_keys_are_independent_slots`,
+`file_written_with_12_1_opens_under_v0_7_layout` (asserts the file
+reopens under the same v0.7.x on-disk layout — no format bump).
+Full suite: 23 unit + 34 cli_smoke + 9 dur1 + 11 fix1 + 80
+integration + 7 proptest + 3 sec1 + 2 doctests, all green, under
+`cargo fmt --check` + `cargo clippy --all-targets --features
+failpoints,benches -- -D warnings` + same on `mnemo-python`.
+
+**Dogfood.** `test/scripts/project_memory.py remember` gained a
+`--key K` flag; when set it takes the keyed-upsert path and prints
+`<ulid>\t<outcome>`; without it the stdout stays as a bare ULID so
+pre-12.1 callers don't change behavior.
+
+**Known limitation flagged in the DISPATCH, parked.** `history_keep`
+(retention per key) is named in the spec and in `MemoryPatch`
+documentation but not implemented — supersession chains are unbounded
+in v0.8.0. Scheduled for Phase 12.5 / Phase 7.
+
+Next: PR 12.6 (filtered recall). Coordination sync commit follows
+this entry; then straight to 12.6 per the DISPATCH ("run the three
+PRs back to back ... unless a gate fails").
