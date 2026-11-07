@@ -907,8 +907,8 @@ fn tool_thread_start(db: &mut Mnemo, args: &Value) -> std::result::Result<String
 
 fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
     use crate::{
-        CommitBatch, EssenceOp, EssenceOpKind, EssenceScope, EssenceSection, KeyedMemory, Memory,
-        MemoryType, Scope, ThreadTurn, TurnPolicy, Ulid,
+        CommitBatch, EssenceOp, EssenceOpKind, EssenceScope, EssenceSection, KeyedMemory,
+        ThreadTurn, TurnPolicy, Ulid,
     };
     let mut batch = CommitBatch::default();
 
