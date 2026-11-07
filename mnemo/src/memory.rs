@@ -331,6 +331,210 @@ pub const THREAD_TURN_CHUNK_BYTES: usize = 8 * 1024;
 /// original can be recovered (or verified) out-of-band.
 pub const THREAD_TOOL_RESULT_TRUNCATE_BYTES: usize = 16 * 1024;
 
+// ---------------------------------------------------------------------------
+// Phase 12.7b: status-record core + essence (timeline + sections). The
+// essence layer rides on the same reserved-metadata namespace as the
+// thread archive, so a file keeps the single `_mnemo.*` convention:
+//
+// - `_mnemo.kind = "essence"` identifies an essence record. Section
+//   is in `_mnemo.section`. Scope — thread or project — is in
+//   `_mnemo.thread` (string) or absent (`None` means project scope).
+// - `_mnemo.status` carries the lifecycle for section items
+//   (`"open"` → `"resolved"`). Timeline entries never get a status.
+// - `_mnemo.status_history` records the status transitions. One
+//   element per transition: `{"status": "...", "at": <unix_secs>}`.
+// - `_mnemo.refs` is an optional array of free-form reference
+//   strings (turn ids, memory ids, commits, paths).
+// ---------------------------------------------------------------------------
+
+/// Reserved `_mnemo.section` key — which essence section an item
+/// belongs to (Phase 12.7b). Values: `"timeline"`, `"intent"`,
+/// `"conventions"`, `"decisions"`, `"state"`, `"open"`, `"next"`,
+/// `"lessons"`. Timeline entries are append-only.
+pub const MNEMO_META_SECTION: &str = "_mnemo.section";
+
+/// Reserved `_mnemo.status` key — current status of a status-record.
+/// Values are per-kind (Phase 12.7b: essence uses `"open"` and
+/// `"resolved"`). Timeline entries never carry this.
+pub const MNEMO_META_STATUS: &str = "_mnemo.status";
+
+/// Reserved `_mnemo.status_history` key — array of status transitions,
+/// each `{"status": <str>, "at": <unix_secs>}`. Append-only — the
+/// first entry records creation, each later entry records a
+/// transition.
+pub const MNEMO_META_STATUS_HISTORY: &str = "_mnemo.status_history";
+
+/// Reserved `_mnemo.refs` key — optional array of free-form reference
+/// strings (turn ids, memory ids, commits, paths) attached to an
+/// essence record (Phase 12.7b).
+pub const MNEMO_META_REFS: &str = "_mnemo.refs";
+
+/// Marker value for `_mnemo.kind` on essence records (Phase 12.7b).
+pub const MNEMO_META_KIND_ESSENCE: &str = "essence";
+
+/// Maximum content length for a timeline entry (Phase 12.7b).
+/// Entries over this are rejected, not truncated — the planner's
+/// spec is explicit about this because truncation would lose the
+/// narrative, and splitting across records would lose ordering.
+pub const ESSENCE_TIMELINE_MAX_BYTES: usize = 600;
+
+/// Maximum content length for a section item (Phase 12.7b).
+/// intent / conventions / decisions / state / open / next / lessons
+/// all share the same single-line cap. Items over this are rejected.
+pub const ESSENCE_SECTION_MAX_BYTES: usize = 280;
+
+/// Default byte budget for [`crate::Mnemo::essence`] rendering
+/// (Phase 12.7b). Matches the planner's "max_bytes = 6144" spec,
+/// which sits comfortably below a 4K-token context window.
+pub const ESSENCE_DEFAULT_RENDER_BYTES: usize = 6144;
+
+/// Which essence section an item belongs to.
+///
+/// Rendering order is fixed at this type's declaration order:
+/// intent → conventions → decisions → state → open → next → lessons
+/// → timeline. See [`EssenceSection::render_order`] for the explicit
+/// list and the [`crate::Mnemo::essence`] docs for per-section rules
+/// (timeline is append-only, every other section is item-edited).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EssenceSection {
+    /// What the thread is trying to do.
+    Intent,
+    /// How the user works — conventions that survive across threads.
+    Conventions,
+    /// Decisions made and why (newest first on render).
+    Decisions,
+    /// The current state of the work.
+    State,
+    /// Open problems.
+    Open,
+    /// What to do next.
+    Next,
+    /// Lessons learned — mistakes caught and their fixes.
+    Lessons,
+    /// Append-only milestone timeline. Entries capped at
+    /// [`ESSENCE_TIMELINE_MAX_BYTES`] and never editable.
+    Timeline,
+}
+
+impl EssenceSection {
+    /// Section → stable `_mnemo.section` string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EssenceSection::Intent => "intent",
+            EssenceSection::Conventions => "conventions",
+            EssenceSection::Decisions => "decisions",
+            EssenceSection::State => "state",
+            EssenceSection::Open => "open",
+            EssenceSection::Next => "next",
+            EssenceSection::Lessons => "lessons",
+            EssenceSection::Timeline => "timeline",
+        }
+    }
+
+    /// Parse a string from `_mnemo.section` into the typed enum.
+    /// Case-insensitive; returns `None` on unknown input.
+    pub fn parse(s: &str) -> Option<EssenceSection> {
+        match s.to_ascii_lowercase().as_str() {
+            "intent" => Some(EssenceSection::Intent),
+            "conventions" => Some(EssenceSection::Conventions),
+            "decisions" => Some(EssenceSection::Decisions),
+            "state" => Some(EssenceSection::State),
+            "open" => Some(EssenceSection::Open),
+            "next" => Some(EssenceSection::Next),
+            "lessons" => Some(EssenceSection::Lessons),
+            "timeline" => Some(EssenceSection::Timeline),
+            _ => None,
+        }
+    }
+
+    /// Fixed render order (intent → conventions → decisions → state
+    /// → open → next → lessons → timeline). The [`crate::Mnemo::essence`]
+    /// render walks this list, allocating a per-section byte budget
+    /// proportional to section importance in the user-centric order.
+    pub fn render_order() -> &'static [EssenceSection] {
+        &[
+            EssenceSection::Intent,
+            EssenceSection::Conventions,
+            EssenceSection::Decisions,
+            EssenceSection::State,
+            EssenceSection::Open,
+            EssenceSection::Next,
+            EssenceSection::Lessons,
+            EssenceSection::Timeline,
+        ]
+    }
+
+    /// `true` for sections whose items carry an `open → resolved`
+    /// status lifecycle (every section except [`EssenceSection::Timeline`]).
+    pub fn has_status_lifecycle(&self) -> bool {
+        !matches!(self, EssenceSection::Timeline)
+    }
+
+    /// Per-section byte cap for new items. Timeline: 600 bytes.
+    /// Every other section: 280 bytes.
+    pub fn item_max_bytes(&self) -> usize {
+        match self {
+            EssenceSection::Timeline => ESSENCE_TIMELINE_MAX_BYTES,
+            _ => ESSENCE_SECTION_MAX_BYTES,
+        }
+    }
+}
+
+/// Scope selector for an essence item (Phase 12.7b). Thread-scoped
+/// items belong to one `_mnemo.thread`; project-scoped items are
+/// shared across every thread in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EssenceScope {
+    /// Belongs to one thread (the string). Shows up in that
+    /// thread's render only.
+    Thread(String),
+    /// Shared across every thread in the file. Shows up in every
+    /// thread's render, and in the `about()` append.
+    Project,
+}
+
+/// Status values the essence section supports (Phase 12.7b). More
+/// kinds (tasks: `queued → active → ready → done | blocked`;
+/// findings: `open → accepted | deferred | rejected | needs-user →
+/// verified`) ship with Phase 13 reusing the same status-record
+/// core; the transition tables for those are declared as constants
+/// in this crate but currently unused.
+pub mod status {
+    /// Freshly-added section item.
+    pub const OPEN: &str = "open";
+    /// The user-facing concern has been addressed.
+    pub const RESOLVED: &str = "resolved";
+}
+
+/// Task transition table (declared for Phase 13; currently unused
+/// in the engine). `queued → active → ready → done | blocked`,
+/// with `blocked → active` as the only back-edge.
+pub const TASK_TRANSITIONS: &[(&str, &str)] = &[
+    ("queued", "active"),
+    ("active", "ready"),
+    ("active", "blocked"),
+    ("blocked", "active"),
+    ("ready", "done"),
+];
+
+/// Finding transition table (declared for Phase 13; currently unused
+/// in the engine). `open → {accepted | deferred | rejected |
+/// needs-user} → verified`.
+pub const FINDING_TRANSITIONS: &[(&str, &str)] = &[
+    ("open", "accepted"),
+    ("open", "deferred"),
+    ("open", "rejected"),
+    ("open", "needs-user"),
+    ("accepted", "verified"),
+    ("deferred", "verified"),
+    ("needs-user", "verified"),
+];
+
+/// Essence transition table for Phase 12.7b. Only `open → resolved`
+/// is allowed. Timeline entries don't use this (they're append-only
+/// and have no status).
+pub const ESSENCE_TRANSITIONS: &[(&str, &str)] = &[(status::OPEN, status::RESOLVED)];
+
 /// Patch body for [`crate::Mnemo::update`] (Phase 12.1): every field is
 /// optional, and only the `Some(...)` fields overwrite the corresponding
 /// field on the target memory. All fields can be set independently.

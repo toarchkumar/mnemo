@@ -5,10 +5,11 @@
 //! (secure) parameters.
 
 use mnemo_engine::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, Filter, KdfParams, KeyScope, Memory, MemoryPatch,
-    MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights,
-    SemanticCachePutOpts, Turn, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD, MNEMO_META_INVALID_AT,
-    MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, EssenceScope, EssenceSection, Filter, KdfParams,
+    KeyScope, Memory, MemoryPatch, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope,
+    ScoreWeights, SemanticCachePutOpts, Turn, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD,
+    MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -3741,5 +3742,206 @@ fn history_in_shared_and_private_are_separate_chains() {
     assert!(
         alice.is_empty(),
         "no 'alice' write → empty chain, not aliased to default or shared"
+    );
+}
+
+// ===========================================================================
+// Phase 12.7b: essence (timeline + sections + render + status lifecycle)
+// ===========================================================================
+
+#[test]
+fn essence_add_section_item_shows_up_in_render() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let id = db
+        .essence_add(
+            EssenceScope::Thread("t1".into()),
+            EssenceSection::Intent,
+            "ship v0.9.0",
+            None,
+        )
+        .unwrap();
+    let rendered = db.essence(EssenceScope::Thread("t1".into()), 1024).unwrap();
+    assert!(
+        rendered.contains("ship v0.9.0"),
+        "intent item should appear in render; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("## intent"),
+        "intent section header missing from render:\n{rendered}"
+    );
+    // The item id should be fetchable + carry open status.
+    let m = db.get(&id).unwrap();
+    assert_eq!(
+        m.metadata.get(MNEMO_META_STATUS).and_then(|v| v.as_str()),
+        Some("open")
+    );
+}
+
+#[test]
+fn essence_timeline_append_is_rejected_over_cap() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-tl.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    // 700 bytes > 600-byte cap → rejected, not truncated.
+    let too_long = "x".repeat(700);
+    let err = db
+        .essence_append_timeline(EssenceScope::Thread("t1".into()), &too_long, None)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("<= 600 bytes"),
+        "expected 600-byte-cap error, got: {err}"
+    );
+    // A 600-byte entry fits.
+    let ok = "y".repeat(600);
+    db.essence_append_timeline(EssenceScope::Thread("t1".into()), &ok, None)
+        .unwrap();
+}
+
+#[test]
+fn essence_section_item_rejected_over_cap() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-sec.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let too_long = "z".repeat(281);
+    let err = db
+        .essence_add(
+            EssenceScope::Thread("t1".into()),
+            EssenceSection::Open,
+            &too_long,
+            None,
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("<= 280 bytes"),
+        "expected 280-byte-cap error, got: {err}"
+    );
+}
+
+#[test]
+fn essence_update_on_timeline_is_error() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-upd.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let id = db
+        .essence_append_timeline(EssenceScope::Thread("t1".into()), "milestone", None)
+        .unwrap();
+    let err = db
+        .essence_update(&id, "edited milestone", None)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("append-only"),
+        "expected append-only guard, got: {err}"
+    );
+}
+
+#[test]
+fn essence_resolve_transitions_status_and_is_idempotent() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-res.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let id = db
+        .essence_add(
+            EssenceScope::Thread("t1".into()),
+            EssenceSection::Open,
+            "fix bug X",
+            None,
+        )
+        .unwrap();
+    let first = db.essence_resolve(&id).unwrap();
+    assert_eq!(first, WriteOutcome::Updated);
+    let m = db.get(&id).unwrap();
+    assert_eq!(
+        m.metadata.get(MNEMO_META_STATUS).and_then(|v| v.as_str()),
+        Some("resolved")
+    );
+    let history = m
+        .metadata
+        .get(MNEMO_META_STATUS_HISTORY)
+        .and_then(|v| v.as_array())
+        .expect("status_history");
+    assert!(
+        history.len() >= 2,
+        "status_history should have at least creation + resolve; got {history:?}"
+    );
+    // Second resolve is a no-op.
+    let second = db.essence_resolve(&id).unwrap();
+    assert_eq!(second, WriteOutcome::Unchanged);
+}
+
+#[test]
+fn essence_render_respects_budget() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-budget.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    // 30 timeline entries, each ~100 bytes. Full render would be
+    // ~3 KB; budget it to 400 bytes and expect fold-tail behavior.
+    for i in 0..30 {
+        let text = format!("milestone #{i:02} — some body text here to fill out the entry");
+        db.essence_append_timeline(EssenceScope::Thread("t1".into()), &text, None)
+            .unwrap();
+    }
+    let out = db.essence(EssenceScope::Thread("t1".into()), 600).unwrap();
+    assert!(out.len() <= 600, "render over budget: {} bytes", out.len());
+    assert!(
+        out.contains("earlier milestones"),
+        "overflow should fold into `+N earlier milestones`:\n{out}"
+    );
+}
+
+#[test]
+fn essence_project_and_thread_scopes_are_independent() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-scope.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    db.essence_add(
+        EssenceScope::Project,
+        EssenceSection::Conventions,
+        "repeat relay prompts verbatim",
+        None,
+    )
+    .unwrap();
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Intent,
+        "ship 12.7",
+        None,
+    )
+    .unwrap();
+
+    // Thread render includes BOTH its own thread items AND project items
+    // (per the spec: project-scope items show up in every thread's render).
+    let thread_render = db.essence(EssenceScope::Thread("t1".into()), 2048).unwrap();
+    assert!(thread_render.contains("ship 12.7"));
+    assert!(thread_render.contains("repeat relay prompts verbatim"));
+
+    // Project render includes project items only.
+    let project_render = db.essence(EssenceScope::Project, 2048).unwrap();
+    assert!(project_render.contains("repeat relay prompts verbatim"));
+    assert!(
+        !project_render.contains("ship 12.7"),
+        "project render should NOT include thread-scoped items; got:\n{project_render}"
     );
 }

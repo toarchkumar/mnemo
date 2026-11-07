@@ -456,6 +456,14 @@ enum Command {
         #[command(subcommand)]
         cmd: ThreadCmd,
     },
+    /// Phase 12.7b essence (timeline + sections). `render` is the
+    /// default subcommand. Section ops take `--section <name>` from
+    /// {intent, conventions, decisions, state, open, next, lessons};
+    /// timeline entries use `append`.
+    Essence {
+        #[command(subcommand)]
+        cmd: EssenceCmd,
+    },
     /// List the restorable snapshots (one per committed flush).
     Snapshots {
         /// Path to the `.mnemo` file.
@@ -575,6 +583,102 @@ enum ThreadCmd {
         /// Thread id to forget.
         #[arg(long)]
         thread: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+}
+
+/// Subcommands under `mnemo essence` (Phase 12.7b).
+#[derive(Subcommand)]
+enum EssenceCmd {
+    /// Render the deterministic markdown view of a thread's essence
+    /// (or the project layer with `--project`). Prints to stdout.
+    Render {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Thread id. Omit with `--project` for the project layer.
+        #[arg(long, conflicts_with = "project")]
+        thread: Option<String>,
+        /// Render the project layer instead of a thread.
+        #[arg(long, conflicts_with = "thread")]
+        project: bool,
+        /// Byte budget for the render (default 6144).
+        #[arg(long, default_value_t = 6144)]
+        budget: usize,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Add a new section item (intent/conventions/decisions/state/
+    /// open/next/lessons). Status starts at `open`.
+    Add {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Section name.
+        #[arg(long)]
+        section: String,
+        /// Item text (≤ 280 bytes).
+        #[arg(long)]
+        text: String,
+        /// Thread id. Omit with `--project` for the project layer.
+        #[arg(long, conflicts_with = "project")]
+        thread: Option<String>,
+        /// Project-scoped item (every thread's render shows it).
+        #[arg(long, conflicts_with = "thread")]
+        project: bool,
+        /// Optional refs: comma-separated turn ids, memory ids, commits, paths.
+        #[arg(long)]
+        refs: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Append a new timeline entry (append-only, ≤ 600 bytes).
+    Append {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Entry text (≤ 600 bytes).
+        #[arg(long)]
+        text: String,
+        /// Thread id. Omit with `--project` for the project-level
+        /// timeline (rare — most milestones belong to a thread).
+        #[arg(long, conflicts_with = "project")]
+        thread: Option<String>,
+        #[arg(long, conflicts_with = "thread")]
+        project: bool,
+        #[arg(long)]
+        refs: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Update an existing section item's text in place.
+    Update {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// ULID of the section item to update.
+        id: String,
+        /// New text (≤ 280 bytes).
+        #[arg(long)]
+        text: String,
+        /// Optional replacement refs.
+        #[arg(long)]
+        refs: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Mark a section item resolved (`open → resolved`).
+    Resolve {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// ULID of the section item to resolve.
+        id: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Soft-delete a section item. Compact to reclaim space.
+    Remove {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// ULID of the section item to remove.
+        id: String,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -1913,6 +2017,7 @@ fn run() -> std::result::Result<(), String> {
             }
         }
         Command::Thread { cmd } => handle_thread_cmd(cmd)?,
+        Command::Essence { cmd } => handle_essence_cmd(cmd)?,
         Command::Snapshots {
             path,
             passphrase: pp,
@@ -2278,6 +2383,144 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             println!(
                 "forgot {n} record(s) in thread '{thread}' (run `mnemo compact {path}` to reclaim space)"
             );
+            Ok(())
+        }
+    }
+}
+
+/// Phase 12.7b: handle `mnemo essence {render|add|append|update|resolve|remove}`.
+fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
+    use mnemo_engine::{EssenceScope, EssenceSection};
+    let parse_refs = |s: Option<String>| -> Option<Vec<String>> {
+        s.map(|raw| {
+            raw.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+        })
+    };
+    let resolve_scope =
+        |thread: Option<String>, project: bool| -> std::result::Result<EssenceScope, String> {
+            match (thread, project) {
+                (Some(t), false) => Ok(EssenceScope::Thread(t)),
+                (None, true) => Ok(EssenceScope::Project),
+                (None, false) => {
+                    Err("pass either --thread <id> or --project (clap also enforces this).".into())
+                }
+                (Some(_), true) => Err("--thread and --project are mutually exclusive.".into()),
+            }
+        };
+    match cmd {
+        EssenceCmd::Render {
+            path,
+            thread,
+            project,
+            budget,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let scope = resolve_scope(thread, project)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let out = db.essence(scope, budget).map_err(fmt)?;
+            print!("{out}");
+            Ok(())
+        }
+        EssenceCmd::Add {
+            path,
+            section,
+            text,
+            thread,
+            project,
+            refs,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let section = EssenceSection::parse(&section).ok_or_else(|| {
+                format!(
+                    "unknown section '{section}' (want intent, conventions, decisions, state, open, next, lessons)"
+                )
+            })?;
+            if section == EssenceSection::Timeline {
+                return Err("use `mnemo essence append` for timeline entries".into());
+            }
+            let scope = resolve_scope(thread, project)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let id = db
+                .essence_add(scope, section, &text, parse_refs(refs))
+                .map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("{id}\tadded");
+            Ok(())
+        }
+        EssenceCmd::Append {
+            path,
+            text,
+            thread,
+            project,
+            refs,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let scope = resolve_scope(thread, project)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let id = db
+                .essence_append_timeline(scope, &text, parse_refs(refs))
+                .map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("{id}\tappended");
+            Ok(())
+        }
+        EssenceCmd::Update {
+            path,
+            id,
+            text,
+            refs,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let ulid = parse_ulid(&id)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let outcome = db
+                .essence_update(&ulid, &text, parse_refs(refs))
+                .map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            let s = match outcome {
+                mnemo_engine::WriteOutcome::Updated => "updated",
+                mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                _ => "updated",
+            };
+            println!("{id}\t{s}");
+            Ok(())
+        }
+        EssenceCmd::Resolve {
+            path,
+            id,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let ulid = parse_ulid(&id)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            let s = match outcome {
+                mnemo_engine::WriteOutcome::Updated => "resolved",
+                mnemo_engine::WriteOutcome::Unchanged => "already-resolved",
+                _ => "resolved",
+            };
+            println!("{id}\t{s}");
+            Ok(())
+        }
+        EssenceCmd::Remove {
+            path,
+            id,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let ulid = parse_ulid(&id)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            db.essence_remove(&ulid).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("{id}\tremoved");
             Ok(())
         }
     }

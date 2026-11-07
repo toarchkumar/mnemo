@@ -358,6 +358,25 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "essence",
+                "description": "Phase 12.7b: edit or render the essence layer of a thread (or the project layer). ONE tool for every op — set `op` to `add` / `append` / `update` / `resolve` / `remove` / `render`. **Call it when the goal, a decision, an open problem, the next step or the user's way of working changes, and append a timeline entry at each milestone.** Section items (`intent`, `conventions`, `decisions`, `state`, `open`, `next`, `lessons`) are ≤ 280 bytes and have an `open → resolved` lifecycle; `append` adds an append-only `timeline` entry (≤ 600 bytes). Thread-scoped (`thread`) or project-scoped (`project: true`). `render` returns the deterministic markdown view, budgeted at `budget` bytes (default 6144).",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["op"],
+                    "properties": {
+                        "op": { "type": "string", "enum": ["add", "append", "update", "resolve", "remove", "render"] },
+                        "thread": { "type": "string", "description": "Thread id. Omit with `project: true` for the project layer." },
+                        "project": { "type": "boolean", "default": false, "description": "Project-scoped item (shows in every thread's render). Mutually exclusive with `thread`." },
+                        "section": { "type": "string", "enum": ["intent", "conventions", "decisions", "state", "open", "next", "lessons"], "description": "Required for `op: add`. Timeline uses `op: append`, not add." },
+                        "id": { "type": "string", "description": "ULID of the section item. Required for update / resolve / remove." },
+                        "text": { "type": "string", "description": "Required for add / append / update." },
+                        "refs": { "type": "array", "items": { "type": "string" }, "description": "Optional free-form reference strings (turn ids, memory ids, commits, paths)." },
+                        "budget": { "type": "integer", "default": 6144, "description": "Byte budget for `op: render`." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
                 "name": "thread_ingest",
                 "description": "Phase 12.7a: ingest a transcript file into a thread's archive layer. Idempotent per `turn_id` — re-running on a longer transcript appends only the new turns. Requires an embedder on the server (`--embed-cmd` at serve start) because every turn is embedded. Returns `{added_records, skipped_existing_turns, chunked_turns, truncated_turns}`.",
                 "inputSchema": {
@@ -549,6 +568,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
         "thread_ingest" => tool_thread_ingest(db, args)?,
+        "essence" => tool_essence(db, args)?,
         "recall" => tool_recall(db, args)?,
         "forget" => tool_forget(db, args)?,
         "list" => tool_list(db, args)?,
@@ -794,6 +814,145 @@ fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         WriteOutcome::Superseded => "updated",
     };
     Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+}
+
+fn tool_essence(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    use crate::{EssenceScope, EssenceSection, Ulid, WriteOutcome};
+    let op = args
+        .get("op")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence: missing 'op'"))?;
+    let thread = args
+        .get("thread")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let scope_from = |t: Option<String>, p: bool| -> std::result::Result<EssenceScope, RpcError> {
+        match (t, p) {
+            (Some(s), false) => Ok(EssenceScope::Thread(s)),
+            (None, true) => Ok(EssenceScope::Project),
+            (None, false) => Err(RpcError::new(
+                INVALID_PARAMS,
+                "essence: pass either `thread` or `project: true`",
+            )),
+            (Some(_), true) => Err(RpcError::new(
+                INVALID_PARAMS,
+                "essence: `thread` and `project` are mutually exclusive",
+            )),
+        }
+    };
+    let refs: Option<Vec<String>> = args.get("refs").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect()
+    });
+    let text = args.get("text").and_then(|v| v.as_str()).map(String::from);
+    let id_str = args.get("id").and_then(|v| v.as_str());
+    let outcome_to_str = |o: WriteOutcome| -> &'static str {
+        match o {
+            WriteOutcome::Updated => "updated",
+            WriteOutcome::Unchanged => "unchanged",
+            WriteOutcome::Added => "updated",
+            WriteOutcome::Superseded => "updated",
+        }
+    };
+    match op {
+        "add" => {
+            let section_str = args
+                .get("section")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence add: missing 'section'"))?;
+            let section = EssenceSection::parse(section_str).ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("essence add: unknown section '{section_str}'"),
+                )
+            })?;
+            if section == EssenceSection::Timeline {
+                return Err(RpcError::new(
+                    INVALID_PARAMS,
+                    "essence add: timeline uses op: append, not add",
+                ));
+            }
+            let text =
+                text.ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence add: missing 'text'"))?;
+            let scope = scope_from(thread, project)?;
+            let id = db
+                .essence_add(scope, section, &text, refs)
+                .map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            Ok(json!({ "id": id.to_string(), "outcome": "added" }).to_string())
+        }
+        "append" => {
+            let text = text
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence append: missing 'text'"))?;
+            let scope = scope_from(thread, project)?;
+            let id = db
+                .essence_append_timeline(scope, &text, refs)
+                .map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            Ok(json!({ "id": id.to_string(), "outcome": "appended" }).to_string())
+        }
+        "update" => {
+            let id = id_str
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence update: missing 'id'"))?;
+            let ulid = Ulid::from_string(id).map_err(|_| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("essence update: invalid ULID '{id}'"),
+                )
+            })?;
+            let text = text
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence update: missing 'text'"))?;
+            let outcome = db.essence_update(&ulid, &text, refs).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            Ok(json!({ "id": id, "outcome": outcome_to_str(outcome) }).to_string())
+        }
+        "resolve" => {
+            let id = id_str
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence resolve: missing 'id'"))?;
+            let ulid = Ulid::from_string(id).map_err(|_| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("essence resolve: invalid ULID '{id}'"),
+                )
+            })?;
+            let outcome = db.essence_resolve(&ulid).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            let s = match outcome {
+                WriteOutcome::Updated => "resolved",
+                WriteOutcome::Unchanged => "already-resolved",
+                _ => "resolved",
+            };
+            Ok(json!({ "id": id, "outcome": s }).to_string())
+        }
+        "remove" => {
+            let id = id_str
+                .ok_or_else(|| RpcError::new(INVALID_PARAMS, "essence remove: missing 'id'"))?;
+            let ulid = Ulid::from_string(id).map_err(|_| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("essence remove: invalid ULID '{id}'"),
+                )
+            })?;
+            db.essence_remove(&ulid).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            Ok(json!({ "id": id, "outcome": "removed" }).to_string())
+        }
+        "render" => {
+            let budget = args.get("budget").and_then(|v| v.as_u64()).unwrap_or(6144) as usize;
+            let scope = scope_from(thread, project)?;
+            let rendered = db.essence(scope, budget).map_err(mnemo_err)?;
+            Ok(rendered)
+        }
+        other => Err(RpcError::new(
+            INVALID_PARAMS,
+            format!("essence: unknown op '{other}'"),
+        )),
+    }
 }
 
 fn tool_thread_ingest(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {

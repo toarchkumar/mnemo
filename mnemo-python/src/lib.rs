@@ -30,9 +30,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, Filter as CoreFilter, KdfParams,
-    Memory, MemoryPatch, MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope,
-    ThreadTurn, Ulid, WriteOutcome,
+    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, EssenceScope as CoreEssenceScope,
+    EssenceSection, Filter as CoreFilter, KdfParams, Memory, MemoryPatch, MemoryType, Metric,
+    Mnemo as Core, MnemoConfig, RecallRequest, Scope, ThreadTurn, Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -135,6 +135,24 @@ fn filter_from_py_dict(d: &Bound<'_, PyDict>) -> PyResult<CoreFilter> {
         }
     }
     Ok(f)
+}
+
+/// Phase 12.7b: map `(thread, project)` kwargs to a [`CoreEssenceScope`].
+/// Exactly one of `thread` and `project` must be set.
+fn essence_scope_from(
+    thread: Option<String>,
+    project: bool,
+) -> PyResult<CoreEssenceScope> {
+    match (thread, project) {
+        (Some(t), false) => Ok(CoreEssenceScope::Thread(t)),
+        (None, true) => Ok(CoreEssenceScope::Project),
+        (None, false) => Err(PyValueError::new_err(
+            "essence: pass either thread=<id> or project=True",
+        )),
+        (Some(_), true) => Err(PyValueError::new_err(
+            "essence: `thread` and `project` are mutually exclusive",
+        )),
+    }
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
@@ -809,6 +827,112 @@ impl Mnemo {
     #[pyo3(signature = (thread_id))]
     fn thread_forget(&mut self, thread_id: &str) -> PyResult<usize> {
         self.core_mut()?.thread_forget(thread_id).map_err(to_py)
+    }
+
+    /// Phase 12.7b: add an essence section item.
+    ///
+    /// `section` is one of `intent`, `conventions`, `decisions`,
+    /// `state`, `open`, `next`, `lessons`. Timeline entries use
+    /// [`essence_append`]. Pass `thread=<id>` for a thread-scoped
+    /// item, or `project=True` for a project-scoped one; exactly
+    /// one of those is required. `refs` is an optional list of
+    /// free-form strings. Returns the new record's ULID string.
+    #[pyo3(signature = (section, text, *, thread=None, project=false, refs=None))]
+    fn essence_add(
+        &mut self,
+        section: &str,
+        text: &str,
+        thread: Option<String>,
+        project: bool,
+        refs: Option<Vec<String>>,
+    ) -> PyResult<String> {
+        let section = EssenceSection::parse(section)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown section '{section}'")))?;
+        if section == EssenceSection::Timeline {
+            return Err(PyValueError::new_err(
+                "essence_add: use essence_append for timeline entries",
+            ));
+        }
+        let scope = essence_scope_from(thread, project)?;
+        let id = self
+            .core_mut()?
+            .essence_add(scope, section, text, refs)
+            .map_err(to_py)?;
+        Ok(id.to_string())
+    }
+
+    /// Phase 12.7b: append a timeline entry (append-only, ≤ 600 bytes).
+    #[pyo3(signature = (text, *, thread=None, project=false, refs=None))]
+    fn essence_append(
+        &mut self,
+        text: &str,
+        thread: Option<String>,
+        project: bool,
+        refs: Option<Vec<String>>,
+    ) -> PyResult<String> {
+        let scope = essence_scope_from(thread, project)?;
+        let id = self
+            .core_mut()?
+            .essence_append_timeline(scope, text, refs)
+            .map_err(to_py)?;
+        Ok(id.to_string())
+    }
+
+    /// Phase 12.7b: update an essence section item's text (and optional
+    /// refs). Returns a dict `{"id", "outcome"}` with outcome
+    /// `"updated"` or `"unchanged"`.
+    #[pyo3(signature = (id, text, *, refs=None))]
+    fn essence_update(
+        &mut self,
+        py: Python<'_>,
+        id: &str,
+        text: &str,
+        refs: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let outcome = self
+            .core_mut()?
+            .essence_update(&ulid, text, refs)
+            .map_err(to_py)?;
+        let out = PyDict::new_bound(py);
+        out.set_item("id", id)?;
+        out.set_item("outcome", write_outcome_str(outcome))?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Phase 12.7b: resolve a section item (`open → resolved`).
+    /// Idempotent: resolving an already-resolved item returns
+    /// `{"outcome": "unchanged"}`.
+    fn essence_resolve(&mut self, py: Python<'_>, id: &str) -> PyResult<PyObject> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let outcome = self.core_mut()?.essence_resolve(&ulid).map_err(to_py)?;
+        let out = PyDict::new_bound(py);
+        out.set_item("id", id)?;
+        out.set_item("outcome", write_outcome_str(outcome))?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Phase 12.7b: soft-delete an essence section item.
+    fn essence_remove(&mut self, id: &str) -> PyResult<()> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        self.core_mut()?.essence_remove(&ulid).map_err(to_py)
+    }
+
+    /// Phase 12.7b: render the essence layer as markdown. Pass
+    /// `thread=<id>` or `project=True` (mutually exclusive). `budget`
+    /// defaults to 6144 bytes.
+    #[pyo3(signature = (*, thread=None, project=false, budget=6144))]
+    fn essence(
+        &mut self,
+        thread: Option<String>,
+        project: bool,
+        budget: usize,
+    ) -> PyResult<String> {
+        let scope = essence_scope_from(thread, project)?;
+        self.core_mut()?.essence(scope, budget).map_err(to_py)
     }
 
     /// Embed `query` with the registered embedder and run `recall`

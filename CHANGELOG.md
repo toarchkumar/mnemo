@@ -8,6 +8,68 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added — PR 12.7b: status-record core + essence (timeline + sections + render)
+
+**Essence is the continuous flow of a working thread** — intent,
+conventions, decisions, open problems, next step, lessons learned
+— plus an append-only milestone timeline. Lives in the same file as
+memories and thread-archive turns, under the `_mnemo.kind =
+"essence"` reserved metadata kind. The render reuses the Phase 12.8
+budget code so a thread's essence loads into a fresh session's
+context deterministically and within a byte cap.
+
+**New Rust API:**
+- `EssenceSection::{Intent, Conventions, Decisions, State, Open, Next,
+  Lessons, Timeline}` + `EssenceScope::{Thread(id), Project}` +
+  `essence_status::{OPEN, RESOLVED}`.
+- `Mnemo::essence_add(scope, section, text, refs)` — adds a section
+  item at status `open`. ≤ 280 bytes; rejected (not truncated) over.
+- `Mnemo::essence_append_timeline(scope, text, refs)` — append-only
+  milestone entry. ≤ 600 bytes; rejected over.
+- `Mnemo::essence_update(id, text, refs)` — in-place text edit for a
+  section item; timeline entries reject this with "append-only".
+- `Mnemo::essence_resolve(id)` — `open → resolved` transition. Writes
+  a new `_mnemo.status_history` entry. Idempotent.
+- `Mnemo::essence_remove(id)` — soft-delete (compact reclaims space).
+- `Mnemo::essence(scope, max_bytes)` — deterministic markdown render.
+  Fixed section order (intent → conventions → decisions → state →
+  open → next → lessons → timeline). Each section gets a budget
+  proportional to its position; timeline folds its tail into
+  `+N earlier milestones` when the budget runs out. Ends with an
+  archive pointer (`mnemo thread export …` / `recall --thread …`).
+
+**Status-record core (reused by Phase 13 for tasks + findings).** The
+new `_mnemo.status` + `_mnemo.status_history` keys ride with any
+record kind that has a lifecycle. v0.9.0 ships the essence
+transition table (`open → resolved`) and declares the task
+(`queued → active → ready → done | blocked`) and finding
+(`open → {accepted | deferred | rejected | needs-user} → verified`)
+tables as `TASK_TRANSITIONS` / `FINDING_TRANSITIONS` constants —
+Phase 13 uses them unchanged.
+
+**Surfaces:**
+- **CLI:** `mnemo essence <file>` with subcommands
+  `render [--thread X | --project] [--budget N]`,
+  `add --section S --text T [--thread X | --project] [--refs r1,r2]`,
+  `append --text T [--thread X | --project]`,
+  `update ID --text T`, `resolve ID`, `remove ID`.
+- **MCP:** ONE `essence {op, thread?, project?, section?, id?, text?,
+  refs?, budget?}` tool, with `op ∈ {add, append, update, resolve,
+  remove, render}`. Tool description tells the model when to call it
+  ("when the goal, a decision, an open problem, the next step or the
+  user's way of working changes, and append a timeline entry at each
+  milestone"). Single tool keeps client tool lists small.
+- **Python:** `db.essence_add(section, text, …)`,
+  `db.essence_append(text, …)`, `db.essence_update(id, text, …)`,
+  `db.essence_resolve(id)`, `db.essence_remove(id)`,
+  `db.essence(thread=..., project=..., budget=6144)`.
+
+**Tests.** 7 new integration tests cover the add + render round-trip,
+timeline-cap rejection at 601 bytes, section-cap rejection at 281
+bytes, timeline update is an error, `open → resolved` transitions
+status + appends status_history, render budget enforces fold-tail
+behavior, and project vs thread scope isolation.
+
 ### Added — PR 12.7a: thread archive (ingest / export / forget)
 
 **The backup layer for long working threads.** Every turn of a

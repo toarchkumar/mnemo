@@ -37,12 +37,14 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, Filter, IngestReport, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope,
-    ScoreWeights, ThreadTurn, WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
-    MNEMO_META_KIND_TURN, MNEMO_META_LENGTH, MNEMO_META_PART, MNEMO_META_ROLE, MNEMO_META_SEQ,
-    MNEMO_META_SHA256, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD,
-    MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
-    THREAD_TURN_CHUNK_BYTES,
+    self, status as essence_status, EssenceScope, EssenceSection, Filter, IngestReport, KeyScope,
+    Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, WriteOutcome,
+    ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS, MNEMO_META_INVALID_AT, MNEMO_META_KEY,
+    MNEMO_META_KIND, MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_TURN, MNEMO_META_LENGTH,
+    MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE, MNEMO_META_SECTION, MNEMO_META_SEQ,
+    MNEMO_META_SHA256, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY,
+    MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
+    THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
 use crate::pager::Pager;
 use crate::result_cache::{
@@ -941,6 +943,51 @@ fn take_utf8_prefix(s: &str, max_bytes: usize) -> String {
 /// Split `s` into chunks, each with `<= max_bytes` of UTF-8 content,
 /// landing on `char` boundaries. Preserves original ordering; a trailing
 /// chunk may be shorter than `max_bytes`.
+/// Phase 12.7b helper: pull the `_mnemo.status` string from an
+/// essence record. Returns `None` for timeline entries (they have no
+/// status) and for malformed records.
+fn status_of(m: &Memory) -> Option<&str> {
+    m.metadata.get(MNEMO_META_STATUS).and_then(|v| v.as_str())
+}
+
+/// Phase 12.7b helper: render one essence item as a markdown bullet.
+/// Timeline entries get a date tag; section items get `[open]` /
+/// `[resolved]` so the reader can scan active work quickly.
+fn render_essence_item(section: EssenceSection, m: &Memory) -> String {
+    if section == EssenceSection::Timeline {
+        let date = format_unix_date(m.created_at);
+        format!("- [{date}] {}\n", m.content)
+    } else {
+        let status = status_of(m).unwrap_or(essence_status::OPEN);
+        format!("- [{status}] {}\n", m.content)
+    }
+}
+
+/// Minimal unix-seconds → `YYYY-MM-DD` formatter (no chrono/time
+/// dependency; mirrors the ISO 8601 parser in `transcript.rs`).
+fn format_unix_date(secs: i64) -> String {
+    let days_total = secs.div_euclid(86_400);
+    let (y, m, d) = civil_from_days(days_total);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Howard Hinnant's `civil_from_days` — inverse of `days_from_civil`,
+/// adequate for Gregorian dates since 1970. Pure arithmetic, no
+/// dependencies.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 fn chunk_utf8(s: &str, max_bytes: usize) -> Vec<String> {
     if s.len() <= max_bytes {
         return vec![s.to_string()];
@@ -2530,6 +2577,486 @@ impl Mnemo {
             self.delete(id)?;
         }
         Ok(n)
+    }
+
+    // --- Phase 12.7b: essence (timeline + sections) -----------------
+
+    /// Phase 12.7b: add a new essence item to a section (any section
+    /// except [`EssenceSection::Timeline`]). Content ≤
+    /// [`memory::ESSENCE_SECTION_MAX_BYTES`] (280 bytes); items over
+    /// that are rejected. Starting status is `"open"`.
+    ///
+    /// Use [`Mnemo::essence_append_timeline`] for timeline entries —
+    /// they have a different cap (600 bytes), are append-only, and
+    /// carry no status lifecycle.
+    pub fn essence_add(
+        &mut self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: &str,
+        refs: Option<Vec<String>>,
+    ) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if section == EssenceSection::Timeline {
+            return Err(MnemoError::Invalid(
+                "essence_add: use essence_append_timeline for the timeline section".into(),
+            ));
+        }
+        if text.is_empty() {
+            return Err(MnemoError::Invalid(
+                "essence_add: text must not be empty".into(),
+            ));
+        }
+        if text.len() > section.item_max_bytes() {
+            return Err(MnemoError::Invalid(format!(
+                "essence_add: '{}' items must be <= {} bytes; got {}",
+                section.as_str(),
+                section.item_max_bytes(),
+                text.len()
+            )));
+        }
+        let now = memory::now_secs();
+        let mem = self.build_essence_record(scope, section, text, refs, Some(now))?;
+        let id = self.put(mem)?;
+        Ok(id)
+    }
+
+    /// Phase 12.7b: append a new timeline entry (append-only
+    /// milestone). Content ≤ [`memory::ESSENCE_TIMELINE_MAX_BYTES`]
+    /// (600 bytes); entries over that are rejected (not truncated —
+    /// truncating a milestone silently loses the narrative).
+    pub fn essence_append_timeline(
+        &mut self,
+        scope: EssenceScope,
+        text: &str,
+        refs: Option<Vec<String>>,
+    ) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if text.is_empty() {
+            return Err(MnemoError::Invalid(
+                "essence_append_timeline: text must not be empty".into(),
+            ));
+        }
+        if text.len() > EssenceSection::Timeline.item_max_bytes() {
+            return Err(MnemoError::Invalid(format!(
+                "essence_append_timeline: entries must be <= {} bytes; got {}",
+                EssenceSection::Timeline.item_max_bytes(),
+                text.len()
+            )));
+        }
+        let mem = self.build_essence_record(scope, EssenceSection::Timeline, text, refs, None)?;
+        let id = self.put(mem)?;
+        Ok(id)
+    }
+
+    /// Phase 12.7b: update an existing essence section item in place.
+    /// Returns [`WriteOutcome::Updated`] / [`WriteOutcome::Unchanged`].
+    /// Timeline entries are append-only — calling this on a timeline
+    /// record is an error.
+    pub fn essence_update(
+        &mut self,
+        id: &Ulid,
+        text: &str,
+        refs: Option<Vec<String>>,
+    ) -> Result<WriteOutcome> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let existing = self.load_essence_record(id)?;
+        let section = self.section_of(&existing)?;
+        if section == EssenceSection::Timeline {
+            return Err(MnemoError::Invalid(
+                "essence_update: timeline entries are append-only; append a new one instead".into(),
+            ));
+        }
+        if text.is_empty() {
+            return Err(MnemoError::Invalid(
+                "essence_update: text must not be empty".into(),
+            ));
+        }
+        if text.len() > section.item_max_bytes() {
+            return Err(MnemoError::Invalid(format!(
+                "essence_update: '{}' items must be <= {} bytes; got {}",
+                section.as_str(),
+                section.item_max_bytes(),
+                text.len()
+            )));
+        }
+        let mut patch = MemoryPatch {
+            content: Some(text.to_string()),
+            ..Default::default()
+        };
+        // We don't have a usable embedder-free path for an in-place
+        // content update, so provide the same vector as the existing
+        // record (the text-vector drift guard in `update` will accept
+        // this).
+        patch.vector = Some(existing.vector.clone());
+        if let Some(r) = refs {
+            let mut meta = Map::new();
+            // Preserve the user-visible metadata (none for essence —
+            // everything lives under `_mnemo.*`) and let `update`'s
+            // metadata-replacement path keep the reserved keys.
+            meta.insert(
+                MNEMO_META_REFS.into(),
+                Value::Array(r.into_iter().map(Value::String).collect()),
+            );
+            patch.metadata = Some(meta);
+        }
+        self.update(id, patch)
+    }
+
+    /// Phase 12.7b: mark a section item as resolved (open → resolved
+    /// transition). A new history entry lands on
+    /// `_mnemo.status_history`. Idempotent — resolving a record that
+    /// is already resolved is a no-op.
+    pub fn essence_resolve(&mut self, id: &Ulid) -> Result<WriteOutcome> {
+        self.essence_transition_status(id, essence_status::RESOLVED)
+    }
+
+    /// Phase 12.7b: soft-delete a section item. Same semantics as
+    /// [`Mnemo::delete`] on any record — space reclaimed by a later
+    /// compact.
+    pub fn essence_remove(&mut self, id: &Ulid) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        self.delete(id)
+    }
+
+    /// Phase 12.7b: deterministic, budgeted markdown render of the
+    /// essence layer for a thread (or the project layer when
+    /// `scope = EssenceScope::Project`). `max_bytes` caps the output;
+    /// sections are emitted in the fixed [`EssenceSection::render_order`],
+    /// and each section's own budget is proportional to its position
+    /// in the order. Oldest timeline entries fold into a
+    /// `+N earlier milestones` tail when the budget runs out.
+    ///
+    /// The render always ends with an archive pointer so the reader
+    /// knows how to drill in deeper (`mnemo thread export …` or
+    /// `recall --thread …`).
+    pub fn essence(&mut self, scope: EssenceScope, max_bytes: usize) -> Result<String> {
+        let max_bytes = if max_bytes == 0 {
+            ESSENCE_DEFAULT_RENDER_BYTES
+        } else {
+            max_bytes
+        };
+        // Collect every live essence record for this scope.
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut by_section: std::collections::BTreeMap<&'static str, Vec<Memory>> =
+            std::collections::BTreeMap::new();
+        for section in EssenceSection::render_order() {
+            by_section.insert(section.as_str(), Vec::new());
+        }
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                != Some(MNEMO_META_KIND_ESSENCE)
+            {
+                continue;
+            }
+            // Scope filter. Project-scope records are shown in every
+            // thread's render (and in the project render); thread-scope
+            // records only match when scope == same thread.
+            let rec_thread = m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str());
+            let matches_scope = match (&scope, rec_thread) {
+                (EssenceScope::Project, None) => true,
+                (EssenceScope::Thread(_), None) => true, // project-scope always shows
+                (EssenceScope::Thread(t), Some(rt)) => rt == t,
+                (EssenceScope::Project, Some(_)) => false,
+            };
+            if !matches_scope {
+                continue;
+            }
+            let section_str = m
+                .metadata
+                .get(MNEMO_META_SECTION)
+                .and_then(|v| v.as_str())
+                .unwrap_or("timeline");
+            by_section
+                .entry(
+                    EssenceSection::parse(section_str)
+                        .map(|s| s.as_str())
+                        .unwrap_or("timeline"),
+                )
+                .or_default()
+                .push(m);
+        }
+
+        // Sort each section's records:
+        // - Decisions + Timeline: newest-first (by created_at desc).
+        // - Everything else: sort open items before resolved, then
+        //   newest-first. Cheap, deterministic.
+        for (name, items) in by_section.iter_mut() {
+            let newest_first = matches!(*name, "decisions" | "timeline");
+            items.sort_by(|a, b| {
+                let a_resolved = status_of(a) == Some(essence_status::RESOLVED);
+                let b_resolved = status_of(b) == Some(essence_status::RESOLVED);
+                match (a_resolved, b_resolved) {
+                    (false, true) => std::cmp::Ordering::Less,
+                    (true, false) => std::cmp::Ordering::Greater,
+                    _ => {
+                        if newest_first {
+                            b.created_at.cmp(&a.created_at)
+                        } else {
+                            a.created_at.cmp(&b.created_at)
+                        }
+                    }
+                }
+            });
+        }
+
+        // Per-section budget: give intent / conventions / decisions a
+        // larger share (they frame the thread), timeline a smaller
+        // share (it can fold). This is deterministic because it
+        // depends only on `max_bytes`.
+        let header_reserve = 256usize; // header + archive pointer
+        let body_budget = max_bytes.saturating_sub(header_reserve);
+        let per_section_budget = |section: EssenceSection| -> usize {
+            match section {
+                EssenceSection::Intent => body_budget / 8,
+                EssenceSection::Conventions => body_budget / 6,
+                EssenceSection::Decisions => body_budget / 4,
+                EssenceSection::State => body_budget / 8,
+                EssenceSection::Open => body_budget / 8,
+                EssenceSection::Next => body_budget / 12,
+                EssenceSection::Lessons => body_budget / 12,
+                EssenceSection::Timeline => body_budget / 4,
+            }
+        };
+
+        let mut out = String::with_capacity(max_bytes);
+        let scope_label = match &scope {
+            EssenceScope::Thread(t) => format!("thread `{t}`"),
+            EssenceScope::Project => "project".to_string(),
+        };
+        out.push_str(&format!("# essence — {scope_label}\n\n"));
+
+        for section in EssenceSection::render_order() {
+            let items = match by_section.get(section.as_str()) {
+                Some(v) if !v.is_empty() => v,
+                _ => continue,
+            };
+            let budget = per_section_budget(*section);
+            let section_header = format!("## {}\n", section.as_str());
+            if out.len() + section_header.len() > max_bytes {
+                break;
+            }
+            out.push_str(&section_header);
+            let mut used = 0usize;
+            let mut rendered = 0usize;
+            for item in items {
+                let line = render_essence_item(*section, item);
+                if used + line.len() > budget {
+                    break;
+                }
+                if out.len() + line.len() > max_bytes {
+                    break;
+                }
+                out.push_str(&line);
+                used += line.len();
+                rendered += 1;
+            }
+            // Fold the remainder for timeline.
+            if *section == EssenceSection::Timeline && rendered < items.len() {
+                let fold = format!("- +{} earlier milestones\n", items.len() - rendered);
+                if out.len() + fold.len() <= max_bytes {
+                    out.push_str(&fold);
+                }
+            }
+            if out.len() < max_bytes {
+                out.push('\n');
+            }
+        }
+
+        // Archive pointer.
+        let pointer = match &scope {
+            EssenceScope::Thread(t) => format!(
+                "> full history: `mnemo thread export <file> --thread {t}` or `recall --thread {t}`\n"
+            ),
+            EssenceScope::Project => String::from(
+                "> full history: `mnemo thread export <file> --thread <id>` or `recall --thread <id>`\n",
+            ),
+        };
+        if out.len() + pointer.len() <= max_bytes {
+            out.push_str(&pointer);
+        }
+        Ok(out)
+    }
+
+    // --- essence internal helpers ----------------------------------
+
+    fn build_essence_record(
+        &self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: &str,
+        refs: Option<Vec<String>>,
+        status_at: Option<i64>,
+    ) -> Result<Memory> {
+        if let Some(e) = self.embedder.as_ref() {
+            let mut vs = e.embed(&[text])?;
+            let v = vs.pop().ok_or_else(|| {
+                MnemoError::Invalid("essence: embedder returned no vector".into())
+            })?;
+            let mut m = Memory::new(text.to_string(), MemoryType::Semantic, v).with_importance(0.5);
+            m.metadata.insert(
+                MNEMO_META_KIND.into(),
+                Value::String(MNEMO_META_KIND_ESSENCE.into()),
+            );
+            m.metadata.insert(
+                MNEMO_META_SECTION.into(),
+                Value::String(section.as_str().into()),
+            );
+            if let EssenceScope::Thread(t) = &scope {
+                m.metadata
+                    .insert(MNEMO_META_THREAD.into(), Value::String(t.clone()));
+            }
+            if let Some(r) = refs {
+                m.metadata.insert(
+                    MNEMO_META_REFS.into(),
+                    Value::Array(r.into_iter().map(Value::String).collect()),
+                );
+            }
+            if let Some(at) = status_at {
+                m.metadata.insert(
+                    MNEMO_META_STATUS.into(),
+                    Value::String(essence_status::OPEN.into()),
+                );
+                m.metadata.insert(
+                    MNEMO_META_STATUS_HISTORY.into(),
+                    Value::Array(vec![serde_json::json!({
+                        "status": essence_status::OPEN,
+                        "at": at,
+                    })]),
+                );
+            }
+            Ok(m)
+        } else {
+            // No embedder: use an axis-neutral all-equal vector
+            // scaled to unit magnitude. Essence records are retrieved
+            // by `_mnemo.kind` filter, not by similarity, so the
+            // concrete vector doesn't matter for retrieval; but we
+            // need something non-zero to pass `put`'s guard.
+            let dims = self.dimensions.max(1);
+            let scale = 1.0 / (dims as f32).sqrt();
+            let v = vec![scale; dims];
+            let mut m = Memory::new(text.to_string(), MemoryType::Semantic, v).with_importance(0.5);
+            m.metadata.insert(
+                MNEMO_META_KIND.into(),
+                Value::String(MNEMO_META_KIND_ESSENCE.into()),
+            );
+            m.metadata.insert(
+                MNEMO_META_SECTION.into(),
+                Value::String(section.as_str().into()),
+            );
+            if let EssenceScope::Thread(t) = &scope {
+                m.metadata
+                    .insert(MNEMO_META_THREAD.into(), Value::String(t.clone()));
+            }
+            if let Some(r) = refs {
+                m.metadata.insert(
+                    MNEMO_META_REFS.into(),
+                    Value::Array(r.into_iter().map(Value::String).collect()),
+                );
+            }
+            if let Some(at) = status_at {
+                m.metadata.insert(
+                    MNEMO_META_STATUS.into(),
+                    Value::String(essence_status::OPEN.into()),
+                );
+                m.metadata.insert(
+                    MNEMO_META_STATUS_HISTORY.into(),
+                    Value::Array(vec![serde_json::json!({
+                        "status": essence_status::OPEN,
+                        "at": at,
+                    })]),
+                );
+            }
+            Ok(m)
+        }
+    }
+
+    fn load_essence_record(&mut self, id: &Ulid) -> Result<Memory> {
+        let m = self.get(id)?;
+        if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()) != Some(MNEMO_META_KIND_ESSENCE)
+        {
+            return Err(MnemoError::Invalid(format!(
+                "essence: record {id} is not an essence record (missing `_mnemo.kind = essence`)"
+            )));
+        }
+        Ok(m)
+    }
+
+    fn section_of(&self, m: &Memory) -> Result<EssenceSection> {
+        let s = m
+            .metadata
+            .get(MNEMO_META_SECTION)
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                MnemoError::Invalid("essence: record missing `_mnemo.section`".into())
+            })?;
+        EssenceSection::parse(s)
+            .ok_or_else(|| MnemoError::Invalid(format!("essence: unknown section '{s}' on record")))
+    }
+
+    fn essence_transition_status(&mut self, id: &Ulid, to: &str) -> Result<WriteOutcome> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let existing = self.load_essence_record(id)?;
+        let section = self.section_of(&existing)?;
+        if !section.has_status_lifecycle() {
+            return Err(MnemoError::Invalid(format!(
+                "essence_transition: '{}' section has no status lifecycle",
+                section.as_str()
+            )));
+        }
+        let from = existing
+            .metadata
+            .get(MNEMO_META_STATUS)
+            .and_then(|v| v.as_str())
+            .unwrap_or(essence_status::OPEN);
+        if from == to {
+            return Ok(WriteOutcome::Unchanged);
+        }
+        let allowed = ESSENCE_TRANSITIONS
+            .iter()
+            .any(|(f, t)| *f == from && *t == to);
+        if !allowed {
+            return Err(MnemoError::Invalid(format!(
+                "essence_transition: '{from}' → '{to}' is not a valid transition for essence"
+            )));
+        }
+        // Mutate metadata in place and `put` back under the same id
+        // so `_mnemo.updated_at` gets stamped and access stats are
+        // preserved.
+        let mut new = existing.clone();
+        new.metadata
+            .insert(MNEMO_META_STATUS.into(), Value::String(to.to_string()));
+        let now = memory::now_secs();
+        let history_entry = serde_json::json!({ "status": to, "at": now });
+        let history = new
+            .metadata
+            .entry(MNEMO_META_STATUS_HISTORY.to_string())
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if let Value::Array(arr) = history {
+            arr.push(history_entry);
+        }
+        new.metadata
+            .insert(MNEMO_META_UPDATED_AT.into(), Value::Number(now.into()));
+        new.id = existing.id;
+        new.created_at = existing.created_at;
+        self.put(new)?;
+        Ok(WriteOutcome::Updated)
     }
 
     /// Return every live memory (used by tooling and compaction).
