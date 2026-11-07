@@ -8,6 +8,74 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-07
+
+PR 12.7d: the gaps left in Phase 12.7, found in the v0.9.0 catch-up and
+verification. No file format change.
+
+### Changed
+
+- **`commit_deltas` embeds.** Facts may now omit `vector`: every fact
+  `content`, every essence `Add` / `AppendTimeline` text and every
+  archive turn in a batch is embedded with the registered embedder in
+  **one** `Embedder::embed` call, before the vectors are checked. This
+  makes the MCP `commit_deltas` tool usable from a model, which can't
+  produce vectors. In Rust, a fact with an empty `vector` means "embed
+  `content`". With no embedder, a text-only fact (or a turn to archive)
+  is still an error.
+- **Stricter `commit_deltas` gate.** Before anything is written, the
+  batch now also checks that every essence `Update` / `Resolve` /
+  `Remove` targets a live essence record it can apply to (not a missing
+  id, a plain memory, a timeline entry for `Update`, or an id removed
+  earlier in the same batch), and that every supplied or embedded vector
+  is finite and non-zero. Previously these failed half-way through the
+  writes, leaving part of the batch staged.
+- **`thread_export` returns the ingest shape.** Python `db.thread_export`
+  and the new MCP `thread_export {thread}` tool return
+  `[{turn_id, role, content, timestamp}]`, one entry per turn in order
+  (a long turn's chunks joined), plus `sha256` and `original_length` on
+  a truncated tool result. `db.ingest_thread(t, db.thread_export(t))`
+  adds nothing. Rust gains `Mnemo::thread_export_turns` and
+  `ExportedTurn`; `Mnemo::thread_export` still returns raw records.
+  Python callers of v0.9.0's raw-dict `thread_export` need updating.
+- **`about` carries the project essence.** `Mnemo::about_essence()` (and
+  Python `db.about_essence()`) returns the project essence render at the
+  default budget, or `None`. `mnemo about` prints it after the manifest
+  and onboarding memories (`"essence"` in `--format json`), and the MCP
+  `about` tool appends it as a final `{"kind": "essence", "render"}`
+  element. `about()` itself still returns records.
+
+### Fixed
+
+- **`mnemo thread export` kept the wrong order.** It grouped turns by
+  `turn_id` in a sorted map, so the JSONL came out in `turn_id` order
+  rather than conversation order. It now uses the shared seq-ordered
+  export.
+- **`TurnPolicy::ExpireAfter` stamped old turns.** It set the TTL on every
+  record whose `turn_id` was in the batch, including turns that were
+  already archived and skipped. The TTL is now set only on the records
+  the batch writes.
+
+### Tests and benches
+
+- An atomicity property test for `commit_deltas` (random valid and
+  invalid batches, plus write failpoints: a rejected batch stages
+  nothing, a torn flush lands on the pre or post state), an end-to-end
+  MCP test (essence ops, a text-only `commit_deltas` through an
+  `--embed-cmd` stub, `thread_ingest`, `thread_start`, the new thread's
+  render, `thread_export`, `about`), a one-embed-call-per-batch check,
+  and export round-trip and `about_essence` tests in Rust and Python.
+- New `benches/thread.rs`, recorded as `remeasured` in
+  `test/scripts/perf_v0.5.0.json` (`speed_v0_9_1`), M1 Pro, canned
+  in-process embedder: ingest **≈31,000 turns/s** (1,000 turns in 32 ms),
+  essence render over 1,000 items **6.3 ms**, `about()` +
+  `about_essence()` with 1,000 project items **6.1 ms**.
+
+### Not published
+
+- **`mnemo-node` stays unpublished** (0.9.0 and 0.9.1). The Node binding
+  waits for Phase 5 (npm).
+
 ## [0.9.0] — 2026-11-07
 
 Phase 12.7 ships: thread archive (12.7a), essence + status-record core
@@ -2325,7 +2393,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/toarchkumar/mnemo/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/toarchkumar/mnemo/compare/v0.8.1...v0.9.0
 [0.5.2]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...v0.5.1
