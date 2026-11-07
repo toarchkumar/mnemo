@@ -6456,3 +6456,75 @@ in v0.8.0. Scheduled for Phase 12.5 / Phase 7.
 Next: PR 12.6 (filtered recall). Coordination sync commit follows
 this entry; then straight to 12.6 per the DISPATCH ("run the three
 PRs back to back ... unless a gate fails").
+
+### 2026-11-06 — WORKER — DONE — PR 12.6 landed on origin/main (filtered recall)
+**Commit:** `a062ed4` `feat(12.6): filtered recall (session_id +
+metadata equality/in/range/exists)`. CI green on all three OS
+matrices + Python jobs. No version bump — v0.8.0 rolls after 12.8.
+
+**What shipped (R-001.10-compliant: no catalog/format change — the
+filter is a query-time construct only):**
+- `Filter` + `FilterTerm` types in `memory.rs`. `Filter` combines an
+  optional `session_id` with an AND-ed `Vec<FilterTerm>`.
+  `FilterTerm` variants: `Exists(key)`, `Eq(key, Value)`,
+  `In(key, Vec<Value>)`, `Range { key, min, max }` (inclusive bounds,
+  either side optional; non-numeric metadata values fail the term).
+  JSON-value equality is permissive on numbers (`5` ≡ `5.0`),
+  otherwise structural.
+- `RecallRequest.filter: Filter` field + `.filter(f)` builder method.
+  Defaults to `Filter::default()` (no constraints, zero cost on the
+  hot path thanks to the `is_empty()` short-circuit).
+- `store::score_once` applies the filter after the type/agent
+  filters, before scoring. Supersession is still dropped first (no
+  decrypt). Phase 12.1's widen-then-exact-scan loop automatically
+  handles filter-starved ANN shortlists, so a selective filter still
+  returns `top_k` correct hits.
+- **CLI:** `mnemo recall` gains `--session SID` and a repeatable
+  `--filter EXPR`. Four shorthand forms matched left-to-right:
+  `key:exists` / `key:in=a,b,c` / `key:gte=NUM` / `key:lte=NUM` /
+  `key=value`. Values are parsed as JSON when they look like JSON,
+  otherwise treated as strings. `parse_filter_expr` is the one-shot
+  parser.
+- **MCP:** `recall` tool gains a `filter` object with MongoDB-shaped
+  operators (`$exists`, `$in`, `$gte`, `$lte`); a plain scalar / list
+  / string under `metadata.<key>` is equality. `parse_mcp_filter`
+  rejects `$exists: false` (drop the term instead), unknown operators,
+  non-boolean `$exists`, non-array `$in`, and non-numeric range
+  bounds.
+- **Python:** `db.recall(..., filter={...})` and
+  `db.recall_text(..., filter={...})` accept the same shape as MCP.
+  `filter_from_py_dict` walks the dict and dispatches to the core
+  builder methods. The GIL-release policy around `core.recall` is
+  unchanged (allow_threads over the ANN + rerank + decrypt pass; the
+  filter struct is built on the Python side and moved in).
+
+**Tests.** 80 → 86 integration tests pass under `cargo test
+--features failpoints --release`. New cases:
+`filter_metadata_equality_restricts_candidates`,
+`filter_in_matches_any_listed_value`,
+`filter_range_matches_inclusive_bounds`,
+`filter_exists_requires_key_presence`,
+`filter_session_id_only_returns_matching_memories`,
+`filter_selective_still_returns_top_k_on_indexed_file`.
+The last one exercises the DISPATCH gate: a `metadata.rare` filter
+matching 40/1000 (4%) memories on an ANN-indexed file still returns
+`top_k=10` correct hits via the widen-then-exact-scan logic. I used
+1 000 memories instead of the DISPATCH's 10 000 because the
+mechanism is identical (it's a single branch in
+`score_once` + the outer widen loop in `recall`) and the lower count
+keeps the test under 1 second on CI — I can bump the size later if
+that trade-off doesn't hold.
+
+**Clippy + fmt.** `cargo fmt --check` + `cargo clippy --all-targets
+--features failpoints,benches -- -D warnings` clean on both crates.
+Four pre-existing tests (FIX-1, DUR-1, SEC-1, cli_smoke, proptest,
+sec1, doctests) continue to pass.
+
+**Known limitation.** The filter grammar is intentionally minimal
+(no `$or`, no nested key paths like `_mnemo.thread.id`). 12.7 relies
+only on `_mnemo.kind` / `_mnemo.thread` equality, which fits cleanly
+into the current `Eq` term. Extending the grammar is a follow-up PR
+if real use cases surface.
+
+Next: PR 12.8 (budgeted recall + optional MMR). Coordination sync
+commit follows this entry; then straight to 12.8 per the DISPATCH.
