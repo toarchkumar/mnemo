@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.8.1</span>
+        <span class="pill"><span class="dot"></span>v0.9.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.8.1.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.9.0.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -728,8 +728,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.8</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.9</span></h3>
         <ul>
+          <li>Session continuity: a full copy of each working thread, plus an essence of where things stand, so a new session carries on where the last one stopped</li>
           <li>Facts that change: a newer version replaces the old one and history is kept; edit memories in place</li>
           <li>Recall filtered by session or tag, and recall within a size budget for small context windows</li>
           <li>Better ranking: the right memory comes first more often, and frequently shown memories no longer crowd out the relevant one</li>
@@ -749,7 +750,6 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Session continuity: keep a whole working session (its full history and where things stand) so a new session carries on where the last one stopped</li>
           <li>Shared access for several agents and tools at once, and a Claude Code plugin that loads and saves memory automatically</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
         </ul>
@@ -760,6 +760,7 @@ AI sessions stay aligned without relying on chat history.
           <li>Speedups and smaller files, wherever the benchmarks point</li>
           <li>An optional built-in local embedding model, no separate program needed</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
+          <li>Agent teams: messages and tasks between agents, per-agent keys, signed authorship, and merging copies of a file</li>
           <li>A Node.js package and framework integrations</li>
         </ul>
       </div>

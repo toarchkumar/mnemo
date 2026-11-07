@@ -100,6 +100,40 @@ The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 
+## What's new in v0.9.0: threads and essence
+
+Memory is the knowledge an agent looks up. **Essence** is where a piece of
+work stands and how it got there, so a new session can carry on where the
+last one stopped. v0.9.0 keeps both, in the same encrypted file:
+
+- **A full copy of a thread.** `ingest_thread` (or `mnemo thread ingest
+  --transcript … --format claude-code-jsonl`) saves every turn word for
+  word. Running it again only adds the new turns. `thread_export` gives the
+  thread back, and `thread_forget` removes it. Turns stay out of normal
+  recall unless you ask for them.
+- **Essence.** Short items in sections (intent, conventions, decisions,
+  state, open, next, lessons), plus a timeline of milestones that only
+  grows. `essence(thread=…)` renders it within a size budget, ready to load
+  at the start of a session. Items are edited one at a time, never
+  rewritten as a whole summary, so they don't drift.
+- **Carry on in a new thread.** `thread_start("new", "old")` links the
+  threads, and the new thread's essence begins with the old one's open
+  items, next steps and recent milestones.
+- **One call to save a batch.** `commit_deltas` writes facts, essence
+  changes and turns together, or nothing at all if any part is invalid.
+
+```python
+db.ingest_thread("planner", [{"turn_id": "t1", "role": "user", "content": "..."}])
+db.essence_add("decisions", "Chose V2 scoring: best ranking, no drift", thread="planner")
+db.essence_append("Shipped v0.9.0", thread="planner")
+db.thread_start("planner-2", "planner")
+print(db.essence(thread="planner-2"))
+```
+
+This uses the embedder you registered with `set_embedder` (see Quick
+start). No file format change: v0.9.0 files open in v0.7 and v0.8, but
+those versions show turns and essence items as ordinary memories.
+
 ## What's new in v0.8.0
 
 - **Facts that change.** `remember(..., key="current-release")` replaces the
@@ -178,6 +212,12 @@ in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
+- **Saving threads isn't automatic yet.** You (or your agent) call
+  `thread ingest` and the essence tools. A Claude Code plugin with hooks
+  that save before compaction and load at session start comes with shared
+  access in v0.10.0. Transcripts can contain anything that was pasted into
+  them; they're encrypted like everything else, and `thread forget`
+  removes them.
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
