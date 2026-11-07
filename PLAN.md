@@ -932,6 +932,20 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   sign-off, then implement. Tests: two processes interleaving
   remember/update/recall/cache_put with crash injection; a proptest model
   extension; lock-contention timeouts that never hang (same rule as 10b.2).
+- **The design note must compare two architectures (added 2026-11-07):**
+  - **(A) per-operation locking:** every process opens the file and takes
+    shared or exclusive locks per call, as above;
+  - **(B) daemon mode:** one local `mnemo serve` process owns the file
+    (the single writer, warm caches, the data key in memory), and every
+    agent, hook, CLI call and SDK talks to it over MCP or a local socket.
+    Commands fall back to opening the file directly when no daemon is
+    running.
+
+  Compare them on: the number of concurrent agents (a few vs dozens),
+  reload cost (MEM-1: opening an indexed 100K file is about 232 ms and the
+  first recall about 45 ms, so per-op reloads are expensive), crash
+  behaviour, and the fit with 13.1 (queue), 13.3 (presence) and 14.1
+  (background sync). Recommend one, or both with a clear default.
 - **The design note must also cover claims and presence (added
   2026-11-06).** They come out of our own multi-agent workflow, where the
   CLAIM entries, lanes and "re-read the tail before writing" rules exist
@@ -1355,6 +1369,79 @@ session start).
 **Where Phase 13 goes relative to Phase 2 (keyword search)** is a user
 decision when v0.10.0 ships. For now it's listed after Phase 12.
 
+## Phase 14 — Encrypted sync and the memory inspector (added 2026-11-07, user decision)
+
+**Goal:** a suite of agents on different machines (laptops, servers, cloud
+workers) shares one memory without any server being able to read it. And
+people can *see* what their agents remember. Positioning (2026-11-07,
+after reviewing Supabase's "Supabase for Agents" offer): don't build a
+general agent backend (SQL, app auth, media storage, functions); that's
+Supabase's ground. Be **"the encrypted brain your agents share and
+carry"**: ready-made memory semantics, client-held keys, portable,
+offline-first. Supabase encrypts at rest, but the provider holds the
+keys. MNemo's sync must be **zero-knowledge**: the relay stores only
+ciphertext.
+
+**Depends on:** 13.2 key slots (each device and agent has its own key),
+13.7 merge (the conflict rules), 12.5 readable export (for the
+inspector), and 12.4 (the daemon or shared mode).
+
+### 14.1 Zero-knowledge sync relay (design note first)
+- **Model:** each copy of a file is a replica. Replicas exchange
+  **encrypted record-level change sets**, never pages: the new or
+  superseded records since the last sync point, identified by ULID, each
+  sealed under the data key. The relay is a dumb, append-only mailbox per
+  file id. It can't decrypt anything, and it learns only sizes and
+  timing; document that metadata leak honestly.
+- **Merge happens on the client,** with 13.7's rules: union by ULID,
+  keyed facts newest-wins with the loser superseded and flagged, and
+  thread turns by `turn_id`. The index is rebuilt or updated locally.
+- **Surfaces:** `mnemo sync <file> --relay <url>` (push then pull), an
+  optional background sync in daemon mode (12.4), and `mnemo relay`
+  (self-hostable relay binary: small, stateless apart from blob storage,
+  with S3-compatible storage as an option). A hosted relay is a possible
+  service later.
+- **Devices and people join through 13.2 grants;** the relay never sees
+  keys. Revocation rotates the data key, and later change sets use the new
+  key.
+- **Design note must cover:**
+  - the change-set format and its versioning;
+  - sync cursors;
+  - replay and duplicate safety (ULIDs plus content hashes);
+  - authenticating writes to the relay (a per-file write token derived
+    from the key, so strangers can't spam a mailbox);
+  - compaction of the mailbox;
+  - the metadata leakage.
+
+  Prior art to check first: Obsidian Sync (end-to-end encrypted sync for
+  local files), Turso/libSQL (sync for an embedded database), and CRDT and
+  local-first literature.
+
+### 14.2 Memory inspector (could move earlier; it only reads)
+- `mnemo inspect <file>` serves a **local** web view on localhost only,
+  unlocked through the keychain (12.3), **read-only by default**. Views:
+  - memories (filter, search, keyed history chains);
+  - threads (archive plus the essence render);
+  - tasks, messages and claims (13.1/13.3);
+  - authorship and signatures (13.4);
+  - visibility levels (13.5);
+  - stale items (13.6);
+  - snapshots and restore points.
+- **Edits are opt-in** (`--write`) and go through the normal APIs, so they
+  get the same supersession, authorship and status rules. This is where a
+  person corrects or approves what agents remember.
+- It can ship as soon as 12.5's export exists. List it as a candidate to
+  pull forward when the user wants a visible demo.
+
+### 14.3 Encrypted backups to object storage
+- `mnemo backup <file> --to s3://…` (any S3-compatible store, including
+  Supabase Storage) uploads encrypted snapshots or change sets. The bucket
+  only ever holds ciphertext. This is the "integrate, don't compete" path
+  with hosted platforms.
+
+**Order:** 14.3 (small) → 14.2 (whenever the user wants it; it can come
+earlier) → 14.1 (design note, then build).
+
 ## Health-check addendum (2026-08-07)
 
 Verified against live state (local tree + github.com + crates.io + pypi.org):
@@ -1466,6 +1553,13 @@ DO NEXT, in this order:
    the v9 bump), and merging copies. Spec in the Phase 13 section. It goes
    after Phase 12; the user decides at v0.10.0 whether it comes before or
    after item 6.
+5d. **Phase 14 — encrypted sync and the memory inspector** (added
+   2026-11-07, user decision; owner PLANNER-A): a zero-knowledge sync
+   relay (the relay stores only ciphertext), `mnemo inspect` (a local,
+   read-only-by-default web view; can be pulled forward), and encrypted
+   backups to S3-compatible storage. Spec in the Phase 14 section. It goes
+   after Phase 13, and its position relative to item 6 is decided with
+   Phase 13's.
 6. **Phase 2 + Phase 11.2 together, one format bump (v9)** (MOVED UP
    2026-10-25 by user decision: correct answers before faster answers).
    Hybrid BM25 + vector recall, plus **record packing** (several small
@@ -8010,3 +8104,171 @@ README and landing page`:**
 5. one coordination backup commit;
 6. push, green CI, tag `v0.9.0`;
 7. DONE with the URLs and the MEM-1 numbers.
+
+### 2026-11-07 — WORKER — DONE — v0.9.0 shipped (12.7a/b/c + recall exclusion fix); MEM-1 closed
+Tag **`v0.9.0`** (annotated, tag object `10393e7`) points at `2dcc65e`.
+CI is green on main and the release workflow is green.
+
+**Commits after the release commit `b8101f0`, in the order you set:**
+
+| hash | subject |
+|---|---|
+| `6bbf2ca` | `fix(12.7): default recall also excludes _mnemo.kind essence and thread_link` |
+| `c9dcbdf` | `fix(bench): MEM-1 root cause — open_rss passed seed as k_clusters; assert in corpus.rs; record fresh_handle_loop_n50 (remeasured)` |
+| `38eb460` | `docs(v0.9.0): threads and essence on README and landing page` |
+| `2dcc65e` | `chore(plan): sync coordination files` |
+
+The earlier v0.9.0 commits are `12acc32` (12.7a), `b228c88` (12.7b),
+`53fb397` + `475bfc0` + `20f97c3` (12.7c with its fmt and MSRV
+fixups), and `b8101f0` (release prep).
+
+**Runs:**
+- ci.yml on `2dcc65e`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42421960608>
+- release.yml on `v0.9.0`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42422436647>
+- GitHub release: <https://github.com/toarchkumar/mnemo/releases/tag/v0.9.0>
+
+**Published:**
+- crates.io (core engine): <https://crates.io/crates/mnemo-engine/0.9.0>.
+  I confirmed this with the crates.io API: published 2026-11-07
+  22:52:34 UTC, `rust_version` 1.75, not yanked.
+- PyPI: <https://pypi.org/project/mnemo-engine/0.9.0/>. Confirmed: the
+  PyPI JSON API lists 0.9.0 with 6 files (5 wheels + sdist), and the
+  `publish to PyPI` job log shows the uploads, with attestations, at
+  22:52:13 UTC. `pip index versions` showed 0.8.1 until run with
+  `--no-cache-dir`, which was just pip's cache.
+- crates.io (Node binding): **not published.** `release.yml` only runs
+  `cargo publish` in `mnemo/`, so `mnemo-node` 0.9.0 doesn't go out
+  with the tag. 0.8.1 was published separately. Lane A, tell me
+  whether you want it for 0.9.0.
+
+**Recall fix (your one pre-tag fix).** By default, `score_once` now
+skips `_mnemo.kind` = `turn`, `essence` and `thread_link`. Any
+`_mnemo.*` filter term still opts back in. The new test
+`default_recall_excludes_turn_essence_and_thread_link_records` checks
+that default recall returns only the fact, and that a `_mnemo.kind`
+`$in` filter returns all three kinds. CHANGELOG `[0.9.0]` has a
+"Fixed" subsection for it. 109 integration tests pass, and clippy is
+clean with failpoints and on the example.
+
+**MEM-1: closed.** I applied your harness fix as specified
+(`gen_clustered_vectors(args.loops, DIMENSIONS, 100, 0xDEAD_BEEF)`,
+plus a `(1..=n.max(1_000)).contains(&k_clusters)` assert in
+`benches/corpus.rs`) and committed the example. Results on the M1 Pro,
+100K × 384-dim indexed corpus, default allocator, with RSS sampled
+after each drop:
+
+| run | cycles | first recall median / p95 | RSS start → peak → end | slope, second half |
+|---|---|---|---|---|
+| read-write | 50 | 49.2 / 58.7 ms | 72 → 305 → 305 MB | +4,705 kB/cycle |
+| read-only | 50 | 44.9 / 50.7 ms | 74 → 306 → 306 MB | +4,704 kB/cycle |
+| read-write | 200 | 44.6 / 52.6 ms | 84 → 359 → 332 MB | −267 kB/cycle |
+
+Read the 50-cycle slope together with the 200-cycle run. The 50-cycle
+runs end before the plateau, so on their own they look like steady
+growth of about 4.7 MB per open. Over 200 cycles, RSS climbs to about
+359 MB (roughly 60 cycles), then levels off and drifts down: bounded
+allocator retention, not a per-handle leak. The "~500 MB per 100K
+handle" item didn't reproduce, so it closes as well. I didn't run the
+allocator variants, since the curve converges. All three rows are in
+`test/scripts/perf_v0.5.0.json` under a new `speed_v0_9_0` block, with
+`remeasured` set and a note explaining the shape. Committing
+`open_rss.rs` also takes care of NOTE item 5: the `mimalloc_bench`
+feature that shipped in `b8101f0` now has its example in the repo.
+
+**Still open from my catch-up NOTE.** Your review didn't cover these,
+so they carry into the next queue rather than being silently dropped:
+1. 12.7b `about()` append (the `memory.rs:492` doc comment claims it,
+   but no code does it);
+2. 12.7c atomicity proptest;
+3. 12.7c end-to-end MCP test (ops → ingest → new thread `--from` →
+   render);
+4. the `remeasured` benches for 12.7: ingest throughput (turns/s) and
+   render time at 1,000 essence items.
+
+This DONE entry isn't synced, per the per-release rule.
+
+### 2026-11-07 — PLANNER-A — VERIFIED + DISPATCH — v0.9.0 accepted; MEM-1 closed; v0.9.1 = 12.7d (your catch-up gaps plus two usability gaps I found); then the 12.4 design note
+**VERIFIED on `pip install mnemo-engine==0.9.0`** (aarch64 Linux):
+- ingest is idempotent (2 records, then re-ingesting with one new turn
+  adds 1 and skips 2);
+- a 700-byte timeline entry is rejected;
+- a thread started `--from` another renders a "continued from" prelude
+  with the old thread's `next` and recent milestones, its own open items,
+  and the archive pointer (deterministic, as specified);
+- a resolved item leaves the render;
+- default recall returns only facts (no turn, essence or link records);
+- a `commit_deltas` batch with one invalid fact writes nothing.
+
+**MEM-1 is closed:** 100K converges at about 360 MB over 200 cycles,
+first recall takes 45–49 ms median, and the "~500 MB per handle" didn't
+reproduce. **Thanks for the catch-up NOTE.** Items 1–5 were real gaps
+against my DISPATCH that I missed in review, and the fresh read after
+the model switch caught them. **mnemo-node:** don't publish 0.9.0. The
+Node binding stays unpublished until Phase 5 (npm). Add one line to
+CHANGELOG `[Unreleased]`.
+
+**Two usability gaps found in verification (fix in 12.7d):**
+- **(A) `commit_deltas` can't embed.** Python and MCP reject facts
+  without a `vector` ("no server-side embedder for batch"), even when an
+  embedder is registered (`set_embedder` in Python; `--embed-cmd` /
+  builtin on the MCP server). An LLM calling the MCP tool can't produce
+  vectors, so **`commit_deltas` is unusable from MCP today**, and MCP is
+  its main consumer. The spec said to embed all texts in **one** batched
+  `Embedder::embed` call.
+- **(B) `thread_export` (Python) returns raw memory dicts.** The
+  `turn_id`, `role` and `timestamp` are buried in `metadata` (`_mnemo.*`)
+  and vectors are included. It should return the ingest shape, so that
+  `ingest_thread(id, thread_export(id))` is a no-op round trip.
+
+**DISPATCH: PR 12.7d → release v0.9.1** (pre-approved; one PR; READY
+before the tag only if the README examples change):
+1. **`commit_deltas` embeds:** in core, when facts or essence ops have
+   text but no vector and an embedder is registered, embed all of them in
+   one `embed` call **before** validation. With no embedder, keep the
+   current error. Python and MCP accept text-only facts. Tests: MCP
+   `commit_deltas` with text-only facts through an `EmbedCmd` stub, and
+   that it makes exactly one embed call per batch.
+2. **`thread_export`** returns `[{turn_id, role, content, timestamp,
+   part?}]` in Python and MCP; check the CLI JSONL matches. Test that a
+   Python round-trip re-ingest skips every turn.
+3. **`about()` appends the project essence render** (12.7b spec), within
+   the default budget, after the manifest. Fix the `memory.rs:492` doc
+   either way.
+4. The atomicity **proptest** (`commit_deltas` added to the model) and the
+   **end-to-end MCP test** (essence ops → `thread_ingest` → `thread_start
+   --from` → render).
+5. **Benches** (`remeasured`): ingest throughput in turns per second,
+   render time at 1,000 essence items, and `about()` time with essence.
+6. The release, the CHANGELOG `[0.9.1]`, one coordination backup commit,
+   and the tag.
+
+**Next after v0.9.1: 12.4 shared access, design note only.** Worker:
+draft it in PLAN.md as a WORKER entry. Cover:
+- the per-operation lock protocol;
+- staleness detection (header txn id) and reload;
+- the in-memory data key for the handle's lifetime;
+- crash cases;
+- presence heartbeats and expiring claims (the 2026-11-06 amendment);
+- reload cost at 100K, using the MEM-1 numbers.
+
+Don't write code. PLANNER-A signs off before any implementation.
+
+### 2026-11-07 — PLANNER-A — DECISION + HANDOFF — Phase 14 added (encrypted sync and the memory inspector); the 12.4 design note must compare locking vs daemon mode
+**User decision (2026-11-07), after reviewing Supabase's agent offering:**
+don't become a general agent backend. Be the **encrypted brain agents
+share and carry**, with ready-made memory semantics and client-held keys.
+- **Added Phase 14** (execution-order item 5d):
+  - 14.1, a zero-knowledge sync relay: encrypted record-level change sets
+    and client-side merge using 13.7's rules, with a design note first;
+  - 14.2, `mnemo inspect`, a local web view that is read-only by default
+    and can be pulled forward;
+  - 14.3, encrypted backups to S3-compatible storage (Supabase Storage
+    included).
+- **12.4 design brief extended:** compare (A) per-operation locking with
+  (B) a daemon that owns the file while agents connect over MCP or a
+  socket, then recommend one, or both with a default. **Worker: include
+  this when you draft the 12.4 note after v0.9.1.**
+
+**HANDOFF (commit with v0.9.1, as its own commit, `docs: roadmap adds
+encrypted sync and the memory inspector`):** `index.html` gets one bullet
+under "After that". No README change.
