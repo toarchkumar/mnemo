@@ -209,8 +209,10 @@ both tracked in git as a backup:
 
 **`PLAN.md` and `reviewer_notes.md` are tracked in git, and only the
 `Worker` commits them.** It commits both by explicit path in a separate
-`chore(plan): sync coordination files` commit: after each `WORKER — DONE`
-entry and before tagging a release. Never mix them into a code commit.
+`chore(plan): sync coordination files` commit **only as a backup**: with
+each release (before tagging) or when the user asks. Agents share the
+working tree, so exchanges between roles don't need a commit. Never mix
+these files into a code commit. CI ignores pushes that touch only them.
 Because the repository is public, keep **unfixed security findings** out of
 both files. Write them in a gitignored `*.local.md` file (for example
 `SECURITY.local.md`) and move them into `PLAN.md` once the fix has shipped.
@@ -288,9 +290,10 @@ it; other roles stop and ask the user first.
      the exact listed paths as **their own separate commit** (never mixed
      into a PR's code commit) and cite the hash in your next `DONE` entry.
    - Commit `PLAN.md` and `reviewer_notes.md` by explicit path, as their
-     own `chore(plan): sync coordination files` commit, after each `DONE`
-     entry and before tagging a release. Commit them as they are, including
-     another role's unfinished edits; they're logs, not code.
+     own `chore(plan): sync coordination files` commit, only before tagging
+     a release or when the user asks for a backup, never after each `DONE`.
+     Commit them as they are, including another role's unfinished edits;
+     they're logs, not code.
    - During release PRs, bump versions in Cargo/Python manifests, lockfiles,
      and `CHANGELOG.md` (the `Planner` updates version text in root
      `README.md` and `index.html` via handoff).
