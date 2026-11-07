@@ -4177,3 +4177,80 @@ fn commit_deltas_rejects_turns_without_thread_id() {
         "expected thread_id-required error, got: {err}"
     );
 }
+
+#[test]
+fn default_recall_excludes_turn_essence_and_thread_link_records() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("kind-excl.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    db.remember(Memory::new(
+        "a durable fact",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    db.ingest_thread("t1", &[tt("u-1", "user", "transient question")])
+        .unwrap();
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Intent,
+        "essence intent item",
+        None,
+    )
+    .unwrap();
+    db.thread_start("t2", "t1").unwrap();
+    db.flush().unwrap();
+
+    let is_thread_layer = |m: &Memory| {
+        matches!(
+            m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
+            Some("turn") | Some("essence") | Some("thread_link")
+        )
+    };
+
+    // Default recall: only the fact; no turn, essence or link records.
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false);
+    let hits = db.recall(&req).unwrap();
+    assert!(
+        hits.iter().any(|h| h.memory.content == "a durable fact"),
+        "the fact should still be recalled"
+    );
+    let leaked: Vec<_> = hits
+        .iter()
+        .filter(|h| is_thread_layer(&h.memory))
+        .map(|h| h.memory.content.clone())
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "default recall leaked thread-layer records: {leaked:?}"
+    );
+
+    // Opt in with a `_mnemo.kind` `$in` filter: all three kinds come back.
+    let req2 = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(50)
+        .track_access(false)
+        .filter(Filter::default().metadata_in(
+            MNEMO_META_KIND,
+            vec![json!("turn"), json!("essence"), json!("thread_link")],
+        ));
+    let kinds: std::collections::HashSet<String> = db
+        .recall(&req2)
+        .unwrap()
+        .iter()
+        .filter_map(|h| {
+            h.memory
+                .metadata
+                .get(MNEMO_META_KIND)
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect();
+    for k in ["turn", "essence", "thread_link"] {
+        assert!(
+            kinds.contains(k),
+            "kind filter should return `{k}`; got {kinds:?}"
+        );
+    }
+}

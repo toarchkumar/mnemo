@@ -3695,16 +3695,21 @@ impl Mnemo {
             if !req.filter.is_empty() && !req.filter.matches(&m) {
                 continue;
             }
-            // Phase 12.7a: default-exclude thread-archive turns. A
-            // caller that wants turns opts in by placing any
-            // `_mnemo.*` term in the filter (equality, `$in`,
-            // `$exists`, or a range on `_mnemo.thread` /
-            // `_mnemo.kind` / `_mnemo.seq`). Without such a term, we
-            // skip `_mnemo.kind = "turn"` records so the archive
-            // layer doesn't pollute default recall.
+            // Phase 12.7: default-exclude the thread layers from fact
+            // recall: archive turns (12.7a), essence items (12.7b; read
+            // by scope through the render, not by similarity) and
+            // thread-link markers (12.7c; they carry an all-equal
+            // sentinel vector and would surface as junk hits). A caller
+            // that wants them opts in by placing any `_mnemo.*` term in
+            // the filter (equality, `$in`, `$exists`, or a range on
+            // `_mnemo.thread` / `_mnemo.kind` / `_mnemo.seq`).
             if !req.filter.mentions_mnemo_meta()
-                && m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
-                    == Some(MNEMO_META_KIND_TURN)
+                && matches!(
+                    m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
+                    Some(MNEMO_META_KIND_TURN)
+                        | Some(MNEMO_META_KIND_ESSENCE)
+                        | Some(MNEMO_META_KIND_THREAD_LINK)
+                )
             {
                 continue;
             }

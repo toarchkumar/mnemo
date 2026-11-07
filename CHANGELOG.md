@@ -15,6 +15,14 @@ Phase 12.7 ships: thread archive (12.7a), essence + status-record core
 bump — v0.9.0 files still open under v0.7.x and v0.8.x readers; new
 metadata lives entirely in the reserved `_mnemo.*` namespace.
 
+### Fixed — default recall excludes every thread layer
+
+Default recall now skips `_mnemo.kind = "essence"` and
+`"thread_link"` records as well as `"turn"`. Essence items are read by
+scope through the render, and link markers carry a sentinel vector
+that could surface as junk hits. Opt in as before with any `_mnemo.*`
+filter term, for example `_mnemo.kind` equality or `$in`.
+
 ### Added — PR 12.7c: continuation + commit_deltas
 
 **New thread, same experience.** Phase 12.7c makes two things routine
