@@ -163,16 +163,29 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
 
 def cmd_remember(args: argparse.Namespace) -> None:
     db = open_db()
-    mid = db.remember_text(
+    # Phase 12.1 (v0.8.0): if --key is given, take the keyed-upsert
+    # path. A repeat of an identical write is a no-op (helpful when a
+    # script re-emits the same "current X" fact), and a new value
+    # under the same key supersedes the prior record but keeps it
+    # walkable through `project_memory.py history --key`. Without
+    # --key the write stays as a plain insert so pre-12.1 callers
+    # don't change behavior.
+    result = db.remember_text(
         args.content,
         args.type,
         agent_id=AGENT_ID,
         importance=args.importance,
         metadata=json.loads(args.metadata) if args.metadata else None,
+        key=args.key,
     )
     db.flush()
     db.close()
-    print(mid)
+    if isinstance(result, dict):
+        # Keyed write — print `id\toutcome` so scripts can branch on it.
+        print(f"{result['id']}\t{result['outcome']}")
+    else:
+        # Un-keyed insert — preserve the pre-12.1 stdout shape (just the ULID).
+        print(result)
 
 
 def cmd_recall(args: argparse.Namespace) -> None:
@@ -326,6 +339,14 @@ def main() -> None:
     )
     p_rem.add_argument("--importance", type=float, default=0.75)
     p_rem.add_argument("--metadata", help='JSON object, e.g. \'{"area":"dogfood"}\'')
+    p_rem.add_argument(
+        "--key",
+        help=(
+            "Phase 12.1 upsert slot. A later `remember --key K` with new "
+            "content supersedes the prior record; an identical re-write is "
+            "a no-op. Omit for a plain insert."
+        ),
+    )
     p_rem.set_defaults(func=cmd_remember)
 
     p_rec = sub.add_parser("recall", help="Retrieve context for a query")

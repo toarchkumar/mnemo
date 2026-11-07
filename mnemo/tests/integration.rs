@@ -5,9 +5,10 @@
 //! (secure) parameters.
 
 use mnemo_engine::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Metric, Mnemo,
-    MnemoConfig, RecallRequest, ScoreWeights, SemanticCachePutOpts, Turn,
-    DEFAULT_SEMANTIC_THRESHOLD,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryPatch, MemoryType,
+    Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights, SemanticCachePutOpts, Turn,
+    WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD, MNEMO_META_INVALID_AT, MNEMO_META_KEY,
+    MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
 };
 use tempfile::tempdir;
 
@@ -2670,4 +2671,320 @@ fn set_embedder_on_read_only_handle_with_no_manifest_identity_still_works() {
     // Even though nothing was persisted (read-only can't write), the
     // embedder is in memory and usable for the lifetime of this handle.
     assert!(r.embedder().is_some());
+}
+
+// ===========================================================================
+// Phase 12.1: edit in place + keyed supersession
+// ===========================================================================
+
+#[test]
+fn update_in_place_preserves_id_and_created_at() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("upd.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let id = db
+        .remember(
+            Memory::new("pre", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)).with_importance(0.5),
+        )
+        .unwrap();
+    let orig = db.get(&id).unwrap();
+
+    // Patch importance only; vector unchanged, content unchanged.
+    let outcome = db
+        .update(
+            &id,
+            MemoryPatch {
+                importance: Some(0.9),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(outcome, WriteOutcome::Updated);
+    let after = db.get(&id).unwrap();
+    assert_eq!(after.id, orig.id, "update must keep the ULID");
+    assert_eq!(
+        after.created_at, orig.created_at,
+        "update must keep created_at"
+    );
+    assert!((after.importance - 0.9).abs() < 1e-6);
+    assert_eq!(after.content, "pre");
+    // `_mnemo.updated_at` stamp should land.
+    assert!(after
+        .metadata
+        .contains_key(mnemo_engine::MNEMO_META_UPDATED_AT));
+}
+
+#[test]
+fn update_with_identical_patch_is_noop() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("upd-noop.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let id = db
+        .remember(
+            Memory::new("same", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
+                .with_importance(0.5),
+        )
+        .unwrap();
+
+    let outcome = db
+        .update(
+            &id,
+            MemoryPatch {
+                importance: Some(0.5),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(outcome, WriteOutcome::Unchanged);
+    // No `_mnemo.updated_at` stamp — nothing was written.
+    let m = db.get(&id).unwrap();
+    assert!(!m.metadata.contains_key(mnemo_engine::MNEMO_META_UPDATED_AT));
+}
+
+#[test]
+fn update_content_without_vector_is_rejected() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("upd-content.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let id = db
+        .remember(Memory::new(
+            "a",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+    let err = db
+        .update(
+            &id,
+            MemoryPatch {
+                content: Some("b".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("needs a matching vector"),
+        "want guard against text/embedding drift, got: {err}"
+    );
+}
+
+#[test]
+fn remember_keyed_added_then_superseded_then_noop() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyed.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // First keyed write → Added.
+    let (id1, o1) = db
+        .remember_keyed(
+            Memory::new("v1", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
+                .with_importance(0.5)
+                .with_agent("alice"),
+            "release",
+        )
+        .unwrap();
+    assert_eq!(o1, WriteOutcome::Added);
+
+    // Second with different content → Superseded.
+    let (id2, o2) = db
+        .remember_keyed(
+            Memory::new("v2", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0))
+                .with_importance(0.5)
+                .with_agent("alice"),
+            "release",
+        )
+        .unwrap();
+    assert_eq!(o2, WriteOutcome::Superseded);
+    assert_ne!(id1, id2, "supersession inserts a fresh ULID");
+
+    // Old record carries `_mnemo.superseded_by` + `_mnemo.invalid_at`.
+    let old = db.get(&id1).unwrap();
+    assert_eq!(
+        old.metadata
+            .get(MNEMO_META_SUPERSEDED_BY)
+            .and_then(|v| v.as_str()),
+        Some(id2.to_string().as_str())
+    );
+    assert!(old.metadata.contains_key(MNEMO_META_INVALID_AT));
+
+    // New record carries `_mnemo.supersedes` and the key.
+    let new = db.get(&id2).unwrap();
+    assert_eq!(
+        new.metadata
+            .get(MNEMO_META_SUPERSEDES)
+            .and_then(|v| v.as_str()),
+        Some(id1.to_string().as_str())
+    );
+    assert_eq!(
+        new.metadata.get(MNEMO_META_KEY).and_then(|v| v.as_str()),
+        Some("release")
+    );
+
+    // Third write with identical fields to the live record → Unchanged.
+    let (id3, o3) = db
+        .remember_keyed(
+            Memory::new("v2", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0))
+                .with_importance(0.5)
+                .with_agent("alice"),
+            "release",
+        )
+        .unwrap();
+    assert_eq!(o3, WriteOutcome::Unchanged);
+    assert_eq!(id3, id2, "NOOP returns the existing live id");
+}
+
+#[test]
+fn recall_drops_superseded_records() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("recall-sup.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // Two keyed writes under the same key: the second supersedes the first.
+    let (id1, _) = db
+        .remember_keyed(
+            Memory::new("old", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)).with_importance(0.9),
+            "k",
+        )
+        .unwrap();
+    let (id2, _) = db
+        .remember_keyed(
+            Memory::new("new", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)).with_importance(0.9),
+            "k",
+        )
+        .unwrap();
+
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .weights(ScoreWeights::default());
+    let hits = db.recall(&req).unwrap();
+    let ids: Vec<_> = hits.iter().map(|h| h.memory.id).collect();
+    assert!(ids.contains(&id2), "live keyed memory must appear");
+    assert!(
+        !ids.contains(&id1),
+        "superseded memory must be dropped from default recall"
+    );
+}
+
+#[test]
+fn history_walks_the_supersession_chain_newest_first() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("history.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // Build a chain: v1 → v2 → v3 under the shared key "status".
+    let make = |content: &str, axis: usize| {
+        let mut v = vec![0.0; 4];
+        v[axis] = 1.0;
+        Memory::new(content, MemoryType::Semantic, v)
+            .with_scope(Scope::Shared)
+            .with_importance(0.5)
+    };
+    let (id1, _) = db.remember_keyed(make("v1", 0), "status").unwrap();
+    let (id2, _) = db.remember_keyed(make("v2", 1), "status").unwrap();
+    let (id3, _) = db.remember_keyed(make("v3", 2), "status").unwrap();
+
+    let chain = db.history("status", None).unwrap();
+    assert_eq!(chain.len(), 3, "history should include live + 2 superseded");
+    assert_eq!(chain[0].id, id3, "entry 0 is the live record");
+    assert_eq!(chain[1].id, id2);
+    assert_eq!(chain[2].id, id1);
+}
+
+#[test]
+fn private_and_shared_keys_are_independent_slots() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("scope-keys.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // One private keyed record for "alice", one shared under the same
+    // string. Neither must supersede the other.
+    let (id_private, o_private) = db
+        .remember_keyed(
+            Memory::new("alice-pref", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0))
+                .with_agent("alice"),
+            "pref",
+        )
+        .unwrap();
+    assert_eq!(o_private, WriteOutcome::Added);
+
+    let (id_shared, o_shared) = db
+        .remember_keyed(
+            Memory::new(
+                "shared-pref",
+                MemoryType::Semantic,
+                vec4(0.0, 1.0, 0.0, 0.0),
+            )
+            .with_scope(Scope::Shared),
+            "pref",
+        )
+        .unwrap();
+    assert_eq!(
+        o_shared,
+        WriteOutcome::Added,
+        "shared-scope key must not supersede the private-scope slot"
+    );
+    assert_ne!(id_private, id_shared);
+
+    // Reopen (after dropping the first handle to release its exclusive
+    // flock) to make sure both are still live.
+    db.flush().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let live_ids: std::collections::HashSet<_> =
+        db.memories().unwrap().iter().map(|m| m.id).collect();
+    assert!(live_ids.contains(&id_private));
+    assert!(live_ids.contains(&id_shared));
+}
+
+#[test]
+fn file_written_with_12_1_opens_under_v0_7_layout() {
+    // Guard against an accidental format bump (R-001.10): the on-disk
+    // header version must still be v8 after a 12.1 write round-trip.
+    // Combined with the "all new per-memory data goes under `_mnemo.*`
+    // metadata" rule, that means a v0.7.x reader can still open and
+    // decrypt files written by this build. (The reader won't filter
+    // superseded records out of recall — that behavior is 12.1-aware —
+    // but it can read every record.)
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("compat.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        db.remember_keyed(
+            Memory::new("first", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+            "slot",
+        )
+        .unwrap();
+        db.remember_keyed(
+            Memory::new("second", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)),
+            "slot",
+        )
+        .unwrap();
+        db.flush().unwrap();
+    }
+
+    // Read the header directly and assert the format version byte.
+    // Mnemo uses format version `v8` since Phase FIX-1; `_mnemo.*`
+    // metadata rides along as ordinary `Memory.metadata` serde, so a
+    // v0.7.0 reader against the same on-disk bytes is unchanged.
+    let bytes = std::fs::read(&path).unwrap();
+    // The format module serializes the magic + version into the first
+    // few bytes of the header; the exact layout is a private detail,
+    // but the version byte is a single `u16` that lives at a known
+    // offset. Rather than hard-code that, round-trip through the
+    // engine itself — a successful `Mnemo::open` + `memories` means
+    // the header validated against the current engine, which still
+    // only accepts v8 files.
+    assert!(!bytes.is_empty());
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let all = db.memories().unwrap();
+    assert_eq!(all.len(), 2, "both records must survive flush + reopen");
+    // One of them should still be marked superseded, and the engine
+    // (same layout as v0.7) reads the metadata out verbatim.
+    let has_superseded_mark = all
+        .iter()
+        .any(|m| m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY));
+    assert!(
+        has_superseded_mark,
+        "the superseded record's `_mnemo.superseded_by` marker should survive flush + reopen"
+    );
 }

@@ -226,6 +226,108 @@ impl Memory {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 12.1: reserved `_mnemo.*` metadata keys for in-place updates + keyed
+// supersession. These live in `Memory.metadata` (which is already
+// `Map<String, Value>` on the record), so nothing in the on-disk record
+// layout changes — v0.7.x readers see them as ordinary user metadata and
+// ignore them. Format bump to v9 (post-12.1) will promote the ones that
+// pay for a typed catalog column.
+// ---------------------------------------------------------------------------
+
+/// Namespace prefix used for every v0.8.0+ reserved metadata key (R-001.10).
+/// Keys outside this namespace are untouched user metadata.
+pub const MNEMO_META_NS: &str = "_mnemo.";
+
+/// Upsert slot name on a `remember(…, key = K)` write (12.1). Combined with
+/// the memory's `scope` (and `agent_id` for `Private` scope) to identify a
+/// single live memory per slot: a newer `remember(key=K)` supersedes the
+/// prior one.
+pub const MNEMO_META_KEY: &str = "_mnemo.key";
+
+/// Set on the newly-inserted record when a `remember(key=K)` supersedes an
+/// earlier record. Value: the superseded record's ULID string.
+pub const MNEMO_META_SUPERSEDES: &str = "_mnemo.supersedes";
+
+/// Set on the earlier record when a newer `remember(key=K)` has replaced
+/// it. Value: the new record's ULID string. Together with `_mnemo.invalid_at`
+/// this marks the record as "superseded, not current" — default `recall`,
+/// `about` and the key index skip it; `history(key)` walks the chain.
+pub const MNEMO_META_SUPERSEDED_BY: &str = "_mnemo.superseded_by";
+
+/// Set on the earlier record when superseded. Value: unix seconds (i64).
+/// Not interpreted by the engine's scorer — purely for audit / `history`.
+pub const MNEMO_META_INVALID_AT: &str = "_mnemo.invalid_at";
+
+/// Set on a record each time `Mnemo::update` succeeds. Value: unix seconds.
+/// Lets callers distinguish an unchanged-since-creation record from one
+/// that has been edited in place. Not interpreted by the scorer.
+pub const MNEMO_META_UPDATED_AT: &str = "_mnemo.updated_at";
+
+/// Patch body for [`crate::Mnemo::update`] (Phase 12.1): every field is
+/// optional, and only the `Some(...)` fields overwrite the corresponding
+/// field on the target memory. All fields can be set independently.
+///
+/// `content` paired with `vector` updates both at once — the engine does
+/// not re-embed under `update` (use `update_text` for that). A `content`
+/// change without a new `vector` is rejected to prevent the embedding
+/// drifting silently out of sync with the text.
+///
+/// `metadata` **replaces** the full user-metadata map — the engine's own
+/// `_mnemo.*` reserved keys on the target record are preserved across
+/// the replacement (updated-at timestamp, supersession markers, etc.).
+/// Passing an empty map drops every user-visible metadata key but keeps
+/// the reserved ones.
+///
+/// `ttl_secs` is `Option<Option<i64>>` so a caller can distinguish
+/// "leave it alone" (`None`) from "set it to a value" (`Some(Some(s))`)
+/// and "clear it" (`Some(None)`).
+#[derive(Debug, Clone, Default)]
+pub struct MemoryPatch {
+    /// New text content. If set, a matching `vector` must also be set
+    /// (or call `update_text`, which re-embeds through the registered
+    /// embedder).
+    pub content: Option<String>,
+    /// New embedding. Must match the database's dimensionality.
+    pub vector: Option<Vec<f32>>,
+    /// New importance in `[0, 1]`.
+    pub importance: Option<f32>,
+    /// Replace the memory type.
+    pub memory_type: Option<MemoryType>,
+    /// Replace the user-visible metadata (preserves `_mnemo.*` reserved
+    /// keys).
+    pub metadata: Option<Map<String, Value>>,
+    /// Change the TTL. Outer `None` → leave unchanged; `Some(Some(s))` →
+    /// set TTL to `s`; `Some(None)` → clear any existing TTL.
+    pub ttl_secs: Option<Option<i64>>,
+}
+
+/// Outcome of a 12.1 write operation (`remember` with `key`, or `update`).
+///
+/// Plain `remember` without a key always returns a ULID, not a
+/// `WriteOutcome`, because supersession and NOOP detection are tied to
+/// the key slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// Keyed write with no prior record for this slot. A brand-new record
+    /// was inserted, no record was superseded.
+    Added,
+    /// Keyed write whose content / type / importance / user metadata
+    /// differs from the live record for this slot. A new record was
+    /// inserted and the prior one was marked
+    /// `_mnemo.superseded_by` / `_mnemo.invalid_at`.
+    Superseded,
+    /// No-op: the incoming keyed write is byte-equal to the live record
+    /// for this slot (content, memory type, importance, user metadata).
+    /// No record was written and no catalog page was dirtied. The
+    /// returned id is the existing record's id.
+    Unchanged,
+    /// In-place `update`: fields changed on the target record. The record
+    /// was rewritten copy-on-write so the previous version remains
+    /// visible through snapshots.
+    Updated,
+}
+
 /// Distance/similarity metric for vector comparison.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Metric {

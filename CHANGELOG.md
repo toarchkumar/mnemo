@@ -6,6 +6,92 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0, the minor component carries the breaking-change signal.
 
+## [Unreleased]
+
+### Added — PR 12.1: edit in place + keyed supersession
+
+**Two new write verbs** on top of `remember`:
+
+* **`Mnemo::update(id, patch)`** — edit a memory in place, preserving its
+  ULID, `created_at` and access stats. A patch whose fields all equal the
+  live record is a no-op; otherwise fields change and a `_mnemo.updated_at`
+  stamp is added. A `content` change requires a matching `vector` (or use
+  `update_text`, which re-embeds through the registered embedder) so text
+  and embedding can't drift silently apart. `MemoryPatch` has optional
+  `content`, `vector`, `importance`, `memory_type`, `metadata` (full
+  replacement of user-visible metadata; reserved `_mnemo.*` keys are
+  preserved), and `ttl_secs: Option<Option<i64>>` (outer `None` =
+  unchanged, `Some(Some(s))` = set, `Some(None)` = clear).
+* **`Mnemo::remember_keyed(memory, key)`** — upsert by `(scope_owner, key)`
+  slot. `Private`-scope memories share a slot per `(agent_id, key)`;
+  `Shared` memories share one slot per `key` across the file. The first
+  keyed write to a slot is `Added`, a later write with different user
+  content is `Superseded` (new record inserted, old record marked with
+  `_mnemo.superseded_by` / `_mnemo.invalid_at`, both survive through
+  `Mnemo::history(key, agent)`), and an identical re-write is `Unchanged`
+  — returns the existing live ULID without writing. Retries, idempotent
+  extractors, and session-end summaries that re-emit the same current
+  fact no longer grow the supersession chain.
+
+**Recall and about drop superseded records.** Before the first decrypt,
+every recall checks a lazy in-memory `superseded` set (built once per
+handle on first keyed op) and skips those IDs. `about()` filters the
+same way. Superseded records remain in `memories()`, in snapshot history,
+and in `history(key, agent)`.
+
+**Short results on the indexed path, fixed.** Pre-12.1, filters (type,
+agent, TTL, and now supersession) applied *after* the ANN shortlist
+could return fewer than `top_k` hits on an indexed file. Recall now
+widens `n_probe` / `n_rerank` 2× when that happens, and if the widened
+shortlist would already cover half or more of the live non-superseded
+records, it skips the ANN pass for an exact scan. This fix is
+independent of supersession and also affects pre-existing type / agent
+filtering.
+
+**Surfaces** across Rust, Python, the CLI, and MCP:
+* **Rust:** `Mnemo::update`, `Mnemo::update_text`, `Mnemo::remember_keyed`,
+  `Mnemo::remember_keyed_text`, `Mnemo::history`. New public types
+  `MemoryPatch`, `WriteOutcome`, and the reserved-key constants
+  (`MNEMO_META_KEY`, `MNEMO_META_SUPERSEDES`, `MNEMO_META_SUPERSEDED_BY`,
+  `MNEMO_META_INVALID_AT`, `MNEMO_META_UPDATED_AT`, `MNEMO_META_NS`).
+* **Python:** `db.update(id, ...)`, `db.update_text(id, new_text, ...)`,
+  `db.history(key, agent_id=None)`, plus a `key=` kwarg on
+  `remember(...)` and `remember_text(...)`. A keyed write returns a
+  `{"id": str, "outcome": "added"|"superseded"|"unchanged"}` dict;
+  without `key`, `remember` still returns a bare ULID string.
+* **CLI:** `mnemo update <file> <id> [--text ... --embed-cmd ... --embed-name ...] [--importance F] [--metadata '{...}'] [--ttl-secs N | --clear-ttl]`,
+  `mnemo history <file> --key K [--agent A] [--format table|json|jsonl]`,
+  and a new `--key K` on `mnemo remember`. Keyed `mnemo remember` prints
+  `<ulid>\t<outcome>`.
+* **MCP:** new `update` and `history` tools, a new optional `key`
+  parameter on the `remember` tool. Tool descriptions steer callers
+  toward `key` for facts that replace earlier ones. The `remember`
+  response is now `{id, outcome}` with `outcome` =
+  `inserted` (un-keyed) or `added`/`superseded`/`unchanged` (keyed).
+
+**No on-disk format change.** All new per-memory data lives in
+`Memory.metadata` under the reserved `_mnemo.*` namespace (R-001.10),
+so a file written by v0.8.0 still opens under v0.7.x. The v9 format
+bump (post-12.1) will promote these into typed catalog columns so the
+lazy key-index + superseded-set scan goes away.
+
+**`history_keep`** (retention per key) is named in the spec but
+**deferred** to Phase 12.5 / Phase 7 — the supersession chain is
+unbounded in v0.8.0.
+
+**Dogfood.** `test/scripts/project_memory.py` gains `remember --key K`:
+pass the same key on repeat runs to supersede the prior record, and an
+identical re-emission is now a no-op. Scripts that key their writes get
+`id\toutcome` on stdout instead of a bare ULID.
+
+**Tests.** 73 → 80 integration tests (7 new: `update_in_place_preserves_id_and_created_at`,
+`update_with_identical_patch_is_noop`, `update_content_without_vector_is_rejected`,
+`remember_keyed_added_then_superseded_then_noop`,
+`recall_drops_superseded_records`, `history_walks_the_supersession_chain_newest_first`,
+`private_and_shared_keys_are_independent_slots`,
+`file_written_with_12_1_opens_under_v0_7_layout`). No pre-12.1 test
+changed behavior.
+
 ## [0.7.0] — 2026-11-06
 
 **Breaking release.** Two import-surface changes ship together: the

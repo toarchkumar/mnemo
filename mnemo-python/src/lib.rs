@@ -30,8 +30,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, KdfParams, Memory, MemoryType,
-    Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope, Ulid,
+    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, KdfParams, Memory, MemoryPatch,
+    MemoryType, Metric, Mnemo as Core, MnemoConfig, RecallRequest, Scope, Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -39,6 +39,16 @@ use mnemo_core::{
 /// Map a core error onto a Python exception.
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
+}
+
+/// Phase 12.1: write-outcome enum → stable Python string.
+fn write_outcome_str(o: WriteOutcome) -> &'static str {
+    match o {
+        WriteOutcome::Added => "added",
+        WriteOutcome::Superseded => "superseded",
+        WriteOutcome::Unchanged => "unchanged",
+        WriteOutcome::Updated => "updated",
+    }
 }
 
 /// Parse a memory-type string, raising `ValueError` on an unknown value.
@@ -268,12 +278,20 @@ impl Mnemo {
 #[pymethods]
 impl Mnemo {
     /// Store a memory; returns its ULID as a string.
+    ///
+    /// Phase 12.1: when `key` is set the write takes the keyed-upsert
+    /// path (`remember_keyed`) and returns a `{"id": str, "outcome":
+    /// str}` dict instead of a bare ULID string. `outcome` is one of
+    /// `"added"`, `"superseded"`, `"unchanged"`. Without `key` the
+    /// return value is still just the ULID string for backward
+    /// compatibility.
     #[pyo3(signature = (content, memory_type, vector, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None))]
+                        shared=false, metadata=None, key=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember(
         &mut self,
+        py: Python<'_>,
         content: String,
         memory_type: &str,
         vector: Vec<f32>,
@@ -283,7 +301,8 @@ impl Mnemo {
         ttl_secs: Option<i64>,
         shared: bool,
         metadata: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<String> {
+        key: Option<String>,
+    ) -> PyResult<PyObject> {
         let mut memory = Memory::new(content, parse_type(memory_type)?, vector);
         if let Some(a) = agent_id {
             memory = memory.with_agent(a);
@@ -307,8 +326,22 @@ impl Mnemo {
                     .insert(k.extract::<String>()?, py_to_json(&v)?);
             }
         }
-        let id = self.core_mut()?.remember(memory).map_err(to_py)?;
-        Ok(id.to_string())
+        match key {
+            None => {
+                let id = self.core_mut()?.remember(memory).map_err(to_py)?;
+                Ok(id.to_string().into_py(py))
+            }
+            Some(k) => {
+                let (id, outcome) = self
+                    .core_mut()?
+                    .remember_keyed(memory, &k)
+                    .map_err(to_py)?;
+                let out = PyDict::new_bound(py);
+                out.set_item("id", id.to_string())?;
+                out.set_item("outcome", write_outcome_str(outcome))?;
+                Ok(out.into_any().unbind())
+            }
+        }
     }
 
     /// Register a text embedder for this handle (Phase 3 PR 10a).
@@ -354,7 +387,7 @@ impl Mnemo {
     /// vector width, or if the callback raised a Python exception.
     #[pyo3(signature = (content, memory_type, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None))]
+                        shared=false, metadata=None, key=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember_text(
         slf: Py<Self>,
@@ -367,7 +400,8 @@ impl Mnemo {
         ttl_secs: Option<i64>,
         shared: bool,
         metadata: Option<Bound<'_, PyDict>>,
-    ) -> PyResult<String> {
+        key: Option<String>,
+    ) -> PyResult<PyObject> {
         let mt = parse_type(memory_type)?;
         // PY-1 (R-001.11): take `slf: Py<Self>` instead of `&mut self` so
         // the PyO3-level `PyRefMut` does NOT live across the embedder
@@ -416,8 +450,166 @@ impl Mnemo {
             }
         }
         let mut s = slf.borrow_mut(py);
-        let id = s.core_mut()?.remember(memory).map_err(to_py)?;
-        Ok(id.to_string())
+        match key {
+            None => {
+                let id = s.core_mut()?.remember(memory).map_err(to_py)?;
+                Ok(id.to_string().into_py(py))
+            }
+            Some(k) => {
+                let (id, outcome) = s
+                    .core_mut()?
+                    .remember_keyed(memory, &k)
+                    .map_err(to_py)?;
+                let out = PyDict::new_bound(py);
+                out.set_item("id", id.to_string())?;
+                out.set_item("outcome", write_outcome_str(outcome))?;
+                Ok(out.into_any().unbind())
+            }
+        }
+    }
+
+    /// Phase 12.1: edit a memory in place, preserving its ULID,
+    /// `created_at` and access stats. Returns a dict
+    /// `{"outcome": "updated"|"unchanged"}`. A patch whose fields all
+    /// equal the live record is a no-op.
+    ///
+    /// A `content` change requires a matching `vector` (or use
+    /// `update_text` to re-embed through the registered embedder).
+    /// `metadata` fully replaces the user-visible metadata; reserved
+    /// `_mnemo.*` keys on the record are preserved.
+    ///
+    /// `ttl_secs`:
+    /// * `None` → leave the TTL unchanged,
+    /// * an integer → set the TTL to that many seconds,
+    /// * pass `clear_ttl=True` to drop any TTL.
+    #[pyo3(signature = (id, *, content=None, vector=None, importance=None,
+                        metadata=None, memory_type=None, ttl_secs=None, clear_ttl=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn update(
+        &mut self,
+        py: Python<'_>,
+        id: &str,
+        content: Option<String>,
+        vector: Option<Vec<f32>>,
+        importance: Option<f32>,
+        metadata: Option<Bound<'_, PyDict>>,
+        memory_type: Option<&str>,
+        ttl_secs: Option<i64>,
+        clear_ttl: bool,
+    ) -> PyResult<PyObject> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let mut patch = MemoryPatch {
+            content,
+            vector,
+            importance,
+            memory_type: memory_type.map(parse_type).transpose()?,
+            ..Default::default()
+        };
+        if let Some(dict) = metadata {
+            let mut map = serde_json::Map::new();
+            for (k, v) in dict.iter() {
+                map.insert(k.extract::<String>()?, py_to_json(&v)?);
+            }
+            patch.metadata = Some(map);
+        }
+        if clear_ttl {
+            patch.ttl_secs = Some(None);
+        } else if let Some(t) = ttl_secs {
+            patch.ttl_secs = Some(Some(t));
+        }
+        let outcome = self.core_mut()?.update(&ulid, patch).map_err(to_py)?;
+        let out = PyDict::new_bound(py);
+        out.set_item("id", id.to_string())?;
+        out.set_item("outcome", write_outcome_str(outcome))?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Phase 12.1: in-place update that re-embeds `new_text` through
+    /// the registered embedder. Shorthand for `update(id,
+    /// content=new_text, vector=embedder.embed([new_text])[0], ...)`.
+    /// Other kwargs behave as in [`Mnemo::update`].
+    #[pyo3(signature = (id, new_text, *, importance=None, metadata=None,
+                        memory_type=None, ttl_secs=None, clear_ttl=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn update_text(
+        slf: Py<Self>,
+        py: Python<'_>,
+        id: &str,
+        new_text: String,
+        importance: Option<f32>,
+        metadata: Option<Bound<'_, PyDict>>,
+        memory_type: Option<&str>,
+        ttl_secs: Option<i64>,
+        clear_ttl: bool,
+    ) -> PyResult<PyObject> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        // PY-1 (R-001.11): clone embedder Arc under a short PyRef, drop
+        // the borrow, then take a fresh PyRefMut for the update call.
+        let embedder = {
+            let s = slf.borrow(py);
+            s.core()?
+                .embedder_arc()
+                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?
+        };
+        let vector = {
+            let mut vs = embedder.embed(&[new_text.as_str()]).map_err(to_py)?;
+            vs.pop().ok_or_else(|| {
+                PyRuntimeError::new_err("embedder returned no vector for the input text")
+            })?
+        };
+        let mut patch = MemoryPatch {
+            content: Some(new_text),
+            vector: Some(vector),
+            importance,
+            memory_type: memory_type.map(parse_type).transpose()?,
+            ..Default::default()
+        };
+        if let Some(dict) = metadata {
+            let mut map = serde_json::Map::new();
+            for (k, v) in dict.iter() {
+                map.insert(k.extract::<String>()?, py_to_json(&v)?);
+            }
+            patch.metadata = Some(map);
+        }
+        if clear_ttl {
+            patch.ttl_secs = Some(None);
+        } else if let Some(t) = ttl_secs {
+            patch.ttl_secs = Some(Some(t));
+        }
+        let mut s = slf.borrow_mut(py);
+        let outcome = s.core_mut()?.update(&ulid, patch).map_err(to_py)?;
+        let out = PyDict::new_bound(py);
+        out.set_item("id", id.to_string())?;
+        out.set_item("outcome", write_outcome_str(outcome))?;
+        Ok(out.into_any().unbind())
+    }
+
+    /// Phase 12.1: walk the full chain for a keyed slot, newest first.
+    /// Entry 0 is the live record (or an empty list if the slot is
+    /// empty); subsequent entries are the superseded history.
+    /// `agent_id=None` queries the shared slot; a string queries the
+    /// private slot for that agent.
+    #[pyo3(signature = (key, *, agent_id=None))]
+    fn history(
+        &mut self,
+        py: Python<'_>,
+        key: &str,
+        agent_id: Option<String>,
+    ) -> PyResult<PyObject> {
+        let chain = self
+            .core_mut()?
+            .history(key, agent_id.as_deref())
+            .map_err(to_py)?;
+        let list = PyList::empty_bound(py);
+        for (i, m) in chain.iter().enumerate() {
+            let d_obj = memory_to_dict(py, m)?;
+            let d = d_obj.downcast_bound::<PyDict>(py)?;
+            d.set_item("state", if i == 0 { "live" } else { "superseded" })?;
+            list.append(d)?;
+        }
+        Ok(list.into_any().unbind())
     }
 
     /// Embed `query` with the registered embedder and run `recall`

@@ -113,6 +113,17 @@ enum Command {
         /// Optional JSON object of extra metadata key/values.
         #[arg(long)]
         metadata: Option<String>,
+        /// Phase 12.1: optional upsert key. When set, this `remember`
+        /// behaves as a keyed write: if a live memory already holds this
+        /// `(scope_owner, key)` slot, the prior record is marked
+        /// `_mnemo.superseded_by` and a new record is inserted; if the
+        /// incoming content, type, importance and user metadata match
+        /// the live record exactly, the write is a no-op and nothing is
+        /// changed. Prefer `--key` for facts that replace earlier ones
+        /// (versions, current status, user preferences). Prints the id
+        /// plus one of `added`/`superseded`/`unchanged` on stdout.
+        #[arg(long)]
+        key: Option<String>,
         /// Embedder command. Shell-style quoted but **not** executed
         /// via a shell — e.g. `"python3 embedder.py"` or `"my-embed
         /// --model=foo"`. Protocol: child reads one JSON string per
@@ -336,6 +347,71 @@ enum Command {
         /// Where to write the demo database.
         #[arg(long, default_value = "demo.mnemo")]
         path: String,
+    },
+    /// Edit a memory in place (Phase 12.1). Keeps the ULID, `created_at`
+    /// and access stats; any of `--text`, `--importance`, `--metadata`,
+    /// `--ttl-secs` may change. `--text` re-embeds through the registered
+    /// embedder (`--embed-cmd` + `--embed-name` required). An identical
+    /// patch is a no-op and prints `unchanged`.
+    Update {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// ULID of the memory to update.
+        id: String,
+        /// New content text; re-embeds through the embedder you supply
+        /// via `--embed-cmd` + `--embed-name`.
+        #[arg(long)]
+        text: Option<String>,
+        /// New importance in `[0, 1]`.
+        #[arg(long)]
+        importance: Option<f32>,
+        /// Replace user-visible metadata with this JSON object. Reserved
+        /// `_mnemo.*` keys on the record are preserved. Pass `{}` to
+        /// clear user metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Set the TTL (seconds). Pass `--clear-ttl` to drop any
+        /// existing TTL instead.
+        #[arg(long, conflicts_with = "clear_ttl")]
+        ttl_secs: Option<i64>,
+        /// Clear any TTL on this memory.
+        #[arg(long)]
+        clear_ttl: bool,
+        /// Embedder command for `--text` (same contract as
+        /// `mnemo remember --embed-cmd`).
+        #[arg(long, requires = "text")]
+        embed_cmd: Option<String>,
+        /// Embedder identity for `--text`; must match the manifest.
+        #[arg(long, requires = "text")]
+        embed_name: Option<String>,
+        /// Whether the embedder returns unit-normalized vectors.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
+        /// Per-request embedder timeout in seconds.
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Walk the full chain for a keyed slot (Phase 12.1), newest first.
+    /// Entry 0 is the live record (or empty if the slot is empty);
+    /// subsequent entries are the superseded history.
+    History {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Keyed slot name (passed to `mnemo remember --key` /
+        /// `remember_keyed`).
+        #[arg(long)]
+        key: String,
+        /// Query the private slot for this agent. Omit for the shared
+        /// slot (one per file).
+        #[arg(long)]
+        agent: Option<String>,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        #[arg(long)]
+        passphrase: Option<String>,
     },
     /// List the restorable snapshots (one per committed flush).
     Snapshots {
@@ -970,6 +1046,7 @@ fn run() -> std::result::Result<(), String> {
             importance,
             agent,
             metadata,
+            key,
             embed_cmd,
             embed_name,
             embed_normalize,
@@ -1027,9 +1104,33 @@ fn run() -> std::result::Result<(), String> {
             }
             // (Scope defaults to Private; add `--shared` later if the
             // CLI needs to opt into Scope::Shared.)
-            let id = db.remember(memory).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
-            println!("{id}");
+            //
+            // Phase 12.1: when `--key` is given, take the keyed-upsert
+            // path (supersede / no-op / add), and print `id\toutcome`
+            // so scripts can distinguish the three states. Without
+            // `--key`, keep the original single-ULID stdout for
+            // backward compatibility.
+            match key {
+                None => {
+                    let id = db.remember(memory).map_err(fmt)?;
+                    db.flush().map_err(fmt)?;
+                    println!("{id}");
+                }
+                Some(k) => {
+                    let (id, outcome) = db.remember_keyed(memory, &k).map_err(fmt)?;
+                    db.flush().map_err(fmt)?;
+                    let outcome_str = match outcome {
+                        mnemo_engine::WriteOutcome::Added => "added",
+                        mnemo_engine::WriteOutcome::Superseded => "superseded",
+                        mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                        // `Updated` isn't reachable on a keyed remember —
+                        // that's the `mnemo update` path. Treat it as
+                        // `superseded` so the enum match stays total.
+                        mnemo_engine::WriteOutcome::Updated => "superseded",
+                    };
+                    println!("{id}\t{outcome_str}");
+                }
+            }
         }
         Command::Index {
             path,
@@ -1450,6 +1551,144 @@ fn run() -> std::result::Result<(), String> {
             print_recall_hits(&hits, format);
         }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
+        Command::Update {
+            path,
+            id,
+            text,
+            importance,
+            metadata,
+            ttl_secs,
+            clear_ttl,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
+            embed_timeout,
+            passphrase: pp,
+        } => {
+            use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
+            let pp = passphrase(&pp)?;
+            let ulid = parse_ulid(&id)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+
+            let mut patch = MemoryPatch::default();
+            if let Some(i) = importance {
+                patch.importance = Some(i);
+            }
+            if let Some(meta_str) = metadata {
+                let parsed: serde_json::Value = serde_json::from_str(&meta_str)
+                    .map_err(|e| format!("invalid --metadata JSON: {e}"))?;
+                let obj = parsed
+                    .as_object()
+                    .ok_or_else(|| "--metadata must be a JSON object".to_string())?;
+                patch.metadata = Some(obj.clone());
+            }
+            if clear_ttl {
+                patch.ttl_secs = Some(None);
+            } else if let Some(ttl) = ttl_secs {
+                patch.ttl_secs = Some(Some(ttl));
+            }
+
+            let outcome = match text {
+                Some(t) => {
+                    let ecmd = embed_cmd.ok_or_else(|| {
+                        "--text requires --embed-cmd and --embed-name".to_string()
+                    })?;
+                    let ename = embed_name.ok_or_else(|| {
+                        "--text requires --embed-cmd and --embed-name".to_string()
+                    })?;
+                    let identity = EmbedderIdentity {
+                        name: ename,
+                        dimensions: db.dimensions(),
+                        normalize: embed_normalize,
+                    };
+                    let embedder = EmbedCmd::new(&ecmd, identity)
+                        .map_err(fmt)?
+                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    db.update_text(&ulid, &t, patch).map_err(fmt)?
+                }
+                None => db.update(&ulid, patch).map_err(fmt)?,
+            };
+            db.flush().map_err(fmt)?;
+            let outcome_str = match outcome {
+                WriteOutcome::Updated => "updated",
+                WriteOutcome::Unchanged => "unchanged",
+                // Not reachable on `update`, but keep the match total.
+                WriteOutcome::Added => "updated",
+                WriteOutcome::Superseded => "updated",
+            };
+            println!("{id}\t{outcome_str}");
+        }
+        Command::History {
+            path,
+            key,
+            agent,
+            format,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let chain = db.history(&key, agent.as_deref()).map_err(fmt)?;
+            match format {
+                OutputFormat::Table => {
+                    if chain.is_empty() {
+                        println!("no history for key={key}");
+                    } else {
+                        for (i, m) in chain.iter().enumerate() {
+                            let state = if i == 0 { "live" } else { "superseded" };
+                            println!(
+                                "{state:<10} {id}  created_at={ct}  {content}",
+                                id = m.id,
+                                ct = m.created_at,
+                                content = truncate(&m.content, 80),
+                            );
+                        }
+                    }
+                }
+                OutputFormat::Json => {
+                    let arr: Vec<_> = chain
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| {
+                            let mut v = memory_to_json(m, false);
+                            if let Some(obj) = v.as_object_mut() {
+                                obj.insert(
+                                    "state".into(),
+                                    serde_json::Value::String(
+                                        (if i == 0 { "live" } else { "superseded" }).into(),
+                                    ),
+                                );
+                            }
+                            v
+                        })
+                        .collect();
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({ "count": arr.len(), "chain": arr }),
+                        )
+                        .unwrap_or_else(|_| "{}".into())
+                    );
+                }
+                OutputFormat::Jsonl => {
+                    for (i, m) in chain.iter().enumerate() {
+                        let mut v = memory_to_json(m, false);
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert(
+                                "state".into(),
+                                serde_json::Value::String(
+                                    (if i == 0 { "live" } else { "superseded" }).into(),
+                                ),
+                            );
+                        }
+                        println!(
+                            "{}",
+                            serde_json::to_string(&v).unwrap_or_else(|_| "{}".into())
+                        );
+                    }
+                }
+            }
+        }
         Command::Snapshots {
             path,
             passphrase: pp,

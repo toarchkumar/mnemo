@@ -318,7 +318,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "remember",
-                "description": "Insert or overwrite a memory. Pass EITHER `vector` (explicit embedding) OR `text` (embedded by the server if it was started with --embed-cmd / --embed-name). Persists to disk before returning. Returns `{id}`.",
+                "description": "Insert, overwrite, or UPSERT a memory. Pass EITHER `vector` (explicit embedding) OR `text` (embedded by the server if it was started with --embed-cmd / --embed-name). Phase 12.1: when `key` is set, this becomes a keyed upsert — if a live memory already holds this `(agent + key)` slot the prior record is marked `_mnemo.superseded_by` and a new one is inserted, and an identical re-write is a no-op. **PREFER `key` for any fact that replaces an earlier one** (versions, current status, user preferences, plan outcomes). Persists to disk before returning. Returns `{id, outcome}` where `outcome` is `added`, `superseded`, `unchanged`, or (no key) `inserted`.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["content", "memory_type"],
@@ -332,7 +332,40 @@ fn tools_list() -> Value {
                         "session_id": { "type": "string" },
                         "ttl_secs": { "type": "integer" },
                         "shared": { "type": "boolean" },
-                        "metadata": { "type": "object" }
+                        "metadata": { "type": "object" },
+                        "key": { "type": "string", "description": "Phase 12.1 upsert slot name. A later `remember` with the same `key` + agent scope supersedes the prior record; an identical re-write is a no-op. Use this for any fact that replaces an earlier one." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "update",
+                "description": "Edit a memory in place (Phase 12.1). Preserves the ULID, `created_at` and access stats. Any of `content` (needs `vector` to avoid embedding drift), `text` (re-embeds via the server), `importance`, `metadata`, `ttl_secs` can change. An identical patch returns `{id, outcome: 'unchanged'}` without writing. Prefer `remember` with `key` for facts that replace earlier ones; use `update` for in-place corrections to one specific record.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                        "id": { "type": "string", "description": "ULID of the memory to update." },
+                        "content": { "type": "string", "description": "New content. Requires a matching `vector` (use `text` to re-embed instead)." },
+                        "vector": { "type": "array", "items": { "type": "number" } },
+                        "text": { "type": "string", "description": "New content; the server embeds it through its registered embedder. Mutually exclusive with `content` + `vector`." },
+                        "importance": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "metadata": { "type": "object", "description": "Replace the user-visible metadata. Reserved `_mnemo.*` keys on the record are preserved." },
+                        "ttl_secs": { "type": "integer", "description": "Set the TTL to this many seconds. Use `clear_ttl: true` to drop any TTL." },
+                        "clear_ttl": { "type": "boolean", "description": "Clear any TTL on the record." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "history",
+                "description": "Walk the full chain for a keyed slot (Phase 12.1), newest first. Entry 0 is the live record (or empty if the slot is empty); subsequent entries are the superseded history. Use `agent` for a private-scope slot; omit for the shared slot.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["key"],
+                    "properties": {
+                        "key": { "type": "string" },
+                        "agent": { "type": "string" }
                     },
                     "additionalProperties": false
                 }
@@ -488,6 +521,8 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
     let text = match name {
         "about" => tool_about(db)?,
         "remember" => tool_remember(db, args)?,
+        "update" => tool_update(db, args)?,
+        "history" => tool_history(db, args)?,
         "recall" => tool_recall(db, args)?,
         "forget" => tool_forget(db, args)?,
         "list" => tool_list(db, args)?,
@@ -631,9 +666,136 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
         }
     }
 
-    let id = db.remember(mem).map_err(mnemo_err)?;
+    // Phase 12.1: when `key` is set, take the keyed-upsert path
+    // (supersede / no-op / add); otherwise keep the pre-12.1
+    // single-id return shape (now carrying `outcome: "inserted"` so
+    // callers can distinguish it from the keyed outcomes).
+    match args.get("key").and_then(|v| v.as_str()) {
+        None => {
+            let id = db.remember(mem).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            Ok(json!({ "id": id.to_string(), "outcome": "inserted" }).to_string())
+        }
+        Some(k) => {
+            let (id, outcome) = db.remember_keyed(mem, k).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            let outcome_str = match outcome {
+                crate::WriteOutcome::Added => "added",
+                crate::WriteOutcome::Superseded => "superseded",
+                crate::WriteOutcome::Unchanged => "unchanged",
+                crate::WriteOutcome::Updated => "superseded",
+            };
+            Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+        }
+    }
+}
+
+fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    use crate::Ulid;
+    use crate::{MemoryPatch, WriteOutcome};
+    let id_str = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "update: missing 'id'"))?;
+    let id = Ulid::from_string(id_str)
+        .map_err(|_| RpcError::new(INVALID_PARAMS, format!("update: invalid ULID '{id_str}'")))?;
+    // Mutually exclusive: `text` (server re-embeds) vs `content`+`vector`
+    // (explicit). Either path produces `(new_content, new_vector)` for
+    // the engine; both unset means no text/vector change.
+    let has_text = args.get("text").is_some();
+    let has_content = args.get("content").is_some();
+    let has_vector = args.get("vector").is_some();
+    if has_text && (has_content || has_vector) {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            "update: pass EITHER 'text' or 'content'+'vector', not both",
+        ));
+    }
+    let mut patch = MemoryPatch::default();
+    if has_content {
+        let c = args
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "update: 'content' must be a string"))?;
+        patch.content = Some(c.to_string());
+    }
+    if has_vector {
+        let v = args
+            .get("vector")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "update: 'vector' must be a JSON array"))?
+            .iter()
+            .map(|v| v.as_f64().map(|f| f as f32))
+            .collect::<Option<Vec<f32>>>()
+            .ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    "update: 'vector' must be an array of numbers",
+                )
+            })?;
+        patch.vector = Some(v);
+    }
+    if let Some(imp) = args.get("importance").and_then(|v| v.as_f64()) {
+        patch.importance = Some(imp as f32);
+    }
+    if let Some(meta) = args.get("metadata").and_then(|v| v.as_object()) {
+        patch.metadata = Some(meta.clone());
+    }
+    let clear_ttl = args
+        .get("clear_ttl")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if clear_ttl {
+        patch.ttl_secs = Some(None);
+    } else if let Some(ttl) = args.get("ttl_secs").and_then(|v| v.as_i64()) {
+        patch.ttl_secs = Some(Some(ttl));
+    }
+
+    let outcome = if has_text {
+        let t = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "update: 'text' must be a string"))?;
+        db.update_text(&id, t, patch).map_err(mnemo_err)?
+    } else {
+        db.update(&id, patch).map_err(mnemo_err)?
+    };
     db.flush().map_err(mnemo_err)?;
-    Ok(json!({ "id": id.to_string() }).to_string())
+    let outcome_str = match outcome {
+        WriteOutcome::Updated => "updated",
+        WriteOutcome::Unchanged => "unchanged",
+        WriteOutcome::Added => "updated",
+        WriteOutcome::Superseded => "updated",
+    };
+    Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+}
+
+fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "history: missing 'key'"))?;
+    let agent = args.get("agent").and_then(|v| v.as_str());
+    let chain = db.history(key, agent).map_err(mnemo_err)?;
+    let out: Vec<Value> = chain
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let mut v = memory_to_json(m);
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert(
+                    "state".into(),
+                    Value::String(if i == 0 {
+                        "live".into()
+                    } else {
+                        "superseded".into()
+                    }),
+                );
+            }
+            v
+        })
+        .collect();
+    Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()))
 }
 
 fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {

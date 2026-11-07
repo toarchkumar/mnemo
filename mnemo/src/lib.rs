@@ -69,7 +69,11 @@ pub use embed::{Embedder, EmbedderIdentity};
 pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};
 pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
-pub use memory::{Memory, MemoryType, Metric, Scope, ScoreWeights};
+pub use memory::{
+    Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, WriteOutcome,
+    MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_NS, MNEMO_META_SUPERSEDED_BY,
+    MNEMO_META_SUPERSEDES, MNEMO_META_UPDATED_AT,
+};
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,
     DEFAULT_BATCH_MAX_AGE, DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,
