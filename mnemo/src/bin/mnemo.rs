@@ -586,6 +586,21 @@ enum ThreadCmd {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Phase 12.7c: start a new thread that continues from a previous
+    /// one. Writes a link record (`_mnemo.continues`); `mnemo essence
+    /// --thread <new>` then pulls the prior thread's open items,
+    /// `next` and last-N timeline entries ahead of its own essence.
+    Start {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// New thread id.
+        new: String,
+        /// Previous thread id to continue from.
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
 }
 
 /// Subcommands under `mnemo essence` (Phase 12.7b).
@@ -2382,6 +2397,21 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             db.flush().map_err(fmt)?;
             println!(
                 "forgot {n} record(s) in thread '{thread}' (run `mnemo compact {path}` to reclaim space)"
+            );
+            Ok(())
+        }
+        ThreadCmd::Start {
+            path,
+            new,
+            from,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let id = db.thread_start(&new, &from).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!(
+                "thread '{new}' continues from '{from}' (link record {id}; try `mnemo essence {path} --thread {new}`)"
             );
             Ok(())
         }

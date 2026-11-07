@@ -30,9 +30,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use mnemo_core::{
-    CacheBudget, CacheFlushPolicy, Embedder, EmbedderIdentity, EssenceScope as CoreEssenceScope,
-    EssenceSection, Filter as CoreFilter, KdfParams, Memory, MemoryPatch, MemoryType, Metric,
-    Mnemo as Core, MnemoConfig, RecallRequest, Scope, ThreadTurn, Ulid, WriteOutcome,
+    CacheBudget, CacheFlushPolicy, CommitBatch, CommitReport, Embedder, EmbedderIdentity,
+    EssenceOp, EssenceOpKind, EssenceScope as CoreEssenceScope, EssenceSection,
+    Filter as CoreFilter, KdfParams, KeyedMemory, Memory, MemoryPatch, MemoryType, Metric,
+    Mnemo as Core, MnemoConfig, RecallRequest, Scope, ThreadTurn, TurnPolicy, Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -139,6 +140,241 @@ fn filter_from_py_dict(d: &Bound<'_, PyDict>) -> PyResult<CoreFilter> {
 
 /// Phase 12.7b: map `(thread, project)` kwargs to a [`CoreEssenceScope`].
 /// Exactly one of `thread` and `project` must be set.
+/// Phase 12.7c: parse the Python `batch` dict handed to
+/// `db.commit_deltas` into the core [`CommitBatch`].
+fn parse_commit_batch(
+    py: Python<'_>,
+    batch: &Bound<'_, PyDict>,
+) -> PyResult<CommitBatch> {
+    let mut out = CommitBatch::default();
+
+    if let Some(raw) = batch.get_item("facts")? {
+        let facts: Vec<Bound<'_, PyDict>> = raw.extract()?;
+        for (i, d) in facts.iter().enumerate() {
+            let content: String = d
+                .get_item("content")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "facts[{i}]: missing required key 'content'"
+                    ))
+                })?
+                .extract()?;
+            let memory_type_str: String = d
+                .get_item("memory_type")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "facts[{i}]: missing required key 'memory_type'"
+                    ))
+                })?
+                .extract()?;
+            let memory_type = parse_type(&memory_type_str)?;
+            let vector: Vec<f32> = d
+                .get_item("vector")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "facts[{i}]: missing required key 'vector' (bindings carry no server-side embedder for batch; embed first)"
+                    ))
+                })?
+                .extract()?;
+            let mut mem = Memory::new(content, memory_type, vector);
+            if let Some(v) = d.get_item("agent_id")? {
+                mem = mem.with_agent(v.extract::<String>()?);
+            }
+            if let Some(v) = d.get_item("session_id")? {
+                mem = mem.with_session(v.extract::<String>()?);
+            }
+            if let Some(v) = d.get_item("importance")? {
+                mem = mem.with_importance(v.extract::<f32>()?);
+            }
+            if let Some(v) = d.get_item("ttl_secs")? {
+                mem = mem.with_ttl(v.extract::<i64>()?);
+            }
+            if let Some(v) = d.get_item("shared")? {
+                if v.extract::<bool>()? {
+                    mem = mem.with_scope(Scope::Shared);
+                }
+            }
+            if let Some(v) = d.get_item("metadata")? {
+                let meta: Bound<'_, PyDict> = v.downcast_into()?;
+                for (mk, mv) in meta.iter() {
+                    mem.metadata
+                        .insert(mk.extract::<String>()?, py_to_json(&mv)?);
+                }
+            }
+            let key = d
+                .get_item("key")?
+                .map(|v| v.extract::<String>())
+                .transpose()?;
+            out.facts.push(KeyedMemory { memory: mem, key });
+        }
+    }
+
+    if let Some(raw) = batch.get_item("essence_ops")? {
+        let ops: Vec<Bound<'_, PyDict>> = raw.extract()?;
+        for (i, d) in ops.iter().enumerate() {
+            let kind_str: String = d
+                .get_item("kind")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "essence_ops[{i}]: missing required key 'kind'"
+                    ))
+                })?
+                .extract()?;
+            let kind = match kind_str.as_str() {
+                "add" => EssenceOpKind::Add,
+                "append_timeline" => EssenceOpKind::AppendTimeline,
+                "update" => EssenceOpKind::Update,
+                "resolve" => EssenceOpKind::Resolve,
+                "remove" => EssenceOpKind::Remove,
+                other => {
+                    return Err(PyValueError::new_err(format!(
+                        "essence_ops[{i}]: unknown kind '{other}'"
+                    )));
+                }
+            };
+            let thread = d
+                .get_item("thread")?
+                .map(|v| v.extract::<String>())
+                .transpose()?;
+            let project = d
+                .get_item("project")?
+                .map(|v| v.extract::<bool>())
+                .transpose()?
+                .unwrap_or(false);
+            let scope = match (thread, project) {
+                (Some(t), false) => Some(CoreEssenceScope::Thread(t)),
+                (None, true) => Some(CoreEssenceScope::Project),
+                (None, false) => None,
+                (Some(_), true) => {
+                    return Err(PyValueError::new_err(format!(
+                        "essence_ops[{i}]: can't set both 'thread' and 'project'"
+                    )));
+                }
+            };
+            let section = if let Some(v) = d.get_item("section")? {
+                let s: String = v.extract()?;
+                Some(EssenceSection::parse(&s).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "essence_ops[{i}]: unknown section '{s}'"
+                    ))
+                })?)
+            } else {
+                None
+            };
+            let id = if let Some(v) = d.get_item("id")? {
+                let s: String = v.extract()?;
+                Some(parse_id(&s)?)
+            } else {
+                None
+            };
+            let text = d
+                .get_item("text")?
+                .map(|v| v.extract::<String>())
+                .transpose()?;
+            let refs = d
+                .get_item("refs")?
+                .map(|v| v.extract::<Vec<String>>())
+                .transpose()?;
+            out.essence_ops.push(EssenceOp {
+                kind,
+                scope,
+                section,
+                id,
+                text,
+                refs,
+            });
+        }
+    }
+
+    if let Some(raw) = batch.get_item("turns")? {
+        let turns: Vec<Bound<'_, PyDict>> = raw.extract()?;
+        for (i, d) in turns.iter().enumerate() {
+            let turn_id: String = d
+                .get_item("turn_id")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "turns[{i}]: missing required key 'turn_id'"
+                    ))
+                })?
+                .extract()?;
+            let role: String = d
+                .get_item("role")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "turns[{i}]: missing required key 'role'"
+                    ))
+                })?
+                .extract()?;
+            let content: String = d
+                .get_item("content")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "turns[{i}]: missing required key 'content'"
+                    ))
+                })?
+                .extract()?;
+            let timestamp = d
+                .get_item("timestamp")?
+                .map(|v| v.extract::<i64>())
+                .transpose()?;
+            out.turns.push(ThreadTurn {
+                turn_id,
+                role,
+                content,
+                timestamp,
+            });
+        }
+    }
+
+    out.thread_id = batch
+        .get_item("thread_id")?
+        .map(|v| v.extract::<String>())
+        .transpose()?;
+
+    let policy = batch
+        .get_item("turn_policy")?
+        .map(|v| v.extract::<String>())
+        .transpose()?
+        .unwrap_or_else(|| "archive".to_string());
+    out.turn_policy = match policy.as_str() {
+        "archive" => TurnPolicy::Archive,
+        "drop" => TurnPolicy::Drop,
+        "expire_after" => {
+            let ttl: i64 = batch
+                .get_item("turn_policy_ttl")?
+                .ok_or_else(|| {
+                    PyValueError::new_err(
+                        "turn_policy='expire_after' requires 'turn_policy_ttl' (seconds)",
+                    )
+                })?
+                .extract()?;
+            TurnPolicy::ExpireAfter(ttl)
+        }
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown turn_policy '{other}'"
+            )));
+        }
+    };
+
+    let _ = py;
+    Ok(out)
+}
+
+fn commit_report_to_dict(py: Python<'_>, r: &CommitReport) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("facts_added", r.facts_added)?;
+    out.set_item("facts_superseded", r.facts_superseded)?;
+    out.set_item("facts_unchanged", r.facts_unchanged)?;
+    out.set_item("essence_ops_applied", r.essence_ops_applied)?;
+    out.set_item("essence_ops_unchanged", r.essence_ops_unchanged)?;
+    out.set_item("turns_added", r.turns_added)?;
+    out.set_item("turns_skipped", r.turns_skipped)?;
+    out.set_item("turns_truncated", r.turns_truncated)?;
+    out.set_item("turns_chunked", r.turns_chunked)?;
+    Ok(out.into_any().unbind())
+}
+
 fn essence_scope_from(
     thread: Option<String>,
     project: bool,
@@ -933,6 +1169,54 @@ impl Mnemo {
     ) -> PyResult<String> {
         let scope = essence_scope_from(thread, project)?;
         self.core_mut()?.essence(scope, budget).map_err(to_py)
+    }
+
+    /// Phase 12.7c: start a new thread that continues from a previous one.
+    /// Writes an `_mnemo.kind="thread_link"` marker with `_mnemo.continues =
+    /// <from>`, so a later `db.essence(thread=<new>)` pulls the prior
+    /// thread's open items, `next` and last-N timeline entries ahead of the
+    /// new thread's own essence. Returns the link-record ULID as a string.
+    #[pyo3(signature = (new, from_))]
+    fn thread_start(&mut self, new: &str, from_: &str) -> PyResult<String> {
+        let id = self.core_mut()?.thread_start(new, from_).map_err(to_py)?;
+        Ok(id.to_string())
+    }
+
+    /// Phase 12.7c: atomic batch write combining facts (12.1),
+    /// essence ops (12.7b) and thread archive turns (12.7a). Validates
+    /// every item before staging — a single malformed op fails the whole
+    /// batch with no record written — then applies all three groups and
+    /// calls `flush()` once. Returns a counts dict with keys
+    /// `facts_added`, `facts_superseded`, `facts_unchanged`,
+    /// `essence_ops_applied`, `essence_ops_unchanged`, `turns_added`,
+    /// `turns_skipped`, `turns_truncated`, `turns_chunked`.
+    ///
+    /// `batch` shape:
+    /// ```python
+    /// db.commit_deltas({
+    ///     "facts": [{
+    ///         "content": "...", "memory_type": "semantic",
+    ///         "vector": [...],  # required: no server-side embedder here
+    ///         "agent_id": "a", "session_id": "s", "importance": 0.7,
+    ///         "shared": False, "metadata": {...}, "key": "note:1",
+    ///     }],
+    ///     "essence_ops": [{"kind": "add", "thread": "t1",
+    ///                      "section": "next", "text": "..."}],
+    ///     "turns": [{"turn_id": "u1", "role": "user", "content": "..."}],
+    ///     "thread_id": "t1",           # required when turns is non-empty
+    ///     "turn_policy": "archive",    # or "drop" / "expire_after"
+    ///     "turn_policy_ttl": 86400,    # required when policy is expire_after
+    /// })
+    /// ```
+    #[pyo3(signature = (batch))]
+    fn commit_deltas(
+        &mut self,
+        py: Python<'_>,
+        batch: Bound<'_, PyDict>,
+    ) -> PyResult<PyObject> {
+        let parsed = parse_commit_batch(py, &batch)?;
+        let report = self.core_mut()?.commit_deltas(parsed).map_err(to_py)?;
+        commit_report_to_dict(py, &report)
     }
 
     /// Embed `query` with the registered embedder and run `recall`

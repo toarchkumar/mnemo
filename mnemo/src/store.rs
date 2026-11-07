@@ -37,14 +37,16 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, status as essence_status, EssenceScope, EssenceSection, Filter, IngestReport, KeyScope,
-    Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, WriteOutcome,
-    ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS, MNEMO_META_INVALID_AT, MNEMO_META_KEY,
-    MNEMO_META_KIND, MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_TURN, MNEMO_META_LENGTH,
-    MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE, MNEMO_META_SECTION, MNEMO_META_SEQ,
-    MNEMO_META_SHA256, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY,
-    MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
-    THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
+    self, status as essence_status, CommitBatch, CommitReport, EssenceOpKind, EssenceScope,
+    EssenceSection, Filter, IngestReport, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope,
+    ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome, CONTINUATION_TIMELINE_ENTRIES,
+    ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS, MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT,
+    MNEMO_META_KEY, MNEMO_META_KIND, MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_THREAD_LINK,
+    MNEMO_META_KIND_TURN, MNEMO_META_LENGTH, MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE,
+    MNEMO_META_SECTION, MNEMO_META_SEQ, MNEMO_META_SHA256, MNEMO_META_STATUS,
+    MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD,
+    MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
+    THREAD_TURN_CHUNK_BYTES,
 };
 use crate::pager::Pager;
 use crate::result_cache::{
@@ -2840,6 +2842,20 @@ impl Mnemo {
         };
         out.push_str(&format!("# essence — {scope_label}\n\n"));
 
+        // Phase 12.7c: continuation. If this is a thread render AND
+        // the thread has a `_mnemo.continues` link, pull the prior
+        // thread's open section items, its `next`, and its last-N
+        // timeline entries in ahead of the new thread's own essence.
+        if let EssenceScope::Thread(new_id) = &scope {
+            if let Some(prev_id) = self.predecessor_thread(new_id)? {
+                let continuation = self
+                    .render_continuation_prelude(&prev_id, max_bytes.saturating_sub(out.len()))?;
+                if !continuation.is_empty() && out.len() + continuation.len() <= max_bytes {
+                    out.push_str(&continuation);
+                }
+            }
+        }
+
         for section in EssenceSection::render_order() {
             let items = match by_section.get(section.as_str()) {
                 Some(v) if !v.is_empty() => v,
@@ -3057,6 +3073,458 @@ impl Mnemo {
         new.created_at = existing.created_at;
         self.put(new)?;
         Ok(WriteOutcome::Updated)
+    }
+
+    // --- Phase 12.7c: continuation + commit_deltas ------------------
+
+    /// Start a new thread that continues from a previous one
+    /// (Phase 12.7c). Writes a thread-link marker record with
+    /// `_mnemo.kind = "thread_link"` + `_mnemo.thread = <new_id>` +
+    /// `_mnemo.continues = <from_id>`. The marker holds no user
+    /// content; its purpose is to let `essence(Thread(new_id))`
+    /// discover the continuation chain.
+    ///
+    /// The render for the new thread pulls the previous thread's
+    /// open section items, its `next`, and its last
+    /// [`CONTINUATION_TIMELINE_ENTRIES`] timeline entries ahead of
+    /// the new thread's own essence — the "new thread, same
+    /// experience" path.
+    pub fn thread_start(&mut self, new_thread_id: &str, from_thread_id: &str) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if new_thread_id.is_empty() || from_thread_id.is_empty() {
+            return Err(MnemoError::Invalid(
+                "thread_start: 'new_thread_id' and 'from_thread_id' must not be empty".into(),
+            ));
+        }
+        if new_thread_id == from_thread_id {
+            return Err(MnemoError::Invalid(
+                "thread_start: 'new_thread_id' must differ from 'from_thread_id'".into(),
+            ));
+        }
+        // Store a tiny marker record so the continuation chain is
+        // queryable from a fresh handle. Vector is the sentinel
+        // all-equal-axis unit spike (same as the scaffold manifest
+        // path) so `put`'s zero-vector guard accepts it.
+        let dims = self.dimensions.max(1);
+        let scale = 1.0 / (dims as f32).sqrt();
+        let v = vec![scale; dims];
+        let content = format!(
+            "thread link: {new_thread_id} continues from {from_thread_id}"
+        );
+        let mut m = Memory::new(content, MemoryType::Semantic, v).with_importance(0.1);
+        m.metadata.insert(
+            MNEMO_META_KIND.into(),
+            Value::String(MNEMO_META_KIND_THREAD_LINK.into()),
+        );
+        m.metadata.insert(
+            MNEMO_META_THREAD.into(),
+            Value::String(new_thread_id.to_string()),
+        );
+        m.metadata.insert(
+            MNEMO_META_CONTINUES.into(),
+            Value::String(from_thread_id.to_string()),
+        );
+        let id = self.put(m)?;
+        Ok(id)
+    }
+
+    /// Phase 12.7c helper: render the predecessor thread's open
+    /// items + `next` + last-N timeline entries as a "continued from"
+    /// prelude. Used by [`Mnemo::essence`] to carry forward the
+    /// prior thread's live state into a fresh thread.
+    fn render_continuation_prelude(
+        &mut self,
+        prev_thread: &str,
+        max_bytes: usize,
+    ) -> Result<String> {
+        if max_bytes == 0 {
+            return Ok(String::new());
+        }
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut open_items: Vec<Memory> = Vec::new();
+        let mut next_items: Vec<Memory> = Vec::new();
+        let mut timeline_items: Vec<Memory> = Vec::new();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                != Some(MNEMO_META_KIND_ESSENCE)
+            {
+                continue;
+            }
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(prev_thread)
+            {
+                continue;
+            }
+            let section = match m
+                .metadata
+                .get(MNEMO_META_SECTION)
+                .and_then(|v| v.as_str())
+                .and_then(EssenceSection::parse)
+            {
+                Some(s) => s,
+                None => continue,
+            };
+            let status = m
+                .metadata
+                .get(MNEMO_META_STATUS)
+                .and_then(|v| v.as_str())
+                .unwrap_or(essence_status::OPEN);
+            match section {
+                EssenceSection::Open if status == essence_status::OPEN => {
+                    open_items.push(m);
+                }
+                EssenceSection::Next if status == essence_status::OPEN => {
+                    next_items.push(m);
+                }
+                EssenceSection::Timeline => timeline_items.push(m),
+                _ => {}
+            }
+        }
+        // Newest-first timeline, cap to last N.
+        timeline_items.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+        timeline_items.truncate(CONTINUATION_TIMELINE_ENTRIES);
+        // Oldest-first for stable chronological read in the render.
+        timeline_items.reverse();
+
+        let mut out = String::new();
+        let header = format!("## continued from `{prev_thread}`\n");
+        if header.len() > max_bytes {
+            return Ok(String::new());
+        }
+        out.push_str(&header);
+        if !open_items.is_empty() {
+            let sub = "### open\n";
+            if out.len() + sub.len() <= max_bytes {
+                out.push_str(sub);
+            }
+            for m in &open_items {
+                let line = format!("- {}\n", m.content);
+                if out.len() + line.len() > max_bytes {
+                    break;
+                }
+                out.push_str(&line);
+            }
+        }
+        if !next_items.is_empty() {
+            let sub = "### next\n";
+            if out.len() + sub.len() <= max_bytes {
+                out.push_str(sub);
+            }
+            for m in &next_items {
+                let line = format!("- {}\n", m.content);
+                if out.len() + line.len() > max_bytes {
+                    break;
+                }
+                out.push_str(&line);
+            }
+        }
+        if !timeline_items.is_empty() {
+            let sub = "### recent milestones\n";
+            if out.len() + sub.len() <= max_bytes {
+                out.push_str(sub);
+            }
+            for m in &timeline_items {
+                let line = format!("- {}\n", m.content);
+                if out.len() + line.len() > max_bytes {
+                    break;
+                }
+                out.push_str(&line);
+            }
+        }
+        if out.len() < max_bytes {
+            out.push('\n');
+        }
+        Ok(out)
+    }
+
+    /// Phase 12.7c helper: find the predecessor thread id for
+    /// `thread_id` by reading its `_mnemo.kind = "thread_link"`
+    /// marker. Returns `None` if the thread has no predecessor
+    /// (fresh thread, no `thread_start` call).
+    fn predecessor_thread(&mut self, thread_id: &str) -> Result<Option<String>> {
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                != Some(MNEMO_META_KIND_THREAD_LINK)
+            {
+                continue;
+            }
+            let this = m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str());
+            if this != Some(thread_id) {
+                continue;
+            }
+            return Ok(m
+                .metadata
+                .get(MNEMO_META_CONTINUES)
+                .and_then(|v| v.as_str())
+                .map(String::from));
+        }
+        Ok(None)
+    }
+
+    /// Atomic batch write combining 12.1 facts, 12.7b essence ops,
+    /// and 12.7a archive turns in one flush (Phase 12.7c).
+    ///
+    /// **Validation up front.** Every op in the batch is validated
+    /// before any write runs: missing required fields in an
+    /// [`EssenceOp`], an invalid `thread_id` for turns, a fact
+    /// whose vector has the wrong dimensionality, a timeline entry
+    /// over the 600-byte cap, etc. Any validation error returns
+    /// `Err(MnemoError::Invalid)` and the file is untouched.
+    ///
+    /// **One flush.** On success, every sub-write runs in order
+    /// (facts → essence ops → turns per `turn_policy`) and the
+    /// method calls `self.flush()` exactly once on exit. On a
+    /// failure that lands past validation (e.g. an I/O error mid-
+    /// batch), the file reflects whatever had already been written
+    /// — the batch is atomic at the "validation gate" but not
+    /// crash-atomic. Callers that need crash atomicity should use
+    /// snapshots.
+    pub fn commit_deltas(&mut self, mut batch: CommitBatch) -> Result<CommitReport> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        // --- Validation gate (no writes yet) ----------------------
+        // Facts: vectors must match the handle's dimensionality.
+        for (i, f) in batch.facts.iter().enumerate() {
+            if f.memory.vector.len() != self.dimensions {
+                return Err(MnemoError::Invalid(format!(
+                    "commit_deltas: facts[{i}] vector has {} dims; this file is {}",
+                    f.memory.vector.len(),
+                    self.dimensions
+                )));
+            }
+            if let Some(k) = &f.key {
+                if k.is_empty() {
+                    return Err(MnemoError::Invalid(format!(
+                        "commit_deltas: facts[{i}] key is empty"
+                    )));
+                }
+            }
+        }
+        // Essence ops: per-kind field presence + text size caps.
+        for (i, op) in batch.essence_ops.iter().enumerate() {
+            match op.kind {
+                EssenceOpKind::Add => {
+                    if op.scope.is_none() {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Add missing 'scope'"
+                        )));
+                    }
+                    let section = op.section.ok_or_else(|| {
+                        MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Add missing 'section'"
+                        ))
+                    })?;
+                    if section == EssenceSection::Timeline {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Add on Timeline; use AppendTimeline"
+                        )));
+                    }
+                    let text = op.text.as_deref().ok_or_else(|| {
+                        MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Add missing 'text'"
+                        ))
+                    })?;
+                    if text.is_empty() || text.len() > section.item_max_bytes() {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Add text length invalid (0 or > {})",
+                            section.item_max_bytes()
+                        )));
+                    }
+                }
+                EssenceOpKind::AppendTimeline => {
+                    if op.scope.is_none() {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] AppendTimeline missing 'scope'"
+                        )));
+                    }
+                    let text = op.text.as_deref().ok_or_else(|| {
+                        MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] AppendTimeline missing 'text'"
+                        ))
+                    })?;
+                    if text.is_empty()
+                        || text.len() > EssenceSection::Timeline.item_max_bytes()
+                    {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] AppendTimeline text length invalid (0 or > {})",
+                            EssenceSection::Timeline.item_max_bytes()
+                        )));
+                    }
+                }
+                EssenceOpKind::Update => {
+                    if op.id.is_none() || op.text.is_none() {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] Update needs 'id' and 'text'"
+                        )));
+                    }
+                }
+                EssenceOpKind::Resolve | EssenceOpKind::Remove => {
+                    if op.id.is_none() {
+                        return Err(MnemoError::Invalid(format!(
+                            "commit_deltas: essence_ops[{i}] needs 'id'"
+                        )));
+                    }
+                }
+            }
+        }
+        // Turns: thread_id required when non-empty.
+        if !batch.turns.is_empty() && batch.thread_id.is_none() {
+            return Err(MnemoError::Invalid(
+                "commit_deltas: 'turns' non-empty but 'thread_id' missing".into(),
+            ));
+        }
+
+        // --- Apply, in planner-specified order --------------------
+        let mut report = CommitReport::default();
+
+        // 1) facts
+        for f in batch.facts.drain(..) {
+            match f.key {
+                Some(k) => {
+                    let (_id, outcome) = self.remember_keyed(f.memory, &k)?;
+                    match outcome {
+                        WriteOutcome::Added => report.facts_added += 1,
+                        WriteOutcome::Superseded => report.facts_superseded += 1,
+                        WriteOutcome::Unchanged => report.facts_unchanged += 1,
+                        WriteOutcome::Updated => report.facts_superseded += 1,
+                    }
+                }
+                None => {
+                    self.remember(f.memory)?;
+                    report.facts_added += 1;
+                }
+            }
+        }
+
+        // 2) essence ops
+        for op in batch.essence_ops.drain(..) {
+            match op.kind {
+                EssenceOpKind::Add => {
+                    self.essence_add(
+                        op.scope.expect("validated"),
+                        op.section.expect("validated"),
+                        op.text.as_deref().expect("validated"),
+                        op.refs,
+                    )?;
+                    report.essence_ops_applied += 1;
+                }
+                EssenceOpKind::AppendTimeline => {
+                    self.essence_append_timeline(
+                        op.scope.expect("validated"),
+                        op.text.as_deref().expect("validated"),
+                        op.refs,
+                    )?;
+                    report.essence_ops_applied += 1;
+                }
+                EssenceOpKind::Update => {
+                    let outcome = self.essence_update(
+                        op.id.as_ref().expect("validated"),
+                        op.text.as_deref().expect("validated"),
+                        op.refs,
+                    )?;
+                    match outcome {
+                        WriteOutcome::Updated | WriteOutcome::Added | WriteOutcome::Superseded => {
+                            report.essence_ops_applied += 1
+                        }
+                        WriteOutcome::Unchanged => report.essence_ops_unchanged += 1,
+                    }
+                }
+                EssenceOpKind::Resolve => {
+                    let outcome = self.essence_resolve(op.id.as_ref().expect("validated"))?;
+                    match outcome {
+                        WriteOutcome::Updated | WriteOutcome::Added | WriteOutcome::Superseded => {
+                            report.essence_ops_applied += 1
+                        }
+                        WriteOutcome::Unchanged => report.essence_ops_unchanged += 1,
+                    }
+                }
+                EssenceOpKind::Remove => {
+                    self.essence_remove(op.id.as_ref().expect("validated"))?;
+                    report.essence_ops_applied += 1;
+                }
+            }
+        }
+
+        // 3) turns per turn_policy
+        match batch.turn_policy {
+            TurnPolicy::Archive => {
+                if !batch.turns.is_empty() {
+                    let thread_id = batch
+                        .thread_id
+                        .as_deref()
+                        .expect("validated above");
+                    let r = self.ingest_thread(thread_id, &batch.turns)?;
+                    report.turns_added += r.added_records;
+                    report.turns_skipped += r.skipped_existing_turns;
+                    report.turns_truncated += r.truncated_turns;
+                    report.turns_chunked += r.chunked_turns;
+                }
+            }
+            TurnPolicy::ExpireAfter(ttl) => {
+                if !batch.turns.is_empty() {
+                    let thread_id = batch
+                        .thread_id
+                        .as_deref()
+                        .expect("validated above");
+                    // Reuse ingest, then apply TTL via `update` on
+                    // the newly-written records. Simpler than a
+                    // dedicated path — the TTL is advisory anyway
+                    // (compact + is_expired do the work).
+                    let r = self.ingest_thread(thread_id, &batch.turns)?;
+                    report.turns_added += r.added_records;
+                    report.turns_skipped += r.skipped_existing_turns;
+                    report.turns_truncated += r.truncated_turns;
+                    report.turns_chunked += r.chunked_turns;
+                    // Walk the just-ingested records and stamp TTL.
+                    // We can identify them by `(thread, seq >=
+                    // next_seq_before)`; simplest: pull the whole
+                    // thread, and for turns whose turn_id is in the
+                    // input set but wasn't already there (handled
+                    // by ingest_thread's idempotence check), set TTL.
+                    let want_ids: std::collections::HashSet<String> =
+                        batch.turns.iter().map(|t| t.turn_id.clone()).collect();
+                    let records = self.thread_export(thread_id)?;
+                    for rec in records {
+                        if let Some(tid) = rec
+                            .metadata
+                            .get(MNEMO_META_TURN_ID)
+                            .and_then(|v| v.as_str())
+                        {
+                            if want_ids.contains(tid) && rec.ttl_secs.is_none() {
+                                let _ = self.update(
+                                    &rec.id,
+                                    MemoryPatch {
+                                        ttl_secs: Some(Some(ttl)),
+                                        ..Default::default()
+                                    },
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+            TurnPolicy::Drop => {
+                // No-op: nothing goes to the archive.
+            }
+        }
+
+        self.flush()?;
+        Ok(report)
     }
 
     /// Return every live memory (used by tooling and compaction).

@@ -377,6 +377,79 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "thread_start",
+                "description": "Phase 12.7c: start a new thread that continues from a previous one. `essence {op: render, thread: <new>}` then pulls the prior thread's open items, `next` and last-N timeline entries ahead of the new thread's own essence — the 'new thread, same experience' path. Returns `{id}` (the link-record ULID).",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["new", "from"],
+                    "properties": {
+                        "new": { "type": "string", "description": "New thread id." },
+                        "from": { "type": "string", "description": "Previous thread id to continue from." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "commit_deltas",
+                "description": "Phase 12.7c: atomic batch write — facts (12.1), essence ops (12.7b), and thread archive turns (12.7a) in one call, with validate-everything-before-staging and a single `flush()` on success. Use when a session end wants to persist a burst of updates without making N round trips. `turn_policy` defaults to `archive`; `expire_after` takes a seconds TTL; `drop` discards turns. Returns a counts summary.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "facts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["content", "memory_type"],
+                                "properties": {
+                                    "content": { "type": "string" },
+                                    "memory_type": { "type": "string", "enum": ["episodic", "semantic", "procedural", "working"] },
+                                    "vector": { "type": "array", "items": { "type": "number" } },
+                                    "importance": { "type": "number", "minimum": 0, "maximum": 1 },
+                                    "agent_id": { "type": "string" },
+                                    "session_id": { "type": "string" },
+                                    "shared": { "type": "boolean" },
+                                    "metadata": { "type": "object" },
+                                    "key": { "type": "string" }
+                                }
+                            }
+                        },
+                        "essence_ops": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["kind"],
+                                "properties": {
+                                    "kind": { "type": "string", "enum": ["add", "append_timeline", "update", "resolve", "remove"] },
+                                    "thread": { "type": "string" },
+                                    "project": { "type": "boolean" },
+                                    "section": { "type": "string" },
+                                    "id": { "type": "string" },
+                                    "text": { "type": "string" },
+                                    "refs": { "type": "array", "items": { "type": "string" } }
+                                }
+                            }
+                        },
+                        "turns": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["turn_id", "role", "content"],
+                                "properties": {
+                                    "turn_id": { "type": "string" },
+                                    "role": { "type": "string" },
+                                    "content": { "type": "string" },
+                                    "timestamp": { "type": "integer" }
+                                }
+                            }
+                        },
+                        "thread_id": { "type": "string", "description": "Required when `turns` is non-empty." },
+                        "turn_policy": { "type": "string", "enum": ["archive", "expire_after", "drop"], "default": "archive" },
+                        "turn_policy_ttl": { "type": "integer", "description": "TTL in seconds; required when `turn_policy = 'expire_after'`." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
                 "name": "thread_ingest",
                 "description": "Phase 12.7a: ingest a transcript file into a thread's archive layer. Idempotent per `turn_id` — re-running on a longer transcript appends only the new turns. Requires an embedder on the server (`--embed-cmd` at serve start) because every turn is embedded. Returns `{added_records, skipped_existing_turns, chunked_turns, truncated_turns}`.",
                 "inputSchema": {
@@ -568,6 +641,8 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
         "thread_ingest" => tool_thread_ingest(db, args)?,
+        "thread_start" => tool_thread_start(db, args)?,
+        "commit_deltas" => tool_commit_deltas(db, args)?,
         "essence" => tool_essence(db, args)?,
         "recall" => tool_recall(db, args)?,
         "forget" => tool_forget(db, args)?,
@@ -814,6 +889,272 @@ fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         WriteOutcome::Superseded => "updated",
     };
     Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+}
+
+fn tool_thread_start(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let new = args
+        .get("new")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "thread_start: missing 'new'"))?;
+    let from = args
+        .get("from")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "thread_start: missing 'from'"))?;
+    let id = db.thread_start(new, from).map_err(mnemo_err)?;
+    db.flush().map_err(mnemo_err)?;
+    Ok(json!({ "id": id.to_string() }).to_string())
+}
+
+fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    use crate::{
+        CommitBatch, EssenceOp, EssenceOpKind, EssenceScope, EssenceSection, KeyedMemory, Memory,
+        MemoryType, Scope, ThreadTurn, TurnPolicy, Ulid,
+    };
+    let mut batch = CommitBatch::default();
+
+    // facts
+    if let Some(arr) = args.get("facts").and_then(|v| v.as_array()) {
+        for (i, f) in arr.iter().enumerate() {
+            let obj = f.as_object().ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: facts[{i}] must be an object"),
+                )
+            })?;
+            let content = obj
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: facts[{i}] missing 'content'"),
+                    )
+                })?;
+            let mtype_str = obj.get("memory_type").and_then(|v| v.as_str()).ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: facts[{i}] missing 'memory_type'"),
+                )
+            })?;
+            let mtype = MemoryType::parse(mtype_str).ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: facts[{i}] unknown memory_type '{mtype_str}'"),
+                )
+            })?;
+            let vector = obj
+                .get("vector")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: facts[{i}] missing 'vector' (MCP carries no server-side embedder for batch)"),
+                    )
+                })?
+                .iter()
+                .map(|v| v.as_f64().map(|f| f as f32))
+                .collect::<Option<Vec<f32>>>()
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: facts[{i}] vector must be numbers"),
+                    )
+                })?;
+            let mut mem = Memory::new(content, mtype, vector);
+            if let Some(a) = obj.get("agent_id").and_then(|v| v.as_str()) {
+                mem = mem.with_agent(a);
+            }
+            if let Some(s) = obj.get("session_id").and_then(|v| v.as_str()) {
+                mem = mem.with_session(s);
+            }
+            if let Some(imp) = obj.get("importance").and_then(|v| v.as_f64()) {
+                mem = mem.with_importance(imp as f32);
+            }
+            if let Some(shared) = obj.get("shared").and_then(|v| v.as_bool()) {
+                if shared {
+                    mem = mem.with_scope(Scope::Shared);
+                }
+            }
+            if let Some(meta) = obj.get("metadata").and_then(|v| v.as_object()) {
+                for (k, v) in meta {
+                    mem.metadata.insert(k.clone(), v.clone());
+                }
+            }
+            let key = obj.get("key").and_then(|v| v.as_str()).map(String::from);
+            batch.facts.push(KeyedMemory { memory: mem, key });
+        }
+    }
+
+    // essence_ops
+    if let Some(arr) = args.get("essence_ops").and_then(|v| v.as_array()) {
+        for (i, o) in arr.iter().enumerate() {
+            let obj = o.as_object().ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: essence_ops[{i}] must be an object"),
+                )
+            })?;
+            let kind_str = obj
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: essence_ops[{i}] missing 'kind'"),
+                    )
+                })?;
+            let kind = match kind_str {
+                "add" => EssenceOpKind::Add,
+                "append_timeline" => EssenceOpKind::AppendTimeline,
+                "update" => EssenceOpKind::Update,
+                "resolve" => EssenceOpKind::Resolve,
+                "remove" => EssenceOpKind::Remove,
+                other => {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: essence_ops[{i}] unknown kind '{other}'"),
+                    ));
+                }
+            };
+            let thread = obj.get("thread").and_then(|v| v.as_str()).map(String::from);
+            let project = obj.get("project").and_then(|v| v.as_bool()).unwrap_or(false);
+            let scope = match (thread, project) {
+                (Some(t), false) => Some(EssenceScope::Thread(t)),
+                (None, true) => Some(EssenceScope::Project),
+                (None, false) => None,
+                (Some(_), true) => {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        format!(
+                            "commit_deltas: essence_ops[{i}] can't set both 'thread' and 'project'"
+                        ),
+                    ));
+                }
+            };
+            let section = obj
+                .get("section")
+                .and_then(|v| v.as_str())
+                .and_then(EssenceSection::parse);
+            let id = obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .map(Ulid::from_string)
+                .transpose()
+                .map_err(|_| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: essence_ops[{i}] 'id' is not a valid ULID"),
+                    )
+                })?;
+            let text = obj.get("text").and_then(|v| v.as_str()).map(String::from);
+            let refs = obj.get("refs").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            });
+            batch.essence_ops.push(EssenceOp {
+                kind,
+                scope,
+                section,
+                id,
+                text,
+                refs,
+            });
+        }
+    }
+
+    // turns
+    if let Some(arr) = args.get("turns").and_then(|v| v.as_array()) {
+        for (i, t) in arr.iter().enumerate() {
+            let obj = t.as_object().ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: turns[{i}] must be an object"),
+                )
+            })?;
+            let turn_id = obj
+                .get("turn_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: turns[{i}] missing 'turn_id'"),
+                    )
+                })?
+                .to_string();
+            let role = obj
+                .get("role")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: turns[{i}] missing 'role'"),
+                    )
+                })?
+                .to_string();
+            let content = obj
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        format!("commit_deltas: turns[{i}] missing 'content'"),
+                    )
+                })?
+                .to_string();
+            let timestamp = obj.get("timestamp").and_then(|v| v.as_i64());
+            batch.turns.push(ThreadTurn {
+                turn_id,
+                role,
+                content,
+                timestamp,
+            });
+        }
+    }
+    batch.thread_id = args
+        .get("thread_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let policy_str = args
+        .get("turn_policy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("archive");
+    batch.turn_policy = match policy_str {
+        "archive" => TurnPolicy::Archive,
+        "drop" => TurnPolicy::Drop,
+        "expire_after" => {
+            let ttl = args
+                .get("turn_policy_ttl")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| {
+                    RpcError::new(
+                        INVALID_PARAMS,
+                        "commit_deltas: turn_policy='expire_after' requires 'turn_policy_ttl' (seconds)",
+                    )
+                })?;
+            TurnPolicy::ExpireAfter(ttl)
+        }
+        other => {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                format!("commit_deltas: unknown turn_policy '{other}'"),
+            ));
+        }
+    };
+
+    let report = db.commit_deltas(batch).map_err(mnemo_err)?;
+    Ok(json!({
+        "facts_added": report.facts_added,
+        "facts_superseded": report.facts_superseded,
+        "facts_unchanged": report.facts_unchanged,
+        "essence_ops_applied": report.essence_ops_applied,
+        "essence_ops_unchanged": report.essence_ops_unchanged,
+        "turns_added": report.turns_added,
+        "turns_skipped": report.turns_skipped,
+        "turns_truncated": report.turns_truncated,
+        "turns_chunked": report.turns_chunked,
+    })
+    .to_string())
 }
 
 fn tool_essence(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {

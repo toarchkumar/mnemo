@@ -8,6 +8,59 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added — PR 12.7c: continuation + commit_deltas
+
+**New thread, same experience.** Phase 12.7c makes two things routine
+for long-running agents: starting a successor thread that still
+remembers where the prior one left off, and shipping a session-end
+burst of updates in one atomic call.
+
+**Continuation (`thread_start --from`).** `Mnemo::thread_start(new,
+from)` writes a `_mnemo.kind = "thread_link"` marker record carrying
+`_mnemo.continues = <from>`. A subsequent `essence(scope =
+Thread(new))` discovers the link, pulls the prior thread's open
+items, its `next` section and the last ten timeline entries, and
+renders them ahead of the new thread's own essence under a
+`## continued from \`<from>\`` header. No format bump: the marker
+lives in the reserved `_mnemo.*` metadata namespace, so v0.9.0 files
+open unchanged under v0.7.x and v0.8.x readers.
+
+**`commit_deltas` (atomic batch write).** `Mnemo::commit_deltas(batch)`
+takes a `CommitBatch { facts, essence_ops, turns, thread_id,
+turn_policy }` and applies all three in one call with a strict
+validate-everything-before-staging gate: a single dim-mismatched
+vector, oversized essence item, or turns-without-thread-id fails
+the whole batch with no record written. On success the apply order
+is facts (12.1 keyed or plain) → essence ops (12.7b) → turns (12.7a
+archive), followed by a single `flush()`. `TurnPolicy ∈ {Archive,
+ExpireAfter(ttl_secs), Drop}` decides what happens to the batch's
+turns.
+
+**Surfaces:**
+- **Rust:** `CommitBatch`, `CommitReport`, `EssenceOp`,
+  `EssenceOpKind`, `KeyedMemory`, `TurnPolicy`,
+  `CONTINUATION_TIMELINE_ENTRIES`, `MNEMO_META_CONTINUES`,
+  `MNEMO_META_KIND_THREAD_LINK` all exported from the crate root.
+- **CLI:** `mnemo thread start <file> --new <id> --from <id>` writes
+  the link record; `mnemo essence <file> --thread <id>` then pulls
+  the continuation prelude automatically.
+- **MCP:** `thread_start {new, from}` → `{id}` and
+  `commit_deltas {facts?, essence_ops?, turns?, thread_id?,
+  turn_policy?, turn_policy_ttl?}` → counts summary. Facts must
+  carry `vector` fields (there is no server-side embedder for
+  batch writes).
+- **Python:** `db.thread_start(new, from_)` returns the link-record
+  ULID; `db.commit_deltas(batch_dict)` returns a counts dict
+  mirroring `CommitReport`.
+
+**Tests.** New integration tests cover the link-record marker shape,
+the continuation render (previous `open`, `next`, last-N timeline
+appearing alongside the new thread's items), the validation gate
+(a dim-mismatched fact fails the whole batch atomically), the
+happy-path end-to-end (facts + essence ops + turns in one call,
+with the essence item rendered and the turn archived), the `Drop`
+policy discarding turns, and the thread-id-required guard.
+
 ### Added — PR 12.7b: status-record core + essence (timeline + sections + render)
 
 **Essence is the continuous flow of a working thread** — intent,

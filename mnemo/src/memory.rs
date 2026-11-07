@@ -535,6 +535,135 @@ pub const FINDING_TRANSITIONS: &[(&str, &str)] = &[
 /// and have no status).
 pub const ESSENCE_TRANSITIONS: &[(&str, &str)] = &[(status::OPEN, status::RESOLVED)];
 
+// ---------------------------------------------------------------------------
+// Phase 12.7c: continuation + commit_deltas
+// ---------------------------------------------------------------------------
+
+/// Reserved `_mnemo.continues` key (Phase 12.7c). Set on a
+/// thread-start marker record to point at the previous thread whose
+/// context the new thread continues from. Value: the prior thread id
+/// (string). Rendering a continued thread pulls the prior thread's
+/// open items, `next` and last-N timeline entries ahead of the new
+/// thread's own essence.
+pub const MNEMO_META_CONTINUES: &str = "_mnemo.continues";
+
+/// Marker value for `_mnemo.kind` on a thread-start record (one per
+/// `thread_start(new, --from old)` call, carrying the link in
+/// `_mnemo.continues`).
+pub const MNEMO_META_KIND_THREAD_LINK: &str = "thread_link";
+
+/// How many timeline entries from the predecessor thread the
+/// continuation render pulls in (Phase 12.7c). Small enough to keep
+/// the render under the default 6 KB budget, large enough to carry a
+/// handful of milestones.
+pub const CONTINUATION_TIMELINE_ENTRIES: usize = 10;
+
+/// What [`crate::Mnemo::commit_deltas`] does with the `turns` carried
+/// in the batch (Phase 12.7c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnPolicy {
+    /// Archive every turn in the batch via
+    /// [`crate::Mnemo::ingest_thread`]. Default — matches the
+    /// "lossless flow preservation" story of 12.7.
+    #[default]
+    Archive,
+    /// Store turns with a TTL (unix-seconds expiry).
+    ExpireAfter(i64),
+    /// Drop turns on the floor (no archive record written).
+    Drop,
+}
+
+/// Which op a [`EssenceOp`] carries. Mirrors the per-method
+/// `Mnemo::essence_*` surface so one batch can mix section + timeline
+/// edits in one call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EssenceOpKind {
+    /// Section item add (any section except timeline).
+    Add,
+    /// Append-only timeline entry.
+    AppendTimeline,
+    /// In-place update of an existing section item.
+    Update,
+    /// Transition an item `open → resolved`.
+    Resolve,
+    /// Soft-delete an item.
+    Remove,
+}
+
+/// One essence op inside a [`CommitBatch`] (Phase 12.7c). Validation
+/// (missing/extra fields per kind) runs up front in
+/// [`crate::Mnemo::commit_deltas`] — a single bad op aborts the
+/// whole batch before any write lands.
+#[derive(Debug, Clone)]
+pub struct EssenceOp {
+    /// Which op to apply.
+    pub kind: EssenceOpKind,
+    /// Scope — required for [`EssenceOpKind::Add`] and
+    /// [`EssenceOpKind::AppendTimeline`].
+    pub scope: Option<EssenceScope>,
+    /// Section — required for [`EssenceOpKind::Add`].
+    pub section: Option<EssenceSection>,
+    /// Target record id — required for [`EssenceOpKind::Update`],
+    /// [`EssenceOpKind::Resolve`], [`EssenceOpKind::Remove`].
+    pub id: Option<Ulid>,
+    /// Content text — required for [`EssenceOpKind::Add`],
+    /// [`EssenceOpKind::AppendTimeline`], [`EssenceOpKind::Update`].
+    pub text: Option<String>,
+    /// Optional refs for ops that carry text.
+    pub refs: Option<Vec<String>>,
+}
+
+/// One keyed fact inside a [`CommitBatch`] (Phase 12.7c).
+#[derive(Debug, Clone)]
+pub struct KeyedMemory {
+    /// The memory to store.
+    pub memory: Memory,
+    /// Optional 12.1 upsert key.
+    pub key: Option<String>,
+}
+
+/// Atomic write batch for [`crate::Mnemo::commit_deltas`]
+/// (Phase 12.7c). The planner's "one call that composes facts +
+/// essence + turns" shape: everything validates up front, then every
+/// write runs under a single `flush()`.
+#[derive(Debug, Clone, Default)]
+pub struct CommitBatch {
+    /// Keyed-or-not facts to remember (12.1).
+    pub facts: Vec<KeyedMemory>,
+    /// Essence ops to apply (12.7b).
+    pub essence_ops: Vec<EssenceOp>,
+    /// Thread archive turns to ingest (12.7a).
+    pub turns: Vec<ThreadTurn>,
+    /// Destination thread id for `turns`. Required when `turns` is
+    /// non-empty.
+    pub thread_id: Option<String>,
+    /// What to do with `turns` — defaults to `Archive`.
+    pub turn_policy: TurnPolicy,
+}
+
+/// Result of [`crate::Mnemo::commit_deltas`] (Phase 12.7c).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommitReport {
+    /// Facts added (plain or `WriteOutcome::Added`).
+    pub facts_added: usize,
+    /// Facts whose keyed write superseded a prior record.
+    pub facts_superseded: usize,
+    /// Keyed facts whose write was a no-op (matched live record).
+    pub facts_unchanged: usize,
+    /// Essence ops that produced an Added/Updated result.
+    pub essence_ops_applied: usize,
+    /// Essence ops that were no-ops (e.g. `resolve` on resolved).
+    pub essence_ops_unchanged: usize,
+    /// Turn records written to the archive.
+    pub turns_added: usize,
+    /// Source turns skipped by the archive's idempotence check.
+    pub turns_skipped: usize,
+    /// Source turns whose content was truncated at the 16 KB cap.
+    pub turns_truncated: usize,
+    /// Source turns split into multiple 8 KB chunks.
+    pub turns_chunked: usize,
+}
+
 /// Patch body for [`crate::Mnemo::update`] (Phase 12.1): every field is
 /// optional, and only the `Some(...)` fields overwrite the corresponding
 /// field on the target memory. All fields can be set independently.

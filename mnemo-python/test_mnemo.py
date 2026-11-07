@@ -896,6 +896,112 @@ def test_history_default_slot_matches_remember_default_slot():
     print("ok  history default slot matches remember default slot (v0.8.1 bugfix)")
 
 
+def test_thread_start_and_essence_continuation():
+    """Phase 12.7c: thread_start links threads; essence(scope=new) pulls prev."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "cont.mnemo")
+        db = mnemo.open(path, "passphrase", dimensions=4)
+        try:
+            # Prev thread: an open item, a next item, and a milestone.
+            db.essence_add("open", "finish 12.7c", thread="t1")
+            db.essence_add("next", "release v0.9.0", thread="t1")
+            db.essence_append("first milestone", thread="t1")
+
+            link_id = db.thread_start("t2", "t1")
+            assert isinstance(link_id, str) and len(link_id) == 26, \
+                f"thread_start should return a ULID string; got {link_id!r}"
+
+            db.essence_add("intent", "pick up where t1 left off", thread="t2")
+            rendered = db.essence(thread="t2", budget=4096)
+            assert "continued from" in rendered, \
+                f"missing continuation prelude:\n{rendered}"
+            assert "finish 12.7c" in rendered, \
+                f"prev open missing:\n{rendered}"
+            assert "release v0.9.0" in rendered, \
+                f"prev next missing:\n{rendered}"
+            assert "first milestone" in rendered, \
+                f"prev timeline missing:\n{rendered}"
+            assert "pick up where t1 left off" in rendered, \
+                f"new intent missing:\n{rendered}"
+        finally:
+            db.close()
+    print("ok  thread_start + essence continuation (12.7c)")
+
+
+def test_commit_deltas_end_to_end():
+    """Phase 12.7c: commit_deltas applies facts + essence + turns atomically."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "batch.mnemo")
+        db = mnemo.open(path, "passphrase", dimensions=4)
+        try:
+            db.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4,
+                            normalize=True)
+            report = db.commit_deltas({
+                "facts": [{
+                    "content": "fact-a",
+                    "memory_type": "semantic",
+                    "vector": [1.0, 0.0, 0.0, 0.0],
+                    "importance": 0.8,
+                }],
+                "essence_ops": [{
+                    "kind": "add",
+                    "thread": "tA",
+                    "section": "intent",
+                    "text": "ship it",
+                }],
+                "turns": [{
+                    "turn_id": "u-1",
+                    "role": "user",
+                    "content": "hello",
+                }],
+                "thread_id": "tA",
+                "turn_policy": "archive",
+            })
+            assert report["facts_added"] == 1, report
+            assert report["essence_ops_applied"] == 1, report
+            assert report["turns_added"] == 1, report
+            out = db.essence(thread="tA", budget=2048)
+            assert "ship it" in out, f"essence not rendered:\n{out}"
+        finally:
+            db.close()
+    print("ok  commit_deltas end-to-end (12.7c)")
+
+
+def test_commit_deltas_validation_is_atomic():
+    """Phase 12.7c: a dim-mismatched fact fails the whole batch; no write."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "atomic.mnemo")
+        db = mnemo.open(path, "passphrase", dimensions=4)
+        try:
+            before = len(db)
+            try:
+                db.commit_deltas({
+                    "facts": [
+                        {
+                            "content": "ok",
+                            "memory_type": "semantic",
+                            "vector": [1.0, 0.0, 0.0, 0.0],
+                        },
+                        {
+                            "content": "wrong-dim",
+                            "memory_type": "semantic",
+                            "vector": [1.0, 0.0],
+                        },
+                    ],
+                })
+            except RuntimeError as e:
+                msg = str(e).lower()
+                assert "dim" in msg or "vector" in msg, msg
+            else:
+                raise AssertionError("expected RuntimeError on dim mismatch")
+            after = len(db)
+            assert before == after, \
+                f"commit_deltas must be atomic on validation failure: {before} -> {after}"
+        finally:
+            db.close()
+    print("ok  commit_deltas validation is atomic (12.7c)")
+
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -928,4 +1034,7 @@ if __name__ == "__main__":
     test_rebuild_index_reclusters_under_current_defaults()
     test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package()
     test_history_default_slot_matches_remember_default_slot()
+    test_thread_start_and_essence_continuation()
+    test_commit_deltas_end_to_end()
+    test_commit_deltas_validation_is_atomic()
     print("\nall Python binding tests passed")

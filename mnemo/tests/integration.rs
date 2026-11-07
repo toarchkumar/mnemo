@@ -5,10 +5,12 @@
 //! (secure) parameters.
 
 use mnemo_engine::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, EssenceScope, EssenceSection, Filter, KdfParams,
-    KeyScope, Memory, MemoryPatch, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope,
-    ScoreWeights, SemanticCachePutOpts, Turn, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD,
-    MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, CommitBatch, EssenceOp, EssenceOpKind,
+    EssenceScope, EssenceSection, Filter, KdfParams, KeyScope, KeyedMemory, Memory, MemoryPatch,
+    MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights,
+    SemanticCachePutOpts, ThreadTurn, Turn, TurnPolicy, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD,
+    MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
+    MNEMO_META_KIND_THREAD_LINK, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
     MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
 };
 use serde_json::json;
@@ -3943,5 +3945,237 @@ fn essence_project_and_thread_scopes_are_independent() {
     assert!(
         !project_render.contains("ship 12.7"),
         "project render should NOT include thread-scoped items; got:\n{project_render}"
+    );
+}
+
+// ---------- Phase 12.7c: continuation + commit_deltas -------------------
+
+#[test]
+fn thread_start_writes_link_record_with_continues_marker() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("link.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let link_id = db.thread_start("t2", "t1").unwrap();
+    let m = db.get(&link_id).unwrap();
+    assert_eq!(
+        m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
+        Some(MNEMO_META_KIND_THREAD_LINK)
+    );
+    assert_eq!(
+        m.metadata.get(MNEMO_META_CONTINUES).and_then(|v| v.as_str()),
+        Some("t1")
+    );
+}
+
+#[test]
+fn essence_render_for_continuation_pulls_prev_open_next_and_timeline() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cont.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+
+    // Previous thread: add open + next + a few timeline entries.
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Open,
+        "finish 12.7c",
+        None,
+    )
+    .unwrap();
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Next,
+        "release v0.9.0",
+        None,
+    )
+    .unwrap();
+    for i in 0..5 {
+        let line = format!("milestone #{i}");
+        db.essence_append_timeline(EssenceScope::Thread("t1".into()), &line, None)
+            .unwrap();
+    }
+
+    // Start continuation thread.
+    db.thread_start("t2", "t1").unwrap();
+
+    // New thread's own essence item.
+    db.essence_add(
+        EssenceScope::Thread("t2".into()),
+        EssenceSection::Intent,
+        "pick up where t1 left off",
+        None,
+    )
+    .unwrap();
+
+    let out = db.essence(EssenceScope::Thread("t2".into()), 4096).unwrap();
+    assert!(
+        out.contains("continued from"),
+        "continuation render missing prelude header; got:\n{out}"
+    );
+    assert!(
+        out.contains("finish 12.7c"),
+        "prelude should carry prev `open`; got:\n{out}"
+    );
+    assert!(
+        out.contains("release v0.9.0"),
+        "prelude should carry prev `next`; got:\n{out}"
+    );
+    assert!(
+        out.contains("milestone #4"),
+        "prelude should carry recent timeline entries; got:\n{out}"
+    );
+    assert!(
+        out.contains("pick up where t1 left off"),
+        "new thread's own essence should still render; got:\n{out}"
+    );
+}
+
+#[test]
+fn commit_deltas_validates_everything_before_staging() {
+    // A dim-mismatched fact mid-batch must fail the whole call with
+    // no record written.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("batch-val.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+    let before = db.stats().unwrap().memories;
+
+    let good = Memory::new("ok", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0));
+    let bad = Memory::new("wrong-dim", MemoryType::Semantic, vec![1.0, 0.0]);
+    let batch = CommitBatch {
+        facts: vec![
+            KeyedMemory {
+                memory: good,
+                key: None,
+            },
+            KeyedMemory {
+                memory: bad,
+                key: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let err = db.commit_deltas(batch).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("dim") || msg.contains("dimension") || msg.contains("vector"),
+        "expected dim-mismatch error, got: {msg}"
+    );
+    let after = db.stats().unwrap().memories;
+    assert_eq!(
+        before, after,
+        "commit_deltas must be atomic on validation failure"
+    );
+}
+
+#[test]
+fn commit_deltas_applies_facts_essence_and_turns_in_one_call() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("batch-ok.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+
+    let fact = Memory::new(
+        "fact-a",
+        MemoryType::Semantic,
+        vec4(1.0, 0.0, 0.0, 0.0),
+    );
+    let op = EssenceOp {
+        kind: EssenceOpKind::Add,
+        scope: Some(EssenceScope::Thread("tA".into())),
+        section: Some(EssenceSection::Intent),
+        id: None,
+        text: Some("ship it".into()),
+        refs: None,
+    };
+    let turn = ThreadTurn {
+        turn_id: "u-1".into(),
+        role: "user".into(),
+        content: "hello".into(),
+        timestamp: None,
+    };
+    let batch = CommitBatch {
+        facts: vec![KeyedMemory {
+            memory: fact,
+            key: None,
+        }],
+        essence_ops: vec![op],
+        turns: vec![turn],
+        thread_id: Some("tA".into()),
+        turn_policy: TurnPolicy::Archive,
+    };
+    let report = db.commit_deltas(batch).unwrap();
+    assert_eq!(report.facts_added, 1);
+    assert_eq!(report.essence_ops_applied, 1);
+    assert_eq!(report.turns_added, 1);
+
+    // Essence item rendered.
+    let out = db.essence(EssenceScope::Thread("tA".into()), 2048).unwrap();
+    assert!(out.contains("ship it"), "essence item not rendered:\n{out}");
+    // Turn archived.
+    let archived = db.thread_export("tA").unwrap();
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].content, "hello");
+}
+
+#[test]
+fn commit_deltas_turn_policy_drop_discards_turns() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("batch-drop.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+
+    let turn = ThreadTurn {
+        turn_id: "u-1".into(),
+        role: "user".into(),
+        content: "ephemeral".into(),
+        timestamp: None,
+    };
+    let batch = CommitBatch {
+        turns: vec![turn],
+        thread_id: Some("tD".into()),
+        turn_policy: TurnPolicy::Drop,
+        ..Default::default()
+    };
+    let report = db.commit_deltas(batch).unwrap();
+    assert_eq!(report.turns_added, 0);
+    let archived = db.thread_export("tD").unwrap();
+    assert!(archived.is_empty(), "drop policy wrote turns: {archived:?}");
+}
+
+#[test]
+fn commit_deltas_rejects_turns_without_thread_id() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("batch-no-thread.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
+        .unwrap();
+
+    let batch = CommitBatch {
+        turns: vec![ThreadTurn {
+            turn_id: "u-1".into(),
+            role: "user".into(),
+            content: "orphan".into(),
+            timestamp: None,
+        }],
+        turn_policy: TurnPolicy::Archive,
+        ..Default::default()
+    };
+    let err = db.commit_deltas(batch).unwrap_err();
+    assert!(
+        err.to_string().to_lowercase().contains("thread"),
+        "expected thread_id-required error, got: {err}"
     );
 }
