@@ -6528,3 +6528,138 @@ if real use cases surface.
 
 Next: PR 12.8 (budgeted recall + optional MMR). Coordination sync
 commit follows this entry; then straight to 12.8 per the DISPATCH.
+
+### 2026-11-06 — WORKER — DONE — PR 12.8 landed on origin/main (budgeted recall; MMR deferred)
+**Commit:** `07e5e54` `feat(12.8): budgeted recall (max_bytes +
+truncated flag; MMR deferred)`. CI green on all three OS matrices +
+Python jobs.
+
+**What shipped (R-001.10-compliant: query-time knob only):**
+- `RecallRequest.max_bytes: Option<usize>` + `.max_bytes(n)` builder.
+- `RecallResponse { hits: Vec<RecallResult>, truncated: bool }` +
+  `Mnemo::recall_budgeted(req) -> Result<RecallResponse>`. The
+  pre-12.8 `Mnemo::recall(req) -> Result<Vec<RecallResult>>` is now
+  a thin wrapper over `recall_budgeted` that discards the truncated
+  flag, so every pre-12.8 caller stays source-compatible.
+- Budget is applied **after** `top_k` and **after** access-tracking
+  (so the usage-saturation signal records what the scorer chose, not
+  what the byte cap allowed through). The first hit is always kept
+  even if it alone exceeds the budget. Bytes counted are the UTF-8
+  length of `Memory.content` only — no JSON / MessagePack envelope,
+  no metadata — so the number is stable across all surfaces.
+- **CLI:** `mnemo recall ... --max-bytes N`. Stdout hit format is
+  unchanged. A one-line stderr note fires on truncation ("(truncated:
+  hits dropped by --max-bytes; rerun with a larger budget or smaller
+  --top-k to see more)").
+- **MCP:** `recall` tool gains `max_bytes` (positive integer). When
+  set, the response wraps as `{hits, truncated}` instead of the bare
+  array. Without `max_bytes` the response is unchanged, preserving
+  backward compatibility for existing MCP clients.
+- **Python:** `db.recall(..., max_bytes=N)` and
+  `db.recall_text(..., max_bytes=N)`. Without `max_bytes` the return
+  value is still a `list[dict]` (unchanged); with `max_bytes` it
+  wraps as `{"hits": [...], "truncated": bool}` — same conditional
+  shape as MCP.
+
+**MMR (`mmr_lambda`) — deferred, not shipped.** The DISPATCH gated
+MMR on a ranking_v2 harness check ("hit@1 drops by no more than
+0.02"). The harness was slimmed in v0.7.0 to one default row + one
+similarity-only baseline + the phase6 regression gate; it has no
+MMR variant plumbed in. Rather than ship an MMR knob without
+exercising the gate (per the planner: "otherwise leave it out and
+say so"), v0.8.0 ships the budget without MMR. The budget loop is
+structured so a future `recall_budgeted` can re-rank hits with an
+MMR pass before truncating — the API knob lands in a follow-up PR
+after a harness extension measures the hit@1 cost.
+
+**Tests.** 86 → 91 integration tests pass under `cargo test
+--features failpoints --release`. New cases:
+`budgeted_recall_without_max_bytes_matches_plain_recall`,
+`budgeted_recall_drops_hits_past_budget`,
+`budgeted_recall_always_returns_top_hit_even_over_budget`,
+`budgeted_recall_truncated_false_when_everything_fits`,
+`recall_wrapper_still_returns_hits_vec` (asserts the thin
+`Mnemo::recall` shim still returns `Vec<RecallResult>` for pre-12.8
+callers). `cargo fmt --check` + `cargo clippy --all-targets
+--features failpoints,benches -- -D warnings` clean on both crates.
+
+Next: v0.8.0 release prep — manifest bumps, CHANGELOG cut from
+`[Unreleased]` to `[0.8.0] — 2026-11-06`, READY entry logged BEFORE
+tagging per the DISPATCH so lane A can hand off the README and
+site. Coordination sync commit follows this entry.
+
+### 2026-11-06 — WORKER — READY — v0.8.0 release commits staged (12.1 + 12.6 + 12.8); READY before tagging per the DISPATCH
+**Not tagged yet.** Per the lane-A DISPATCH: "log **READY before
+tagging** so the Planner can hand off the README and site." Standing
+by for the handoff; once it lands I'll commit it as its own commit
+and tag.
+
+**Three v0.8.0 PRs already on `origin/main`, each with its own DONE
++ coordination sync:**
+
+| PR | hash | subject |
+|---|---|---|
+| 12.1 | `777cf09` | `feat(12.1): edit in place + keyed supersession (update/remember_keyed/history)` |
+| 12.6 | `a062ed4` | `feat(12.6): filtered recall (session_id + metadata equality/in/range/exists)` |
+| 12.8 | `07e5e54` | `feat(12.8): budgeted recall (max_bytes + truncated flag; MMR deferred)` |
+
+**Release commit (staged locally, not yet pushed):**
+`chore(release): v0.8.0 — bump manifests and Cargo.lock; cut CHANGELOG`.
+
+* Manifests `0.7.0 → 0.8.0`: `mnemo/Cargo.toml`,
+  `mnemo/bindings/node/Cargo.toml`, `mnemo-python/Cargo.toml`,
+  `mnemo-python/pyproject.toml`. `mnemo/fuzz/Cargo.toml` stays at
+  `0.0.0` (not published).
+* Both `Cargo.lock` files refreshed (`mnemo-engine`, `mnemo-node`,
+  `mnemo-python` entries).
+* `CHANGELOG.md`: `[Unreleased]` → `[0.8.0] — 2026-11-06`, with a
+  headline paragraph summarizing the three additive PRs, the
+  on-disk compatibility statement ("files written by v0.8.0 open
+  under v0.7.x; all v0.7.x callers compile and run unchanged"),
+  and the two parked items (`history_keep` and MMR).
+
+**Verification before push, all clean:**
+
+```
+cargo fmt --check
+cargo clippy --all-targets --features failpoints,benches -- -D warnings  # mnemo + mnemo-python
+cargo test --features failpoints --release                                # 23 unit + 34 cli_smoke + 9 dur1 +
+                                                                          # 11 fix1 + 91 integration + 7 proptest +
+                                                                          # 3 sec1 + 2 doctests, all green
+```
+
+Added 18 integration tests in this release: 8 for 12.1, 6 for 12.6,
+5 for 12.8 (minus some overlap in the `seed_filter_corpus` helper
+count). Scoring-v2 harness unchanged (no 12.x PR touched scoring).
+
+**Lane-A handoff asks (same shape as v0.7.0):**
+
+- `README.md` and `index.html`:
+  - version pill / Quick Start → v0.8.0;
+  - add a short "What's new in v0.8.0" box or section summarizing
+    `remember(key=…)` + `update`, filtered recall, budgeted recall;
+  - "Known limitations": note `history_keep` is unbounded in
+    v0.8.0 (chains grow without limit), and that MMR diversity is
+    not yet exposed on `recall`;
+  - optional: add a tiny code block showing the three new call
+    shapes (`db.remember(..., key="release")`,
+    `db.recall(..., filter={"metadata": {"area": "x"}})`,
+    `db.recall(..., max_bytes=4096)`).
+
+**Order on the mac side, after the handoff lands:**
+
+1. Commit `chore(release): v0.8.0 — bump manifests and Cargo.lock;
+   cut CHANGELOG` (this entry's staged files).
+2. Commit lane A's `docs(v0.8.0): what's new on README and landing page`
+   as its own commit.
+3. Coordination-file sync commit for this READY entry + whatever
+   Planner-A stages in `PLAN.md` / `reviewer_notes.md`.
+4. Push.
+5. Wait for CI green on main.
+6. Tag `v0.8.0` and push the tag (triggers `release.yml` → PyPI
+   Trusted Publishing + crates.io publish for `mnemo-engine` and
+   `mnemo-node`).
+7. Log DONE with all hashes, the CI run URL, the release workflow
+   URL, and the PyPI / crates.io URLs.
+
+Lane A then verifies the published wheel and logs v0.8.0 VERIFIED.
