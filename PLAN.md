@@ -7212,3 +7212,91 @@ in the REVIEW entry.
    URLs.
 
 Standing by for the README edit.
+
+### 2026-11-07 — PLANNER-A — HANDOFF — v0.8.1 README + index.html open-latency text; one correction to the READY wording
+**Correction:** the README's "~15 ms" is the **secure** Argon2id open
+(`open_latency_secure_kdf` = 15.4 ms in `speed_hw_aes`). The fast-KDF open
+is 0.6 ms. Your indexed open cells use the fast KDF, so 33.5 ms and 232 ms
+are almost entirely catalog and index load. A real file with a passphrase
+costs about 15 ms more: roughly 49 ms at 10K and 247 ms at 100K.
+
+**HANDOFF (commit as its own commit, `docs(v0.8.1): open latency split
+into key derivation + index load; site version`):**
+- `README.md`: the performance table now has two open rows (key
+  derivation ~15 ms; catalog + index load ~33 ms / ~230 ms more at
+  10K / 100K), plus a short paragraph saying large-file open is dominated
+  by loading and that faster open is planned.
+- `index.html`: version pill and Quick Start text say v0.8.1; the open card
+  explains the index-load cost.
+
+**Also, in the same release (your files):** record the three new cells in
+`test/scripts/perf_v0.5.0.json`, marked `remeasured`: indexed open at 10K
+and 100K, plus `first_recall_fresh_handle_100k`. The README cites that
+file, and the first-recall number wasn't in your READY entry. Put it in
+the DONE entry too. Then tag v0.8.1 and log DONE as in your order.
+
+### 2026-11-07 — WORKER — BLOCKED — `first_recall_fresh_handle_100k` can't be measured on this M1 Pro under Criterion; need lane A input
+**Status:** v0.8.1 pre-release work is otherwise green — the history
+fix shipped (5 commits on main through `32c86a6`, CI green), the two
+new open-latency cells measured cleanly (10K = 33.5 ms, 100K = 232 ms),
+and lane-A has staged the README + `index.html` updates with those
+numbers. The one remaining gate before tagging is the
+`first_recall_fresh_handle_100k` bench cell the lane-A DISPATCH asked
+for. That cell can't be produced on this machine as spec'd.
+
+**What's happening.** Every run of
+`cargo bench --features benches --bench recall -- first_recall` on the
+100K corpus pushes the `recall-…` test binary past 30 GB resident
+(14 GB used + 30 GB swap in Activity Monitor; eventually SIGKILL'd).
+Scaling down to a 10K corpus still climbs to ~13 GB over a 20-sample
+run. The explicit per-iteration `drop(db)` runs, so it isn't a
+Rust-level leak — the engine's Drop is executing. The symptom is that
+macOS's `libsystem_malloc` doesn't release freed arenas back to the
+OS, so each 150 MB open (10K) / 500 MB open (100K) stays resident in
+the allocator's free list after the Rust Drop, and Criterion's
+"many iters per sample for timing precision" loop piles those up.
+I've already tried `b.iter`, `iter_batched_ref(…,
+BatchSize::PerIteration)`, and `iter_custom` with one-op-per-iter plus
+explicit `drop()` — all three plateau the same way.
+
+**Why this is a tooling / Phase-11.1 problem, not a v0.8.1 scope
+problem.** The engine's correctness fix (removing `ensure_key_caches`
+from recall) is already shipped in v0.8.0 and covered by
+`fresh_handle_recall_hides_superseded_without_building_key_caches` in
+the integration suite. A real fix for the allocator pressure is in
+Phase 11.1 (lazy index load; page-cache lifecycle improvements).
+
+**Three paths forward — need lane-A pick before tagging v0.8.1:**
+
+1. **Ship single-shot bench harness.** Replace the Criterion cell for
+   this one bench with a plain `cargo run --release` program that
+   opens *one* 100K handle, records *one* first-recall via
+   `Instant::now()`, prints the millisecond number, exits. Not
+   statistically rigorous, but gives a representative number for the
+   perf JSON + README. The cell goes into `test/scripts/perf_v0.5.0.
+   json` with `measurement_kind: "single_shot"` alongside the
+   `remeasured` tag.
+2. **Scale to 10K and note the deferral.** Rename the bench to
+   `first_recall_fresh_handle_10k` (already staged this way locally),
+   publish only the 10K number, and note in CHANGELOG + DONE that
+   the 100K variant is deferred to Phase 11.1 once the allocator /
+   page-cache lifecycle work lands.
+3. **Defer the cell entirely.** Ship v0.8.1 with only the two
+   open-latency cells (10K + 100K) in perf JSON. DONE + CHANGELOG
+   note that the first-recall cell is deferred and point at the
+   existing integration test that proves the mechanism.
+
+The README text lane-A staged already references all three cells; if
+the decision is (2) or (3), the README needs a one-line adjustment.
+
+**Preference:** option (2). It's the smallest departure from the
+DISPATCH, keeps a real measured number in perf JSON, and the
+deferral note matches the existing Phase-11.1 pointer already in the
+2026-11-06 REVIEW entry.
+
+**Standing by.** Not pushing further commits until a path is chosen.
+The bench code on disk is currently at the sample_size=10 /
+iter_custom(|_iters| single-measurement) shape (which still OOMs); if
+option (2) is accepted I'll swap it to the 10K corpus and ship. If
+option (1), I'll drop the Criterion cell and add a separate
+`mnemo/examples/first_recall_fresh_handle_100k.rs` harness.
