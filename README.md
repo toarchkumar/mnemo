@@ -61,6 +61,9 @@ with mnemo_engine.open("agent.mnemo", "a long passphrase", dimensions=384) as db
     db.remember_text("the user prefers dark mode", "semantic", importance=0.8)
     for hit in db.recall_text("which theme does the user like?", top_k=5):
         print(round(hit["score"], 3), hit["content"])
+
+    # A fact that changes: the key replaces the old version, and history is kept
+    db.remember_text("the current release is v0.8.0", "semantic", key="current-release")
 ```
 
 CLI, with any program that turns text into vectors (a reference script is in
@@ -96,6 +99,23 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.8.0
+
+- **Facts that change.** `remember(..., key="current-release")` replaces the
+  memory holding that key with a new version. The old version leaves recall
+  but stays in `history(key)`. Writing the same value again does nothing.
+  `update(id, ...)` corrects a memory in place (the id is kept).
+- **Filtered recall.** Limit a search to a session or to metadata values:
+  `recall_text(..., filter={"session_id": "s1", "metadata": {"area": "billing"}})`,
+  with `$in`, `$gte`/`$lte` and `$exists`. The CLI has `--session` and
+  `--filter`; MCP takes a `filter` object.
+- **Recall within a size budget.** `max_bytes=4096` stops adding results once
+  their text would pass the budget, and reports whether anything was cut.
+  It's for small context windows.
+
+All three work the same in Rust, Python, the CLI and MCP. Files written by
+v0.8.0 still open in v0.7.
 
 ## For AI agents
 
@@ -152,6 +172,9 @@ in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
+- **Version history has no limit yet.** Every keyed replacement keeps the
+  old version, so a key that changes very often grows the file. A
+  per-key retention setting is planned.
 - **Exact names and numbers.** Meaning-based search is weak on exact
   identifiers such as version numbers, PR numbers or function names (a
   question about "BP.1" can surface the wrong memory). Keyword search
