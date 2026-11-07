@@ -115,7 +115,8 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
   It's for small context windows.
 
 All three work the same in Rust, Python, the CLI and MCP. Files written by
-v0.8.0 still open in v0.7.
+v0.8.0 still open in v0.7, but v0.7 shows replaced versions as ordinary
+memories, so upgrade every tool that reads the file.
 
 ## For AI agents
 
