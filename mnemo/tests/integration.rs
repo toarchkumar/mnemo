@@ -2889,9 +2889,7 @@ fn history_walks_the_supersession_chain_newest_first() {
     // `history(key, None)` now walks the private slot (matching keyed
     // `remember` default), so use `history_in(key, KeyScope::Shared)`
     // for the shared chain.
-    let chain = db
-        .history_in("status", KeyScope::Shared)
-        .unwrap();
+    let chain = db.history_in("status", KeyScope::Shared).unwrap();
     assert_eq!(chain.len(), 3, "history should include live + 2 superseded");
     assert_eq!(chain[0].id, id3, "entry 0 is the live record");
     assert_eq!(chain[1].id, id2);
