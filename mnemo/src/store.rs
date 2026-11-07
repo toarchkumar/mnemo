@@ -3110,9 +3110,7 @@ impl Mnemo {
         let dims = self.dimensions.max(1);
         let scale = 1.0 / (dims as f32).sqrt();
         let v = vec![scale; dims];
-        let content = format!(
-            "thread link: {new_thread_id} continues from {from_thread_id}"
-        );
+        let content = format!("thread link: {new_thread_id} continues from {from_thread_id}");
         let mut m = Memory::new(content, MemoryType::Semantic, v).with_importance(0.1);
         m.metadata.insert(
             MNEMO_META_KIND.into(),
@@ -3158,8 +3156,7 @@ impl Mnemo {
             {
                 continue;
             }
-            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(prev_thread)
-            {
+            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(prev_thread) {
                 continue;
             }
             let section = match m
@@ -3357,9 +3354,7 @@ impl Mnemo {
                             "commit_deltas: essence_ops[{i}] AppendTimeline missing 'text'"
                         ))
                     })?;
-                    if text.is_empty()
-                        || text.len() > EssenceSection::Timeline.item_max_bytes()
-                    {
+                    if text.is_empty() || text.len() > EssenceSection::Timeline.item_max_bytes() {
                         return Err(MnemoError::Invalid(format!(
                             "commit_deltas: essence_ops[{i}] AppendTimeline text length invalid (0 or > {})",
                             EssenceSection::Timeline.item_max_bytes()
@@ -3464,10 +3459,7 @@ impl Mnemo {
         match batch.turn_policy {
             TurnPolicy::Archive => {
                 if !batch.turns.is_empty() {
-                    let thread_id = batch
-                        .thread_id
-                        .as_deref()
-                        .expect("validated above");
+                    let thread_id = batch.thread_id.as_deref().expect("validated above");
                     let r = self.ingest_thread(thread_id, &batch.turns)?;
                     report.turns_added += r.added_records;
                     report.turns_skipped += r.skipped_existing_turns;
@@ -3477,10 +3469,7 @@ impl Mnemo {
             }
             TurnPolicy::ExpireAfter(ttl) => {
                 if !batch.turns.is_empty() {
-                    let thread_id = batch
-                        .thread_id
-                        .as_deref()
-                        .expect("validated above");
+                    let thread_id = batch.thread_id.as_deref().expect("validated above");
                     // Reuse ingest, then apply TTL via `update` on
                     // the newly-written records. Simpler than a
                     // dedicated path — the TTL is advisory anyway

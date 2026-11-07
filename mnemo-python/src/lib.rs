@@ -64,9 +64,9 @@ fn filter_from_py_dict(d: &Bound<'_, PyDict>) -> PyResult<CoreFilter> {
         f = f.with_session(s);
     }
     if let Some(meta) = d.get_item("metadata")? {
-        let meta: Bound<'_, PyDict> = meta.downcast_into::<PyDict>().map_err(|_| {
-            PyTypeError::new_err("filter.metadata must be a dict")
-        })?;
+        let meta: Bound<'_, PyDict> = meta
+            .downcast_into::<PyDict>()
+            .map_err(|_| PyTypeError::new_err("filter.metadata must be a dict"))?;
         for (k, v) in meta.iter() {
             let key: String = k.extract()?;
             // Nested operator dict? Extract and dispatch.
@@ -142,10 +142,7 @@ fn filter_from_py_dict(d: &Bound<'_, PyDict>) -> PyResult<CoreFilter> {
 /// Exactly one of `thread` and `project` must be set.
 /// Phase 12.7c: parse the Python `batch` dict handed to
 /// `db.commit_deltas` into the core [`CommitBatch`].
-fn parse_commit_batch(
-    py: Python<'_>,
-    batch: &Bound<'_, PyDict>,
-) -> PyResult<CommitBatch> {
+fn parse_commit_batch(py: Python<'_>, batch: &Bound<'_, PyDict>) -> PyResult<CommitBatch> {
     let mut out = CommitBatch::default();
 
     if let Some(raw) = batch.get_item("facts")? {
@@ -154,17 +151,13 @@ fn parse_commit_batch(
             let content: String = d
                 .get_item("content")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "facts[{i}]: missing required key 'content'"
-                    ))
+                    PyValueError::new_err(format!("facts[{i}]: missing required key 'content'"))
                 })?
                 .extract()?;
             let memory_type_str: String = d
                 .get_item("memory_type")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "facts[{i}]: missing required key 'memory_type'"
-                    ))
+                    PyValueError::new_err(format!("facts[{i}]: missing required key 'memory_type'"))
                 })?
                 .extract()?;
             let memory_type = parse_type(&memory_type_str)?;
@@ -215,9 +208,7 @@ fn parse_commit_batch(
             let kind_str: String = d
                 .get_item("kind")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "essence_ops[{i}]: missing required key 'kind'"
-                    ))
+                    PyValueError::new_err(format!("essence_ops[{i}]: missing required key 'kind'"))
                 })?
                 .extract()?;
             let kind = match kind_str.as_str() {
@@ -254,9 +245,7 @@ fn parse_commit_batch(
             let section = if let Some(v) = d.get_item("section")? {
                 let s: String = v.extract()?;
                 Some(EssenceSection::parse(&s).ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "essence_ops[{i}]: unknown section '{s}'"
-                    ))
+                    PyValueError::new_err(format!("essence_ops[{i}]: unknown section '{s}'"))
                 })?)
             } else {
                 None
@@ -292,25 +281,19 @@ fn parse_commit_batch(
             let turn_id: String = d
                 .get_item("turn_id")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "turns[{i}]: missing required key 'turn_id'"
-                    ))
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'turn_id'"))
                 })?
                 .extract()?;
             let role: String = d
                 .get_item("role")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "turns[{i}]: missing required key 'role'"
-                    ))
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'role'"))
                 })?
                 .extract()?;
             let content: String = d
                 .get_item("content")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "turns[{i}]: missing required key 'content'"
-                    ))
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'content'"))
                 })?
                 .extract()?;
             let timestamp = d
@@ -375,10 +358,7 @@ fn commit_report_to_dict(py: Python<'_>, r: &CommitReport) -> PyResult<PyObject>
     Ok(out.into_any().unbind())
 }
 
-fn essence_scope_from(
-    thread: Option<String>,
-    project: bool,
-) -> PyResult<CoreEssenceScope> {
+fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEssenceScope> {
     match (thread, project) {
         (Some(t), false) => Ok(CoreEssenceScope::Thread(t)),
         (None, true) => Ok(CoreEssenceScope::Project),
@@ -551,10 +531,9 @@ impl Embedder for PyFnEmbedder {
             // Pass a Python list of strs; keeps the common
             // `sentence-transformers` / OpenAI shape natural.
             let arg = pyo3::types::PyList::new_bound(py, texts);
-            let out = self
-                .callback
-                .call1(py, (arg,))
-                .map_err(|e| mnemo_core::MnemoError::Invalid(format!("embedder callback raised: {e}")))?;
+            let out = self.callback.call1(py, (arg,)).map_err(|e| {
+                mnemo_core::MnemoError::Invalid(format!("embedder callback raised: {e}"))
+            })?;
             let vecs: Vec<Vec<f32>> = out.extract(py).map_err(|e| {
                 mnemo_core::MnemoError::Invalid(format!(
                     "embedder must return list[list[float]]; got {e}"
@@ -682,10 +661,7 @@ impl Mnemo {
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = self
-                    .core_mut()?
-                    .remember_keyed(memory, &k)
-                    .map_err(to_py)?;
+                let (id, outcome) = self.core_mut()?.remember_keyed(memory, &k).map_err(to_py)?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;
@@ -806,10 +782,7 @@ impl Mnemo {
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = s
-                    .core_mut()?
-                    .remember_keyed(memory, &k)
-                    .map_err(to_py)?;
+                let (id, outcome) = s.core_mut()?.remember_keyed(memory, &k).map_err(to_py)?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1001,9 +974,7 @@ impl Mnemo {
             let turn_id: String = d
                 .get_item("turn_id")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "turns[{i}]: missing required key 'turn_id'"
-                    ))
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'turn_id'"))
                 })?
                 .extract()?;
             let role: String = d
@@ -1015,13 +986,10 @@ impl Mnemo {
             let content: String = d
                 .get_item("content")?
                 .ok_or_else(|| {
-                    PyValueError::new_err(format!(
-                        "turns[{i}]: missing required key 'content'"
-                    ))
+                    PyValueError::new_err(format!("turns[{i}]: missing required key 'content'"))
                 })?
                 .extract()?;
-            let timestamp: Option<i64> =
-                d.get_item("timestamp")?.and_then(|t| t.extract().ok());
+            let timestamp: Option<i64> = d.get_item("timestamp")?.and_then(|t| t.extract().ok());
             rust_turns.push(ThreadTurn {
                 turn_id,
                 role,
@@ -1209,11 +1177,7 @@ impl Mnemo {
     /// })
     /// ```
     #[pyo3(signature = (batch))]
-    fn commit_deltas(
-        &mut self,
-        py: Python<'_>,
-        batch: Bound<'_, PyDict>,
-    ) -> PyResult<PyObject> {
+    fn commit_deltas(&mut self, py: Python<'_>, batch: Bound<'_, PyDict>) -> PyResult<PyObject> {
         let parsed = parse_commit_batch(py, &batch)?;
         let report = self.core_mut()?.commit_deltas(parsed).map_err(to_py)?;
         commit_report_to_dict(py, &report)
@@ -1789,7 +1753,9 @@ impl Mnemo {
     /// Tombstone a cache entry. Silently succeeds if the entry does
     /// not exist. Space reclaimed by `compact` (external CLI).
     fn cache_delete(&mut self, namespace: &str, key: &str) -> PyResult<()> {
-        self.core_mut()?.cache_delete(namespace, key).map_err(to_py)?;
+        self.core_mut()?
+            .cache_delete(namespace, key)
+            .map_err(to_py)?;
         self.maybe_flush_after_cache_write()
     }
 
@@ -2068,11 +2034,7 @@ impl Mnemo {
     /// closed` error through `__repr__`.
     fn __repr__(&self) -> String {
         match self.inner.as_ref() {
-            Some(core) => format!(
-                "<mnemo.Mnemo path='{}' memories={}>",
-                self.path,
-                core.len()
-            ),
+            Some(core) => format!("<mnemo.Mnemo path='{}' memories={}>", self.path, core.len()),
             None => format!("<mnemo.Mnemo path='{}' closed>", self.path),
         }
     }
@@ -2428,8 +2390,9 @@ fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObje
     // on realistic corpora.
     let path = path.to_string();
     let pp = passphrase.to_string();
-    let report =
-        py.allow_threads(move || Core::compact_file(&path, &pp)).map_err(to_py)?;
+    let report = py
+        .allow_threads(move || Core::compact_file(&path, &pp))
+        .map_err(to_py)?;
     let d = PyDict::new_bound(py);
     d.set_item("before", report.before)?;
     d.set_item("after", report.after)?;

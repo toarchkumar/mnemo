@@ -3965,7 +3965,9 @@ fn thread_start_writes_link_record_with_continues_marker() {
         Some(MNEMO_META_KIND_THREAD_LINK)
     );
     assert_eq!(
-        m.metadata.get(MNEMO_META_CONTINUES).and_then(|v| v.as_str()),
+        m.metadata
+            .get(MNEMO_META_CONTINUES)
+            .and_then(|v| v.as_str()),
         Some("t1")
     );
 }
@@ -4084,11 +4086,7 @@ fn commit_deltas_applies_facts_essence_and_turns_in_one_call() {
     db.set_embedder(FakeEmbedder::new("fake-4d", 4, true))
         .unwrap();
 
-    let fact = Memory::new(
-        "fact-a",
-        MemoryType::Semantic,
-        vec4(1.0, 0.0, 0.0, 0.0),
-    );
+    let fact = Memory::new("fact-a", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0));
     let op = EssenceOp {
         kind: EssenceOpKind::Add,
         scope: Some(EssenceScope::Thread("tA".into())),

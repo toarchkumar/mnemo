@@ -921,21 +921,21 @@ fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
                     format!("commit_deltas: facts[{i}] must be an object"),
                 )
             })?;
-            let content = obj
-                .get("content")
+            let content = obj.get("content").and_then(|v| v.as_str()).ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: facts[{i}] missing 'content'"),
+                )
+            })?;
+            let mtype_str = obj
+                .get("memory_type")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
                     RpcError::new(
                         INVALID_PARAMS,
-                        format!("commit_deltas: facts[{i}] missing 'content'"),
+                        format!("commit_deltas: facts[{i}] missing 'memory_type'"),
                     )
                 })?;
-            let mtype_str = obj.get("memory_type").and_then(|v| v.as_str()).ok_or_else(|| {
-                RpcError::new(
-                    INVALID_PARAMS,
-                    format!("commit_deltas: facts[{i}] missing 'memory_type'"),
-                )
-            })?;
             let mtype = MemoryType::parse(mtype_str).ok_or_else(|| {
                 RpcError::new(
                     INVALID_PARAMS,
@@ -994,15 +994,12 @@ fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
                     format!("commit_deltas: essence_ops[{i}] must be an object"),
                 )
             })?;
-            let kind_str = obj
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    RpcError::new(
-                        INVALID_PARAMS,
-                        format!("commit_deltas: essence_ops[{i}] missing 'kind'"),
-                    )
-                })?;
+            let kind_str = obj.get("kind").and_then(|v| v.as_str()).ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("commit_deltas: essence_ops[{i}] missing 'kind'"),
+                )
+            })?;
             let kind = match kind_str {
                 "add" => EssenceOpKind::Add,
                 "append_timeline" => EssenceOpKind::AppendTimeline,
@@ -1017,7 +1014,10 @@ fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
                 }
             };
             let thread = obj.get("thread").and_then(|v| v.as_str()).map(String::from);
-            let project = obj.get("project").and_then(|v| v.as_bool()).unwrap_or(false);
+            let project = obj
+                .get("project")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let scope = match (thread, project) {
                 (Some(t), false) => Some(EssenceScope::Thread(t)),
                 (None, true) => Some(EssenceScope::Project),
