@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0, the minor component carries the breaking-change signal.
 
+## [0.8.1] — 2026-11-06
+
+**Patch release.** Fixes one usability bug landed in v0.8.0 and adds
+two remeasured bench cells. No format change, no API shape change
+except the additive `KeyScope` enum and the new `history_in` /
+`shared` arguments.
+
+### Fixed — PR 12.1.1: `history(key)` with default arguments now walks the matching slot
+
+Pre-v0.8.1, `remember(key=K)` with no explicit agent wrote a *private*
+record under agent `"default"`, but `history(K)` with no arguments
+looked up the *shared* slot and returned an empty chain. The obvious
+call silently found nothing. v0.8.1 makes `history`'s default slot
+match the keyed `remember`'s default slot — the private slot of the
+default agent — so `remember(key=K)` + `history(K)` round-trips
+without any extra kwargs. The old shared-slot behavior is still
+reachable, now explicitly:
+
+* **Rust:** new `KeyScope::{Private(String), Shared}` + new
+  `Mnemo::history_in(key, scope)` for the explicit form.
+  `Mnemo::history(key, agent_id)` is preserved as the convenience
+  shim and maps `agent_id = None` to `KeyScope::private_default()`
+  (= `Private("default")`).
+* **Python:** `db.history(key, agent_id=None, shared=False)`. Pass
+  `shared=True` for the shared slot. `agent_id=...` together with
+  `shared=True` is rejected with `ValueError`.
+* **CLI:** `mnemo history <file> --key K [--agent A] [--shared]`.
+  `--agent` + `--shared` conflict at parse time. No flags → default
+  agent's private slot.
+* **MCP:** `history` tool gains a `shared: bool` parameter;
+  `shared` + `agent` together returns an `INVALID_PARAMS` error.
+
+New regression tests across every surface:
+
+* Rust: `history_default_slot_matches_remember_default_slot`,
+  `history_in_shared_and_private_are_separate_chains` (in
+  `mnemo/tests/integration.rs`).
+* CLI: `cli_history_defaults_to_private_slot_after_keyed_remember`,
+  `cli_history_rejects_agent_with_shared` (in
+  `mnemo/tests/cli_smoke.rs`).
+* Python: `test_history_default_slot_matches_remember_default_slot`
+  (in `mnemo-python/test_mnemo.py`).
+
+### Added — remeasured bench cells (lane A DISPATCH)
+
+- `bench_open_latency_indexed_10k` and
+  `bench_open_latency_indexed_100k` in `mnemo/benches/open.rs`:
+  open latency on an indexed file at the 10K / 100K tiers. The
+  numbers feed the lane-A README edit (Planner-A's handoff
+  replaces the "open ~15 ms" line, which was KDF-only, with the
+  full open-with-catalog-and-index number).
+- The `bench_first_recall_fresh_handle_100k` cell added in v0.8.0
+  stays in place; v0.8.1 does not change its path.
+
 ## [0.8.0] — 2026-11-06
 
 **Additive release.** Three PRs ship together, plus two lane-A
