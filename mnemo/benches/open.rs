@@ -29,7 +29,10 @@ use mnemo_engine::{Memory, MemoryType, Mnemo};
 
 #[path = "corpus.rs"]
 mod corpus;
-use corpus::{fast_kdf_cfg, gen_clustered_vectors, secure_kdf_cfg, DIMENSIONS, PASSPHRASE};
+use corpus::{
+    fast_kdf_cfg, gen_clustered_vectors, secure_kdf_cfg, setup_cached_corpus, DIMENSIONS,
+    PASSPHRASE,
+};
 
 const OPEN_CORPUS_SIZE: usize = 100;
 
@@ -103,9 +106,46 @@ fn bench_open_latency_secure_kdf(c: &mut Criterion) {
     group.finish();
 }
 
+/// Phase 12.1.1 lane-A DISPATCH remeasure (v0.8.1): open latency on an
+/// **indexed** 10K-memory file with fast KDF. This isolates the
+/// non-KDF cost dominated by catalog + ANN-index load. Pairs with the
+/// 100K variant below so the README's "open ~15 ms" line can be
+/// replaced with numbers that reflect what agents actually pay.
+fn bench_open_latency_indexed_10k(c: &mut Criterion) {
+    let cached = setup_cached_corpus(10_000, DIMENSIONS);
+    let mut group = c.benchmark_group("open");
+    group.sample_size(30);
+    group.bench_function("open_latency_indexed_10k", |b| {
+        b.iter(|| {
+            let db = Mnemo::open(&cached, PASSPHRASE).expect("open");
+            black_box(db);
+        });
+    });
+    group.finish();
+}
+
+/// Phase 12.1.1 lane-A DISPATCH remeasure (v0.8.1): open latency on an
+/// **indexed** 100K-memory file with fast KDF. This is the number
+/// Planner-A called out as "~115 ms in my sandbox" that doesn't
+/// regress v0.7.0 → v0.8.0 but needs its own README mention.
+fn bench_open_latency_indexed_100k(c: &mut Criterion) {
+    let cached = setup_cached_corpus(100_000, DIMENSIONS);
+    let mut group = c.benchmark_group("open");
+    group.sample_size(20);
+    group.bench_function("open_latency_indexed_100k", |b| {
+        b.iter(|| {
+            let db = Mnemo::open(&cached, PASSPHRASE).expect("open");
+            black_box(db);
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     open_benches,
     bench_open_latency_fast_kdf,
     bench_open_latency_secure_kdf,
+    bench_open_latency_indexed_10k,
+    bench_open_latency_indexed_100k,
 );
 criterion_main!(open_benches);

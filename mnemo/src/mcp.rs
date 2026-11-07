@@ -359,13 +359,14 @@ fn tools_list() -> Value {
             },
             {
                 "name": "history",
-                "description": "Walk the full chain for a keyed slot (Phase 12.1), newest first. Entry 0 is the live record (or empty if the slot is empty); subsequent entries are the superseded history. Use `agent` for a private-scope slot; omit for the shared slot.",
+                "description": "Walk the full chain for a keyed slot (Phase 12.1), newest first. Entry 0 is the live record (or empty if the slot is empty); subsequent entries are the superseded history. Slot resolution matches keyed `remember`: with no `agent` and `shared=false`, walks the default agent's private slot (v0.8.1 bugfix — pre-v0.8.1 this walked the shared slot by accident and returned empty for the common case). Pass `shared: true` for the shared slot; `agent` + `shared=true` is rejected.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["key"],
                     "properties": {
                         "key": { "type": "string" },
-                        "agent": { "type": "string" }
+                        "agent": { "type": "string", "description": "Query the private slot for this agent. Mutually exclusive with `shared`." },
+                        "shared": { "type": "boolean", "default": false, "description": "Query the shared slot (one per file). Mutually exclusive with `agent`." }
                     },
                     "additionalProperties": false
                 }
@@ -781,12 +782,32 @@ fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
 }
 
 fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    use crate::KeyScope;
     let key = args
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "history: missing 'key'"))?;
     let agent = args.get("agent").and_then(|v| v.as_str());
-    let chain = db.history(key, agent).map_err(mnemo_err)?;
+    let shared = args
+        .get("shared")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if shared && agent.is_some() {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            "history: 'agent' and 'shared' are mutually exclusive",
+        ));
+    }
+    // v0.8.1 bugfix (lane A): match keyed `remember` slot resolution.
+    let scope = if shared {
+        KeyScope::Shared
+    } else {
+        match agent {
+            Some(a) => KeyScope::Private(a.to_string()),
+            None => KeyScope::private_default(),
+        }
+    };
+    let chain = db.history_in(key, scope).map_err(mnemo_err)?;
     let out: Vec<Value> = chain
         .iter()
         .enumerate()

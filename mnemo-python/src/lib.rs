@@ -685,19 +685,39 @@ impl Mnemo {
     /// Phase 12.1: walk the full chain for a keyed slot, newest first.
     /// Entry 0 is the live record (or an empty list if the slot is
     /// empty); subsequent entries are the superseded history.
-    /// `agent_id=None` queries the shared slot; a string queries the
-    /// private slot for that agent.
-    #[pyo3(signature = (key, *, agent_id=None))]
+    ///
+    /// Slot resolution (v0.8.1 bugfix): matches keyed `remember` with
+    /// the same arguments.
+    ///
+    /// * `agent_id=None, shared=False` → default agent's private slot
+    ///   (same slot `remember(key=K)` writes to when `agent_id` is
+    ///   omitted).
+    /// * `agent_id="alice"` → alice's private slot.
+    /// * `shared=True` → shared slot. Mutually exclusive with
+    ///   `agent_id`.
+    #[pyo3(signature = (key, *, agent_id=None, shared=false))]
     fn history(
         &mut self,
         py: Python<'_>,
         key: &str,
         agent_id: Option<String>,
+        shared: bool,
     ) -> PyResult<PyObject> {
-        let chain = self
-            .core_mut()?
-            .history(key, agent_id.as_deref())
-            .map_err(to_py)?;
+        use mnemo_core::KeyScope;
+        if shared && agent_id.is_some() {
+            return Err(PyValueError::new_err(
+                "history: 'agent_id' and 'shared' are mutually exclusive",
+            ));
+        }
+        let scope = if shared {
+            KeyScope::Shared
+        } else {
+            match agent_id {
+                Some(a) => KeyScope::Private(a),
+                None => KeyScope::private_default(),
+            }
+        };
+        let chain = self.core_mut()?.history_in(key, scope).map_err(to_py)?;
         let list = PyList::empty_bound(py);
         for (i, m) in chain.iter().enumerate() {
             let d_obj = memory_to_dict(py, m)?;

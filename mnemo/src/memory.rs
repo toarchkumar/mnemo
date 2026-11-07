@@ -302,6 +302,40 @@ pub struct MemoryPatch {
     pub ttl_secs: Option<Option<i64>>,
 }
 
+/// Scope selector for a keyed slot (Phase 12.1.1). A keyed
+/// `remember`'s slot is always identified by `(scope_owner, key)`:
+/// `Private(agent_id)` slots are per-agent, `Shared` slots are per-file.
+/// `history_in(key, scope)` uses the same selector so the lookup matches
+/// the write exactly.
+///
+/// The convenience [`crate::Mnemo::history`] is equivalent to
+/// `history_in(key, KeyScope::Private(agent.unwrap_or("default")))` —
+/// i.e. `history(key, None)` resolves to the default agent's private
+/// slot, matching the `remember(…, agent_id=None, scope=Private, key=K)`
+/// write path. Use [`crate::Mnemo::history_in`] with
+/// [`KeyScope::Shared`] when you need the shared slot.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum KeyScope {
+    /// Per-agent slot. The agent id is the one carried on `Memory.agent_id`
+    /// at write time; `remember` with no explicit agent uses `"default"`.
+    Private(String),
+    /// Per-file slot shared across every agent.
+    Shared,
+}
+
+impl KeyScope {
+    /// Default agent id used when `Memory::new(...)` is called without
+    /// `.with_agent(...)` — same `"default"` the [`Memory::new`]
+    /// constructor seeds into `Memory.agent_id`.
+    pub const DEFAULT_AGENT: &'static str = "default";
+
+    /// Build the private slot for the default agent. Shorthand for
+    /// `KeyScope::Private(KeyScope::DEFAULT_AGENT.to_string())`.
+    pub fn private_default() -> Self {
+        KeyScope::Private(Self::DEFAULT_AGENT.to_string())
+    }
+}
+
 /// Outcome of a 12.1 write operation (`remember` with `key`, or `update`).
 ///
 /// Plain `remember` without a key always returns a ULID, not a

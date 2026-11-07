@@ -5,7 +5,7 @@
 //! (secure) parameters.
 
 use mnemo_engine::{
-    CacheBudget, CacheFlushPolicy, CachePutOpts, Filter, KdfParams, Memory, MemoryPatch,
+    CacheBudget, CacheFlushPolicy, CachePutOpts, Filter, KdfParams, KeyScope, Memory, MemoryPatch,
     MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, Scope, ScoreWeights,
     SemanticCachePutOpts, Turn, WriteOutcome, DEFAULT_SEMANTIC_THRESHOLD, MNEMO_META_INVALID_AT,
     MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
@@ -2884,7 +2884,14 @@ fn history_walks_the_supersession_chain_newest_first() {
     let (id2, _) = db.remember_keyed(make("v2", 1), "status").unwrap();
     let (id3, _) = db.remember_keyed(make("v3", 2), "status").unwrap();
 
-    let chain = db.history("status", None).unwrap();
+    // v0.8.1 bugfix: these writes used `Scope::Shared`, so the chain
+    // lives in the shared slot, not the default-agent private slot.
+    // `history(key, None)` now walks the private slot (matching keyed
+    // `remember` default), so use `history_in(key, KeyScope::Shared)`
+    // for the shared chain.
+    let chain = db
+        .history_in("status", KeyScope::Shared)
+        .unwrap();
     assert_eq!(chain.len(), 3, "history should include live + 2 superseded");
     assert_eq!(chain[0].id, id3, "entry 0 is the live record");
     assert_eq!(chain[1].id, id2);
@@ -3431,4 +3438,89 @@ fn recall_wrapper_still_returns_hits_vec() {
     // (the always-keep-top-1 rule).
     assert!(!hits.is_empty());
     assert!(hits.len() <= 3);
+}
+
+// ===========================================================================
+// Phase 12.1.1 (v0.8.1): history slot resolution — default to the private
+// slot of the default agent, with KeyScope::Shared as an explicit opt-in.
+// ===========================================================================
+
+#[test]
+fn history_default_slot_matches_remember_default_slot() {
+    // v0.8.1 bugfix (lane A): `remember(key=K)` with no explicit agent
+    // writes to the default agent's private slot; `history(K)` with no
+    // arguments must now walk that same slot (pre-v0.8.1 it walked the
+    // shared slot by accident and returned []).
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("hist-default.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let (_id1, _) = db
+        .remember_keyed(
+            Memory::new("v1", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)).with_importance(0.5),
+            "release",
+        )
+        .unwrap();
+    let (_id2, _) = db
+        .remember_keyed(
+            Memory::new("v2", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0)).with_importance(0.5),
+            "release",
+        )
+        .unwrap();
+
+    // The obvious call: no agent, no shared → must walk the default
+    // agent's private chain (live + 1 superseded = 2 entries).
+    let chain = db.history("release", None).unwrap();
+    assert_eq!(
+        chain.len(),
+        2,
+        "history(key, None) should walk the default-agent private chain, not the shared slot"
+    );
+    assert_eq!(chain[0].content, "v2", "entry 0 is the live record");
+    assert_eq!(chain[1].content, "v1");
+}
+
+#[test]
+fn history_in_shared_and_private_are_separate_chains() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("hist-sep.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+
+    // Two keyed slots under the same key string "pref":
+    //   * default-agent private slot
+    //   * shared slot
+    // They must not alias.
+    db.remember_keyed(
+        Memory::new("priv-v1", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+        "pref",
+    )
+    .unwrap();
+    db.remember_keyed(
+        Memory::new("priv-v2", MemoryType::Semantic, vec4(1.0, 0.0, 0.0, 0.0)),
+        "pref",
+    )
+    .unwrap();
+    db.remember_keyed(
+        Memory::new("shared-v1", MemoryType::Semantic, vec4(0.0, 1.0, 0.0, 0.0))
+            .with_scope(Scope::Shared),
+        "pref",
+    )
+    .unwrap();
+
+    let private = db.history("pref", None).unwrap();
+    assert_eq!(private.len(), 2, "default-agent private chain = 2");
+    assert_eq!(private[0].content, "priv-v2");
+    assert_eq!(private[1].content, "priv-v1");
+
+    let shared = db.history_in("pref", KeyScope::Shared).unwrap();
+    assert_eq!(shared.len(), 1, "shared chain = 1 (no supersession)");
+    assert_eq!(shared[0].content, "shared-v1");
+
+    // Named-agent lookup must also be independent.
+    let alice = db
+        .history_in("pref", KeyScope::Private("alice".into()))
+        .unwrap();
+    assert!(
+        alice.is_empty(),
+        "no 'alice' write → empty chain, not aliased to default or shared"
+    );
 }

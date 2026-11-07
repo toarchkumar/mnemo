@@ -1711,3 +1711,102 @@ fn recall_tracking_flushes_access_count_to_disk() {
     // before the second open completes.
     drop(dir);
 }
+
+#[test]
+fn cli_history_defaults_to_private_slot_after_keyed_remember() {
+    // v0.8.1 bugfix: `mnemo history <file> --key K` with no --agent /
+    // --shared must walk the default agent's private slot — the same
+    // slot `mnemo remember --key K` writes to when neither flag is set.
+    use mnemo_engine::Memory;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cli-hist.mnemo");
+    let pp = "hist-pw";
+
+    // Seed with two keyed writes under the default agent's private
+    // slot, via the library (the CLI's remember path with --key would
+    // work too but needs a Python embedder; the library write hits the
+    // same `remember_keyed` code path).
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember_keyed(
+            Memory::new("v1", MemoryType::Semantic, vec![1.0, 0.0, 0.0, 0.0]),
+            "release",
+        )
+        .unwrap();
+        db.remember_keyed(
+            Memory::new("v2", MemoryType::Semantic, vec![0.0, 1.0, 0.0, 0.0]),
+            "release",
+        )
+        .unwrap();
+        db.flush().unwrap();
+    }
+
+    // Default (no --agent, no --shared) → private default-agent chain.
+    let (status, stdout, _stderr) =
+        run_cli(&["history", path.to_str().unwrap(), "--key", "release"], pp);
+    assert!(status.success());
+    // Two chain entries ("live …" + "superseded …"); both contents
+    // land on the same line as their state marker.
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "default --key history should return 2 entries (live + 1 superseded); got {stdout}"
+    );
+    assert!(
+        lines[0].contains("live"),
+        "entry 0 must be live, got {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("v2"),
+        "live entry should be v2, got {}",
+        lines[0]
+    );
+    assert!(lines[1].contains("superseded"));
+    assert!(lines[1].contains("v1"));
+
+    // --shared should return an empty chain (no shared writes).
+    let (status2, stdout2, _stderr2) = run_cli(
+        &[
+            "history",
+            path.to_str().unwrap(),
+            "--key",
+            "release",
+            "--shared",
+        ],
+        pp,
+    );
+    assert!(status2.success());
+    assert!(
+        stdout2.contains("no history"),
+        "no shared writes → 'no history' message; got {stdout2}"
+    );
+}
+
+#[test]
+fn cli_history_rejects_agent_with_shared() {
+    let (_dir, path, pp, _) = seed_db();
+    let (status, _stdout, stderr) = run_cli(
+        &[
+            "history",
+            path.to_str().unwrap(),
+            "--key",
+            "k",
+            "--agent",
+            "alice",
+            "--shared",
+        ],
+        pp,
+    );
+    assert!(
+        !status.success(),
+        "clap should reject --agent with --shared"
+    );
+    assert!(
+        stderr.contains("cannot be used with")
+            || stderr.contains("conflicts")
+            || (stderr.contains("--agent") && stderr.contains("--shared")),
+        "expected a clap 'conflicts' message, got: {stderr}"
+    );
+}

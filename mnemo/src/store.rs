@@ -37,9 +37,9 @@ use crate::error::{MnemoError, Result};
 use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
-    self, Filter, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, WriteOutcome,
-    MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
-    MNEMO_META_UPDATED_AT,
+    self, Filter, KeyScope, Memory, MemoryPatch, MemoryType, Metric, Scope, ScoreWeights,
+    WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY,
+    MNEMO_META_SUPERSEDES, MNEMO_META_UPDATED_AT,
 };
 use crate::pager::Pager;
 use crate::result_cache::{
@@ -2081,16 +2081,45 @@ impl Mnemo {
     /// the slot is empty, in which case the vector is empty); subsequent
     /// entries are the superseded history in reverse-supersession order.
     ///
-    /// `agent_id = Some(a)` queries the private slot for that agent;
-    /// `agent_id = None` queries the shared slot.
+    /// **Slot resolution (v0.8.1 bugfix, lane A).** The lookup slot
+    /// matches a keyed `remember` with the same arguments, so the
+    /// obvious `history(key, None)` walks the private slot of the
+    /// default agent — the same slot
+    /// `remember_keyed(Memory::new(...), key)` writes to when the
+    /// caller omits an explicit `agent_id` / `scope`. Pre-v0.8.1
+    /// `agent_id = None` incorrectly looked up the shared slot and
+    /// returned an empty chain for the common case; the old behavior
+    /// is still reachable via `history_in(key, KeyScope::Shared)`.
+    ///
+    /// * `agent_id = Some(a)` → private slot for that agent.
+    /// * `agent_id = None` → private slot for the default agent (same
+    ///   as [`KeyScope::private_default`]).
+    ///
+    /// Use [`Mnemo::history_in`] with [`KeyScope::Shared`] for the
+    /// shared slot.
     pub fn history(&mut self, key: &str, agent_id: Option<&str>) -> Result<Vec<Memory>> {
+        let scope = match agent_id {
+            Some(a) => KeyScope::Private(a.to_string()),
+            None => KeyScope::private_default(),
+        };
+        self.history_in(key, scope)
+    }
+
+    /// Walk the full chain for a keyed slot identified by an explicit
+    /// [`KeyScope`]. Returns the same shape as [`Mnemo::history`] —
+    /// live record first, then the superseded chain newest-first.
+    ///
+    /// Use this when you need the **shared** slot (`KeyScope::Shared`),
+    /// which `history(key, None)` no longer reaches as of v0.8.1.
+    pub fn history_in(&mut self, key: &str, scope: KeyScope) -> Result<Vec<Memory>> {
         self.ensure_key_caches()?;
         let slot = crate::store::KeySlot {
-            scope_owner: agent_id.map(|a| a.to_string()),
+            scope_owner: match scope {
+                KeyScope::Private(a) => Some(a),
+                KeyScope::Shared => None,
+            },
             key: key.to_string(),
         };
-        // Start from the live id (if any) in the slot; walk backwards via
-        // `_mnemo.supersedes`.
         let live_id = self.key_index.as_ref().and_then(|k| k.get(&slot).copied());
         let mut out = Vec::new();
         let mut cursor = live_id;

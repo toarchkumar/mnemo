@@ -845,6 +845,57 @@ def test_rebuild_index_reclusters_under_current_defaults():
     print("ok  db.rebuild_index() runs + persists")
 
 
+def test_history_default_slot_matches_remember_default_slot():
+    """v0.8.1 bugfix (lane A): `remember(key=K)` with no explicit
+    agent writes to the default agent's private slot; `history(K)`
+    with no arguments must walk that same slot — pre-v0.8.1 it
+    walked the shared slot by accident and returned []."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "hist.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        try:
+            r1 = db.remember(
+                "v1", "semantic", [1.0, 0.0, 0.0, 0.0], key="release"
+            )
+            r2 = db.remember(
+                "v2", "semantic", [0.0, 1.0, 0.0, 0.0], key="release"
+            )
+            assert isinstance(r1, dict) and r1["outcome"] == "added"
+            assert isinstance(r2, dict) and r2["outcome"] == "superseded"
+
+            # The common-case call: no agent_id, no shared.
+            chain = db.history("release")
+            assert len(chain) == 2, (
+                f"history('release') should return the private chain "
+                f"(2 entries); got {len(chain)}"
+            )
+            assert chain[0]["content"] == "v2"
+            assert chain[0]["state"] == "live"
+            assert chain[1]["content"] == "v1"
+            assert chain[1]["state"] == "superseded"
+
+            # Shared slot is empty (we only wrote private).
+            shared = db.history("release", shared=True)
+            assert shared == [], f"shared slot should be empty, got {shared}"
+
+            # Named-agent lookup is also independent.
+            alice = db.history("release", agent_id="alice")
+            assert alice == [], f"'alice' slot should be empty, got {alice}"
+
+            # `shared=True` with `agent_id=...` is rejected.
+            try:
+                db.history("release", agent_id="alice", shared=True)
+            except ValueError as e:
+                assert "mutually exclusive" in str(e)
+            else:
+                raise AssertionError("expected ValueError on shared+agent_id")
+        finally:
+            db.close()
+
+    print("ok  history default slot matches remember default slot (v0.8.1 bugfix)")
+
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -876,4 +927,5 @@ if __name__ == "__main__":
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()
     test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package()
+    test_history_default_slot_matches_remember_default_slot()
     print("\nall Python binding tests passed")

@@ -422,7 +422,10 @@ enum Command {
     },
     /// Walk the full chain for a keyed slot (Phase 12.1), newest first.
     /// Entry 0 is the live record (or empty if the slot is empty);
-    /// subsequent entries are the superseded history.
+    /// subsequent entries are the superseded history. Slot resolution
+    /// matches `mnemo remember --key`: without `--agent` or `--shared`,
+    /// walks the default agent's private slot (v0.8.1 bugfix); pass
+    /// `--shared` for the shared slot.
     History {
         /// Path to the `.mnemo` file.
         path: String,
@@ -430,10 +433,15 @@ enum Command {
         /// `remember_keyed`).
         #[arg(long)]
         key: String,
-        /// Query the private slot for this agent. Omit for the shared
-        /// slot (one per file).
-        #[arg(long)]
+        /// Query the private slot for this agent. Omit for the default
+        /// agent's private slot (pre-v0.8.1 this flag was required for
+        /// a working chain; it's now optional).
+        #[arg(long, conflicts_with = "shared")]
         agent: Option<String>,
+        /// Query the shared slot (one per file across every agent)
+        /// instead of a private slot. Mutually exclusive with `--agent`.
+        #[arg(long, conflicts_with = "agent")]
+        shared: bool,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
@@ -1753,12 +1761,25 @@ fn run() -> std::result::Result<(), String> {
             path,
             key,
             agent,
+            shared,
             format,
             passphrase: pp,
         } => {
+            use mnemo_engine::KeyScope;
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-            let chain = db.history(&key, agent.as_deref()).map_err(fmt)?;
+            // v0.8.1 bugfix: default slot matches keyed remember with
+            // the same arguments. No `--shared`, no `--agent` → default
+            // agent's private slot.
+            let scope = if shared {
+                KeyScope::Shared
+            } else {
+                match agent {
+                    Some(a) => KeyScope::Private(a),
+                    None => KeyScope::private_default(),
+                }
+            };
+            let chain = db.history_in(&key, scope).map_err(fmt)?;
             match format {
                 OutputFormat::Table => {
                     if chain.is_empty() {
