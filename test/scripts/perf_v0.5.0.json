@@ -4840,5 +4840,54 @@
       "write/remember_batch_100_then_flush"
     ],
     "remeasured_note": "Only the benches listed in \"remeasured\" were actually re-run for v0.6.1 (DUR-1 step 5 write benches on Apple M1 Pro, hardware AES, release build). The other bench cells are copied verbatim from the v0.5.1 speed_hw_aes block — no code path touching them changed between v0.5.1 and v0.6.1. NAME-1 (2026-11-05): planner noted the ambiguity and asked for this field so the copied cells aren't mistaken for fresh measurements."
+  },
+  "speed_v0_9_0": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "methodology": "examples/open_rss.rs on the cached 100K x 384-dim indexed corpus (target/benches/corpus_100000_384d.mnemo), release build. Each cycle opens a fresh handle, runs one top-10 recall (timed), drops the handle, then samples process RSS via `ps -o rss=`. RSS is the whole process after the drop, not a live handle. Default system allocator, no macOS malloc env switches, no pressure relief.",
+    "benches": {
+      "open/fresh_handle_loop_n50": {
+        "corpus": 100000,
+        "dimensions": 384,
+        "cycles": 50,
+        "read_write": {
+          "first_recall_median_ms": 49.177,
+          "first_recall_p95_ms": 58.662,
+          "rss_kb_start": 71920,
+          "rss_kb_end": 305264,
+          "rss_kb_peak": 305264,
+          "rss_kb_slope_second_half": 4705.33
+        },
+        "read_only": {
+          "first_recall_median_ms": 44.933,
+          "first_recall_p95_ms": 50.692,
+          "rss_kb_start": 74192,
+          "rss_kb_end": 305936,
+          "rss_kb_peak": 305936,
+          "rss_kb_slope_second_half": 4704.0
+        }
+      },
+      "open/fresh_handle_loop_n200": {
+        "corpus": 100000,
+        "dimensions": 384,
+        "cycles": 200,
+        "read_write": {
+          "first_recall_median_ms": 44.602,
+          "first_recall_p95_ms": 52.56,
+          "rss_kb_start": 84080,
+          "rss_kb_end": 332288,
+          "rss_kb_peak": 358672,
+          "rss_kb_slope_second_half": -266.51
+        }
+      }
+    },
+    "remeasured": [
+      "open/fresh_handle_loop_n50",
+      "open/fresh_handle_loop_n200"
+    ],
+    "remeasured_note": "Both cells measured fresh for v0.9.0 (MEM-1 close-out) after fixing the swapped gen_clustered_vectors arguments in open_rss.rs. RSS climbs about 4.7 MB per cycle until it peaks at 359 MB (roughly the first 60 cycles, estimated from the slope), then levels off (second-half slope -0.27 MB per cycle over 200 cycles): bounded allocator retention, not a per-handle leak. The 50-cycle cell ends before the plateau, so read its slope together with the 200-cycle cell. The earlier ~500 MB-per-100K-handle reading did not reproduce."
   }
 }

@@ -71,6 +71,12 @@ pub fn secure_kdf_cfg(dimensions: usize) -> MnemoConfig {
 /// show that advantage.
 #[allow(dead_code)]
 pub fn gen_clustered_vectors(n: usize, dims: usize, k_clusters: usize, seed: u64) -> Vec<Vec<f32>> {
+    // MEM-1: a swapped (seed, k_clusters) pair once asked for
+    // 0xDEAD_BEEF ≈ 3.7 billion centres and read as a 13–43 GB "leak".
+    assert!(
+        (1..=n.max(1_000)).contains(&k_clusters),
+        "k_clusters looks like a swapped argument"
+    );
     // Hand-rolled splitmix64 → xoroshiro128+ because the `rand` crate's
     // RNG API moved between 0.8 and 0.9 and we're pinned to 0.8.6; a
     // tiny deterministic RNG here keeps the benches independent of
