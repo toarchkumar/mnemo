@@ -6980,3 +6980,73 @@ imports the code on another machine. Passphrases stay optional.
 
 Driven by the user's questions on 2026-11-06 about how keys work with
 sharing and what onboarding looks like.
+
+### 2026-11-06 — WORKER — DONE — v0.8.0 shipped: 12.1 + 12.6 + 12.8 (edit + keyed supersession / filtered recall / budgeted recall)
+**Everything green and published.** Four commits + tag pushed, CI
+green on main, release workflow green, both artifacts on PyPI and
+crates.io. Over to lane A for wheel verification.
+
+**Commits (on `origin/main`, in order):**
+
+| hash | subject |
+|---|---|
+| `169469e` | `fix(recall): drop ensure_key_caches from recall_budgeted; widen from effective_defaults` |
+| `47257f9` | `chore(release): v0.8.0 — bump manifests and Cargo.lock; cut CHANGELOG` |
+| `b741042` | `docs(v0.8.0): what's new on README and landing page` |
+| `22b38e3` | `chore(plan): sync coordination files` |
+
+Tag **`v0.8.0`** points at `22b38e3`.
+
+Earlier in the release window, each of the three feature PRs landed
+as its own commit with its own DONE + sync (per the DISPATCH "run
+the three PRs back to back"):
+
+- `777cf09` `feat(12.1): edit in place + keyed supersession`
+- `a062ed4` `feat(12.6): filtered recall`
+- `07e5e54` `feat(12.8): budgeted recall (MMR deferred)`
+
+**CI + release runs:**
+
+- **ci.yml on `22b38e3`:** ✓ green —
+  <https://github.com/toarchkumar/mnemo/actions/runs/42351043135>
+- **release.yml on `v0.8.0`:** ✓ green —
+  <https://github.com/toarchkumar/mnemo/actions/runs/42351476291>
+
+**Published artifacts:**
+
+- **PyPI:** <https://pypi.org/project/mnemo-engine/0.8.0/>
+- **crates.io (core engine):** <https://crates.io/crates/mnemo-engine/0.8.0>
+- **crates.io (Node binding):** <https://crates.io/crates/mnemo-node/0.8.0>
+
+**Lane-A REVIEW asks from the v0.8.0 entry — status:**
+
+1. HIGH `recall_budgeted` no longer calls `ensure_key_caches` — done
+   in `169469e`. The slow-path `_mnemo.superseded_by` check in
+   `score_once` keeps correctness; the lazy `superseded` set is now
+   a fast-path only, built by explicit keyed ops. New integration
+   test `fresh_handle_recall_hides_superseded_without_building_key_caches`
+   exercises the invariant; new bench `bench_first_recall_fresh_handle_100k`
+   added to `mnemo/benches/recall.rs` for the remeasure cell.
+2. MEDIUM widen step uses `IvfPqIndex::effective_defaults()` and
+   always falls through to exact scan when still short — done in
+   `169469e`. New `RecallResponse.used_exact_scan: bool` field
+   exposes the path. New integration test
+   `filtered_recall_with_30_percent_match_does_not_exact_scan`
+   builds a 1 000-memory indexed corpus with ~30% marker selectivity
+   and asserts `used_exact_scan == false`.
+
+Release commit (`47257f9`) bumps `0.7.0 → 0.8.0` across
+`mnemo/Cargo.toml`, `mnemo/bindings/node/Cargo.toml`,
+`mnemo-python/Cargo.toml`, `mnemo-python/pyproject.toml`, both
+`Cargo.lock`s. CHANGELOG `[Unreleased]` → `[0.8.0] — 2026-11-06`
+with a header paragraph on the additive nature of the release, the
+two lane-A fix bullets, and parked `history_keep` / MMR notes.
+
+Docs commit (`b741042`, lane-A handoff): top-level `README.md` +
+`index.html` with the v0.8.0 version pill, "What's new" section,
+known-limitations updates, and the three example call shapes.
+
+**Over to lane A (PLANNER-A).** Please verify on the published wheel
+and log v0.8.0 VERIFIED. When you log VERIFIED I'll make the
+follow-up coordination sync. Marking the "Release v0.8.0 = 12.1 +
+12.6 + 12.8" task completed.
