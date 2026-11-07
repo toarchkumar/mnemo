@@ -10,7 +10,7 @@
 # The CLI binary name stays `mnemo`, so users still invoke `mnemo` on
 # the command line after `cargo install mnemo-engine`.
 name = "mnemo-engine"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.75"
 # `benches/corpus.rs` is a shared helper module pulled into real benches
@@ -108,6 +108,13 @@ sha2 = "=0.10.8"
 # published crate carries criterion only as an optional feature,
 # never resolved by default consumers.
 criterion = { version = "=0.5.1", features = ["html_reports"], optional = true }
+# Phase 12.1 MEM-1 open_rss example variant 4 (`#[global_allocator]`).
+# Pure Rust microsoft/mimalloc binding; gated behind `mimalloc_bench`
+# so default consumers of the crate don't carry the dep. Lives under
+# `[dependencies]` for the same reason criterion does — `optional`
+# fields are only honoured on top-level deps, and we need the example
+# binary (built from this crate) to link against it when requested.
+mimalloc = { version = "=0.1.43", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "=3.10.1"
@@ -156,6 +163,11 @@ failpoints = []
 # `--all-targets --features failpoints,benches`; the MSRV CI job
 # never sees them. Not for production use.
 benches = ["dep:criterion"]
+# Phase 12.1 MEM-1 open_rss example variant 4: swap the global
+# allocator for mimalloc inside the example binary only. Default
+# consumers do not carry the dep. Combine with `--features benches`
+# to actually build the example.
+mimalloc_bench = ["dep:mimalloc"]
 
 [profile.release]
 lto = true

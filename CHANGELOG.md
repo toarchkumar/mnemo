@@ -8,6 +8,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-07
+
+Phase 12.7 ships: thread archive (12.7a), essence + status-record core
+(12.7b), continuation + atomic batch write (12.7c). No on-disk format
+bump — v0.9.0 files still open under v0.7.x and v0.8.x readers; new
+metadata lives entirely in the reserved `_mnemo.*` namespace.
+
 ### Added — PR 12.7c: continuation + commit_deltas
 
 **New thread, same experience.** Phase 12.7c makes two things routine
@@ -2310,7 +2317,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/toarchkumar/mnemo/compare/v0.8.1...v0.9.0
 [0.5.2]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/toarchkumar/mnemo/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/toarchkumar/mnemo/compare/v0.4.1...v0.5.0
