@@ -504,6 +504,13 @@ pub struct RecallResponse {
     /// that would otherwise have been returned (i.e. the result is
     /// shorter than what `top_k` alone would produce).
     pub truncated: bool,
+    /// Phase 12.1 + 12.6 observability: `true` iff recall fell
+    /// through to an exact scan (ANN shortlist too narrow after
+    /// filtering, and the widen pass also came up short, so the
+    /// index was skipped for one full-corpus pass). Monitoring on
+    /// this flag is how callers detect selective-filter regressions
+    /// or supersession chains outgrowing the ANN shortlist.
+    pub used_exact_scan: bool,
 }
 
 /// Summary statistics for a database.
@@ -2251,12 +2258,22 @@ impl Mnemo {
 
         let mut scored: Vec<RecallResult> = Vec::with_capacity(entries.len());
         for e in &entries {
-            // Phase 12.1: drop superseded records before decrypt. The
-            // caller already called `ensure_key_caches` so this is O(1).
+            // Phase 12.1: drop superseded records.
+            //
+            // Fast path: if the lazy `superseded` set has already been
+            // built by a prior keyed op on this handle, check it before
+            // decrypt — O(1), no AES work. On a fresh read-only handle
+            // it is typically `None`, so we fall through to the slow
+            // path (one `_mnemo.superseded_by` lookup per surviving
+            // record, O(k) over user metadata), and never trigger the
+            // full-file scan that `ensure_key_caches()` would do.
             if self.superseded.as_ref().is_some_and(|s| s.contains(&e.id)) {
                 continue;
             }
             let m = self.read_memory(e)?;
+            if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+                continue;
+            }
             if m.is_expired(now) {
                 continue;
             }
@@ -2337,13 +2354,20 @@ impl Mnemo {
         if self.read_only && req.track_access {
             return Err(MnemoError::ReadOnly);
         }
-        // Phase 12.1: ensure the superseded id cache is present so we can
-        // drop superseded records before any decrypt. Cheap (O(1)) after
-        // the first call in this handle's lifetime.
-        self.ensure_key_caches()?;
+        // Phase 12.1 **fix** (lane A v0.8.0 REVIEW): do NOT call
+        // `ensure_key_caches()` here. A fresh read-only handle that
+        // only ever recalls would otherwise pay a full-file decrypt
+        // on its first query to build the lazy superseded set. Instead
+        // `score_once` checks `_mnemo.superseded_by` per-record after
+        // decrypt (slow path) and consults the set only when it has
+        // already been built by a prior keyed op on this handle (fast
+        // path). `live_non_superseded` is not knowable without a
+        // decrypt pass either, so we approximate by `live_count`; the
+        // exact-scan gate uses this as a conservative upper bound,
+        // which errs toward widening (cheaper) rather than skipping
+        // straight to a full scan.
         let live_count = self.catalog.iter().filter(|e| !e.deleted).count();
-        let superseded_count = self.superseded.as_ref().map(|s| s.len()).unwrap_or(0);
-        let live_non_superseded = live_count.saturating_sub(superseded_count);
+        let live_non_superseded = live_count;
         let now = memory::now_secs();
 
         // Scoring v2 (shipped v0.7.0). Single-pass filter + score:
@@ -2353,35 +2377,52 @@ impl Mnemo {
         //     importance-centered, saturating-usage formula documented
         //     on `ScoreWeights`.
         //
-        // Phase 12.1: when the ANN shortlist is narrower than the live
-        // non-superseded count, the type/agent/supersession/TTL filters can
-        // reduce the result below `top_k`. If that happens, re-query the
-        // index with `n_probe`/`n_rerank` doubled; if that would already
-        // cover ≥50% of the live non-superseded set, skip the index and do
-        // an exact scan. This is the "short results on the indexed path"
-        // fix called for by the 12.1 DISPATCH.
+        // Phase 12.1 + 12.6 short-results-on-indexed-path fix: when the
+        // ANN shortlist is narrower than the live count, the filters
+        // (type / agent / supersession / TTL / 12.6) can reduce the
+        // result below `top_k`. If that happens, re-query the index
+        // with `n_probe` / `n_rerank` doubled from their *effective*
+        // base; if that would already cover ≥50% of the live set,
+        // skip the index and do an exact scan.
+        //
+        // Lane A v0.8.0 REVIEW fix: widen from
+        // `IvfPqIndex::effective_defaults()` when the caller didn't
+        // pin the knobs. The pre-fix code only doubled when `req.n_*`
+        // was already `Some(_)`, which skipped the widen step for the
+        // default (unpinned) recall path and jumped straight to an
+        // exact scan on moderately selective filters.
         let mut scored = self.score_once(req, now, false)?;
-        if self.ann.is_some() && scored.len() < req.top_k && live_non_superseded > req.top_k {
-            // Attempt 2: widen once, 2× on both knobs (if the caller set
-            // them; otherwise the ANN defaults already apply and we fall
-            // straight through to the exact-scan attempt).
-            let widen_probe = req.n_probe.map(|n| n.saturating_mul(2));
-            let widen_rerank = req.n_rerank.map(|n| n.saturating_mul(2));
-            if widen_probe != req.n_probe || widen_rerank != req.n_rerank {
-                let widened = RecallRequest {
-                    n_probe: widen_probe,
-                    n_rerank: widen_rerank,
-                    ..req.clone()
-                };
-                scored = self.score_once(&widened, now, false)?;
-            }
-            // Attempt 3: if still short and the widened pass would
-            // already cover half or more of the live non-superseded
-            // records, skip the index and do an exact scan.
-            if scored.len() < req.top_k {
-                let widened_rerank = widen_rerank.unwrap_or(0);
-                if widened_rerank == 0 || widened_rerank * 2 >= live_non_superseded {
+        let mut used_exact_scan = self.ann.is_none();
+        if scored.len() < req.top_k && live_non_superseded > req.top_k {
+            if let Some(ann) = &self.ann {
+                let (default_probe, default_rerank) = ann.effective_defaults();
+                let base_probe = req.n_probe.unwrap_or(default_probe);
+                let base_rerank = req.n_rerank.unwrap_or(default_rerank);
+                let widen_probe = base_probe.saturating_mul(2);
+                let widen_rerank = base_rerank.saturating_mul(2);
+                // Attempt 2: widen once, 2× from the effective base.
+                // Only worth another ANN pass if either knob actually
+                // grew (saturating_mul on usize::MAX would cap).
+                if widen_probe > base_probe || widen_rerank > base_rerank {
+                    let widened = RecallRequest {
+                        n_probe: Some(widen_probe),
+                        n_rerank: Some(widen_rerank),
+                        ..req.clone()
+                    };
+                    scored = self.score_once(&widened, now, false)?;
+                }
+                // Attempt 3: if still short after widening, pay the
+                // exact scan — it's the only path that guarantees
+                // `top_k` correct hits when the filter is more
+                // selective than `widen_rerank / live_count`. Before
+                // the fix this was gated on `widened_rerank * 2 >=
+                // live_non_superseded`, which silently returned fewer
+                // than `top_k` hits on selective filters that fell in
+                // the gap. Exact scan is bounded (one decrypt per
+                // live record); the previous widen is an optimization.
+                if scored.len() < req.top_k {
                     scored = self.score_once(req, now, true)?;
+                    used_exact_scan = true;
                 }
             }
         }
@@ -2449,6 +2490,7 @@ impl Mnemo {
         Ok(RecallResponse {
             hits: scored,
             truncated,
+            used_exact_scan,
         })
     }
 

@@ -112,10 +112,48 @@ fn bench_recall_1m(c: &mut Criterion) {
     bench_recall_pair(c, 1_000_000, "1m", 10);
 }
 
+/// Phase 12.1 lane-A REVIEW remeasure: first recall on a *fresh*
+/// `Mnemo` handle. Opens the cached 100K corpus, issues a single
+/// recall, closes the handle — repeated per Criterion iteration. The
+/// pre-v0.8.0 code called `ensure_key_caches()` inside recall itself,
+/// which decrypted every live record on the first call — roughly 1 s
+/// at 100K with hardware AES. Post-fix, the first recall only decrypts
+/// the ANN shortlist plus whatever the widen / exact-scan loop needs
+/// (typically a few hundred records), so this cell should sit near
+/// the pure per-query cost of `ivfpq_recall_100k`.
+fn bench_first_recall_fresh_handle_100k(c: &mut Criterion) {
+    use mnemo_engine::{RecallRequest, ScoreWeights};
+    let cached = setup_cached_corpus(100_000, DIMENSIONS);
+    let queries = gen_clustered_vectors(DIMENSIONS, 20, 0xDEAD_BEEF, 100);
+    let mut group = c.benchmark_group("ivfpq_first_recall_fresh_handle_100k");
+    group.sample_size(20);
+    group.bench_function("first_recall", |b| {
+        let mut i = 0usize;
+        b.iter(|| {
+            // Open a *fresh* handle every iteration so the key-cache
+            // lazy init (removed in v0.8.0) and page-cache are cold.
+            // Use `open_corpus_with_index` so the IVF+PQ path is live;
+            // the "fresh handle" invariant we want to measure is the
+            // one that pre-v0.8.0 would have paid for key-cache init
+            // on every first recall.
+            let mut db = open_corpus_with_index(&cached);
+            let q = &queries[i % queries.len()];
+            i += 1;
+            let req = RecallRequest::new(q.clone())
+                .top_k(10)
+                .track_access(false)
+                .weights(ScoreWeights::default());
+            let _ = black_box(db.recall(&req).unwrap());
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     recall_benches,
     bench_recall_10k,
     bench_recall_100k,
     bench_recall_1m,
+    bench_first_recall_fresh_handle_100k,
 );
 criterion_main!(recall_benches);
