@@ -1451,7 +1451,7 @@ DO NEXT, in this order:
    with the variant chosen by harness numbers, after extending the harness
    to an age-varied corpus. Minor release v0.6.0 with before/after
    numbers. Dogfood recall switches to track_access=False.
-5b. ← ACTIVE (lane B; dispatched 2026-11-06 by PLANNER-A covering lane B). **Phase 12 — seamless agent memory**
+5b. ← ACTIVE (PLANNER-A). v0.8.0 SHIPPED 2026-11-06 (12.1 + 12.6 + 12.8; VERIFIED); v0.8.1 patch ACTIVE; 12.7 next after user sign-off. **Phase 12 — seamless agent memory**
    (added 2026-10-30, user decision; slotted ahead of keyword search). Order
    inside (revised 2026-11-06, user decision "small releases"): **12.1 → 12.6
    → 12.8 = v0.8.0** (pre-approved queue, see the DISPATCH entry) → 12.7
@@ -1473,7 +1473,10 @@ DO NEXT, in this order:
 7. **Phase 11.1 — remaining speedups, no format change**, re-ranked on
    hardware-AES numbers: fsync count per flush (durability-preserving
    first), semantic-cache index, and the exact-scan vector layout only if a
-   profile still shows decryption dominating.
+   profile still shows decryption dominating. **Added 2026-11-06:** faster open for
+   large files (lazy or streamed catalog and index load). An indexed 20K
+   file opens in about 115 ms, mostly loading rather than KDF; measure it at
+   10K and 100K in v0.8.1.
 8. **PR 10c — `embed-fastembed`**: FOLDED INTO Phase 12.3 (2026-10-30).
 9. **Phase 7** memory-model features — build in intra-phase order
    **7.1 dedup → 7.4 consolidation hook → 7.3 links → 7.2 decay/forget**, per
@@ -7050,3 +7053,67 @@ known-limitations updates, and the three example call shapes.
 and log v0.8.0 VERIFIED. When you log VERIFIED I'll make the
 follow-up coordination sync. Marking the "Release v0.8.0 = 12.1 +
 12.6 + 12.8" task completed.
+
+### 2026-11-06 — PLANNER-A — VERIFIED + DISPATCH — v0.8.0 accepted with one usability bug → v0.8.1 patch
+**Verified** on `pip install mnemo-engine==0.8.0` (aarch64 Linux, hardware
+AES): the tag `v0.8.0` → 22b38e3 and the commits match the DONE entry.
+- **Keyed facts:** added → superseded → unchanged (same id returned). A
+  **fresh handle** hides the superseded version without the key scan.
+  `update` keeps the id; a content change without a vector is rejected.
+- **Filters** `session_id`, equality, `$in`, `$gte` and `$exists` all
+  return the right memories.
+- **`max_bytes`** returns `{hits, truncated}` with at least one hit.
+- **The speed fix works.** On a 20K-memory indexed file, the first recall
+  on a fresh handle takes 3.7 ms (1.7 ms warm), and filters matching 30% or
+  10% take 3.6 or 5.4 ms with full `top_k`. Superseded versions are hidden
+  on the indexed path too.
+- **Compatibility:** a 0.7.0 file opens under 0.8.0. A 0.8.0 file opens
+  under 0.7.0, but shows superseded versions as ordinary memories, which is
+  expected. I added a README sentence (see the HANDOFF below).
+
+**Bug, which becomes the v0.8.1 patch: `history(key)` with default
+arguments returns `[]`.** `remember(..., key="release")` with no `agent_id`
+writes a *private* memory under agent `"default"`. But `history("release")`
+with `agent_id=None` looks up the *shared* slot (store.rs `history`:
+`scope_owner = agent_id.map(..)`, so None means shared). The obvious call
+silently finds nothing, and the README example (`history(key)`) doesn't
+work. `history("release", agent_id="default")` works.
+
+**DISPATCH: PR 12.1.1 → release v0.8.1** (small, no format change):
+1. **Make the history slot match the write slot.** `history` resolves its
+   slot exactly as a keyed `remember` with the same arguments would:
+   - `agent_id=None` means the default agent's private slot, whatever
+     `remember` uses when `agent_id` is omitted;
+   - add `shared=True` (Python), `--shared` (CLI) and `shared` (MCP) for
+     the shared slot.
+
+   Do this in Python, the CLI and MCP. Rust: add
+   `KeyScope::{Private(agent), Shared}` with `history_in(key, KeyScope)`,
+   and make `history(key, None)` use the default agent too. Document it in
+   the CHANGELOG as a fix; it's 0.x, and the old behaviour was
+   unintentionally useless.
+
+   Tests in Python, CLI and MCP: `remember(key=K)` then `history(K)` with
+   no extra arguments returns the chain; shared and private slots stay
+   separate.
+2. **Benchmark cells, marked `remeasured`, on the M1 Pro:**
+   - first recall on a fresh 100K handle (your
+     `bench_first_recall_fresh_handle_100k`);
+   - **open latency for indexed files at 10K and 100K.**
+
+   The README's "open ~15 ms" is only the key derivation. In my sandbox,
+   opening an indexed 20K file takes about 115 ms in both 0.7.0 and 0.8.0,
+   so it isn't a regression: loading the catalog and index dominates. I'll
+   correct the README from your numbers. **Planned:** faster open (lazy
+   index load) joins Phase 11.1, and matters more once 12.3's generated
+   keys remove the KDF cost.
+3. Release v0.8.1, plus the docs HANDOFF commit and a sync. **Log READY
+   before tagging only if the open numbers change the README** (they likely
+   will). Otherwise tag directly and log DONE.
+
+**HANDOFF (commit with the release, separately):** `README.md`, one
+sentence in "What's new in v0.8.0": "v0.7 shows replaced versions as
+ordinary memories, so upgrade every tool that reads the file."
+
+**Next after v0.8.1: 12.7 (threads and essence) waits for the user's
+sign-off on its design.** Don't start it.
