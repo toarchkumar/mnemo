@@ -6,7 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0, the minor component carries the breaking-change signal.
 
-## [Unreleased]
+## [0.8.0] — 2026-11-06
+
+**Additive release.** Three PRs ship together, plus two lane-A
+recall regressions fixed in the release gate (same commit as the
+version bump):
+
+1. **Fresh-handle recall no longer decrypts the whole file.** Pre-fix,
+   `recall_budgeted` called `ensure_key_caches()` on every invocation,
+   so the first recall on a fresh handle triggered a lazy scan that
+   decrypted every live record (~1 s on a 100K-memory file). The lazy
+   `superseded` set is now consulted only when a prior keyed op on
+   this handle has already built it; the correctness case is covered
+   by a slow-path `_mnemo.superseded_by` check on each decrypted
+   record. Added `bench_first_recall_fresh_handle_100k` to the recall
+   benches to track the post-fix number.
+2. **Selective-filter widening uses `effective_defaults()`, not the
+   caller's `None`.** Pre-fix, the widen step was gated on
+   `req.n_probe.map(|n| n * 2)`, which stayed `None` for the default
+   recall path and skipped straight to exact scan on moderately
+   selective filters. Recall now widens from
+   `IvfPqIndex::effective_defaults()` (the ANN-1.1 auto formulas),
+   and falls through to exact scan only if the widened pass still
+   can't satisfy `top_k`. New `RecallResponse.used_exact_scan: bool`
+   makes the path observable on every call so callers can monitor
+   ANN degradation / excess supersession.
+
+The three feature PRs: — all three add *new*
+query-time knobs without changing the on-disk format or any
+pre-12.1 Rust / Python / CLI / MCP signature. Files written by
+v0.8.0 open under v0.7.x; all v0.7.x callers compile and run
+unchanged against v0.8.0. Upgrade-path summary:
+
+* **12.1 Edit in place + keyed supersession:** new `update(id,
+  patch)`, new `remember(..., key=K)` keyed-upsert path (NOOP on
+  identical re-writes), new `history(key, agent)`. Superseded
+  records drop out of default `recall` / `about` automatically.
+  All new per-memory data lives under the reserved `_mnemo.*`
+  metadata namespace, no format bump.
+* **12.6 Filtered recall:** new `RecallRequest::filter(Filter)` with
+  session + per-metadata-key conditions (`$eq` / `$in` / `$exists`
+  / `$gte`+`$lte`). Reuses 12.1's widen-then-exact-scan logic, so
+  a selective filter still returns `top_k` correct hits on an
+  indexed file.
+* **12.8 Budgeted recall:** new `RecallRequest::max_bytes(n)` + new
+  `Mnemo::recall_budgeted(req) -> RecallResponse { hits, truncated }`.
+  The pre-12.8 `Mnemo::recall(req) -> Vec<RecallResult>` is now a
+  thin shim over `recall_budgeted` that discards the flag. Python
+  and MCP wrap their responses as `{hits, truncated}` when
+  `max_bytes` is set, and keep the bare list / array shape when
+  it isn't.
+
+Known limitations tracked for follow-up:
+
+* `history_keep` (per-key retention cap) is named in the 12.1 spec
+  and in `MemoryPatch` docs but **not implemented** — supersession
+  chains are unbounded in v0.8.0. Scheduled for Phase 12.5 / Phase
+  7.
+* MMR diversity (`mmr_lambda`) **not shipped** — the ranking_v2
+  harness doesn't have an MMR variant plumbed in, so the planner's
+  "hit@1 drops by no more than 0.02" gate wasn't exercised. The
+  budget loop in `recall_budgeted` is structured so a future PR can
+  add MMR re-ranking before truncation.
 
 ### Added — PR 12.8: budgeted recall (`max_bytes`)
 
