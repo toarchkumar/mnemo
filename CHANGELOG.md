@@ -58,7 +58,13 @@ New regression tests across every surface:
   replaces the "open ~15 ms" line, which was KDF-only, with the
   full open-with-catalog-and-index number).
 - The `bench_first_recall_fresh_handle_100k` cell added in v0.8.0
-  stays in place; v0.8.1 does not change its path.
+  was removed in v0.8.1. Running it alongside the 1M recall setup
+  pushed the bench binary into swap on development machines, so the
+  measurement is deferred to a dedicated investigation (PR MEM-1).
+  The post-v0.8.0 fix is still covered by
+  `fresh_handle_recall_hides_superseded_without_building_key_caches`
+  in the integration suite — only the remeasured bench number is
+  deferred.
 
 ## [0.8.0] — 2026-11-06
 
