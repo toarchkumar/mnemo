@@ -22,8 +22,10 @@ Two roles write to this file:
 Worker rules:
 1. Never edit any section above the WORKLOG — append log entries only.
 2. Commit `PLAN.md` and `reviewer_notes.md` by explicit path, as their own
-   `chore(plan): sync coordination files` commit, after each DONE entry and
-   before tagging a release (revised 2026-11-06; they were gitignored before).
+   `chore(plan): sync coordination files` commit, **only before tagging a
+   release or when the user asks for a backup** (revised 2026-11-07, user:
+   the files are shared locally, so exchanges don't need commits and the CI
+   runs they trigger). They were gitignored before 2026-11-06.
 3. If the plan conflicts with what you find in the code, or a step fails
    (CI red, publish rejected, dependency won't build on MSRV): STOP, append
    a `BLOCKED` worklog entry describing exactly what you saw, and end the
@@ -1451,7 +1453,7 @@ DO NEXT, in this order:
    with the variant chosen by harness numbers, after extending the harness
    to an age-varied corpus. Minor release v0.6.0 with before/after
    numbers. Dogfood recall switches to track_access=False.
-5b. ← ACTIVE (PLANNER-A). v0.8.0 SHIPPED 2026-11-06 (12.1 + 12.6 + 12.8; VERIFIED); v0.8.1 patch ACTIVE; 12.7 next after user sign-off. **Phase 12 — seamless agent memory**
+5b. ← ACTIVE (PLANNER-A). v0.8.0 SHIPPED 2026-11-06 (12.1 + 12.6 + 12.8; VERIFIED); v0.8.1 patch ACTIVE → then PR MEM-1 (macOS memory growth across repeated opens; investigation) → 12.7 after user sign-off. **Phase 12 — seamless agent memory**
    (added 2026-10-30, user decision; slotted ahead of keyword search). Order
    inside (revised 2026-11-06, user decision "small releases"): **12.1 → 12.6
    → 12.8 = v0.8.0** (pre-approved queue, see the DISPATCH entry) → 12.7
@@ -7300,3 +7302,101 @@ iter_custom(|_iters| single-measurement) shape (which still OOMs); if
 option (2) is accepted I'll swap it to the 10K corpus and ship. If
 option (1), I'll drop the Criterion cell and add a separate
 `mnemo/examples/first_recall_fresh_handle_100k.rs` harness.
+
+### 2026-11-07 — PLANNER-A — DECISION + HANDOFF — BLOCKED resolved: the memory blow-up is the bench file's setup, not the engine; and no more per-exchange PLAN.md commits
+**Root cause: not macOS malloc, and not an engine leak.**
+- **No engine leak.** Engine memory plateaus. On the published 0.8.0
+  wheel, opening and closing an indexed 20K file 25 times (with or without
+  a recall) levels off at 110–130 MB RSS by the eighth open and stays flat.
+  Freed handles are reused.
+- **What eats the memory is the bench file's setup.** `benches/recall.rs`
+  runs `bench_recall_10k`, `_100k` and `_1m` before the first-recall
+  bench, and a Criterion name filter (`-- first_recall`) only skips the
+  `bench_function` calls, **not the setup code around them**. So
+  `bench_recall_pair(…, 1_000_000, …)` still runs `setup_cached_corpus(1M)`
+  (building it if it isn't cached) and opens the 1M corpus twice, with the
+  index and exact-only. That's tens of GB on its own, and it explains why
+  "scaling the first-recall bench down to 10K" didn't help.
+- **The timing is also wrong:** `iter_custom` must return the total time
+  for `iters` iterations. Returning one measurement makes Criterion divide
+  it by `iters`, so the reported per-iteration time would be too small.
+
+**Decision: none of the three options as written. Do this instead:**
+1. Move the cell into **its own bench target**
+   (`mnemo/benches/first_recall.rs` + a `[[bench]]` entry), so it runs
+   alone with `cargo bench --features benches --bench first_recall`, and
+   restore the **100K** corpus.
+2. Measure correctly: inside `iter_custom`, loop `iters` times. Each loop
+   opens a handle **untimed**, times **only** the first `recall`, drops the
+   handle, and adds that time to the total. Return the total. Use
+   `sample_size(10)`. If Criterion's wall time gets too long because of
+   the untimed opens, use the simpler harness instead (option 1 done
+   properly): an example that runs 20 fresh handles and reports the median
+   and p95.
+3. Record it in `perf_v0.5.0.json` with `remeasured` and
+   `measurement_kind`, and put the number in DONE.
+
+The README text doesn't change; it only states the open-latency rows,
+which are already measured.
+
+**Process change (user, 2026-11-07): stop the per-exchange PLAN.md
+commits.** The Planner and Worker share this working tree, so a WORKLOG
+exchange needs no commit, and every sync commit was triggering CI.
+- From now on, commit `PLAN.md` and `reviewer_notes.md` **only before
+  tagging a release, or when the user asks for a backup.**
+- In the same v0.8.1 release, add `paths-ignore: [PLAN.md,
+  reviewer_notes.md]` to `.github/workflows/ci.yml`'s `push` and
+  `pull_request` triggers, so a backup-only push doesn't run CI.
+
+**HANDOFF (commit `AGENTS.md` on its own, `docs(agents): coordination
+files are committed only as release-time backups`):** the backup-only
+cadence in the multi-agent section and the Worker rules. PLAN.md Protocol
+rule 2 is updated to match.
+
+**Order:**
+1. the bench fix and the `ci.yml` paths-ignore (one commit);
+2. my two docs HANDOFFs (README + index.html; AGENTS.md), as separate
+   commits;
+3. one coordination-file backup commit;
+4. push, green CI, tag `v0.8.1`;
+5. DONE with the first-recall number.
+
+### 2026-11-07 — PLANNER-A — DECISION — Correction: the separate bench target still reaches 17 GB on the Mac; ship v0.8.1 without the cell and diagnose with an RSS-printing harness
+**My earlier root cause was incomplete.** The user's Activity Monitor
+shows `first_recall-…` (its own target, so no 1M setup) at **16.85 GB**,
+with 15 GB of swap. So the 1M setup wasn't the whole story. On Linux I
+still can't reproduce growth: the 0.8.0 wheel run 30 times through
+read-write `open` → `recall` → `close` on an indexed 20K file plateaus at
+130 MB, and read-only does the same. Two candidates remain:
+- (a) **the engine leaks or fragments per open/drop on macOS only** (a
+  real bug that would hit long-lived SDK users who reopen files);
+- (b) **a harness artefact.** Criterion sizes `iters` from the ~5 ms timed
+  part, so a 30 s measurement asks for thousands of untimed 232 ms opens.
+  Whatever per-open residue macOS's allocator keeps, it piles up over
+  thousands of opens.
+
+**Decision:**
+1. **Stop the Criterion cell now.** Delete `benches/first_recall.rs` and
+   its `[[bench]]` entry. It's a measurement, not a release gate.
+2. **Ship v0.8.1 without that cell** (it's the `history` fix plus the open
+   numbers). Keep the rest of the order: bench/CI commit (just the
+   `ci.yml` paths-ignore now), my README + index.html and AGENTS.md
+   handoffs, the backup commit, tag. The README never cited the
+   first-recall number, so nothing changes there.
+3. **Diagnose separately, as `PR MEM-1` (investigation, next after
+   v0.8.1, ahead of 12.7).**
+   - Write `mnemo/examples/open_rss.rs` (corpus path, N = 20): open the
+     cached 100K corpus *read-write* like the bench, time the first recall,
+     drop. After each drop, print the iteration, the recall time and the
+     **process RSS** (`ps -o rss= -p <pid>` is fine, no new dependency).
+     Do a second pass with `open_read_only`.
+   - Run it on the M1 Pro and paste the table into the BLOCKED or DONE
+     entry.
+   - **If RSS plateaus:** it's (b). Record the median and p95 first-recall
+     times in the perf JSON (`measurement_kind: "fresh_handle_loop_n20"`,
+     `remeasured`) and close MEM-1.
+   - **If RSS climbs on every open:** it's (a). Stop and log BLOCKED with
+     the table, and find the allocation that isn't freed
+     (`heap`/`leaks`/Instruments on the example: page cache, the ANN
+     index, WAL or lock state, thread-locals, anything global). That would
+     be a high-priority fix in its own patch.
