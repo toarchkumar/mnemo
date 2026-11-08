@@ -21,7 +21,6 @@
 //! [`Mnemo::restore_to`] can reinstate any past state. Stale pages — and the
 //! history along with them — are reclaimed by [`Mnemo::compact_file`].
 
-use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -774,7 +773,7 @@ pub struct Mnemo {
     pager: Pager,
     header: Header,
     catalog: Vec<CatalogEntry>,
-    index: HashMap<u128, usize>,
+    index: IdIndex,
     #[allow(dead_code)]
     path: PathBuf,
     dimensions: usize,
@@ -1109,13 +1108,87 @@ fn is_manifest(m: &Memory) -> bool {
         .unwrap_or(false)
 }
 
-/// Build the ULID → catalog-slot lookup map.
-fn build_id_index(catalog: &[CatalogEntry]) -> HashMap<u128, usize> {
-    let mut m = HashMap::with_capacity(catalog.len());
-    for (i, e) in catalog.iter().enumerate() {
-        m.insert(e.id, i);
+/// PERF-1 step 4: ULID → catalog row, as an open-addressing table of `u32`
+/// row numbers: 4 bytes a slot, about 5 bytes an entry, against about 43
+/// for the `HashMap<u128, usize>` it replaces. A probe compares against the
+/// catalog's own id at that row, so the ids aren't stored twice. Rows are
+/// never removed (a delete only tombstones the catalog entry), so there's
+/// no delete path.
+#[derive(Debug, Clone, Default)]
+struct IdIndex {
+    slots: Vec<u32>,
+    len: usize,
+}
+
+const NO_ROW: u32 = u32::MAX;
+
+impl IdIndex {
+    fn build(catalog: &[CatalogEntry]) -> IdIndex {
+        let mut t = IdIndex {
+            slots: vec![NO_ROW; crate::index::table_capacity_for(catalog.len())],
+            len: 0,
+        };
+        for (row, e) in catalog.iter().enumerate() {
+            t.insert(e.id, row, catalog);
+        }
+        t
     }
-    m
+
+    /// The catalog row holding `id`, if any.
+    fn get(&self, id: u128, catalog: &[CatalogEntry]) -> Option<usize> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        let cap = self.slots.len();
+        let mut i = crate::index::slot_home(id, cap);
+        loop {
+            let row = self.slots[i];
+            if row == NO_ROW {
+                return None;
+            }
+            if catalog[row as usize].id == id {
+                return Some(row as usize);
+            }
+            i = crate::index::next_slot(i, cap);
+        }
+    }
+
+    /// Map `id` to `row`. `catalog` must hold every row already in the
+    /// table (the new row may not be pushed yet).
+    fn insert(&mut self, id: u128, row: usize, catalog: &[CatalogEntry]) {
+        if (self.len + 1) * 4 > self.slots.len() * 3 {
+            let cap = (self.slots.len() * 2).max(crate::index::table_capacity_for(self.len + 1));
+            let old = std::mem::replace(&mut self.slots, vec![NO_ROW; cap]);
+            self.len = 0;
+            for r in old.into_iter().filter(|&r| r != NO_ROW) {
+                self.insert(catalog[r as usize].id, r as usize, catalog);
+            }
+        }
+        let cap = self.slots.len();
+        let mut i = crate::index::slot_home(id, cap);
+        loop {
+            let r = self.slots[i];
+            if r == NO_ROW {
+                self.slots[i] = row as u32;
+                self.len += 1;
+                return;
+            }
+            if catalog[r as usize].id == id {
+                self.slots[i] = row as u32;
+                return;
+            }
+            i = crate::index::next_slot(i, cap);
+        }
+    }
+
+    fn heap_bytes(&self) -> usize {
+        self.slots.capacity() * std::mem::size_of::<u32>()
+    }
+}
+
+/// Build the ULID → catalog-row lookup.
+fn build_id_index(catalog: &[CatalogEntry]) -> IdIndex {
+    IdIndex::build(catalog)
 }
 
 // ---------------------------------------------------------------------------
@@ -1344,7 +1417,7 @@ impl Mnemo {
             pager,
             header,
             catalog: Vec::new(),
-            index: HashMap::new(),
+            index: IdIndex::default(),
             path,
             dimensions: config.dimensions,
             kdf: config.kdf,
@@ -1882,7 +1955,7 @@ impl Mnemo {
         // stored version first (one decrypt), so the caches drop exactly
         // what it contributed.
         if self.layers.is_some() {
-            if let Some(&idx) = self.index.get(&id_u) {
+            if let Some(idx) = self.index.get(id_u, &self.catalog) {
                 let old_entry = self.catalog[idx].clone();
                 if !old_entry.deleted {
                     let old = self.read_memory(&old_entry)?;
@@ -1894,7 +1967,7 @@ impl Mnemo {
         let (start, pc) = self.write_record(&bytes)?;
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
-        let (prev_accessed, prev_count) = match self.index.get(&id_u).copied() {
+        let (prev_accessed, prev_count) = match self.index.get(id_u, &self.catalog) {
             Some(idx) => (
                 self.catalog[idx].accessed_at,
                 self.catalog[idx].access_count,
@@ -1910,10 +1983,10 @@ impl Mnemo {
             accessed_at: prev_accessed,
             access_count: prev_count,
         };
-        match self.index.get(&id_u).copied() {
+        match self.index.get(id_u, &self.catalog) {
             Some(idx) => self.catalog[idx] = entry,
             None => {
-                self.index.insert(id_u, self.catalog.len());
+                self.index.insert(id_u, self.catalog.len(), &self.catalog);
                 self.catalog.push(entry);
             }
         }
@@ -2100,9 +2173,9 @@ impl Mnemo {
 
     /// Fetch a memory by ID.
     pub fn get(&mut self, id: &Ulid) -> Result<Memory> {
-        let idx = *self
+        let idx = self
             .index
-            .get(&id.0)
+            .get(id.0, &self.catalog)
             .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
         let entry = self.catalog[idx].clone();
         if entry.deleted {
@@ -2116,9 +2189,9 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
-        let idx = *self
+        let idx = self
             .index
-            .get(&id.0)
+            .get(id.0, &self.catalog)
             .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
         // R-004.2 / 12.1: with the handle caches built, read the record
         // being deleted (one decrypt) so the key slot, superseded set and
@@ -2189,7 +2262,11 @@ impl Mnemo {
     /// The live catalog entries for `ids` (ids that are gone are skipped).
     fn live_entries(&self, ids: impl IntoIterator<Item = u128>) -> Vec<CatalogEntry> {
         ids.into_iter()
-            .filter_map(|id| self.index.get(&id).map(|&i| self.catalog[i].clone()))
+            .filter_map(|id| {
+                self.index
+                    .get(id, &self.catalog)
+                    .map(|i| self.catalog[i].clone())
+            })
             .filter(|e| !e.deleted)
             .collect()
     }
@@ -2374,9 +2451,9 @@ impl Mnemo {
         // user-visible fields match, return the existing id without a
         // write.
         if let Some(prev_id_u) = existing {
-            let prev_idx = *self
+            let prev_idx = self
                 .index
-                .get(&prev_id_u)
+                .get(prev_id_u, &self.catalog)
                 .ok_or_else(|| MnemoError::Invalid("key_index drift".into()))?;
             let prev_entry = self.catalog[prev_idx].clone();
             let prev_mem = self.read_memory(&prev_entry)?;
@@ -2475,9 +2552,9 @@ impl Mnemo {
                     .into(),
             ));
         }
-        let idx = *self
+        let idx = self
             .index
-            .get(&id.0)
+            .get(id.0, &self.catalog)
             .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
         if self.catalog[idx].deleted {
             return Err(MnemoError::NotFound(id.to_string()));
@@ -2624,7 +2701,7 @@ impl Mnemo {
         let mut out = Vec::new();
         let mut cursor = live_id;
         while let Some(id_u) = cursor {
-            let idx = *self.index.get(&id_u).ok_or_else(|| {
+            let idx = self.index.get(id_u, &self.catalog).ok_or_else(|| {
                 MnemoError::Invalid("history: superseded chain references missing id".into())
             })?;
             let entry = self.catalog[idx].clone();
@@ -4015,7 +4092,7 @@ impl Mnemo {
         r.unreferenced_bytes = r.file_bytes.saturating_sub(accounted);
 
         r.ram_catalog = (self.catalog.capacity() * std::mem::size_of::<CatalogEntry>()) as u64;
-        r.ram_id_map = crate::index::hash_map_bytes::<u128, usize>(self.index.capacity()) as u64;
+        r.ram_id_map = self.index.heap_bytes() as u64;
         if let Some(ann) = &self.ann {
             let (c, cb, ids, codes, assign) = ann.heap_bytes();
             r.ram_ann_centroids = c as u64;
@@ -4213,7 +4290,7 @@ impl Mnemo {
             (Some(ann), false) => {
                 let ids = ann.query(&req.query, req.n_probe, req.n_rerank);
                 ids.iter()
-                    .filter_map(|id| self.index.get(id).copied())
+                    .filter_map(|&id| self.index.get(id, &self.catalog))
                     .map(|i| self.catalog[i].clone())
                     .filter(|e| !e.deleted)
                     .collect()
@@ -4438,7 +4515,7 @@ impl Mnemo {
         // record body stays untouched until the next real edit.
         if req.track_access {
             for r in &mut scored {
-                if let Some(&idx) = self.index.get(&r.memory.id.0) {
+                if let Some(idx) = self.index.get(r.memory.id.0, &self.catalog) {
                     let entry = &mut self.catalog[idx];
                     entry.accessed_at = now;
                     entry.access_count = entry.access_count.saturating_add(1);
@@ -4586,7 +4663,7 @@ impl Mnemo {
         let stale: Vec<u128> = match &self.ann {
             Some(ann) => ann
                 .ids()
-                .filter(|id| !matches!(self.index.get(id), Some(&i) if !self.catalog[i].deleted))
+                .filter(|&id| !matches!(self.index.get(id, &self.catalog), Some(i) if !self.catalog[i].deleted))
                 .collect(),
             None => Vec::new(),
         };
@@ -5128,8 +5205,9 @@ impl Mnemo {
     /// Bound the in-memory page cache to `pages` decrypted pages.
     ///
     /// The cache holds decrypted page payloads to speed repeated reads. By
-    /// default it is capped at 8192 pages (~64 MiB); lower the cap to trade
-    /// hit rate for a smaller footprint, or raise it for a hotter cache. The
+    /// default it is capped at 1024 pages (~8 MiB; 8192 before v0.10.0).
+    /// Lower the cap to trade hit rate for a smaller footprint, or raise
+    /// it for a hotter cache. The
     /// cap governs *clean* pages — pages with un-flushed writes are always
     /// retained until [`Mnemo::flush`], regardless of the cap.
     pub fn set_cache_capacity(&mut self, pages: usize) {

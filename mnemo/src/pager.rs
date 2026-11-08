@@ -86,8 +86,11 @@ use crate::crypto::{self, KEY_LEN, NONCE_LEN};
 use crate::error::{MnemoError, Result};
 use crate::format::{PAGE_SIZE, PAYLOAD};
 
-/// Default page-cache capacity, in pages (~64 MiB of decrypted payloads).
-pub const DEFAULT_CACHE_PAGES: usize = 8192;
+/// Default page-cache capacity, in pages (~8 MiB of decrypted payloads).
+/// PERF-1 step 4 lowered it from 8192 (~64 MiB): at 10K and 100K memories
+/// that cache was most of an open handle's RSS, for little hit rate on
+/// recall's scattered record reads. `Mnemo::set_cache_capacity` raises it.
+pub const DEFAULT_CACHE_PAGES: usize = 1024;
 
 /// Encrypted page reader/writer with a bounded write-back cache.
 pub struct Pager {

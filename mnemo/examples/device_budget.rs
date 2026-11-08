@@ -5,11 +5,11 @@
 //!
 //! - file bytes per memory, split into records (and their page slack),
 //!   index, catalog, WAL and the rest;
-//! - RSS of one open handle (open → first recall → 200 warm recalls),
+//! - RSS of one open handle (open → first recall → 1,000 warm recalls),
 //!   plus the engine's own heap breakdown (`Mnemo::__budget_report`), and
 //!   the phase's peak RSS when `/usr/bin/time` is available;
 //! - open time and first recall on fresh handles (20 cycles);
-//! - warm recall (median / p95 over 200 queries);
+//! - warm recall (median / p95 over 1,000 queries);
 //! - durable writes: single (`remember` + `flush`) and batched (100
 //!   `remember` + one `flush`), with the fsync count per commit.
 //!
@@ -41,7 +41,8 @@ use corpus::{fast_kdf_cfg, gen_clustered_vectors, DIMENSIONS, PASSPHRASE};
 const DEFAULT_SIZES: [usize; 3] = [1_000, 10_000, 100_000];
 const TEXT_BYTES: usize = 300;
 const OPEN_CYCLES: usize = 20;
-const WARM_QUERIES: usize = 200;
+/// PERF-1 step 4's gate measures one handle's RSS over 1,000 warm recalls.
+const WARM_QUERIES: usize = 1_000;
 const SINGLE_WRITES: usize = 20;
 const BATCHES: usize = 5;
 const BATCH_SIZE: usize = 100;
@@ -532,7 +533,7 @@ fn main() {
     }
     println!(
         "\n(B/mem: file bytes per memory as built / after compact; slack%: empty space in record \
-         pages; handleMB: RSS growth for one open handle after 200 warm recalls; peakMB: peak RSS \
+         pages; handleMB: RSS growth for one open handle after 1,000 warm recalls; peakMB: peak RSS \
          of that phase's process; engineMB: the engine's own heap accounting; times in ms; open = \
          median over {OPEN_CYCLES} fresh opens, open1st = the handle phase's single open)"
     );

@@ -439,7 +439,7 @@ Decrypted page payloads are held in a **bounded LRU cache** so repeated reads
 skip a decrypt. Eviction targets the least-recently-used *clean* page; a dirty
 page — the only copy of an un-flushed write — is never evicted, so the cap
 bounds retained clean pages without ever risking data. The default cap is
-8192 pages (~64 MiB); `Mnemo::set_cache_capacity` tunes it, and
+1024 pages (~8 MiB; 8192 pages before v0.10.0); `Mnemo::set_cache_capacity` tunes it, and
 `Mnemo::cache_stats` reports occupancy. The LRU order is an intrusive linked
 list over a slab of indices, so it stays within the crate's
 `#![forbid(unsafe_code)]`.

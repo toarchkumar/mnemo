@@ -20,14 +20,168 @@
 //! similar norms — L2-nearest and cosine-nearest largely agree, and a
 //! generous `n_rerank` absorbs the rest.
 
-use std::collections::HashMap;
-
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MnemoError, Result};
+
+/// Slot marker for an empty [`U128Map`] slot (values are partition or row
+/// numbers, so `u32::MAX` is never a real value).
+const VACANT: u32 = u32::MAX;
+
+/// Home slot of a ULID (or any `u128` id) in a table of `cap` slots.
+/// ULIDs carry 80 random low bits, so folding the halves and a
+/// multiplicative mix is enough; the high bits of `hash * cap` then pick
+/// the slot, so `cap` needn't be a power of two (a power-of-two table at
+/// <= 3/4 load can sit at 3/8, doubling its size for nothing).
+pub(crate) fn slot_home(k: u128, cap: usize) -> usize {
+    let x = (k as u64) ^ ((k >> 64) as u64).rotate_left(29);
+    let h = x.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    ((h as u128 * cap as u128) >> 64) as usize
+}
+
+/// The slot after `i`, wrapping at `cap`.
+pub(crate) fn next_slot(i: usize, cap: usize) -> usize {
+    if i + 1 == cap {
+        0
+    } else {
+        i + 1
+    }
+}
+
+/// Forward distance from slot `from` to slot `to`, wrapping at `cap`.
+fn cyclic_dist(from: usize, to: usize, cap: usize) -> usize {
+    if to >= from {
+        to - from
+    } else {
+        to + cap - from
+    }
+}
+
+/// Slot count that holds `n` entries at <= 3/4 load.
+pub(crate) fn table_capacity_for(n: usize) -> usize {
+    (n * 4 / 3 + 1).max(16)
+}
+
+/// PERF-1 step 4: a compact `u128 → u32` map (linear probing,
+/// backward-shift deletion) for the ANN's id → partition assignment. It
+/// takes 20 bytes a slot at <= 3/4 load, about 27 bytes an entry, against
+/// about 43 for `HashMap<u128, usize>` (whose 32-byte, 16-aligned slots
+/// dominate).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct U128Map {
+    keys: Vec<u128>,
+    vals: Vec<u32>,
+    len: usize,
+}
+
+impl U128Map {
+    pub(crate) fn with_capacity(n: usize) -> Self {
+        let mut m = Self::default();
+        m.resize(table_capacity_for(n));
+        m
+    }
+
+    fn resize(&mut self, cap: usize) {
+        let keys = std::mem::replace(&mut self.keys, vec![0; cap]);
+        let vals = std::mem::replace(&mut self.vals, vec![VACANT; cap]);
+        self.len = 0;
+        for (k, v) in keys.into_iter().zip(vals) {
+            if v != VACANT {
+                self.insert(k, v);
+            }
+        }
+    }
+
+    fn find(&self, k: u128) -> Option<usize> {
+        if self.vals.is_empty() {
+            return None;
+        }
+        let cap = self.vals.len();
+        let mut i = slot_home(k, cap);
+        loop {
+            if self.vals[i] == VACANT {
+                return None;
+            }
+            if self.keys[i] == k {
+                return Some(i);
+            }
+            i = next_slot(i, cap);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn get(&self, k: u128) -> Option<u32> {
+        self.find(k).map(|i| self.vals[i])
+    }
+
+    pub(crate) fn contains_key(&self, k: u128) -> bool {
+        self.find(k).is_some()
+    }
+
+    pub(crate) fn insert(&mut self, k: u128, v: u32) {
+        debug_assert_ne!(v, VACANT);
+        if (self.len + 1) * 4 > self.vals.len() * 3 {
+            let cap = (self.vals.len() * 2).max(table_capacity_for(self.len + 1));
+            self.resize(cap);
+        }
+        let cap = self.vals.len();
+        let mut i = slot_home(k, cap);
+        loop {
+            if self.vals[i] == VACANT {
+                self.keys[i] = k;
+                self.vals[i] = v;
+                self.len += 1;
+                return;
+            }
+            if self.keys[i] == k {
+                self.vals[i] = v;
+                return;
+            }
+            i = next_slot(i, cap);
+        }
+    }
+
+    pub(crate) fn remove(&mut self, k: u128) -> Option<u32> {
+        let i = self.find(k)?;
+        let out = self.vals[i];
+        let cap = self.vals.len();
+        // Backward-shift: pull later entries of the probe run into the
+        // hole when the hole lies on their path from home.
+        let mut hole = i;
+        let mut j = i;
+        loop {
+            j = next_slot(j, cap);
+            if self.vals[j] == VACANT {
+                break;
+            }
+            let home = slot_home(self.keys[j], cap);
+            let from_home = cyclic_dist(home, j, cap);
+            let from_hole = cyclic_dist(hole, j, cap);
+            if from_home >= from_hole {
+                self.keys[hole] = self.keys[j];
+                self.vals[hole] = self.vals[j];
+                hole = j;
+            }
+        }
+        self.vals[hole] = VACANT;
+        self.len -= 1;
+        Some(out)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Heap bytes held by the two slot arrays.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.keys.capacity() * std::mem::size_of::<u128>()
+            + self.vals.capacity() * std::mem::size_of::<u32>()
+    }
+}
 
 /// Estimated heap bytes of a `HashMap<K, V>` with the given capacity:
 /// one `(K, V)` slot plus one control byte per bucket, with buckets
@@ -363,7 +517,7 @@ pub struct IvfPqIndex {
     /// `id -> partition`. Reconstructed from `partitions` after load, never
     /// serialized.
     #[serde(skip)]
-    assignment: HashMap<u128, usize>,
+    assignment: U128Map,
     // Serialized shape is frozen at v0.5.2's: dims, n_partitions,
     // n_probe, n_rerank, centroids, pq, partitions. Do NOT append new
     // fields here under the same `format::VERSION` — rmp-serde 1.3.0's
@@ -451,7 +605,7 @@ impl IvfPqIndex {
             centroids,
             pq,
             partitions: vec![Posting::default(); n_partitions],
-            assignment: HashMap::with_capacity(n),
+            assignment: U128Map::with_capacity(n),
         };
         for &(id, v) in items {
             index.add(id, v);
@@ -507,7 +661,7 @@ impl IvfPqIndex {
 
     /// Whether `id` is indexed.
     pub(crate) fn contains(&self, id: u128) -> bool {
-        self.assignment.contains_key(&id)
+        self.assignment.contains_key(id)
     }
 
     /// Every indexed id (PERF-1 reconcile).
@@ -536,7 +690,7 @@ impl IvfPqIndex {
             .map(|p| p.ids.capacity() * std::mem::size_of::<u128>())
             .sum();
         let codes = self.partitions.iter().map(|p| p.codes.capacity()).sum();
-        let assignment = hash_map_bytes::<u128, usize>(self.assignment.capacity());
+        let assignment = self.assignment.heap_bytes();
         (centroids, codebook, ids, codes, assignment)
     }
 
@@ -563,10 +717,11 @@ impl IvfPqIndex {
     /// Rebuild the `id -> partition` map from the posting lists. Called once
     /// after the index is deserialized (the map itself is not stored).
     pub fn rebuild_assignment(&mut self) {
-        self.assignment.clear();
+        let n = self.partitions.iter().map(|p| p.ids.len()).sum();
+        self.assignment = U128Map::with_capacity(n);
         for (pi, p) in self.partitions.iter().enumerate() {
             for &id in &p.ids {
-                self.assignment.insert(id, pi);
+                self.assignment.insert(id, pi as u32);
             }
         }
     }
@@ -586,14 +741,14 @@ impl IvfPqIndex {
         let p = &mut self.partitions[part];
         p.ids.push(id);
         p.codes.extend_from_slice(&code);
-        self.assignment.insert(id, part);
+        self.assignment.insert(id, part as u32);
     }
 
     /// Remove a vector if present (no-op otherwise).
     pub fn remove(&mut self, id: u128) {
-        if let Some(part) = self.assignment.remove(&id) {
+        if let Some(part) = self.assignment.remove(id) {
             let m = self.pq.m();
-            let p = &mut self.partitions[part];
+            let p = &mut self.partitions[part as usize];
             if let Some(pos) = p.ids.iter().position(|&x| x == id) {
                 p.ids.remove(pos);
                 p.codes.drain(pos * m..(pos + 1) * m);
@@ -826,5 +981,42 @@ mod ann_1_1_tests {
         let (p, r) = idx.effective_defaults();
         assert_eq!(p, 3);
         assert_eq!(r, 17);
+    }
+}
+
+#[cfg(test)]
+mod u128_map_tests {
+    use super::U128Map;
+    use std::collections::HashMap;
+
+    /// Random inserts, overwrites and removes agree with `HashMap`,
+    /// including keys that collide on their home slot.
+    #[test]
+    fn matches_hashmap_under_random_ops() {
+        let mut ours = U128Map::default();
+        let mut reference: HashMap<u128, u32> = HashMap::new();
+        let mut x: u64 = 0x9E37_79B9;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for step in 0..60_000u32 {
+            // A small key space forces overwrites, removes and long runs.
+            let k = (next() % 5_000) as u128 | ((next() % 3) as u128) << 100;
+            match next() % 4 {
+                0 | 1 => {
+                    ours.insert(k, step);
+                    reference.insert(k, step);
+                }
+                2 => assert_eq!(ours.remove(k), reference.remove(&k)),
+                _ => assert_eq!(ours.get(k), reference.get(&k).copied()),
+            }
+            assert_eq!(ours.len(), reference.len());
+        }
+        for (k, v) in &reference {
+            assert_eq!(ours.get(*k), Some(*v));
+        }
     }
 }
