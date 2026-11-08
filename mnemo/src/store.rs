@@ -1248,6 +1248,129 @@ fn read_run_bytes(
     Ok(buf)
 }
 
+/// FMT-9b: a page run read as a byte stream, one page at a time and
+/// without caching it, so loading a large run (a 100K catalog is several
+/// MB, its index about 17 MB) never holds the whole serialized run in
+/// memory next to the structure being decoded from it.
+struct RunReader<'a> {
+    pager: &'a mut Pager,
+    /// The first page error, kept so the caller reports it as itself
+    /// (e.g. `PageAuthFailed`) rather than as a decode error.
+    err: &'a std::cell::RefCell<Option<MnemoError>>,
+    next_page: u64,
+    end_page: u64,
+    gen: u64,
+    remaining: u64,
+    buf: Vec<u8>,
+    pos: usize,
+}
+
+impl<'a> RunReader<'a> {
+    fn new(
+        pager: &'a mut Pager,
+        err: &'a std::cell::RefCell<Option<MnemoError>>,
+        start: u64,
+        pages: u64,
+        len: u64,
+        gen: u64,
+    ) -> Self {
+        RunReader {
+            pager,
+            err,
+            next_page: start,
+            end_page: start + pages,
+            gen,
+            remaining: len,
+            buf: Vec::new(),
+            pos: 0,
+        }
+    }
+}
+
+impl Read for RunReader<'_> {
+    /// The decoder reads a byte or a few at a time; serve those straight
+    /// from the current page.
+    #[inline]
+    fn read_exact(&mut self, out: &mut [u8]) -> std::io::Result<()> {
+        if self.buf.len() - self.pos >= out.len() {
+            out.copy_from_slice(&self.buf[self.pos..self.pos + out.len()]);
+            self.pos += out.len();
+            return Ok(());
+        }
+        let mut done = 0;
+        while done < out.len() {
+            match self.read(&mut out[done..])? {
+                0 => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                n => done += n,
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos == self.buf.len() {
+            if self.remaining == 0 || self.next_page >= self.end_page {
+                return Ok(0);
+            }
+            let mut page = match self.pager.read_page_uncached(self.next_page, self.gen) {
+                Ok(p) => p,
+                Err(e) => {
+                    let msg = e.to_string();
+                    *self.err.borrow_mut() = Some(e);
+                    return Err(std::io::Error::other(msg));
+                }
+            };
+            self.next_page += 1;
+            page.truncate((self.remaining as usize).min(page.len()));
+            self.remaining -= page.len() as u64;
+            self.buf = page;
+            self.pos = 0;
+        }
+        let n = out.len().min(self.buf.len() - self.pos);
+        out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// FMT-9b: deserialize a sequence into a `Vec` sized from the encoded
+/// length up front (bounded by `cap`, so a hostile length can't force a
+/// huge allocation). serde's own `Vec` impl pre-sizes only up to 1 MiB and
+/// then doubles, which for a 100K catalog leaves a quarter of the capacity
+/// unused and a freed half-size copy behind in the allocator.
+struct ExactVec<T> {
+    cap: usize,
+    _t: std::marker::PhantomData<T>,
+}
+
+impl<'de, T: Deserialize<'de>> serde::de::DeserializeSeed<'de> for ExactVec<T> {
+    type Value = Vec<T>;
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        d: D,
+    ) -> std::result::Result<Vec<T>, D::Error> {
+        d.deserialize_seq(self)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for ExactVec<T> {
+    type Value = Vec<T>;
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("a sequence")
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> std::result::Result<Vec<T>, A::Error> {
+        let mut v = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(self.cap));
+        while let Some(x) = seq.next_element()? {
+            v.push(x);
+        }
+        Ok(v)
+    }
+}
+
 /// Load a v5+ catalog run (an empty `pages` yields an empty catalog).
 fn load_catalog(
     pager: &mut Pager,
@@ -1259,8 +1382,38 @@ fn load_catalog(
     if pages == 0 {
         return Ok(Vec::new());
     }
-    let buf = read_run_bytes(pager, start, pages, len, gen)?;
-    rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
+    // Sized exactly (every row encodes to at least 8 bytes, which bounds
+    // the up-front allocation by the run's length). v8 decodes from one
+    // buffer, as before; v9 streams the run (it's larger, and it's paired
+    // with a resident vector column, so the transient buffer costs RSS).
+    let cap = (len / 8) as usize;
+    if pager.version() < VERSION_V9 {
+        let buf = read_run_bytes(pager, start, pages, len, gen)?;
+        let mut de = rmp_serde::Deserializer::from_read_ref(&buf);
+        return serde::de::DeserializeSeed::deserialize(
+            ExactVec::<CatalogEntry> {
+                cap,
+                _t: std::marker::PhantomData,
+            },
+            &mut de,
+        )
+        .map_err(|e| MnemoError::Serialize(e.to_string()));
+    }
+    let err = std::cell::RefCell::new(None);
+    let mut de = rmp_serde::Deserializer::new(RunReader::new(pager, &err, start, pages, len, gen));
+    let res = serde::de::DeserializeSeed::deserialize(
+        ExactVec::<CatalogEntry> {
+            cap,
+            _t: std::marker::PhantomData,
+        },
+        &mut de,
+    );
+    drop(de);
+    match (res, err.into_inner()) {
+        (Ok(v), _) => Ok(v),
+        (Err(_), Some(page_err)) => Err(page_err),
+        (Err(e), None) => Err(MnemoError::Serialize(e.to_string())),
+    }
 }
 
 /// Load a **v4** catalog run using the frozen [`CatalogEntryV4`] shape.
@@ -1357,9 +1510,28 @@ fn load_index(
     if pages == 0 {
         return Ok(None);
     }
-    let buf = read_run_bytes(pager, start, pages, len, gen)?;
-    let mut idx: IvfPqIndex =
-        rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+    // v8 decodes from one buffer, as before. v9 streams the run (a 100K
+    // index is ~17 MB), trading decode speed for not holding it twice.
+    if pager.version() < VERSION_V9 {
+        let buf = read_run_bytes(pager, start, pages, len, gen)?;
+        let mut idx: IvfPqIndex =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        if idx.dims() != dims {
+            return Err(MnemoError::Invalid(
+                "ANN index dimensionality does not match the database".into(),
+            ));
+        }
+        idx.rebuild_assignment();
+        return Ok(Some(idx));
+    }
+    let err = std::cell::RefCell::new(None);
+    let res: std::result::Result<IvfPqIndex, _> =
+        rmp_serde::from_read(RunReader::new(pager, &err, start, pages, len, gen));
+    let mut idx = match (res, err.into_inner()) {
+        (Ok(i), _) => i,
+        (Err(_), Some(page_err)) => return Err(page_err),
+        (Err(e), None) => return Err(MnemoError::Serialize(e.to_string())),
+    };
     if idx.dims() != dims {
         return Err(MnemoError::Invalid(
             "ANN index dimensionality does not match the database".into(),

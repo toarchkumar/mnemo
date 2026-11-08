@@ -216,6 +216,11 @@ impl Pager {
         }
     }
 
+    /// The format version the pager encrypts for.
+    pub(crate) fn version(&self) -> u16 {
+        self.version
+    }
+
     /// Borrow the data-encryption-key (used by `rekey`, which re-wraps it).
     pub fn dek(&self) -> &[u8; KEY_LEN] {
         &self.dek
