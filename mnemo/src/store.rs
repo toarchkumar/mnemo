@@ -100,6 +100,24 @@ pub const DEFAULT_VECTOR_CACHE_BUDGET: usize = 96 * 1024 * 1024;
 /// codebook alone would cost more disk than it saves time.
 pub const V9_ANN_MIN_FACTS: usize = 20_000;
 
+/// FMT-9c: page runs longer than this are written copy-on-write straight
+/// to their home pages (and fsynced) before the commit, instead of through
+/// the WAL, on v9. The WAL then carries only the header and small runs, so
+/// it stays at its 64 KiB default instead of growing to the largest
+/// catalog or index (26 MB at 100K on v8). Safe for the same reason data
+/// pages are: the pages come from the tail or from quarantined free runs,
+/// so nothing committed references them until the header flips.
+const V9_WAL_RUN_MAX_PAGES: u64 = 2;
+
+/// FMT-9c: snapshot retention on v9: the newest 16 snapshots, plus any
+/// from the last 24 hours, with retained snapshots never pinning more than
+/// a quarter of the file (past that, the oldest go first, whatever their
+/// age). `set_max_snapshots` changes the count.
+pub const V9_DEFAULT_MAX_SNAPSHOTS: usize = 16;
+const V9_SNAPSHOT_KEEP_SECS: i64 = 24 * 3600;
+/// FMT-9c: the pin cap never drops below 128 pages (1 MiB).
+const V9_PIN_FLOOR_PAGES: u64 = 128;
+
 /// FMT-9b: how many sparse vector pages one commit folds into its new
 /// pages (the vacuum). Bounded so a commit's cost stays bounded.
 const VACUUM_PAGES_PER_COMMIT: usize = 4;
@@ -1204,6 +1222,12 @@ pub struct Mnemo {
     col: VecColumn,
     /// FMT-9b.2: packed record pages (v9; unused on v8).
     recs: RecPages,
+    /// FMT-9c: the snapshot count was set explicitly (config or
+    /// `set_max_snapshots`), which replaces v9's default retention policy.
+    snapshot_cap_explicit: bool,
+    /// FMT-9c: this flush wrote big runs straight to their home pages,
+    /// which must be fsynced before the commit.
+    direct_writes: bool,
     /// FMT-9b: keep the column resident while it fits this many bytes.
     vector_cache_budget: usize,
 }
@@ -2051,7 +2075,14 @@ impl Mnemo {
             index_persist: IndexPersist::default(),
             ann_unloaded: false,
             manifest: Vec::new(),
-            max_snapshots: config.max_snapshots,
+            // FMT-9c: v9 keeps fewer snapshots by default: with page reuse,
+            // retention is what pins pages.
+            max_snapshots: if version >= VERSION_V9 && config.max_snapshots == DEFAULT_MAX_SNAPSHOTS
+            {
+                V9_DEFAULT_MAX_SNAPSHOTS
+            } else {
+                config.max_snapshots
+            },
             read_only: false,
             cache_dir: Vec::new(),
             cache_idx: DirectoryIndex::new(),
@@ -2074,6 +2105,8 @@ impl Mnemo {
             gen_leased: false,
             col: VecColumn::default(),
             recs: RecPages::default(),
+            snapshot_cap_explicit: config.max_snapshots != DEFAULT_MAX_SNAPSHOTS,
+            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2334,6 +2367,11 @@ impl Mnemo {
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
         let recs = RecPages::from_catalog(&catalog);
+        let max_snapshots = if header.version >= VERSION_V9 {
+            V9_DEFAULT_MAX_SNAPSHOTS
+        } else {
+            DEFAULT_MAX_SNAPSHOTS
+        };
 
         Ok(Mnemo {
             pager,
@@ -2358,7 +2396,7 @@ impl Mnemo {
             // to [`DEFAULT_MAX_SNAPSHOTS`]. Override with
             // [`Mnemo::set_max_snapshots`] right after open if you need
             // unlimited retention or a different cap for this handle.
-            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            max_snapshots,
             read_only: false,
             cache_dir,
             cache_idx,
@@ -2381,6 +2419,8 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            snapshot_cap_explicit: false,
+            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2512,6 +2552,11 @@ impl Mnemo {
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
         let recs = RecPages::from_catalog(&catalog);
+        let max_snapshots = if header.version >= VERSION_V9 {
+            V9_DEFAULT_MAX_SNAPSHOTS
+        } else {
+            DEFAULT_MAX_SNAPSHOTS
+        };
 
         Ok(Mnemo {
             pager,
@@ -2530,7 +2575,7 @@ impl Mnemo {
             index_persist: IndexPersist::default(),
             ann_unloaded,
             manifest,
-            max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            max_snapshots,
             read_only: true,
             cache_dir,
             cache_idx,
@@ -2553,6 +2598,8 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            snapshot_cap_explicit: false,
+            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2562,6 +2609,9 @@ impl Mnemo {
     /// drops the rest on the next flush. See [`MnemoConfig::max_snapshots`].
     pub fn set_max_snapshots(&mut self, max: usize) {
         self.max_snapshots = max;
+        // FMT-9c: an explicit count is a hard cap on v9 (see
+        // `apply_retention`).
+        self.snapshot_cap_explicit = true;
     }
 
     /// Embedding dimensionality this database expects.
@@ -6258,12 +6308,20 @@ impl Mnemo {
         gen: u64,
         frames: &mut Vec<wal::Frame>,
     ) -> Result<()> {
+        let direct = self.is_v9() && pages > V9_WAL_RUN_MAX_PAGES;
         for i in 0..pages as usize {
             let lo = (i * PAYLOAD).min(bytes.len());
             let hi = ((i + 1) * PAYLOAD).min(bytes.len());
             let page_no = start + i as u64;
             let sealed = self.pager.seal_page(page_no, gen, &bytes[lo..hi])?;
-            frames.push((page_no, sealed.to_vec()));
+            if direct {
+                self.pager.write_sealed(page_no, &sealed)?;
+            } else {
+                frames.push((page_no, sealed.to_vec()));
+            }
+        }
+        if direct {
+            self.direct_writes = true;
         }
         Ok(())
     }
@@ -6543,7 +6601,7 @@ impl Mnemo {
         let live = self.len() as u64;
         let mut manifest = self.manifest.clone();
         if is_memory_or_index_flush {
-            if self.max_snapshots > 0 {
+            if self.max_snapshots > 0 && !v9 {
                 // Drop the oldest entries so there's room for the new one.
                 while manifest.len() >= self.max_snapshots {
                     manifest.remove(0);
@@ -6564,6 +6622,12 @@ impl Mnemo {
                     index: self.header.index_gen,
                 }),
             });
+            if v9 {
+                let extra = self.pending_free.iter().map(|r| r.1).sum::<u64>()
+                    + superseded.iter().map(|r| r.1).sum::<u64>()
+                    + self.header.manifest_pages;
+                self.apply_retention(&mut manifest, extra);
+            }
             let man_bytes =
                 rmp_serde::to_vec(&manifest).map_err(|e| MnemoError::Serialize(e.to_string()))?;
             if v9 && self.header.manifest_pages > 0 {
@@ -6605,6 +6669,7 @@ impl Mnemo {
         //     snapshot predates it. The list is staged in a local and
         //     adopted only once the commit succeeds (a failed flush that
         //     is retried must not free the same runs twice).
+        let mut shrink = false;
         let staged_free =
             if v9 && (self.free_dirty || !self.pending_free.is_empty() || !superseded.is_empty()) {
                 let mut staged = self.free.clone();
@@ -6613,6 +6678,16 @@ impl Mnemo {
                 }
                 if !self.header.free.is_empty() {
                     staged.free(txn_id, self.header.free.start, self.header.free.pages)?;
+                }
+                // FMT-9c: give eligible free runs at the file's tail back
+                // to the filesystem: the header's `next_page` moves down in
+                // this commit, and the file is cut after it.
+                let min_snap = self.min_snapshot_txn();
+                while let Some(p) =
+                    staged.take_tail(self.header.next_page, self.header.wal_seq, min_snap)
+                {
+                    self.header.next_page = p;
+                    shrink = true;
                 }
                 // Size the run with room for the one extra entry that
                 // allocating it out of the list can create (a split), then
@@ -6663,11 +6738,23 @@ impl Mnemo {
         // 4. COMMIT — log the transaction and fsync. Nothing at a home page
         //    other than the leased header has changed yet; this single
         //    fsync is what makes the rest durable.
+        // FMT-9c: big runs went straight to their home pages; make them
+        // durable before the header that references them can be.
+        if self.direct_writes {
+            self.pager.sync()?;
+            self.direct_writes = false;
+        }
         let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
         wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
 
         // 5. Checkpoint — fold the WAL into the home pages.
         self.checkpoint(&frames)?;
+        // FMT-9c: the committed header no longer covers the tail; cut it.
+        // A crash before this leaves a longer file, which is harmless.
+        if shrink {
+            let len = self.header.next_page * PAGE_SIZE as u64;
+            self.pager.file_mut().set_len(len)?;
+        }
 
         self.manifest = manifest;
         if let Some(staged) = staged_free {
@@ -6784,8 +6871,24 @@ impl Mnemo {
         // Grow WAL if needed (DUR-1: relocation is WAL-logged and does
         // its own fsyncs). The cache directory rides in the same
         // transaction so its page count contributes to the reservation.
+        // FMT-9c: on v9 only runs of up to V9_WAL_RUN_MAX_PAGES go through
+        // the WAL; longer ones are written in place.
+        let v9 = self.is_v9();
+        let in_wal = |pc: usize| {
+            if v9 && pc as u64 > V9_WAL_RUN_MAX_PAGES {
+                0
+            } else {
+                pc
+            }
+        };
         self.ensure_wal_capacity(
-            cat_pc + idx_pc + cache_pc + man_pc_est + free_pc_est + keys_pc + 1,
+            in_wal(cat_pc)
+                + in_wal(idx_pc)
+                + in_wal(cache_pc)
+                + in_wal(man_pc_est)
+                + in_wal(free_pc_est)
+                + in_wal(keys_pc)
+                + 1,
         )?;
 
         // DUR-1 (R-002.1): the pre-flush "leased header" write that used
@@ -6810,6 +6913,9 @@ impl Mnemo {
     /// Flush and close. Equivalent to `flush()` on a read-write handle; on
     /// a read-only handle it's a no-op (no dirty state to persist). The
     /// file is released on drop, which also drops the OS advisory lock.
+    /// **Caution:** the handle keeps the file and its lock until it is
+    /// dropped, so `drop` it before reopening the same file (or the open
+    /// fails with [`MnemoError::Locked`]).
     pub fn close(&mut self) -> Result<()> {
         if self.read_only {
             return Ok(());
@@ -7537,6 +7643,47 @@ impl Mnemo {
         self.flush()
     }
 
+    /// FMT-9c: v9 snapshot retention, applied to the staged manifest (the
+    /// new snapshot already appended): keep the newest `max_snapshots`
+    /// plus any younger than 24 hours, then drop the oldest while retained
+    /// snapshots pin more than a quarter of the file's live pages. The
+    /// newest snapshot always stays.
+    ///
+    /// The pin cap is a quarter of the live pages or [`V9_PIN_FLOOR_PAGES`]
+    /// (1 MiB), whichever is larger, so tiny files keep their history.
+    /// `extra` is what this commit frees (pinned by every older snapshot).
+    ///
+    /// An explicit count (`set_max_snapshots`, or a non-default
+    /// `MnemoConfig::max_snapshots`) replaces the policy: exactly the
+    /// newest `n` are kept (`0` keeps all), whatever they pin.
+    fn apply_retention(&self, manifest: &mut Vec<Snapshot>, extra: u64) {
+        if self.snapshot_cap_explicit {
+            if self.max_snapshots > 0 {
+                while manifest.len() > self.max_snapshots {
+                    manifest.remove(0);
+                }
+            }
+            return;
+        }
+        let now = memory::now_secs();
+        if self.max_snapshots > 0 {
+            while manifest.len() > self.max_snapshots
+                && now - manifest[0].created_at > V9_SNAPSHOT_KEEP_SECS
+            {
+                manifest.remove(0);
+            }
+        }
+        let live_pages = self.header.next_page.saturating_sub(self.free.pages());
+        let cap = (live_pages / 4).max(V9_PIN_FLOOR_PAGES);
+        while manifest.len() > 1 {
+            let pinned = self.free.pinned_pages(manifest[0].txn_id) + extra;
+            if pinned <= cap {
+                break;
+            }
+            manifest.remove(0);
+        }
+    }
+
     /// FMT-9 (a): a restore makes the snapshot's records live again and the
     /// current ones (those the snapshot doesn't have) dead. The snapshot's
     /// record runs may be on the free list (freed after the snapshot, and
@@ -7611,7 +7758,18 @@ impl Mnemo {
             .iter()
             .find(|s| s.txn_id == txn_id)
             .cloned()
-            .ok_or_else(|| MnemoError::NotFound(format!("snapshot for transaction {txn_id}")))?;
+            .ok_or_else(|| {
+                let oldest = self.manifest.iter().map(|s| s.txn_id).min();
+                match oldest {
+                    Some(o) if self.is_v9() && txn_id < o => MnemoError::NotFound(format!(
+                        "snapshot for transaction {txn_id}: older than the retention window \
+                         (the newest {} snapshots and any from the last 24 hours, with at \
+                         most a quarter of the file pinned); the oldest kept is {o}",
+                        self.max_snapshots
+                    )),
+                    _ => MnemoError::NotFound(format!("snapshot for transaction {txn_id}")),
+                }
+            })?;
         self.apply_snapshot(&snap)?;
         Ok(SnapshotInfo {
             txn_id: snap.txn_id,

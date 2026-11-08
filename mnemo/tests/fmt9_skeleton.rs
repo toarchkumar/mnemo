@@ -179,6 +179,9 @@ fn retained_snapshots_pin_freed_pages_and_restore_stays_intact() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
     let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    // An explicit count keeps exactly that many snapshots (v9's default
+    // policy would let its pin cap drop the pre-delete one).
+    db.set_max_snapshots(256);
     // Default retention (many snapshots): nothing freed is reusable yet.
     let ids: Vec<Ulid> = (0..10).map(|i| db.remember(mem(i)).unwrap()).collect();
     db.flush().unwrap();

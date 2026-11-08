@@ -68,9 +68,36 @@ impl FreeList {
     }
 
     /// Total free pages (eligible or not).
-    #[cfg(test)]
     pub fn pages(&self) -> u64 {
         self.runs.values().map(|&(c, _)| c).sum()
+    }
+
+    /// FMT-9c retention: pages a snapshot at `min_snapshot_txn` keeps from
+    /// reuse (freed after it).
+    pub fn pinned_pages(&self, min_snapshot_txn: u64) -> u64 {
+        self.runs
+            .values()
+            .filter(|&&(_, f)| f > min_snapshot_txn)
+            .map(|&(c, _)| c)
+            .sum()
+    }
+
+    /// FMT-9c: if an eligible run ends exactly at `end` (the file's tail),
+    /// take it off the list and return its first page, so the file can
+    /// shrink to it.
+    pub fn take_tail(
+        &mut self,
+        end: u64,
+        committed_txn: u64,
+        min_snapshot_txn: u64,
+    ) -> Option<u64> {
+        let (&p, &(c, f)) = self.runs.range(..end).next_back()?;
+        if p + c == end && f <= committed_txn && f <= min_snapshot_txn {
+            self.runs.remove(&p);
+            Some(p)
+        } else {
+            None
+        }
     }
 
     /// Free `count` pages from `page`, unreferenced since `freed_at`.
@@ -89,20 +116,22 @@ impl FreeList {
             .checked_add(count)
             .ok_or_else(|| MnemoError::Invalid("free list: run overflows".into()))?;
         // Neighbour before.
+        // Only runs freed by the same transaction coalesce here. Merging an
+        // eligible run with a just-freed neighbour would make the whole
+        // run wait out the neighbour's quarantine (and a file's tail,
+        // re-freed by every commit, would never come off).
         let mut start = page;
         let mut len = count;
-        let mut at = freed_at;
         if let Some((&p, &(c, f))) = self.runs.range(..=page).next_back() {
             if p + c > page {
                 return Err(MnemoError::Invalid(format!(
                     "free list: double free of page {page} (overlaps run {p}+{c})"
                 )));
             }
-            if p + c == page {
+            if p + c == page && f == freed_at {
                 self.runs.remove(&p);
                 start = p;
                 len += c;
-                at = at.max(f);
             }
         }
         // Neighbour after.
@@ -112,13 +141,12 @@ impl FreeList {
                     "free list: double free of page {p} (inside freed run {page}+{count})"
                 )));
             }
-            if p == end {
+            if p == end && f == freed_at {
                 self.runs.remove(&p);
                 len += c;
-                at = at.max(f);
             }
         }
-        self.runs.insert(start, (len, at));
+        self.runs.insert(start, (len, freed_at));
         Ok(())
     }
 
@@ -129,15 +157,54 @@ impl FreeList {
         if count == 0 {
             return None;
         }
-        let (&page, &(c, f)) = self
-            .runs
-            .iter()
-            .find(|(_, &(c, f))| c >= count && f <= committed_txn && f <= min_snapshot_txn)?;
+        let eligible = |f: u64| f <= committed_txn && f <= min_snapshot_txn;
+        let fits = |runs: &BTreeMap<u64, (u64, u64)>| {
+            runs.iter()
+                .find(|(_, &(c, f))| c >= count && eligible(f))
+                .map(|(&p, &(c, f))| (p, c, f))
+        };
+        let (page, c, f) = match fits(&self.runs) {
+            Some(hit) => hit,
+            None => {
+                // Adjacent runs freed by different transactions are kept
+                // apart; once both are eligible they can serve one
+                // allocation together.
+                self.merge_eligible(committed_txn, min_snapshot_txn);
+                fits(&self.runs)?
+            }
+        };
         self.runs.remove(&page);
         if c > count {
             self.runs.insert(page + count, (c - count, f));
         }
         Some(page)
+    }
+
+    /// Merge adjacent runs that are both eligible. Eligibility only grows
+    /// (the committed txn and the oldest retained snapshot only move
+    /// forward), so the merged run, stamped with the later `freed_at`,
+    /// stays eligible.
+    pub fn merge_eligible(&mut self, committed_txn: u64, min_snapshot_txn: u64) {
+        let eligible = |f: u64| f <= committed_txn && f <= min_snapshot_txn;
+        let runs: Vec<(u64, u64, u64)> = self.runs.iter().map(|(&p, &(c, f))| (p, c, f)).collect();
+        let mut merged: BTreeMap<u64, (u64, u64)> = BTreeMap::new();
+        let mut cur: Option<(u64, u64, u64)> = None;
+        for (p, c, f) in runs {
+            cur = match cur {
+                Some((cp, cc, cf)) if cp + cc == p && eligible(cf) && eligible(f) => {
+                    Some((cp, cc + c, cf.max(f)))
+                }
+                Some((cp, cc, cf)) => {
+                    merged.insert(cp, (cc, cf));
+                    Some((p, c, f))
+                }
+                None => Some((p, c, f)),
+            };
+        }
+        if let Some((cp, cc, cf)) = cur {
+            merged.insert(cp, (cc, cf));
+        }
+        self.runs = merged;
     }
 
     /// Take `count` pages from `page` back off the list wherever they
@@ -186,18 +253,17 @@ mod tests {
     fn coalesces_and_splits() {
         let mut fl = FreeList::default();
         fl.free(5, 10, 2).unwrap();
-        fl.free(7, 12, 3).unwrap();
+        fl.free(5, 12, 3).unwrap();
+        assert_eq!(fl.len(), 1, "same transaction: coalesced");
         fl.free(6, 8, 2).unwrap();
-        assert_eq!(fl.len(), 1);
-        assert_eq!(
-            fl.to_runs(),
-            vec![FreeRun {
-                freed_at: 7,
-                page: 8,
-                count: 7
-            }]
-        );
-        assert_eq!(fl.alloc(3, 7, u64::MAX), Some(8));
+        assert_eq!(fl.len(), 2, "different transactions stay apart");
+        // A 7-page allocation needs both; they merge once both are eligible.
+        assert_eq!(fl.alloc(7, 5, u64::MAX), None, "txn 6 isn't committed");
+        assert_eq!(fl.alloc(7, 6, u64::MAX), Some(8));
+        assert_eq!(fl.len(), 0);
+        fl.free(6, 10, 2).unwrap();
+        fl.free(6, 12, 2).unwrap();
+        assert_eq!(fl.alloc(0, 6, u64::MAX), None);
         assert_eq!(fl.pages(), 4);
         fl.unfree(12, 1);
         assert_eq!(fl.pages(), 3);
@@ -216,6 +282,18 @@ mod tests {
         assert_eq!(fl.alloc(1, 10, 8), None);
         // Committed and no older snapshot retained: yes.
         assert_eq!(fl.alloc(1, 10, 10), Some(100));
+    }
+
+    #[test]
+    fn tail_runs_come_off_only_when_eligible() {
+        let mut fl = FreeList::default();
+        fl.free(3, 10, 5).unwrap(); // pages 10..15
+        assert_eq!(fl.take_tail(16, 9, u64::MAX), None, "not at the tail");
+        assert_eq!(fl.take_tail(15, 2, u64::MAX), None, "not committed");
+        assert_eq!(fl.take_tail(15, 9, 2), None, "pinned by a snapshot");
+        assert_eq!(fl.pinned_pages(2), 5);
+        assert_eq!(fl.take_tail(15, 9, 9), Some(10));
+        assert_eq!(fl.pages(), 0);
     }
 
     #[test]
