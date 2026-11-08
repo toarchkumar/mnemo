@@ -1513,6 +1513,17 @@ impl Mnemo {
             .map_err(to_py)
     }
 
+    /// Switch this database to (or rotate) a raw 256-bit key (32 bytes, e.g.
+    /// from `mnemo.generate_key()` held in an OS keychain). Records the
+    /// minimal Argon2id parameters, so later `open_with_key` calls skip the
+    /// KDF cost. Only the wrapped data key changes.
+    fn rekey_with_key(&mut self, py: Python<'_>, key: &[u8]) -> PyResult<()> {
+        let key = key_from_bytes(key)?;
+        let core = self.core_mut()?;
+        py.allow_threads(|| core.rekey_with_key(&key))
+            .map_err(to_py)
+    }
+
     /// Return the database's self-describing onboarding memories (those tagged
     /// `metadata.area = "onboarding"`), sorted by importance descending then
     /// created_at ascending. This is the engine-level entry point for a
@@ -2381,6 +2392,72 @@ fn open(
     })
 }
 
+/// A 32-byte key from `bytes`, or `ValueError`.
+fn key_from_bytes(key: &[u8]) -> PyResult<[u8; 32]> {
+    key.try_into().map_err(|_| {
+        PyValueError::new_err(format!("key must be exactly 32 bytes, got {}", key.len()))
+    })
+}
+
+/// Open (or, with `dimensions`, create) a database unlocked by a raw
+/// 256-bit key instead of a passphrase (PERF-1 step 7). `key` is 32
+/// uniformly random bytes, typically from `generate_key()` and stored in an
+/// OS keychain; it gets no stretching, so opening skips the Argon2id cost.
+/// Files created this way open only with their key (and `rekey` switches
+/// back to a passphrase).
+#[pyfunction]
+#[pyo3(signature = (path, key, dimensions=None, read_only=false))]
+fn open_with_key(
+    py: Python<'_>,
+    path: &str,
+    key: &[u8],
+    dimensions: Option<usize>,
+    read_only: bool,
+) -> PyResult<Mnemo> {
+    let key = key_from_bytes(key)?;
+    let exists = std::path::Path::new(path).exists();
+    if read_only && !exists {
+        return Err(PyValueError::new_err(
+            "read_only=True cannot create a new database",
+        ));
+    }
+    if !exists && dimensions.is_none() {
+        return Err(PyValueError::new_err(
+            "dimensions is required when creating a new database",
+        ));
+    }
+    let path_s = path.to_string();
+    let inner = py
+        .allow_threads(move || -> mnemo_core::Result<Core> {
+            if read_only {
+                Core::open_read_only_with_key(&path_s, &key)
+            } else if exists {
+                Core::open_with_key(&path_s, &key)
+            } else {
+                let cfg = MnemoConfig {
+                    dimensions: dimensions.unwrap_or(0),
+                    ..Default::default()
+                };
+                Core::create_with_key(&path_s, &key, cfg)
+            }
+        })
+        .map_err(to_py)?;
+    Ok(Mnemo {
+        inner: Some(inner),
+        path: path.to_string(),
+        batched_cache_flush: false,
+    })
+}
+
+/// 32 random bytes for `open_with_key` (from the OS-seeded CSPRNG). Keep it
+/// in a keychain: the file can't be opened without it.
+#[pyfunction]
+fn generate_key(py: Python<'_>) -> PyObject {
+    pyo3::types::PyBytes::new_bound(py, &Core::generate_key())
+        .into_any()
+        .unbind()
+}
+
 /// Rewrite the file at `path` out-of-place, dropping tombstoned and
 /// expired memories and reclaiming stale pages. The compacted file
 /// atomically replaces the original via `rename`.
@@ -2447,6 +2524,8 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
     m.add_class::<Turn>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
+    m.add_function(wrap_pyfunction!(open_with_key, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_key, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

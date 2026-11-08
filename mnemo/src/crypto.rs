@@ -42,7 +42,7 @@ pub const SALT_LEN: usize = 16;
 
 /// Argon2id cost parameters. Stored (unencrypted) in the file header so the
 /// KEK can be re-derived on open.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KdfParams {
     /// Memory cost in KiB.
     pub m_cost: u32,
@@ -58,6 +58,20 @@ impl KdfParams {
         Self {
             m_cost: 19_456,
             t_cost: 2,
+            p_cost: 1,
+        }
+    }
+
+    /// PERF-1 step 7 (R-004.5): the Argon2id floor (8 KiB, one pass), for
+    /// databases unlocked by a raw random 256-bit key
+    /// (`Mnemo::create_with_key`). A uniformly random key has full entropy
+    /// already, so stretching it buys nothing; these are recorded in the
+    /// header so the normal open path runs in microseconds. **Never** use
+    /// them with a human passphrase.
+    pub fn raw_key() -> Self {
+        Self {
+            m_cost: 8,
+            t_cost: 1,
             p_cost: 1,
         }
     }

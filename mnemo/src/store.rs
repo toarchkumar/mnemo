@@ -265,7 +265,7 @@ const TORN_HEADER_SCAN_CHUNK: usize = 1 << 20; // 1 MiB
 /// and every WAL commit writes its first frame at the region's start.
 fn scan_header_recovery_candidates(
     file: &mut File,
-    passphrase: &str,
+    secret: &[u8],
 ) -> Result<Option<Vec<wal::Frame>>> {
     let file_len = file.seek(SeekFrom::End(0))?;
     if file_len < PAGE_SIZE as u64 * 2 {
@@ -300,7 +300,7 @@ fn scan_header_recovery_candidates(
         while inner + 4 <= filled {
             if &chunk[inner..inner + 4] == wal::FRAME_MAGIC_BYTES {
                 let page_no = (offset + inner as u64) / page_sz;
-                if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, passphrase)? {
+                if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, secret)? {
                     let keep = match &best {
                         None => true,
                         Some((id, _)) => txn_id > *id,
@@ -330,7 +330,7 @@ fn scan_header_recovery_candidates(
 fn try_recover_candidate(
     file: &mut File,
     candidate_page_no: u64,
-    passphrase: &str,
+    secret: &[u8],
 ) -> Result<Option<(u64, Vec<wal::Frame>)>> {
     let Some((txn_id, frames)) = wal::scan_committed_txn(file, candidate_page_no)? else {
         return Ok(None);
@@ -365,7 +365,7 @@ fn try_recover_candidate(
         t_cost: candidate.t_cost,
         p_cost: candidate.p_cost,
     };
-    let kek = match crypto::derive_kek(passphrase.as_bytes(), &candidate.salt, kdf) {
+    let kek = match crypto::derive_kek(secret, &candidate.salt, kdf) {
         Ok(k) => k,
         Err(_) => return Ok(None),
     };
@@ -1347,6 +1347,41 @@ impl Mnemo {
         passphrase: &str,
         config: MnemoConfig,
     ) -> Result<Mnemo> {
+        Self::create_secret(path, passphrase.as_bytes(), config)
+    }
+
+    /// PERF-1 step 7 (R-004.5): create a database unlocked by a **raw
+    /// 256-bit key** instead of a passphrase, for keys held by an OS
+    /// keychain or keystore. The key must be uniformly random (see
+    /// [`Mnemo::generate_key`]); it gets no stretching. The header records
+    /// minimal Argon2id parameters ([`KdfParams::raw_key`]), so opening
+    /// costs microseconds instead of tens of milliseconds. `config.kdf` is
+    /// ignored. No format change: the key goes through the same KEK
+    /// derivation a passphrase does.
+    pub fn create_with_key(
+        path: impl Into<PathBuf>,
+        key: &[u8; crypto::KEY_LEN],
+        config: MnemoConfig,
+    ) -> Result<Mnemo> {
+        let config = MnemoConfig {
+            kdf: KdfParams::raw_key(),
+            ..config
+        };
+        Self::create_secret(path, key, config)
+    }
+
+    /// A fresh random 256-bit key for [`Mnemo::create_with_key`], from the
+    /// thread-local CSPRNG (seeded from the OS). Store it in a keychain;
+    /// it can't be recovered from the file.
+    pub fn generate_key() -> [u8; crypto::KEY_LEN] {
+        *crypto::random_dek()
+    }
+
+    fn create_secret(
+        path: impl Into<PathBuf>,
+        secret: &[u8],
+        config: MnemoConfig,
+    ) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
@@ -1356,7 +1391,7 @@ impl Mnemo {
 
         let salt = crypto::random_salt();
         let dek = crypto::random_dek();
-        let kek = crypto::derive_kek(passphrase.as_bytes(), &salt, config.kdf)?;
+        let kek = crypto::derive_kek(secret, &salt, config.kdf)?;
         let dek_nonce = crypto::random_nonce();
         let wrapped = crypto::wrap_dek(&kek, &dek_nonce, &dek)?;
         if wrapped.len() != WRAPPED_DEK_LEN {
@@ -1455,6 +1490,16 @@ impl Mnemo {
     /// [`Mnemo::open_read_only`]), prefer that entry point — it takes a
     /// shared lock and coexists with other readers.
     pub fn open(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
+        Self::open_secret(path, passphrase.as_bytes())
+    }
+
+    /// PERF-1 step 7: open a database created by [`Mnemo::create_with_key`]
+    /// (or rekeyed with [`Mnemo::rekey_with_key`]) with its raw key.
+    pub fn open_with_key(path: impl Into<PathBuf>, key: &[u8; crypto::KEY_LEN]) -> Result<Mnemo> {
+        Self::open_secret(path, key)
+    }
+
+    fn open_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         let mut file = open_with_lock(&path, /*write=*/ true, /*create=*/ false)?;
 
@@ -1475,7 +1520,7 @@ impl Mnemo {
                 // regions, pick the highest `txn_id`, and replay it. If
                 // nothing valid is found, return the *original* error so
                 // non-mnemo files still report `BadMagic`.
-                let scan = scan_header_recovery_candidates(&mut file, passphrase)?;
+                let scan = scan_header_recovery_candidates(&mut file, secret)?;
                 let frames = scan.ok_or(e)?;
                 for (page_no, bytes) in &frames {
                     if bytes.len() != PAGE_SIZE {
@@ -1521,7 +1566,7 @@ impl Mnemo {
             t_cost: header.t_cost,
             p_cost: header.p_cost,
         };
-        let kek = crypto::derive_kek(passphrase.as_bytes(), &header.salt, kdf)?;
+        let kek = crypto::derive_kek(secret, &header.salt, kdf)?;
         let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
 
         // Validate the v7 header seal now that we have the DEK. Returns
@@ -1743,6 +1788,18 @@ impl Mnemo {
     /// migrates in place), close the handle cleanly, and reopen
     /// read-only. This is documented in the README's Durability section.
     pub fn open_read_only(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
+        Self::open_read_only_secret(path, passphrase.as_bytes())
+    }
+
+    /// PERF-1 step 7: [`Mnemo::open_read_only`] for a raw-key database.
+    pub fn open_read_only_with_key(
+        path: impl Into<PathBuf>,
+        key: &[u8; crypto::KEY_LEN],
+    ) -> Result<Mnemo> {
+        Self::open_read_only_secret(path, key)
+    }
+
+    fn open_read_only_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         let mut file = open_with_lock(&path, /*write=*/ false, /*create=*/ false)?;
 
@@ -1761,7 +1818,7 @@ impl Mnemo {
         let header = match Header::from_page(&hbuf) {
             Ok(h) => h,
             Err(parse_err) => {
-                let recoverable = scan_header_recovery_candidates(&mut file, passphrase)?;
+                let recoverable = scan_header_recovery_candidates(&mut file, secret)?;
                 return Err(match (parse_err, recoverable) {
                     (_, Some(_)) => MnemoError::NeedsWriteOpen {
                         reason: "torn header page needs recovery from WAL",
@@ -1801,7 +1858,7 @@ impl Mnemo {
             t_cost: header.t_cost,
             p_cost: header.p_cost,
         };
-        let kek = crypto::derive_kek(passphrase.as_bytes(), &header.salt, kdf)?;
+        let kek = crypto::derive_kek(secret, &header.salt, kdf)?;
         let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
         header.validate_seal(&dek)?;
 
@@ -5994,12 +6051,23 @@ impl Mnemo {
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps the DEK;
     /// the encrypted pages are never rewritten.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
+        self.rekey_secret(new_passphrase.as_bytes(), kdf)
+    }
+
+    /// PERF-1 step 7: switch to (or rotate) a raw 256-bit key, recording
+    /// [`KdfParams::raw_key`] in the header. Like [`Mnemo::rekey`], only the
+    /// wrapped DEK changes; pages aren't rewritten.
+    pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
+        self.rekey_secret(new_key, KdfParams::raw_key())
+    }
+
+    fn rekey_secret(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
         self.flush()?;
         let new_salt = crypto::random_salt();
-        let new_kek = crypto::derive_kek(new_passphrase.as_bytes(), &new_salt, kdf)?;
+        let new_kek = crypto::derive_kek(secret, &new_salt, kdf)?;
         let new_nonce = crypto::random_nonce();
         let wrapped = crypto::wrap_dek(&new_kek, &new_nonce, self.pager.dek())?;
         if wrapped.len() != WRAPPED_DEK_LEN {
@@ -6129,14 +6197,23 @@ impl Mnemo {
     /// the cache; the Planner's interim README caveat (c417d2e) called
     /// that out — this PR removes the surprise.
     pub fn compact_file(path: &str, passphrase: &str) -> Result<CompactReport> {
-        let mut old = Mnemo::open(path, passphrase)?;
+        Self::compact_file_secret(path, passphrase.as_bytes())
+    }
+
+    /// PERF-1 step 7: [`Mnemo::compact_file`] for a raw-key database.
+    pub fn compact_file_with_key(path: &str, key: &[u8; crypto::KEY_LEN]) -> Result<CompactReport> {
+        Self::compact_file_secret(path, key)
+    }
+
+    fn compact_file_secret(path: &str, secret: &[u8]) -> Result<CompactReport> {
+        let mut old = Mnemo::open_secret(path, secret)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
         let tmp = format!("{path}.compact-tmp");
 
-        let mut new = Mnemo::create(
+        let mut new = Mnemo::create_secret(
             &tmp,
-            passphrase,
+            secret,
             MnemoConfig {
                 dimensions: dims,
                 kdf,

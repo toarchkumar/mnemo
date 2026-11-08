@@ -375,6 +375,53 @@ fn phase_layers(n: usize) -> Value {
     })
 }
 
+/// PERF-1 step 7 (R-004.5): open cost with a raw 256-bit key (minimal
+/// Argon2id in the header) against the default secure passphrase KDF, on
+/// copies of the corpus rekeyed each way. The other phases use the fast
+/// test KDF.
+fn phase_keyopen(n: usize) -> Value {
+    let key = Mnemo::generate_key();
+    let keyed = scratch_copy(n, "key");
+    {
+        let mut db = Mnemo::open(&keyed, PASSPHRASE).expect("open");
+        db.rekey_with_key(&key).expect("rekey_with_key");
+    }
+    let secure = scratch_copy(n, "secure");
+    {
+        let mut db = Mnemo::open(&secure, PASSPHRASE).expect("open");
+        db.rekey(PASSPHRASE, mnemo_engine::KdfParams::secure())
+            .expect("rekey");
+    }
+    let rss_before = rss_kb();
+    let (mut key_ms, mut secure_ms) = (Vec::new(), Vec::new());
+    let mut rss_key_open = 0;
+    for i in 0..OPEN_CYCLES {
+        let t = Instant::now();
+        let db = Mnemo::open_with_key(&keyed, &key).expect("open_with_key");
+        key_ms.push(ms(t));
+        if i == 0 {
+            rss_key_open = rss_kb();
+        }
+        drop(db);
+        let t = Instant::now();
+        let db = Mnemo::open(&secure, PASSPHRASE).expect("open secure");
+        secure_ms.push(ms(t));
+        drop(db);
+    }
+    let _ = std::fs::remove_file(&keyed);
+    let _ = std::fs::remove_file(&secure);
+    let (k_med, k_p95) = median_p95(key_ms);
+    let (s_med, s_p95) = median_p95(secure_ms);
+    json!({
+        "open_with_key_median_ms": k_med,
+        "open_with_key_p95_ms": k_p95,
+        "open_secure_kdf_median_ms": s_med,
+        "open_secure_kdf_p95_ms": s_p95,
+        "rss_kb_before_open": rss_before,
+        "rss_kb_after_key_open": rss_key_open,
+    })
+}
+
 // --- parent ------------------------------------------------------------
 
 /// Peak RSS in kB from `/usr/bin/time` output: macOS `-l` prints bytes,
@@ -447,6 +494,7 @@ fn main() {
             "cycles" => phase_cycles(n),
             "writes" => phase_writes(n),
             "layers" => phase_layers(n),
+            "keyopen" => phase_keyopen(n),
             other => panic!("unknown phase {other}"),
         };
         println!("RESULT {v}");
@@ -480,9 +528,10 @@ fn main() {
         let cycles = run("cycles");
         let writes = run("writes");
         let layers = run("layers");
+        let keyopen = run("keyopen");
         results.insert(
             n.to_string(),
-            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers }),
+            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers, "keyopen": keyopen }),
         );
     }
 
@@ -559,6 +608,21 @@ fn main() {
          call on a fresh handle, which builds the handle caches; ingest1 cold includes \
          set_embedder)"
     );
+    println!(
+        "\n{:>7} | {:>13} {:>13} | {:>13}",
+        "n", "open with key", "open secure", "RSS after key"
+    );
+    for &n in &sizes {
+        let k = &results[&n.to_string()]["keyopen"];
+        let f = |x: &str| k[x].as_f64().unwrap_or(0.0);
+        println!(
+            "{:>7} | {:>13.2} {:>13.2} | {:>10.1} MB",
+            n,
+            f("open_with_key_median_ms"),
+            f("open_secure_kdf_median_ms"),
+            (f("rss_kb_after_key_open") - f("rss_kb_before_open")) / 1024.0,
+        );
+    }
 
     let doc = Value::Object(results);
     let path = out_dir().join("device_budget.json");

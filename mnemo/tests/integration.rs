@@ -5134,3 +5134,64 @@ fn unloaded_index_is_refreshed_once_pending_reaches_the_bound() {
         "at the bound the flush loads and persists the index"
     );
 }
+
+// ---------- PERF-1 step 7 (R-004.5): raw-key databases -------------------
+
+#[test]
+fn raw_key_create_open_rekey_and_compact() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("keyed.mnemo");
+    let key = Mnemo::generate_key();
+    assert_ne!(key, Mnemo::generate_key(), "keys are random");
+    {
+        let mut db = Mnemo::create_with_key(&path, &key, fast_cfg(4)).unwrap();
+        assert_eq!(
+            db.kdf_params(),
+            KdfParams::raw_key(),
+            "header records the raw-key floor"
+        );
+        db.remember(Memory::new(
+            "held by a keychain",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+        db.close().unwrap();
+    }
+    // The key opens it, read-write and read-only; anything else doesn't.
+    assert_eq!(Mnemo::open_with_key(&path, &key).unwrap().len(), 1);
+    assert_eq!(
+        Mnemo::open_read_only_with_key(&path, &key).unwrap().len(),
+        1
+    );
+    assert!(Mnemo::open_with_key(&path, &Mnemo::generate_key()).is_err());
+    assert!(Mnemo::open(&path, "a passphrase").is_err());
+
+    // Rotate the key; the old one stops working.
+    let key2 = Mnemo::generate_key();
+    {
+        let mut db = Mnemo::open_with_key(&path, &key).unwrap();
+        db.rekey_with_key(&key2).unwrap();
+    }
+    assert!(Mnemo::open_with_key(&path, &key).is_err());
+    let mut db = Mnemo::open_with_key(&path, &key2).unwrap();
+    assert_eq!(db.memories().unwrap()[0].content, "held by a keychain");
+    drop(db);
+
+    // Compact with the key.
+    let report = Mnemo::compact_file_with_key(path.to_str().unwrap(), &key2).unwrap();
+    assert_eq!(report.after, 1);
+    assert_eq!(Mnemo::open_with_key(&path, &key2).unwrap().len(), 1);
+
+    // A passphrase file can switch to a key, and back.
+    let p2 = dir.path().join("switch.mnemo");
+    {
+        let mut db = Mnemo::create(&p2, "pw", fast_cfg(4)).unwrap();
+        db.rekey_with_key(&key).unwrap();
+    }
+    {
+        let mut db = Mnemo::open_with_key(&p2, &key).unwrap();
+        db.rekey("pw-again", KdfParams::fast()).unwrap();
+    }
+    assert!(Mnemo::open(&p2, "pw-again").is_ok());
+}

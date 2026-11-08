@@ -1082,6 +1082,40 @@ def test_about_essence():
             db.close()
     print("ok  about_essence (12.7d)")
 
+
+def test_open_with_key():
+    """PERF-1 step 7: raw-key databases."""
+    key = mnemo.generate_key()
+    assert isinstance(key, bytes) and len(key) == 32
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "keyed.mnemo")
+        db = mnemo.open_with_key(path, key, dimensions=4)
+        db.remember("held by a keychain", "semantic", [1.0, 0.0, 0.0, 0.0])
+        db.close()
+        db = mnemo.open_with_key(path, key, read_only=True)
+        assert len(db) == 1
+        db.close()
+        try:
+            mnemo.open_with_key(path, mnemo.generate_key())
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("a wrong key must not open the file")
+        try:
+            mnemo.open_with_key(path, b"short")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a key that isn't 32 bytes is a ValueError")
+        key2 = mnemo.generate_key()
+        db = mnemo.open_with_key(path, key)
+        db.rekey_with_key(key2)
+        db.close()
+        db = mnemo.open_with_key(path, key2)
+        assert len(db) == 1
+        db.close()
+    print("ok  open_with_key / generate_key / rekey_with_key (PERF-1 step 7)")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1120,4 +1154,5 @@ if __name__ == "__main__":
     test_commit_deltas_text_only_facts_use_one_embed_call()
     test_thread_export_is_ingest_shape_and_round_trips()
     test_about_essence()
+    test_open_with_key()
     print("\nall Python binding tests passed")
