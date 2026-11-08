@@ -966,3 +966,142 @@ proptest! {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// PERF-1 step 2: the ANN index is derived data.
+//
+// `flush` persists the index only every so often, so a reopen (after a
+// clean close, or a crash-equivalent drop) must re-assign every record
+// written since the persisted index run and drop deleted ids. The model
+// tracks the durable live set; after the run, ANN recall with full probe
+// and rerank must find each live vector's own id first, and never a
+// deleted one.
+// ---------------------------------------------------------------------
+
+use mnemo_engine::{MemoryPatch, Metric, RecallRequest, ScoreWeights};
+
+#[derive(Clone, Debug)]
+enum IdxOp {
+    Remember,
+    Delete(u8),
+    Update(u8),
+    Flush,
+    FlushIndex,
+    Crash,
+    Close,
+}
+
+fn arb_idx_op() -> impl Strategy<Value = IdxOp> {
+    prop_oneof![
+        4 => Just(IdxOp::Remember),
+        2 => any::<u8>().prop_map(IdxOp::Delete),
+        2 => any::<u8>().prop_map(IdxOp::Update),
+        3 => Just(IdxOp::Flush),
+        1 => Just(IdxOp::FlushIndex),
+        2 => Just(IdxOp::Crash),
+        1 => Just(IdxOp::Close),
+    ]
+}
+
+/// A vector unique to counter `c`.
+fn unique_vec(c: u32) -> Vec<f32> {
+    let x = c as f32;
+    vec![
+        1.0 + x * 0.013,
+        (x * 0.37).sin(),
+        (x * 0.11).cos(),
+        0.5 + x * 0.007,
+    ]
+}
+
+fn l2_top(db: &mut Mnemo, v: &[f32], k: usize) -> Vec<u128> {
+    let mut req = RecallRequest::new(v.to_vec())
+        .top_k(k)
+        .n_probe(10_000)
+        .n_rerank(10_000)
+        .track_access(false);
+    req.metric = Metric::L2;
+    req.weights = ScoreWeights {
+        alpha: 1.0,
+        beta: 0.0,
+        gamma: 0.0,
+        delta: 0.0,
+        half_life_secs: 1.0,
+    };
+    db.recall(&req)
+        .unwrap()
+        .iter()
+        .map(|h| h.memory.id.0)
+        .collect()
+}
+
+proptest! {
+    #[test]
+    fn prop_index_is_derived_data(ops in prop::collection::vec(arb_idx_op(), 1..=10)) {
+        let (_dir, path, mut db) = fresh_db();
+        let mut counter = 0u32;
+        // (id, current vector) of every live memory, staged and durable.
+        let mut staged: Vec<(Ulid, Vec<f32>)> = Vec::new();
+        for _ in 0..30 {
+            let v = unique_vec(counter);
+            counter += 1;
+            let id = db.remember(Memory::new(format!("m{counter}"), MemoryType::Semantic, v.clone())).unwrap();
+            staged.push((id, v));
+        }
+        db.build_index().unwrap();
+        db.flush().unwrap();
+        let mut durable = staged.clone();
+        let mut gone: Vec<(Ulid, Vec<f32>)> = Vec::new();
+        let mut gone_durable = gone.clone();
+
+        for op in ops {
+            match op {
+                IdxOp::Remember => {
+                    let v = unique_vec(counter);
+                    counter += 1;
+                    let id = db.remember(Memory::new(format!("m{counter}"), MemoryType::Semantic, v.clone())).unwrap();
+                    staged.push((id, v));
+                }
+                IdxOp::Delete(i) => {
+                    if staged.len() <= 2 { continue; }
+                    let (id, v) = staged.remove(i as usize % staged.len());
+                    db.delete(&id).unwrap();
+                    gone.push((id, v));
+                }
+                IdxOp::Update(i) => {
+                    if staged.is_empty() { continue; }
+                    let j = i as usize % staged.len();
+                    let v = unique_vec(counter);
+                    counter += 1;
+                    db.update(&staged[j].0, MemoryPatch { vector: Some(v.clone()), ..Default::default() }).unwrap();
+                    staged[j].1 = v;
+                }
+                IdxOp::Flush | IdxOp::FlushIndex => {
+                    if matches!(op, IdxOp::Flush) { db.flush().unwrap() } else { db.flush_index().unwrap() }
+                    durable = staged.clone();
+                    gone_durable = gone.clone();
+                }
+                IdxOp::Crash => {
+                    db = reopen(db, &path);
+                    staged = durable.clone();
+                    gone = gone_durable.clone();
+                }
+                IdxOp::Close => {
+                    db.close().unwrap();
+                    durable = staged.clone();
+                    gone_durable = gone.clone();
+                    db = reopen(db, &path);
+                }
+            }
+        }
+        // Finish with a crash-equivalent reopen of the durable state.
+        db = reopen(db, &path);
+        prop_assert!(db.has_index());
+        for (id, v) in &durable {
+            prop_assert_eq!(l2_top(&mut db, v, 1), vec![id.0], "a live memory isn't its own nearest neighbour");
+        }
+        for (id, v) in &gone_durable {
+            prop_assert!(!l2_top(&mut db, v, 3).contains(&id.0), "a deleted id came back");
+        }
+    }
+}

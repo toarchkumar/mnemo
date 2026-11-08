@@ -4639,3 +4639,254 @@ fn about_essence_renders_open_project_items_only() {
         .iter()
         .all(|m| m.metadata.get(MNEMO_META_KIND).is_none()));
 }
+
+// ---------- PERF-1 step 2: the ANN index is derived data -----------------
+
+fn l2_top(db: &mut Mnemo, v: &[f32], k: usize) -> Vec<u128> {
+    let mut req = RecallRequest::new(v.to_vec())
+        .top_k(k)
+        .n_probe(10_000)
+        .n_rerank(10_000)
+        .track_access(false);
+    req.metric = Metric::L2;
+    req.weights = sim_only();
+    db.recall(&req)
+        .unwrap()
+        .iter()
+        .map(|h| h.memory.id.0)
+        .collect()
+}
+
+/// Plain flushes rewrite only the catalog; the persisted index run stays
+/// put. After a crash-equivalent drop, reopening re-assigns every record
+/// written since that run (new, updated) and forgets deleted ones, so ANN
+/// recall still finds exactly the live set. `flush_index` and `close`
+/// persist the index.
+#[test]
+fn index_persists_lazily_and_reopen_reassigns_newer_records() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("lazy-index.mnemo");
+    let dims = 32;
+    let mut rng = Rng::new(0x1DE5);
+    let vec_ = |rng: &mut Rng| -> Vec<f32> { (0..dims).map(|_| rng.normalish()).collect() };
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(dims)).unwrap();
+    let mut old = Vec::new();
+    for i in 0..400 {
+        let v = vec_(&mut rng);
+        let id = db
+            .remember(Memory::new(
+                format!("old {i}"),
+                MemoryType::Semantic,
+                v.clone(),
+            ))
+            .unwrap();
+        old.push((id, v));
+    }
+    db.flush().unwrap();
+    db.build_index().unwrap();
+    db.flush().unwrap();
+    let index_start = db.__budget_report().unwrap().index_start_page;
+    assert!(index_start > 0);
+
+    let mut fresh = Vec::new();
+    for k in 0..5 {
+        let v = vec_(&mut rng);
+        let id = db
+            .remember(Memory::new(
+                format!("new {k}"),
+                MemoryType::Semantic,
+                v.clone(),
+            ))
+            .unwrap();
+        db.flush().unwrap();
+        fresh.push((id, v));
+    }
+    let moved = vec_(&mut rng);
+    let (upd_id, _) = old[3].clone();
+    db.update(
+        &upd_id,
+        MemoryPatch {
+            vector: Some(moved.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let (del_id, del_vec) = old[7].clone();
+    db.delete(&del_id).unwrap();
+    db.flush().unwrap();
+    assert_eq!(
+        db.__budget_report().unwrap().index_start_page,
+        index_start,
+        "plain flushes must not rewrite the index"
+    );
+
+    // Crash-equivalent: drop without close.
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert!(db.has_index());
+    for (id, v) in &fresh {
+        assert_eq!(
+            l2_top(&mut db, v, 1),
+            vec![id.0],
+            "a record newer than the index is found"
+        );
+    }
+    assert_eq!(
+        l2_top(&mut db, &moved, 1),
+        vec![upd_id.0],
+        "an updated vector is re-assigned"
+    );
+    assert!(
+        !l2_top(&mut db, &del_vec, 5).contains(&del_id.0),
+        "a deleted id is gone"
+    );
+    let (keep_id, keep_vec) = &old[100];
+    assert_eq!(l2_top(&mut db, keep_vec, 1), vec![keep_id.0]);
+
+    // flush_index persists the reconciled index.
+    db.flush_index().unwrap();
+    let persisted = db.__budget_report().unwrap().index_start_page;
+    assert_ne!(persisted, index_start);
+
+    // close() persists it too.
+    let v = vec_(&mut rng);
+    let late = db
+        .remember(Memory::new("late", MemoryType::Semantic, v.clone()))
+        .unwrap();
+    db.close().unwrap();
+    assert_ne!(db.__budget_report().unwrap().index_start_page, persisted);
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(l2_top(&mut db, &v, 1), vec![late.0]);
+}
+
+/// The persistence policy: after `INDEX_PERSIST_EVERY_COMMITS` index-dirty
+/// commits, a plain flush persists the index.
+#[test]
+fn index_is_persisted_every_n_commits() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("every-n.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for i in 0..50 {
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Semantic,
+            vec4(1.0, i as f32, 0.5, 2.0),
+        ))
+        .unwrap();
+    }
+    db.build_index().unwrap();
+    db.flush().unwrap();
+    let start = db.__budget_report().unwrap().index_start_page;
+    let n = mnemo_engine::INDEX_PERSIST_EVERY_COMMITS;
+    for i in 0..n - 1 {
+        db.remember(Memory::new(
+            format!("x{i}"),
+            MemoryType::Semantic,
+            vec4(2.0, i as f32, 1.0, 0.5),
+        ))
+        .unwrap();
+        db.flush().unwrap();
+        assert_eq!(
+            db.__budget_report().unwrap().index_start_page,
+            start,
+            "commit {i}"
+        );
+    }
+    db.remember(Memory::new(
+        "last",
+        MemoryType::Semantic,
+        vec4(3.0, 1.0, 1.0, 1.0),
+    ))
+    .unwrap();
+    db.flush().unwrap();
+    assert_ne!(
+        db.__budget_report().unwrap().index_start_page,
+        start,
+        "the {n}th index-dirty commit persists the index"
+    );
+}
+
+/// R-004.1: a read-only open re-assigns memories written after the
+/// persisted index, in memory, without writing.
+#[test]
+fn read_only_open_finds_memories_newer_than_the_index() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ro-pending.mnemo");
+    let dims = 16;
+    let mut rng = Rng::new(0xA11CE);
+    let vec_ = |rng: &mut Rng| -> Vec<f32> { (0..dims).map(|_| rng.normalish()).collect() };
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(dims)).unwrap();
+    for i in 0..200 {
+        db.remember(Memory::new(format!("old {i}"), MemoryType::Semantic, vec_(&mut rng)))
+            .unwrap();
+    }
+    db.build_index().unwrap();
+    db.flush().unwrap();
+    let v = vec_(&mut rng);
+    let id = db
+        .remember(Memory::new("pending", MemoryType::Semantic, v.clone()))
+        .unwrap();
+    db.flush().unwrap(); // catalog only: the index run doesn't have it
+    let start = db.__budget_report().unwrap().index_start_page;
+    drop(db);
+
+    let mut ro = Mnemo::open_read_only(&path, "pw").unwrap();
+    assert_eq!(l2_top(&mut ro, &v, 1), vec![id.0]);
+    drop(ro);
+    let db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(
+        db.__budget_report().unwrap().index_start_page,
+        start,
+        "the read-only open wrote nothing"
+    );
+}
+
+/// R-004.1: restoring a snapshot whose index run predates its catalog
+/// re-assigns the newer records before the index is persisted again.
+#[test]
+fn restore_to_with_a_stale_index_reassigns_newer_records() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("restore-stale.mnemo");
+    let dims = 16;
+    let mut rng = Rng::new(0xBEE5);
+    let vec_ = |rng: &mut Rng| -> Vec<f32> { (0..dims).map(|_| rng.normalish()).collect() };
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(dims)).unwrap();
+    for i in 0..200 {
+        db.remember(Memory::new(format!("old {i}"), MemoryType::Semantic, vec_(&mut rng)))
+            .unwrap();
+    }
+    db.build_index().unwrap();
+    db.flush().unwrap();
+    // Two catalog-only commits: the snapshot of the second one points at
+    // the index built above, which has neither of these.
+    let a = vec_(&mut rng);
+    let a_id = db
+        .remember(Memory::new("a", MemoryType::Semantic, a.clone()))
+        .unwrap();
+    db.flush().unwrap();
+    let b = vec_(&mut rng);
+    let b_id = db
+        .remember(Memory::new("b", MemoryType::Semantic, b.clone()))
+        .unwrap();
+    db.flush().unwrap();
+    let target = db.snapshots().last().unwrap().txn_id;
+    // Move on, then restore that snapshot.
+    let (later_id, _) = {
+        let v = vec_(&mut rng);
+        (
+            db.remember(Memory::new("later", MemoryType::Semantic, v.clone()))
+                .unwrap(),
+            v,
+        )
+    };
+    db.flush_index().unwrap();
+    db.restore_to(target).unwrap();
+    assert_eq!(l2_top(&mut db, &a, 1), vec![a_id.0]);
+    assert_eq!(l2_top(&mut db, &b, 1), vec![b_id.0]);
+    assert!(db.get(&later_id).is_err(), "the later memory isn't in the snapshot");
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(l2_top(&mut db, &a, 1), vec![a_id.0]);
+    assert_eq!(l2_top(&mut db, &b, 1), vec![b_id.0]);
+}

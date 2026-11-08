@@ -505,6 +505,11 @@ impl IvfPqIndex {
         self.partitions.iter().map(|p| p.ids.len()).sum()
     }
 
+    /// Every indexed id (PERF-1 reconcile).
+    pub(crate) fn ids(&self) -> impl Iterator<Item = u128> + '_ {
+        self.partitions.iter().flat_map(|p| p.ids.iter().copied())
+    }
+
     /// Heap bytes held by the index, by part (P-0 device budget). Counts
     /// buffer capacities; the hash map is estimated from its capacity.
     /// Returns `(coarse_centroids, pq_codebook, posting_ids, posting_codes,

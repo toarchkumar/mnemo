@@ -75,6 +75,30 @@ const MIN_WAL_PAGES: u64 = 2;
 /// of manifest). Set `MnemoConfig::max_snapshots = 0` to disable the cap.
 pub const DEFAULT_MAX_SNAPSHOTS: usize = 256;
 
+/// PERF-1: the ANN index is derived data, so `flush` persists it only every
+/// this many commits that changed it (or see
+/// [`INDEX_PERSIST_EVERY_CHANGES`], [`Mnemo::flush_index`], [`Mnemo::close`]).
+/// Between persists, only the catalog is rewritten.
+pub const INDEX_PERSIST_EVERY_COMMITS: u32 = 64;
+
+/// PERF-1: …or once this many vectors were added, changed or removed since
+/// the last persist. Records written after the persisted index are
+/// re-assigned when the index is next loaded, so this bounds that work.
+pub const INDEX_PERSIST_EVERY_CHANGES: usize = 1_000;
+
+/// PERF-1: when the in-memory ANN index was last persisted, and whether the
+/// next flush must persist it.
+#[derive(Debug, Default, Clone, Copy)]
+struct IndexPersist {
+    /// Persist on the next flush (build, rebuild, drop, `flush_index`,
+    /// `close`, snapshot restore).
+    forced: bool,
+    /// Commits since the last persist that left the index dirty.
+    commits: u32,
+    /// Vectors added, re-assigned or removed since the last persist.
+    changes: usize,
+}
+
 /// Chunk size for the torn-header scan's streaming read of the file.
 /// We walk the file 1 MiB at a time looking for 8 KiB-aligned `MWAL`
 /// magic. There is **no** cap on how far a given candidate's frame
@@ -544,6 +568,8 @@ pub struct BudgetReport {
     pub catalog_payload_bytes: u64,
     pub index_run_bytes: u64,
     pub index_payload_bytes: u64,
+    /// First page of the persisted index run (0 = none).
+    pub index_start_page: u64,
     pub wal_bytes: u64,
     pub snapshot_manifest_bytes: u64,
     pub cache_dir_run_bytes: u64,
@@ -624,8 +650,11 @@ pub struct Mnemo {
     dirty_catalog: bool,
     /// Optional IVF+PQ approximate-nearest-neighbour index.
     ann: Option<IvfPqIndex>,
-    /// Set whenever the ANN index changes; drives whether `flush` rewrites it.
+    /// Set whenever the in-memory ANN index differs from the persisted one.
+    /// PERF-1: `flush` persists it only per [`IndexPersist`]'s policy.
     dirty_index: bool,
+    /// PERF-1: index persistence policy state.
+    index_persist: IndexPersist,
     /// Append-only manifest of committed snapshots, oldest first. Capped
     /// at [`Mnemo::max_snapshots`] entries on every flush — the oldest
     /// entries are pruned first.
@@ -991,6 +1020,16 @@ impl IngestPlan {
     }
 }
 
+/// Whether a record belongs in the ANN index: facts only. Thread-archive
+/// turns, essence items and thread links are read by kind and scope, never
+/// by similarity, so they stay out (R-004.2).
+fn is_ann_kind(m: &Memory) -> bool {
+    !matches!(
+        m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
+        Some(MNEMO_META_KIND_TURN) | Some(MNEMO_META_KIND_ESSENCE) | Some(MNEMO_META_KIND_THREAD_LINK)
+    )
+}
+
 /// Hex-encode a byte slice. Low-dependency alternative to pulling in a
 /// hex crate for the lone call site in `ingest_thread`'s SHA-256
 /// recording.
@@ -1172,6 +1211,7 @@ impl Mnemo {
             dirty_catalog: false,
             ann: None,
             dirty_index: false,
+            index_persist: IndexPersist::default(),
             manifest: Vec::new(),
             max_snapshots: config.max_snapshots,
             read_only: false,
@@ -1419,7 +1459,7 @@ impl Mnemo {
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
 
-        Ok(Mnemo {
+        let mut db = Mnemo {
             pager,
             header,
             catalog,
@@ -1430,6 +1470,12 @@ impl Mnemo {
             dirty_catalog: migrated,
             ann,
             dirty_index,
+            // A v5→v6 page migration leaves the index sealed under the old
+            // page AAD, so it must be rewritten on the next flush.
+            index_persist: IndexPersist {
+                forced: dirty_index,
+                ..IndexPersist::default()
+            },
             manifest,
             // `Mnemo::open` has no [`MnemoConfig`] to read; default the cap
             // to [`DEFAULT_MAX_SNAPSHOTS`]. Override with
@@ -1449,7 +1495,12 @@ impl Mnemo {
             agent_set: None,
             key_index: None,
             superseded: None,
-        })
+        };
+        // PERF-1: records written after the persisted index run are
+        // re-assigned now (step 3 moves this to the index's first use).
+        let index_start = db.header.index_start;
+        db.reconcile_ann_with_catalog(index_start)?;
+        Ok(db)
     }
 
     /// Open an existing database in **read-only** mode. Takes an OS shared
@@ -1565,7 +1616,7 @@ impl Mnemo {
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
 
-        Ok(Mnemo {
+        let mut db = Mnemo {
             pager,
             header,
             catalog,
@@ -1579,6 +1630,7 @@ impl Mnemo {
             dirty_catalog: false,
             ann,
             dirty_index: false,
+            index_persist: IndexPersist::default(),
             manifest,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             read_only: true,
@@ -1594,7 +1646,12 @@ impl Mnemo {
             agent_set: None,
             key_index: None,
             superseded: None,
-        })
+        };
+        // PERF-1: records written after the persisted index run are
+        // re-assigned now (step 3 moves this to the index's first use).
+        let index_start = db.header.index_start;
+        db.reconcile_ann_with_catalog(index_start)?;
+        Ok(db)
     }
 
     /// Override the manifest snapshot cap on this open handle. `0` disables
@@ -1715,6 +1772,7 @@ impl Mnemo {
         if let Some(ann) = &mut self.ann {
             ann.add(id_u, &m.vector);
             self.dirty_index = true;
+            self.index_persist.changes += 1;
         }
 
         // FIX-1 R-001.8 part 2: keep the lazy agent set in sync. If
@@ -1908,6 +1966,7 @@ impl Mnemo {
         if let Some(ann) = &mut self.ann {
             ann.remove(id.0);
             self.dirty_index = true;
+            self.index_persist.changes += 1;
         }
         // FIX-1 R-001.8 part 2: we can't tell whether this delete
         // removed the last memory of its agent without a decrypt
@@ -3753,6 +3812,7 @@ impl Mnemo {
             catalog_payload_bytes: h.catalog_len,
             index_run_bytes: h.index_pages * ps,
             index_payload_bytes: h.index_len,
+            index_start_page: h.index_start,
             wal_bytes: h.wal_pages * ps,
             snapshot_manifest_bytes: h.manifest_pages * ps,
             cache_dir_run_bytes: h.cache_pages * ps,
@@ -4267,6 +4327,7 @@ impl Mnemo {
         let info = idx.info();
         self.ann = Some(idx);
         self.dirty_index = true;
+        self.index_persist.forced = true;
         Ok(info)
     }
 
@@ -4295,7 +4356,70 @@ impl Mnemo {
         if self.ann.is_some() {
             self.ann = None;
             self.dirty_index = true;
+            self.index_persist.forced = true;
         }
+    }
+
+    /// PERF-1 (R-004.1): bring a just-loaded ANN index up to date with the
+    /// catalog. Called by `open`, `open_read_only` and `restore_to`, with the
+    /// first page of the index run that was loaded.
+    ///
+    /// `flush` persists the index only every so often, so that run can lag
+    /// the catalog. It does two things:
+    ///
+    /// 1. **Prune** every indexed id the catalog no longer has live
+    ///    (missing or deleted).
+    /// 2. **Re-add** every live record written after the index run. Pages
+    ///    are allocated monotonically in v8, and every write, including an
+    ///    in-place `update` or `essence_update` (they rewrite the record to
+    ///    fresh pages), lands at a page `> index_start`. Those records are
+    ///    read and re-assigned. A record of a non-fact kind (turn, essence,
+    ///    thread link) is removed instead: those never belong in the ANN.
+    ///
+    /// The work is bounded by [`INDEX_PERSIST_EVERY_CHANGES`] in the common
+    /// case, since a writer persists the index at least that often.
+    fn reconcile_ann_with_catalog(&mut self, index_start: u64) -> Result<()> {
+        if self.ann.is_none() {
+            return Ok(());
+        }
+        let mut changed = 0usize;
+        // 1. Prune ids that are no longer live.
+        let stale: Vec<u128> = match &self.ann {
+            Some(ann) => ann
+                .ids()
+                .filter(|id| !matches!(self.index.get(id), Some(&i) if !self.catalog[i].deleted))
+                .collect(),
+            None => Vec::new(),
+        };
+        if let Some(ann) = &mut self.ann {
+            for id in &stale {
+                ann.remove(*id);
+                changed += 1;
+            }
+        }
+        // 2. Re-add records written after the index run.
+        let pending: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted && e.start_page > index_start)
+            .cloned()
+            .collect();
+        for e in &pending {
+            let m = self.read_memory(e)?;
+            if let Some(ann) = &mut self.ann {
+                if is_ann_kind(&m) {
+                    ann.add(e.id, &m.vector);
+                } else {
+                    ann.remove(e.id);
+                }
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.dirty_index = true;
+            self.index_persist.changes += changed;
+        }
+        Ok(())
     }
 
     /// Whether an ANN index is currently loaded.
@@ -4429,7 +4553,17 @@ impl Mnemo {
         // fsync count is a viable write-latency win before we touch
         // the write path's durability model.
         let fsync_before = crate::fsync_count();
-        if !self.dirty_catalog && !self.dirty_index && !self.dirty_cache {
+        // PERF-1: persist the (derived) ANN index only when forced or due.
+        // Otherwise the header keeps pointing at the previous index run, and
+        // records written since then are re-assigned when it's next loaded
+        // (`reconcile_ann_with_catalog`). `ann == None` with `dirty_index` set is a
+        // dropped index, which is persisted at once.
+        let persist_index = self.dirty_index
+            && (self.index_persist.forced
+                || self.ann.is_none()
+                || self.index_persist.commits + 1 >= INDEX_PERSIST_EVERY_COMMITS
+                || self.index_persist.changes >= INDEX_PERSIST_EVERY_CHANGES);
+        if !self.dirty_catalog && !persist_index && !self.dirty_cache {
             // No control-plane changes pending. Because every `put` that
             // dirties a data page also dirties the catalog, and every
             // `cache_put` that dirties a data page also dirties
@@ -4448,12 +4582,12 @@ impl Mnemo {
         // counts against `max_snapshots` (default 256), so a cache-
         // heavy workload would otherwise evict every real memory
         // restore point within ~256 cache writes.
-        let is_memory_or_index_flush = self.dirty_catalog || self.dirty_index;
+        let is_memory_or_index_flush = self.dirty_catalog || persist_index;
 
         // 1. Serialize control plane, ensure WAL capacity, lease counter +
         //    page slots, and persist the leased header *before* any data
         //    page hits the disk.
-        let ctx = self.prepare_for_flush()?;
+        let ctx = self.prepare_for_flush(persist_index)?;
 
         // 2. Record (vector) data pages: copy-on-write to fresh pages, fsynced.
         //    Safe: the lease guarantees that even if we crash here, reopen
@@ -4468,7 +4602,7 @@ impl Mnemo {
             self.header.catalog_pages = pages as u64;
             self.header.catalog_len = bytes.len() as u64;
         }
-        if self.dirty_index {
+        if persist_index {
             match &ctx.idx_bytes {
                 Some(bytes) => {
                     let (start, pages) = self.seal_run(bytes, &mut frames)?;
@@ -4578,7 +4712,12 @@ impl Mnemo {
 
         self.manifest = manifest;
         self.dirty_catalog = false;
-        self.dirty_index = false;
+        if persist_index {
+            self.dirty_index = false;
+            self.index_persist = IndexPersist::default();
+        } else if self.dirty_index {
+            self.index_persist.commits += 1;
+        }
         self.dirty_cache = false;
         // Batched policy: successful flush consumes the pending batch.
         self.cache_batch.reset();
@@ -4609,7 +4748,7 @@ impl Mnemo {
     /// still on disk. SEC-1's per-session random nonce prefix gives the
     /// same guarantee without needing a persisted counter, which is why
     /// this routine no longer writes page 0.
-    fn prepare_for_flush(&mut self) -> Result<FlushPrelude> {
+    fn prepare_for_flush(&mut self, persist_index: bool) -> Result<FlushPrelude> {
         // Serialize.
         let cat_bytes = if self.dirty_catalog {
             Some(
@@ -4619,7 +4758,7 @@ impl Mnemo {
         } else {
             None
         };
-        let idx_bytes: Option<Vec<u8>> = if self.dirty_index {
+        let idx_bytes: Option<Vec<u8>> = if persist_index {
             match &self.ann {
                 Some(ann) => {
                     Some(rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?)
@@ -4687,6 +4826,22 @@ impl Mnemo {
         if self.read_only {
             return Ok(());
         }
+        // PERF-1: closing persists a dirty ANN index too, so the next open
+        // has nothing to re-assign.
+        self.index_persist.forced = true;
+        self.flush()
+    }
+
+    /// PERF-1: flush, persisting the ANN index even if the
+    /// [`INDEX_PERSIST_EVERY_COMMITS`] / [`INDEX_PERSIST_EVERY_CHANGES`]
+    /// policy wouldn't yet. Plain [`Mnemo::flush`] writes only the catalog
+    /// between persists; the index is derived, so a crash costs nothing but
+    /// re-assigning the newer records on the next load.
+    pub fn flush_index(&mut self) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        self.index_persist.forced = true;
         self.flush()
     }
 
@@ -4708,7 +4863,7 @@ impl Mnemo {
         if !self.dirty_catalog && !self.dirty_index {
             return Ok(());
         }
-        let _prelude = self.prepare_for_flush()?;
+        let _prelude = self.prepare_for_flush(self.dirty_index)?;
         self.pager.flush()
     }
 
@@ -5329,10 +5484,14 @@ impl Mnemo {
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
         self.ann = ann;
+        // PERF-1: the snapshot's index may predate its catalog; bring it up
+        // to date before it's persisted again.
+        self.reconcile_ann_with_catalog(snap.index_start)?;
         // Re-commit as a fresh transaction: crash-safe, and itself recorded
         // as a new snapshot so a restore can always be undone.
         self.dirty_catalog = true;
         self.dirty_index = true;
+        self.index_persist.forced = true;
         self.flush()
     }
 

@@ -248,7 +248,9 @@ pub fn serve_with_streams<R: Read, W: Write>(
     // access stats too — the write is cheap (catalog page only; the
     // record bodies aren't dirty) and guarantees the usage-saturation
     // signal survives across sessions.
-    if let Err(e) = db.flush() {
+    // PERF-1 (R-004.3): `close()` also persists the ANN index, which plain
+    // flushes now write only every so often.
+    if let Err(e) = db.close() {
         eprintln!("mnemo mcp: flush on shutdown failed: {e}");
     }
     eprintln!("mnemo mcp: stdin closed, shutting down");
