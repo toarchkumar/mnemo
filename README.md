@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/mnemo-engine)](https://crates.io/crates/mnemo-engine)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**Encrypted memory and cache for AI agents, in one file. Written in Rust.**
+**Encrypted memory and cache for on-device AI agents, in one file, from desktop apps to phones. Written in Rust.**
 
 MNemo gives an agent durable memory and a cache for expensive calls, inside a
 single encrypted `.mnemo` file. There's no server or vector database to run:
@@ -100,6 +100,30 @@ The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 
+## What's new in v0.10.0: smaller and faster
+
+The first release of the on-device work, with no file format change. At
+100K memories, compared with v0.9.1:
+
+- **Opening takes 9 ms instead of 384 ms.** It no longer re-reads the crash
+  log, and the search index loads on first use.
+- **Saving one memory takes 28 ms instead of 449 ms,** and grows the file
+  by 3.4 MB instead of 21 MB. The search index is saved every 64 commits
+  and on close, not on every save.
+- **An open file uses 34–54 MB of memory instead of 115–158 MB.** Warm
+  searches take 8.8 ms instead of 23–27 ms, with the same accuracy.
+- **Keys for keychains.** A file created with a random key skips the
+  passphrase step, so it opens without the ~16 ms and ~19 MB that
+  passphrase hashing costs:
+
+```python
+key = mnemo_engine.generate_key()  # keep it in the OS keychain
+db = mnemo_engine.open_with_key("agent.mnemo", key, dimensions=384)
+```
+
+The page cache is now 8 MB by default (it was 64 MB). Raise it with
+`set_cache_capacity` if your searches rerank many candidates.
+
 ## What's new in v0.9.0: threads and essence
 
 Memory is the knowledge an agent looks up. **Essence** is where a piece of
@@ -167,17 +191,24 @@ start. Working on this repository itself? Start at [AGENTS.md](AGENTS.md).
 
 ## Performance
 
-Measured on an Apple M1 Pro (release build, 384-dimension vectors):
+Measured with v0.10.0 on an Apple M1 Pro (release build, 384-dimension
+vectors, about 300 bytes of text per memory, indexed):
 
-| Operation | Time |
-|---|---|
-| Exact-key cache hit | ~1 µs |
-| Similar-prompt cache hit (500 entries) | ~0.4 ms |
-| Open a file: passphrase key derivation (Argon2id, slow on purpose) | ~15 ms |
-| Open a file: loading its catalog and index, 10K / 100K memories | ~33 ms / ~230 ms more |
-| Store one memory durably, 1K / 10K / 100K memories | ~28 ms / ~67 ms / ~450 ms (the large-file cost is being fixed in v0.10.0); ~0.4 / 0.8 / 4.7 ms each when 100 are committed together |
-| Indexed search, 10K / 100K / 1M memories | ~1.4 ms / ~9.4 ms / ~134 ms |
-| Exact search over every memory, 10K / 100K | ~105 ms / ~1.05 s |
+| | 1K memories | 10K | 100K |
+|---|---|---|---|
+| Open with a raw key (from a keychain) | 0.2 ms | 0.9 ms | 9 ms |
+| Open with a passphrase (Argon2id, slow on purpose) | ~16 ms | ~16 ms | ~23 ms |
+| First search after opening (loads the index) | 3 ms | 11 ms | 99 ms |
+| Search, warm | 0.4 ms | 1.4 ms | 8.8 ms |
+| Store one memory durably | 16 ms | 16 ms | 28 ms |
+| … each, when 100 are committed together | 0.26 ms | 0.26 ms | 0.42 ms |
+| Memory used by an open file (after 1,000 searches) | 11 MB | 13 MB | 34 MB |
+| Disk per memory | 10 KB | 8.9 KB | 8.7 KB |
+
+The library adds about 1.4 MB (Python package) or 2.4 MB (CLI), stripped.
+An exact-key cache hit takes ~1 µs, and a similar-prompt hit over 500
+entries ~0.4 ms. Full results:
+[`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
 
 **Ranking quality (v0.7.0).** On a small age-varied test set (13
 questions), the right memory comes first for 92% of them, up from 77% in
@@ -185,13 +216,8 @@ v0.6 and 62% when ranking on similarity alone. The ranking stays the same
 however often the memories are recalled.
 
 Indexed search finds 96–98% of the true top-10 matches at the default
-settings (v0.6.0: 0.964 at 10K, 0.982 at 100K, 0.970 at 1M). Storing got about
-14% faster in v0.6.1, after one disk sync per commit was removed. Full results:
-[`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
-
-Opening a large file is dominated by loading its catalog and index, not by
-the key derivation. Long-running agents and the MCP server pay it once;
-faster opening of large files is planned.
+settings (0.964 at 10K, 0.982 at 100K, 0.970 at 1M); v0.10.0 kept every
+measured accuracy cell unchanged.
 
 **Upgrading an index from v0.5.x?** It improves automatically (about 76–83%
 of the true top-10), and rebuilding it restores the full accuracy: run
@@ -212,6 +238,11 @@ in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
+- **Files still grow with each save and use about 8.7 KB per memory.**
+  Each save adds a new copy of the memory list (about 3.4 MB at 100K
+  memories), and each memory takes a whole 8 KB page. `mnemo compact`
+  reclaims the space. The next file format (v0.11) saves only what changed,
+  reuses old space and packs memories together.
 - **Saving threads isn't automatic yet.** You (or your agent) call
   `thread ingest` and the essence tools. A Claude Code plugin with hooks
   that save before compaction and load at session start is on the roadmap,

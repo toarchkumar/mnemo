@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MNemo — Encrypted memory and cache for AI agents, in one file</title>
-<meta name="description" content="MNemo is an encrypted, single-file memory engine for AI agents, written in Rust. Durable memory, a result cache, and an MCP server in one portable .mnemo file.">
+<title>MNemo — Encrypted memory for on-device AI agents, in one file</title>
+<meta name="description" content="MNemo is an encrypted, single-file memory engine for on-device AI agents, from desktop apps to phones, written in Rust. Durable memory, a result cache, and an MCP server in one portable .mnemo file.">
 <meta property="og:title" content="MNemo — Encrypted memory and cache for AI agents">
 <meta property="og:description" content="Durable agent memory, a result cache and an MCP server inside one encrypted, portable file. Written in Rust.">
 <meta property="og:type" content="website">
@@ -386,11 +386,11 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.9.0</span>
+        <span class="pill"><span class="dot"></span>v0.10.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
-      <h1>Encrypted memory and cache for AI agents, <span>in one file</span>.</h1>
+      <h1>Encrypted memory for on-device AI agents, <span>in one file</span>.</h1>
       <p class="sub">MNemo gives an agent durable memory and a cache for expensive calls, inside a single encrypted <code>.mnemo</code> file. There's no server or vector database to run. Copy the file and the memory comes with it.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="#quickstart">Get started</a>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.9.0.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.10.0.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -704,15 +704,15 @@ AI sessions stay aligned without relying on chat history.
     <div class="head">
       <p class="eyebrow">Performance</p>
       <h2 class="title">Measured, not promised</h2>
-      <p class="lead">We only publish numbers we've measured. These are from an Apple M1 Pro (release build, 384-dimension vectors). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
+      <p class="lead">We only publish numbers we've measured. These are from v0.10.0 on an Apple M1 Pro (release build, 384-dimension vectors, about 300 bytes of text per memory). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
     </div>
     <div class="grid grid-3">
       <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
       <div class="card stat"><div class="v">~0.4<span> ms</span></div><div class="l">Similar-prompt cache hit</div><div class="d">Matching by meaning across a 500-entry cache.</div></div>
-      <div class="card stat"><div class="v">~15<span> ms</span></div><div class="l">Open an encrypted file</div><div class="d">The passphrase step (Argon2id), slow on purpose so guessing is expensive. Large files add the time to load their index: ~33 ms at 10K memories, ~230 ms at 100K. Long-running apps pay it once.</div></div>
-      <div class="card stat"><div class="v">~28<span> ms</span></div><div class="l">Store a memory durably (1K memories)</div><div class="d">For small files, bound by full disk syncs. Commit 100 at once and each costs well under a millisecond. Large files are slower today (~450 ms at 100K memories); that is being fixed next.</div></div>
-      <div class="card stat"><div class="v">~105<span> ms</span></div><div class="l">Check every memory, 10K-memory file</div><div class="d">Exact search with no index, every candidate decrypted. 1.05 s at 100K.</div></div>
-      <div class="card stat"><div class="v">~9.4<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings (v0.6.0). ~1.4 ms at 10K, ~134 ms at 1M.</div></div>
+      <div class="card stat"><div class="v">~9<span> ms</span></div><div class="l">Open a 100K-memory file</div><div class="d">With a random key from the OS keychain: 0.9 ms at 10K memories. With a passphrase, add ~16 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
+      <div class="card stat"><div class="v">~16<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by disk syncs: 16 ms up to 10K memories, 28 ms at 100K. Commit 100 at once and each costs under half a millisecond.</div></div>
+      <div class="card stat"><div class="v">~34<span> MB</span></div><div class="l">Memory for an open 100K-memory file</div><div class="d">About 13 MB at 10K memories, and 11 MB at 1K: small enough for phones and tablets. The library itself is about 1.4 MB.</div></div>
+      <div class="card stat"><div class="v">~8.8<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings. 1.4 ms at 10K memories, 0.4 ms at 1K.</div></div>
     </div>
     <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
   </div>
@@ -728,8 +728,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.9</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.10</span></h3>
         <ul>
+          <li>Smaller and faster: at 100K memories, opening went from 384 ms to 9 ms, saving from 449 ms to 28 ms, and memory use dropped about 3×; plus keychain-friendly random keys</li>
           <li>Session continuity: a full copy of each working thread, plus an essence of where things stand, so a new session carries on where the last one stopped</li>
           <li>Facts that change: a newer version replaces the old one and history is kept; edit memories in place</li>
           <li>Recall filtered by session or tag, and recall within a size budget for small context windows</li>
@@ -750,7 +751,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Smaller and faster for on-device use, from desktop apps to phones and tablets: quicker opening and saving, and a compact file format</li>
+          <li>A compact file format: memories packed together and saves that write only what changed, aiming for files about 4× smaller</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
           <li>iOS and Android packages</li>
         </ul>
