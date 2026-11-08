@@ -76,15 +76,61 @@ pub fn txn_byte_len(n: usize, page_size: usize) -> u64 {
     ((n * (FRAME_HEADER + page_size)) + FRAME_HEADER) as u64
 }
 
-/// CRC-32 (IEEE 802.3, reflected). Small and dependency-free.
-fn crc32(seed: u32, data: &[u8]) -> u32 {
-    let mut c = !seed;
-    for &b in data {
-        c ^= b as u32;
-        for _ in 0..8 {
-            let mask = (c & 1).wrapping_neg();
-            c = (c >> 1) ^ (0xEDB8_8320 & mask);
+/// Slice-by-8 lookup tables for CRC-32 (IEEE 802.3, reflected,
+/// polynomial `0xEDB8_8320`), built at compile time. `CRC_TABLES[0]` is the
+/// classic byte table; `CRC_TABLES[k]` advances a byte through `k` more
+/// zero bytes.
+const CRC_TABLES: [[u32; 256]; 8] = {
+    let mut t = [[0u32; 256]; 8];
+    let mut i = 0;
+    while i < 256 {
+        let mut c = i as u32;
+        let mut k = 0;
+        while k < 8 {
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+            k += 1;
         }
+        t[0][i] = c;
+        i += 1;
+    }
+    let mut k = 1;
+    while k < 8 {
+        let mut i = 0;
+        while i < 256 {
+            let prev = t[k - 1][i];
+            t[k][i] = (prev >> 8) ^ t[0][(prev & 0xFF) as usize];
+            i += 1;
+        }
+        k += 1;
+    }
+    t
+};
+
+/// CRC-32 (IEEE 802.3, reflected), continuing from `seed`. Dependency-free
+/// slice-by-8 (PERF-1: the bit-at-a-time loop it replaces was a large part
+/// of every commit and open); the output is bit-identical.
+fn crc32(seed: u32, data: &[u8]) -> u32 {
+    let t = &CRC_TABLES;
+    let mut c = !seed;
+    let mut chunks = data.chunks_exact(8);
+    for b in &mut chunks {
+        let one = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) ^ c;
+        let two = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+        c = t[7][(one & 0xFF) as usize]
+            ^ t[6][((one >> 8) & 0xFF) as usize]
+            ^ t[5][((one >> 16) & 0xFF) as usize]
+            ^ t[4][(one >> 24) as usize]
+            ^ t[3][(two & 0xFF) as usize]
+            ^ t[2][((two >> 8) & 0xFF) as usize]
+            ^ t[1][((two >> 16) & 0xFF) as usize]
+            ^ t[0][(two >> 24) as usize];
+    }
+    for &b in chunks.remainder() {
+        c = t[0][((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
     }
     !c
 }
@@ -285,6 +331,27 @@ pub fn recover(
     if wal_pages == 0 {
         return Ok(None);
     }
+    // PERF-1: peek at the first frame header before reading anything else.
+    // A transaction always starts at the region's first byte and every one
+    // of its frames carries the same txn id, so a first frame whose id is
+    // `<= wal_seq` means the region holds an already-checkpointed (or an
+    // older, never-committed) transaction. The full scan below would reach
+    // the same `None`, after reading, checksumming and copying the whole
+    // transaction. An empty or zeroed region fails the magic check here,
+    // as it would below.
+    file.seek(SeekFrom::Start(wal_start * PAGE_SIZE as u64))?;
+    let mut head = [0u8; FRAME_HEADER];
+    let mut got = 0usize;
+    while got < FRAME_HEADER {
+        match file.read(&mut head[got..])? {
+            0 => break,
+            n => got += n,
+        }
+    }
+    if got < FRAME_HEADER || &head[0..4] != FRAME_MAGIC || rd_u64(&head, 5) <= wal_seq {
+        return Ok(None);
+    }
+
     let capacity = (wal_pages * PAGE_SIZE as u64) as usize;
     let mut region = vec![0u8; capacity];
     file.seek(SeekFrom::Start(wal_start * PAGE_SIZE as u64))?;
@@ -366,4 +433,42 @@ pub fn recover_bytes(region: &[u8], wal_seq: u64) -> Result<Option<Vec<Frame>>> 
     }
     // Reached here with no COMMIT frame: the transaction never committed.
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bit-at-a-time CRC the slice-by-8 version replaced.
+    fn crc32_bitwise(seed: u32, data: &[u8]) -> u32 {
+        let mut c = !seed;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                let mask = (c & 1).wrapping_neg();
+                c = (c >> 1) ^ (0xEDB8_8320 & mask);
+            }
+        }
+        !c
+    }
+
+    #[test]
+    fn crc32_matches_the_bitwise_reference() {
+        assert_eq!(checksum(b"123456789"), 0xCBF4_3926);
+        let data: Vec<u8> = (0..20_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect();
+        for len in (0..64).chain([255, 256, 1_000, 8_192, 20_000]) {
+            for seed in [0u32, 0xDEAD_BEEF] {
+                assert_eq!(
+                    crc32(seed, &data[..len]),
+                    crc32_bitwise(seed, &data[..len]),
+                    "len {len}"
+                );
+            }
+        }
+        // Chaining across a split equals one pass.
+        let whole = crc32(0, &data);
+        assert_eq!(crc32(crc32(0, &data[..777]), &data[777..]), whole);
+    }
 }

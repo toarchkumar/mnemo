@@ -93,7 +93,7 @@ pub use session::{Role, Session, Turn};
 pub use store::BudgetReport;
 pub use store::{
     CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResponse, RecallResult, SnapshotInfo,
-    Stats,
+    Stats, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
 };
 pub use transcript::{read_transcript, TranscriptFormat};
 
@@ -251,6 +251,43 @@ pub mod __failpoints {
     /// invariant the property test asserts.
     pub fn set_writes_until_fail(n: i64) {
         crate::pager::failpoints::set_writes_until_fail(n)
+    }
+}
+
+/// WAL entry points for the PERF-1 allocation test
+/// (`tests/wal_recover_alloc.rs`), which needs its own global allocator and
+/// so can't live in this `forbid(unsafe_code)` crate. Not a stable API.
+#[doc(hidden)]
+pub mod __wal {
+    /// Page size of the WAL region.
+    pub const PAGE_SIZE: usize = crate::format::PAGE_SIZE;
+
+    /// One WAL frame: a home page number and its page image.
+    pub type Frame = (u64, Vec<u8>);
+
+    /// Bytes a transaction of `n` page frames occupies.
+    pub fn txn_byte_len(n: usize) -> u64 {
+        crate::wal::txn_byte_len(n, PAGE_SIZE)
+    }
+
+    /// Commit `frames` as transaction `txn_id` at the start of a region.
+    pub fn commit(
+        file: &mut std::fs::File,
+        wal_pages: u64,
+        txn_id: u64,
+        frames: &[Frame],
+    ) -> crate::Result<()> {
+        crate::wal::commit(file, 0, wal_pages, txn_id, frames)
+    }
+
+    /// Run open-time recovery over a region starting at page 0; returns the
+    /// frames to replay, if any.
+    pub fn recover(
+        file: &mut std::fs::File,
+        wal_pages: u64,
+        wal_seq: u64,
+    ) -> crate::Result<Option<Vec<Frame>>> {
+        crate::wal::recover(file, 0, wal_pages, wal_seq)
     }
 }
 
