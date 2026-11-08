@@ -44,6 +44,15 @@ still change between PRs.
     `MnemoConfig::store_float_vectors`.
   - v9 files under `V9_ANN_MIN_FACTS` (20K) facts use an exact scan and
     build no ANN index.
+- **9b.2: packed record pages.**
+  - v9 records share pages: a slot directory on each 8 KB page. Records
+    over a page own whole pages, as before.
+  - Each commit folds pages under 3/4 full into its new pages.
+  - Thread turns are chunked at 7,900 bytes on v9, so a chunk fits one
+    page.
+  - At 100K memories a v9 file takes 1.8 KB per memory (v8: 8.7 KB). Warm
+    recall is 2.5 ms (v8: 8.6 ms), and an open handle's RSS is about 112 MB
+    with the vector column resident.
 
 ## [0.10.0] — 2026-11-07
 

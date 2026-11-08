@@ -1956,7 +1956,7 @@ impl Mnemo {
         if version >= VERSION_V9 && veccol::per_page(config.dimensions) == 0 {
             return Err(MnemoError::Invalid(format!(
                 "a v9 file supports up to {} dimensions for now (one fp16 vector \
-                 must fit a page); records that span pages come with FMT-9b.2",
+                 must fit a page); vector entries that span pages are not supported yet",
                 (PAYLOAD - veccol::PAGE_HEADER - 4) / 2
             )));
         }
