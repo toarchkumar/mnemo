@@ -565,6 +565,10 @@ impl Header {
         self.bm25.write(b, o + 96);
         self.vec_col.write(b, o + 128);
         self.catalog_delta.write(b, o + 160);
+        // Reserved bytes and everything past the 512-byte header stay zero
+        // (the buffer starts zeroed; stated here so the layout is explicit).
+        b[V9_RESERVED_OFF..V9_CRC_OFF].fill(0);
+        b[V9_HEADER_LEN..].fill(0);
         let crc = crate::wal::checksum(&b[0..V9_CRC_OFF]);
         b[V9_CRC_OFF..V9_CRC_OFF + 4].copy_from_slice(&crc.to_le_bytes());
     }
