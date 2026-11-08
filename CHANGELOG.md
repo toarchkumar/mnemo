@@ -8,6 +8,30 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### FMT-9 (format v9), in progress — not yet the default
+
+v9 is being built PR by PR (9a–9f) and ships in v0.11.0. Until 9f, new files
+are still v8, v8 files read and write exactly as before (their bytes are
+unchanged), and a v9 file can only be made through the hidden
+`MnemoConfig::format_version = 9` (or `MNEMO_DEV_FORMAT=9`) development
+switch. **Don't keep data in a v9 file before v0.11.0:** its layout can
+still change between PRs.
+
+- **9a skeleton.**
+  - A v9 header that fits in 512 bytes. The seal now covers every byte of
+    it, including the dimensions, flags, KDF parameters and salt.
+  - A quarantined free list, so v9 files reuse the pages of deleted and
+    overwritten records and of superseded catalog, index, manifest,
+    cache-directory and WAL runs. A page is reused only once the
+    transaction that freed it is durable and no retained snapshot is older
+    than it.
+  - The writing transaction's generation is now bound into every v9 page's
+    AAD, so putting back a reused page's old ciphertext fails
+    authentication.
+  - A key-slot run for Phase 13.2.
+  - Each writable session takes one small header-only commit before its
+    first v9 write.
+
 ## [0.10.0] — 2026-11-07
 
 PERF-1, the first release of the on-device track: size and speed, with no

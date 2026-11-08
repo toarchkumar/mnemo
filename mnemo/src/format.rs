@@ -36,6 +36,15 @@ pub const MAGIC: &[u8; 4] = b"MNEM";
 ///   into the v5 shape (populating the new fields from each record's
 ///   serialized body) and rewritten on the next flush.
 pub const VERSION: u16 = 8;
+/// FMT-9: the v9 format (slotted pages, page reuse through a quarantined
+/// free list, a generation in every page's AAD, a sealed 512-byte header,
+/// and a key-slot run). **Under construction:** until PR 9f a v9 file is
+/// created only through the hidden [`crate::MnemoConfig::format_version`]
+/// switch (or `MNEMO_DEV_FORMAT=9`), and the layout can still change
+/// between the 9a–9f PRs. New files stay v8 until 9f flips the default.
+pub const VERSION_V9: u16 = 9;
+/// Highest version this build can open.
+pub const MAX_VERSION: u16 = VERSION_V9;
 /// Lowest version this build can auto-migrate on open. Files older than
 /// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
 /// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
@@ -115,6 +124,82 @@ pub const HEADER_CACHE_LEN_OFF: usize = HEADER_CACHE_PAGES_OFF + 8;
 // still fit inside one page after the existing header fields and CRC.
 const _: () = assert!(HEADER_CACHE_LEN_OFF + 8 <= PAGE_SIZE);
 
+// --- v9 header layout (FMT-9 (b)) ---------------------------------------
+//
+// Bytes 0..294 keep the v8 offsets (the legacy CRC slot at 238..242 is
+// zero in v9). The v9 fields follow, and **everything meaningful ends
+// before byte 512**, so page 0 is written within one 512-byte sector:
+//
+//   294..326  catalog_gen, index_gen, manifest_gen, cache_gen (u64 each)
+//   326..358  free-list run      (start, pages, len, gen)
+//   358..390  key-slot run       (start, pages, len, gen)
+//   390..422  BM25 manifest run  (start, pages, len, gen)   [9d]
+//   422..454  vector-column run  (start, pages, len, gen)   [9b]
+//   454..486  catalog-delta head (start, pages, len, gen)   [9c]
+//   486..508  reserved, must be zero
+//   508..512  CRC-32 over bytes 0..508 (seal included)
+//
+// The v9 seal authenticates **every** byte of 0..508 (with the seal's own
+// nonce and tag zeroed), not just the mutable pointers the v7 seal lists:
+// dimensions, flags, KDF parameters and the salt are covered too. Bytes
+// 512.. of page 0 are zero and ignored.
+
+/// Byte offset of the first v9-only field.
+pub const V9_FIELDS_OFF: usize = HEADER_CACHE_LEN_OFF + 8; // 294
+/// Byte offset of the v9 reserved region.
+pub const V9_RESERVED_OFF: usize = V9_FIELDS_OFF + 4 * 8 + 5 * 32; // 486
+/// Byte offset of the v9 header CRC.
+pub const V9_CRC_OFF: usize = 508;
+/// Meaningful bytes in a v9 header page.
+pub const V9_HEADER_LEN: usize = 512;
+/// Domain-separation prefix for the v9 header seal AAD.
+pub const SEAL_AAD_PREFIX_V9: &[u8] = b"mnemo-header-seal-v9";
+
+const _: () = assert!(V9_FIELDS_OFF == 294);
+const _: () = assert!(V9_RESERVED_OFF <= V9_CRC_OFF);
+const _: () = assert!(V9_CRC_OFF + 4 == V9_HEADER_LEN);
+
+/// `serde(skip_serializing_if)` helper for the v9-only trailing `gen`
+/// fields: a zero generation (every v8 row) is left out, so v8 encodings
+/// stay byte-for-byte what v0.10 wrote and reads.
+pub(crate) fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
+}
+
+/// A pointer to a run of consecutive encrypted pages, with the generation
+/// (the transaction id that wrote it) its pages must carry in their AAD.
+/// All zero means "no run".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunPtr {
+    pub start: u64,
+    pub pages: u64,
+    pub len: u64,
+    pub gen: u64,
+}
+
+impl RunPtr {
+    /// True when no run is referenced.
+    pub fn is_empty(&self) -> bool {
+        self.pages == 0
+    }
+
+    fn write(&self, b: &mut [u8], o: usize) {
+        b[o..o + 8].copy_from_slice(&self.start.to_le_bytes());
+        b[o + 8..o + 16].copy_from_slice(&self.pages.to_le_bytes());
+        b[o + 16..o + 24].copy_from_slice(&self.len.to_le_bytes());
+        b[o + 24..o + 32].copy_from_slice(&self.gen.to_le_bytes());
+    }
+
+    fn read(b: &[u8], o: usize) -> RunPtr {
+        RunPtr {
+            start: rd_u64(b, o),
+            pages: rd_u64(b, o + 8),
+            len: rd_u64(b, o + 16),
+            gen: rd_u64(b, o + 24),
+        }
+    }
+}
+
 /// The header page. Fixed-size, unencrypted, lives at page 0.
 #[derive(Clone, Debug)]
 pub struct Header {
@@ -184,6 +269,26 @@ pub struct Header {
     pub cache_pages: u64,
     /// Exact serialized byte length of the result-cache directory (v8+).
     pub cache_len: u64,
+    /// v9: generation (writing transaction id) of the catalog run. `0` on
+    /// v8 and older, where page AAD carries no generation.
+    pub catalog_gen: u64,
+    /// v9: generation of the ANN index run.
+    pub index_gen: u64,
+    /// v9: generation of the snapshot-manifest run.
+    pub manifest_gen: u64,
+    /// v9: generation of the result-cache directory run.
+    pub cache_gen: u64,
+    /// v9 (a): the quarantined free list.
+    pub free: RunPtr,
+    /// v9 (b): the key-slot run (Phase 13.2 adds slots; header slot 0 is
+    /// `wrapped_dek` above).
+    pub keys: RunPtr,
+    /// v9 (9d): the BM25 segment manifest. Reserved; zero until 9d.
+    pub bm25: RunPtr,
+    /// v9 (9b): the vector column. Reserved; zero until 9b.
+    pub vec_col: RunPtr,
+    /// v9 (9c): head of the catalog delta chain. Reserved; zero until 9c.
+    pub catalog_delta: RunPtr,
 }
 
 /// Compute the AEAD AAD bytes used by the v7 header seal. The AAD covers
@@ -265,6 +370,10 @@ impl Header {
         b[214..222].copy_from_slice(&self.manifest_start.to_le_bytes());
         b[222..230].copy_from_slice(&self.manifest_pages.to_le_bytes());
         b[230..238].copy_from_slice(&self.manifest_len.to_le_bytes());
+        if self.version >= VERSION_V9 {
+            self.write_v9_tail(&mut b);
+            return b;
+        }
         // Header CRC over every byte before it — detects a torn page-0 write.
         // The v7 seal (bytes 242..270) and v8 cache pointer (bytes 270..294)
         // deliberately live outside the CRC region: the CRC is a
@@ -300,11 +409,15 @@ impl Header {
         // and forward versions are rejected. `Mnemo::open` is responsible
         // for upgrading migratable in-memory state and rewriting the on-disk
         // format on the next flush.
-        if version != VERSION && !(MIGRATABLE_FROM..VERSION).contains(&version) {
+        if !(MIGRATABLE_FROM..=MAX_VERSION).contains(&version) {
             return Err(MnemoError::UnsupportedVersion(version));
         }
-        let stored_crc = rd_u32(b, HEADER_CRC_OFF);
-        if crate::wal::checksum(&b[0..HEADER_CRC_OFF]) != stored_crc {
+        let (crc_off, stored_crc) = if version >= VERSION_V9 {
+            (V9_CRC_OFF, rd_u32(b, V9_CRC_OFF))
+        } else {
+            (HEADER_CRC_OFF, rd_u32(b, HEADER_CRC_OFF))
+        };
+        if crate::wal::checksum(&b[0..crc_off]) != stored_crc {
             // A torn or corrupt header page — fail cleanly rather than
             // derive a key from garbage.
             return Err(MnemoError::HeaderChecksum);
@@ -315,7 +428,9 @@ impl Header {
         dek_nonce.copy_from_slice(&b[102..102 + NONCE_LEN]);
         let mut wrapped_dek = [0u8; WRAPPED_DEK_LEN];
         wrapped_dek.copy_from_slice(&b[114..114 + WRAPPED_DEK_LEN]);
-        Ok(Header {
+        let v9 = version >= VERSION_V9;
+        let o = V9_FIELDS_OFF;
+        let h = Header {
             version,
             page_size: rd_u32(b, 6),
             flags: rd_u32(b, 10),
@@ -379,7 +494,89 @@ impl Header {
             } else {
                 0
             },
-        })
+            catalog_gen: if v9 { rd_u64(b, o) } else { 0 },
+            index_gen: if v9 { rd_u64(b, o + 8) } else { 0 },
+            manifest_gen: if v9 { rd_u64(b, o + 16) } else { 0 },
+            cache_gen: if v9 { rd_u64(b, o + 24) } else { 0 },
+            free: if v9 {
+                RunPtr::read(b, o + 32)
+            } else {
+                RunPtr::default()
+            },
+            keys: if v9 {
+                RunPtr::read(b, o + 64)
+            } else {
+                RunPtr::default()
+            },
+            bm25: if v9 {
+                RunPtr::read(b, o + 96)
+            } else {
+                RunPtr::default()
+            },
+            vec_col: if v9 {
+                RunPtr::read(b, o + 128)
+            } else {
+                RunPtr::default()
+            },
+            catalog_delta: if v9 {
+                RunPtr::read(b, o + 160)
+            } else {
+                RunPtr::default()
+            },
+        };
+        if v9 {
+            // Canonical-form check: re-serializing the parsed fields must
+            // reproduce bytes 0..508 exactly (seal region aside). This
+            // rejects nonzero reserved bytes, a stray legacy CRC, or any
+            // byte the parser would otherwise ignore, so the seal (which
+            // is computed over the canonical bytes) really covers every
+            // byte that's there.
+            let canon = h.to_page();
+            let same = (0..V9_CRC_OFF)
+                .filter(|i| !(HEADER_SEAL_NONCE_OFF..HEADER_SEAL_TAG_OFF + TAG_LEN).contains(i))
+                .all(|i| canon[i] == b[i]);
+            if !same {
+                return Err(MnemoError::Invalid(
+                    "v9 header is not in canonical form (reserved bytes set?)".into(),
+                ));
+            }
+        }
+        Ok(h)
+    }
+
+    /// v9: write the generation fields, the five run pointers and the CRC
+    /// into a page whose bytes 0..294 `to_page` has already filled. The
+    /// seal region (242..270) is left zero here; `apply_seal` fills it and
+    /// recomputes the CRC.
+    fn write_v9_tail(&self, b: &mut [u8; PAGE_SIZE]) {
+        b[HEADER_CACHE_START_OFF..HEADER_CACHE_START_OFF + 8]
+            .copy_from_slice(&self.cache_start.to_le_bytes());
+        b[HEADER_CACHE_PAGES_OFF..HEADER_CACHE_PAGES_OFF + 8]
+            .copy_from_slice(&self.cache_pages.to_le_bytes());
+        b[HEADER_CACHE_LEN_OFF..HEADER_CACHE_LEN_OFF + 8]
+            .copy_from_slice(&self.cache_len.to_le_bytes());
+        let o = V9_FIELDS_OFF;
+        b[o..o + 8].copy_from_slice(&self.catalog_gen.to_le_bytes());
+        b[o + 8..o + 16].copy_from_slice(&self.index_gen.to_le_bytes());
+        b[o + 16..o + 24].copy_from_slice(&self.manifest_gen.to_le_bytes());
+        b[o + 24..o + 32].copy_from_slice(&self.cache_gen.to_le_bytes());
+        self.free.write(b, o + 32);
+        self.keys.write(b, o + 64);
+        self.bm25.write(b, o + 96);
+        self.vec_col.write(b, o + 128);
+        self.catalog_delta.write(b, o + 160);
+        let crc = crate::wal::checksum(&b[0..V9_CRC_OFF]);
+        b[V9_CRC_OFF..V9_CRC_OFF + 4].copy_from_slice(&crc.to_le_bytes());
+    }
+
+    /// v9 seal AAD: the prefix, then the canonical bytes 0..508 with the
+    /// seal nonce and tag zeroed (which `to_page` leaves them).
+    fn seal_aad_v9(&self) -> Vec<u8> {
+        let canon = self.to_page();
+        let mut aad = Vec::with_capacity(SEAL_AAD_PREFIX_V9.len() + V9_CRC_OFF);
+        aad.extend_from_slice(SEAL_AAD_PREFIX_V9);
+        aad.extend_from_slice(&canon[0..V9_CRC_OFF]);
+        aad
     }
 
     /// Validate the v7 header seal under the given DEK. Recomputes the AAD
@@ -392,7 +589,11 @@ impl Header {
         }
         let nonce = self.seal_nonce.ok_or(MnemoError::HeaderTampered)?;
         let tag = self.seal_tag.ok_or(MnemoError::HeaderTampered)?;
-        let aad = header_seal_aad(self);
+        let aad = if self.version >= VERSION_V9 {
+            self.seal_aad_v9()
+        } else {
+            header_seal_aad(self)
+        };
         // AES-GCM over empty plaintext yields a 16-byte tag; decryption
         // takes the tag as the ciphertext input and returns empty bytes
         // on success.
@@ -414,7 +615,11 @@ impl Header {
             return Ok(());
         }
         let nonce = crate::crypto::random_nonce();
-        let aad = header_seal_aad(self);
+        let aad = if self.version >= VERSION_V9 {
+            self.seal_aad_v9()
+        } else {
+            header_seal_aad(self)
+        };
         let tag_buf = crate::crypto::aead_encrypt(dek, &nonce, &[], &aad)?;
         if tag_buf.len() != TAG_LEN {
             return Err(MnemoError::Crypto(
@@ -425,6 +630,12 @@ impl Header {
         tag.copy_from_slice(&tag_buf);
         page[HEADER_SEAL_NONCE_OFF..HEADER_SEAL_NONCE_OFF + NONCE_LEN].copy_from_slice(&nonce);
         page[HEADER_SEAL_TAG_OFF..HEADER_SEAL_TAG_OFF + TAG_LEN].copy_from_slice(&tag);
+        if self.version >= VERSION_V9 {
+            // The v9 CRC covers the seal bytes too; recompute it now that
+            // they're written.
+            let crc = crate::wal::checksum(&page[0..V9_CRC_OFF]);
+            page[V9_CRC_OFF..V9_CRC_OFF + 4].copy_from_slice(&crc.to_le_bytes());
+        }
         self.seal_nonce = Some(nonce);
         self.seal_tag = Some(tag);
         Ok(())
@@ -434,3 +645,154 @@ impl Header {
 // Compile-time sanity: the header layout must fit inside one page.
 const _: () = assert!(HEADER_CRC_OFF + 4 <= PAGE_SIZE);
 const _: () = assert!(TAG_LEN == 16);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::{KEY_LEN, SALT_LEN};
+
+    fn v9_header() -> Header {
+        Header {
+            version: VERSION_V9,
+            page_size: PAGE_SIZE as u32,
+            flags: FLAG_ENCRYPTED,
+            dimensions: 384,
+            created_at: 1_700_000_000,
+            write_counter: 7,
+            next_page: 42,
+            catalog_start: 20,
+            catalog_pages: 1,
+            catalog_len: 300,
+            vector_count: 5,
+            m_cost: 8,
+            t_cost: 1,
+            p_cost: 1,
+            salt: [3u8; SALT_LEN],
+            dek_nonce: [4u8; NONCE_LEN],
+            wrapped_dek: [5u8; WRAPPED_DEK_LEN],
+            index_start: 0,
+            index_pages: 0,
+            index_len: 0,
+            wal_start: 1,
+            wal_pages: 8,
+            wal_seq: 9,
+            manifest_start: 21,
+            manifest_pages: 1,
+            manifest_len: 90,
+            seal_nonce: None,
+            seal_tag: None,
+            cache_start: 0,
+            cache_pages: 0,
+            cache_len: 0,
+            catalog_gen: 9,
+            index_gen: 0,
+            manifest_gen: 9,
+            cache_gen: 0,
+            free: RunPtr {
+                start: 30,
+                pages: 1,
+                len: 40,
+                gen: 9,
+            },
+            keys: RunPtr {
+                start: 31,
+                pages: 1,
+                len: 60,
+                gen: 3,
+            },
+            bm25: RunPtr::default(),
+            vec_col: RunPtr::default(),
+            catalog_delta: RunPtr::default(),
+        }
+    }
+
+    fn sealed(h: &mut Header, dek: &[u8; KEY_LEN]) -> [u8; PAGE_SIZE] {
+        let mut page = h.to_page();
+        h.apply_seal(&mut page, dek).unwrap();
+        page
+    }
+
+    /// Re-CRC a tampered v9 page, the way an attacker with write access
+    /// would, so the test reaches the seal rather than the CRC.
+    fn recrc(page: &mut [u8; PAGE_SIZE]) {
+        let crc = crate::wal::checksum(&page[0..V9_CRC_OFF]);
+        page[V9_CRC_OFF..V9_CRC_OFF + 4].copy_from_slice(&crc.to_le_bytes());
+    }
+
+    #[test]
+    fn v9_header_round_trips_and_fits_in_512_bytes() {
+        let dek = [9u8; KEY_LEN];
+        let mut h = v9_header();
+        let page = sealed(&mut h, &dek);
+        assert!(page[V9_HEADER_LEN..].iter().all(|&b| b == 0));
+        let back = Header::from_page(&page).unwrap();
+        back.validate_seal(&dek).unwrap();
+        assert_eq!(back.free, h.free);
+        assert_eq!(back.keys, h.keys);
+        assert_eq!(back.catalog_gen, 9);
+        assert_eq!(back.manifest_gen, 9);
+        assert_eq!(back.dimensions, 384);
+    }
+
+    #[test]
+    fn v9_seal_covers_fields_the_v8_seal_left_out() {
+        let dek = [9u8; KEY_LEN];
+        let mut h = v9_header();
+        let page = sealed(&mut h, &dek);
+        // dimensions (14..18), flags (10..14), m_cost (74..78), a salt byte
+        // (86), a free-list generation byte, a key-slot pointer byte.
+        for off in [
+            14usize,
+            10,
+            74,
+            86,
+            V9_FIELDS_OFF + 32 + 24,
+            V9_FIELDS_OFF + 64,
+        ] {
+            let mut t = page;
+            t[off] ^= 1;
+            recrc(&mut t);
+            let parsed = Header::from_page(&t).unwrap();
+            assert!(
+                matches!(parsed.validate_seal(&dek), Err(MnemoError::HeaderTampered)),
+                "byte {off} not covered by the v9 seal"
+            );
+        }
+    }
+
+    #[test]
+    fn v9_torn_or_noncanonical_header_is_rejected() {
+        let dek = [9u8; KEY_LEN];
+        let mut h = v9_header();
+        let page = sealed(&mut h, &dek);
+        // A flipped seal byte without re-CRC trips the CRC (it covers the seal).
+        let mut t = page;
+        t[HEADER_SEAL_TAG_OFF] ^= 1;
+        assert!(matches!(
+            Header::from_page(&t),
+            Err(MnemoError::HeaderChecksum)
+        ));
+        // A reserved byte set (re-CRC'd) is rejected as non-canonical.
+        let mut t = page;
+        t[V9_RESERVED_OFF] = 1;
+        recrc(&mut t);
+        assert!(matches!(Header::from_page(&t), Err(MnemoError::Invalid(_))));
+        // So is a value in the legacy v8 CRC slot.
+        let mut t = page;
+        t[HEADER_CRC_OFF] = 1;
+        recrc(&mut t);
+        assert!(matches!(Header::from_page(&t), Err(MnemoError::Invalid(_))));
+    }
+
+    #[test]
+    fn versions_past_v9_are_refused() {
+        let dek = [9u8; KEY_LEN];
+        let mut h = v9_header();
+        let mut page = sealed(&mut h, &dek);
+        page[4..6].copy_from_slice(&10u16.to_le_bytes());
+        assert!(matches!(
+            Header::from_page(&page),
+            Err(MnemoError::UnsupportedVersion(10))
+        ));
+    }
+}

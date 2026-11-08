@@ -33,8 +33,12 @@ use ulid::Ulid;
 use crate::crypto::{self, KdfParams};
 use crate::embed::{self, Embedder};
 use crate::error::{MnemoError, Result};
-use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED_DEK_LEN};
+use crate::format::{
+    Header, RunPtr, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, VERSION_V9, WRAPPED_DEK_LEN,
+};
+use crate::freelist::FreeList;
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
+use crate::keyslot::{KeySlot as KeySlotEntry, KeySlotRun};
 use crate::memory::{
     self, status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind,
     EssenceScope, EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, Memory,
@@ -410,6 +414,14 @@ pub struct MnemoConfig {
     ///
     /// Apply to an already-open database with [`Mnemo::set_max_snapshots`].
     pub max_snapshots: usize,
+    /// FMT-9 development switch: the on-disk format a new file is created
+    /// in. `0` (the default) means the current default, v8, unless the
+    /// `MNEMO_DEV_FORMAT=9` environment variable is set; `8` or `9` pick
+    /// one explicitly. **Not a stable API:** v9 is under construction until
+    /// PR 9f, its layout can change between the 9a–9f PRs, and 9f removes
+    /// this field when v9 becomes the default.
+    #[doc(hidden)]
+    pub format_version: u16,
 }
 
 impl Default for MnemoConfig {
@@ -419,7 +431,22 @@ impl Default for MnemoConfig {
             kdf: KdfParams::secure(),
             wal_pages_initial: DEFAULT_WAL_PAGES,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
+            format_version: 0,
         }
+    }
+}
+
+/// FMT-9: resolve [`MnemoConfig::format_version`] for a new file.
+fn resolve_format_version(requested: u16) -> Result<u16> {
+    match requested {
+        0 => Ok(match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
+            Ok("9") => VERSION_V9,
+            _ => VERSION,
+        }),
+        VERSION | VERSION_V9 => Ok(requested),
+        v => Err(MnemoError::Invalid(format!(
+            "format_version {v} is not supported for new files (use 8 or 9)"
+        ))),
     }
 }
 
@@ -444,6 +471,11 @@ struct CatalogEntry {
     accessed_at: i64,
     /// How many times `recall` has surfaced this memory.
     access_count: u32,
+    /// FMT-9: the generation the record's pages were sealed under (v9 page
+    /// AAD). `0`, and left out of the encoding, on v8 files, so a v8
+    /// catalog is byte-for-byte what v0.10 writes.
+    #[serde(default, skip_serializing_if = "crate::format::is_zero_u64")]
+    gen: u64,
 }
 
 /// Frozen v4 catalog entry shape, used only by the v4→v5 migration path in
@@ -487,6 +519,26 @@ struct Snapshot {
     index_pages: u64,
     index_len: u64,
     memory_count: u64,
+    /// FMT-9: generations of the catalog and index runs (v9 only; `None`,
+    /// and left out of the encoding, on v8 files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    gens: Option<SnapshotGens>,
+}
+
+/// FMT-9: the generations a v9 snapshot's runs were sealed under.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+struct SnapshotGens {
+    catalog: u64,
+    index: u64,
+}
+
+impl Snapshot {
+    fn catalog_gen(&self) -> u64 {
+        self.gens.map_or(0, |g| g.catalog)
+    }
+    fn index_gen(&self) -> u64 {
+        self.gens.map_or(0, |g| g.index)
+    }
 }
 
 /// A restorable point in a database's history — see [`Mnemo::snapshots`].
@@ -870,6 +922,25 @@ pub struct Mnemo {
     superseded: Option<std::collections::HashSet<u128>>,
     /// R-004.2: thread layers + onboarding ids, built by the same lazy scan.
     layers: Option<LayerCache>,
+    /// FMT-9 (a): the committed free list (v9; always empty on v8). Pages
+    /// allocated from it since the last commit are already removed.
+    free: FreeList,
+    /// FMT-9 (a): runs this transaction stopped referencing (overwritten
+    /// or deleted records, tombstoned cache entries, a relocated WAL
+    /// region). The next commit adds them to the free list, freed at its
+    /// own transaction id.
+    pending_free: Vec<(u64, u64)>,
+    /// FMT-9 (a): the free list changed (an allocation took pages from it)
+    /// and must be rewritten by the next commit.
+    free_dirty: bool,
+    /// FMT-9 (b): the key-slot run (v9; empty until Phase 13.2 adds slots).
+    key_slots: KeySlotRun,
+    /// FMT-9 (b): `key_slots` changed since the last commit.
+    dirty_keys: bool,
+    /// FMT-9: this writable session has burned a transaction id with a
+    /// durable header-only commit (`ensure_gen_lease`), so the generations
+    /// its pages carry can't repeat ones a crashed earlier session used.
+    gen_leased: bool,
 }
 
 /// Composite key for the lazy `key_index` on `Mnemo`. A slot is identified
@@ -983,21 +1054,34 @@ fn is_lock_conflict(e: &std::io::Error) -> bool {
 }
 
 /// Read a run of consecutive encrypted pages and concatenate their plaintext.
-fn read_run_bytes(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result<Vec<u8>> {
+/// `gen` is the generation the run's pointer expects (v9; `0` before).
+fn read_run_bytes(
+    pager: &mut Pager,
+    start: u64,
+    pages: u64,
+    len: u64,
+    gen: u64,
+) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(len as usize);
     for i in 0..pages {
-        buf.extend_from_slice(&pager.read_page(start + i)?);
+        buf.extend_from_slice(&pager.read_page(start + i, gen)?);
     }
     buf.truncate(len as usize);
     Ok(buf)
 }
 
 /// Load a v5+ catalog run (an empty `pages` yields an empty catalog).
-fn load_catalog(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result<Vec<CatalogEntry>> {
+fn load_catalog(
+    pager: &mut Pager,
+    start: u64,
+    pages: u64,
+    len: u64,
+    gen: u64,
+) -> Result<Vec<CatalogEntry>> {
     if pages == 0 {
         return Ok(Vec::new());
     }
-    let buf = read_run_bytes(pager, start, pages, len)?;
+    let buf = read_run_bytes(pager, start, pages, len, gen)?;
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
 }
 
@@ -1012,7 +1096,7 @@ fn load_catalog_v4(
     if pages == 0 {
         return Ok(Vec::new());
     }
-    let buf = read_run_bytes(pager, start, pages, len)?;
+    let buf = read_run_bytes(pager, start, pages, len, 0)?;
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
 }
 
@@ -1029,7 +1113,7 @@ fn migrate_v4_catalog(pager: &mut Pager, v4: Vec<CatalogEntryV4>) -> Result<Vec<
         } else {
             let mut buf = Vec::with_capacity(e.len as usize);
             for i in 0..e.page_count as u64 {
-                buf.extend_from_slice(&pager.read_page(e.start_page + i)?);
+                buf.extend_from_slice(&pager.read_page(e.start_page + i, 0)?);
             }
             buf.truncate(e.len as usize);
             let mem: Memory = rmp_serde::from_slice(&buf)
@@ -1044,17 +1128,24 @@ fn migrate_v4_catalog(pager: &mut Pager, v4: Vec<CatalogEntryV4>) -> Result<Vec<
             deleted: e.deleted,
             accessed_at,
             access_count,
+            gen: 0,
         });
     }
     Ok(out)
 }
 
 /// Load the snapshot manifest (an empty `pages` yields an empty manifest).
-fn load_manifest(pager: &mut Pager, start: u64, pages: u64, len: u64) -> Result<Vec<Snapshot>> {
+fn load_manifest(
+    pager: &mut Pager,
+    start: u64,
+    pages: u64,
+    len: u64,
+    gen: u64,
+) -> Result<Vec<Snapshot>> {
     if pages == 0 {
         return Ok(Vec::new());
     }
-    let buf = read_run_bytes(pager, start, pages, len)?;
+    let buf = read_run_bytes(pager, start, pages, len, gen)?;
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
 }
 
@@ -1066,11 +1157,12 @@ fn load_cache_directory(
     start: u64,
     pages: u64,
     len: u64,
+    gen: u64,
 ) -> Result<Vec<CacheDirectoryEntry>> {
     if pages == 0 {
         return Ok(Vec::new());
     }
-    let buf = read_run_bytes(pager, start, pages, len)?;
+    let buf = read_run_bytes(pager, start, pages, len, gen)?;
     rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
 }
 
@@ -1080,12 +1172,13 @@ fn load_index(
     start: u64,
     pages: u64,
     len: u64,
+    gen: u64,
     dims: usize,
 ) -> Result<Option<IvfPqIndex>> {
     if pages == 0 {
         return Ok(None);
     }
-    let buf = read_run_bytes(pager, start, pages, len)?;
+    let buf = read_run_bytes(pager, start, pages, len, gen)?;
     let mut idx: IvfPqIndex =
         rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
     if idx.dims() != dims {
@@ -1095,6 +1188,29 @@ fn load_index(
     }
     idx.rebuild_assignment();
     Ok(Some(idx))
+}
+
+/// FMT-9 (a): load the v9 free list (an empty pointer yields an empty list).
+fn load_free_list(pager: &mut Pager, ptr: RunPtr) -> Result<FreeList> {
+    if ptr.is_empty() {
+        return Ok(FreeList::default());
+    }
+    let buf = read_run_bytes(pager, ptr.start, ptr.pages, ptr.len, ptr.gen)?;
+    let runs: Vec<crate::freelist::FreeRun> =
+        rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+    FreeList::from_runs(runs)
+}
+
+/// FMT-9 (b): load the v9 key-slot run (an empty pointer yields no slots).
+fn load_key_slots(pager: &mut Pager, ptr: RunPtr) -> Result<KeySlotRun> {
+    if ptr.is_empty() {
+        return Ok(KeySlotRun::default());
+    }
+    let buf = read_run_bytes(pager, ptr.start, ptr.pages, ptr.len, ptr.gen)?;
+    let run: KeySlotRun =
+        rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+    run.validate()?;
+    Ok(run)
 }
 
 /// True if a memory's metadata marks it as the canonical onboarding manifest
@@ -1228,6 +1344,17 @@ impl IngestPlan {
 
     fn text_count(&self) -> usize {
         self.pending.iter().map(|p| p.parts.len()).sum()
+    }
+}
+
+/// PERF-1 / FMT-9: was this catalog row written after the persisted index
+/// run? v8 allocates pages monotonically, so a record past the run's first
+/// page is newer. v9 reuses pages, so it compares generations instead.
+fn written_after_index(e: &CatalogEntry, v9: bool, index_start: u64, index_gen: u64) -> bool {
+    if v9 {
+        e.gen > index_gen
+    } else {
+        e.start_page > index_start
     }
 }
 
@@ -1386,6 +1513,7 @@ impl Mnemo {
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
         }
+        let version = resolve_format_version(config.format_version)?;
         // Exclusive lock covers the write path; second writer sees `Locked`.
         let file = open_with_lock(&path, /*write=*/ true, /*create=*/ true)?;
 
@@ -1401,7 +1529,7 @@ impl Mnemo {
         wrapped_dek.copy_from_slice(&wrapped);
 
         let mut header = Header {
-            version: VERSION,
+            version,
             page_size: PAGE_SIZE as u32,
             flags: FLAG_ENCRYPTED,
             dimensions: config.dimensions as u32,
@@ -1440,9 +1568,19 @@ impl Mnemo {
             cache_start: 0,
             cache_pages: 0,
             cache_len: 0,
+            // FMT-9 v9 fields; all zero on a fresh file (and unused on v8).
+            catalog_gen: 0,
+            index_gen: 0,
+            manifest_gen: 0,
+            cache_gen: 0,
+            free: RunPtr::default(),
+            keys: RunPtr::default(),
+            bm25: RunPtr::default(),
+            vec_col: RunPtr::default(),
+            catalog_delta: RunPtr::default(),
         };
 
-        let mut pager = Pager::new(file, dek, 0, VERSION);
+        let mut pager = Pager::new(file, dek, 0, version);
         let mut page = header.to_page();
         header.apply_seal(&mut page, pager.dek())?;
         pager.write_raw(0, &page)?;
@@ -1477,6 +1615,12 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            free: FreeList::default(),
+            pending_free: Vec::new(),
+            free_dirty: false,
+            key_slots: KeySlotRun::default(),
+            dirty_keys: false,
+            gen_leased: false,
         })
     }
 
@@ -1604,6 +1748,7 @@ impl Mnemo {
                     header.catalog_start,
                     header.catalog_pages,
                     header.catalog_len,
+                    header.catalog_gen,
                 )?,
                 false,
             )
@@ -1628,6 +1773,7 @@ impl Mnemo {
                 header.index_start,
                 header.index_pages,
                 header.index_len,
+                header.index_gen,
                 dimensions,
             )?
         } else {
@@ -1639,6 +1785,7 @@ impl Mnemo {
             header.manifest_start,
             header.manifest_pages,
             header.manifest_len,
+            header.manifest_gen,
         )?;
 
         // === v5→v6 page-encryption migration =============================
@@ -1656,8 +1803,8 @@ impl Mnemo {
                     continue;
                 }
                 for i in 0..e.page_count as u64 {
-                    let payload = pager.read_page(e.start_page + i)?;
-                    pager.write_page(e.start_page + i, &payload)?;
+                    let payload = pager.read_page(e.start_page + i, 0)?;
+                    pager.write_page(e.start_page + i, 0, &payload)?;
                 }
             }
             pager.set_version(6);
@@ -1724,8 +1871,13 @@ impl Mnemo {
             header.cache_start,
             header.cache_pages,
             header.cache_len,
+            header.cache_gen,
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
+        // FMT-9 (a)/(b): the free list and key-slot run (empty pointers on
+        // v8, so these don't touch the disk there).
+        let free = load_free_list(&mut pager, header.free)?;
+        let key_slots = load_key_slots(&mut pager, header.keys)?;
 
         Ok(Mnemo {
             pager,
@@ -1765,6 +1917,12 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            free,
+            pending_free: Vec::new(),
+            free_dirty: false,
+            key_slots,
+            dirty_keys: false,
+            gen_leased: false,
         })
     }
 
@@ -1870,6 +2028,7 @@ impl Mnemo {
             header.catalog_start,
             header.catalog_pages,
             header.catalog_len,
+            header.catalog_gen,
         )?;
         let index = build_id_index(&catalog);
         // PERF-1 step 3: the ANN index loads on first use, not at open.
@@ -1880,14 +2039,18 @@ impl Mnemo {
             header.manifest_start,
             header.manifest_pages,
             header.manifest_len,
+            header.manifest_gen,
         )?;
         let cache_dir = load_cache_directory(
             &mut pager,
             header.cache_start,
             header.cache_pages,
             header.cache_len,
+            header.cache_gen,
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
+        let free = load_free_list(&mut pager, header.free)?;
+        let key_slots = load_key_slots(&mut pager, header.keys)?;
 
         Ok(Mnemo {
             pager,
@@ -1921,6 +2084,12 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            free,
+            pending_free: Vec::new(),
+            free_dirty: false,
+            key_slots,
+            dirty_keys: false,
+            gen_leased: false,
         })
     }
 
@@ -1948,22 +2117,119 @@ impl Mnemo {
 
     // --- internal page/record helpers -------------------------------------
 
-    fn write_record(&mut self, bytes: &[u8]) -> Result<(u64, u32)> {
+    /// FMT-9: true for a v9 file (page reuse, generations in the AAD).
+    fn is_v9(&self) -> bool {
+        self.header.version >= VERSION_V9
+    }
+
+    /// FMT-9: the generation for pages written now: the id of the
+    /// transaction that will commit them, or a lower bound on it (a WAL
+    /// relocation inside the next flush can push the commit id higher).
+    /// Either way it's strictly greater than the generation any earlier
+    /// write to a reused page carried, which is all rollback protection
+    /// needs: a page is reused only after the transaction that freed it
+    /// committed, and that transaction came after the one that wrote it.
+    /// `0` on v8, whose page AAD has no generation.
+    fn write_gen(&self) -> u64 {
+        if self.is_v9() {
+            self.header.wal_seq + 1
+        } else {
+            0
+        }
+    }
+
+    /// FMT-9 (a): the oldest retained snapshot's transaction id
+    /// (`u64::MAX` when none is retained). Only pages freed at or before it
+    /// may be reused.
+    fn min_snapshot_txn(&self) -> u64 {
+        self.manifest
+            .iter()
+            .map(|s| s.txn_id)
+            .min()
+            .unwrap_or(u64::MAX)
+    }
+
+    /// Allocate `n` contiguous pages. v9 takes them from the free list when
+    /// an eligible run fits (freed by a committed transaction, and not
+    /// referenced by a retained snapshot); otherwise, and always on v8, the
+    /// file grows.
+    fn alloc_pages(&mut self, n: u64) -> u64 {
+        if self.is_v9() {
+            let committed = self.header.wal_seq;
+            let min_snap = self.min_snapshot_txn();
+            if let Some(p) = self.free.alloc(n, committed, min_snap) {
+                self.free_dirty = true;
+                return p;
+            }
+        }
+        let p = self.header.next_page;
+        self.header.next_page += n;
+        p
+    }
+
+    /// FMT-9 (a): record that the current transaction stopped referencing
+    /// `n` pages from `page`. The next commit frees them. No-op on v8,
+    /// which never reuses a page.
+    fn release_pages(&mut self, page: u64, n: u64) {
+        if self.is_v9() && n > 0 && page != 0 {
+            self.pending_free.push((page, n));
+        }
+    }
+
+    /// FMT-9: before this session seals its first v9 page, commit a
+    /// header-only transaction that bumps `wal_seq`.
+    ///
+    /// A page's generation is the id of the transaction that writes it,
+    /// and that id is `wal_seq + 1`, which is only made durable by the
+    /// commit. If a session crashes before committing, its pages (orphan
+    /// data pages, or uncommitted WAL frames) carry an id the next session
+    /// would hand out again, for the same pages (allocation is
+    /// deterministic). An attacker holding a copy of the crashed file could
+    /// then swap an orphan back in under a matching generation. Burning
+    /// one id durably per writable session rules that out: every id this
+    /// session uses is above every id any earlier session used. Costs one
+    /// small commit per session, on its first write only.
+    fn ensure_gen_lease(&mut self) -> Result<()> {
+        if !self.is_v9() || self.gen_leased || self.read_only {
+            return Ok(());
+        }
+        self.header.wal_seq += 1;
+        let wal_start = self.header.wal_start;
+        self.relocate_header_through_wal(wal_start)?;
+        self.gen_leased = true;
+        Ok(())
+    }
+
+    /// Write a serialized record (memory or cache entry) to fresh pages.
+    /// Returns `(start_page, page_count, generation)`.
+    fn write_record(&mut self, bytes: &[u8]) -> Result<(u64, u32, u64)> {
+        self.ensure_gen_lease()?;
         let pc = bytes.len().div_ceil(PAYLOAD).max(1);
-        let start = self.header.next_page;
-        self.header.next_page += pc as u64;
+        let start = self.alloc_pages(pc as u64);
+        let gen = self.write_gen();
         for i in 0..pc {
             let lo = i * PAYLOAD;
             let hi = ((i + 1) * PAYLOAD).min(bytes.len());
-            self.pager.write_page(start + i as u64, &bytes[lo..hi])?;
+            self.pager
+                .write_page(start + i as u64, gen, &bytes[lo..hi])?;
         }
-        Ok((start, pc as u32))
+        Ok((start, pc as u32, gen))
+    }
+
+    /// Read a record run of `pages` pages at `start`, sealed under `gen`.
+    fn read_record_run(&mut self, start: u64, pages: u32, len: u32, gen: u64) -> Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(len as usize);
+        for i in 0..pages as u64 {
+            buf.extend_from_slice(&self.pager.read_page(start + i, gen)?);
+        }
+        buf.truncate(len as usize);
+        Ok(buf)
     }
 
     fn read_record(&mut self, e: &CatalogEntry) -> Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(e.len as usize);
         for i in 0..e.page_count as u64 {
-            buf.extend_from_slice(&self.pager.read_page(e.start_page + i)?);
+            buf.extend_from_slice(&self.pager.read_page(e.start_page + i, e.gen)?);
         }
         buf.truncate(e.len as usize);
         Ok(buf)
@@ -2021,7 +2287,7 @@ impl Mnemo {
             }
         }
         let bytes = rmp_serde::to_vec(&m).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-        let (start, pc) = self.write_record(&bytes)?;
+        let (start, pc, gen) = self.write_record(&bytes)?;
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
         let (prev_accessed, prev_count) = match self.index.get(id_u, &self.catalog) {
@@ -2039,9 +2305,20 @@ impl Mnemo {
             deleted: false,
             accessed_at: prev_accessed,
             access_count: prev_count,
+            gen,
         };
         match self.index.get(id_u, &self.catalog) {
-            Some(idx) => self.catalog[idx] = entry,
+            Some(idx) => {
+                // FMT-9 (a): the overwritten version's pages are freed by
+                // this transaction's commit. A tombstone's pages were
+                // already freed when its delete committed.
+                let old = &self.catalog[idx];
+                if !old.deleted {
+                    let (p, c) = (old.start_page, old.page_count as u64);
+                    self.release_pages(p, c);
+                }
+                self.catalog[idx] = entry;
+            }
             None => {
                 self.index.insert(id_u, self.catalog.len(), &self.catalog);
                 self.catalog.push(entry);
@@ -2261,6 +2538,8 @@ impl Mnemo {
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
+            let (p, c) = (entry.start_page, entry.page_count as u64);
+            self.release_pages(p, c);
         }
         if let Some(ann) = &mut self.ann {
             if ann.contains(id.0) {
@@ -4107,6 +4386,90 @@ impl Mnemo {
         Ok(report)
     }
 
+    /// **Not a stable API.** The file's on-disk format version.
+    #[doc(hidden)]
+    pub fn __format_version(&self) -> u16 {
+        self.header.version
+    }
+
+    /// **Not a stable API.** FMT-9 (a): the committed free list as
+    /// `(freed_at_txn, first_page, page_count)` runs, plus the number of
+    /// runs pending for the next commit.
+    #[doc(hidden)]
+    pub fn __free_list(&self) -> (Vec<(u64, u64, u64)>, usize) {
+        (
+            self.free
+                .to_runs()
+                .into_iter()
+                .map(|r| (r.freed_at, r.page, r.count))
+                .collect(),
+            self.pending_free.len(),
+        )
+    }
+
+    /// **Not a stable API.** FMT-9: where a memory's record lives:
+    /// `(first_page, page_count, generation)`.
+    #[doc(hidden)]
+    pub fn __record_location(&self, id: &Ulid) -> Option<(u64, u32, u64)> {
+        let idx = self.index.get(id.0, &self.catalog)?;
+        let e = &self.catalog[idx];
+        (!e.deleted).then_some((e.start_page, e.page_count, e.gen))
+    }
+
+    /// **Not a stable API.** FMT-9: the header's next unallocated page.
+    #[doc(hidden)]
+    pub fn __next_page(&self) -> u64 {
+        self.header.next_page
+    }
+
+    /// **Not a stable API.** FMT-9 (b): add a placeholder key slot (its
+    /// wrapped DEK is random bytes, so it unlocks nothing) to exercise the
+    /// key-slot run until Phase 13.2 adds real slots. v9 only.
+    #[doc(hidden)]
+    pub fn __add_key_slot_for_testing(&mut self, label: &str) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if !self.is_v9() {
+            return Err(MnemoError::Invalid("key slots need a v9 file".into()));
+        }
+        let mut wrapped = vec![0u8; WRAPPED_DEK_LEN];
+        wrapped[..crypto::KEY_LEN].copy_from_slice(&crypto::random_dek()[..]);
+        self.key_slots.slots.push(KeySlotEntry {
+            label: label.to_string(),
+            role: 0,
+            m_cost: KdfParams::raw_key().m_cost,
+            t_cost: KdfParams::raw_key().t_cost,
+            p_cost: KdfParams::raw_key().p_cost,
+            salt: crypto::random_salt(),
+            dek_nonce: crypto::random_nonce(),
+            wrapped_dek: wrapped,
+        });
+        self.dirty_keys = true;
+        Ok(())
+    }
+
+    /// **Not a stable API.** FMT-9 (b): the key-slot labels.
+    #[doc(hidden)]
+    pub fn __key_slot_labels(&self) -> Vec<String> {
+        self.key_slots
+            .slots
+            .iter()
+            .map(|s| s.label.clone())
+            .collect()
+    }
+
+    /// **Not a stable API.** FMT-9 (b): the key-slot run's pointer
+    /// `(first_page, page_count, generation)`.
+    #[doc(hidden)]
+    pub fn __key_slot_run(&self) -> (u64, u64, u64) {
+        (
+            self.header.keys.start,
+            self.header.keys.pages,
+            self.header.keys.gen,
+        )
+    }
+
     /// FMT-9a measurement hook: the ANN shortlist (candidate ids, nearest
     /// first by PQ distance) that recall would rerank, at the given or the
     /// index's effective `n_probe` / `n_rerank`. Empty without an index.
@@ -4733,7 +5096,11 @@ impl Mnemo {
     ///
     /// The work is bounded by [`INDEX_PERSIST_EVERY_CHANGES`] in the common
     /// case, since a writer persists the index at least that often.
-    fn reconcile_ann_with_catalog(&mut self, index_start: u64) -> Result<()> {
+    ///
+    /// **v9:** pages are reused, so "a page past the run" no longer means
+    /// "written after it". A v9 record is newer than the index run when its
+    /// generation is greater than the run's (`index_gen`).
+    fn reconcile_ann_with_catalog(&mut self, index_start: u64, index_gen: u64) -> Result<()> {
         if self.ann.is_none() {
             return Ok(());
         }
@@ -4753,10 +5120,11 @@ impl Mnemo {
             }
         }
         // 2. Re-add records written after the index run.
+        let v9 = self.is_v9();
         let pending: Vec<CatalogEntry> = self
             .catalog
             .iter()
-            .filter(|e| !e.deleted && e.start_page > index_start)
+            .filter(|e| !e.deleted && written_after_index(e, v9, index_start, index_gen))
             .cloned()
             .collect();
         for e in &pending {
@@ -4797,10 +5165,11 @@ impl Mnemo {
             self.header.index_start,
             self.header.index_pages,
             self.header.index_len,
+            self.header.index_gen,
             self.dimensions,
         )?;
-        let index_start = self.header.index_start;
-        self.reconcile_ann_with_catalog(index_start)?;
+        let (index_start, index_gen) = (self.header.index_start, self.header.index_gen);
+        self.reconcile_ann_with_catalog(index_start, index_gen)?;
         let non_facts: Vec<u128> = match &self.layers {
             Some(l) => l
                 .essence
@@ -4832,18 +5201,39 @@ impl Mnemo {
     /// append a WAL frame for each. Returns the run's `(start_page, pages)`.
     /// The pages are *not* written to their home locations here — they go to
     /// the WAL and are folded in later by [`Mnemo::checkpoint`].
-    fn seal_run(&mut self, bytes: &[u8], frames: &mut Vec<wal::Frame>) -> Result<(u64, u32)> {
+    ///
+    /// `gen` is the run's generation (v9; `0` on v8). On v9 the pages come
+    /// from the free list when an eligible run fits.
+    fn seal_run(
+        &mut self,
+        bytes: &[u8],
+        gen: u64,
+        frames: &mut Vec<wal::Frame>,
+    ) -> Result<(u64, u32)> {
         let pc = bytes.len().div_ceil(PAYLOAD).max(1);
-        let start = self.header.next_page;
-        self.header.next_page += pc as u64;
-        for i in 0..pc {
-            let lo = i * PAYLOAD;
+        let start = self.alloc_pages(pc as u64);
+        self.seal_run_at(start, pc as u64, bytes, gen, frames)?;
+        Ok((start, pc as u32))
+    }
+
+    /// Seal `bytes` into the `pages` already-allocated pages at `start`
+    /// (pages past the data are sealed empty) and append their WAL frames.
+    fn seal_run_at(
+        &mut self,
+        start: u64,
+        pages: u64,
+        bytes: &[u8],
+        gen: u64,
+        frames: &mut Vec<wal::Frame>,
+    ) -> Result<()> {
+        for i in 0..pages as usize {
+            let lo = (i * PAYLOAD).min(bytes.len());
             let hi = ((i + 1) * PAYLOAD).min(bytes.len());
             let page_no = start + i as u64;
-            let sealed = self.pager.seal_page(page_no, &bytes[lo..hi])?;
+            let sealed = self.pager.seal_page(page_no, gen, &bytes[lo..hi])?;
             frames.push((page_no, sealed.to_vec()));
         }
-        Ok((start, pc as u32))
+        Ok(())
     }
 
     /// Grow the WAL region if `frame_pages` worth of frames would not fit.
@@ -4859,6 +5249,11 @@ impl Mnemo {
         let req = need.div_ceil(PAGE_SIZE as u64);
         let new_pages = (req + req / 2 + 4).max(DEFAULT_WAL_PAGES);
         let old_wal_start = self.header.wal_start;
+        let old_wal_pages = self.header.wal_pages;
+        // FMT-9 (a): the new region always comes from the file's tail: the
+        // relocation commits a header-only transaction, so a region taken
+        // from the free list would still be listed as free in the
+        // committed free-list run.
         let new_start = self.header.next_page;
         self.header.next_page += new_pages;
         self.header.wal_start = new_start;
@@ -4870,7 +5265,11 @@ impl Mnemo {
         // overwritten) or recovers to the new state via the torn-header
         // scan in `Mnemo::open`, which prefers the highest-txn-id valid
         // committed header frame.
-        self.relocate_header_through_wal(old_wal_start)
+        self.relocate_header_through_wal(old_wal_start)?;
+        // FMT-9 (a): once the relocation has committed, the old region is
+        // unreferenced; the next commit frees it.
+        self.release_pages(old_wal_start, old_wal_pages);
+        Ok(())
     }
 
     /// Shared helper for every post-`create` page-0 commit: WAL-log the
@@ -4957,11 +5356,12 @@ impl Mnemo {
         // INDEX_PERSIST_EVERY_CHANGES of them, load it now so this flush
         // persists a current index and keeps that work bounded.
         if self.ann_unloaded && self.dirty_catalog {
-            let index_start = self.header.index_start;
+            let (index_start, index_gen) = (self.header.index_start, self.header.index_gen);
+            let v9 = self.is_v9();
             let pending = self
                 .catalog
                 .iter()
-                .filter(|e| !e.deleted && e.start_page > index_start)
+                .filter(|e| !e.deleted && written_after_index(e, v9, index_start, index_gen))
                 .count();
             if pending >= INDEX_PERSIST_EVERY_CHANGES {
                 self.ensure_ann()?;
@@ -4977,7 +5377,9 @@ impl Mnemo {
                 || self.ann.is_none()
                 || self.index_persist.commits + 1 >= INDEX_PERSIST_EVERY_COMMITS
                 || self.index_persist.changes >= INDEX_PERSIST_EVERY_CHANGES);
-        if !self.dirty_catalog && !persist_index && !self.dirty_cache {
+        let free_work =
+            self.is_v9() && (self.free_dirty || !self.pending_free.is_empty() || self.dirty_keys);
+        if !self.dirty_catalog && !persist_index && !self.dirty_cache && !free_work {
             // No control-plane changes pending. Because every `put` that
             // dirties a data page also dirties the catalog, and every
             // `cache_put` that dirties a data page also dirties
@@ -4998,6 +5400,10 @@ impl Mnemo {
         // restore point within ~256 cache writes.
         let is_memory_or_index_flush = self.dirty_catalog || persist_index;
 
+        // FMT-9: a v9 session's first sealed page needs the generation
+        // lease (normally taken by its first record write already).
+        self.ensure_gen_lease()?;
+
         // 1. Serialize control plane, ensure WAL capacity, lease counter +
         //    page slots, and persist the leased header *before* any data
         //    page hits the disk.
@@ -5009,25 +5415,41 @@ impl Mnemo {
         self.pager.flush()?;
 
         // 3. Seal the catalog / index control pages into fresh home runs.
+        //    FMT-9: `txn_id` is this transaction's id and the generation
+        //    of every run it seals. A v9 run replaced here is freed by this
+        //    same commit (`superseded`); v8 never reuses pages.
+        let txn_id = self.header.wal_seq + 1;
+        let gen = if self.is_v9() { txn_id } else { 0 };
+        let v9 = self.is_v9();
+        let mut superseded: Vec<(u64, u64)> = Vec::new();
         let mut frames: Vec<wal::Frame> = Vec::new();
         if let Some(bytes) = &ctx.cat_bytes {
-            let (start, pages) = self.seal_run(bytes, &mut frames)?;
+            if v9 && self.header.catalog_pages > 0 {
+                superseded.push((self.header.catalog_start, self.header.catalog_pages));
+            }
+            let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
             self.header.catalog_start = start;
             self.header.catalog_pages = pages as u64;
             self.header.catalog_len = bytes.len() as u64;
+            self.header.catalog_gen = gen;
         }
         if persist_index {
+            if v9 && self.header.index_pages > 0 {
+                superseded.push((self.header.index_start, self.header.index_pages));
+            }
             match &ctx.idx_bytes {
                 Some(bytes) => {
-                    let (start, pages) = self.seal_run(bytes, &mut frames)?;
+                    let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
                     self.header.index_start = start;
                     self.header.index_pages = pages as u64;
                     self.header.index_len = bytes.len() as u64;
+                    self.header.index_gen = gen;
                 }
                 None => {
                     self.header.index_start = 0;
                     self.header.index_pages = 0;
                     self.header.index_len = 0;
+                    self.header.index_gen = 0;
                 }
             }
         }
@@ -5037,12 +5459,16 @@ impl Mnemo {
         // v8+ (see `header_seal_aad`), so tampering with the pointer
         // trips the header seal on the next open.
         if self.dirty_cache {
+            if v9 && self.header.cache_pages > 0 {
+                superseded.push((self.header.cache_start, self.header.cache_pages));
+            }
             match &ctx.cache_bytes {
                 Some(bytes) if !self.cache_dir.is_empty() => {
-                    let (start, pages) = self.seal_run(bytes, &mut frames)?;
+                    let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
                     self.header.cache_start = start;
                     self.header.cache_pages = pages as u64;
                     self.header.cache_len = bytes.len() as u64;
+                    self.header.cache_gen = gen;
                 }
                 _ => {
                     // Either the directory serialized to nothing (all
@@ -5051,6 +5477,7 @@ impl Mnemo {
                     self.header.cache_start = 0;
                     self.header.cache_pages = 0;
                     self.header.cache_len = 0;
+                    self.header.cache_gen = 0;
                 }
             }
         }
@@ -5062,8 +5489,10 @@ impl Mnemo {
         //     The cap (`self.max_snapshots`) is applied to the staged local
         //     before the new entry lands, so after appending the manifest
         //     holds at most `max_snapshots` entries — the most-recent N.
-        //     `max_snapshots == 0` disables the cap. Pages referenced only
-        //     by pruned snapshots stay on disk until `compact_file`.
+        //     `max_snapshots == 0` disables the cap. On v8, pages
+        //     referenced only by pruned snapshots stay on disk until
+        //     `compact_file`; on v9 they become reusable once no retained
+        //     snapshot is older than the transaction that freed them.
         //
         //     FIX-1 R-001.8 part 3: skip the snapshot push on a
         //     cache-only flush. Snapshots don't capture the cache
@@ -5076,7 +5505,6 @@ impl Mnemo {
         //     `self.header.manifest_{start,pages,len}` (set by the
         //     last memory-touching flush, or at `create` time).
         let live = self.len() as u64;
-        let txn_id = self.header.wal_seq + 1;
         let mut manifest = self.manifest.clone();
         if is_memory_or_index_flush {
             if self.max_snapshots > 0 {
@@ -5095,16 +5523,97 @@ impl Mnemo {
                 index_pages: self.header.index_pages,
                 index_len: self.header.index_len,
                 memory_count: live,
+                gens: v9.then_some(SnapshotGens {
+                    catalog: self.header.catalog_gen,
+                    index: self.header.index_gen,
+                }),
             });
             let man_bytes =
                 rmp_serde::to_vec(&manifest).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-            let (m_start, m_pages) = self.seal_run(&man_bytes, &mut frames)?;
+            if v9 && self.header.manifest_pages > 0 {
+                superseded.push((self.header.manifest_start, self.header.manifest_pages));
+            }
+            let (m_start, m_pages) = self.seal_run(&man_bytes, gen, &mut frames)?;
             self.header.manifest_start = m_start;
             self.header.manifest_pages = m_pages as u64;
             self.header.manifest_len = man_bytes.len() as u64;
+            self.header.manifest_gen = gen;
         }
 
-        // 3c. The header is the transaction's final frame; stamp the new id
+        // 3c. FMT-9 (b): the key-slot run, rewritten copy-on-write when a
+        //     slot changed. The header seal covers its pointer.
+        if v9 && self.dirty_keys {
+            if !self.header.keys.is_empty() {
+                superseded.push((self.header.keys.start, self.header.keys.pages));
+            }
+            if self.key_slots.slots.is_empty() {
+                self.header.keys = RunPtr::default();
+            } else {
+                let bytes = rmp_serde::to_vec(&self.key_slots)
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+                let (start, pages) = self.seal_run(&bytes, gen, &mut frames)?;
+                self.header.keys = RunPtr {
+                    start,
+                    pages: pages as u64,
+                    len: bytes.len() as u64,
+                    gen,
+                };
+            }
+        }
+
+        // 3d. FMT-9 (a): the free list. Everything this transaction
+        //     stopped referencing (`pending_free`, the runs replaced above,
+        //     and the previous free-list run itself) is freed *at this
+        //     transaction's id*, in this transaction's own commit, so it
+        //     can't be reused until this commit is durable and no retained
+        //     snapshot predates it. The list is staged in a local and
+        //     adopted only once the commit succeeds (a failed flush that
+        //     is retried must not free the same runs twice).
+        let staged_free =
+            if v9 && (self.free_dirty || !self.pending_free.is_empty() || !superseded.is_empty()) {
+                let mut staged = self.free.clone();
+                for &(p, c) in self.pending_free.iter().chain(superseded.iter()) {
+                    staged.free(txn_id, p, c)?;
+                }
+                if !self.header.free.is_empty() {
+                    staged.free(txn_id, self.header.free.start, self.header.free.pages)?;
+                }
+                // Size the run with room for the one extra entry that
+                // allocating it out of the list can create (a split), then
+                // allocate it from the list (eligible runs only) or the tail.
+                let est = rmp_serde::to_vec(&staged.to_runs())
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?
+                    .len()
+                    + 64;
+                let pc = est.div_ceil(PAYLOAD).max(1) as u64;
+                let start = match staged.alloc(pc, self.header.wal_seq, self.min_snapshot_txn()) {
+                    Some(p) => p,
+                    None => {
+                        let p = self.header.next_page;
+                        self.header.next_page += pc;
+                        p
+                    }
+                };
+                let bytes = rmp_serde::to_vec(&staged.to_runs())
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+                if bytes.len() as u64 > pc * PAYLOAD as u64 {
+                    return Err(MnemoError::Invalid(
+                        "free list outgrew its reserved run".into(),
+                    ));
+                }
+                self.seal_run_at(start, pc, &bytes, gen, &mut frames)?;
+                self.header.free = RunPtr {
+                    start,
+                    pages: pc,
+                    len: bytes.len() as u64,
+                    gen,
+                };
+                Some(staged)
+            } else {
+                None
+            };
+
+        // 3e. The header is the transaction's final frame; stamp the new id
         //     and the *actual* (post-flush) write counter, which is <= the
         //     leased value persisted in `prepare_for_flush`. This is the
         //     value that ultimately replaces the leased header on checkpoint.
@@ -5125,6 +5634,12 @@ impl Mnemo {
         self.checkpoint(&frames)?;
 
         self.manifest = manifest;
+        if let Some(staged) = staged_free {
+            self.free = staged;
+        }
+        self.pending_free.clear();
+        self.free_dirty = false;
+        self.dirty_keys = false;
         self.dirty_catalog = false;
         if persist_index {
             self.dirty_index = false;
@@ -5206,13 +5721,36 @@ impl Mnemo {
         // Upper bound on the manifest run: one extra entry, <=82 bytes each
         // (rmp_serde encodes a Snapshot as a 9-element fixarray of i64/u64,
         // worst case 81 bytes plus a 1-byte array header).
-        let man_upper = 9 + (self.manifest.len() + 1) * 82;
+        // v9 snapshots carry two more u64s (≤ 20 bytes with the array header).
+        let per_snapshot = if self.is_v9() { 102 } else { 82 };
+        let man_upper = 9 + (self.manifest.len() + 1) * per_snapshot;
         let man_pc_est = man_upper.div_ceil(PAYLOAD).max(1);
+        // FMT-9: the free-list run (≤ 28 bytes per run: every pending and
+        // superseded run plus a split and a relocated WAL region) and the
+        // key-slot run.
+        let (free_pc_est, keys_pc) = if self.is_v9() {
+            let runs = self.free.len() + self.pending_free.len() + 12;
+            let free_pc = (runs * 28 + 64).div_ceil(PAYLOAD).max(1);
+            let keys_pc = if self.dirty_keys {
+                rmp_serde::to_vec(&self.key_slots)
+                    .map_err(|e| MnemoError::Serialize(e.to_string()))?
+                    .len()
+                    .div_ceil(PAYLOAD)
+                    .max(1)
+            } else {
+                0
+            };
+            (free_pc, keys_pc)
+        } else {
+            (0, 0)
+        };
 
         // Grow WAL if needed (DUR-1: relocation is WAL-logged and does
         // its own fsyncs). The cache directory rides in the same
         // transaction so its page count contributes to the reservation.
-        self.ensure_wal_capacity(cat_pc + idx_pc + cache_pc + man_pc_est + 1)?;
+        self.ensure_wal_capacity(
+            cat_pc + idx_pc + cache_pc + man_pc_est + free_pc_est + keys_pc + 1,
+        )?;
 
         // DUR-1 (R-002.1): the pre-flush "leased header" write that used
         // to live here is gone. It existed to close the Phase 1.1 nonce
@@ -5349,13 +5887,14 @@ impl Mnemo {
             model: None,
         };
         let bytes = rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-        let (start_page, page_count) = self.write_record(&bytes)?;
+        let (start_page, page_count, gen) = self.write_record(&bytes)?;
 
         // Tombstone any prior entry for this key. Its pages remain on
         // disk until `compact_file`, exactly like memory-record
         // overwrites — the tombstone just hides it from lookups.
         if let Some(prev_pos) = self.cache_idx.get(namespace, &key_hash) {
             self.cache_dir[prev_pos].deleted = true;
+            self.release_cache_pages(prev_pos);
             self.cache_idx.remove(namespace, &key_hash);
         }
 
@@ -5373,6 +5912,7 @@ impl Mnemo {
             created_at: now,
             vector: None,
             model: None,
+            gen,
         };
         let pos = self.cache_dir.len();
         self.cache_dir.push(dir_entry);
@@ -5424,7 +5964,7 @@ impl Mnemo {
         let now = memory::now_secs();
         // Snapshot the directory entry fields we need before any
         // mutation — the borrow checker gets grumpy otherwise.
-        let (start_page, page_count, len, ttl_secs, expired, created_at) = {
+        let (start_page, page_count, len, ttl_secs, expired, created_at, gen) = {
             let e = &self.cache_dir[pos];
             (
                 e.start_page,
@@ -5433,6 +5973,7 @@ impl Mnemo {
                 e.ttl_secs,
                 e.is_expired(now),
                 e.created_at,
+                e.gen,
             )
         };
         if expired {
@@ -5442,11 +5983,7 @@ impl Mnemo {
             return Ok(None);
         }
         // Decrypt and decode the record body.
-        let mut buf = Vec::with_capacity(len as usize);
-        for i in 0..page_count as u64 {
-            buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
-        }
-        buf.truncate(len as usize);
+        let buf = self.read_record_run(start_page, page_count, len, gen)?;
         let entry: CacheEntry =
             rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
 
@@ -5499,6 +6036,7 @@ impl Mnemo {
         let key_hash = result_cache::hash_key(key);
         if let Some(pos) = self.cache_idx.get(namespace, &key_hash) {
             self.cache_dir[pos].deleted = true;
+            self.release_cache_pages(pos);
             self.cache_idx.remove(namespace, &key_hash);
             self.dirty_cache = true;
             self.cache_batch.record_dirty();
@@ -5537,6 +6075,7 @@ impl Mnemo {
             let key_hash = self.cache_dir[pos].key_hash;
             let ns = self.cache_dir[pos].namespace.clone();
             self.cache_dir[pos].deleted = true;
+            self.release_cache_pages(pos);
             self.cache_idx.remove(&ns, &key_hash);
             purged += 1;
         }
@@ -5604,6 +6143,16 @@ impl Mnemo {
         // which the next flush() will consume.
     }
 
+    /// FMT-9 (a): free a just-tombstoned cache entry's record pages at the
+    /// next commit (v9; no-op on v8).
+    fn release_cache_pages(&mut self, pos: usize) {
+        let (p, c) = (
+            self.cache_dir[pos].start_page,
+            self.cache_dir[pos].page_count as u64,
+        );
+        self.release_pages(p, c);
+    }
+
     /// Evict LRU live entries in `namespace` until it fits under both
     /// budget caps. Called from `cache_put` after the insert; the new
     /// entry is included in the count so we always leave room.
@@ -5644,6 +6193,7 @@ impl Mnemo {
             let key_hash = self.cache_dir[pos].key_hash;
             let ns = self.cache_dir[pos].namespace.clone();
             self.cache_dir[pos].deleted = true;
+            self.release_cache_pages(pos);
             self.cache_idx.remove(&ns, &key_hash);
             self.cache_counters.evictions += 1;
         }
@@ -5704,10 +6254,11 @@ impl Mnemo {
             model: Some(opts.model.clone()),
         };
         let bytes = rmp_serde::to_vec(&entry).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-        let (start_page, page_count) = self.write_record(&bytes)?;
+        let (start_page, page_count, gen) = self.write_record(&bytes)?;
 
         if let Some(prev_pos) = self.cache_idx.get(namespace, &key_hash) {
             self.cache_dir[prev_pos].deleted = true;
+            self.release_cache_pages(prev_pos);
             self.cache_idx.remove(namespace, &key_hash);
         }
 
@@ -5725,6 +6276,7 @@ impl Mnemo {
             created_at: now,
             vector: Some(vector),
             model: Some(opts.model),
+            gen,
         };
         let pos = self.cache_dir.len();
         self.cache_dir.push(dir_entry);
@@ -5807,17 +6359,20 @@ impl Mnemo {
 
         // Extract fields before any mutation to keep the borrow checker
         // happy.
-        let (start_page, page_count, len, ttl_secs, created_at) = {
+        let (start_page, page_count, len, ttl_secs, created_at, gen) = {
             let e = &self.cache_dir[pos];
-            (e.start_page, e.page_count, e.len, e.ttl_secs, e.created_at)
+            (
+                e.start_page,
+                e.page_count,
+                e.len,
+                e.ttl_secs,
+                e.created_at,
+                e.gen,
+            )
         };
 
         // Decrypt and decode the record body.
-        let mut buf = Vec::with_capacity(len as usize);
-        for i in 0..page_count as u64 {
-            buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
-        }
-        buf.truncate(len as usize);
+        let buf = self.read_record_run(start_page, page_count, len, gen)?;
         let entry: CacheEntry =
             rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
 
@@ -5888,14 +6443,19 @@ impl Mnemo {
             snap.catalog_start,
             snap.catalog_pages,
             snap.catalog_len,
+            snap.catalog_gen(),
         )?;
         let ann = load_index(
             &mut self.pager,
             snap.index_start,
             snap.index_pages,
             snap.index_len,
+            snap.index_gen(),
             self.dimensions,
         )?;
+        if self.is_v9() {
+            self.reclaim_for_restore(&catalog);
+        }
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
         self.ann = ann;
@@ -5907,13 +6467,47 @@ impl Mnemo {
         self.agent_set = None;
         // PERF-1: the snapshot's index may predate its catalog; bring it up
         // to date before it's persisted again.
-        self.reconcile_ann_with_catalog(snap.index_start)?;
+        self.reconcile_ann_with_catalog(snap.index_start, snap.index_gen())?;
         // Re-commit as a fresh transaction: crash-safe, and itself recorded
         // as a new snapshot so a restore can always be undone.
         self.dirty_catalog = true;
         self.dirty_index = true;
         self.index_persist.forced = true;
         self.flush()
+    }
+
+    /// FMT-9 (a): a restore makes the snapshot's records live again and the
+    /// current ones (those the snapshot doesn't have) dead. The snapshot's
+    /// record runs may be on the free list (freed after the snapshot, and
+    /// quarantined while it's retained), so they come back off it, and off
+    /// this transaction's pending frees; the current runs it doesn't share
+    /// are freed by the restoring commit.
+    fn reclaim_for_restore(&mut self, restored: &[CatalogEntry]) {
+        let live_then: std::collections::BTreeMap<u64, u64> = restored
+            .iter()
+            .filter(|e| !e.deleted)
+            .map(|e| (e.start_page, e.page_count as u64))
+            .collect();
+        let overlaps = |p: u64, c: u64| {
+            live_then
+                .range(..p + c)
+                .next_back()
+                .is_some_and(|(&q, &n)| q + n > p)
+        };
+        let dying: Vec<(u64, u64)> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted && !live_then.contains_key(&e.start_page))
+            .map(|e| (e.start_page, e.page_count as u64))
+            .collect();
+        self.pending_free.retain(|&(p, c)| !overlaps(p, c));
+        for (&p, &c) in &live_then {
+            self.free.unfree(p, c);
+        }
+        for (p, c) in dying {
+            self.release_pages(p, c);
+        }
+        self.free_dirty = true;
     }
 
     /// Restore the database to the snapshot produced by transaction `txn_id`.
@@ -6118,7 +6712,11 @@ impl Mnemo {
         self.header.wal_start = new_start;
         self.header.wal_pages = new_pages;
         self.header.wal_seq += 1;
-        self.relocate_header_through_wal(old_wal_start)
+        self.relocate_header_through_wal(old_wal_start)?;
+        // FMT-9 (a): the old region is freed by the next commit (see
+        // `ensure_wal_capacity`).
+        self.release_pages(old_wal_start, new_pages);
+        Ok(())
     }
 
     /// Decrypt and validate every live record. Returns the count verified
@@ -6144,23 +6742,71 @@ impl Mnemo {
         // skipped — their pages are orphan ciphertext awaiting
         // `compact_file`, same as deleted memories. Expired entries
         // are *still* on disk until compaction, so we verify them too.
-        let cache_positions: Vec<(u64, u32, u32)> = self
+        let cache_positions: Vec<(u64, u32, u32, u64)> = self
             .cache_dir
             .iter()
             .filter(|e| !e.deleted)
-            .map(|e| (e.start_page, e.page_count, e.len))
+            .map(|e| (e.start_page, e.page_count, e.len, e.gen))
             .collect();
-        for (start_page, page_count, len) in cache_positions {
-            let mut buf = Vec::with_capacity(len as usize);
-            for i in 0..page_count as u64 {
-                buf.extend_from_slice(&self.pager.read_page(start_page + i)?);
-            }
-            buf.truncate(len as usize);
+        for (start_page, page_count, len, gen) in cache_positions {
+            let buf = self.read_record_run(start_page, page_count, len, gen)?;
             let _c: CacheEntry = rmp_serde::from_slice(&buf)
                 .map_err(|err| MnemoError::Serialize(err.to_string()))?;
             n += 1;
         }
+        // FMT-9 (a): no free run may overlap a page the committed state
+        // references (records, cache entries, control runs, the WAL).
+        if self.is_v9() {
+            self.check_free_list_disjoint()?;
+        }
         Ok(n)
+    }
+
+    /// FMT-9 (a): fail if the free list (or a pending free) overlaps any
+    /// page the current state references.
+    fn check_free_list_disjoint(&self) -> Result<()> {
+        let h = &self.header;
+        let mut live: Vec<(u64, u64, &str)> = vec![
+            (h.wal_start, h.wal_pages, "WAL region"),
+            (h.catalog_start, h.catalog_pages, "catalog run"),
+            (h.index_start, h.index_pages, "index run"),
+            (h.manifest_start, h.manifest_pages, "manifest run"),
+            (h.cache_start, h.cache_pages, "cache directory run"),
+            (h.free.start, h.free.pages, "free-list run"),
+            (h.keys.start, h.keys.pages, "key-slot run"),
+        ];
+        live.extend(
+            self.catalog
+                .iter()
+                .filter(|e| !e.deleted)
+                .map(|e| (e.start_page, e.page_count as u64, "record")),
+        );
+        live.extend(
+            self.cache_dir
+                .iter()
+                .filter(|e| !e.deleted)
+                .map(|e| (e.start_page, e.page_count as u64, "cache entry")),
+        );
+        for (p, c, what) in live {
+            if c == 0 {
+                continue;
+            }
+            if self.free.overlaps(p, c) {
+                return Err(MnemoError::Invalid(format!(
+                    "free list overlaps a live {what} at page {p} (+{c})"
+                )));
+            }
+            if self
+                .pending_free
+                .iter()
+                .any(|&(q, n)| q < p + c && p < q + n)
+            {
+                return Err(MnemoError::Invalid(format!(
+                    "a pending free overlaps a live {what} at page {p} (+{c})"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Summary statistics for the open database.
@@ -6239,6 +6885,9 @@ impl Mnemo {
             MnemoConfig {
                 dimensions: dims,
                 kdf,
+                // FMT-9a: compaction keeps the source's format (v8 stays
+                // v8, v9 stays v9). 9f makes it write v9.
+                format_version: old.header.version.max(VERSION),
                 ..Default::default()
             },
         )?;
@@ -6312,7 +6961,7 @@ impl Mnemo {
         }
         // Snapshot the directory fields we need, so the borrow on
         // `old.cache_dir` ends before we touch `old.pager`.
-        let (start_page, page_count, len, dir_accessed_at, dir_access_count) = {
+        let (start_page, page_count, len, dir_accessed_at, dir_access_count, old_gen) = {
             let e = &old.cache_dir[pos];
             (
                 e.start_page,
@@ -6320,15 +6969,12 @@ impl Mnemo {
                 e.len,
                 e.accessed_at,
                 e.access_count,
+                e.gen,
             )
         };
 
         // Read + decrypt the old record body.
-        let mut buf = Vec::with_capacity(len as usize);
-        for i in 0..page_count as u64 {
-            buf.extend_from_slice(&old.pager.read_page(start_page + i)?);
-        }
-        buf.truncate(len as usize);
+        let buf = old.read_record_run(start_page, page_count, len, old_gen)?;
         let mut entry: CacheEntry =
             rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
 
@@ -6342,7 +6988,7 @@ impl Mnemo {
 
         let bytes =
             rmp_serde::to_vec(&entry).map_err(|err| MnemoError::Serialize(err.to_string()))?;
-        let (new_start_page, new_page_count) = self.write_record(&bytes)?;
+        let (new_start_page, new_page_count, gen) = self.write_record(&bytes)?;
 
         let dir_entry = CacheDirectoryEntry {
             namespace: entry.namespace.clone(),
@@ -6358,6 +7004,7 @@ impl Mnemo {
             created_at: entry.created_at,
             vector: entry.vector.clone(),
             model: entry.model.clone(),
+            gen,
         };
         let new_pos = self.cache_dir.len();
         self.cache_idx

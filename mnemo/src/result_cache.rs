@@ -296,6 +296,11 @@ pub(crate) struct CacheDirectoryEntry {
     /// Semantic-cache: model identifier. `None` on pure exact-key entries.
     #[serde(default)]
     pub model: Option<String>,
+    /// FMT-9: generation the entry's record pages were sealed under (v9
+    /// page AAD). Always `0`, and not serialized, on v8 files, so the v8
+    /// directory encoding is byte-for-byte unchanged.
+    #[serde(default, skip_serializing_if = "crate::format::is_zero_u64")]
+    pub gen: u64,
 }
 
 impl CacheDirectoryEntry {
@@ -482,6 +487,7 @@ mod tests {
                 created_at: 0,
                 vector: None,
                 model: None,
+                gen: 0,
             },
             CacheDirectoryEntry {
                 namespace: "http".into(),
@@ -497,6 +503,7 @@ mod tests {
                 created_at: 0,
                 vector: None,
                 model: None,
+                gen: 0,
             },
         ];
         let idx = DirectoryIndex::build(&entries);
@@ -535,6 +542,7 @@ mod tests {
             created_at: now - 30,
             vector: None,
             model: None,
+            gen: 0,
         };
         assert!(!fresh.is_expired(now), "30s old with 60s TTL is fresh");
         let stale = CacheDirectoryEntry {

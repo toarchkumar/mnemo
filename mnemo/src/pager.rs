@@ -126,6 +126,9 @@ pub struct Pager {
     version: u16,
     /// Bounded LRU cache of decrypted page payloads.
     cache: PageCache,
+    /// FMT-9: the generation each dirty page is to be sealed under (v9
+    /// binds it into the page AAD). Drained by [`Pager::flush`].
+    dirty_gens: std::collections::HashMap<u64, u64>,
 }
 
 impl Pager {
@@ -146,6 +149,7 @@ impl Pager {
             session_counter: 0,
             version,
             cache: PageCache::new(DEFAULT_CACHE_PAGES),
+            dirty_gens: std::collections::HashMap::new(),
         }
     }
 
@@ -179,9 +183,23 @@ impl Pager {
     /// fresh `Vec` each call to keep the `Aead::Payload` lifetime simple at
     /// every call site. Empty for v4/v5 (matching the historical scheme
     /// without page binding); `page_no.to_le_bytes()` from v6 onwards.
+    ///
+    /// **v9 (FMT-9 (a)):** `page_no || generation`, where the generation is
+    /// the transaction id that wrote the page. Pages are reused in v9, so a
+    /// page number alone no longer pins a ciphertext: an attacker holding
+    /// an older copy of the file could put back the page's previous
+    /// ciphertext, whose tag is valid for the same `page_no`. Every pointer
+    /// to a page (header run pointers, catalog rows, cache-directory
+    /// entries, snapshots) records the generation it expects, and a read
+    /// under any other generation fails authentication.
     #[inline]
-    fn page_aad(&self, page_no: u64) -> Vec<u8> {
-        if self.version >= 6 {
+    fn page_aad(&self, page_no: u64, gen: u64) -> Vec<u8> {
+        if self.version >= crate::format::VERSION_V9 {
+            let mut aad = Vec::with_capacity(16);
+            aad.extend_from_slice(&page_no.to_le_bytes());
+            aad.extend_from_slice(&gen.to_le_bytes());
+            aad
+        } else if self.version >= 6 {
             page_no.to_le_bytes().to_vec()
         } else {
             Vec::new()
@@ -237,7 +255,9 @@ impl Pager {
     /// clean entry) so later reads see the new content. Used by the WAL path:
     /// the returned bytes are logged to the WAL and only later copied to
     /// `page_no` by a checkpoint.
-    pub fn seal_page(&mut self, page_no: u64, payload: &[u8]) -> Result<[u8; PAGE_SIZE]> {
+    ///
+    /// `gen` is the page's generation (v9; ignored before).
+    pub fn seal_page(&mut self, page_no: u64, gen: u64, payload: &[u8]) -> Result<[u8; PAGE_SIZE]> {
         if payload.len() > PAYLOAD {
             return Err(MnemoError::Invalid(format!(
                 "payload {} exceeds page capacity {}",
@@ -253,7 +273,7 @@ impl Pager {
         // random + counter pair (SEC-1).
         self.write_counter += 1;
         let nonce = self.next_nonce();
-        let aad = self.page_aad(page_no);
+        let aad = self.page_aad(page_no, gen);
         let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &padded, &aad)?;
 
         let mut disk = [0u8; PAGE_SIZE];
@@ -284,8 +304,9 @@ impl Pager {
         Ok(())
     }
 
-    /// Read and decrypt the plaintext payload of an encrypted page.
-    pub fn read_page(&mut self, page_no: u64) -> Result<Vec<u8>> {
+    /// Read and decrypt the plaintext payload of an encrypted page. `gen` is
+    /// the generation the referencing pointer expects (v9; ignored before).
+    pub fn read_page(&mut self, page_no: u64, gen: u64) -> Result<Vec<u8>> {
         if let Some(p) = self.cache.get(page_no) {
             return Ok(p);
         }
@@ -298,7 +319,7 @@ impl Pager {
         nonce.copy_from_slice(&disk[0..NONCE_LEN]);
         let ciphertext = &disk[NONCE_LEN..];
 
-        let aad = self.page_aad(page_no);
+        let aad = self.page_aad(page_no, gen);
         let payload = crypto::aead_decrypt(&self.dek, &nonce, ciphertext, &aad)
             .map_err(|_| MnemoError::PageAuthFailed(page_no))?;
 
@@ -309,7 +330,9 @@ impl Pager {
     /// Stage a plaintext payload for an encrypted page. The payload is padded
     /// (or rejected if too large) to exactly [`PAYLOAD`] bytes. The page is
     /// cached dirty — pinned against eviction — until [`Pager::flush`].
-    pub fn write_page(&mut self, page_no: u64, payload: &[u8]) -> Result<()> {
+    ///
+    /// [`Pager::flush`] seals it under generation `gen` (v9; ignored before).
+    pub fn write_page(&mut self, page_no: u64, gen: u64, payload: &[u8]) -> Result<()> {
         if payload.len() > PAYLOAD {
             return Err(MnemoError::Invalid(format!(
                 "payload {} exceeds page capacity {}",
@@ -320,6 +343,7 @@ impl Pager {
         let mut padded = vec![0u8; PAYLOAD];
         padded[..payload.len()].copy_from_slice(payload);
         self.cache.insert(page_no, padded, true);
+        self.dirty_gens.insert(page_no, gen);
         Ok(())
     }
 
@@ -345,7 +369,8 @@ impl Pager {
                 .to_vec();
             self.write_counter += 1;
             let nonce = self.next_nonce();
-            let aad = self.page_aad(page_no);
+            let gen = self.dirty_gens.get(&page_no).copied().unwrap_or(0);
+            let aad = self.page_aad(page_no, gen);
             let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &payload, &aad)?;
 
             let mut disk = Vec::with_capacity(PAGE_SIZE);
@@ -363,6 +388,7 @@ impl Pager {
         // The pages just written are now clean and so evictable; settle the
         // cache back within its bound.
         self.cache.mark_all_clean();
+        self.dirty_gens.clear();
         self.cache.trim();
         Ok(())
     }
