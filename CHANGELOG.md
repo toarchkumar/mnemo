@@ -53,6 +53,21 @@ still change between PRs.
   - At 100K memories a v9 file takes 1.8 KB per memory (v8: 8.7 KB). Warm
     recall is 2.5 ms (v8: 8.6 ms), and an open handle's RSS is about 112 MB
     with the vector column resident.
+- **9c.1: commits.**
+  - On v9, page runs longer than two pages (a large catalog or the index)
+    are written in place and fsynced before the commit instead of going
+    through the WAL, so the WAL stays at 64 KiB.
+  - Free runs at the end of the file are truncated once reusable.
+  - Snapshot retention defaults to the newest 16 plus any from the last 24
+    hours, never pinning more than a quarter of the file (or 1 MiB). An
+    explicit `set_max_snapshots(n)` keeps exactly `n`.
+  - Restoring past the window names it.
+
+### Fixed
+
+- `mnemo demo` failed with `Locked` on its reopen step (since v0.4.0): it
+  now drops the handle before reopening. `close()`'s docs note that the
+  file and its lock are held until the handle is dropped (R-005.1).
 
 ## [0.10.0] — 2026-11-07
 

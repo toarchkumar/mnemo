@@ -2059,3 +2059,23 @@ fn mcp_end_to_end_threads_essence_and_commit_deltas() {
         texts[&11]
     );
 }
+
+/// R-005.1: `mnemo demo` runs its whole lifecycle, including the reopen,
+/// to a clean exit (it failed with `Locked` from v0.4.0 until the fix).
+#[test]
+fn demo_runs_to_a_clean_exit() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("demo.mnemo");
+    let out = Command::new(bin())
+        .args(["demo", "--path", path.to_str().unwrap()])
+        .output()
+        .expect("spawn mnemo demo");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "demo failed: {}\n{stdout}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("memories survive the round-trip"), "{stdout}");
+    assert!(stdout.contains("demo complete."), "{stdout}");
+}
