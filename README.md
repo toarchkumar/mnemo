@@ -175,7 +175,7 @@ Measured on an Apple M1 Pro (release build, 384-dimension vectors):
 | Similar-prompt cache hit (500 entries) | ~0.4 ms |
 | Open a file: passphrase key derivation (Argon2id, slow on purpose) | ~15 ms |
 | Open a file: loading its catalog and index, 10K / 100K memories | ~33 ms / ~230 ms more |
-| Store one memory durably | ~19 ms (~0.25 ms each when 100 are committed together) |
+| Store one memory durably, 1K / 10K / 100K memories | ~28 ms / ~67 ms / ~450 ms (the large-file cost is being fixed in v0.10.0); ~0.4 / 0.8 / 4.7 ms each when 100 are committed together |
 | Indexed search, 10K / 100K / 1M memories | ~1.4 ms / ~9.4 ms / ~134 ms |
 | Exact search over every memory, 10K / 100K | ~105 ms / ~1.05 s |
 
@@ -214,8 +214,8 @@ in Rust. Each re-clusters the index with the new defaults.
 
 - **Saving threads isn't automatic yet.** You (or your agent) call
   `thread ingest` and the essence tools. A Claude Code plugin with hooks
-  that save before compaction and load at session start comes with shared
-  access in v0.10.0. Transcripts can contain anything that was pasted into
+  that save before compaction and load at session start is on the roadmap,
+  after the current size and speed work. Transcripts can contain anything that was pasted into
   them; they're encrypted like everything else, and `thread forget`
   removes them.
 - **Version history has no limit yet.** Every keyed replacement keeps the

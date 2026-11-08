@@ -710,7 +710,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
       <div class="card stat"><div class="v">~0.4<span> ms</span></div><div class="l">Similar-prompt cache hit</div><div class="d">Matching by meaning across a 500-entry cache.</div></div>
       <div class="card stat"><div class="v">~15<span> ms</span></div><div class="l">Open an encrypted file</div><div class="d">The passphrase step (Argon2id), slow on purpose so guessing is expensive. Large files add the time to load their index: ~33 ms at 10K memories, ~230 ms at 100K. Long-running apps pay it once.</div></div>
-      <div class="card stat"><div class="v">~19<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by full disk syncs. Commit 100 memories at once and each costs about 0.25 ms.</div></div>
+      <div class="card stat"><div class="v">~28<span> ms</span></div><div class="l">Store a memory durably (1K memories)</div><div class="d">For small files, bound by full disk syncs. Commit 100 at once and each costs well under a millisecond. Large files are slower today (~450 ms at 100K memories); that is being fixed next.</div></div>
       <div class="card stat"><div class="v">~105<span> ms</span></div><div class="l">Check every memory, 10K-memory file</div><div class="d">Exact search with no index, every candidate decrypted. 1.05 s at 100K.</div></div>
       <div class="card stat"><div class="v">~9.4<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings (v0.6.0). ~1.4 ms at 10K, ~134 ms at 1M.</div></div>
     </div>
@@ -750,8 +750,9 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Shared access for several agents and tools at once, and a Claude Code plugin that loads and saves memory automatically</li>
+          <li>Smaller and faster for on-device use, from desktop apps to phones and tablets: quicker opening and saving, and a compact file format</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
+          <li>iOS and Android packages</li>
         </ul>
       </div>
       <div class="card">
@@ -760,6 +761,7 @@ AI sessions stay aligned without relying on chat history.
           <li>Speedups and smaller files, wherever the benchmarks point</li>
           <li>An optional built-in local embedding model, no separate program needed</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
+          <li>Shared access for several agents and tools at once, and a Claude Code plugin that loads and saves memory automatically</li>
           <li>Agent teams: messages and tasks between agents, per-agent keys, signed authorship, and merging copies of a file</li>
           <li>Encrypted sync across machines through a relay that can't read your data, and a memory inspector to see and correct what your agents remember</li>
           <li>A Node.js package and framework integrations</li>
