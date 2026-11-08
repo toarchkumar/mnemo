@@ -477,22 +477,59 @@ impl PqCodebook {
 
     /// Precompute, for a query, the distance from each query subspace to every
     /// codeword. Asymmetric distance = sum of one lookup per subspace.
-    fn distance_table(&self, q: &[f32]) -> Vec<Vec<f32>> {
+    ///
+    /// PERF-1 step 5: one flat buffer with a fixed [`PQ_CODEWORDS`]-entry row
+    /// per subspace (rows of subspaces with fewer codewords are padded and
+    /// never read), so the scan indexes a row with a `u8` code and no bounds
+    /// check, instead of chasing one heap `Vec` per subspace.
+    fn distance_table(&self, q: &[f32]) -> Vec<f32> {
         let m = self.m();
-        let mut table = Vec::with_capacity(m);
-        for s in 0..m {
+        let mut table = vec![0.0f32; m * PQ_CODEWORDS];
+        for (s, row) in table.chunks_exact_mut(PQ_CODEWORDS).enumerate() {
             let (lo, hi) = (self.sub_offsets[s], self.sub_offsets[s + 1]);
             let sd = hi - lo;
             let qs = &q[lo..hi];
             let cs = &self.centroids[s];
-            let mut row = vec![0.0f32; self.ks[s]];
-            for (c, slot) in row.iter_mut().enumerate() {
+            for (c, slot) in row.iter_mut().enumerate().take(self.ks[s]) {
                 *slot = squared_l2(qs, &cs[c * sd..(c + 1) * sd]);
             }
-            table.push(row);
         }
         table
     }
+}
+
+/// Asymmetric (PQ) distance of one code against a query's flat distance
+/// table: one lookup per subspace, summed.
+///
+/// PERF-1 step 5: four named accumulators over 4-subspace blocks instead of
+/// one running sum. A single sum is a chain of `m` dependent float adds (96
+/// at 384 dims), which made this loop latency-bound and about half of a
+/// warm recall at 100K. (An accumulator *array* indexed by `s & 3` was
+/// tried first and ran 2.3x slower than the single chain: it stays in
+/// memory.) Micro-benchmark, 50K codes of 96: 4.0 ms → 1.45 ms. The order
+/// of the additions changes, so the sum can differ in the last bits; it
+/// only ranks the rerank shortlist, and `ann_recall_grid_v2` recall@10 is
+/// unchanged in every cell.
+fn adc_distance(code: &[u8], table: &[f32]) -> f32 {
+    const K: usize = PQ_CODEWORDS;
+    let (mut a0, mut a1, mut a2, mut a3) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let mut codes = code.chunks_exact(4);
+    let mut rows = table.chunks_exact(4 * K);
+    for (c, r) in (&mut codes).zip(&mut rows) {
+        a0 += r[c[0] as usize];
+        a1 += r[K + c[1] as usize];
+        a2 += r[2 * K + c[2] as usize];
+        a3 += r[3 * K + c[3] as usize];
+    }
+    let done = code.len() / 4 * 4;
+    for (&c, r) in codes
+        .remainder()
+        .iter()
+        .zip(table[done * K..].chunks_exact(K))
+    {
+        a0 += r[c as usize];
+    }
+    (a0 + a1) + (a2 + a3)
 }
 
 /// One IVF partition: parallel arrays of memory IDs and their PQ codes.
@@ -783,16 +820,15 @@ impl IvfPqIndex {
         // Stage 2 — scan PQ codes in the selected partitions.
         let table = self.pq.distance_table(q);
         let m = self.pq.m();
-        let mut cands: Vec<(u128, f32)> = Vec::new();
+        let total: usize = parts
+            .iter()
+            .map(|&(pi, _)| self.partitions[pi].ids.len())
+            .sum();
+        let mut cands: Vec<(u128, f32)> = Vec::with_capacity(total);
         for (pi, _) in parts {
             let p = &self.partitions[pi];
-            for (j, &id) in p.ids.iter().enumerate() {
-                let code = &p.codes[j * m..(j + 1) * m];
-                let mut d = 0.0f32;
-                for (s, row) in table.iter().enumerate() {
-                    d += row[code[s] as usize];
-                }
-                cands.push((id, d));
+            for (&id, code) in p.ids.iter().zip(p.codes.chunks_exact(m)) {
+                cands.push((id, adc_distance(code, &table)));
             }
         }
 
@@ -1017,6 +1053,42 @@ mod u128_map_tests {
         }
         for (k, v) in &reference {
             assert_eq!(ours.get(*k), Some(*v));
+        }
+    }
+}
+
+#[cfg(test)]
+mod adc_tests {
+    use super::{adc_distance, PQ_CODEWORDS};
+
+    /// The unrolled sum agrees with the plain one for every subspace count,
+    /// including those that aren't a multiple of four.
+    #[test]
+    fn unrolled_adc_matches_the_plain_sum() {
+        let mut x: u32 = 0xA5A5_1234;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x
+        };
+        for m in 1..=13usize {
+            let table: Vec<f32> = (0..m * PQ_CODEWORDS)
+                .map(|_| (next() % 10_000) as f32 / 100.0)
+                .collect();
+            for _ in 0..50 {
+                let code: Vec<u8> = (0..m).map(|_| next() as u8).collect();
+                let plain: f32 = code
+                    .iter()
+                    .enumerate()
+                    .map(|(s, &c)| table[s * PQ_CODEWORDS + c as usize])
+                    .sum();
+                let fast = adc_distance(&code, &table);
+                assert!(
+                    (plain - fast).abs() <= 1e-3 * plain.abs().max(1.0),
+                    "m={m}: {plain} vs {fast}"
+                );
+            }
         }
     }
 }

@@ -284,6 +284,14 @@ fn main() {
         .map(|&n| sweep_tier(n))
         .collect();
 
+    // `ANN_GRID_OUT=path` writes only this block to `path` (PERF-1 used it
+    // to check the recall gate without rewriting the perf JSON).
+    if let Ok(alt) = std::env::var("ANN_GRID_OUT") {
+        let block = json!({ "tiers": tiers });
+        fs::write(&alt, serde_json::to_string_pretty(&block).unwrap() + "\n").unwrap();
+        println!("\n[ann-grid-v2] wrote {alt}");
+        return;
+    }
     let perf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
