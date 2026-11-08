@@ -31,6 +31,19 @@ still change between PRs.
   - A key-slot run for Phase 13.2.
   - Each writable session takes one small header-only commit before its
     first v9 write.
+- **9b.1: the v9 catalog row and the fp16 vector column.**
+  - v9 records no longer carry their vector. Vectors live in a column of
+    fp16 entries (10 per page at 384 dims), which stays resident while it
+    fits `Mnemo::set_vector_cache_budget` (default 96 MiB) and is read
+    through the page cache above that.
+  - Catalog rows carry the kind, flags, type, thread, key and agent hashes,
+    `created_at` and `importance`. Recall scores candidates from the rows
+    and the column, and decrypts only the hits it returns.
+  - `get()` and `recall()` return fp16-rounded vectors (about 1e-3
+    relative error) unless the file is created with
+    `MnemoConfig::store_float_vectors`.
+  - v9 files under `V9_ANN_MIN_FACTS` (20K) facts use an exact scan and
+    build no ANN index.
 
 ## [0.10.0] — 2026-11-07
 

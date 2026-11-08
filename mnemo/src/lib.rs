@@ -65,6 +65,7 @@ mod result_cache;
 mod session;
 mod store;
 mod transcript;
+mod veccol;
 mod wal;
 
 pub use crypto::KdfParams;
@@ -95,7 +96,8 @@ pub use session::{Role, Session, Turn};
 pub use store::BudgetReport;
 pub use store::{
     CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResponse, RecallResult, SnapshotInfo,
-    Stats, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
+    Stats, DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
+    V9_ANN_MIN_FACTS,
 };
 pub use transcript::{read_transcript, TranscriptFormat};
 

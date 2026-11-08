@@ -56,6 +56,7 @@ use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
     CacheStats, CachedValue, CounterState, DirectoryIndex, SemanticCachePutOpts,
 };
+use crate::veccol;
 use crate::wal;
 
 /// Default initial size of the write-ahead log region, in pages (64 KiB).
@@ -88,6 +89,24 @@ pub const INDEX_PERSIST_EVERY_COMMITS: u32 = 64;
 /// the last persist. Records written after the persisted index are
 /// re-assigned when the index is next loaded, so this bounds that work.
 pub const INDEX_PERSIST_EVERY_CHANGES: usize = 1_000;
+
+/// FMT-9b: default [`Mnemo::set_vector_cache_budget`]: the fp16 vector
+/// column stays resident while it fits (100K × 384 dims is about 77 MB) and
+/// is read through the page cache above it. PLANNER-A, 2026-11-07.
+pub const DEFAULT_VECTOR_CACHE_BUDGET: usize = 96 * 1024 * 1024;
+
+/// FMT-9b: below this many facts a v9 file has no ANN index: an exact
+/// fp16 scan of 20K × 384 dims is about a millisecond, and the IVF+PQ
+/// codebook alone would cost more disk than it saves time.
+pub const V9_ANN_MIN_FACTS: usize = 20_000;
+
+/// FMT-9b: how many sparse vector pages one commit folds into its new
+/// pages (the vacuum). Bounded so a commit's cost stays bounded.
+const VACUUM_PAGES_PER_COMMIT: usize = 4;
+
+/// FMT-9b: header flag: the file also keeps each record's float vector
+/// (`MnemoConfig::store_float_vectors`).
+const FLAG_FLOAT_VECTORS: u32 = 2;
 
 /// PERF-1: when the in-memory ANN index was last persisted, and whether the
 /// next flush must persist it.
@@ -422,6 +441,12 @@ pub struct MnemoConfig {
     /// this field when v9 becomes the default.
     #[doc(hidden)]
     pub format_version: u16,
+    /// FMT-9b (v9 files only; ignored for v8): also keep each memory's
+    /// full-precision vector in its record, so `get()` and `recall()`
+    /// return it exactly. Off by default: a v9 file stores vectors as
+    /// fp16 (about 1e-3 relative error) in the vector column, which recall
+    /// scores from either way. Costs `4 × dimensions` bytes per memory.
+    pub store_float_vectors: bool,
 }
 
 impl Default for MnemoConfig {
@@ -432,6 +457,7 @@ impl Default for MnemoConfig {
             wal_pages_initial: DEFAULT_WAL_PAGES,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             format_version: 0,
+            store_float_vectors: false,
         }
     }
 }
@@ -476,6 +502,146 @@ struct CatalogEntry {
     /// catalog is byte-for-byte what v0.10 writes.
     #[serde(default, skip_serializing_if = "crate::format::is_zero_u64")]
     gen: u64,
+    /// FMT-9b: the v9 row's tags, scoring inputs and vector location
+    /// (`None`, and left out of the encoding, on v8 files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    v9: Option<RowV9>,
+}
+
+/// FMT-9b: what a v9 catalog row carries beyond the v8 fields, so recall
+/// can filter and score a candidate without decrypting its record, and a
+/// cold handle can select records by kind or thread.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+struct RowV9 {
+    /// The vector column entry: page (`0` while it's waiting for the next
+    /// flush), slot, and the page's generation.
+    vec_page: u64,
+    vec_slot: u16,
+    vec_gen: u64,
+    /// `ROW_KIND_*`.
+    kind: u8,
+    /// `ROW_SUPERSEDED | ROW_HAS_TTL | ROW_SHARED`.
+    flags: u8,
+    /// [`memory_type_code`].
+    memory_type: u8,
+    /// FNV-1a of `_mnemo.thread`, of the 12.1 key slot, and of `agent_id`
+    /// (`0` = none). A collision only lets a non-match through to the
+    /// decrypted check.
+    thread_hash: u32,
+    key_hash: u32,
+    agent_hash: u32,
+    created_at: i64,
+    importance: f32,
+    /// `created_at + ttl_secs` when `ROW_HAS_TTL` is set.
+    expires_at: i64,
+}
+
+const ROW_SUPERSEDED: u8 = 1;
+const ROW_HAS_TTL: u8 = 2;
+const ROW_SHARED: u8 = 4;
+const ROW_KIND_FACT: u8 = 0;
+const ROW_KIND_TURN: u8 = 1;
+const ROW_KIND_ESSENCE: u8 = 2;
+const ROW_KIND_THREAD_LINK: u8 = 3;
+const ROW_KIND_ONBOARDING: u8 = 4;
+
+/// 32-bit FNV-1a over `parts` (separated), never `0` ("none" in a row).
+fn fnv1a32(parts: &[&[u8]]) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for (i, p) in parts.iter().enumerate() {
+        if i > 0 {
+            h ^= 0xff;
+            h = h.wrapping_mul(0x0100_0193);
+        }
+        for &b in p.iter() {
+            h ^= b as u32;
+            h = h.wrapping_mul(0x0100_0193);
+        }
+    }
+    h.max(1)
+}
+
+fn memory_type_code(t: MemoryType) -> u8 {
+    match t {
+        MemoryType::Episodic => 0,
+        MemoryType::Semantic => 1,
+        MemoryType::Procedural => 2,
+        MemoryType::Working => 3,
+    }
+}
+
+/// FMT-9b: a memory's row tags and scoring inputs (the vector location is
+/// filled in when its column entry is written).
+fn row_tags(m: &Memory) -> RowV9 {
+    let kind = match meta_str(m, MNEMO_META_KIND) {
+        Some(MNEMO_META_KIND_TURN) => ROW_KIND_TURN,
+        Some(MNEMO_META_KIND_ESSENCE) => ROW_KIND_ESSENCE,
+        Some(MNEMO_META_KIND_THREAD_LINK) => ROW_KIND_THREAD_LINK,
+        _ if is_onboarding(m) => ROW_KIND_ONBOARDING,
+        _ => ROW_KIND_FACT,
+    };
+    let mut flags = 0u8;
+    if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+        flags |= ROW_SUPERSEDED;
+    }
+    if m.ttl_secs.is_some() {
+        flags |= ROW_HAS_TTL;
+    }
+    if m.scope == Scope::Shared {
+        flags |= ROW_SHARED;
+    }
+    let key_hash = meta_str(m, MNEMO_META_KEY).map_or(0, |k| {
+        let slot = Mnemo::key_slot_for(m, k);
+        fnv1a32(&[
+            slot.scope_owner.as_deref().unwrap_or("").as_bytes(),
+            slot.key.as_bytes(),
+        ])
+    });
+    RowV9 {
+        kind,
+        flags,
+        memory_type: memory_type_code(m.memory_type),
+        thread_hash: meta_str(m, MNEMO_META_THREAD).map_or(0, |t| fnv1a32(&[t.as_bytes()])),
+        key_hash,
+        agent_hash: fnv1a32(&[m.agent_id.as_bytes()]),
+        created_at: m.created_at,
+        importance: m.importance,
+        expires_at: m.ttl_secs.map_or(0, |t| m.created_at.saturating_add(t)),
+        ..RowV9::default()
+    }
+}
+
+/// FMT-9b: the handle's view of the fp16 vector column.
+#[derive(Debug, Default)]
+struct VecColumn {
+    /// Resident fp16 values by catalog row (`rows × dims`), once loaded.
+    data: Vec<u16>,
+    norms: Vec<f32>,
+    resident: bool,
+    /// Rows whose entries aren't on a page yet; the next flush writes them.
+    /// A row here has no page entry (its old one was released).
+    hot: std::collections::HashMap<usize, (Vec<u16>, f32)>,
+    /// Rows to write, in order (may repeat; the flush skips repeats).
+    pending: Vec<usize>,
+    /// Vector page → the live rows whose entries it holds.
+    page_rows: std::collections::HashMap<u64, Vec<usize>>,
+}
+
+impl VecColumn {
+    fn from_catalog(catalog: &[CatalogEntry]) -> VecColumn {
+        let mut col = VecColumn::default();
+        for (i, e) in catalog.iter().enumerate() {
+            if e.deleted {
+                continue;
+            }
+            if let Some(r) = e.v9 {
+                if r.vec_page != 0 {
+                    col.page_rows.entry(r.vec_page).or_default().push(i);
+                }
+            }
+        }
+        col
+    }
 }
 
 /// Frozen v4 catalog entry shape, used only by the v4→v5 migration path in
@@ -941,6 +1107,10 @@ pub struct Mnemo {
     /// durable header-only commit (`ensure_gen_lease`), so the generations
     /// its pages carry can't repeat ones a crashed earlier session used.
     gen_leased: bool,
+    /// FMT-9b: the fp16 vector column (v9; unused on v8).
+    col: VecColumn,
+    /// FMT-9b: keep the column resident while it fits this many bytes.
+    vector_cache_budget: usize,
 }
 
 /// Composite key for the lazy `key_index` on `Mnemo`. A slot is identified
@@ -1129,6 +1299,7 @@ fn migrate_v4_catalog(pager: &mut Pager, v4: Vec<CatalogEntryV4>) -> Result<Vec<
             accessed_at,
             access_count,
             gen: 0,
+            v9: None,
         });
     }
     Ok(out)
@@ -1514,6 +1685,18 @@ impl Mnemo {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
         }
         let version = resolve_format_version(config.format_version)?;
+        if version >= VERSION_V9 && veccol::per_page(config.dimensions) == 0 {
+            return Err(MnemoError::Invalid(format!(
+                "a v9 file supports up to {} dimensions for now (one fp16 vector \
+                 must fit a page); records that span pages come with FMT-9b.2",
+                (PAYLOAD - veccol::PAGE_HEADER - 4) / 2
+            )));
+        }
+        let flags = if version >= VERSION_V9 && config.store_float_vectors {
+            FLAG_ENCRYPTED | FLAG_FLOAT_VECTORS
+        } else {
+            FLAG_ENCRYPTED
+        };
         // Exclusive lock covers the write path; second writer sees `Locked`.
         let file = open_with_lock(&path, /*write=*/ true, /*create=*/ true)?;
 
@@ -1531,7 +1714,7 @@ impl Mnemo {
         let mut header = Header {
             version,
             page_size: PAGE_SIZE as u32,
-            flags: FLAG_ENCRYPTED,
+            flags,
             dimensions: config.dimensions as u32,
             created_at: memory::now_secs(),
             write_counter: 0,
@@ -1621,6 +1804,8 @@ impl Mnemo {
             key_slots: KeySlotRun::default(),
             dirty_keys: false,
             gen_leased: false,
+            col: VecColumn::default(),
+            vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
 
@@ -1878,6 +2063,7 @@ impl Mnemo {
         // v8, so these don't touch the disk there).
         let free = load_free_list(&mut pager, header.free)?;
         let key_slots = load_key_slots(&mut pager, header.keys)?;
+        let col = VecColumn::from_catalog(&catalog);
 
         Ok(Mnemo {
             pager,
@@ -1923,6 +2109,8 @@ impl Mnemo {
             key_slots,
             dirty_keys: false,
             gen_leased: false,
+            col,
+            vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
 
@@ -2051,6 +2239,7 @@ impl Mnemo {
         let cache_idx = DirectoryIndex::build(&cache_dir);
         let free = load_free_list(&mut pager, header.free)?;
         let key_slots = load_key_slots(&mut pager, header.keys)?;
+        let col = VecColumn::from_catalog(&catalog);
 
         Ok(Mnemo {
             pager,
@@ -2090,6 +2279,8 @@ impl Mnemo {
             key_slots,
             dirty_keys: false,
             gen_leased: false,
+            col,
+            vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
 
@@ -2176,6 +2367,207 @@ impl Mnemo {
         }
     }
 
+    /// FMT-9b: the file keeps float vectors in its records.
+    fn float_vectors(&self) -> bool {
+        self.is_v9() && self.header.flags & FLAG_FLOAT_VECTORS != 0
+    }
+
+    /// FMT-9b: quantize `v` into the column for catalog row `idx` (written
+    /// by the next flush).
+    fn stage_vector(&mut self, idx: usize, v: &[f32]) {
+        let (h, norm) = veccol::quantize(v);
+        let d = self.dimensions;
+        if self.col.resident {
+            let rows = self.catalog.len();
+            let fits = rows * veccol::entry_len(d) <= self.vector_cache_budget;
+            if fits {
+                if self.col.data.len() < rows * d {
+                    self.col.data.resize(rows * d, 0);
+                    self.col.norms.resize(rows, 0.0);
+                }
+                self.col.data[idx * d..(idx + 1) * d].copy_from_slice(&h);
+                self.col.norms[idx] = norm;
+            } else {
+                // Grown past the budget: page the column from now on.
+                self.col.data = Vec::new();
+                self.col.norms = Vec::new();
+                self.col.resident = false;
+            }
+        }
+        self.col.hot.insert(idx, (h, norm));
+        self.col.pending.push(idx);
+        if let Some(r) = self.catalog[idx].v9.as_mut() {
+            r.vec_page = 0;
+            r.vec_slot = 0;
+            r.vec_gen = 0;
+        }
+    }
+
+    /// FMT-9b: row `idx` no longer needs its column entry (`row` is the row
+    /// as it was): drop a staged one, or take it off its page and free the
+    /// page once nothing live is left on it.
+    fn kill_vector(&mut self, idx: usize, row: &CatalogEntry) {
+        self.col.hot.remove(&idx);
+        let Some(r) = row.v9 else { return };
+        if r.vec_page == 0 {
+            return;
+        }
+        let empty = match self.col.page_rows.get_mut(&r.vec_page) {
+            Some(rows) => {
+                rows.retain(|&i| i != idx);
+                rows.is_empty()
+            }
+            None => false,
+        };
+        if empty {
+            self.col.page_rows.remove(&r.vec_page);
+            self.release_pages(r.vec_page, 1);
+        }
+    }
+
+    /// FMT-9b: row `e`'s column entry (fp16 values and norm), from the
+    /// staged set, the resident column, or its page.
+    fn column_entry(&mut self, e: &CatalogEntry) -> Result<(Vec<u16>, f32)> {
+        let d = self.dimensions;
+        if let Some(idx) = self.index.get(e.id, &self.catalog) {
+            if let Some((h, n)) = self.col.hot.get(&idx) {
+                return Ok((h.clone(), *n));
+            }
+            if self.col.resident && self.col.norms.len() > idx {
+                return Ok((
+                    self.col.data[idx * d..(idx + 1) * d].to_vec(),
+                    self.col.norms[idx],
+                ));
+            }
+        }
+        let r =
+            e.v9.ok_or_else(|| MnemoError::Invalid("v9 row without a vector entry".into()))?;
+        if r.vec_page == 0 {
+            return Err(MnemoError::Invalid("vector entry not written yet".into()));
+        }
+        let page = self.pager.read_page(r.vec_page, r.vec_gen)?;
+        veccol::decode_entry(&page, d, r.vec_slot as usize)
+    }
+
+    /// FMT-9b: load the whole column into memory if it fits the budget.
+    /// Called before scoring; a no-op once resident (or on v8).
+    fn ensure_column(&mut self) -> Result<()> {
+        if !self.is_v9() || self.col.resident {
+            return Ok(());
+        }
+        let d = self.dimensions;
+        let rows = self.catalog.len();
+        if rows * veccol::entry_len(d) > self.vector_cache_budget {
+            return Ok(());
+        }
+        let mut data = vec![0u16; rows * d];
+        let mut norms = vec![0f32; rows];
+        let mut by_page: std::collections::BTreeMap<u64, (u64, Vec<(usize, u16)>)> =
+            std::collections::BTreeMap::new();
+        for (i, e) in self.catalog.iter().enumerate() {
+            if e.deleted {
+                continue;
+            }
+            if let Some(r) = e.v9 {
+                if r.vec_page != 0 {
+                    by_page
+                        .entry(r.vec_page)
+                        .or_insert_with(|| (r.vec_gen, Vec::new()))
+                        .1
+                        .push((i, r.vec_slot));
+                }
+            }
+        }
+        for (page, (gen, slots)) in by_page {
+            let bytes = self.pager.read_page(page, gen)?;
+            for (i, slot) in slots {
+                let (h, n) = veccol::decode_entry(&bytes, d, slot as usize)?;
+                data[i * d..(i + 1) * d].copy_from_slice(&h);
+                norms[i] = n;
+            }
+        }
+        for (&i, (h, n)) in &self.col.hot {
+            if i < rows {
+                data[i * d..(i + 1) * d].copy_from_slice(h);
+                norms[i] = *n;
+            }
+        }
+        self.col.data = data;
+        self.col.norms = norms;
+        self.col.resident = true;
+        Ok(())
+    }
+
+    /// FMT-9b: write the staged column entries, plus the live entries of up
+    /// to [`VACUUM_PAGES_PER_COMMIT`] sparse pages (under 3/4 full), into
+    /// fresh vector pages. Runs at the top of a flush, before the catalog
+    /// is serialized, since it moves rows' vector locations. Only when
+    /// something is staged, so a flush with no new vectors writes none.
+    fn pack_vectors(&mut self) -> Result<()> {
+        if !self.is_v9() || self.col.pending.is_empty() {
+            return Ok(());
+        }
+        let d = self.dimensions;
+        let per = veccol::per_page(d);
+        let mut sparse: Vec<u64> = self
+            .col
+            .page_rows
+            .iter()
+            .filter(|(_, rows)| rows.len() * 4 < per * 3)
+            .map(|(&p, _)| p)
+            .collect();
+        sparse.sort_unstable();
+        sparse.truncate(VACUUM_PAGES_PER_COMMIT);
+        let mut order: Vec<usize> = Vec::new();
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for p in sparse {
+            let rows = self.col.page_rows.remove(&p).unwrap_or_default();
+            for idx in rows {
+                let e = self.catalog[idx].clone();
+                let v = self.column_entry(&e)?;
+                self.col.hot.insert(idx, v);
+                if seen.insert(idx) {
+                    order.push(idx);
+                }
+            }
+            self.release_pages(p, 1);
+        }
+        let pending = std::mem::take(&mut self.col.pending);
+        for idx in pending {
+            if self.col.hot.contains_key(&idx) && seen.insert(idx) {
+                order.push(idx);
+            }
+        }
+        let gen = self.write_gen();
+        for chunk in order.chunks(per) {
+            let page = self.alloc_pages(1);
+            let bytes = {
+                let entries: Vec<(&[u16], f32)> = chunk
+                    .iter()
+                    .map(|i| {
+                        let (h, n) = &self.col.hot[i];
+                        (h.as_slice(), *n)
+                    })
+                    .collect();
+                veccol::encode_page(d, gen, &entries)
+            };
+            self.pager.write_page(page, gen, &bytes)?;
+            for (slot, &i) in chunk.iter().enumerate() {
+                if let Some(r) = self.catalog[i].v9.as_mut() {
+                    r.vec_page = page;
+                    r.vec_slot = slot as u16;
+                    r.vec_gen = gen;
+                }
+            }
+            self.col.page_rows.insert(page, chunk.to_vec());
+        }
+        for i in order {
+            self.col.hot.remove(&i);
+        }
+        self.dirty_catalog = true;
+        Ok(())
+    }
+
     /// FMT-9: before this session seals its first v9 page, commit a
     /// header-only transaction that bumps `wal_seq`.
     ///
@@ -2239,6 +2631,12 @@ impl Mnemo {
         let bytes = self.read_record(e)?;
         let mut m: Memory =
             rmp_serde::from_slice(&bytes).map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        // FMT-9b: a v9 record carries no vector (unless the file keeps
+        // float vectors); it comes from the column, fp16-rounded.
+        if e.v9.is_some() && !self.float_vectors() {
+            let (h, _) = self.column_entry(e)?;
+            m.vector = veccol::dequantize(&h);
+        }
         // The catalog is the source of truth for access stats — the values
         // in the record body are a stale snapshot from when the record was
         // last written. Overwrite them here so consumers always see live
@@ -2286,7 +2684,18 @@ impl Mnemo {
                 }
             }
         }
-        let bytes = rmp_serde::to_vec(&m).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        // FMT-9b: a v9 record is stored without its vector (unless the file
+        // keeps float vectors); the vector goes to the fp16 column.
+        let v9 = self.is_v9();
+        let bytes = if v9 && !self.float_vectors() {
+            let vector = std::mem::take(&mut m.vector);
+            let b = rmp_serde::to_vec(&m);
+            m.vector = vector;
+            b
+        } else {
+            rmp_serde::to_vec(&m)
+        }
+        .map_err(|e| MnemoError::Serialize(e.to_string()))?;
         let (start, pc, gen) = self.write_record(&bytes)?;
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
@@ -2306,9 +2715,14 @@ impl Mnemo {
             accessed_at: prev_accessed,
             access_count: prev_count,
             gen,
+            v9: v9.then(|| row_tags(&m)),
         };
         match self.index.get(id_u, &self.catalog) {
             Some(idx) => {
+                if v9 && !self.catalog[idx].deleted {
+                    let old = self.catalog[idx].clone();
+                    self.kill_vector(idx, &old);
+                }
                 // FMT-9 (a): the overwritten version's pages are freed by
                 // this transaction's commit. A tombstone's pages were
                 // already freed when its delete committed.
@@ -2325,6 +2739,11 @@ impl Mnemo {
             }
         }
         self.dirty_catalog = true;
+        if v9 {
+            if let Some(idx) = self.index.get(id_u, &self.catalog) {
+                self.stage_vector(idx, &m.vector);
+            }
+        }
 
         // Keep the ANN index complete: assign the (new or changed) vector to
         // its nearest partition. Centroids/codebook stay fixed until rebuild.
@@ -2540,6 +2959,9 @@ impl Mnemo {
             self.dirty_catalog = true;
             let (p, c) = (entry.start_page, entry.page_count as u64);
             self.release_pages(p, c);
+            if self.is_v9() {
+                self.kill_vector(idx, &entry);
+            }
         }
         if let Some(ann) = &mut self.ann {
             if ann.contains(id.0) {
@@ -4416,6 +4838,13 @@ impl Mnemo {
         (!e.deleted).then_some((e.start_page, e.page_count, e.gen))
     }
 
+    /// **Not a stable API.** FMT-9b: whether the vector column is resident,
+    /// and how many vector pages hold live entries.
+    #[doc(hidden)]
+    pub fn __vector_column(&self) -> (bool, usize) {
+        (self.col.resident, self.col.page_rows.len())
+    }
+
     /// **Not a stable API.** FMT-9: the header's next unallocated page.
     #[doc(hidden)]
     pub fn __next_page(&self) -> u64 {
@@ -4569,6 +4998,8 @@ impl Mnemo {
 
     /// Return every live memory (used by tooling and compaction).
     pub fn memories(&mut self) -> Result<Vec<Memory>> {
+        // FMT-9b: one pass over the vector pages instead of one per record.
+        self.ensure_column()?;
         let entries: Vec<CatalogEntry> = self
             .catalog
             .iter()
@@ -4755,6 +5186,12 @@ impl Mnemo {
         now: i64,
         entries: &[CatalogEntry],
     ) -> Result<Vec<RecallResult>> {
+        // FMT-9b: score v9 candidates from their rows and the fp16 column,
+        // decrypting only what makes `top_k`. A metadata filter needs the
+        // record body, so it takes the general path below.
+        if self.is_v9() && req.filter.is_empty() {
+            return self.score_rows(req, now, entries);
+        }
         let mut scored: Vec<RecallResult> = Vec::with_capacity(entries.len());
         for e in entries {
             // Phase 12.1: drop superseded records.
@@ -4823,6 +5260,103 @@ impl Mnemo {
             });
         }
         Ok(scored)
+    }
+
+    /// FMT-9b: [`Mnemo::score_entries`] for a v9 file with no metadata
+    /// filter. Every check the general path makes on the decrypted record
+    /// is made on the row instead (supersession, TTL, type, agent
+    /// visibility, the thread-layer kinds), the similarity comes from the
+    /// fp16 column, and the score from the row's `created_at` and
+    /// `importance`. Candidates are then decrypted best-first until `top_k`
+    /// survive; the agent check is repeated on the record, since the row
+    /// only has a hash of the agent id.
+    fn score_rows(
+        &mut self,
+        req: &RecallRequest,
+        now: i64,
+        entries: &[CatalogEntry],
+    ) -> Result<Vec<RecallResult>> {
+        self.ensure_column()?;
+        let d = self.dimensions;
+        let q = &req.query;
+        let q_norm = q.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let agent_h = req.agent_id.as_deref().map(|a| fnv1a32(&[a.as_bytes()]));
+        let types: Option<Vec<u8>> = req
+            .memory_types
+            .as_ref()
+            .map(|ts| ts.iter().map(|&t| memory_type_code(t)).collect());
+        let mut cand: Vec<(f32, f32, usize)> = Vec::with_capacity(entries.len());
+        for (pos, e) in entries.iter().enumerate() {
+            let Some(r) = e.v9 else { continue };
+            if r.flags & ROW_SUPERSEDED != 0 {
+                continue;
+            }
+            if self.superseded.as_ref().is_some_and(|s| s.contains(&e.id)) {
+                continue;
+            }
+            if r.flags & ROW_HAS_TTL != 0 && now >= r.expires_at {
+                continue;
+            }
+            if let Some(ts) = &types {
+                if !ts.contains(&r.memory_type) {
+                    continue;
+                }
+            }
+            if let Some(ah) = agent_h {
+                if r.flags & ROW_SHARED == 0 && r.agent_hash != ah {
+                    continue;
+                }
+            }
+            if matches!(
+                r.kind,
+                ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK
+            ) {
+                continue;
+            }
+            let Some(idx) = self.index.get(e.id, &self.catalog) else {
+                continue;
+            };
+            let sim = if let Some((h, n)) = self.col.hot.get(&idx) {
+                veccol::similarity_f16(req.metric, q, q_norm, h, *n)
+            } else if self.col.resident && self.col.norms.len() > idx {
+                veccol::similarity_f16(
+                    req.metric,
+                    q,
+                    q_norm,
+                    &self.col.data[idx * d..(idx + 1) * d],
+                    self.col.norms[idx],
+                )
+            } else {
+                let (h, n) = self.column_entry(e)?;
+                veccol::similarity_f16(req.metric, q, q_norm, &h, n)
+            };
+            let score = req.weights.score(
+                sim,
+                (now - r.created_at) as f32,
+                r.importance,
+                e.access_count,
+            );
+            cand.push((score, sim, pos));
+        }
+        cand.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut out: Vec<RecallResult> = Vec::with_capacity(req.top_k.min(cand.len()));
+        for (score, sim, pos) in cand {
+            if out.len() >= req.top_k {
+                break;
+            }
+            let m = self.read_memory(&entries[pos])?;
+            if let Some(agent) = &req.agent_id {
+                if !(m.agent_id == *agent || m.scope == Scope::Shared) {
+                    continue;
+                }
+            }
+            out.push(RecallResult {
+                memory: m,
+                score,
+                similarity: sim,
+            });
+        }
+        Ok(out)
     }
 
     /// Phase-5 multi-signal recall under the v0.7.0 scoring-v2 formula
@@ -5035,6 +5569,30 @@ impl Mnemo {
             return Err(MnemoError::Invalid(
                 "cannot build an index over an empty database".into(),
             ));
+        }
+        // FMT-9b: a v9 file below V9_ANN_MIN_FACTS recalls by an exact fp16
+        // scan, which is faster than the index there and costs no disk.
+        // Report it as an index with no partitions, and drop a stale one.
+        // `MNEMO_DEV_ANN_MIN_FACTS` overrides the threshold so the v8 index
+        // suites can run on v9 files during FMT-9 (removed in 9f).
+        let min_facts = std::env::var("MNEMO_DEV_ANN_MIN_FACTS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(V9_ANN_MIN_FACTS);
+        if self.is_v9() && mems.len() < min_facts {
+            if self.ann.is_some() || self.ann_unloaded {
+                self.ann = None;
+                self.ann_unloaded = false;
+                self.dirty_index = true;
+                self.index_persist.forced = true;
+            }
+            return Ok(IndexInfo {
+                vectors: mems.len(),
+                partitions: 0,
+                subspaces: 0,
+                n_probe: 0,
+                n_rerank: 0,
+            });
         }
         let items: Vec<(u128, &[f32])> =
             mems.iter().map(|m| (m.id.0, m.vector.as_slice())).collect();
@@ -5403,6 +5961,9 @@ impl Mnemo {
         // FMT-9: a v9 session's first sealed page needs the generation
         // lease (normally taken by its first record write already).
         self.ensure_gen_lease()?;
+        // FMT-9b: column entries first; they move rows' vector locations,
+        // so they must land before the catalog is serialized.
+        self.pack_vectors()?;
 
         // 1. Serialize control plane, ensure WAL capacity, lease counter +
         //    page slots, and persist the leased header *before* any data
@@ -5829,6 +6390,21 @@ impl Mnemo {
     /// retained until [`Mnemo::flush`], regardless of the cap.
     pub fn set_cache_capacity(&mut self, pages: usize) {
         self.pager.set_cache_capacity(pages);
+    }
+
+    /// FMT-9b (v9 files): keep the fp16 vector column in memory while it
+    /// takes at most `bytes` (default [`DEFAULT_VECTOR_CACHE_BUDGET`],
+    /// 96 MiB, about 125K vectors at 384 dims). Above it, recall reads
+    /// vector entries through the page cache instead: less memory, slower
+    /// recall. Lowering it below the resident size drops the resident copy.
+    pub fn set_vector_cache_budget(&mut self, bytes: usize) {
+        self.vector_cache_budget = bytes;
+        let need = self.catalog.len() * veccol::entry_len(self.dimensions);
+        if self.col.resident && need > bytes {
+            self.col.data = Vec::new();
+            self.col.norms = Vec::new();
+            self.col.resident = false;
+        }
     }
 
     /// Page-cache occupancy: `(pages_cached, capacity)`. Renamed from
@@ -6458,6 +7034,8 @@ impl Mnemo {
         }
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
+        // FMT-9b: the column described the catalog being replaced.
+        self.col = VecColumn::from_catalog(&self.catalog);
         self.ann = ann;
         self.ann_unloaded = false;
         // The handle caches describe the catalog being replaced.
@@ -6500,12 +7078,34 @@ impl Mnemo {
             .filter(|e| !e.deleted && !live_then.contains_key(&e.start_page))
             .map(|e| (e.start_page, e.page_count as u64))
             .collect();
-        self.pending_free.retain(|&(p, c)| !overlaps(p, c));
+        // FMT-9b: vector pages hold many rows, so they're compared as a
+        // set: the snapshot's come back, the current ones it lacks go.
+        let vec_then: std::collections::BTreeSet<u64> = restored
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter_map(|e| e.v9.map(|r| r.vec_page))
+            .filter(|&p| p != 0)
+            .collect();
+        let vec_dying: Vec<u64> = self
+            .col
+            .page_rows
+            .keys()
+            .copied()
+            .filter(|p| !vec_then.contains(p))
+            .collect();
+        self.pending_free
+            .retain(|&(p, c)| !(overlaps(p, c) || (c == 1 && vec_then.contains(&p))));
         for (&p, &c) in &live_then {
             self.free.unfree(p, c);
         }
+        for &p in &vec_then {
+            self.free.unfree(p, 1);
+        }
         for (p, c) in dying {
             self.release_pages(p, c);
+        }
+        for p in vec_dying {
+            self.release_pages(p, 1);
         }
         self.free_dirty = true;
     }
@@ -6736,6 +7336,15 @@ impl Mnemo {
             let bytes = self.read_record(e)?;
             let _m: Memory = rmp_serde::from_slice(&bytes)
                 .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+            // FMT-9b: and the row's vector column entry.
+            if e.v9.is_some() {
+                let (h, _) = self.column_entry(e)?;
+                if h.len() != self.dimensions {
+                    return Err(MnemoError::Invalid(
+                        "vector entry has the wrong width".into(),
+                    ));
+                }
+            }
         }
 
         // Also decode every live cache entry. Tombstoned entries are
@@ -6787,6 +7396,7 @@ impl Mnemo {
                 .filter(|e| !e.deleted)
                 .map(|e| (e.start_page, e.page_count as u64, "cache entry")),
         );
+        live.extend(self.col.page_rows.keys().map(|&p| (p, 1, "vector page")));
         for (p, c, what) in live {
             if c == 0 {
                 continue;
