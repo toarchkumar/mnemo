@@ -189,4 +189,3 @@ fn a_crash_during_out_of_wal_runs_is_pre_or_post() {
     }
     assert!(saw_pre && saw_post);
 }
-

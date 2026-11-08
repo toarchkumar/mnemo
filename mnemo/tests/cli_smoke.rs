@@ -2076,6 +2076,9 @@ fn demo_runs_to_a_clean_exit() {
         "demo failed: {}\n{stdout}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(stdout.contains("memories survive the round-trip"), "{stdout}");
+    assert!(
+        stdout.contains("memories survive the round-trip"),
+        "{stdout}"
+    );
     assert!(stdout.contains("demo complete."), "{stdout}");
 }
