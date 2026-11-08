@@ -1551,7 +1551,7 @@ fn recall_falls_back_to_read_only_when_write_lock_held() {
          is unavailable; got status={status:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
     );
     assert!(
-        stderr.contains("another writer holds the lock")
+        stderr.contains("holds the lock on")
             && stderr.contains("read-only")
             && stderr.contains("--no-track"),
         "expected the one-line stderr fallback note, got stderr:\n{stderr}",
@@ -1561,6 +1561,39 @@ fn recall_falls_back_to_read_only_when_write_lock_held() {
     assert!(
         stdout.contains("the user prefers tea"),
         "expected recall output to include the top hit; got:\n{stdout}",
+    );
+}
+
+/// R-004.4: when an exclusive writer holds the file, the read-only
+/// fallback can't open either. Recall must fail with the lock error and
+/// must not print the "running read-only" notice first.
+#[test]
+fn recall_with_an_exclusive_holder_fails_without_the_fallback_notice() {
+    let (_dir, path, pp, _) = seed_db();
+    let writer = Mnemo::open(&path, pp).expect("exclusive writer");
+    let (status, stdout, stderr) = run_cli(
+        &[
+            "recall",
+            path.to_str().unwrap(),
+            "--query",
+            "[1.0,0.0,0.0,0.0]",
+            "--top-k",
+            "1",
+        ],
+        pp,
+    );
+    drop(writer);
+    assert!(
+        !status.success(),
+        "recall can't open a file an exclusive writer holds; stdout:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("running recall read-only"),
+        "the fallback notice must not print when the fallback fails: {stderr}"
+    );
+    assert!(
+        stderr.to_lowercase().contains("lock"),
+        "expected the lock error, got: {stderr}"
     );
 }
 
@@ -1623,7 +1656,7 @@ fn recall_text_falls_back_to_read_only_when_write_lock_held() {
         out.status,
     );
     assert!(
-        stderr.contains("another writer holds the lock")
+        stderr.contains("holds the lock on")
             && stderr.contains("read-only")
             && stderr.contains("--no-track"),
         "expected the one-line stderr fallback note (--text), got stderr:\n{stderr}",
@@ -1679,7 +1712,7 @@ fn recall_tracking_flushes_access_count_to_disk() {
     // recall takes the exclusive lock cleanly in the no-contention
     // case.
     assert!(
-        !stderr.contains("another writer holds the lock"),
+        !stderr.contains("holds the lock on"),
         "unexpected lock-fallback note on a tracking recall with no contention: {stderr}",
     );
 

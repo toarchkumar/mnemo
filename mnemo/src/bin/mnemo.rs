@@ -1785,11 +1785,16 @@ fn run() -> std::result::Result<(), String> {
                     match Mnemo::open(path, pp) {
                         Ok(db) => Ok((db, false)),
                         Err(mnemo_engine::MnemoError::Locked { .. }) => {
+                            // R-004.4: open read-only first and print the
+                            // notice only if that worked. An exclusive
+                            // holder blocks the read-only open too, and
+                            // then the `Locked` error is the whole story.
+                            let db = Mnemo::open_read_only(path, pp)?;
                             eprintln!(
-                                "mnemo: another writer holds the lock on {path}; \
+                                "mnemo: another process holds the lock on {path}; \
                                  running recall read-only with --no-track"
                             );
-                            Mnemo::open_read_only(path, pp).map(|db| (db, true))
+                            Ok((db, true))
                         }
                         Err(e) => Err(e),
                     }
