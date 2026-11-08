@@ -28,7 +28,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use mnemo_engine::{IndexConfig, Memory, MemoryType, Mnemo, RecallRequest};
+use mnemo_engine::{
+    Embedder, EmbedderIdentity, EssenceScope, EssenceSection, IndexConfig, Memory, MemoryType,
+    Mnemo, RecallRequest, ThreadTurn,
+};
 use serde_json::{json, Value};
 
 #[path = "../benches/corpus.rs"]
@@ -266,6 +269,111 @@ fn phase_writes(n: usize) -> Value {
     })
 }
 
+/// In-process embedder returning one canned vector, so the layers phase
+/// measures engine cost only.
+struct Canned(Vec<f32>);
+impl Embedder for Canned {
+    fn identity(&self) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: "device-budget-canned".into(),
+            dimensions: self.0.len(),
+            normalize: true,
+        }
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        Ok(texts.iter().map(|_| self.0.clone()).collect())
+    }
+}
+
+fn turn(i: usize) -> ThreadTurn {
+    ThreadTurn {
+        turn_id: format!("turn-{i:06}"),
+        role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+        content: text_for(i),
+        timestamp: None,
+    }
+}
+
+/// PERF-1 step 2b (R-004.2): the `about` briefing + a thread's essence
+/// render, and a single-turn ingest, cold (first call on a fresh handle,
+/// which builds the handle caches) and warm.
+fn phase_layers(n: usize) -> Value {
+    let copy = scratch_copy(n, "layers");
+    let canned = gen_clustered_vectors(1, DIMENSIONS, 1, 0x1A7E_0001).remove(0);
+    {
+        let mut db = Mnemo::open(&copy, PASSPHRASE).expect("open");
+        db.set_embedder(Canned(canned.clone())).expect("embedder");
+        db.remember(Memory::scaffold_manifest(DIMENSIONS))
+            .expect("manifest");
+        for i in 0..20 {
+            let section = [EssenceSection::Conventions, EssenceSection::Decisions][i % 2];
+            db.essence_add(
+                EssenceScope::Project,
+                section,
+                &format!("project item {i}"),
+                None,
+            )
+            .expect("essence");
+        }
+        for i in 0..10 {
+            db.essence_add(
+                EssenceScope::Thread("bench".into()),
+                EssenceSection::Open,
+                &format!("open item {i}"),
+                None,
+            )
+            .expect("essence");
+        }
+        let turns: Vec<ThreadTurn> = (0..200).map(turn).collect();
+        db.ingest_thread("bench", &turns).expect("ingest");
+        db.close().expect("close");
+    }
+    let brief = |db: &mut Mnemo| {
+        let t = Instant::now();
+        std::hint::black_box(db.about().expect("about"));
+        std::hint::black_box(db.about_essence().expect("about_essence"));
+        std::hint::black_box(
+            db.essence(EssenceScope::Thread("bench".into()), 6144)
+                .expect("essence"),
+        );
+        ms(t)
+    };
+    // Cold brief: a fresh handle with no embedder, so the first call pays
+    // the one lazy handle scan. (`set_embedder` reads the manifest through
+    // `about()`, so on a handle with an embedder that scan happens at
+    // registration instead.)
+    let mut db = Mnemo::open(&copy, PASSPHRASE).expect("open");
+    let brief_cold = brief(&mut db);
+    db.set_embedder(Canned(canned.clone())).expect("embedder");
+    let brief_warm: Vec<f64> = (0..20).map(|_| brief(&mut db)).collect();
+    let mut ingest_warm = Vec::new();
+    for i in 0..20 {
+        let t = Instant::now();
+        db.ingest_thread("bench", &[turn(1_000 + i)])
+            .expect("ingest");
+        ingest_warm.push(ms(t));
+    }
+    drop(db);
+    // Cold ingest: fresh handle; registering the embedder pays the scan.
+    let mut db = Mnemo::open(&copy, PASSPHRASE).expect("open");
+    let t = Instant::now();
+    db.set_embedder(Canned(canned)).expect("embedder");
+    db.ingest_thread("bench", &[turn(2_000)]).expect("ingest");
+    let ingest_cold = ms(t);
+    drop(db);
+    let _ = std::fs::remove_file(&copy);
+    let (bw_med, bw_p95) = median_p95(brief_warm);
+    let (iw_med, iw_p95) = median_p95(ingest_warm);
+    json!({
+        "brief_cold_ms": brief_cold,
+        "brief_warm_median_ms": bw_med,
+        "brief_warm_p95_ms": bw_p95,
+        "ingest_one_turn_cold_ms": ingest_cold,
+        "ingest_one_turn_warm_median_ms": iw_med,
+        "ingest_one_turn_warm_p95_ms": iw_p95,
+    })
+}
+
 // --- parent ------------------------------------------------------------
 
 /// Peak RSS in kB from `/usr/bin/time` output: macOS `-l` prints bytes,
@@ -337,6 +445,7 @@ fn main() {
             "handle" => phase_handle(n),
             "cycles" => phase_cycles(n),
             "writes" => phase_writes(n),
+            "layers" => phase_layers(n),
             other => panic!("unknown phase {other}"),
         };
         println!("RESULT {v}");
@@ -351,18 +460,28 @@ fn main() {
         })
         .unwrap_or_else(|| DEFAULT_SIZES.to_vec());
 
+    // `--only layers` (comma-separated) runs a subset; build always runs.
+    let only: Option<Vec<String>> =
+        arg("--only").map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
+    let wanted = |p: &str| match &only {
+        Some(o) => o.iter().any(|x| x == p),
+        None => true,
+    };
+    let skip = || json!({});
     let mut results = serde_json::Map::new();
     for &n in &sizes {
         eprintln!("== n = {n}: build (cached after the first run)");
         let build = run_phase("build", n);
         eprintln!("== n = {n}: file, handle, cycles, writes");
-        let file = run_phase("file", n);
-        let handle = run_phase("handle", n);
-        let cycles = run_phase("cycles", n);
-        let writes = run_phase("writes", n);
+        let run = |p: &str| if wanted(p) { run_phase(p, n) } else { skip() };
+        let file = run("file");
+        let handle = run("handle");
+        let cycles = run("cycles");
+        let writes = run("writes");
+        let layers = run("layers");
         results.insert(
             n.to_string(),
-            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes }),
+            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers }),
         );
     }
 
@@ -416,6 +535,28 @@ fn main() {
          pages; handleMB: RSS growth for one open handle after 200 warm recalls; peakMB: peak RSS \
          of that phase's process; engineMB: the engine's own heap accounting; times in ms; open = \
          median over {OPEN_CYCLES} fresh opens, open1st = the handle phase's single open)"
+    );
+    println!(
+        "\n{:>7} | {:>10} {:>10} | {:>12} {:>12}",
+        "n", "brief cold", "brief warm", "ingest1 cold", "ingest1 warm"
+    );
+    for &n in &sizes {
+        let l = &results[&n.to_string()]["layers"];
+        let f = |k: &str| l[k].as_f64().unwrap_or(0.0);
+        println!(
+            "{:>7} | {:>10.2} {:>10.3} | {:>12.2} {:>12.3}",
+            n,
+            f("brief_cold_ms"),
+            f("brief_warm_median_ms"),
+            f("ingest_one_turn_cold_ms"),
+            f("ingest_one_turn_warm_median_ms"),
+        );
+    }
+    println!(
+        "(brief = about() + about_essence() + essence(thread) with 1 manifest, 20 project and 10 \
+         thread items; ingest1 = ingest_thread of one new turn into a 200-turn thread; cold = first \
+         call on a fresh handle, which builds the handle caches; ingest1 cold includes \
+         set_embedder)"
     );
 
     let doc = Value::Object(results);

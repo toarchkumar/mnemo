@@ -4818,8 +4818,12 @@ fn read_only_open_finds_memories_newer_than_the_index() {
     let vec_ = |rng: &mut Rng| -> Vec<f32> { (0..dims).map(|_| rng.normalish()).collect() };
     let mut db = Mnemo::create(&path, "pw", fast_cfg(dims)).unwrap();
     for i in 0..200 {
-        db.remember(Memory::new(format!("old {i}"), MemoryType::Semantic, vec_(&mut rng)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("old {i}"),
+            MemoryType::Semantic,
+            vec_(&mut rng),
+        ))
+        .unwrap();
     }
     db.build_index().unwrap();
     db.flush().unwrap();
@@ -4853,8 +4857,12 @@ fn restore_to_with_a_stale_index_reassigns_newer_records() {
     let vec_ = |rng: &mut Rng| -> Vec<f32> { (0..dims).map(|_| rng.normalish()).collect() };
     let mut db = Mnemo::create(&path, "pw", fast_cfg(dims)).unwrap();
     for i in 0..200 {
-        db.remember(Memory::new(format!("old {i}"), MemoryType::Semantic, vec_(&mut rng)))
-            .unwrap();
+        db.remember(Memory::new(
+            format!("old {i}"),
+            MemoryType::Semantic,
+            vec_(&mut rng),
+        ))
+        .unwrap();
     }
     db.build_index().unwrap();
     db.flush().unwrap();
@@ -4884,9 +4892,145 @@ fn restore_to_with_a_stale_index_reassigns_newer_records() {
     db.restore_to(target).unwrap();
     assert_eq!(l2_top(&mut db, &a, 1), vec![a_id.0]);
     assert_eq!(l2_top(&mut db, &b, 1), vec![b_id.0]);
-    assert!(db.get(&later_id).is_err(), "the later memory isn't in the snapshot");
+    assert!(
+        db.get(&later_id).is_err(),
+        "the later memory isn't in the snapshot"
+    );
     drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(l2_top(&mut db, &a, 1), vec![a_id.0]);
     assert_eq!(l2_top(&mut db, &b, 1), vec![b_id.0]);
+}
+
+// ---------- PERF-1 step 2b (R-004.2): thread layers out of the ANN -------
+
+/// Turns, essence items and thread links never enter the ANN, whether
+/// they're written before or after the index is built.
+#[test]
+fn non_fact_kinds_stay_out_of_the_ann() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("kinds.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    for i in 0..60 {
+        db.remember(Memory::new(
+            format!("fact {i}"),
+            MemoryType::Semantic,
+            vec4(1.0, i as f32, 0.5, 0.1),
+        ))
+        .unwrap();
+    }
+    db.ingest_thread(
+        "t1",
+        &[tt("u-1", "user", "a turn"), tt("u-2", "user", "another")],
+    )
+    .unwrap();
+    db.essence_add(
+        EssenceScope::Project,
+        EssenceSection::Conventions,
+        "be brief",
+        None,
+    )
+    .unwrap();
+    db.build_index().unwrap();
+    // 60 facts + the scaffold manifest.
+    assert_eq!(db.stats().unwrap().index.unwrap().vectors, 61);
+    db.ingest_thread("t1", &[tt("u-3", "user", "after the build")])
+        .unwrap();
+    db.essence_append_timeline(EssenceScope::Thread("t1".into()), "a milestone", None)
+        .unwrap();
+    db.thread_start("t2", "t1").unwrap();
+    db.remember(Memory::new(
+        "one more fact",
+        MemoryType::Semantic,
+        vec4(0.0, 1.0, 0.0, 0.0),
+    ))
+    .unwrap();
+    assert_eq!(db.stats().unwrap().index.unwrap().vectors, 62);
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.stats().unwrap().index.unwrap().vectors, 62);
+
+    // A thread-pinned recall scans that thread's records exactly.
+    let req = RecallRequest::new(vec4(1.0, 0.0, 0.0, 0.0))
+        .top_k(10)
+        .track_access(false)
+        .filter(Filter::default().metadata_eq("_mnemo.thread", json!("t1")));
+    let hits = db.recall(&req).unwrap();
+    let mut contents: Vec<String> = hits.iter().map(|h| h.memory.content.clone()).collect();
+    contents.sort();
+    assert_eq!(
+        contents,
+        ["a milestone", "a turn", "after the build", "another"]
+    );
+}
+
+/// Once the handle caches are built, writes keep them current: about,
+/// essence, ingest idempotence, forget and keyed slots all see changes made
+/// on the same handle.
+#[test]
+fn handle_caches_track_writes_on_the_same_handle() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("caches.mnemo");
+    let mut db = with_embedder(&path, "pw");
+    assert_eq!(db.about().unwrap().len(), 1); // builds the caches
+
+    // Onboarding: add, then delete.
+    let note = db
+        .remember(
+            Memory::new("read me", MemoryType::Semantic, vec4(0.0, 0.0, 1.0, 0.0))
+                .with_meta("area", json!("onboarding")),
+        )
+        .unwrap();
+    assert_eq!(db.about().unwrap().len(), 2);
+    db.delete(&note).unwrap();
+    assert_eq!(db.about().unwrap().len(), 1);
+
+    // Essence: add, update, remove.
+    let item = db
+        .essence_add(EssenceScope::Project, EssenceSection::Open, "first", None)
+        .unwrap();
+    assert!(db.about_essence().unwrap().unwrap().contains("first"));
+    db.essence_update(&item, "second", None).unwrap();
+    let r = db.about_essence().unwrap().unwrap();
+    assert!(r.contains("second") && !r.contains("first"), "{r}");
+    db.essence_remove(&item).unwrap();
+    assert_eq!(db.about_essence().unwrap(), None);
+
+    // Ingest: idempotent on the same handle, and forget resets the thread.
+    let turns = [tt("u-1", "user", "hi"), tt("u-2", "assistant", "hello")];
+    assert_eq!(db.ingest_thread("t", &turns).unwrap().added_records, 2);
+    let again = db.ingest_thread("t", &turns).unwrap();
+    assert_eq!((again.added_records, again.skipped_existing_turns), (0, 2));
+    db.ingest_thread("t", &[tt("u-3", "user", "more")]).unwrap();
+    let seqs: Vec<u64> = db
+        .thread_export("t")
+        .unwrap()
+        .iter()
+        .map(|m| m.metadata["_mnemo.seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!(seqs, [0, 1, 2]);
+    assert_eq!(db.thread_forget("t").unwrap(), 3);
+    assert!(db.thread_export("t").unwrap().is_empty());
+    assert_eq!(db.ingest_thread("t", &turns).unwrap().added_records, 2);
+
+    // Continuation link.
+    db.thread_start("t-next", "t").unwrap();
+    assert!(db
+        .essence(EssenceScope::Thread("t-next".into()), 4096)
+        .unwrap()
+        .contains("continued from"));
+
+    // Keyed slot: supersede, delete the live record, then write again.
+    let k = |c: &str| Memory::new(c, MemoryType::Semantic, vec4(0.0, 1.0, 1.0, 0.0));
+    db.remember_keyed(k("v1"), "release").unwrap();
+    let (live, outcome) = db.remember_keyed(k("v2"), "release").unwrap();
+    assert_eq!(outcome, WriteOutcome::Superseded);
+    db.delete(&live).unwrap();
+    let (_, outcome) = db.remember_keyed(k("v3"), "release").unwrap();
+    assert_eq!(
+        outcome,
+        WriteOutcome::Added,
+        "deleting the live record empties the slot"
+    );
 }

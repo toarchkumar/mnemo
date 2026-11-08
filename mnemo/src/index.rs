@@ -505,6 +505,11 @@ impl IvfPqIndex {
         self.partitions.iter().map(|p| p.ids.len()).sum()
     }
 
+    /// Whether `id` is indexed.
+    pub(crate) fn contains(&self, id: u128) -> bool {
+        self.assignment.contains_key(&id)
+    }
+
     /// Every indexed id (PERF-1 reconcile).
     pub(crate) fn ids(&self) -> impl Iterator<Item = u128> + '_ {
         self.partitions.iter().flat_map(|p| p.ids.iter().copied())

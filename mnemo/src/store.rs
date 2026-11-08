@@ -38,7 +38,7 @@ use crate::format::{Header, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, WRAPPED
 use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
 use crate::memory::{
     self, status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind,
-    EssenceScope, EssenceSection, ExportedTurn, Filter, IngestReport, KeyScope, Memory,
+    EssenceScope, EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, Memory,
     MemoryPatch, MemoryType, Metric, Scope, ScoreWeights, ThreadTurn, TurnPolicy, WriteOutcome,
     CONTINUATION_TIMELINE_ENTRIES, ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS,
     MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
@@ -97,6 +97,139 @@ struct IndexPersist {
     commits: u32,
     /// Vectors added, re-assigned or removed since the last persist.
     changes: usize,
+}
+
+/// R-004.2: where the thread layers and the onboarding briefing live,
+/// built by the handle's one lazy scan (`ensure_key_caches`, together with
+/// the 12.1 key caches) and then kept current by `put` and `delete`. It
+/// lets `about`, `essence`, `ingest_thread`, `thread_export` and
+/// thread-pinned recall read just their own records instead of decrypting
+/// the whole file each time.
+#[derive(Debug, Default)]
+struct LayerCache {
+    /// Live essence item ids.
+    essence: std::collections::HashSet<u128>,
+    /// Live ids tagged `metadata.area = "onboarding"` (superseded versions
+    /// included; `about` drops those when it reads them).
+    onboarding: std::collections::HashSet<u128>,
+    /// Per `_mnemo.thread`: its records and archive state.
+    threads: std::collections::HashMap<String, ThreadCache>,
+    /// Thread → (the thread it continues, the link record's id).
+    links: std::collections::HashMap<String, (String, u128)>,
+}
+
+/// One thread's records (turns, essence items, link), the turn ids already
+/// archived (with how many records each has: long turns are chunked), and
+/// the highest `_mnemo.seq` seen.
+#[derive(Debug, Default)]
+struct ThreadCache {
+    records: std::collections::HashSet<u128>,
+    turns: std::collections::HashMap<String, u32>,
+    max_seq: Option<u64>,
+}
+
+fn meta_str<'a>(m: &'a Memory, key: &str) -> Option<&'a str> {
+    m.metadata.get(key).and_then(|v| v.as_str())
+}
+
+fn is_onboarding(m: &Memory) -> bool {
+    meta_str(m, "area").is_some_and(|s| s.eq_ignore_ascii_case("onboarding"))
+}
+
+impl LayerCache {
+    fn add(&mut self, m: &Memory) {
+        let id = m.id.0;
+        let kind = meta_str(m, MNEMO_META_KIND);
+        if kind == Some(MNEMO_META_KIND_ESSENCE) {
+            self.essence.insert(id);
+        }
+        if is_onboarding(m) {
+            self.onboarding.insert(id);
+        }
+        let Some(thread) = meta_str(m, MNEMO_META_THREAD) else {
+            return;
+        };
+        let tc = self.threads.entry(thread.to_string()).or_default();
+        tc.records.insert(id);
+        if kind == Some(MNEMO_META_KIND_TURN) {
+            if let Some(turn_id) = meta_str(m, MNEMO_META_TURN_ID) {
+                *tc.turns.entry(turn_id.to_string()).or_insert(0) += 1;
+            }
+            if let Some(seq) = m.metadata.get(MNEMO_META_SEQ).and_then(|v| v.as_u64()) {
+                tc.max_seq = Some(tc.max_seq.map_or(seq, |s| s.max(seq)));
+            }
+        }
+        if kind == Some(MNEMO_META_KIND_THREAD_LINK) {
+            if let Some(from) = meta_str(m, MNEMO_META_CONTINUES) {
+                self.links
+                    .entry(thread.to_string())
+                    .or_insert_with(|| (from.to_string(), id));
+            }
+        }
+    }
+
+    /// Undo [`LayerCache::add`] for the stored version of a record that is
+    /// being overwritten or deleted. A thread with no records left is
+    /// dropped, so a forgotten thread's `_mnemo.seq` restarts at 0. Partial
+    /// deletes keep the old maximum (sequence gaps are harmless).
+    fn remove(&mut self, m: &Memory) {
+        let id = m.id.0;
+        self.essence.remove(&id);
+        self.onboarding.remove(&id);
+        let Some(thread) = meta_str(m, MNEMO_META_THREAD) else {
+            return;
+        };
+        if self.links.get(thread).is_some_and(|(_, link)| *link == id) {
+            self.links.remove(thread);
+        }
+        let Some(tc) = self.threads.get_mut(thread) else {
+            return;
+        };
+        tc.records.remove(&id);
+        if meta_str(m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {
+            if let Some(turn_id) = meta_str(m, MNEMO_META_TURN_ID) {
+                if let Some(n) = tc.turns.get_mut(turn_id) {
+                    *n -= 1;
+                    if *n == 0 {
+                        tc.turns.remove(turn_id);
+                    }
+                }
+            }
+        }
+        if tc.records.is_empty() {
+            self.threads.remove(thread);
+        }
+    }
+}
+
+/// The thread a recall filter pins with `_mnemo.thread` equality, if any.
+fn filter_thread_pin(f: &Filter) -> Option<&str> {
+    f.terms.iter().find_map(|t| match t {
+        FilterTerm::Eq(k, Value::String(s)) if k == MNEMO_META_THREAD => Some(s.as_str()),
+        _ => None,
+    })
+}
+
+/// Whether a recall filter can only match records that aren't in the ANN
+/// (R-004.2): it pins `_mnemo.thread`, or restricts `_mnemo.kind` to turns,
+/// essence items or thread links. Such recalls scan exactly instead.
+fn filter_bypasses_ann(f: &Filter) -> bool {
+    let non_ann = |v: &Value| {
+        matches!(
+            v.as_str(),
+            Some(MNEMO_META_KIND_TURN)
+                | Some(MNEMO_META_KIND_ESSENCE)
+                | Some(MNEMO_META_KIND_THREAD_LINK)
+        )
+    };
+    filter_thread_pin(f).is_some()
+        || f.terms.iter().any(|t| match t {
+            FilterTerm::Eq(k, v) => k == MNEMO_META_KIND && non_ann(v),
+            FilterTerm::In(k, vs) => {
+                k == MNEMO_META_KIND && !vs.is_empty() && vs.iter().all(non_ann)
+            }
+            _ => false,
+        })
 }
 
 /// Chunk size for the torn-header scan's streaming read of the file.
@@ -733,6 +866,8 @@ pub struct Mnemo {
     /// to v9 moves the key into the catalog row so the scan goes away.
     key_index: Option<std::collections::HashMap<KeySlot, u128>>,
     superseded: Option<std::collections::HashSet<u128>>,
+    /// R-004.2: thread layers + onboarding ids, built by the same lazy scan.
+    layers: Option<LayerCache>,
 }
 
 /// Composite key for the lazy `key_index` on `Mnemo`. A slot is identified
@@ -1026,7 +1161,9 @@ impl IngestPlan {
 fn is_ann_kind(m: &Memory) -> bool {
     !matches!(
         m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
-        Some(MNEMO_META_KIND_TURN) | Some(MNEMO_META_KIND_ESSENCE) | Some(MNEMO_META_KIND_THREAD_LINK)
+        Some(MNEMO_META_KIND_TURN)
+            | Some(MNEMO_META_KIND_ESSENCE)
+            | Some(MNEMO_META_KIND_THREAD_LINK)
     )
 }
 
@@ -1227,6 +1364,7 @@ impl Mnemo {
             agent_set: None,
             key_index: None,
             superseded: None,
+            layers: None,
         })
     }
 
@@ -1495,6 +1633,7 @@ impl Mnemo {
             agent_set: None,
             key_index: None,
             superseded: None,
+            layers: None,
         };
         // PERF-1: records written after the persisted index run are
         // re-assigned now (step 3 moves this to the index's first use).
@@ -1646,6 +1785,7 @@ impl Mnemo {
             agent_set: None,
             key_index: None,
             superseded: None,
+            layers: None,
         };
         // PERF-1: records written after the persisted index run are
         // re-assigned now (step 3 moves this to the index's first use).
@@ -1738,6 +1878,18 @@ impl Mnemo {
             m.id = Ulid::new();
         }
         let id_u: u128 = m.id.0;
+        // R-004.2: an overwrite with the handle caches built reads the
+        // stored version first (one decrypt), so the caches drop exactly
+        // what it contributed.
+        if self.layers.is_some() {
+            if let Some(&idx) = self.index.get(&id_u) {
+                let old_entry = self.catalog[idx].clone();
+                if !old_entry.deleted {
+                    let old = self.read_memory(&old_entry)?;
+                    self.note_removed(&old);
+                }
+            }
+        }
         let bytes = rmp_serde::to_vec(&m).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         let (start, pc) = self.write_record(&bytes)?;
         // For overwrites preserve the existing access stats; for inserts
@@ -1769,11 +1921,20 @@ impl Mnemo {
 
         // Keep the ANN index complete: assign the (new or changed) vector to
         // its nearest partition. Centroids/codebook stay fixed until rebuild.
+        // R-004.2: only facts go in; turns, essence items and thread links
+        // are read by kind and scope.
         if let Some(ann) = &mut self.ann {
-            ann.add(id_u, &m.vector);
-            self.dirty_index = true;
-            self.index_persist.changes += 1;
+            if is_ann_kind(&m) {
+                ann.add(id_u, &m.vector);
+                self.dirty_index = true;
+                self.index_persist.changes += 1;
+            } else if ann.contains(id_u) {
+                ann.remove(id_u);
+                self.dirty_index = true;
+                self.index_persist.changes += 1;
+            }
         }
+        self.note_added(&m);
 
         // FIX-1 R-001.8 part 2: keep the lazy agent set in sync. If
         // it hasn't been built yet (no `stats()` call this session),
@@ -1959,14 +2120,24 @@ impl Mnemo {
             .index
             .get(&id.0)
             .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
+        // R-004.2 / 12.1: with the handle caches built, read the record
+        // being deleted (one decrypt) so the key slot, superseded set and
+        // thread layers drop exactly what it contributed.
+        let entry = self.catalog[idx].clone();
+        if self.layers.is_some() && !entry.deleted {
+            let old = self.read_memory(&entry)?;
+            self.note_removed(&old);
+        }
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
         }
         if let Some(ann) = &mut self.ann {
-            ann.remove(id.0);
-            self.dirty_index = true;
-            self.index_persist.changes += 1;
+            if ann.contains(id.0) {
+                ann.remove(id.0);
+                self.dirty_index = true;
+                self.index_persist.changes += 1;
+            }
         }
         // FIX-1 R-001.8 part 2: we can't tell whether this delete
         // removed the last memory of its agent without a decrypt
@@ -1975,14 +2146,76 @@ impl Mnemo {
         // rebuilds from live memories.
         self.agent_set = None;
         // Phase 12.1: delete of a keyed record removes it from the slot,
-        // and delete of a superseded record frees a `history` entry. In
-        // both cases the exact (key, scope_owner) needs a decrypt we're
-        // not willing to pay here, so drop the lazy caches and rebuild
-        // on next access. Format v9 moves the key into the catalog row
-        // and this becomes O(1).
-        self.key_index = None;
-        self.superseded = None;
+        // and delete of a superseded record frees a `history` entry. When
+        // the caches are built, `note_removed` above did that exactly;
+        // otherwise they're built from scratch on first use anyway.
         Ok(())
+    }
+
+    /// Keep the handle caches (12.1 key slots, superseded set, R-004.2
+    /// layers) current after `put` writes `m`. No-op until they're built.
+    fn note_added(&mut self, m: &Memory) {
+        let id = m.id.0;
+        if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
+            if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+                sup.insert(id);
+            } else if let Some(Value::String(k)) = m.metadata.get(MNEMO_META_KEY) {
+                keys.insert(Self::key_slot_for(m, k), id);
+            }
+        }
+        if let Some(layers) = self.layers.as_mut() {
+            layers.add(m);
+        }
+    }
+
+    /// Undo [`Mnemo::note_added`] for the stored version of a record that's
+    /// about to be overwritten or deleted.
+    fn note_removed(&mut self, m: &Memory) {
+        let id = m.id.0;
+        if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
+            sup.remove(&id);
+            if let Some(Value::String(k)) = m.metadata.get(MNEMO_META_KEY) {
+                let slot = Self::key_slot_for(m, k);
+                if keys.get(&slot) == Some(&id) {
+                    keys.remove(&slot);
+                }
+            }
+        }
+        if let Some(layers) = self.layers.as_mut() {
+            layers.remove(m);
+        }
+    }
+
+    /// The live catalog entries for `ids` (ids that are gone are skipped).
+    fn live_entries(&self, ids: impl IntoIterator<Item = u128>) -> Vec<CatalogEntry> {
+        ids.into_iter()
+            .filter_map(|id| self.index.get(&id).map(|&i| self.catalog[i].clone()))
+            .filter(|e| !e.deleted)
+            .collect()
+    }
+
+    /// Catalog entries of the essence items, from the handle caches.
+    fn essence_entries(&mut self) -> Result<Vec<CatalogEntry>> {
+        self.ensure_key_caches()?;
+        let ids: Vec<u128> = self
+            .layers
+            .as_ref()
+            .map(|l| l.essence.iter().copied().collect())
+            .unwrap_or_default();
+        Ok(self.live_entries(ids))
+    }
+
+    /// Catalog entries of every record filed under `thread`, from the
+    /// handle caches.
+    fn thread_entries(&mut self, thread: &str) -> Result<Vec<CatalogEntry>> {
+        self.ensure_key_caches()?;
+        let ids: Vec<u128> = self
+            .layers
+            .as_ref()
+            .and_then(|l| l.threads.get(thread))
+            .map(|tc| tc.records.iter().copied().collect())
+            .unwrap_or_default();
+        Ok(self.live_entries(ids))
     }
 
     // --- Phase 12.1: edit in place + keyed supersession -----------------
@@ -2002,12 +2235,14 @@ impl Mnemo {
         }
     }
 
-    /// Build the `key_index` + `superseded` lazy caches from live
-    /// records. Called by every 12.1 entrypoint on first use. Decrypts
-    /// every live record once, so a fresh open pays one scan the first
-    /// time a keyed op touches it; subsequent ops are O(1).
+    /// The handle's one lazy scan: builds the 12.1 `key_index` +
+    /// `superseded` caches and the R-004.2 layer cache (essence ids,
+    /// onboarding ids, threads, links) from live records, and prunes
+    /// non-fact ids from a loaded ANN index (files written before v0.10.0
+    /// indexed every kind). Decrypts every live record once per handle;
+    /// `put` and `delete` keep the result current after that.
     fn ensure_key_caches(&mut self) -> Result<()> {
-        if self.key_index.is_some() && self.superseded.is_some() {
+        if self.key_index.is_some() && self.superseded.is_some() && self.layers.is_some() {
             return Ok(());
         }
         let entries: Vec<CatalogEntry> = self
@@ -2019,8 +2254,14 @@ impl Mnemo {
         let mut keys: std::collections::HashMap<crate::store::KeySlot, u128> =
             std::collections::HashMap::new();
         let mut superseded: std::collections::HashSet<u128> = std::collections::HashSet::new();
+        let mut layers = LayerCache::default();
+        let mut non_facts: Vec<u128> = Vec::new();
         for e in &entries {
             let m = self.read_memory(e)?;
+            layers.add(&m);
+            if !is_ann_kind(&m) {
+                non_facts.push(e.id);
+            }
             if m.metadata.get(MNEMO_META_SUPERSEDED_BY).is_some() {
                 superseded.insert(e.id);
                 continue;
@@ -2042,6 +2283,20 @@ impl Mnemo {
         }
         self.key_index = Some(keys);
         self.superseded = Some(superseded);
+        self.layers = Some(layers);
+        if let Some(ann) = &mut self.ann {
+            let mut pruned = 0usize;
+            for id in non_facts {
+                if ann.contains(id) {
+                    ann.remove(id);
+                    pruned += 1;
+                }
+            }
+            if pruned > 0 {
+                self.dirty_index = true;
+                self.index_persist.changes += pruned;
+            }
+        }
         Ok(())
     }
 
@@ -2286,9 +2541,7 @@ impl Mnemo {
         cand.created_at = existing.created_at;
         // put() preserves accessed_at/access_count via the index lookup.
         self.put(cand)?;
-        // key_index may need maintenance if this update added or removed
-        // `_mnemo.key`; cheapest safe path is to invalidate.
-        self.key_index = None;
+        // `put` kept the key slot and the other handle caches current.
         Ok(WriteOutcome::Updated)
     }
 
@@ -2505,10 +2758,16 @@ impl Mnemo {
         // cost: one decrypt per existing thread record. A future v9
         // format bump can move `_mnemo.turn_id` into the catalog row
         // and drop this scan.
-        let existing_turn_ids = self.collect_turn_ids_in_thread(thread_id)?;
-        // Also figure out the next `_mnemo.seq` value so a repeat
-        // ingest continues the sequence instead of restarting at 0.
-        let next_seq = self.max_seq_in_thread(thread_id)?.map_or(0, |n| n + 1);
+        // R-004.2: the turn ids already archived and the next `_mnemo.seq`
+        // come from the handle caches: one lazy scan per handle, then O(1)
+        // per ingest instead of two full decrypt scans each time.
+        self.ensure_key_caches()?;
+        let cached = self.layers.as_ref().and_then(|l| l.threads.get(thread_id));
+        let existing_turn_ids: std::collections::HashSet<&str> = cached
+            .map(|tc| tc.turns.keys().map(String::as_str).collect())
+            .unwrap_or_default();
+        // A repeat ingest continues the sequence instead of restarting at 0.
+        let next_seq = cached.and_then(|tc| tc.max_seq).map_or(0, |n| n + 1);
 
         // Determine each incoming turn's final text pieces (post-
         // chunking / truncation) before any writes, so the caller can
@@ -2521,7 +2780,7 @@ impl Mnemo {
                     "ingest_thread: turn_id must not be empty".into(),
                 ));
             }
-            if existing_turn_ids.contains(&t.turn_id) {
+            if existing_turn_ids.contains(t.turn_id.as_str()) {
                 report.skipped_existing_turns += 1;
                 continue;
             }
@@ -2624,53 +2883,6 @@ impl Mnemo {
         Ok(report)
     }
 
-    /// Phase 12.7a helper: collect every `_mnemo.turn_id` already
-    /// stored in `thread_id`. One decrypt per record in the thread.
-    fn collect_turn_ids_in_thread(
-        &mut self,
-        thread_id: &str,
-    ) -> Result<std::collections::HashSet<String>> {
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
-        let mut out = std::collections::HashSet::new();
-        for e in &entries {
-            let m = self.read_memory(e)?;
-            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
-                continue;
-            }
-            if let Some(tid) = m.metadata.get(MNEMO_META_TURN_ID).and_then(|v| v.as_str()) {
-                out.insert(tid.to_string());
-            }
-        }
-        Ok(out)
-    }
-
-    /// Phase 12.7a helper: find the largest `_mnemo.seq` in a thread,
-    /// so a resumed ingest continues the sequence.
-    fn max_seq_in_thread(&mut self, thread_id: &str) -> Result<Option<u64>> {
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
-        let mut best: Option<u64> = None;
-        for e in &entries {
-            let m = self.read_memory(e)?;
-            if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
-                continue;
-            }
-            if let Some(n) = m.metadata.get(MNEMO_META_SEQ).and_then(|v| v.as_u64()) {
-                best = Some(best.map_or(n, |cur| cur.max(n)));
-            }
-        }
-        Ok(best)
-    }
-
     /// Export the archive layer for `thread_id` in `_mnemo.seq`
     /// order. Each entry is the Memory as stored; chunks of a
     /// multi-part turn come out in `_mnemo.part` order within their
@@ -2679,12 +2891,8 @@ impl Mnemo {
     /// the pre-truncation original should round-trip via
     /// `_mnemo.sha256` + `_mnemo.length`.
     pub fn thread_export(&mut self, thread_id: &str) -> Result<Vec<Memory>> {
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
+        // R-004.2: the thread's own records, from the handle caches.
+        let entries = self.thread_entries(thread_id)?;
         let mut out: Vec<Memory> = Vec::new();
         for e in &entries {
             let m = self.read_memory(e)?;
@@ -2784,12 +2992,7 @@ impl Mnemo {
         }
         // Collect first, then delete — can't hold catalog borrows
         // across `self.delete`.
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
+        let entries = self.thread_entries(thread_id)?;
         let mut victims: Vec<Ulid> = Vec::new();
         for e in &entries {
             let m = self.read_memory(e)?;
@@ -3012,12 +3215,8 @@ impl Mnemo {
             max_bytes
         };
         // Collect every live essence record for this scope.
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
+        // R-004.2: only the essence items, from the handle caches.
+        let entries = self.essence_entries()?;
         let mut by_section: std::collections::BTreeMap<&'static str, Vec<Memory>> =
             std::collections::BTreeMap::new();
         for section in EssenceSection::render_order() {
@@ -3375,12 +3574,7 @@ impl Mnemo {
         if max_bytes == 0 {
             return Ok(String::new());
         }
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
+        let entries = self.essence_entries()?;
         let mut open_items: Vec<Memory> = Vec::new();
         let mut next_items: Vec<Memory> = Vec::new();
         let mut timeline_items: Vec<Memory> = Vec::new();
@@ -3481,30 +3675,12 @@ impl Mnemo {
     /// marker. Returns `None` if the thread has no predecessor
     /// (fresh thread, no `thread_start` call).
     fn predecessor_thread(&mut self, thread_id: &str) -> Result<Option<String>> {
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
-        for e in &entries {
-            let m = self.read_memory(e)?;
-            if m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
-                != Some(MNEMO_META_KIND_THREAD_LINK)
-            {
-                continue;
-            }
-            let this = m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str());
-            if this != Some(thread_id) {
-                continue;
-            }
-            return Ok(m
-                .metadata
-                .get(MNEMO_META_CONTINUES)
-                .and_then(|v| v.as_str())
-                .map(String::from));
-        }
-        Ok(None)
+        self.ensure_key_caches()?;
+        Ok(self
+            .layers
+            .as_ref()
+            .and_then(|l| l.links.get(thread_id))
+            .map(|(from, _)| from.clone()))
     }
 
     /// Atomic batch write combining 12.1 facts, 12.7b essence ops,
@@ -3902,18 +4078,20 @@ impl Mnemo {
         // Phase 12.1: drop records that have been superseded by a newer
         // keyed write. They still live in snapshot history and
         // `history(key)` — just not here.
-        let mut out: Vec<Memory> = self
-            .memories()?
-            .into_iter()
-            .filter(|m| !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY))
-            .filter(|m| {
-                m.metadata
-                    .get("area")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.eq_ignore_ascii_case("onboarding"))
-                    .unwrap_or(false)
-            })
-            .collect();
+        // R-004.2: read only the onboarding records, from the handle caches.
+        self.ensure_key_caches()?;
+        let ids: Vec<u128> = self
+            .layers
+            .as_ref()
+            .map(|l| l.onboarding.iter().copied().collect())
+            .unwrap_or_default();
+        let mut out: Vec<Memory> = Vec::new();
+        for e in self.live_entries(ids) {
+            let m = self.read_memory(&e)?;
+            if !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) && is_onboarding(&m) {
+                out.push(m);
+            }
+        }
         out.sort_by(|a, b| {
             let a_manifest = is_manifest(a);
             let b_manifest = is_manifest(b);
@@ -3933,12 +4111,7 @@ impl Mnemo {
     /// append it after the manifest and onboarding memories; [`Mnemo::about`]
     /// itself keeps returning records.
     pub fn about_essence(&mut self) -> Result<Option<String>> {
-        let entries: Vec<CatalogEntry> = self
-            .catalog
-            .iter()
-            .filter(|e| !e.deleted)
-            .cloned()
-            .collect();
+        let entries = self.essence_entries()?;
         let mut any = false;
         for e in &entries {
             let m = self.read_memory(e)?;
@@ -4027,6 +4200,15 @@ impl Mnemo {
     ) -> Result<Vec<RecallResult>> {
         // Candidate set: ANN-narrowed when an index exists and the
         // caller hasn't forced an exact scan, else everything live.
+        // R-004.2: a filter pinning `_mnemo.thread` scans just that
+        // thread's records (from the handle caches); one that can only
+        // match non-fact kinds skips the ANN, which doesn't hold them.
+        if let Some(thread) = filter_thread_pin(&req.filter) {
+            let thread = thread.to_string();
+            let entries = self.thread_entries(&thread)?;
+            return self.score_entries(req, now, &entries);
+        }
+        let force_exact = force_exact || filter_bypasses_ann(&req.filter);
         let entries: Vec<CatalogEntry> = match (&self.ann, force_exact) {
             (Some(ann), false) => {
                 let ids = ann.query(&req.query, req.n_probe, req.n_rerank);
@@ -4044,8 +4226,18 @@ impl Mnemo {
                 .collect(),
         };
 
+        self.score_entries(req, now, &entries)
+    }
+
+    /// Score one candidate set for [`Mnemo::score_once`].
+    fn score_entries(
+        &mut self,
+        req: &RecallRequest,
+        now: i64,
+        entries: &[CatalogEntry],
+    ) -> Result<Vec<RecallResult>> {
         let mut scored: Vec<RecallResult> = Vec::with_capacity(entries.len());
-        for e in &entries {
+        for e in entries {
             // Phase 12.1: drop superseded records.
             //
             // Fast path: if the lazy `superseded` set has already been
@@ -4198,8 +4390,8 @@ impl Mnemo {
         // default (unpinned) recall path and jumped straight to an
         // exact scan on moderately selective filters.
         let mut scored = self.score_once(req, now, false)?;
-        let mut used_exact_scan = self.ann.is_none();
-        if scored.len() < req.top_k && live_non_superseded > req.top_k {
+        let mut used_exact_scan = self.ann.is_none() || filter_bypasses_ann(&req.filter);
+        if !used_exact_scan && scored.len() < req.top_k && live_non_superseded > req.top_k {
             if let Some(ann) = &self.ann {
                 let (default_probe, default_rerank) = ann.effective_defaults();
                 let base_probe = req.n_probe.unwrap_or(default_probe);
@@ -4315,7 +4507,9 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
-        let mems = self.memories()?;
+        // R-004.2: facts only; turns, essence items and thread links stay
+        // out of the ANN.
+        let mems: Vec<Memory> = self.memories()?.into_iter().filter(is_ann_kind).collect();
         if mems.is_empty() {
             return Err(MnemoError::Invalid(
                 "cannot build an index over an empty database".into(),
@@ -5484,6 +5678,11 @@ impl Mnemo {
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
         self.ann = ann;
+        // The handle caches describe the catalog being replaced.
+        self.key_index = None;
+        self.superseded = None;
+        self.layers = None;
+        self.agent_set = None;
         // PERF-1: the snapshot's index may predate its catalog; bring it up
         // to date before it's persisted again.
         self.reconcile_ann_with_catalog(snap.index_start)?;
