@@ -66,20 +66,27 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-06)
+## Status (2026-11-07)
 
-**Published:** v0.6.1 on crates.io, PyPI and GitHub Releases (`mnemo-engine`,
-file format v8). **On main, unreleased:** NAME-1 (the Python import and Rust
-library are now `mnemo_engine`, with no `import mnemo` alias). **In
-progress:** Recall scoring v2 (item 5 of the authoritative execution order),
-which ships with NAME-1 as v0.7.0. **After that:** Phase 12 (5b), then
-Phase 2 + 11.2 (format v9). Read the WORKLOG from the 2026-11-05 entries on
-for the live thread.
+**Published:** v0.9.0 (threads and essence) on crates.io and PyPI, file
+format v8. **In progress:** v0.9.1 (12.7d: `commit_deltas` embeds,
+`thread_export` shape, `about()` essence, tests, benches). **Target market
+(user decision 2026-11-07):** on-device agents and apps, from desktop to
+tablets, phones and other small devices. **Next:** the on-device track,
+which puts size and speed first (see "Authoritative execution order").
+Read the WORKLOG from the 2026-11-07 entries on for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
 The Planner's working memory lives here and in the WORKLOG, not in
 AGENTS.md. AGENTS.md has only the role rules.
+
+**Target market (user decision 2026-11-07):** on-device agents and apps,
+from desktop apps down to tablets, phones and other small devices. Not
+hyperscale enterprise. **Optimise size and speed first.** Every spec
+should say how it affects disk per memory, RAM per open handle, open
+time and recall time. The targets are in "On-device track" under the
+execution order.
 
 **Open Planner to-dos**
 1. DONE 2026-11-06 (63e0f63). At the v0.7.0 release, hand off for the Worker to commit:
@@ -932,6 +939,11 @@ recall` while the MCP server holds the exclusive lock gets `Locked`
   sign-off, then implement. Tests: two processes interleaving
   remember/update/recall/cache_put with crash injection; a proptest model
   extension; lock-contention timeouts that never hang (same rule as 10b.2).
+- **Framing (R-004.5, 2026-11-07):** **bounded-backoff per-op locking is
+  the portable base**, the only option on iOS and Android, where apps
+  can't spawn daemons. **An optional desktop daemon** is the fast path when
+  several CLI/MCP processes share a file. The comparison below decides the
+  daemon's role and default on desktop, not whether locking exists.
 - **The design note must compare two architectures (added 2026-11-07):**
   - **(A) per-operation locking:** every process opens the file and takes
     shared or exclusive locks per call, as above;
@@ -1401,6 +1413,10 @@ inspector), and 12.4 (the daemon or shared mode).
   (self-hostable relay binary: small, stateless apart from blob storage,
   with S3-compatible storage as an option). A hosted relay is a possible
   service later.
+- **Side channels (R-004.5):** pad every sync envelope to bucketed sizes
+  (powers of two above a floor), and never compress records of different
+  13.5 visibility scopes in the same frame, to avoid a CRIME/BREACH-style
+  length oracle. The design note quantifies the remaining leak.
 - **Devices and people join through 13.2 grants;** the relay never sees
   keys. Revocation rotates the data key, and later change sets use the new
   key.
@@ -1488,6 +1504,135 @@ Work these in order, one PR each. The global definition of done at the end
 of this file applies to every one.
 
 ### Authoritative execution order (as of 2026-09-20)
+
+> **Override (2026-11-07, user decision: on-device market, focus on size
+> and speed). The next items, in order, replace what follows from item
+> 5b on.** After v0.9.1 ships:
+> 1. **P-0, device budget bench:** one baseline (see the track below). No
+>    release.
+> 2. **PERF-1 → v0.10.0:** faster open and a smaller memory footprint, with
+>    no format change (Phase 11.1 refocused).
+> 3. **FMT-9 → v0.11.0:** format v9 (record packing, int8 vectors, zstd
+>    before encryption, Phase 2 keyword search, and header room for 13.2
+>    key slots). The design note comes first.
+> 4. **MOBILE-1 → v0.12.0:** Swift and Kotlin bindings, iOS/Android
+>    builds in CI, platform embedders, the keychain/keystore key (12.3's
+>    generated-key half), and device benchmarks.
+> 5. **Then resume Phase 12:** 12.4 (its design note compares locking vs
+>    daemon) + 12.2 → 12.3 (the rest) → 12.5, then Phase 13, then Phase 14.
+>
+> The Claude Code plugin (12.2) waits about three releases because of
+> this; that's the accepted trade-off.
+
+#### On-device track (added 2026-11-07)
+**Device classes:** desktop and laptop (8–16 GB of RAM, up to about 1M
+memories); tablets and phones (an app's memory budget is a few hundred MB
+in the foreground and much less in the background, typically 1K–50K
+memories); small devices (embedded, wearables, set-top boxes: tens of MB).
+
+**Targets.** These are proposals; P-0 sets the real baseline, then PLANNER-A
+fixes the numbers. Measured at 384 dims with about 300 bytes of text per
+memory, on the M1 Pro, plus a phone once MOBILE-1 lands. "Today" is
+v0.8/0.9, M1 Pro.
+
+| Metric | Today | Desktop target | Phone target (10K) |
+|---|---|---|---|
+| Disk per memory, index included | ~8.5 KB (about 80% of each page empty) | ≤ 2 KB | ≤ 2 KB |
+| RAM for one open handle | 100K ≈ 360 MB (converged) | 100K ≤ 120 MB | 10K ≤ 20 MB |
+| Open, excluding the KDF | 10K 33 ms / 100K 232 ms | 100K ≤ 50 ms | 10K ≤ 10 ms |
+| First recall on a fresh handle | 100K ≈ 45 ms | 100K ≤ 15 ms | 10K ≤ 5 ms |
+| Warm recall | 100K ≈ 9.4 ms | 100K ≤ 5 ms | 10K ≤ 2 ms |
+| Durable single write | ~19 ms (fsync-bound) | ≤ 20 ms | ≤ 20 ms on device flash |
+| Library size, stripped, per architecture | measure in P-0 | n/a | ≤ 5 MB |
+
+**P-0, device budget bench (do first; no release).**
+`mnemo/examples/device_budget.rs` reports, at 1K / 10K / 100K:
+- file bytes per memory, split into records, index, catalog, WAL and slack;
+- the steady-state RSS of one open handle;
+- open time with fast KDF;
+- first and warm recall;
+- single and batched durable writes;
+- stripped `cdylib` size on aarch64 macOS and Linux.
+
+Write it to `perf_v0.5.0.json` under `device_budget`, marked `remeasured`.
+Use the `open_rss` pattern: plain loops, no Criterion for fresh handles.
+Profile where the RAM goes (catalog, ANN centroids/codes, full vectors,
+caches) so PERF-1 targets the biggest item.
+
+**PERF-1 → v0.10.0, no format change** (Phase 11.1 refocused):
+- **Lazy and streamed open:** read the header and catalog first, and
+  load the ANN index on first use instead of at open.
+- **Don't keep full float vectors resident** if reranking can read them
+  from records on demand.
+- **Pre-size** every load buffer from known counts.
+- **Bound** any per-handle caches.
+- **Keep the fsync count per commit at 3 or lower.**
+- **Gates:** hit the desktop rows for open, RAM and first recall without
+  recall@10 dropping by more than 0.005 (`ann_recall_grid_v2`), and without
+  the ranking_v2 harness hit@1 dropping by more than 0.02.
+
+**FMT-9 → v0.11.0, format v9; the design note comes first and PLANNER-A
+signs it off.**
+- **Record packing:** several small records per page, with large records
+  spanning pages.
+- **Scalar int8 vector storage,** optionally with float only for rerank,
+  gated by the recall harness.
+- **zstd per page before encryption,** if the numbers justify it.
+- **Phase 2 BM25 keyword index,** for hybrid recall (this fixes exact
+  identifiers like "BP.1").
+- **Header room for 13.2 key slots,** so Phase 13 never needs a v10.
+- **Incremental catalog and index** (added 2026-11-07 from P-0): today
+  every commit rewrites the whole catalog (3.4 MB at 100K) and the whole
+  index (17 MB). v9 appends catalog and index *deltas* and merges them
+  periodically, so a commit writes O(change), not O(n).
+- **Page reuse and snapshot retention:** keep a free-page list, plus a
+  retention policy (for example the last N snapshots or the last N days;
+  the default is set in the design note). Runs older than the policy are
+  reused instead of growing the file forever. Today a single write grows a
+  100K file by 20.8 MB.
+- **Required design-note sections (R-004.3/R-004.2, 2026-11-07):**
+  - **(a) A quarantined free list:** `(freed_at_txn, page_no,
+    page_count)`. A page is reusable only after its freeing txn has
+    committed **and** once it's older than the earliest retained snapshot.
+    Snapshot retention pins pages. Data pages are written before
+    `wal::commit`, so free-and-reuse in the same txn must be impossible;
+    add a crash test for it.
+  - **(b) Header atomicity:** keep Page 0 ≤ 512 bytes with the whole
+    pre-seal region CRC-covered, and put the 13.2 key slots in a CoW,
+    authenticated page run (`key_slots_start`). That's the preferred
+    option. Evaluate ping-pong headers on Pages 0/1 as the alternative,
+    since they might also remove DUR-1's file-wide torn-header scan. Pick
+    one, with a crash analysis.
+  - **(c) Catalog-row tags:** add a kind tag (fact, turn, essence,
+    thread_link, onboarding), a superseded bit, and a thread and key hash
+    to the v9 catalog row, so even *cold* handles never decrypt
+    non-matching records for `about`, `essence`, `ingest_thread` or
+    `recall`. This also replaces PERF-1's monotonic `start_page` rule for
+    index reconciliation (incremental index deltas instead).
+  - **(d) Compression scope:** page compression only packs records of one
+    13.5 visibility scope together.
+- **A separate vector column for rerank:** rerank currently decrypts and
+  deserializes whole records (content, metadata and vector). Storing int8
+  vectors in their own packed pages lets rerank read only vectors.
+- **Migration:** v8 opens read-only-compatible; `compact` writes v9.
+- **Gates:** the disk-per-memory row, plus the recall and ranking gates
+  above; identifier queries must improve.
+
+**MOBILE-1 → v0.12.0:**
+- **Bindings:** UniFFI-generated Swift (an iOS/macOS XCFramework) and
+  Kotlin (an Android AAR) packages, built in CI.
+- **Keys:** keychain/keystore storage of a generated key. The raw-key open
+  API itself (`open_with_key`) ships earlier, in PERF-1 (R-004.5), so this
+  item is only the platform key storage.
+- **Embedders:** platform embedder hooks, so an app can pass its OS's
+  embedding API or a bundled small model.
+- **Sample apps:** a minimal iOS and Android sample.
+- **Device benchmarks:** fill in the phone column on a real device.
+- **Mobile constraints:** background-safe flushes and file-protection
+  classes on iOS.
+
+Later, only if demand appears: WebAssembly with browser file storage for
+small web apps.
 
 SHIPPED: PR 6 (v0.4.0 release), PR 6.1 (lock-race fix), PR 7 + 7.1 + 7.2
 (Phase 1.2 fuzzing), PR 8 + 8.1 + 8.2 + 8.3 (Phase 1.3 proptest + crash
@@ -8272,3 +8417,1003 @@ share and carry**, with ready-made memory semantics and client-held keys.
 **HANDOFF (commit with v0.9.1, as its own commit, `docs: roadmap adds
 encrypted sync and the memory inspector`):** `index.html` gets one bullet
 under "After that". No README change.
+
+### 2026-11-07 — PLANNER-A — DECISION + PLAN — Target market is on-device (desktop to phones and small devices); size and speed come first; execution order overridden
+**User decision:** the market is on-device agents and apps, from desktop
+down to tablets, phones and other small devices. Not hyperscale
+enterprise. **Hyper-focus on size and speed.**
+
+**What changed in this file:**
+- Status refreshed, and a target-market line added to the Planner
+  handover.
+- An **override block** at the top of "Authoritative execution order":
+  after v0.9.1, the order is
+  1. **P-0** (a device budget bench, no release);
+  2. **PERF-1 → v0.10.0** (lazy open, no resident float vectors, bounded
+     caches; no format change);
+  3. **FMT-9 → v0.11.0** (record packing, int8 vectors, zstd, BM25,
+     key-slot header room; design note first);
+  4. **MOBILE-1 → v0.12.0** (Swift and Kotlin bindings, keystore keys,
+     platform embedders, device benchmarks);
+  5. then Phase 12 resumes (12.4 + 12.2 …), then 13, then 14.
+- An **"On-device track"** with device classes and a target table
+  (disk ≤ 2 KB per memory; 100K handle ≤ 120 MB RAM, open ≤ 50 ms, first
+  recall ≤ 15 ms; phone at 10K ≤ 20 MB, ≤ 10 ms open). P-0 sets the real
+  baseline before I fix the numbers.
+
+**Worker: after v0.9.1 ships, do P-0 next (pre-approved).** Log its
+results in a DONE entry. **Don't draft the 12.4 design note yet;** that
+waits for Phase 12 to resume. I'll dispatch PERF-1 once I've read the P-0
+numbers.
+
+### 2026-11-07 — WORKER — DONE — v0.9.1 shipped (12.7d); starting P-0
+Tag **`v0.9.1`** points at `f1fc0ca`. CI is green on main, and the
+release workflow is green.
+
+| hash | subject |
+|---|---|
+| `89f1224` | `feat(12.7d): commit_deltas batch-embeds text-only facts; thread_export ingest shape; about carries project essence; atomicity proptest + MCP e2e; thread benches` |
+| `c90531f` | `chore(release): v0.9.1 — bump manifests and Cargo.lock; cut CHANGELOG; add thread bench target` |
+| `f1fc0ca` | `chore(plan): sync coordination files` (tag) |
+| `adff6ef` | `docs: roadmap adds encrypted sync and the memory inspector` |
+
+**Ordering slip:** your roadmap handoff (`adff6ef`) landed **after** the tag
+rather than before it. `index.html` only drives the landing page, so I left
+the tag where it is instead of moving a published release.
+
+**Runs and artifacts:**
+- ci.yml on `f1fc0ca`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42425363805>
+- release.yml on `v0.9.1`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42425939450>
+- GitHub release: <https://github.com/toarchkumar/mnemo/releases/tag/v0.9.1>
+- PyPI: <https://pypi.org/project/mnemo-engine/0.9.1/>. The JSON API shows
+  0.9.1 with 6 files.
+- crates.io: <https://crates.io/crates/mnemo-engine/0.9.1>. The API shows it
+  published 23:37:46 UTC, not yanked.
+- `mnemo-node`: not published, as you asked, and its CHANGELOG line says it
+  waits for Phase 5. Its manifest also has `publish = false`, so the
+  "crates.io (Node binding) …/mnemo-node/0.8.1" link in the v0.8.1 DONE
+  entry is probably wrong; I couldn't confirm the crate exists.
+
+**DISPATCH items:**
+1. **`commit_deltas` embeds.** An empty `vector` on a fact means "embed
+   `content`". Fact texts, essence `Add`/`AppendTimeline` texts (when an
+   embedder is registered) and archive turn chunks go to **one**
+   `Embedder::embed` call. That call comes after the structural checks and
+   before the vector checks (width, non-zero, finite), so a malformed batch
+   never costs an embed call. With no embedder, a text-only fact or a turn
+   to archive is an error, as before. Python and MCP accept text-only
+   facts, and the MCP tool description says so.
+   - **Tests.** An integration test counts calls with a `CountingEmbedder`:
+     facts + essence + turns make exactly 1 call, and nothing to embed
+     makes 0. A cli_smoke test sends `commit_deltas` with text-only facts
+     through MCP and an `--embed-cmd` stub. A Python test checks
+     `calls == [3]`. EmbedCmd sends one line per text, so the stub can't
+     count batches; the one-call check runs in-process instead.
+   - **Also fixed: the gate was incomplete.** Essence `Update`, `Resolve`
+     and `Remove` could fail half-way through the writes (on a missing id,
+     a plain memory, `Update` on a timeline entry, an oversized update, or
+     an op on an id already removed in the same batch), leaving the
+     earlier facts staged. These are now checked before anything is
+     written.
+   - **Also fixed: `ExpireAfter` stamped old turns.** It put the TTL on
+     already-archived turns that it skipped. The TTL is now set at write
+     time on new records only.
+2. **`thread_export`.** Python `db.thread_export` and a new MCP
+   `thread_export {thread}` return `[{turn_id, role, content, timestamp}]`,
+   plus `sha256` and `original_length` on a truncated tool result. The CLI
+   JSONL uses the same `ExportedTurn::to_json`.
+   - **Deviation from your shape:** there's **no `part` field.** A long
+     turn's chunks are joined into one entry, which matches what the CLI
+     already did. Exporting one entry per chunk would make a re-ingest
+     into a *new* thread write one turn per chunk under the same
+     `turn_id`. Joining re-chunks identically.
+   - **Also fixed: the CLI export order.** It grouped by `turn_id` in a
+     `BTreeMap`, which sorted by turn id instead of conversation order.
+   - **Tests.** Same-thread re-ingest skips every turn (Rust and Python),
+     and a new-thread copy reproduces the export.
+3. **`about()` essence.** `Mnemo::about_essence()` returns the project
+   render at the default 6 KB budget, or `None` when the file has no open
+   project item. `mnemo about` prints it after the manifest and onboarding
+   memories, `--format json` adds `"essence"`, MCP `about` appends
+   `{"kind": "essence", "render"}`, and Python has `db.about_essence()`.
+   **`about()` itself still returns records,** because a markdown render
+   isn't a `Memory`. If you want the literal "about() returns it", the
+   option I'd take is a synthetic record, which I avoided. The doc at
+   `memory.rs:492` now describes what ships. The bench below measures
+   `about()` + `about_essence()`.
+4. **Atomicity proptest.** `prop_commit_deltas_is_all_or_nothing` builds
+   random batches of valid and invalid items under random turn policies,
+   with a write failpoint in 30% of cases. A rejected batch leaves the live
+   handle and a reopen at the pre state. A valid batch matches the model.
+   A torn flush reopens at pre or post. It takes 13 s at 256 cases; the
+   proptest binary is ≈ 52 s overall. **End-to-end MCP test:**
+   `mcp_end_to_end_threads_essence_and_commit_deltas` runs, in one server
+   session: essence ops, `commit_deltas` with a text-only fact,
+   `thread_ingest`, `thread_start --from`, the new thread's render
+   (prelude plus project item), `thread_export` order, `about`, and a
+   recall of the fact.
+5. **Benches** (`speed_v0_9_1`, `remeasured`). M1 Pro, 384 dims, a canned
+   in-process embedder:
+   - ingest of 1,000 turns: 32.1 ms median, **≈ 31,100 turns/s**;
+   - essence render over 1,000 items: **6.28 ms**;
+   - `about()` + `about_essence()` with 1,000 project items: **6.11 ms**.
+
+   Render and about decrypt every live record to find essence items, so
+   their cost grows with total file size, not essence size. That's a P-0
+   and PERF-1 input.
+6. **Release.** Done, as listed above. I didn't log a READY: the README
+   examples are unchanged. I added `about_essence` to `mnemo/README.md`
+   and `mnemo-python/README.md`.
+
+**12.4 design note.** I drafted it before your on-device DECISION landed,
+and I'm holding it out of PLAN.md as you asked. It can come in when Phase 12
+resumes. It recommends per-op locking first and a daemon as the default when
+one is running, and it would need revisiting against the on-device targets
+(no daemons on iOS, and RAM per handle).
+
+**Next:** P-0, `mnemo/examples/device_budget.rs`, pre-approved, no release.
+
+### 2026-11-07 — WORKER — DONE — P-0 device budget bench: baseline measured; the biggest targets are the WAL read on open and whole-catalog/index rewrites per commit
+**Commit:** `7fad106` `feat(bench): P-0 device budget bench (examples/device_budget.rs) + hidden Mnemo::__budget_report; record device_budget (remeasured)`.
+CI is green. No release.
+
+**What's in it:**
+- **`mnemo/examples/device_budget.rs`**, using the `open_rss` pattern. Each
+  phase (build, file, handle, cycles, writes) runs in its own child process
+  under `/usr/bin/time -l` for peak RSS.
+- **One hidden diagnostic in the engine,
+  `Mnemo::__budget_report() -> BudgetReport`** (`#[doc(hidden)]`, unstable).
+  It splits the file into header, record pages and payload, catalog, index,
+  WAL, snapshot manifest, cache directory and unreferenced, and counts the
+  engine's main heap structures by capacity (hash maps estimated). It reads
+  the header and catalog only. An encrypted file can't be split from
+  outside, so the bench needs this.
+- **Results** in `perf_v0.5.0.json` under `device_budget`, marked
+  `remeasured`.
+
+**Baseline** (M1 Pro; 384 dims, ~300 bytes of text, IVF+PQ, fast KDF; run 2 of 2):
+
+| Metric | 1K | 10K | 100K | Desktop target (100K) | Phone target (10K) |
+|---|---|---|---|---|---|
+| Disk per memory | 10.2 KB | 8.9 KB | 8.7 KB | ≤ 2 KB | ≤ 2 KB |
+| RSS for one handle (after 200 recalls) | 12.6 MB | 73.7 MB | 158 MB (run 1: 115) | ≤ 120 MB | ≤ 20 MB |
+| …the engine's own heap | 0.7 MB | 3.1 MB | 29 MB | | |
+| Open, fast KDF (median of 20) | 14.5 ms | 48.9 ms | 384 ms | ≤ 50 ms | ≤ 10 ms |
+| First recall, fresh handle | 1.2 ms | 1.9 ms | 9.2 ms (run 1: 28.3) | ≤ 15 ms | ≤ 5 ms |
+| Warm recall (median of 200) | 0.50 ms | 2.7 ms (run 1: 1.4) | 23.5 ms (run 1: 27.3) | ≤ 5 ms | ≤ 2 ms |
+| Single durable write | 28 ms | 67 ms | 449 ms | ≤ 20 ms | ≤ 20 ms |
+| Batched write, per memory (100/flush) | 0.36 ms | 0.78 ms | 4.65 ms | | |
+| fsyncs per commit | 3 | 3 | 3 | ≤ 3 | ≤ 3 |
+| File growth per single write | 0.78 MB | 2.7 MB | **20.8 MB** | | |
+
+**Library size, stripped, aarch64 macOS:** the Python extension (engine +
+PyO3) is **1.37 MB**, and the CLI (engine + clap + MCP) is 2.36 MB, both
+well under the ≤ 5 MB target. A plain `--crate-type cdylib` build of the
+engine is 16 KB and doesn't count: with no `extern "C"` exports, LTO
+strips everything. **aarch64 Linux is pending**: I can't build it on the
+Mac, and a one-off CI job (`cargo build --release` on an arm64 Linux
+runner, then `strip`) would fill it in.
+
+**Noise:** disk, open and write numbers agreed within a few percent across
+the two runs. RAM and recall at 100K didn't (see the parentheses above), and
+in run 2 the handle's RSS grew 51 MB across the 200 warm recalls against
+6 MB in run 1. The engine's own structures don't account for that growth.
+Treat the 100K RAM and recall figures as ±30% until PERF-1 runs a longer
+warm loop.
+
+**Where the RAM and time go, ranked for PERF-1:**
+1. **Every open reads and checksums the whole WAL region, and copies every
+   frame of the last transaction, just to find it was already
+   checkpointed.** `wal::recover` allocates `vec![0; wal_pages × 8 KB]`,
+   reads it all, then in `recover_bytes` checksums each frame and
+   `payload.to_vec()`s it. Only at the COMMIT frame does it see `id ≤
+   wal_seq` and discard everything. At 100K the WAL region is 26 MB (sized
+   by the last index-build transaction), so each open allocates about
+   52 MB and checksums 26 MB for nothing. This very likely accounts for
+   much of the 384 ms open, and of the gap between the 29 MB engine heap
+   and the 113 MB RSS right after open. **Fix:** read the first frame
+   header and stop when its `txn_id ≤ wal_seq`, collecting frames only for
+   a transaction that needs replay. It's small, has no format change, and
+   PERF-1 should do it first. Also consider shrinking the WAL region after
+   a large transaction checkpoints.
+2. **Every flush rewrites the whole catalog run (3.4 MB at 100K) and, when
+   the index is dirty (any insert), the whole index run (17 MB).** That's
+   O(n) bytes, about 21 MB at 100K, written to the WAL, then checkpointed
+   to fresh pages. So a single durable write takes 449 ms, and the file
+   grows by 20.8 MB per commit until compact. That's worse for on-device
+   than the slack. The append-only allocator never reuses the old runs.
+   **Options without a format change:** don't persist the index on every
+   flush (persist it on close, on an explicit `flush_index`, or every N
+   commits, and rebuild missing assignments from the catalog on open), and
+   reuse the previous catalog/index run's pages when the new run fits. A
+   real fix is a v9 incremental catalog/index (an FMT-9 input).
+3. **Record pages are 72% empty:** the 2,298-byte records each take a
+   full 8 KB page. FMT-9's record packing takes disk per memory from 8.7 KB
+   toward ≈ 2.5 KB. int8 vectors (1,536 → 384 bytes) take it toward
+   ≈ 1.2 KB.
+4. **The engine's own heap at 100K is 29 MB:**
+
+   | Structure | Size |
+   |---|---|
+   | PQ codes | 9.6 MB |
+   | catalog `Vec<CatalogEntry>` (≈ 84 bytes per entry) | 8.4 MB |
+   | id → index `HashMap` | 4.3 MB |
+   | ANN `assignment` `HashMap` | 4.3 MB |
+   | posting ids | 1.6 MB |
+   | centroids + codebook | 0.9 MB |
+
+   The two `u128`-keyed hash maps (8.6 MB together) could become sorted
+   vectors or a single map. No full float vectors are resident; rerank
+   already reads records on demand.
+5. **Lazy index load** (PERF-1 as specified) helps open further, but only
+   after (1). Today the WAL read probably costs more than the index load.
+6. **Warm recall at 100K is 23–27 ms here, not the ≈ 9.4 ms in the target
+   table.** That 9.4 ms came from the Criterion `ivfpq_recall_100k` bench,
+   whose corpus has tiny texts and the same page count. I haven't explained
+   the gap yet. PERF-1 should profile the rerank path: 500 record decrypts
+   and deserializations per query at the auto `n_rerank`.
+
+**Not done in P-0:** no engine fixes (measurement only, as dispatched), and
+no aarch64 Linux size. The 12.4 design draft stays parked.
+
+**Next:** waiting for your PERF-1 dispatch.
+
+### 2026-11-07 — PLANNER-A — VERIFIED + REVIEW + DISPATCH — v0.9.1 accepted; P-0 accepted; PERF-1 dispatched from the measured hot spots; FMT-9 spec extended
+**v0.9.1 VERIFIED** on `pip install mnemo-engine==0.9.1`:
+- `commit_deltas` with two text-only facts and one turn makes **one**
+  embed call of 3 texts;
+- `thread_export` returns `{turn_id, role, content, timestamp}`, and
+  re-ingesting it skips everything;
+- `about_essence()` renders the project essence.
+
+Your deviations are accepted. Joining chunks on export avoids the
+duplicate `turn_id` problem, and `about_essence()` is cleaner than a
+synthetic record. Thanks for the gate fixes (essence update, resolve and
+remove before writes; `ExpireAfter` on new records only) and the CLI
+export order fix. The roadmap commit after the tag is fine. mnemo-node:
+noted.
+
+**P-0 accepted.** It's an excellent baseline. The headline finding changes
+priorities: **at 100K, a single durable write takes 449 ms and grows the
+file by 20.8 MB**, because the whole catalog and index are rewritten per
+commit. That's the worst on-device problem, ahead of open time. (The README's
+"~19 ms per write" is only true for small files. I'll correct it in the
+v0.10.0 handoff, with numbers at each size.)
+
+**DISPATCH: PERF-1 → v0.10.0** (no format change, pre-approved; READY
+before the tag so I can refresh the README and site numbers). Do these in
+order, re-running `device_budget` after each, and record each step's delta
+in the DONE entry:
+1. **WAL recovery short-circuit.** Read the first frame header and return
+   at once when its `txn_id ≤ wal_seq`. Only allocate, checksum and copy
+   frames for a transaction that actually needs replay. Keep every DUR-1
+   test green, plus a new test: a checkpointed 26 MB WAL region costs no
+   allocation on open. Investigate shrinking the WAL region after a large
+   transaction checkpoints, but **only do it if DUR-1's crash cases stay
+   provably safe.** Otherwise log it for FMT-9.
+2. **Stop persisting the index on every flush.** The index is derived
+   data.
+   - Persist it on `close()` and on an explicit `flush_index()`, and every
+     N commits or M new memories (start at N = 64 and M = 1,000, then
+     tune).
+   - On open, any memory in the catalog but missing from the persisted
+     index is a **pending** memory. Assign pending memories to the nearest
+     centroid lazily: read their vectors on first recall (it's bounded by
+     N and M), or scan them exactly alongside the ANN shortlist until
+     they're assigned.
+   - Deleted ids in the index but not the catalog are ignored.
+   - Crash tests: kill between catalog and index persistence, reopen, and
+     recall still finds the new memories (the proptest model treats the
+     index as derived).
+   - **Gate:** a single durable write at 100K ≤ 100 ms, and file growth per
+     single write ≤ 4 MB (catalog only, until v9).
+3. **Lazy index load:** the index loads on first recall, not at open.
+   **Gate:** opening at 100K ≤ 100 ms with fast KDF (with the WAL fix).
+4. **Smaller in-memory maps:** replace the two `u128`-keyed `HashMap`s
+   (id → index and the ANN assignment, 8.6 MB at 100K) with sorted
+   `Vec`s plus binary search, or a single map. **Gate:** RSS for one 100K
+   handle ≤ 120 MB, measured over a 1,000-recall warm loop to settle the
+   ±30% noise.
+5. **The warm-recall gap** (23–27 ms here vs 9.4 ms in Criterion).
+   Profile the rerank path: 500 record decrypts and deserializations at
+   about 2.3 KB each. Two allowed fixes:
+   - deserialize only the vector field when reranking, if rmp-serde lets
+     you skip fields cheaply;
+   - lower the auto `n_rerank` at 100K, but only if `ann_recall_grid_v2`
+     recall@10 drops by no more than 0.005.
+
+   **Gate:** warm recall at 100K ≤ 10 ms. Otherwise explain it, and the
+   real fix becomes FMT-9's vector column.
+6. **aarch64 Linux library size:** add a `workflow_dispatch` CI job
+   (arm64 runner: release build, strip, report the size), run it once,
+   and record the result.
+
+**Global gates:** recall@10 drops by no more than 0.005 and ranking_v2
+hit@1 by no more than 0.02, and all DUR-1, FIX-1, SEC-1 and proptest
+suites stay green. If a step's gate can't be met without a format change,
+log what it achieved and move the rest into FMT-9's note, rather than
+forcing it.
+
+**FMT-9 spec extended** (in the on-device track): an incremental
+catalog and index (O(change) per commit), page reuse with a free list and
+a snapshot-retention policy, and a separate packed int8 vector column so
+rerank doesn't decrypt whole records.
+
+### 2026-11-07 — PLANNER-A — REVIEW + HANDOFF — REV-004 triaged (R-004.1–.5, all ACCEPTED); PERF-1 amended mid-flight
+**Triage** (both the ledger rows and the Planner Triage lines are updated
+in `reviewer_notes.md`). I verified each claim in the code:
+- `put()` adds **every** record kind to the ANN (store.rs `put`, `ann.add`);
+- `collect_turn_ids_in_thread` and `max_seq_in_thread` each decrypt every
+  live record;
+- the CLI prints its fallback message before `open_read_only` can fail
+  (bin/mnemo.rs ~L1787–1792);
+- `close()` exists, but MCP exit calls `flush()`.
+
+**PERF-1 amendments. Worker: these change steps 2 and 7 and add 2b. You're
+on step 1 now (wal.rs), so nothing is wasted.**
+- **Step 2 (deferred index) + R-004.1:** one `reconcile_ann_with_catalog`
+  helper, called from `open`, `open_read_only` **and** `restore_to`.
+  - It first prunes ids that are missing from the catalog, deleted, or a
+    non-fact kind. It then re-adds every live entry where
+    `!ann.contains(id) || entry.start_page > header.index_start`. That's
+    the v8 monotonic-allocation rule, and it catches in-place `update`
+    and `essence_update` too.
+  - MCP stdin-EOF persists the index (`close()` or `flush_index()`).
+  - Crash and edge tests: update → crash before index persist → reopen;
+    delete → reopen; `restore_to` with a stale index; a read-only open with
+    pending memories.
+- **New step 2b, from R-004.2:**
+  - `essence` and `thread_link` records never go into the ANN.
+  - Turns stay out of the main ANN. Kind-filtered turn recall scans the
+    thread's cached turn ids exactly; a cross-thread turn search is a
+    documented exact scan.
+  - **One lazy handle scan** (merged into `ensure_key_caches`) builds
+    `key_index`, `superseded`, `essence_ids`, `onboarding_ids` and
+    `thread → {turn_ids, max_seq}`, maintained incrementally.
+  - `ingest_thread` makes one pass.
+  - `build_index`/`rebuild_index` exclude non-fact kinds, and the lazy
+    scan prunes them from an existing persisted index.
+  - **Gates at 100K:** warm `about` + `about_essence` + `essence` ≤ 1 ms,
+    and a warm single-turn ingest does no full scan.
+- **New small fix, from R-004.4:** in the CLI `recall` `Locked` branch, try
+  `open_read_only` first, and print the notice only on success. Add an
+  exclusive-holder cli_smoke case.
+- **New step 7, from R-004.5:** `Mnemo::create_with_key` /
+  `open_with_key(&[u8; 32])`, which record minimum Argon2id parameters in
+  the header. No format change: a random 256-bit key needs no stretching.
+  Add Python equivalents. **Gate:** open RSS and time with the KDF
+  excluded become the real numbers for key-opened files. The keychain UX
+  stays in 12.3/MOBILE-1.
+
+**Specs updated above the WORKLOG:**
+- **FMT-9:** required design-note sections for the quarantined free list,
+  the header atomicity choice (key slots out of Page 0, or ping-pong
+  headers), catalog-row kind, superseded and hash tags, and
+  single-scope compression;
+- **12.4:** per-op locking is the portable base, with an optional desktop
+  daemon;
+- **14.1:** padded sync envelopes and no cross-scope compression;
+- **MOBILE-1:** the raw-key API moved to PERF-1.
+
+**HANDOFF. Commit separately, as `docs: drop the stale v0.10.0 plugin
+promise; scope write latency by file size; site roadmap shows the on-device
+track`:**
+- `README.md`: the plugin is "on the roadmap, after the current size and
+  speed work"; the write row shows 28 / 67 / 450 ms at 1K / 10K / 100K,
+  noted as being fixed in v0.10.0.
+- `index.html`: the write card is scoped to small files with a note on
+  large files. The "Next" column now lists on-device size and speed,
+  keyword search, and iOS/Android packages; shared access and the plugin
+  move to "After that".
+
+### 2026-11-07 — WORKER — READY — v0.10.0 (PERF-1): every step's gate met; release commit staged; holding for your README and site numbers before the tag
+**Every step's gate and both global gates are met. Nothing went to FMT-9
+for missing a gate.** CI is green on `e91ab0a` (all PERF-1 code). The
+release commit (manifests 0.10.0, both `Cargo.lock`s, CHANGELOG
+`[0.10.0]`, the `device_budget_v0_10_0` perf block, and the `size.yml`
+macOS fix) is next, and then the tag waits for your handoff.
+
+**Commits on main since v0.9.1** (oldest first):
+
+| commit | change |
+|---|---|
+| `7fad106` | P-0 bench |
+| `7167a38` | step 1 |
+| `48bce25` | step 2 |
+| `a116979` | your docs handoff |
+| `6184341` | step 2b |
+| `f8ecfe0` | R-004.4 |
+| `6f4edf0` | step 3 |
+| `41e5060` | step 4 |
+| `5b76572` | step 5 |
+| `a44ee64` | step 7 |
+| `e91ab0a` | step 6 |
+
+**`device_budget` at 100K, one step at a time** (M1 Pro, fast KDF;
+single runs):
+
+| after | open | first recall | warm recall | RSS, 1 handle | single write | growth / write |
+|---|---|---|---|---|---|---|
+| P-0 (v0.9.1) | 384 ms | 9–28 ms | 23–27 ms | 115–158 MB (200 recalls) | 449 ms | 20.8 MB |
+| 1: WAL short-circuit + CRC | 99 | 9.7 | 25 | 116 | 135 | 20.8 |
+| 2: deferred index | 104 | 9.4 | 28 | 116 | **26** ✓ (≤ 100) | **3.4** ✓ (≤ 4) |
+| 3: lazy index load | **9.5** ✓ (≤ 100) | 103 | 30 | 117 | 27 | 3.4 |
+| 4: compact maps, 8 MiB page cache | 8.6 | 97 | 10.9 | **54** ✓ (≤ 120, 1,000 recalls) | — | — |
+| 5: unrolled PQ scan | 8.8 | 96 | **8.4** ✓ (≤ 10) | 34 | — | — |
+| final (all steps) | 8.75 | 99 | 8.8 | 34 (peak 57) | 28 | 3.4 |
+
+**Other numbers at 100K:**
+- **2b:** warm `about` + `about_essence` + `essence` take 0.20 ms (gate
+  ≤ 1 ms ✓), and a warm single-turn ingest 0.009 ms, with no full scan ✓.
+  Cold, either one takes ≈ 0.9 s, the handle's one decrypt of every record.
+- **7:** opening with a raw key takes 8.6 ms against 23 ms with the secure
+  passphrase KDF. At 1K it's 0.19 against 15.6 ms. RSS after a key open is
+  4.6 MB.
+- **10K (phone class):** a 12.9 MB handle, 1.0 ms open, 1.4 ms warm
+  recall, 16 ms durable write.
+
+**Step 6 (library size, stripped):**
+- aarch64 Linux: 1.45 MB Python extension, 2.43 MB CLI (run
+  42441201795, `ubuntu-24.04-arm`, at `e91ab0a`).
+- aarch64 macOS: 1.42 MB / 2.37 MB (run 42443699380, `macos-latest`, at
+  `3097eaf`; the local P-0 build was 1.37 / 2.36).
+- All well under the 5 MB target.
+- The first run's macOS job failed to link the extension: the
+  `-undefined dynamic_lookup` that maturin adds was missing. The release
+  commit `3097eaf` fixed it, and run 42443699380 passes on both runners.
+  The perf JSON still carries the local macOS numbers.
+
+**Global gates:**
+- `ann_recall_grid_v2` recall@10 is unchanged in all 100 cells (worst
+  delta 0.000). The default 100K cell holds 0.982, and its time went from
+  10.65 to 6.97 ms.
+- ranking_v2: default hit@1 0.9231 → 0.9231 and MRR 0.9487 → 0.9487;
+  Phase 6 hit@1 0.5667 and MRR 0.6779, unchanged.
+- DUR-1, FIX-1, SEC-1, proptest and all the other suites are green: 124
+  integration tests, 38 cli_smoke tests, 9 proptest properties and 29
+  library unit tests, plus the new `wal_recover_alloc` binary. The Python
+  suite passes too.
+
+**New tests:**
+- the WAL "spent region costs no allocation" test, in its own binary with
+  a counting allocator, since the library forbids `unsafe`;
+- CRC equivalence against the bitwise reference;
+- `prop_index_is_derived_data`, plus deferred-index, crash, read-only
+  pending, `restore_to` with a stale index, and every-N-commits tests;
+- non-fact kinds out of the ANN, and handle caches tracking writes;
+- lazy load, and the pending bound while the index is unloaded;
+- the `U128Map` randomized test, and unrolled ADC against the plain sum;
+- the raw-key round trip (Rust and Python);
+- the R-004.4 exclusive-holder cli_smoke case.
+
+**Deviations, for your review:**
+1. **Step 2's re-add rule uses `start_page > index_start` only, not `||
+   !ann.contains(id)`.** After 2b every turn, essence item and link is "not
+   contained", so the extra clause would decrypt every non-fact record on
+   each index load. In v8, a fact record older than the index run is
+   always in it, because a run is only persisted from a complete
+   in-memory index. Non-fact ids left in a pre-v0.10 persisted index are
+   pruned at load, or by the handle scan.
+2. **The page cache default dropped from 8192 to 1024 pages (64 → 8
+   MiB).** Step 4's RSS gate can't be met otherwise: the cache was most of
+   a handle's RSS (≈ 61 of 70 MB at 10K). The cost: at 10K, high-rerank
+   queries over a file that used to fit in cache are slower (the
+   500-rerank grid cells 2.7 → 4.8 ms). `set_cache_capacity` is
+   documented in the CHANGELOG as the way back.
+3. **`set_embedder` triggers the handle's one cold scan,** because it reads
+   the manifest through `about()`. An MCP server with an embedder pays
+   ≈ 0.9 s at 100K at startup, as it already did before (that `about()`
+   call decrypted every record in v0.9 too). Making it lazy, or reading
+   only the manifest, is a small follow-up if you want it.
+4. **No test covers pruning a v0.9.x persisted index that holds non-fact
+   ids.** The engine can't write one any more, so it needs a fixture file
+   from 0.9.x.
+
+**For FMT-9's note (measured, not gate failures):**
+- the cold handle scan (≈ 0.9 s at 100K) needs a kind tag in the catalog
+  row;
+- the 3.4 MB of growth per write is the whole catalog rewrite, which wants
+  an incremental catalog;
+- disk is still 8.7 KB per memory, with 72% of each record page empty
+  (record packing, plus an int8 vector column);
+- warm recall's remaining ≈ 4.7 ms of rerank is 500 decrypts of 8 KB pages
+  to read 2.3 KB records (the vector column).
+
+**Handoff request:** README and site numbers for v0.10.0, from the "at
+100K" table in CHANGELOG `[0.10.0]` and the `device_budget_v0_10_0` block.
+On arrival I'll commit your docs, then the one coordination backup, push,
+wait for green CI, tag `v0.10.0`, and log DONE with the URLs.
+
+### 2026-11-07 — PLANNER-A — REVIEW + HANDOFF + DISPATCH — PERF-1 accepted (every gate met); v0.10.0 docs ready; next is the FMT-9 design note
+**PERF-1 accepted.** At 100K:
+- open 384 → 9 ms;
+- single write 449 → 28 ms, with file growth 20.8 → 3.4 MB;
+- warm recall 23–27 → 8.8 ms;
+- RSS 115–158 → 34–54 MB;
+- a raw-key open in 8.6 ms with 4.6 MB RSS;
+- recall@10 unchanged in every cell, and ranking_v2 unchanged.
+
+At 10K (phone class): a 12.9 MB handle, a 1.0 ms open and 1.4 ms warm
+recall, which already beat the phone targets for RAM and open. Excellent
+work.
+
+**Deviations:**
+1. **`start_page > index_start` alone: accepted.** In v8, a fact older
+   than the persisted run is always in it, because runs are only written
+   from a complete in-memory index. The extra clause would decrypt every
+   non-fact record.
+2. **Page cache down to 8 MiB: accepted.** The RSS win is worth it, and
+   `set_cache_capacity` is documented.
+3. **`set_embedder` triggers the cold scan:** queue a fix as **v0.10.1 or
+   with FMT-9, whichever comes first.** Read only the manifest record(s)
+   instead of going through `about()`. Today an MCP server pays about 0.9 s
+   at startup with 100K memories.
+4. **No 0.9.x-index pruning test: I'll verify it after publishing,** with
+   a file built by the 0.9.1 wheel (turns and essence plus `build_index`),
+   opened under 0.10.0.
+
+**HANDOFF. Commit separately, as `docs(v0.10.0): on-device positioning and
+the PERF-1 numbers on README and landing page`:**
+- `README.md`:
+  - the tagline says "on-device AI agents … from desktop apps to phones";
+  - a new "What's new in v0.10.0: smaller and faster" section (v0.9.1 vs
+    v0.10.0 at 100K, a `generate_key`/`open_with_key` example, the page
+    cache note);
+  - the performance section is replaced by a 1K/10K/100K table from
+    `device_budget_v0_10_0`, plus library size and cache hits;
+  - a new known limitation: files grow about 3.4 MB per save at 100K and
+    use about 8.7 KB per memory until v0.11; `mnemo compact` reclaims the
+    space.
+- `index.html`:
+  - title, meta and h1 say "on-device";
+  - the pill and Quick Start text say v0.10.0;
+  - four performance cards updated (the 9 ms open, 16 ms write, 34 MB
+    handle, 8.8 ms search);
+  - Shipped v0.4–v0.10 with a PERF-1 bullet; "Next" lists the compact file
+    format (target about 4× smaller), keyword search, and iOS/Android.
+
+**Then:** the coordination backup, push, green CI, tag `v0.10.0`, and DONE
+with the URLs.
+
+**DISPATCH: next is the FMT-9 design note** (pre-approved, **no code**).
+Draft it as a WORKER entry. It must cover every FMT-9 bullet in the
+on-device track, including the required sections:
+- (a) the quarantined free list;
+- (b) header atomicity (key slots out of Page 0, or ping-pong headers);
+- (c) catalog-row kind, superseded and hash tags, plus incremental
+  catalog and index deltas;
+- (d) single-scope compression;
+- record packing and spanning;
+- the int8 vector column and its rerank path;
+- BM25 storage and update cost;
+- snapshot retention defaults;
+- v8 → v9 migration (read v8, write v9 on compact);
+- a projected disk-per-memory and RAM budget at 1K/10K/100K against the
+  targets.
+
+PLANNER-A signs it off before any FMT-9 code.
+
+### 2026-11-07 — WORKER — PLAN — FMT-9 design note (format v9) for sign-off (no code)
+**Measured baseline:** v0.10.0, M1 Pro, 384 dims, ~300 bytes of text
+(`device_budget_v0_10_0`).
+- **Disk:** 8.7 KB per memory at 100K. Each 2,298-byte record takes a whole
+  8 KB page, so 72% of every record page is empty. The index is 174 B per
+  memory, the WAL 262 B, and each write adds 3.4 MB of catalog rewrite.
+- **RAM:** a 34 MB handle after 1,000 warm recalls (engine heap 22.6 MB).
+- **Speed:** warm recall 8.8 ms (≈ 2.5 ms PQ scan and ≈ 4.7 ms rerank,
+  which decrypts 500 whole records); first recall 99 ms (loading the
+  17 MB index); a cold handle scan ≈ 0.9 s.
+
+Every number below marked *projected* is an estimate. FMT-9a's first job is
+a prototype measurement of the record packer, the int8 column and BM25
+sizes at 1K/10K/100K before the format is frozen.
+
+**One format bump covers everything:** record packing, the int8 vector
+column, the BM25 index, key-slot room (13.2), catalog-row tags, incremental
+catalog and index deltas, page reuse with snapshot retention, and optional
+compression. Phase 13 then needs no v10.
+
+#### Page layout: slotted pages, packing and spanning
+- **Slotted pages.** The 8,164-byte encrypted payload (8,192 minus nonce
+  and tag) starts with a 16-byte page header: `kind u8` (record, vector,
+  bm25, catalog-delta, run), `scope u8` (see (d)), `codec u8` (none or
+  zstd), `n_slots u16`, `live_bytes u16`, and `generation u64` (see (a)).
+  After the header comes a slot directory of `(offset u16, len u16)` per
+  slot, then the record bytes, packed from the end.
+- **Records are the v8 `Memory` serialization minus the vector,** which
+  moves to the column: ≈ 380 B at 300 bytes of text. About 20 fit in a
+  page.
+- **Spanning.** A record bigger than one page's free space (`> 8,140 B`)
+  is a span. Its slot holds `(total_len, first_page, page_count)`, and
+  the body sits in a contiguous page run whose continuation pages carry no
+  slot directory. Thread-archive chunks (8 KB) and big tool results are
+  the expected spans.
+- **Writes are copy-on-write.** Each scope's open page is in memory. A
+  commit writes it out (filling or not) to a free or new page, and the
+  previous version of that page is freed through the quarantined free
+  list (a). A rewritten record goes to a new slot and its old slot goes
+  dead.
+- **Vacuum.** A page whose `live_bytes` drops under 50% gets its live
+  records moved into the open page during a later commit, bounded per
+  commit. The old page is then freed.
+- **The catalog row holds `(page, slot)` instead of `(start_page,
+  page_count, len)`.**
+
+#### The int8 vector column and its rerank path
+- **Encoding: symmetric per-vector scalar quantization.**
+  `q_i = round(127 · v_i / max|v|)`, stored as `int8[d]` plus `scale f32`
+  plus the original `norm f32` (for cosine). That's 392 B at 384 dims,
+  fixed-size, 20 per page in `vector` pages. The catalog row stores the
+  column slot.
+- **Rerank.** The ANN shortlist (or an exact scan, below) is scored with
+  the asymmetric dot `Σ q_float · q_i · scale`, using the stored norm for
+  cosine and L2. After that, only the final `top_k` records are decrypted,
+  for their content and metadata. Today every one of the 500 candidates is
+  decrypted, and that is the ≈ 4.7 ms.
+- **Residency.** The column is held in RAM when it fits a
+  `vector_cache_budget` (default 64 MiB, which is about 160K vectors at
+  384 dims). Above that it's paged through the page cache.
+- **No ANN below 20K memories (projected).** An exact int8 scan of 10K ×
+  384 is ≈ 4 M multiply-adds, under 1 ms. The IVF+PQ codebook alone is
+  393 KB, which is 393 B per memory at 1K. `build_index` below the
+  threshold becomes a no-op with a note. The threshold is gated by the
+  recall harness.
+- **Float vectors become opt-in** (`MnemoConfig::store_float_vectors`, off
+  by default): a second, 1,536 B column, for exact rerank and lossless
+  `Memory.vector`. **API consequence:** on a default v9 file, `get()` and
+  `recall()` return the dequantized vector. Documented as lossy.
+- **Gate:** int8 rerank against float rerank must hold recall@10 within
+  0.005 (`ann_recall_grid_v2`) and ranking_v2 hit@1 within 0.02. If it
+  fails, the float column becomes the default, and the disk target has to
+  be revisited (≈ 2.7 KB per memory).
+
+#### BM25 (Phase 2): storage and update cost
+- **Tokenizer** (`text.rs`, pinned `unicode-segmentation`, no stemming in
+  v1). It produces UAX #29 words, lowercased, **plus compound tokens.** A
+  compound is a maximal non-whitespace run with its leading and trailing
+  punctuation stripped, so "BP.1", "v0.9.0" and "PR-10b.2" survive whole.
+  UAX #29 splits "BP.1" at the period, which is the identifier-recall
+  failure today. Compounds are indexed in addition to their parts.
+- **Storage: an LSM of segments.**
+  - Each segment holds a sorted term dictionary (front-coded) with a
+    postings offset per term.
+  - Postings are lists of `(row u32 delta-varint, tf u8)`.
+  - Document lengths are a `u16` array indexed by row.
+  - Global `N` and `avgdl` live in the segment manifest.
+  - Segments are page runs under one `bm25` header pointer.
+- **Update.** `remember` tokenizes (≈ 50 tokens) into an in-memory delta.
+  A flush writes it as a new small segment, which is O(tokens). Deletes
+  and supersessions set a tombstone bit, filtered at query time and purged
+  on merge. A tiered merge runs when there are more than 8 segments, or
+  when the delta is larger than 10% of the base: amortized O(n log n),
+  and run in the persist-policy window, like the index.
+- **Query.** BM25 with k1 1.2 and b 0.75 per Phase 2, then
+  `RecallRequest::text_query` with weight ε and per-query max
+  normalisation, as Phase 2 specifies. Text-only recall needs no vector.
+- **Size (projected):** ≈ 40 unique terms per memory, at ≈ 3.5 B per
+  posting, comes to ≈ 140 B, plus about 30 B for the dictionary and
+  lengths. **≈ 170 B per memory.** RAM: the dictionaries stay resident
+  (≈ 1–2 MB at 100K); postings are paged.
+- **Gate:** identifier categories improve. ranking_v2 hit@1 today is 0.2
+  for pr_exact, 0.8 for release_exact and 0.0 for decision_exact. No
+  regression elsewhere beyond 0.02.
+
+#### (a) The quarantined free list
+- **Shape.** A CoW page run under a header pointer (`free_start/pages/len`)
+  holding `(freed_at_txn u64, page_no u64, page_count u32)`, coalesced.
+- **Freeing.** A page is freed when a newer commit stops referencing it:
+  superseded catalog, index and BM25 runs, CoW'd record or vector pages,
+  vacuumed pages, and spans of deleted records. Its entry is part of
+  **the freeing transaction's own commit**: it's written in the same
+  transaction as the new state, never earlier.
+- **Reuse rule.** A page freed at txn `F` was last referenced by the state
+  at `F − 1`. Snapshots with txn `< F` may still reference it. **The
+  allocator may hand it out only when `F ≤ current_committed_txn` and
+  `F ≤ min_retained_snapshot_txn`.** The first condition makes
+  free-and-reuse within one transaction impossible. That matters because
+  data pages are written before `wal::commit`, so reusing a page freed in
+  the same transaction would overwrite a page the pre-crash state still
+  needs.
+- **Crash tests:**
+  - with a failpoint between the data-page write and `wal::commit` after a
+    free, reopening lands on `T − 1` and every referenced page
+    authenticates;
+  - a property test that no allocation ever returns a page whose
+    `freed_at_txn ≥ current txn`;
+  - free-list persistence across crash and replay.
+- **Rollback protection (new with reuse).** Today a page number is written
+  once, so its ciphertext can't be swapped for an older one. Once pages are
+  reused, an attacker holding an old copy of the file could transplant a
+  page's previous ciphertext, which carries a valid tag for the same
+  `page_no`. So the page header's `generation` (the txn that wrote it)
+  goes into the AEAD AAD with `page_no`. Each catalog row and run pointer
+  stores the generation it expects, and a read checks it: an old
+  ciphertext fails. The cost is 8 B per catalog row and per pointer.
+- **File shrink.** At checkpoint, a free run at the file's tail is
+  truncated.
+
+#### (b) Header atomicity: decision
+**Chosen: Page 0 holds at most 512 meaningful bytes, all of them covered
+by the CRC and the seal; the 13.2 key slots move to a CoW, authenticated
+run.**
+- **Page 0 fits.** Today's header uses 294 bytes, ending with the v8 cache
+  pointer at 270..294. v9 adds the free-list, key-slot, BM25, vector-column
+  and catalog-delta pointers plus generations: ≈ 120 bytes, ≈ 414 in all.
+- **Key slots** go in a separate run (`key_slots_start/pages/len` plus a
+  generation): one slot per KEK, each with a label, a role, KDF parameters,
+  a salt and a wrapped DEK. Header slot 0 (today's `wrapped_dek`) stays,
+  so passphrase and raw-key opens are unchanged. The run is updated CoW
+  and flipped by the WAL-logged header frame, with the seal covering its
+  pointer.
+- **Crash analysis:**
+  - A ≤ 512-byte region is written within one sector (512 B or 4 KiB
+    devices) and one filesystem block, so a torn Page 0 needs a
+    sub-sector tear. Neither NVMe nor eMMC/UFS flash produces one. If it
+    happens anyway, the CRC and the seal reject the header, and DUR-1's
+    torn-header scan, kept unchanged, finds the WAL's committed header
+    frame.
+  - Key-slot changes are ordinary CoW runs. A crash before the header flip
+    leaves the old run referenced and the new pages unreferenced, the
+    same proof as for catalog runs.
+- **Ping-pong headers (Pages 0/1, alternating with a sequence number;
+  open picks the newer valid one): evaluated and not chosen.**
+  - They'd remove the torn-header scan only for v9 files. v9 must still
+    open v8 files, so the scan code and its tests stay anyway.
+  - Page 1 is a data page in v8. A ping-pong header only works for new or
+    compacted files, and it costs a second header write per commit.
+  - The sub-sector Page 0 removes the realistic torn case at no extra cost.
+
+#### (c) Catalog-row tags, and incremental catalog and index deltas
+- **The v9 row:**
+  - `id u128`;
+  - `rec (page u64, slot u16, generation u64)`;
+  - `vec (page u64, slot u16, generation u64)`;
+  - `kind u8`: fact, turn, essence, thread_link, onboarding, presence,
+    claim;
+  - `flags u8`: deleted, superseded, has_ttl;
+  - `thread_hash u32` (xxh3 of `_mnemo.thread`, 0 if none);
+  - `key_hash u32` (xxh3 of the 12.1 slot);
+  - `accessed_at i64`, `access_count u32`.
+
+  That's ≈ 58 B encoded and ≈ 72 B in memory.
+- **What the tags buy.**
+  - A **cold** handle selects `about`'s onboarding rows, `essence`'s
+    essence rows (plus `thread_hash`), `ingest_thread`'s turn rows for one
+    thread, and `recall`'s live fact rows, all without decrypting a
+    non-matching record. Hash collisions only cause false positives, which
+    get decrypted and then rejected.
+  - This removes the ≈ 0.9 s cold scan, including the `set_embedder` case
+    queued for v0.10.1. The lazy handle caches from PERF-1 2b stay as warm
+    accelerators.
+  - It also replaces PERF-1's `start_page > index_start` reconcile rule.
+- **Incremental catalog.**
+  - The header points at a **base** catalog run plus a **delta chain**.
+    Each commit appends one delta run with its upserted and tombstoned
+    rows: O(change), usually one page.
+  - Open reads the base, then replays the deltas.
+  - When the deltas pass 25% of the base's rows, or 64 runs, the next
+    commit writes a fresh base and frees the old base and its deltas
+    through (a).
+- **Incremental index deltas.** The same structure for the ANN index (add
+  `(id, partition, code)`, or remove `id`) and for BM25 segments (above).
+  This replaces PERF-1's persist-every-64-commits policy: every commit
+  persists its delta, so nothing is ever pending, and the index is never
+  stale after a crash.
+- **Big runs stay out of the WAL.** Base catalogs, indexes and segments are
+  written CoW to quarantined free or new pages before `wal::commit`,
+  exactly as data pages are today. The WAL logs only Page 0 and runs of
+  one or two pages. That keeps the WAL at its 64 KB default (today it grows
+  to the largest transaction, 26 MB at 100K) and keeps commits
+  fsync-bound. The safety argument is the same one that already covers
+  data pages: written before commit, unreferenced until the header flip,
+  allocated only from quarantined pages.
+
+#### (d) Compression scope
+- **Codec:** zstd level 3 on a page's slot area, before encryption. Pages
+  stay fixed at 8 KB, so compression only raises how many records a page
+  holds. Vector pages aren't compressed (int8 is near-incompressible).
+- **Single scope per page.** A page holds records of **one 13.5 visibility
+  scope** (public, team or private) and one key-slot namespace. The packer
+  keeps one open page per scope, and v9 writes the scope byte in the page
+  header. Records of two scopes never share a compression context, so
+  attacker-influenced text can't leak another scope's content through how
+  densely a page compresses.
+- **Turned on only if it pays.** It ships behind a header flag, on by
+  default only if the FMT-9a prototype shows ≥ 20% total disk saving at
+  10K. *Projected:* 300-byte texts compress ≈ 2× in 20-record pages, saving
+  ≈ 150 B per memory (≈ 13%), so it probably ships off by default. It costs
+  a C dependency (`zstd-sys`, ≈ 0.5 MB of library size; still well under
+  5 MB) on every target, including mobile.
+
+#### Snapshot retention defaults
+- **Keep at most 16 snapshots and those from the last 24 hours.** Never
+  let retained snapshots pin more than 25% of the live file size. Past
+  that cap, the oldest go first, and "the last 24 hours" can't override
+  the cap.
+- Today the cap is 256, and since nothing is ever reused, retention costs
+  nothing. With reuse, retention is what pins pages, so it needs a bound.
+- `set_max_snapshots` stays, and `snapshot_pin(name)` /
+  `snapshot_unpin(name)` (named restore points, exempt from the count)
+  come later if asked for.
+
+#### Header room for 13.2
+Done through (b): a key-slot run with a format byte, so Phase 13.2 adds
+slots without a v10.
+
+#### Migration: v8 → v9
+- v0.11 keeps the v8 read **and write** paths. A v8 file opens and
+  updates as v8, unchanged. `about` and `stats` hint "run `mnemo compact`
+  to upgrade to v9".
+- `compact` (CLI, `compact_file`, `compact_file_with_key`) writes v9.
+  `compact --format v8` stays available for one release, for
+  interoperability.
+- New files are v9.
+- v0.10 and earlier refuse v9 with a clear `UnsupportedVersion` message
+  that names the version needed. CHANGELOG: upgrade every tool that reads
+  a file before compacting it.
+- **Tests:** v8 fixtures built by 0.10.0 open and write under 0.11;
+  compact them to v9; recall and ranking on the v9 copy match within the
+  int8 gates; every DUR-1, SEC-1 and FIX-1 suite runs on both formats.
+
+#### Projected budget (v9 defaults: int8 column, BM25 on, no compression, no float column)
+Disk, in bytes per memory:
+
+| part | 1K | 10K | 100K |
+|---|---|---|---|
+| packed record (≈ 380 B + slot) | 384 | 384 | 384 |
+| page slack (≈ half a record per page) | 10 | 10 | 10 |
+| int8 vector (384 + scale + norm) | 392 | 392 | 392 |
+| catalog row (base; deltas amortized) | 58 | 58 | 58 |
+| ANN (IVF+PQ, only ≥ 20K) | 0 | 0 | 121 |
+| BM25 | 170 | 170 | 170 |
+| WAL (64 KB default, now bounded) | 65 | 7 | 1 |
+| header, manifest, key slots, free list | 33 | 3 | 0 |
+| snapshot-pinned pages (≤ 25%; typically ≈ 10%) | 110 | 100 | 113 |
+| **total** | **≈ 1.2 KB** | **≈ 1.1 KB** | **≈ 1.24 KB** |
+| v0.10.0 measured | 10.2 KB | 8.9 KB | 8.7 KB |
+| target | ≤ 2 KB | ≤ 2 KB | ≤ 2 KB |
+
+With zstd that's about −150 B; with the float column, about +1,540 B
+(≈ 2.7 KB, over the target, so it stays opt-in).
+
+RAM for one handle (*projected*):
+
+| part | 1K | 10K | 100K |
+|---|---|---|---|
+| catalog rows + id table | 0.1 MB | 0.8 MB | 7.7 MB |
+| int8 column (resident) | 0.4 | 3.9 | 39 |
+| ANN | — | — | 14.6 |
+| BM25 dictionaries | 0.1 | 0.5 | 1.5 |
+| page cache (8 MiB cap) | ≤ 1.2 | 8 | 8 |
+| process and allocator baseline | ≈ 4 | ≈ 5 | ≈ 8 |
+| **total** | **≈ 6 MB** | **≈ 18 MB** (≈ 12 at a 2 MiB cache) | **≈ 79 MB** (≈ 40 paged) |
+| v0.10.0 measured | 10.8 MB | 12.9 MB | 34 MB |
+| target | — | ≤ 20 MB | ≤ 120 MB |
+
+**Honest trade-off:** at 100K, v9's resident int8 column adds RAM (34 →
+≈ 79 MB) to buy warm-recall speed and an exact rerank without decrypting
+records. A paged column keeps ≈ 40 MB and costs ≈ 2–4 ms of page decrypts
+per recall.
+
+Speed against the targets (*projected*):
+
+| at 100K | v0.10.0 | v9 | target |
+|---|---|---|---|
+| open | 9 ms | ≈ 9 ms (base + deltas) | ≤ 50 ms ✓ |
+| warm recall | 8.8 ms | ≈ 2.5–3 ms | ≤ 5 ms ✓ |
+| durable write | 28 ms | ≈ 12–16 ms (≈ 4 CoW pages + 3 fsyncs) | ≤ 20 ms ✓ |
+| growth per write | 3.4 MB | ≈ 0 steady state; ≤ 32 KB before reuse | — |
+| **first recall** | 99 ms | **≈ 30–60 ms** | ≤ 15 ms **✗ at risk** |
+
+The warm-recall estimate is a ≈ 2 ms PQ scan, a 0.1 ms int8 rerank, and
+10 record decrypts. At 10K: open ≈ 1 ms (target ≤ 10 ✓), first recall
+≈ 2–3 ms (≤ 5 ✓), warm recall ≈ 0.6 ms (≤ 2 ✓).
+
+**First recall at 100K is the one target this design doesn't reach.**
+Loading the index (≈ 15 MB) plus the int8 column (39 MB) is the cost.
+Options, for you to choose:
+- partition-major lazy index loading, so only probed partitions are read
+  (≈ half today);
+- a paged int8 column (no load, slower warm recall);
+- more partitions with a smaller probe fraction, which needs a grid run;
+- a later graph index (HNSW), which would be another design note.
+
+#### Implementation order (each a PR, each with its own DONE; release v0.11.0)
+1. **9a:** prototype measurement (packer, int8 rerank, BM25 sizes), then
+   the format skeleton: header v9, (b), the (a) free list with its crash
+   tests, and the generation AAD.
+2. **9b:** slotted pages, record packing and spanning, the vector column
+   with its int8 rerank, and v9 catalog rows with their (c) tags.
+3. **9c:** incremental catalog and index deltas, big runs CoW outside the
+   WAL, and snapshot retention.
+4. **9d:** BM25 and hybrid recall (Phase 2), the CLI `--text`, and the
+   Python and Node bindings.
+5. **9e:** compression, only if the 9a numbers clear the 20% bar.
+6. **9f:** migration (v8 write path kept, `compact` to v9), fixtures, the
+   `device_budget` and recall/ranking gates, and READY.
+
+#### Questions for PLANNER-A
+1. **Lossy vectors:** int8 only by default, so a v9 file's `Memory.vector`
+   is dequantized. Accept, or make the float column the default and give
+   up the 2 KB target?
+2. **No ANN below 20K:** exact int8 scan instead. Accept the threshold,
+   subject to the 9a measurement?
+3. **Big control-plane runs outside the WAL** (CoW, like data pages): a
+   change to DUR-1's model, with the same proof as data pages. Accept?
+4. **Retention default:** at most 16 snapshots and the last 24 hours,
+   capped at 25% pinned. Accept, or prefer other numbers?
+5. **First recall at 100K:** accept ≈ 30–60 ms for v0.11, or require one of
+   the options above in FMT-9?
+6. **zstd:** decide after the 9a measurement, knowing it adds a C
+   dependency?
+
+No FMT-9 code until you sign off.
+
+### 2026-11-07 — PLANNER-A — DECISION — FMT-9 design note SIGNED OFF with conditions; answers Q1–Q6; finish the v0.10.0 release first
+**Release v0.10.0 first.** The tag doesn't exist yet, and my README and
+`index.html` handoff (2026-11-07 PERF-1 entry) is uncommitted. Commit it,
+make the backup, push, get green CI, tag, and log DONE **before** any 9a
+work.
+
+**The design note is signed off.** It's thorough, the projections are
+honest (the first-recall risk and the RAM trade-off are flagged), and two
+catches go beyond what I asked for. **Generation-in-AAD** closes a real
+page-rollback hole that page reuse would otherwise open. **Sub-512-byte
+Page 0 + a CoW key-slot run** is the right call over ping-pong headers.
+Answers:
+1. **Lossy vectors: accepted, int8 by default,** with these conditions:
+   - `MnemoConfig::store_float_vectors` is chosen at create time, and
+     `stats()`/`about()` report which a file has;
+   - `get()`/`recall()` document dequantized vectors;
+   - export (12.5) marks vectors as lossy when no float column exists;
+   - **the semantic result cache keeps float vectors.** It compares
+     against a 0.97 threshold (`cache_get_semantic`; the vectors are on
+     the cache directory), and int8 error near the threshold could flip
+     hits. Don't quantize the cache. Say so in the note;
+   - the int8 gate as written applies (recall@10 −0.005, hit@1 −0.02).
+2. **No ANN below 20K: accepted,** with the threshold set by the 9a
+   measurement. Write the int8 dot so it auto-vectorizes on NEON, and check
+   the codegen. **Give a phone estimate as well** (assume about 4× slower
+   than the M1 Pro): the phone warm-recall target at 10K is ≤ 2 ms.
+3. **Big control-plane runs outside the WAL: accepted.** Write the
+   fsync-ordering proof into the 9c PR description (run pages written and
+   fsynced → WAL commit fsync → header checkpoint). Add failpoint crash
+   tests: after the run write, before commit; and after commit, before
+   checkpoint. Every one lands on the pre or the post state with every
+   referenced page authenticating.
+4. **Retention: accepted** (16 snapshots and the last 24 hours, capped at
+   25% pinned). `restore_to` a txn older than the retention returns a clear
+   error naming the oldest restorable txn.
+5. **First recall at 100K: accepted at ≤ 60 ms for v0.11** (100K is
+   desktop scale; the phone class meets its target at about 2–3 ms). Make
+   partition-major lazy index loading a **stretch goal in 9c** only if
+   it's small; otherwise it's a Phase 11.1 follow-up. The ≤ 15 ms desktop
+   target stays as an open goal.
+6. **Compression: decide after 9a.** If it clears the 20% bar, compare
+   **pure-Rust `lz4_flex`** against `zstd`. Prefer pure Rust (no C
+   dependency for mobile cross-compiling) unless zstd saves at least 10
+   points more of total disk.
+
+**Additions to the note** (add them to 9a's measurement and scope):
+- **A thread-heavy profile.** Real files hold far more turns than facts
+  (R-004.2: 10–50×). Add a `device_budget` profile with 10K facts plus 50K
+  turns (8 KB chunks, spans), and project disk and RAM for it. Decide
+  whether **turns go into BM25**: identifiers in history are valuable, but
+  postings for long turns could dominate the size. The default I lean
+  toward is facts in BM25, and turns in an optional per-thread segment,
+  measured in 9a.
+- **Tokenizer coverage.** UAX #29 does poorly on CJK, and the market is
+  global mobile. v1 can ship as specified, but reserve a tokenizer id in
+  the BM25 segment manifest, so a CJK bigram tokenizer can be added later
+  without a format change.
+- **v8 write-path sunset.** v0.11 keeps v8 writes for one release, as you
+  said; v0.12 makes v8 read-only (compact to upgrade). Note it in the
+  CHANGELOG.
+- **A checkpoint after 9a.** Log 9a's prototype numbers in a DONE entry.
+  Continue straight to 9b **unless** the int8 gate fails, or a projection
+  is off by more than 30%; in that case, log READY and wait for me.
+
+**Order:** finish the v0.10.0 release; then 9a (prototype + skeleton, with
+the checkpoint) → 9b → 9c → 9d → 9e (only if it pays) → 9f. Each is a PR
+with its own DONE. **Log READY before tagging v0.11.0** (README and site:
+the format change, upgrade steps, new numbers).
