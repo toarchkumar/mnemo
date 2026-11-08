@@ -1,0 +1,69 @@
+# PERF-1 step 6: stripped library size on arm64 Linux (and macOS for
+# comparison). Run by hand from the Actions tab; the on-device track's
+# target is <= 5 MB per architecture.
+#
+# Two stand-ins for "the engine linked into an app", until MOBILE-1 adds
+# real UniFFI exports (a bare `--crate-type cdylib` of mnemo-engine is
+# ~16 KB because LTO strips everything without `extern "C"` exports):
+# - the Python extension (engine + PyO3), built as maturin builds it;
+# - the `mnemo` CLI (engine + clap + MCP server).
+name: Library size
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same flags as release.yml: ARMv8 hardware AES / PMULL.
+  RUSTFLAGS: --cfg aes_armv8 --cfg polyval_armv8
+
+jobs:
+  size:
+    name: stripped size (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the Python extension (release, as maturin does)
+        working-directory: mnemo-python
+        run: cargo build --release --features pyo3/extension-module
+
+      - name: Build the CLI (release)
+        working-directory: mnemo
+        run: cargo build --release --bin mnemo
+
+      - name: Strip and report
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$(uname)" = "Darwin" ]; then
+            ext=mnemo-python/target/release/libmnemo_engine.dylib
+            strip_ext() { strip -x "$1"; }
+          else
+            ext=mnemo-python/target/release/libmnemo_engine.so
+            strip_ext() { strip --strip-unneeded "$1"; }
+          fi
+          cp "$ext" /tmp/ext && strip_ext /tmp/ext
+          cp mnemo/target/release/mnemo /tmp/cli && strip /tmp/cli
+          arch="$(uname -sm)"
+          ext_bytes=$(wc -c < /tmp/ext | tr -d ' ')
+          cli_bytes=$(wc -c < /tmp/cli | tr -d ' ')
+          echo "$arch python_extension_stripped_bytes=$ext_bytes cli_stripped_bytes=$cli_bytes"
+          {
+            echo "### Stripped sizes on $arch"
+            echo ""
+            echo "| artifact | bytes |"
+            echo "|---|---|"
+            echo "| Python extension (engine + PyO3) | $ext_bytes |"
+            echo "| CLI (engine + clap + MCP) | $cli_bytes |"
+          } >> "$GITHUB_STEP_SUMMARY"
