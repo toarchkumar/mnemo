@@ -4924,5 +4924,188 @@
       "thread/about_with_essence_1000_items"
     ],
     "remeasured_note": "All three cells are new in v0.9.1 (12.7d) and measured fresh. Render and about both decrypt every live record once per call to find the essence items, so their cost grows with the file's total record count, not only with the number of essence items."
+  },
+  "device_budget": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "methodology": "mnemo/examples/device_budget.rs (P-0), release build. Corpora of 1K/10K/100K memories, ~300 bytes of ASCII text and a 384-dim clustered vector each, IVF+PQ index (IndexConfig::default), fast KDF, built with one flush plus build_index plus flush. Each phase runs in its own child process under /usr/bin/time -l (peak RSS). RSS from `ps -o rss=`. handle_rss_kb = RSS after open + first recall + 200 warm recalls minus RSS before open. engine_heap_bytes = Mnemo::__budget_report capacity accounting (hash maps estimated). open = median of 20 fresh Mnemo::open calls; first recall = top-10, track_access off, on each fresh handle. Writes run on a scratch copy: 20 x (remember + flush), 5 x (100 remember + flush).",
+    "sizes": {
+      "1000": {
+        "disk_bytes_per_memory": {
+          "total": 10182.7,
+          "total_after_compact": 10223.6,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 720.9,
+          "catalog_run": 32.8,
+          "wal": 1146.9,
+          "header_and_manifest": 16.4,
+          "unreferenced": 73.7
+        },
+        "record_page_slack_pct": 71.9,
+        "ram": {
+          "handle_rss_kb": 12912,
+          "peak_rss_kb": 15056,
+          "rss_kb_before_open": 2128,
+          "rss_kb_open": 6320,
+          "rss_kb_after_warm": 15040,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 67584,
+            "ram_ann_centroids": 49152,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 96000,
+            "ram_ann_posting_ids": 16000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 48000,
+            "ram_id_map": 67584,
+            "ram_key_caches": 0,
+            "ram_total": 739080
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 14.51,
+          "p95": 14.94
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 1.2,
+          "p95": 1.37
+        },
+        "warm_recall_ms": {
+          "median": 0.5,
+          "p95": 1.75
+        },
+        "durable_writes": {
+          "single_median_ms": 28.17,
+          "single_p95_ms": 30.97,
+          "batch_of_100_median_ms": 36.02,
+          "batch_per_memory_ms": 0.36,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 778240,
+          "file_growth_per_batch_of_100_bytes": 1644953
+        }
+      },
+      "10000": {
+        "disk_bytes_per_memory": {
+          "total": 8877.7,
+          "total_after_compact": 8869.5,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 231.0,
+          "catalog_run": 33.6,
+          "wal": 354.7,
+          "header_and_manifest": 1.6,
+          "unreferenced": 64.7
+        },
+        "record_page_slack_pct": 71.9,
+        "ram": {
+          "handle_rss_kb": 75456,
+          "peak_rss_kb": 77584,
+          "rss_kb_before_open": 2112,
+          "rss_kb_open": 15408,
+          "rss_kb_after_warm": 77568,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 540672,
+            "ram_ann_centroids": 153600,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 960000,
+            "ram_ann_posting_ids": 160000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 480000,
+            "ram_id_map": 540672,
+            "ram_key_caches": 0,
+            "ram_total": 3229704
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 48.85,
+          "p95": 49.92
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 1.92,
+          "p95": 2.08
+        },
+        "warm_recall_ms": {
+          "median": 2.68,
+          "p95": 7.52
+        },
+        "durable_writes": {
+          "single_median_ms": 66.97,
+          "single_p95_ms": 71.89,
+          "batch_of_100_median_ms": 77.88,
+          "batch_per_memory_ms": 0.779,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 2663628,
+          "file_growth_per_batch_of_100_bytes": 3535667
+        }
+      },
+      "100000": {
+        "disk_bytes_per_memory": {
+          "total": 8713.6,
+          "total_after_compact": 8712.8,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 173.5,
+          "catalog_run": 33.8,
+          "wal": 261.8,
+          "header_and_manifest": 0.2,
+          "unreferenced": 52.3
+        },
+        "record_page_slack_pct": 71.9,
+        "ram": {
+          "handle_rss_kb": 162240,
+          "peak_rss_kb": 164368,
+          "rss_kb_before_open": 2112,
+          "rss_kb_open": 113280,
+          "rss_kb_after_warm": 164352,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 4325376,
+            "ram_ann_centroids": 486912,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 9600000,
+            "ram_ann_posting_ids": 1600000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 8388480,
+            "ram_id_map": 4325376,
+            "ram_key_caches": 0,
+            "ram_total": 29120904
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 384.33,
+          "p95": 387.1
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 9.2,
+          "p95": 9.55
+        },
+        "warm_recall_ms": {
+          "median": 23.54,
+          "p95": 50.84
+        },
+        "durable_writes": {
+          "single_median_ms": 448.6,
+          "single_p95_ms": 527.87,
+          "batch_of_100_median_ms": 465.15,
+          "batch_per_memory_ms": 4.652,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 20750336,
+          "file_growth_per_batch_of_100_bytes": 21621964
+        }
+      }
+    },
+    "library_size_bytes": {
+      "note": "A plain `cargo rustc --crate-type cdylib` of mnemo-engine is 16 KB: with no extern \"C\" exports, LTO strips the engine. These two stripped artifacts bound the real size of the engine linked into an app until MOBILE-1 adds UniFFI exports.",
+      "aarch64_macos_python_extension_stripped": 1368552,
+      "aarch64_macos_cli_stripped": 2356072,
+      "aarch64_linux": null
+    },
+    "remeasured": [
+      "sizes",
+      "library_size_bytes"
+    ],
+    "remeasured_note": "All new in P-0 (2026-11-07), second of two full runs on the same machine. Run-to-run noise on this laptop is large for RAM and recall at 100K: run 1 measured handle RSS 115 MB (run 2: 158 MB), first recall 28.3 ms (9.2 ms) and warm recall 27.3 ms (23.5 ms); disk, open and write figures agreed within a few percent. aarch64 Linux library size pending (needs a Linux runner)."
   }
 }

@@ -29,6 +29,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{MnemoError, Result};
 
+/// Estimated heap bytes of a `HashMap<K, V>` with the given capacity:
+/// one `(K, V)` slot plus one control byte per bucket, with buckets
+/// rounded up from capacity at the 7/8 load factor. An estimate for the
+/// P-0 device budget, not an exact allocator figure.
+pub(crate) fn hash_map_bytes<K, V>(capacity: usize) -> usize {
+    if capacity == 0 {
+        return 0;
+    }
+    let buckets = (capacity * 8 / 7).next_power_of_two();
+    buckets * (std::mem::size_of::<(K, V)>() + 1)
+}
+
 /// Default RNG seed — fixed so index builds are reproducible.
 const DEFAULT_SEED: u64 = 0x4d_4e_45_4d_4f_49_44_58; // "MNEMOIDX"
 /// Training-set cap: k-means trains on at most this many sampled vectors.
@@ -491,6 +503,31 @@ impl IvfPqIndex {
     /// Total vectors currently indexed.
     pub fn len(&self) -> usize {
         self.partitions.iter().map(|p| p.ids.len()).sum()
+    }
+
+    /// Heap bytes held by the index, by part (P-0 device budget). Counts
+    /// buffer capacities; the hash map is estimated from its capacity.
+    /// Returns `(coarse_centroids, pq_codebook, posting_ids, posting_codes,
+    /// assignment_map)`.
+    pub(crate) fn heap_bytes(&self) -> (usize, usize, usize, usize, usize) {
+        let f32s = std::mem::size_of::<f32>();
+        let centroids = self.centroids.capacity() * f32s;
+        let codebook = self
+            .pq
+            .centroids
+            .iter()
+            .map(|c| c.capacity() * f32s)
+            .sum::<usize>()
+            + self.pq.sub_offsets.capacity() * std::mem::size_of::<usize>()
+            + self.pq.ks.capacity() * std::mem::size_of::<usize>();
+        let ids = self
+            .partitions
+            .iter()
+            .map(|p| p.ids.capacity() * std::mem::size_of::<u128>())
+            .sum();
+        let codes = self.partitions.iter().map(|p| p.codes.capacity()).sum();
+        let assignment = hash_map_bytes::<u128, usize>(self.assignment.capacity());
+        (centroids, codebook, ids, codes, assignment)
     }
 
     /// Shape snapshot for statistics.

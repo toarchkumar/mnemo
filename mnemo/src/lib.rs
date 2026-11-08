@@ -89,6 +89,8 @@ pub use result_cache::{
     DEFAULT_SEMANTIC_THRESHOLD,
 };
 pub use session::{Role, Session, Turn};
+#[doc(hidden)]
+pub use store::BudgetReport;
 pub use store::{
     CompactReport, Mnemo, MnemoConfig, RecallRequest, RecallResponse, RecallResult, SnapshotInfo,
     Stats,

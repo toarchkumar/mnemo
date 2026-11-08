@@ -520,6 +520,50 @@ pub struct RecallResponse {
     pub used_exact_scan: bool,
 }
 
+/// Where a file's bytes and an open handle's heap go (P-0 device budget,
+/// `examples/device_budget.rs`). **Unstable diagnostic**: fields may
+/// change in any release. File figures come from the header and the
+/// catalog. RAM figures are buffer capacities, with hash maps estimated
+/// from their capacity; they cover the engine's main structures, not
+/// every allocation, and not allocator overhead.
+#[doc(hidden)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct BudgetReport {
+    pub file_bytes: u64,
+    pub page_size: u64,
+    /// Page 0.
+    pub header_bytes: u64,
+    /// Whole pages holding live records (superseded versions included).
+    pub record_page_bytes: u64,
+    /// Serialized bytes of those records; the rest of their pages is
+    /// slack.
+    pub record_payload_bytes: u64,
+    /// Pages still holding soft-deleted records (reclaimed by compact).
+    pub deleted_record_page_bytes: u64,
+    pub catalog_run_bytes: u64,
+    pub catalog_payload_bytes: u64,
+    pub index_run_bytes: u64,
+    pub index_payload_bytes: u64,
+    pub wal_bytes: u64,
+    pub snapshot_manifest_bytes: u64,
+    pub cache_dir_run_bytes: u64,
+    /// Everything else: superseded catalog, index and directory runs from
+    /// earlier flushes, and freed pages, until the next compact.
+    pub unreferenced_bytes: u64,
+    pub live_records: u64,
+    pub ram_catalog: u64,
+    pub ram_id_map: u64,
+    pub ram_ann_centroids: u64,
+    pub ram_ann_codebook: u64,
+    pub ram_ann_posting_ids: u64,
+    pub ram_ann_posting_codes: u64,
+    pub ram_ann_assignment: u64,
+    pub ram_cache_dir: u64,
+    pub ram_key_caches: u64,
+    /// Sum of the `ram_*` fields.
+    pub ram_total: u64,
+}
+
 /// Summary statistics for a database.
 #[derive(Clone, Debug)]
 pub struct Stats {
@@ -3692,6 +3736,80 @@ impl Mnemo {
 
         self.flush()?;
         Ok(report)
+    }
+
+    /// P-0 device budget breakdown of this file and handle. **Unstable
+    /// diagnostic**; see [`BudgetReport`]. Reads the header, the catalog
+    /// and file metadata only; nothing is decrypted.
+    #[doc(hidden)]
+    pub fn __budget_report(&self) -> Result<BudgetReport> {
+        let h = &self.header;
+        let ps = h.page_size as u64;
+        let mut r = BudgetReport {
+            file_bytes: std::fs::metadata(&self.path)?.len(),
+            page_size: ps,
+            header_bytes: ps,
+            catalog_run_bytes: h.catalog_pages * ps,
+            catalog_payload_bytes: h.catalog_len,
+            index_run_bytes: h.index_pages * ps,
+            index_payload_bytes: h.index_len,
+            wal_bytes: h.wal_pages * ps,
+            snapshot_manifest_bytes: h.manifest_pages * ps,
+            cache_dir_run_bytes: h.cache_pages * ps,
+            ..Default::default()
+        };
+        for e in &self.catalog {
+            let pages = e.page_count as u64 * ps;
+            if e.deleted {
+                r.deleted_record_page_bytes += pages;
+            } else {
+                r.record_page_bytes += pages;
+                r.record_payload_bytes += e.len as u64;
+                r.live_records += 1;
+            }
+        }
+        let accounted = r.header_bytes
+            + r.record_page_bytes
+            + r.deleted_record_page_bytes
+            + r.catalog_run_bytes
+            + r.index_run_bytes
+            + r.wal_bytes
+            + r.snapshot_manifest_bytes
+            + r.cache_dir_run_bytes;
+        r.unreferenced_bytes = r.file_bytes.saturating_sub(accounted);
+
+        r.ram_catalog = (self.catalog.capacity() * std::mem::size_of::<CatalogEntry>()) as u64;
+        r.ram_id_map = crate::index::hash_map_bytes::<u128, usize>(self.index.capacity()) as u64;
+        if let Some(ann) = &self.ann {
+            let (c, cb, ids, codes, assign) = ann.heap_bytes();
+            r.ram_ann_centroids = c as u64;
+            r.ram_ann_codebook = cb as u64;
+            r.ram_ann_posting_ids = ids as u64;
+            r.ram_ann_posting_codes = codes as u64;
+            r.ram_ann_assignment = assign as u64;
+        }
+        r.ram_cache_dir =
+            (self.cache_dir.capacity() * std::mem::size_of::<CacheDirectoryEntry>()) as u64;
+        let key_index = self.key_index.as_ref().map_or(0, |k| {
+            crate::index::hash_map_bytes::<KeySlot, u128>(k.capacity())
+                + k.keys()
+                    .map(|s| s.key.capacity() + s.scope_owner.as_ref().map_or(0, |o| o.capacity()))
+                    .sum::<usize>()
+        });
+        let superseded = self.superseded.as_ref().map_or(0, |s| {
+            crate::index::hash_map_bytes::<u128, ()>(s.capacity())
+        });
+        r.ram_key_caches = (key_index + superseded) as u64;
+        r.ram_total = r.ram_catalog
+            + r.ram_id_map
+            + r.ram_ann_centroids
+            + r.ram_ann_codebook
+            + r.ram_ann_posting_ids
+            + r.ram_ann_posting_codes
+            + r.ram_ann_assignment
+            + r.ram_cache_dir
+            + r.ram_key_caches;
+        Ok(r)
     }
 
     /// Return every live memory (used by tooling and compaction).
