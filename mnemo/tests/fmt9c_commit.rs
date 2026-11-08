@@ -189,3 +189,124 @@ fn a_crash_during_out_of_wal_runs_is_pre_or_post() {
     }
     assert!(saw_pre && saw_post);
 }
+
+// --- FMT-9c.2: catalog deltas ----------------------------------------------
+
+#[test]
+fn small_commits_append_catalog_deltas_and_reopen() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
+    for i in 0..1000 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.flush().unwrap();
+    let (_, chain, base) = db.__catalog_shape();
+    assert_eq!(chain, 0, "the first commit writes a base");
+    let ids: Vec<Ulid> = (0..20)
+        .map(|i| {
+            let id = db.remember(mem(2000 + i)).unwrap();
+            db.flush().unwrap();
+            id
+        })
+        .collect();
+    let (rows, chain, base_after) = db.__catalog_shape();
+    assert_eq!(
+        (rows, chain, base_after),
+        (1020, 20, base),
+        "one delta per commit"
+    );
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.__catalog_shape().0, 1020);
+    for (i, id) in ids.iter().enumerate() {
+        assert_eq!(db.get(id).unwrap().content, format!("memory {}", 2000 + i));
+    }
+    assert_eq!(db.verify().unwrap(), 1020);
+}
+
+#[test]
+fn the_chain_folds_into_a_new_base() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
+    for i in 0..100 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.flush().unwrap();
+    for i in 0..40 {
+        db.remember(mem(500 + i)).unwrap();
+        db.flush().unwrap();
+    }
+    let (rows, chain, _) = db.__catalog_shape();
+    assert_eq!(rows, 140);
+    assert!(chain < 40, "the chain was folded ({chain} deltas)");
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.verify().unwrap(), 140);
+}
+
+#[test]
+fn deleted_rows_are_dropped_from_a_new_base() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
+    let ids: Vec<Ulid> = (0..100).map(|i| db.remember(mem(i)).unwrap()).collect();
+    db.flush().unwrap();
+    for id in &ids[..60] {
+        db.delete(id).unwrap();
+    }
+    db.flush().unwrap();
+    assert_eq!(
+        db.__catalog_shape().0,
+        40,
+        "tombstones dropped with the base"
+    );
+    for (i, id) in ids.iter().enumerate().skip(60) {
+        assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
+    }
+    assert!(db.get(&ids[0]).is_err());
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.len(), 40);
+    assert_eq!(db.verify().unwrap(), 40);
+    let hits = db
+        .recall(
+            &mnemo_engine::RecallRequest::new(mem(70).vector)
+                .top_k(1)
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hits[0].memory.id, ids[70]);
+}
+
+#[test]
+fn restore_replays_the_snapshots_delta_chain() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
+    // Big enough that five small commits (each also moving the rows of a
+    // partly filled page) stay under the fold threshold.
+    for i in 0..2000 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.flush().unwrap();
+    let mut marks = Vec::new();
+    for i in 0..5 {
+        db.remember(mem(1000 + i)).unwrap();
+        db.flush().unwrap();
+        marks.push(db.snapshots().last().unwrap().txn_id);
+    }
+    assert!(db.__catalog_shape().1 >= 5);
+    db.restore_to(marks[2]).unwrap();
+    assert_eq!(db.len(), 2003);
+    assert_eq!(db.__catalog_shape().1, 0, "a restore writes a base");
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.len(), 2003);
+    assert_eq!(db.verify().unwrap(), 2003);
+}

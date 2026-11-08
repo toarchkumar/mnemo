@@ -122,6 +122,12 @@ const V9_PIN_FLOOR_PAGES: u64 = 128;
 /// pages (the vacuum). Bounded so a commit's cost stays bounded.
 const VACUUM_PAGES_PER_COMMIT: usize = 4;
 
+/// FMT-9c.2: and at most this many rows moved by the vacuum per commit (a
+/// moved row is a changed catalog row, so it lands in the commit's delta).
+/// Pages with more live rows than this stay as they are until deletes thin
+/// them out.
+const VACUUM_MAX_ROWS: usize = 64;
+
 /// FMT-9b: header flag: the file also keeps each record's float vector
 /// (`MnemoConfig::store_float_vectors`).
 const FLAG_FLOAT_VECTORS: u32 = 2;
@@ -572,6 +578,25 @@ const REC_SLOT_BYTES: usize = 4;
 /// 212 MB for the 50K-turn profile).
 const V9_TURN_CHUNK_BYTES: usize = 7_900;
 
+/// FMT-9c.2: pick the sparse pages (`(page, live rows)`, in page order) one
+/// commit's vacuum folds in: at most [`VACUUM_PAGES_PER_COMMIT`] pages and
+/// [`VACUUM_MAX_ROWS`] rows.
+fn vacuum_pick(sparse: Vec<(u64, usize)>) -> Vec<u64> {
+    let mut rows = 0usize;
+    let mut out = Vec::new();
+    for (p, n) in sparse {
+        if out.len() == VACUUM_PAGES_PER_COMMIT {
+            break;
+        }
+        if rows + n > VACUUM_MAX_ROWS {
+            continue;
+        }
+        rows += n;
+        out.push(p);
+    }
+    out
+}
+
 /// FMT-9b.2: encode a packed record page: the header, the slot directory,
 /// then the records in slot order.
 fn encode_record_page(gen: u64, recs: &[&[u8]]) -> Vec<u8> {
@@ -769,6 +794,8 @@ struct CatalogEntryV4 {
 /// so we don't re-serialize after the lease has been persisted.
 struct FlushPrelude {
     cat_bytes: Option<Vec<u8>>,
+    /// FMT-9c.2: `cat_bytes` is a delta run, not a base catalog.
+    cat_delta: bool,
     idx_bytes: Option<Vec<u8>>,
     /// Serialized result-cache directory bytes when `dirty_cache` is
     /// set (Phase 10.1). `None` if the cache didn't change since the
@@ -804,6 +831,9 @@ struct Snapshot {
 struct SnapshotGens {
     catalog: u64,
     index: u64,
+    /// FMT-9c.2: the catalog's delta-chain head at this snapshot.
+    #[serde(default)]
+    delta: (u64, u64, u64, u64),
 }
 
 impl Snapshot {
@@ -812,6 +842,9 @@ impl Snapshot {
     }
     fn index_gen(&self) -> u64 {
         self.gens.map_or(0, |g| g.index)
+    }
+    fn delta_head(&self) -> RunPtr {
+        self.gens.map_or(RunPtr::default(), |g| tuple_ptr(g.delta))
     }
 }
 
@@ -1222,6 +1255,16 @@ pub struct Mnemo {
     col: VecColumn,
     /// FMT-9b.2: packed record pages (v9; unused on v8).
     recs: RecPages,
+    /// FMT-9c.2: catalog rows changed since the last commit (v9 writes
+    /// them as a delta run instead of the whole catalog).
+    dirty_rows: std::collections::BTreeSet<usize>,
+    /// FMT-9c.2: the delta runs on top of the base catalog, oldest first,
+    /// and how many rows they hold in all.
+    delta_chain: Vec<RunPtr>,
+    delta_rows: usize,
+    /// FMT-9c.2: the next commit writes a whole base catalog (after a
+    /// restore, or when the chain has grown too long).
+    catalog_rewrite: bool,
     /// FMT-9c: the snapshot count was set explicitly (config or
     /// `set_max_snapshots`), which replaces v9's default retention policy.
     snapshot_cap_explicit: bool,
@@ -1525,6 +1568,67 @@ fn load_catalog(
         (Err(_), Some(page_err)) => Err(page_err),
         (Err(e), None) => Err(MnemoError::Serialize(e.to_string())),
     }
+}
+
+/// FMT-9c.2: one delta run of a v9 catalog: the rows a commit changed or
+/// added, by position, and the previous delta in the chain.
+#[derive(Serialize, Deserialize)]
+struct CatalogDelta {
+    prev: (u64, u64, u64, u64),
+    rows: Vec<(u32, CatalogEntry)>,
+}
+
+fn ptr_tuple(p: RunPtr) -> (u64, u64, u64, u64) {
+    (p.start, p.pages, p.len, p.gen)
+}
+
+fn tuple_ptr(t: (u64, u64, u64, u64)) -> RunPtr {
+    RunPtr {
+        start: t.0,
+        pages: t.1,
+        len: t.2,
+        gen: t.3,
+    }
+}
+
+/// FMT-9c.2: walk the delta chain from `head` back to the base and replay
+/// it onto `catalog`, oldest first. Returns the catalog, the chain (oldest
+/// first) and its total row count. An empty `head` is a no-op (and v8).
+fn apply_delta_chain(
+    pager: &mut Pager,
+    mut catalog: Vec<CatalogEntry>,
+    head: RunPtr,
+) -> Result<(Vec<CatalogEntry>, Vec<RunPtr>, usize)> {
+    let mut deltas: Vec<(RunPtr, Vec<(u32, CatalogEntry)>)> = Vec::new();
+    let mut at = head;
+    while !at.is_empty() {
+        if deltas.len() > 4096 {
+            return Err(MnemoError::Invalid("catalog delta chain too long".into()));
+        }
+        let buf = read_run_bytes(pager, at.start, at.pages, at.len, at.gen)?;
+        let d: CatalogDelta =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        deltas.push((at, d.rows));
+        at = tuple_ptr(d.prev);
+    }
+    deltas.reverse();
+    let mut rows = 0usize;
+    let mut chain = Vec::with_capacity(deltas.len());
+    for (ptr, d) in deltas {
+        rows += d.len();
+        chain.push(ptr);
+        for (i, row) in d {
+            let i = i as usize;
+            match i.cmp(&catalog.len()) {
+                std::cmp::Ordering::Less => catalog[i] = row,
+                std::cmp::Ordering::Equal => catalog.push(row),
+                std::cmp::Ordering::Greater => {
+                    return Err(MnemoError::Invalid("catalog delta skips a row".into()))
+                }
+            }
+        }
+    }
+    Ok((catalog, chain, rows))
 }
 
 /// Load a **v4** catalog run using the frozen [`CatalogEntryV4`] shape.
@@ -2105,6 +2209,10 @@ impl Mnemo {
             gen_leased: false,
             col: VecColumn::default(),
             recs: RecPages::default(),
+            dirty_rows: std::collections::BTreeSet::new(),
+            delta_chain: Vec::new(),
+            delta_rows: 0,
+            catalog_rewrite: false,
             snapshot_cap_explicit: config.max_snapshots != DEFAULT_MAX_SNAPSHOTS,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2250,6 +2358,9 @@ impl Mnemo {
         } else {
             return Err(MnemoError::UnsupportedVersion(on_disk_version));
         };
+        // FMT-9c.2: replay the v9 delta chain onto the base catalog.
+        let (catalog, delta_chain, delta_rows) =
+            apply_delta_chain(&mut pager, catalog, header.catalog_delta)?;
         let index = build_id_index(&catalog);
         // PERF-1 step 3: the ANN index loads on first use, not at open. A
         // v5→v6 page migration is the exception: it must read the index
@@ -2419,6 +2530,10 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            dirty_rows: std::collections::BTreeSet::new(),
+            delta_chain,
+            delta_rows,
+            catalog_rewrite: false,
             snapshot_cap_explicit: false,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2529,6 +2644,9 @@ impl Mnemo {
             header.catalog_len,
             header.catalog_gen,
         )?;
+        // FMT-9c.2: replay the v9 delta chain onto the base catalog.
+        let (catalog, delta_chain, delta_rows) =
+            apply_delta_chain(&mut pager, catalog, header.catalog_delta)?;
         let index = build_id_index(&catalog);
         // PERF-1 step 3: the ANN index loads on first use, not at open.
         let ann: Option<IvfPqIndex> = None;
@@ -2598,6 +2716,10 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            dirty_rows: std::collections::BTreeSet::new(),
+            delta_chain,
+            delta_rows,
+            catalog_rewrite: false,
             snapshot_cap_explicit: false,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2690,6 +2812,43 @@ impl Mnemo {
         }
     }
 
+    /// FMT-9c.2: catalog row `idx` changed (v9 writes it in the next
+    /// commit's delta run). No-op on v8, which rewrites the whole catalog.
+    fn touch(&mut self, idx: usize) {
+        if self.is_v9() {
+            self.dirty_rows.insert(idx);
+        }
+    }
+
+    /// FMT-9c.2: write this commit's catalog change as a delta run on the
+    /// chain, rather than a new base? Not after a restore, not before the
+    /// first base, and not once the chain has 64 runs or holds more than a
+    /// quarter of the base's rows (the next base then folds it in).
+    fn catalog_as_delta(&self) -> bool {
+        self.is_v9()
+            && !self.catalog_rewrite
+            && self.header.catalog_pages > 0
+            && self.delta_chain.len() < 64
+            && (self.delta_rows + self.dirty_rows.len()) * 4 <= self.catalog.len()
+    }
+
+    /// FMT-9c.2: before writing a new base, drop deleted rows once they're
+    /// more than a quarter of the catalog. Rows move, so the id index and
+    /// the page maps are rebuilt, and the resident column reloads lazily.
+    /// Runs inside a flush, after packing, when nothing is waiting.
+    fn compact_tombstones(&mut self) {
+        let dead = self.catalog.iter().filter(|e| e.deleted).count();
+        if dead == 0 || dead * 4 <= self.catalog.len() {
+            return;
+        }
+        self.catalog.retain(|e| !e.deleted);
+        self.catalog.shrink_to_fit();
+        self.index = build_id_index(&self.catalog);
+        self.col = VecColumn::from_catalog(&self.catalog);
+        self.recs = RecPages::from_catalog(&self.catalog);
+        self.dirty_rows.clear();
+    }
+
     /// FMT-9b: the file keeps float vectors in its records.
     fn float_vectors(&self) -> bool {
         self.is_v9() && self.header.flags & FLAG_FLOAT_VECTORS != 0
@@ -2722,6 +2881,7 @@ impl Mnemo {
         }
         self.col.hot.insert(idx, (h, norm));
         self.col.pending.push(idx);
+        self.touch(idx);
         if let Some(r) = self.catalog[idx].v9.as_mut() {
             r.vec_page = 0;
             r.vec_slot = 0;
@@ -2786,7 +2946,7 @@ impl Mnemo {
         if !self.is_v9() || self.recs.pending.is_empty() {
             return Ok(());
         }
-        let mut sparse: Vec<u64> = self
+        let mut sparse: Vec<(u64, usize)> = self
             .recs
             .page_rows
             .iter()
@@ -2797,10 +2957,10 @@ impl Mnemo {
                     .sum();
                 live * 4 < REC_PAGE_CAP * 3
             })
-            .map(|(&p, _)| p)
+            .map(|(&p, rows)| (p, rows.len()))
             .collect();
         sparse.sort_unstable();
-        sparse.truncate(VACUUM_PAGES_PER_COMMIT);
+        let sparse = vacuum_pick(sparse);
         let mut order: Vec<usize> = Vec::new();
         let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for p in sparse {
@@ -2847,6 +3007,7 @@ impl Mnemo {
             };
             self.pager.write_page(page, gen, &bytes)?;
             for (slot, &k) in order[i..j].iter().enumerate() {
+                self.touch(k);
                 let e = &mut self.catalog[k];
                 e.start_page = page;
                 e.page_count = 1;
@@ -2971,15 +3132,15 @@ impl Mnemo {
         }
         let d = self.dimensions;
         let per = veccol::per_page(d);
-        let mut sparse: Vec<u64> = self
+        let mut sparse: Vec<(u64, usize)> = self
             .col
             .page_rows
             .iter()
             .filter(|(_, rows)| rows.len() * 4 < per * 3)
-            .map(|(&p, _)| p)
+            .map(|(&p, rows)| (p, rows.len()))
             .collect();
         sparse.sort_unstable();
-        sparse.truncate(VACUUM_PAGES_PER_COMMIT);
+        let sparse = vacuum_pick(sparse);
         let mut order: Vec<usize> = Vec::new();
         let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
         for p in sparse {
@@ -3015,6 +3176,7 @@ impl Mnemo {
             };
             self.pager.write_page(page, gen, &bytes)?;
             for (slot, &i) in chunk.iter().enumerate() {
+                self.touch(i);
                 if let Some(r) = self.catalog[i].v9.as_mut() {
                     r.vec_page = page;
                     r.vec_slot = slot as u16;
@@ -3226,9 +3388,11 @@ impl Mnemo {
                     }
                 }
                 self.catalog[idx] = entry;
+                self.touch(idx);
             }
             None => {
                 self.index.insert(id_u, self.catalog.len(), &self.catalog);
+                self.touch(self.catalog.len());
                 self.catalog.push(entry);
             }
         }
@@ -3455,6 +3619,7 @@ impl Mnemo {
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
+            self.touch(idx);
             if self.is_v9() {
                 self.kill_record(idx, &entry);
                 self.kill_vector(idx, &entry);
@@ -5350,6 +5515,17 @@ impl Mnemo {
         (self.col.resident, self.col.page_rows.len())
     }
 
+    /// **Not a stable API.** FMT-9c.2: `(catalog rows incl. tombstones,
+    /// delta runs on the chain, first page of the base run)`.
+    #[doc(hidden)]
+    pub fn __catalog_shape(&self) -> (usize, usize, u64) {
+        (
+            self.catalog.len(),
+            self.delta_chain.len(),
+            self.header.catalog_start,
+        )
+    }
+
     /// **Not a stable API.** FMT-9: the header's next unallocated page.
     #[doc(hidden)]
     pub fn __next_page(&self) -> u64 {
@@ -6016,6 +6192,7 @@ impl Mnemo {
         if req.track_access {
             for r in &mut scored {
                 if let Some(idx) = self.index.get(r.memory.id.0, &self.catalog) {
+                    self.touch(idx);
                     let entry = &mut self.catalog[idx];
                     entry.accessed_at = now;
                     entry.access_count = entry.access_count.saturating_add(1);
@@ -6517,15 +6694,40 @@ impl Mnemo {
         let v9 = self.is_v9();
         let mut superseded: Vec<(u64, u64)> = Vec::new();
         let mut frames: Vec<wal::Frame> = Vec::new();
+        // FMT-9c.2: a delta run goes on the chain; a new base replaces the
+        // old base and the whole chain (all freed by this commit). The
+        // chain is adopted once the commit succeeds.
+        let mut new_chain: Option<(Vec<RunPtr>, usize)> = None;
         if let Some(bytes) = &ctx.cat_bytes {
-            if v9 && self.header.catalog_pages > 0 {
-                superseded.push((self.header.catalog_start, self.header.catalog_pages));
+            if ctx.cat_delta {
+                let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
+                let ptr = RunPtr {
+                    start,
+                    pages: pages as u64,
+                    len: bytes.len() as u64,
+                    gen,
+                };
+                self.header.catalog_delta = ptr;
+                let mut chain = self.delta_chain.clone();
+                chain.push(ptr);
+                new_chain = Some((chain, self.delta_rows + self.dirty_rows.len()));
+            } else {
+                if v9 && self.header.catalog_pages > 0 {
+                    superseded.push((self.header.catalog_start, self.header.catalog_pages));
+                }
+                if v9 {
+                    for r in &self.delta_chain {
+                        superseded.push((r.start, r.pages));
+                    }
+                    self.header.catalog_delta = RunPtr::default();
+                    new_chain = Some((Vec::new(), 0));
+                }
+                let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
+                self.header.catalog_start = start;
+                self.header.catalog_pages = pages as u64;
+                self.header.catalog_len = bytes.len() as u64;
+                self.header.catalog_gen = gen;
             }
-            let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
-            self.header.catalog_start = start;
-            self.header.catalog_pages = pages as u64;
-            self.header.catalog_len = bytes.len() as u64;
-            self.header.catalog_gen = gen;
         }
         if persist_index {
             if v9 && self.header.index_pages > 0 {
@@ -6620,6 +6822,7 @@ impl Mnemo {
                 gens: v9.then_some(SnapshotGens {
                     catalog: self.header.catalog_gen,
                     index: self.header.index_gen,
+                    delta: ptr_tuple(self.header.catalog_delta),
                 }),
             });
             if v9 {
@@ -6763,6 +6966,14 @@ impl Mnemo {
         self.pending_free.clear();
         self.free_dirty = false;
         self.dirty_keys = false;
+        if let Some((chain, rows)) = new_chain {
+            self.delta_chain = chain;
+            self.delta_rows = rows;
+        }
+        if ctx.cat_bytes.is_some() {
+            self.dirty_rows.clear();
+            self.catalog_rewrite = false;
+        }
         self.dirty_catalog = false;
         if persist_index {
             self.dirty_index = false;
@@ -6802,13 +7013,30 @@ impl Mnemo {
     /// this routine no longer writes page 0.
     fn prepare_for_flush(&mut self, persist_index: bool) -> Result<FlushPrelude> {
         // Serialize.
-        let cat_bytes = if self.dirty_catalog {
+        // FMT-9c.2: on v9 usually just the changed rows, as a delta run.
+        let cat_delta = self.dirty_catalog && self.catalog_as_delta();
+        let cat_bytes = if !self.dirty_catalog {
+            None
+        } else if cat_delta {
+            let rows: Vec<(u32, CatalogEntry)> = self
+                .dirty_rows
+                .iter()
+                .filter(|&&i| i < self.catalog.len())
+                .map(|&i| (i as u32, self.catalog[i].clone()))
+                .collect();
+            let d = CatalogDelta {
+                prev: ptr_tuple(self.header.catalog_delta),
+                rows,
+            };
+            Some(rmp_serde::to_vec(&d).map_err(|e| MnemoError::Serialize(e.to_string()))?)
+        } else {
+            if self.is_v9() {
+                self.compact_tombstones();
+            }
             Some(
                 rmp_serde::to_vec(&self.catalog)
                     .map_err(|e| MnemoError::Serialize(e.to_string()))?,
             )
-        } else {
-            None
         };
         let idx_bytes: Option<Vec<u8>> = if persist_index {
             match &self.ann {
@@ -6905,6 +7133,7 @@ impl Mnemo {
 
         Ok(FlushPrelude {
             cat_bytes,
+            cat_delta,
             idx_bytes,
             cache_bytes,
         })
@@ -7608,6 +7837,9 @@ impl Mnemo {
             snap.catalog_len,
             snap.catalog_gen(),
         )?;
+        let (catalog, _, _) = apply_delta_chain(&mut self.pager, catalog, snap.delta_head())?;
+        // FMT-9c.2: the restored catalog is written whole.
+        self.catalog_rewrite = true;
         let ann = load_index(
             &mut self.pager,
             snap.index_start,
@@ -8042,6 +8274,11 @@ impl Mnemo {
                 .map(|e| (e.start_page, e.page_count as u64, "cache entry")),
         );
         live.extend(self.col.page_rows.keys().map(|&p| (p, 1, "vector page")));
+        live.extend(
+            self.delta_chain
+                .iter()
+                .map(|r| (r.start, r.pages, "catalog delta run")),
+        );
         for (p, c, what) in live {
             if c == 0 {
                 continue;
