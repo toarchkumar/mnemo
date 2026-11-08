@@ -5034,3 +5034,103 @@ fn handle_caches_track_writes_on_the_same_handle() {
         "deleting the live record empties the slot"
     );
 }
+
+// ---------- PERF-1 step 3: the ANN index loads on first use --------------
+
+#[test]
+fn ann_index_loads_on_first_recall_not_at_open() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("lazy-load.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for i in 0..300 {
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Semantic,
+            vec4(1.0, i as f32 * 0.01, 0.3, 0.7),
+        ))
+        .unwrap();
+    }
+    db.build_index().unwrap();
+    db.close().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert!(
+        db.has_index(),
+        "a persisted index counts before it's loaded"
+    );
+    assert_eq!(
+        db.__budget_report().unwrap().ram_ann_posting_codes,
+        0,
+        "open must not load the index"
+    );
+    db.recall(
+        &RecallRequest::new(vec4(1.0, 0.0, 0.3, 0.7))
+            .top_k(3)
+            .track_access(false),
+    )
+    .unwrap();
+    assert!(db.__budget_report().unwrap().ram_ann_posting_codes > 0);
+
+    // Read-only handles load lazily too.
+    drop(db);
+    let mut ro = Mnemo::open_read_only(&path, "pw").unwrap();
+    assert_eq!(ro.__budget_report().unwrap().ram_ann_posting_codes, 0);
+    assert_eq!(ro.stats().unwrap().index.unwrap().vectors, 300);
+}
+
+/// While the index is unloaded, records written since its run pile up for
+/// the next load. A flush that finds INDEX_PERSIST_EVERY_CHANGES of them
+/// loads the index and persists it, so that work stays bounded.
+#[test]
+fn unloaded_index_is_refreshed_once_pending_reaches_the_bound() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("lazy-bound.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    for i in 0..100 {
+        db.remember(Memory::new(
+            format!("m{i}"),
+            MemoryType::Semantic,
+            vec4(1.0, i as f32, 0.0, 1.0),
+        ))
+        .unwrap();
+    }
+    db.build_index().unwrap();
+    db.close().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let start = db.__budget_report().unwrap().index_start_page;
+    let bound = mnemo_engine::INDEX_PERSIST_EVERY_CHANGES;
+    for i in 0..bound - 1 {
+        db.remember(Memory::new(
+            format!("p{i}"),
+            MemoryType::Semantic,
+            vec4(0.5, i as f32, 1.0, 0.0),
+        ))
+        .unwrap();
+    }
+    db.flush().unwrap();
+    assert_eq!(
+        db.__budget_report().unwrap().index_start_page,
+        start,
+        "below the bound"
+    );
+    assert_eq!(
+        db.__budget_report().unwrap().ram_ann_posting_codes,
+        0,
+        "still unloaded"
+    );
+    db.remember(Memory::new(
+        "last",
+        MemoryType::Semantic,
+        vec4(0.5, 0.5, 1.0, 0.0),
+    ))
+    .unwrap();
+    db.flush().unwrap();
+    assert_ne!(
+        db.__budget_report().unwrap().index_start_page,
+        start,
+        "at the bound the flush loads and persists the index"
+    );
+}

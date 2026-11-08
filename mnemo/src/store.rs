@@ -788,6 +788,9 @@ pub struct Mnemo {
     dirty_index: bool,
     /// PERF-1: index persistence policy state.
     index_persist: IndexPersist,
+    /// PERF-1 step 3: the header points at a persisted ANN index that
+    /// hasn't been loaded yet. It loads on first use (`ensure_ann`).
+    ann_unloaded: bool,
     /// Append-only manifest of committed snapshots, oldest first. Capped
     /// at [`Mnemo::max_snapshots`] entries on every flush — the oldest
     /// entries are pruned first.
@@ -1349,6 +1352,7 @@ impl Mnemo {
             ann: None,
             dirty_index: false,
             index_persist: IndexPersist::default(),
+            ann_unloaded: false,
             manifest: Vec::new(),
             max_snapshots: config.max_snapshots,
             read_only: false,
@@ -1497,13 +1501,21 @@ impl Mnemo {
             return Err(MnemoError::UnsupportedVersion(on_disk_version));
         };
         let index = build_id_index(&catalog);
-        let ann = load_index(
-            &mut pager,
-            header.index_start,
-            header.index_pages,
-            header.index_len,
-            dimensions,
-        )?;
+        // PERF-1 step 3: the ANN index loads on first use, not at open. A
+        // v5→v6 page migration is the exception: it must read the index
+        // now, under the old page AAD, to rewrite it.
+        let ann = if on_disk_version < 6 {
+            load_index(
+                &mut pager,
+                header.index_start,
+                header.index_pages,
+                header.index_len,
+                dimensions,
+            )?
+        } else {
+            None
+        };
+        let ann_unloaded = ann.is_none() && header.index_pages > 0;
         let mut manifest = load_manifest(
             &mut pager,
             header.manifest_start,
@@ -1597,7 +1609,7 @@ impl Mnemo {
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
 
-        let mut db = Mnemo {
+        Ok(Mnemo {
             pager,
             header,
             catalog,
@@ -1614,6 +1626,7 @@ impl Mnemo {
                 forced: dirty_index,
                 ..IndexPersist::default()
             },
+            ann_unloaded,
             manifest,
             // `Mnemo::open` has no [`MnemoConfig`] to read; default the cap
             // to [`DEFAULT_MAX_SNAPSHOTS`]. Override with
@@ -1634,12 +1647,7 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
-        };
-        // PERF-1: records written after the persisted index run are
-        // re-assigned now (step 3 moves this to the index's first use).
-        let index_start = db.header.index_start;
-        db.reconcile_ann_with_catalog(index_start)?;
-        Ok(db)
+        })
     }
 
     /// Open an existing database in **read-only** mode. Takes an OS shared
@@ -1734,13 +1742,9 @@ impl Mnemo {
             header.catalog_len,
         )?;
         let index = build_id_index(&catalog);
-        let ann = load_index(
-            &mut pager,
-            header.index_start,
-            header.index_pages,
-            header.index_len,
-            dimensions,
-        )?;
+        // PERF-1 step 3: the ANN index loads on first use, not at open.
+        let ann: Option<IvfPqIndex> = None;
+        let ann_unloaded = header.index_pages > 0;
         let manifest = load_manifest(
             &mut pager,
             header.manifest_start,
@@ -1755,7 +1759,7 @@ impl Mnemo {
         )?;
         let cache_idx = DirectoryIndex::build(&cache_dir);
 
-        let mut db = Mnemo {
+        Ok(Mnemo {
             pager,
             header,
             catalog,
@@ -1770,6 +1774,7 @@ impl Mnemo {
             ann,
             dirty_index: false,
             index_persist: IndexPersist::default(),
+            ann_unloaded,
             manifest,
             max_snapshots: DEFAULT_MAX_SNAPSHOTS,
             read_only: true,
@@ -1786,12 +1791,7 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
-        };
-        // PERF-1: records written after the persisted index run are
-        // re-assigned now (step 3 moves this to the index's first use).
-        let index_start = db.header.index_start;
-        db.reconcile_ann_with_catalog(index_start)?;
-        Ok(db)
+        })
     }
 
     /// Override the manifest snapshot cap on this open handle. `0` disables
@@ -4346,6 +4346,8 @@ impl Mnemo {
                 got: req.query.len(),
             });
         }
+        // PERF-1 step 3: the ANN index loads on the first recall.
+        self.ensure_ann()?;
         // Access-tracking bumps `accessed_at` / `access_count` in the
         // catalog, which is a mutation. On a read-only handle the caller
         // must pass `track_access(false)` (via CLI `--no-track`).
@@ -4520,6 +4522,7 @@ impl Mnemo {
         let idx = IvfPqIndex::build(self.dimensions, &items, cfg)?;
         let info = idx.info();
         self.ann = Some(idx);
+        self.ann_unloaded = false;
         self.dirty_index = true;
         self.index_persist.forced = true;
         Ok(info)
@@ -4547,16 +4550,18 @@ impl Mnemo {
         if self.read_only {
             return;
         }
-        if self.ann.is_some() {
+        if self.ann.is_some() || self.ann_unloaded {
             self.ann = None;
+            self.ann_unloaded = false;
             self.dirty_index = true;
             self.index_persist.forced = true;
         }
     }
 
     /// PERF-1 (R-004.1): bring a just-loaded ANN index up to date with the
-    /// catalog. Called by `open`, `open_read_only` and `restore_to`, with the
-    /// first page of the index run that was loaded.
+    /// catalog. Called wherever an index run is loaded: on first use after
+    /// `open` / `open_read_only` (`ensure_ann`, PERF-1 step 3) and by
+    /// `restore_to`, with the first page of that run.
     ///
     /// `flush` persists the index only every so often, so that run can lag
     /// the catalog. It does two things:
@@ -4616,9 +4621,53 @@ impl Mnemo {
         Ok(())
     }
 
-    /// Whether an ANN index is currently loaded.
+    /// Whether the database has an ANN index (loaded, or persisted and
+    /// loading on first use).
     pub fn has_index(&self) -> bool {
-        self.ann.is_some()
+        self.ann.is_some() || self.ann_unloaded
+    }
+
+    /// PERF-1 step 3: load the persisted ANN index on first use, then bring
+    /// it up to date with the catalog (`reconcile_ann_with_catalog`) and,
+    /// when the handle caches are already built, prune non-fact ids an
+    /// older persisted index may hold.
+    fn ensure_ann(&mut self) -> Result<()> {
+        if !self.ann_unloaded {
+            return Ok(());
+        }
+        self.ann_unloaded = false;
+        self.ann = load_index(
+            &mut self.pager,
+            self.header.index_start,
+            self.header.index_pages,
+            self.header.index_len,
+            self.dimensions,
+        )?;
+        let index_start = self.header.index_start;
+        self.reconcile_ann_with_catalog(index_start)?;
+        let non_facts: Vec<u128> = match &self.layers {
+            Some(l) => l
+                .essence
+                .iter()
+                .copied()
+                .chain(l.threads.values().flat_map(|t| t.records.iter().copied()))
+                .collect(),
+            None => Vec::new(),
+        };
+        if let Some(ann) = &mut self.ann {
+            let mut pruned = 0usize;
+            for id in non_facts {
+                if ann.contains(id) {
+                    ann.remove(id);
+                    pruned += 1;
+                }
+            }
+            if pruned > 0 {
+                self.dirty_index = true;
+                self.index_persist.changes += pruned;
+            }
+        }
+        Ok(())
     }
 
     // --- durability & maintenance ----------------------------------------
@@ -4747,6 +4796,21 @@ impl Mnemo {
         // fsync count is a viable write-latency win before we touch
         // the write path's durability model.
         let fsync_before = crate::fsync_count();
+        // PERF-1 step 3: while the index is unloaded, records written since
+        // its run pile up for the next load to re-assign. Once there are
+        // INDEX_PERSIST_EVERY_CHANGES of them, load it now so this flush
+        // persists a current index and keeps that work bounded.
+        if self.ann_unloaded && self.dirty_catalog {
+            let index_start = self.header.index_start;
+            let pending = self
+                .catalog
+                .iter()
+                .filter(|e| !e.deleted && e.start_page > index_start)
+                .count();
+            if pending >= INDEX_PERSIST_EVERY_CHANGES {
+                self.ensure_ann()?;
+            }
+        }
         // PERF-1: persist the (derived) ANN index only when forced or due.
         // Otherwise the header keeps pointing at the previous index run, and
         // records written since then are re-assigned when it's next loaded
@@ -5678,6 +5742,7 @@ impl Mnemo {
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
         self.ann = ann;
+        self.ann_unloaded = false;
         // The handle caches describe the catalog being replaced.
         self.key_index = None;
         self.superseded = None;
@@ -5960,7 +6025,10 @@ impl Mnemo {
             agents,
             encrypted: self.header.flags & FLAG_ENCRYPTED != 0,
             created_at: self.header.created_at,
-            index: self.ann.as_ref().map(|a| a.info()),
+            index: {
+                self.ensure_ann()?;
+                self.ann.as_ref().map(|a| a.info())
+            },
             wal_pages: self.header.wal_pages,
             fsyncs_last_flush: self.fsyncs_last_flush,
         })
@@ -6003,7 +6071,7 @@ impl Mnemo {
         // compacted vector count. Previously we froze the pre-compact
         // (n_probe, n_rerank), which left the new index on stale
         // numbers for the smaller post-compact corpus.
-        let want_index = old.ann.is_some();
+        let want_index = old.has_index();
         let now = memory::now_secs();
         let all = old.memories()?;
         let before = all.len();
