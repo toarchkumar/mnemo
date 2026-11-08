@@ -73,8 +73,20 @@ fn out_dir() -> PathBuf {
     PathBuf::from(base).join("device_budget")
 }
 
+/// FMT-9: `_v9` when the run creates v9 files (`MNEMO_DEV_FORMAT=9`), so
+/// v8 and v9 corpora and results don't overwrite each other.
+fn format_suffix() -> &'static str {
+    match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
+        Ok("9") => "_v9",
+        _ => "",
+    }
+}
+
 fn corpus_path(n: usize) -> PathBuf {
-    out_dir().join(format!("corpus_{n}_{DIMENSIONS}d_{TEXT_BYTES}b.mnemo"))
+    out_dir().join(format!(
+        "corpus_{n}_{DIMENSIONS}d_{TEXT_BYTES}b{}.mnemo",
+        format_suffix()
+    ))
 }
 
 fn rss_kb() -> u64 {
@@ -107,7 +119,7 @@ fn recall_req(q: &[f32]) -> RecallRequest {
 
 /// Copy the cached corpus to a scratch file the phase may modify.
 fn scratch_copy(n: usize, tag: &str) -> PathBuf {
-    let dst = out_dir().join(format!("scratch_{n}_{tag}.mnemo"));
+    let dst = out_dir().join(format!("scratch_{n}_{tag}{}.mnemo", format_suffix()));
     std::fs::copy(corpus_path(n), &dst).expect("copy corpus");
     dst
 }
@@ -625,7 +637,7 @@ fn main() {
     }
 
     let doc = Value::Object(results);
-    let path = out_dir().join("device_budget.json");
+    let path = out_dir().join(format!("device_budget{}.json", format_suffix()));
     std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).expect("write json");
     println!("full results: {}", path.display());
 }

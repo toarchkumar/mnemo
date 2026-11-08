@@ -126,24 +126,38 @@ pub(crate) fn dequantize(h: &[u16]) -> Vec<f32> {
     h.iter().map(|&x| t[x as usize]).collect()
 }
 
-/// `Σ q_i · v_i` with `v` in fp16; four accumulators.
+/// Widen an fp16 value for the scoring kernels, branch-free so the loop
+/// vectorizes: the magnitude bits shifted into place as an `f32`, times
+/// 2^112, re-biases normals and subnormals exactly. Infinity and NaN don't
+/// survive (they come out as 65536 × 1.m); embeddings never hold them, and
+/// [`dequantize`] (what `get()` returns) is exact for every value.
+#[inline(always)]
+fn widen(h: u16) -> f32 {
+    let h = h as u32;
+    let mag = f32::from_bits((h & 0x7fff) << 13) * f32::from_bits(0x7780_0000);
+    f32::from_bits(mag.to_bits() | ((h & 0x8000) << 16))
+}
+
+/// `Σ q_i · v_i` with `v` in fp16: eight lanes per step, so the compiler
+/// can keep two NEON (or SSE) registers of partial sums.
 pub(crate) fn dot_f16(q: &[f32], h: &[u16]) -> f32 {
-    let t = table();
     let n = q.len().min(h.len());
-    let (mut a, mut b, mut c, mut d) = (0f32, 0f32, 0f32, 0f32);
-    let mut i = 0;
-    while i + 4 <= n {
-        a += q[i] * t[h[i] as usize];
-        b += q[i + 1] * t[h[i + 1] as usize];
-        c += q[i + 2] * t[h[i + 2] as usize];
-        d += q[i + 3] * t[h[i + 3] as usize];
-        i += 4;
+    let (q, h) = (&q[..n], &h[..n]);
+    let mut acc = [0f32; 8];
+    let mut qc = q.chunks_exact(8);
+    let mut hc = h.chunks_exact(8);
+    for (qa, ha) in (&mut qc).zip(&mut hc) {
+        let qa: &[f32; 8] = qa.try_into().expect("chunk of 8");
+        let ha: &[u16; 8] = ha.try_into().expect("chunk of 8");
+        for ((a, &x), &y) in acc.iter_mut().zip(qa).zip(ha) {
+            *a += x * widen(y);
+        }
     }
-    while i < n {
-        a += q[i] * t[h[i] as usize];
-        i += 1;
+    let mut sum = ((acc[0] + acc[4]) + (acc[1] + acc[5])) + ((acc[2] + acc[6]) + (acc[3] + acc[7]));
+    for (&x, &y) in qc.remainder().iter().zip(hc.remainder()) {
+        sum += x * widen(y);
     }
-    (a + b) + (c + d)
+    sum
 }
 
 /// The recall similarity of a float query against an fp16 entry, matching
@@ -191,6 +205,36 @@ pub(crate) fn encode_page(dims: usize, gen: u64, entries: &[(&[u16], f32)]) -> V
         out.extend_from_slice(&norm.to_le_bytes());
     }
     out
+}
+
+/// Decode slot `slot` of a vector page into `out` (`dims` values);
+/// returns the entry's norm.
+pub(crate) fn decode_entry_into(
+    page: &[u8],
+    dims: usize,
+    slot: usize,
+    out: &mut [u16],
+) -> Result<f32> {
+    let bad = || MnemoError::Invalid("malformed vector page".into());
+    if page.len() < PAGE_HEADER || page[0] != PAGE_KIND_VECTOR || out.len() != dims {
+        return Err(bad());
+    }
+    let n = u16::from_le_bytes([page[4], page[5]]) as usize;
+    if slot >= n {
+        return Err(bad());
+    }
+    let el = entry_len(dims);
+    let o = PAGE_HEADER + slot * el;
+    let e = page.get(o..o + el).ok_or_else(bad)?;
+    for (dst, c) in out.iter_mut().zip(e[..dims * 2].chunks_exact(2)) {
+        *dst = u16::from_le_bytes([c[0], c[1]]);
+    }
+    Ok(f32::from_le_bytes([
+        e[dims * 2],
+        e[dims * 2 + 1],
+        e[dims * 2 + 2],
+        e[dims * 2 + 3],
+    ]))
 }
 
 /// Decode slot `slot` of a vector page.
@@ -256,6 +300,20 @@ mod tests {
             let y = f16_to_f32(f32_to_f16(x));
             assert!((x - y).abs() <= x.abs() * 2f32.powi(-11) + 2f32.powi(-25));
         }
+    }
+
+    #[test]
+    fn fast_widen_is_exact_for_every_finite_half() {
+        for h in 0..=u16::MAX {
+            let f = f16_to_f32(h);
+            if f.is_finite() {
+                assert_eq!(widen(h).to_bits(), f.to_bits(), "half {h:#06x}");
+            }
+        }
+        let q: Vec<f32> = (0..19).map(|i| i as f32 * 0.1 - 0.7).collect();
+        let (h, _) = quantize(&q);
+        let slow: f32 = q.iter().zip(dequantize(&h)).map(|(a, b)| a * b).sum();
+        assert!((dot_f16(&q, &h) - slow).abs() < 1e-5);
     }
 
     #[test]

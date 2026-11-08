@@ -617,6 +617,11 @@ struct VecColumn {
     /// Resident fp16 values by catalog row (`rows × dims`), once loaded.
     data: Vec<u16>,
     norms: Vec<f32>,
+    /// Which rows of `data` are filled. The column is allocated zeroed for
+    /// every row (the OS maps those pages lazily) and filled a vector page
+    /// at a time as recall touches rows, so the first recall reads only the
+    /// pages its candidates live on.
+    have: Vec<bool>,
     resident: bool,
     /// Rows whose entries aren't on a page yet; the next flush writes them.
     /// A row here has no page entry (its old one was released).
@@ -936,6 +941,9 @@ pub struct BudgetReport {
     pub ram_ann_assignment: u64,
     pub ram_cache_dir: u64,
     pub ram_key_caches: u64,
+    /// FMT-9b: the resident fp16 vector column as allocated (rows not yet
+    /// touched by recall cost no physical memory).
+    pub ram_vector_column: u64,
     /// Sum of the `ram_*` fields.
     pub ram_total: u64,
 }
@@ -2384,13 +2392,16 @@ impl Mnemo {
                 if self.col.data.len() < rows * d {
                     self.col.data.resize(rows * d, 0);
                     self.col.norms.resize(rows, 0.0);
+                    self.col.have.resize(rows, false);
                 }
                 self.col.data[idx * d..(idx + 1) * d].copy_from_slice(&h);
                 self.col.norms[idx] = norm;
+                self.col.have[idx] = true;
             } else {
                 // Grown past the budget: page the column from now on.
                 self.col.data = Vec::new();
                 self.col.norms = Vec::new();
+                self.col.have = Vec::new();
                 self.col.resident = false;
             }
         }
@@ -2433,7 +2444,7 @@ impl Mnemo {
             if let Some((h, n)) = self.col.hot.get(&idx) {
                 return Ok((h.clone(), *n));
             }
-            if self.col.resident && self.col.norms.len() > idx {
+            if self.col.resident && self.col.have.get(idx).copied().unwrap_or(false) {
                 return Ok((
                     self.col.data[idx * d..(idx + 1) * d].to_vec(),
                     self.col.norms[idx],
@@ -2449,8 +2460,10 @@ impl Mnemo {
         veccol::decode_entry(&page, d, r.vec_slot as usize)
     }
 
-    /// FMT-9b: load the whole column into memory if it fits the budget.
-    /// Called before scoring; a no-op once resident (or on v8).
+    /// FMT-9b: make the column resident if it fits the budget: allocate it
+    /// (zeroed, so untouched rows cost no memory) and copy in the staged
+    /// entries. Rows fill a vector page at a time on first use
+    /// ([`Mnemo::fill_column_page`]). A no-op once resident, and on v8.
     fn ensure_column(&mut self) -> Result<()> {
         if !self.is_v9() || self.col.resident {
             return Ok(());
@@ -2460,41 +2473,61 @@ impl Mnemo {
         if rows * veccol::entry_len(d) > self.vector_cache_budget {
             return Ok(());
         }
-        let mut data = vec![0u16; rows * d];
-        let mut norms = vec![0f32; rows];
-        let mut by_page: std::collections::BTreeMap<u64, (u64, Vec<(usize, u16)>)> =
-            std::collections::BTreeMap::new();
-        for (i, e) in self.catalog.iter().enumerate() {
-            if e.deleted {
+        self.col.data = vec![0u16; rows * d];
+        self.col.norms = vec![0f32; rows];
+        self.col.have = vec![false; rows];
+        let hot: Vec<(usize, Vec<u16>, f32)> = self
+            .col
+            .hot
+            .iter()
+            .filter(|(&i, _)| i < rows)
+            .map(|(&i, (h, n))| (i, h.clone(), *n))
+            .collect();
+        for (i, h, n) in hot {
+            self.col.data[i * d..(i + 1) * d].copy_from_slice(&h);
+            self.col.norms[i] = n;
+            self.col.have[i] = true;
+        }
+        self.col.resident = true;
+        Ok(())
+    }
+
+    /// FMT-9b: fill the resident column from row `idx`'s vector page: every
+    /// live row on that page, in one decrypt that bypasses the page cache.
+    fn fill_column_page(&mut self, idx: usize) -> Result<()> {
+        let Some(r) = self.catalog[idx].v9 else {
+            return Ok(());
+        };
+        if r.vec_page == 0 {
+            return Ok(());
+        }
+        let d = self.dimensions;
+        let bytes = self.pager.read_page_uncached(r.vec_page, r.vec_gen)?;
+        let rows = self
+            .col
+            .page_rows
+            .get(&r.vec_page)
+            .cloned()
+            .unwrap_or_default();
+        for i in rows.into_iter().chain(std::iter::once(idx)) {
+            if i >= self.col.have.len() || self.col.have[i] {
                 continue;
             }
-            if let Some(r) = e.v9 {
-                if r.vec_page != 0 {
-                    by_page
-                        .entry(r.vec_page)
-                        .or_insert_with(|| (r.vec_gen, Vec::new()))
-                        .1
-                        .push((i, r.vec_slot));
-                }
+            let Some(ri) = self.catalog[i].v9 else {
+                continue;
+            };
+            if ri.vec_page != r.vec_page {
+                continue;
             }
+            let n = veccol::decode_entry_into(
+                &bytes,
+                d,
+                ri.vec_slot as usize,
+                &mut self.col.data[i * d..(i + 1) * d],
+            )?;
+            self.col.norms[i] = n;
+            self.col.have[i] = true;
         }
-        for (page, (gen, slots)) in by_page {
-            let bytes = self.pager.read_page(page, gen)?;
-            for (i, slot) in slots {
-                let (h, n) = veccol::decode_entry(&bytes, d, slot as usize)?;
-                data[i * d..(i + 1) * d].copy_from_slice(&h);
-                norms[i] = n;
-            }
-        }
-        for (&i, (h, n)) in &self.col.hot {
-            if i < rows {
-                data[i * d..(i + 1) * d].copy_from_slice(h);
-                norms[i] = *n;
-            }
-        }
-        self.col.data = data;
-        self.col.norms = norms;
-        self.col.resident = true;
         Ok(())
     }
 
@@ -4984,6 +5017,9 @@ impl Mnemo {
             crate::index::hash_map_bytes::<u128, ()>(s.capacity())
         });
         r.ram_key_caches = (key_index + superseded) as u64;
+        r.ram_vector_column = (self.col.data.capacity() * 2
+            + self.col.norms.capacity() * 4
+            + self.col.have.capacity()) as u64;
         r.ram_total = r.ram_catalog
             + r.ram_id_map
             + r.ram_ann_centroids
@@ -4992,7 +5028,8 @@ impl Mnemo {
             + r.ram_ann_posting_codes
             + r.ram_ann_assignment
             + r.ram_cache_dir
-            + r.ram_key_caches;
+            + r.ram_key_caches
+            + r.ram_vector_column;
         Ok(r)
     }
 
@@ -5316,9 +5353,16 @@ impl Mnemo {
             let Some(idx) = self.index.get(e.id, &self.catalog) else {
                 continue;
             };
+            if self.col.resident
+                && idx < self.col.have.len()
+                && !self.col.have[idx]
+                && !self.col.hot.contains_key(&idx)
+            {
+                self.fill_column_page(idx)?;
+            }
             let sim = if let Some((h, n)) = self.col.hot.get(&idx) {
                 veccol::similarity_f16(req.metric, q, q_norm, h, *n)
-            } else if self.col.resident && self.col.norms.len() > idx {
+            } else if self.col.resident && self.col.have.get(idx).copied().unwrap_or(false) {
                 veccol::similarity_f16(
                     req.metric,
                     q,
@@ -6403,6 +6447,7 @@ impl Mnemo {
         if self.col.resident && need > bytes {
             self.col.data = Vec::new();
             self.col.norms = Vec::new();
+            self.col.have = Vec::new();
             self.col.resident = false;
         }
     }

@@ -92,6 +92,12 @@ use crate::format::{PAGE_SIZE, PAYLOAD};
 /// recall's scattered record reads. `Mnemo::set_cache_capacity` raises it.
 pub const DEFAULT_CACHE_PAGES: usize = 1024;
 
+/// FMT-9b: the default page cache for a v9 file, 256 pages (~2 MiB). v9
+/// recall scores from the catalog rows and the resident vector column and
+/// decrypts only the `top_k` hits, so a large cache of record pages buys
+/// little; `Mnemo::set_cache_capacity` still raises it.
+pub const V9_DEFAULT_CACHE_PAGES: usize = 256;
+
 /// Encrypted page reader/writer with a bounded write-back cache.
 pub struct Pager {
     file: File,
@@ -148,7 +154,11 @@ impl Pager {
             session_random: crypto::random_u64(),
             session_counter: 0,
             version,
-            cache: PageCache::new(DEFAULT_CACHE_PAGES),
+            cache: PageCache::new(if version >= crate::format::VERSION_V9 {
+                V9_DEFAULT_CACHE_PAGES
+            } else {
+                DEFAULT_CACHE_PAGES
+            }),
             dirty_gens: std::collections::HashMap::new(),
         }
     }
@@ -325,6 +335,24 @@ impl Pager {
 
         self.cache.insert(page_no, payload.clone(), false);
         Ok(payload)
+    }
+
+    /// FMT-9b: [`Pager::read_page`] without caching the result: for bulk
+    /// reads (loading the vector column) that would otherwise push every
+    /// cached record page out. A cached copy (possibly dirty) still wins.
+    pub fn read_page_uncached(&mut self, page_no: u64, gen: u64) -> Result<Vec<u8>> {
+        if let Some(p) = self.cache.peek(page_no) {
+            return Ok(p.to_vec());
+        }
+        let mut disk = [0u8; PAGE_SIZE];
+        self.file
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        self.file.read_exact(&mut disk)?;
+        let mut nonce = [0u8; NONCE_LEN];
+        nonce.copy_from_slice(&disk[0..NONCE_LEN]);
+        let aad = self.page_aad(page_no, gen);
+        crypto::aead_decrypt(&self.dek, &nonce, &disk[NONCE_LEN..], &aad)
+            .map_err(|_| MnemoError::PageAuthFailed(page_no))
     }
 
     /// Stage a plaintext payload for an encrypted page. The payload is padded
