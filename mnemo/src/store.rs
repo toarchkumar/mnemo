@@ -4107,6 +4107,28 @@ impl Mnemo {
         Ok(report)
     }
 
+    /// FMT-9a measurement hook: the ANN shortlist (candidate ids, nearest
+    /// first by PQ distance) that recall would rerank, at the given or the
+    /// index's effective `n_probe` / `n_rerank`. Empty without an index.
+    /// **Unstable diagnostic.**
+    #[doc(hidden)]
+    pub fn __ann_shortlist(
+        &mut self,
+        query: &[f32],
+        n_probe: Option<usize>,
+        n_rerank: Option<usize>,
+    ) -> Result<Vec<Ulid>> {
+        self.ensure_ann()?;
+        Ok(match &self.ann {
+            Some(ann) => ann
+                .query(query, n_probe, n_rerank)
+                .into_iter()
+                .map(Ulid)
+                .collect(),
+            None => Vec::new(),
+        })
+    }
+
     /// P-0 device budget breakdown of this file and handle. **Unstable
     /// diagnostic**; see [`BudgetReport`]. Reads the header, the catalog
     /// and file metadata only; nothing is decrypted.

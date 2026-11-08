@@ -198,6 +198,19 @@ fn round4(x: f64) -> f64 {
 // Fixture → .mnemo
 // ------------------------------------------------------------------
 
+/// FMT-9a: symmetric per-vector int8 quantization and back
+/// (`q = round(127 · v / max|v|)`, `v' = q · max|v| / 127`).
+fn int8_roundtrip(v: &[f32]) -> Vec<f32> {
+    let max = v.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+    if max == 0.0 {
+        return v.to_vec();
+    }
+    let scale = max / 127.0;
+    v.iter()
+        .map(|x| (x / scale).round().clamp(-127.0, 127.0) * scale)
+        .collect()
+}
+
 /// Build a fresh database from the fixture, return (handle, label→ulid map).
 fn build_db(fixture: &Fixture, now: i64) -> MnemoResult<(Mnemo, HashMap<String, Ulid>)> {
     let tmp = tempfile::Builder::new()
@@ -216,9 +229,19 @@ fn build_db(fixture: &Fixture, now: i64) -> MnemoResult<(Mnemo, HashMap<String, 
     };
     let mut db = Mnemo::create(&path, "harness-pw", cfg)?;
 
+    // FMT-9a: `RANKING_QUANTIZE_INT8=1` stores every memory vector as a v9
+    // int8 column would hold it (symmetric per-vector quantization, then
+    // dequantized), so the harness measures int8 rerank against float.
+    // Queries stay float, as they would in v9.
+    let quantize = std::env::var("RANKING_QUANTIZE_INT8").is_ok_and(|v| v == "1");
     let mut labels: HashMap<String, Ulid> = HashMap::new();
     for m in &fixture.memories {
-        let mut mem = Memory::new(m.content.clone(), MemoryType::Semantic, m.vector.clone())
+        let vector = if quantize {
+            int8_roundtrip(&m.vector)
+        } else {
+            m.vector.clone()
+        };
+        let mut mem = Memory::new(m.content.clone(), MemoryType::Semantic, vector)
             .with_agent(&m.agent_id)
             .with_importance(m.importance);
         let backdated = now - m.created_at_offset_secs;
