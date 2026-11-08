@@ -518,6 +518,9 @@ struct RowV9 {
     vec_page: u64,
     vec_slot: u16,
     vec_gen: u64,
+    /// FMT-9b.2: the record's slot on its packed page (`start_page`), or
+    /// [`REC_SPAN`] when the record owns a run of whole pages.
+    rec_slot: u16,
     /// `ROW_KIND_*`.
     kind: u8,
     /// `ROW_SUPERSEDED | ROW_HAS_TTL | ROW_SHARED`.
@@ -534,6 +537,88 @@ struct RowV9 {
     importance: f32,
     /// `created_at + ttl_secs` when `ROW_HAS_TTL` is set.
     expires_at: i64,
+}
+
+/// FMT-9b.2: `RowV9::rec_slot` of a record too big for a packed page; it
+/// owns `page_count` whole pages from `start_page`, as in v8.
+const REC_SPAN: u16 = u16::MAX;
+/// FMT-9b.2: `kind` byte of a packed record page.
+const PAGE_KIND_RECORD: u8 = 1;
+/// FMT-9b.2: bytes of a packed record page available to slots and data.
+const REC_PAGE_CAP: usize = PAYLOAD - veccol::PAGE_HEADER;
+/// FMT-9b.2: bytes per slot-directory entry (offset u16, length u16).
+const REC_SLOT_BYTES: usize = 4;
+/// FMT-9b.2: thread-archive chunk size on v9. A chunk plus its record's
+/// metadata (~200 B) then fits one packed page (the FMT-9a measurement:
+/// 8 KB chunks spill into a second page almost every time, 300 MB vs
+/// 212 MB for the 50K-turn profile).
+const V9_TURN_CHUNK_BYTES: usize = 7_900;
+
+/// FMT-9b.2: encode a packed record page: the header, the slot directory,
+/// then the records in slot order.
+fn encode_record_page(gen: u64, recs: &[&[u8]]) -> Vec<u8> {
+    let dir = recs.len() * REC_SLOT_BYTES;
+    let data: usize = recs.iter().map(|r| r.len()).sum();
+    let mut out = Vec::with_capacity(veccol::PAGE_HEADER + dir + data);
+    out.extend_from_slice(&[PAGE_KIND_RECORD, 0, 0, 0]);
+    out.extend_from_slice(&(recs.len() as u16).to_le_bytes());
+    out.extend_from_slice(&((dir + data) as u16).to_le_bytes());
+    out.extend_from_slice(&gen.to_le_bytes());
+    let mut off = veccol::PAGE_HEADER + dir;
+    for r in recs {
+        out.extend_from_slice(&(off as u16).to_le_bytes());
+        out.extend_from_slice(&(r.len() as u16).to_le_bytes());
+        off += r.len();
+    }
+    for r in recs {
+        out.extend_from_slice(r);
+    }
+    out
+}
+
+/// FMT-9b.2: the bytes of slot `slot` of a packed record page.
+fn record_slot(page: &[u8], slot: u16) -> Result<Vec<u8>> {
+    let bad = || MnemoError::Invalid("malformed record page".into());
+    if page.len() < veccol::PAGE_HEADER || page[0] != PAGE_KIND_RECORD {
+        return Err(bad());
+    }
+    let n = u16::from_le_bytes([page[4], page[5]]);
+    if slot >= n {
+        return Err(bad());
+    }
+    let d = veccol::PAGE_HEADER + slot as usize * REC_SLOT_BYTES;
+    let dir = page.get(d..d + REC_SLOT_BYTES).ok_or_else(bad)?;
+    let off = u16::from_le_bytes([dir[0], dir[1]]) as usize;
+    let len = u16::from_le_bytes([dir[2], dir[3]]) as usize;
+    page.get(off..off + len).map(|b| b.to_vec()).ok_or_else(bad)
+}
+
+/// FMT-9b.2: the handle's view of packed record pages.
+#[derive(Debug, Default)]
+struct RecPages {
+    /// Rows whose records aren't on a page yet; the next flush packs them.
+    hot: std::collections::HashMap<usize, Vec<u8>>,
+    /// Rows to pack, in order (may repeat; the flush skips repeats).
+    pending: Vec<usize>,
+    /// Packed page → the live rows on it.
+    page_rows: std::collections::HashMap<u64, Vec<usize>>,
+}
+
+impl RecPages {
+    fn from_catalog(catalog: &[CatalogEntry]) -> RecPages {
+        let mut recs = RecPages::default();
+        for (i, e) in catalog.iter().enumerate() {
+            if e.deleted || e.start_page == 0 {
+                continue;
+            }
+            if let Some(r) = e.v9 {
+                if r.rec_slot != REC_SPAN {
+                    recs.page_rows.entry(e.start_page).or_default().push(i);
+                }
+            }
+        }
+        recs
+    }
 }
 
 const ROW_SUPERSEDED: u8 = 1;
@@ -1117,6 +1202,8 @@ pub struct Mnemo {
     gen_leased: bool,
     /// FMT-9b: the fp16 vector column (v9; unused on v8).
     col: VecColumn,
+    /// FMT-9b.2: packed record pages (v9; unused on v8).
+    recs: RecPages,
     /// FMT-9b: keep the column resident while it fits this many bytes.
     vector_cache_budget: usize,
 }
@@ -1703,7 +1790,8 @@ impl IngestPlan {
 /// page is newer. v9 reuses pages, so it compares generations instead.
 fn written_after_index(e: &CatalogEntry, v9: bool, index_start: u64, index_gen: u64) -> bool {
     if v9 {
-        e.gen > index_gen
+        // `start_page` 0: packed at the next flush, so certainly newer.
+        e.start_page == 0 || e.gen > index_gen
     } else {
         e.start_page > index_start
     }
@@ -1985,6 +2073,7 @@ impl Mnemo {
             dirty_keys: false,
             gen_leased: false,
             col: VecColumn::default(),
+            recs: RecPages::default(),
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2244,6 +2333,7 @@ impl Mnemo {
         let free = load_free_list(&mut pager, header.free)?;
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
+        let recs = RecPages::from_catalog(&catalog);
 
         Ok(Mnemo {
             pager,
@@ -2290,6 +2380,7 @@ impl Mnemo {
             dirty_keys: false,
             gen_leased: false,
             col,
+            recs,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2420,6 +2511,7 @@ impl Mnemo {
         let free = load_free_list(&mut pager, header.free)?;
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
+        let recs = RecPages::from_catalog(&catalog);
 
         Ok(Mnemo {
             pager,
@@ -2460,6 +2552,7 @@ impl Mnemo {
             dirty_keys: false,
             gen_leased: false,
             col,
+            recs,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -2606,6 +2699,120 @@ impl Mnemo {
             self.col.page_rows.remove(&r.vec_page);
             self.release_pages(r.vec_page, 1);
         }
+    }
+
+    /// FMT-9b.2: row `idx` no longer needs its record (`row` is the row as
+    /// it was): drop a waiting one, free a span, or take it off its packed
+    /// page and free the page once nothing live is left on it.
+    fn kill_record(&mut self, idx: usize, row: &CatalogEntry) {
+        self.recs.hot.remove(&idx);
+        let Some(r) = row.v9 else { return };
+        if r.rec_slot == REC_SPAN {
+            self.release_pages(row.start_page, row.page_count as u64);
+            return;
+        }
+        if row.start_page == 0 {
+            return;
+        }
+        let empty = match self.recs.page_rows.get_mut(&row.start_page) {
+            Some(rows) => {
+                rows.retain(|&i| i != idx);
+                rows.is_empty()
+            }
+            None => false,
+        };
+        if empty {
+            self.recs.page_rows.remove(&row.start_page);
+            self.release_pages(row.start_page, 1);
+        }
+    }
+
+    /// FMT-9b.2: pack the waiting records, plus the live records of up to
+    /// [`VACUUM_PAGES_PER_COMMIT`] sparse pages (under 3/4 full), into
+    /// fresh record pages, filling each before starting the next. Runs at
+    /// the top of a flush, before the catalog is serialized (it moves rows'
+    /// record locations), and only when something is waiting.
+    fn pack_records(&mut self) -> Result<()> {
+        if !self.is_v9() || self.recs.pending.is_empty() {
+            return Ok(());
+        }
+        let mut sparse: Vec<u64> = self
+            .recs
+            .page_rows
+            .iter()
+            .filter(|(_, rows)| {
+                let live: usize = rows
+                    .iter()
+                    .map(|&i| self.catalog[i].len as usize + REC_SLOT_BYTES)
+                    .sum();
+                live * 4 < REC_PAGE_CAP * 3
+            })
+            .map(|(&p, _)| p)
+            .collect();
+        sparse.sort_unstable();
+        sparse.truncate(VACUUM_PAGES_PER_COMMIT);
+        let mut order: Vec<usize> = Vec::new();
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for p in sparse {
+            let rows = self.recs.page_rows.remove(&p).unwrap_or_default();
+            if let Some(&first) = rows.first() {
+                let page = self.pager.read_page_uncached(p, self.catalog[first].gen)?;
+                for idx in rows {
+                    let slot = self.catalog[idx].v9.map_or(0, |r| r.rec_slot);
+                    let b = record_slot(&page, slot)?;
+                    self.recs.hot.insert(idx, b);
+                    if seen.insert(idx) {
+                        order.push(idx);
+                    }
+                }
+            }
+            self.release_pages(p, 1);
+        }
+        let pending = std::mem::take(&mut self.recs.pending);
+        for idx in pending {
+            if self.recs.hot.contains_key(&idx) && seen.insert(idx) {
+                order.push(idx);
+            }
+        }
+        let gen = self.write_gen();
+        let mut i = 0;
+        while i < order.len() {
+            let mut used = 0usize;
+            let mut j = i;
+            while j < order.len() {
+                let l = self.recs.hot[&order[j]].len() + REC_SLOT_BYTES;
+                if j > i && used + l > REC_PAGE_CAP {
+                    break;
+                }
+                used += l;
+                j += 1;
+            }
+            let page = self.alloc_pages(1);
+            let bytes = {
+                let recs: Vec<&[u8]> = order[i..j]
+                    .iter()
+                    .map(|k| self.recs.hot[k].as_slice())
+                    .collect();
+                encode_record_page(gen, &recs)
+            };
+            self.pager.write_page(page, gen, &bytes)?;
+            for (slot, &k) in order[i..j].iter().enumerate() {
+                let e = &mut self.catalog[k];
+                e.start_page = page;
+                e.page_count = 1;
+                e.gen = gen;
+                if let Some(r) = e.v9.as_mut() {
+                    r.rec_slot = slot as u16;
+                }
+            }
+            self.recs.page_rows.insert(page, order[i..j].to_vec());
+            i = j;
+        }
+        for k in order {
+            self.recs.hot.remove(&k);
+        }
+        self.dirty_catalog = true;
+        Ok(())
     }
 
     /// FMT-9b: row `e`'s column entry (fp16 values and norm), from the
@@ -2824,6 +3031,21 @@ impl Mnemo {
     }
 
     fn read_record(&mut self, e: &CatalogEntry) -> Result<Vec<u8>> {
+        // FMT-9b.2: a packed v9 record is one slot of a shared page, or
+        // still waiting for the next flush.
+        if let Some(r) = e.v9 {
+            if r.rec_slot != REC_SPAN {
+                if e.start_page == 0 {
+                    return self
+                        .index
+                        .get(e.id, &self.catalog)
+                        .and_then(|idx| self.recs.hot.get(&idx).cloned())
+                        .ok_or_else(|| MnemoError::Invalid("record not written yet".into()));
+                }
+                let page = self.pager.read_page(e.start_page, e.gen)?;
+                return record_slot(&page, r.rec_slot);
+            }
+        }
         let mut buf = Vec::with_capacity(e.len as usize);
         for i in 0..e.page_count as u64 {
             buf.extend_from_slice(&self.pager.read_page(e.start_page + i, e.gen)?);
@@ -2901,7 +3123,20 @@ impl Mnemo {
             rmp_serde::to_vec(&m)
         }
         .map_err(|e| MnemoError::Serialize(e.to_string()))?;
-        let (start, pc, gen) = self.write_record(&bytes)?;
+        // FMT-9b.2: a v9 record that fits a packed page waits for the next
+        // flush, which packs it with others; a bigger one owns a run of
+        // whole pages, written now as on v8.
+        let packed = v9 && bytes.len() + REC_SLOT_BYTES <= REC_PAGE_CAP;
+        // A waiting record has `start_page` 0. Its generation is never 0 on
+        // v9: the row encoding leaves out a zero `gen`, which would shift
+        // the `v9` field into its place (a deleted row can stay unpacked).
+        let (start, pc, gen) = if packed {
+            self.ensure_gen_lease()?;
+            (0, 1, self.write_gen())
+        } else {
+            self.write_record(&bytes)?
+        };
+        let rec_len = bytes.len();
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
         let (prev_accessed, prev_count) = match self.index.get(id_u, &self.catalog) {
@@ -2915,26 +3150,30 @@ impl Mnemo {
             id: id_u,
             start_page: start,
             page_count: pc,
-            len: bytes.len() as u32,
+            len: rec_len as u32,
             deleted: false,
             accessed_at: prev_accessed,
             access_count: prev_count,
             gen,
-            v9: v9.then(|| row_tags(&m)),
+            v9: v9.then(|| {
+                let mut r = row_tags(&m);
+                r.rec_slot = if packed { 0 } else { REC_SPAN };
+                r
+            }),
         };
         match self.index.get(id_u, &self.catalog) {
             Some(idx) => {
-                if v9 && !self.catalog[idx].deleted {
-                    let old = self.catalog[idx].clone();
-                    self.kill_vector(idx, &old);
-                }
                 // FMT-9 (a): the overwritten version's pages are freed by
                 // this transaction's commit. A tombstone's pages were
                 // already freed when its delete committed.
-                let old = &self.catalog[idx];
-                if !old.deleted {
-                    let (p, c) = (old.start_page, old.page_count as u64);
-                    self.release_pages(p, c);
+                if !self.catalog[idx].deleted {
+                    let old = self.catalog[idx].clone();
+                    if v9 {
+                        self.kill_vector(idx, &old);
+                        self.kill_record(idx, &old);
+                    } else {
+                        self.release_pages(old.start_page, old.page_count as u64);
+                    }
                 }
                 self.catalog[idx] = entry;
             }
@@ -2947,6 +3186,10 @@ impl Mnemo {
         if v9 {
             if let Some(idx) = self.index.get(id_u, &self.catalog) {
                 self.stage_vector(idx, &m.vector);
+                if packed {
+                    self.recs.hot.insert(idx, bytes);
+                    self.recs.pending.push(idx);
+                }
             }
         }
 
@@ -3162,10 +3405,11 @@ impl Mnemo {
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
-            let (p, c) = (entry.start_page, entry.page_count as u64);
-            self.release_pages(p, c);
             if self.is_v9() {
+                self.kill_record(idx, &entry);
                 self.kill_vector(idx, &entry);
+            } else {
+                self.release_pages(entry.start_page, entry.page_count as u64);
             }
         }
         if let Some(ann) = &mut self.ann {
@@ -3784,6 +4028,12 @@ impl Mnemo {
                 "ingest_thread: 'thread_id' must not be empty".into(),
             ));
         }
+        // FMT-9b.2: v9 chunks fit one packed page with their metadata.
+        let chunk_bytes = if self.is_v9() {
+            V9_TURN_CHUNK_BYTES
+        } else {
+            THREAD_TURN_CHUNK_BYTES
+        };
         let mut report = IngestReport::default();
         if turns.is_empty() {
             return Ok(IngestPlan {
@@ -3836,9 +4086,9 @@ impl Mnemo {
                     };
                     let truncated = take_utf8_prefix(&t.content, THREAD_TOOL_RESULT_TRUNCATE_BYTES);
                     (vec![truncated], Some((hash, content_bytes as u64)))
-                } else if content_bytes > THREAD_TURN_CHUNK_BYTES {
+                } else if content_bytes > chunk_bytes {
                     report.chunked_turns += 1;
-                    (chunk_utf8(&t.content, THREAD_TURN_CHUNK_BYTES), None)
+                    (chunk_utf8(&t.content, chunk_bytes), None)
                 } else {
                     (vec![t.content.clone()], None)
                 };
@@ -5148,15 +5398,23 @@ impl Mnemo {
             ..Default::default()
         };
         for e in &self.catalog {
-            let pages = e.page_count as u64 * ps;
+            // FMT-9b.2: packed v9 records share pages (counted once below);
+            // a v9 delete frees its pages, so there are no deleted ones.
+            let packed = e.v9.is_some_and(|r| r.rec_slot != REC_SPAN);
+            let pages = if packed { 0 } else { e.page_count as u64 * ps };
             if e.deleted {
-                r.deleted_record_page_bytes += pages;
+                if e.v9.is_none() {
+                    r.deleted_record_page_bytes += pages;
+                }
             } else {
                 r.record_page_bytes += pages;
                 r.record_payload_bytes += e.len as u64;
                 r.live_records += 1;
             }
         }
+        r.record_page_bytes += self.recs.page_rows.len() as u64 * ps;
+        // FMT-9b: the vector column, reported with the records.
+        r.record_page_bytes += self.col.page_rows.len() as u64 * ps;
         let accounted = r.header_bytes
             + r.record_page_bytes
             + r.deleted_record_page_bytes
@@ -6179,6 +6437,7 @@ impl Mnemo {
         self.ensure_gen_lease()?;
         // FMT-9b: column entries first; they move rows' vector locations,
         // so they must land before the catalog is serialized.
+        self.pack_records()?;
         self.pack_vectors()?;
 
         // 1. Serialize control plane, ensure WAL capacity, lease counter +
@@ -6592,6 +6851,11 @@ impl Mnemo {
         if !self.dirty_catalog && !self.dirty_index {
             return Ok(());
         }
+        // FMT-9b: v9 records and vectors reach their pages at the top of a
+        // flush; do that part too.
+        self.ensure_gen_lease()?;
+        self.pack_records()?;
+        self.pack_vectors()?;
         let _prelude = self.prepare_for_flush(self.dirty_index)?;
         self.pager.flush()
     }
@@ -7251,8 +7515,10 @@ impl Mnemo {
         }
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
-        // FMT-9b: the column described the catalog being replaced.
+        // FMT-9b: the column and the packed pages described the catalog
+        // being replaced.
         self.col = VecColumn::from_catalog(&self.catalog);
+        self.recs = RecPages::from_catalog(&self.catalog);
         self.ann = ann;
         self.ann_unloaded = false;
         // The handle caches describe the catalog being replaced.
@@ -7278,22 +7544,26 @@ impl Mnemo {
     /// this transaction's pending frees; the current runs it doesn't share
     /// are freed by the restoring commit.
     fn reclaim_for_restore(&mut self, restored: &[CatalogEntry]) {
-        let live_then: std::collections::BTreeMap<u64, u64> = restored
-            .iter()
-            .filter(|e| !e.deleted)
-            .map(|e| (e.start_page, e.page_count as u64))
-            .collect();
+        // Record runs, deduplicated (FMT-9b.2: packed records share a page);
+        // rows still waiting to be packed own no page yet.
+        let runs = |cat: &[CatalogEntry]| -> std::collections::BTreeMap<u64, u64> {
+            cat.iter()
+                .filter(|e| !e.deleted && e.start_page != 0)
+                .map(|e| (e.start_page, e.page_count as u64))
+                .collect()
+        };
+        let live_then = runs(restored);
+        let live_now = runs(&self.catalog);
         let overlaps = |p: u64, c: u64| {
             live_then
                 .range(..p + c)
                 .next_back()
                 .is_some_and(|(&q, &n)| q + n > p)
         };
-        let dying: Vec<(u64, u64)> = self
-            .catalog
+        let dying: Vec<(u64, u64)> = live_now
             .iter()
-            .filter(|e| !e.deleted && !live_then.contains_key(&e.start_page))
-            .map(|e| (e.start_page, e.page_count as u64))
+            .filter(|(p, _)| !live_then.contains_key(p))
+            .map(|(&p, &c)| (p, c))
             .collect();
         // FMT-9b: vector pages hold many rows, so they're compared as a
         // set: the snapshot's come back, the current ones it lacks go.

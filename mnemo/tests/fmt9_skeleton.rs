@@ -20,9 +20,16 @@ fn cfg(version: u16) -> MnemoConfig {
     }
 }
 
+/// FMT-9b.2 packs small records into shared pages. These tests are about
+/// page reuse one record at a time, so each record here is bigger than a
+/// packed page and owns its own run of pages (a span), as in v8.
+fn content(i: usize) -> String {
+    format!("memory number {i} {}", "x".repeat(8_200))
+}
+
 fn mem(i: usize) -> Memory {
     Memory::new(
-        format!("memory number {i}"),
+        content(i),
         MemoryType::Semantic,
         vec![1.0 + i as f32, 1.0, 0.5, 0.25],
     )
@@ -91,7 +98,7 @@ fn v9_round_trips_through_close_and_reopen() {
     assert_eq!(db.__format_version(), 9);
     assert_eq!(db.len(), 12);
     for (i, id) in ids.iter().enumerate() {
-        assert_eq!(db.get(id).unwrap().content, format!("memory number {i}"));
+        assert_eq!(db.get(id).unwrap().content, content(i));
         let (_, _, gen) = db.__record_location(id).unwrap();
         assert!(gen >= 1, "v9 records carry a generation");
     }
@@ -162,10 +169,7 @@ fn freed_pages_are_reused_once_unpinned() {
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 20);
     for (i, id) in ids[10..].iter().chain(fresh.iter()).enumerate() {
-        assert_eq!(
-            db.get(id).unwrap().content,
-            format!("memory number {}", i + 10)
-        );
+        assert_eq!(db.get(id).unwrap().content, content(i + 10));
     }
     assert_eq!(db.verify().unwrap(), 20);
 }
@@ -198,7 +202,7 @@ fn retained_snapshots_pin_freed_pages_and_restore_stays_intact() {
     db.restore_to(before_delete).unwrap();
     assert_eq!(db.len(), 10);
     for (i, id) in ids.iter().enumerate() {
-        assert_eq!(db.get(id).unwrap().content, format!("memory number {i}"));
+        assert_eq!(db.get(id).unwrap().content, content(i));
     }
     let (runs, _) = db.__free_list();
     for (_, p, c) in runs {
@@ -223,7 +227,7 @@ fn retained_snapshots_pin_freed_pages_and_restore_stays_intact() {
         db.flush().unwrap();
     }
     for (i, id) in ids.iter().enumerate() {
-        assert_eq!(db.get(id).unwrap().content, format!("memory number {i}"));
+        assert_eq!(db.get(id).unwrap().content, content(i));
     }
     assert_eq!(db.verify().unwrap(), 10);
     db.close().unwrap();
@@ -242,7 +246,7 @@ fn rollback_of_a_reused_page_fails_authentication() {
     let keep = db.remember(mem(1)).unwrap();
     db.close().unwrap();
     let (vp, vc, vgen) = db.__record_location(&victim).unwrap();
-    assert_eq!(vc, 1);
+    assert_eq!(vc, 2, "a span of two pages");
     drop(db);
     // The attacker's old copy of the victim's page.
     let stale = read_page(&path, vp);

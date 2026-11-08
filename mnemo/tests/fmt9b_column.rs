@@ -3,8 +3,8 @@
 //! same with or without `MNEMO_DEV_FORMAT=9`.
 
 use mnemo_engine::{
-    Filter, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, MnemoError, RecallRequest,
-    Scope, Ulid,
+    Embedder, EmbedderIdentity, Filter, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig,
+    MnemoError, RecallRequest, Scope, ThreadTurn, Ulid,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -363,4 +363,157 @@ fn too_many_dimensions_for_a_v9_page_is_refused() {
         },
     )
     .unwrap();
+}
+
+// --- FMT-9b.2: packed record pages -----------------------------------------
+
+fn distinct_pages(db: &Mnemo, ids: &[Ulid]) -> usize {
+    let mut pages: Vec<u64> = ids
+        .iter()
+        .filter_map(|id| db.__record_location(id))
+        .flat_map(|(p, c, _)| p..p + c as u64)
+        .collect();
+    pages.sort_unstable();
+    pages.dedup();
+    pages.len()
+}
+
+#[test]
+fn small_records_share_pages_and_survive_reopen() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    let ids: Vec<Ulid> = (0..1000).map(|i| db.remember(mem(i)).unwrap()).collect();
+    db.flush().unwrap();
+    let pages = distinct_pages(&db, &ids);
+    // ~130-byte records, ~60 per page.
+    assert!(pages <= 25, "1000 small records on {pages} pages");
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    for (i, id) in ids.iter().enumerate().step_by(37) {
+        assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
+    }
+    assert_eq!(db.verify().unwrap(), 1000);
+}
+
+#[test]
+fn single_commits_fill_pages_and_deletes_vacuum_them() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    db.set_max_snapshots(1);
+    let ids: Vec<Ulid> = (0..200)
+        .map(|i| {
+            let id = db.remember(mem(i)).unwrap();
+            db.flush().unwrap();
+            id
+        })
+        .collect();
+    let before = distinct_pages(&db, &ids);
+    assert!(before <= 8, "200 single-commit records on {before} pages");
+    // Delete most of them: the sparse pages are folded into later commits.
+    for id in ids.iter().skip(20) {
+        db.delete(id).unwrap();
+    }
+    for i in 0..10 {
+        db.remember(mem(1000 + i)).unwrap();
+        db.flush().unwrap();
+    }
+    let after = distinct_pages(&db, &ids[..20]);
+    assert!(after <= 2, "20 survivors still spread over {after} pages");
+    for (i, id) in ids[..20].iter().enumerate() {
+        assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
+    }
+    assert_eq!(db.verify().unwrap(), 30);
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.verify().unwrap(), 30);
+}
+
+#[test]
+fn big_records_span_whole_pages() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    let big = "y".repeat(20_000);
+    let id = db
+        .remember(Memory::new(big.clone(), MemoryType::Semantic, vector(1)))
+        .unwrap();
+    let small = db.remember(mem(2)).unwrap();
+    db.close().unwrap();
+    let (_, pages, _) = db.__record_location(&id).unwrap();
+    assert_eq!(pages, 3, "a 20 KB record owns three pages");
+    assert_eq!(db.__record_location(&small).unwrap().1, 1);
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.get(&id).unwrap().content, big);
+    db.delete(&id).unwrap();
+    db.flush().unwrap();
+    assert_eq!(db.verify().unwrap(), 1);
+}
+
+struct AxisEmbedder;
+impl Embedder for AxisEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: "axis".into(),
+            dimensions: DIMS,
+            normalize: false,
+        }
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        Ok(texts.iter().map(|t| vector(t.len())).collect())
+    }
+}
+
+#[test]
+fn long_turns_chunk_to_fit_one_packed_page() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    db.set_embedder(AxisEmbedder).unwrap();
+    let long = "z".repeat(30_000);
+    db.ingest_thread(
+        "chat",
+        &[ThreadTurn {
+            turn_id: "t1".into(),
+            role: "user".into(),
+            content: long.clone(),
+            timestamp: None,
+        }],
+    )
+    .unwrap();
+    db.close().unwrap();
+    let chunks = db.thread_export("chat").unwrap();
+    assert_eq!(chunks.len(), 4, "30,000 bytes in 7,900-byte chunks");
+    for m in &chunks {
+        let (_, pages, _) = db.__record_location(&m.id).unwrap();
+        assert_eq!(pages, 1, "a chunk and its metadata fit one page");
+    }
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let turns = db.thread_export_turns("chat").unwrap();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].content, long);
+}
+
+#[test]
+fn a_record_deleted_before_its_first_flush_reopens_cleanly() {
+    // Regression: the deleted row never got a page, and its zero
+    // generation was left out of the row encoding, shifting the v9 fields.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    let keep = db.remember(mem(1)).unwrap();
+    let gone = db.remember(mem(2)).unwrap();
+    db.delete(&gone).unwrap();
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.len(), 1);
+    db.get(&keep).unwrap();
+    assert!(db.get(&gone).is_err());
+    assert_eq!(db.verify().unwrap(), 1);
 }
