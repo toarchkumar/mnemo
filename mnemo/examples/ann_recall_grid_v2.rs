@@ -102,16 +102,14 @@ fn gen_clustered_vectors(n: usize, dims: usize, k_clusters: usize, seed: u64) ->
 
 fn cached_corpus_path(n: usize) -> PathBuf {
     let base = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
-    PathBuf::from(base)
-        .join("benches")
-        .join(format!(
-            "corpus_{n}_{DIMENSIONS}d{}.mnemo",
-            // FMT-9: v9 corpora (`MNEMO_DEV_FORMAT=9`) are cached apart.
-            match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
-                Ok("9") => "_v9",
-                _ => "",
-            }
-        ))
+    PathBuf::from(base).join("benches").join(format!(
+        "corpus_{n}_{DIMENSIONS}d{}.mnemo",
+        // FMT-9: v9 corpora (`MNEMO_DEV_FORMAT=9`) are cached apart.
+        match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
+            Ok("9") => "_v9",
+            _ => "",
+        }
+    ))
 }
 
 fn ensure_corpus(n: usize) -> PathBuf {
