@@ -5107,5 +5107,224 @@
       "library_size_bytes"
     ],
     "remeasured_note": "All new in P-0 (2026-11-07), second of two full runs on the same machine. Run-to-run noise on this laptop is large for RAM and recall at 100K: run 1 measured handle RSS 115 MB (run 2: 158 MB), first recall 28.3 ms (9.2 ms) and warm recall 27.3 ms (23.5 ms); disk, open and write figures agreed within a few percent. aarch64 Linux library size pending (needs a Linux runner)."
+  },
+  "device_budget_v0_10_0": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "methodology": "Same harness and corpora as the P-0 `device_budget` block (examples/device_budget.rs), after PERF-1 (v0.10.0). Differences: the warm loop is 1,000 queries (P-0: 200); new phases measure the about/essence briefing and single-turn ingest (cold = first call on a fresh handle, which builds the handle caches) and raw-key open against the secure passphrase KDF. The page cache default is now 1024 pages.",
+    "sizes": {
+      "1000": {
+        "disk_bytes_per_memory": {
+          "total": 10182.7,
+          "total_after_compact": 10223.6,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 720.9,
+          "catalog_run": 32.8,
+          "wal": 1146.9,
+          "unreferenced": 73.7
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 11088,
+          "peak_rss_kb": 14544,
+          "rss_kb_before_open": 3440,
+          "rss_kb_open": 4496,
+          "rss_kb_after_first_recall": 7424,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 26680,
+            "ram_ann_centroids": 49152,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 96000,
+            "ram_ann_posting_ids": 16000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 48000,
+            "ram_id_map": 5336,
+            "ram_key_caches": 0,
+            "ram_total": 635928
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 0.31,
+          "p95": 0.44
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 3.0,
+          "p95": 3.3
+        },
+        "warm_recall_ms": {
+          "median": 0.44,
+          "p95": 0.57,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 15.99,
+          "single_p95_ms": 21.85,
+          "batch_of_100_median_ms": 26.0,
+          "batch_per_memory_ms": 0.26,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 57344,
+          "file_growth_per_batch_of_100_bytes": 874905
+        },
+        "layers": {
+          "brief_cold_ms": 14.95,
+          "brief_warm_median_ms": 0.286,
+          "ingest_one_turn_cold_ms": 14.57,
+          "ingest_one_turn_warm_median_ms": 0.0108
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 0.19,
+          "open_secure_kdf_median_ms": 15.59,
+          "rss_kb_after_key_open": 64
+        }
+      },
+      "10000": {
+        "disk_bytes_per_memory": {
+          "total": 8877.7,
+          "total_after_compact": 8869.5,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 231.0,
+          "catalog_run": 33.6,
+          "wal": 354.7,
+          "unreferenced": 64.7
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 13248,
+          "peak_rss_kb": 18960,
+          "rss_kb_before_open": 3456,
+          "rss_kb_open": 5216,
+          "rss_kb_after_first_recall": 13184,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 266680,
+            "ram_ann_centroids": 153600,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 960000,
+            "ram_ann_posting_ids": 160000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 480000,
+            "ram_id_map": 53336,
+            "ram_key_caches": 0,
+            "ram_total": 2468376
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 1.02,
+          "p95": 1.18
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 11.22,
+          "p95": 11.8
+        },
+        "warm_recall_ms": {
+          "median": 1.43,
+          "p95": 5.26,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 15.75,
+          "single_p95_ms": 18.01,
+          "batch_of_100_median_ms": 26.09,
+          "batch_per_memory_ms": 0.261,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 352256,
+          "file_growth_per_batch_of_100_bytes": 1173094
+        },
+        "layers": {
+          "brief_cold_ms": 96.13,
+          "brief_warm_median_ms": 0.218,
+          "ingest_one_turn_cold_ms": 98.56,
+          "ingest_one_turn_warm_median_ms": 0.0079
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 0.87,
+          "open_secure_kdf_median_ms": 16.39,
+          "rss_kb_after_key_open": 912
+        }
+      },
+      "100000": {
+        "disk_bytes_per_memory": {
+          "total": 8713.6,
+          "total_after_compact": 8712.8,
+          "record_pages": 8192.0,
+          "record_payload": 2298.0,
+          "index_run": 173.5,
+          "catalog_run": 33.8,
+          "wal": 261.8,
+          "unreferenced": 52.3
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 35168,
+          "peak_rss_kb": 58720,
+          "rss_kb_before_open": 3456,
+          "rss_kb_open": 17424,
+          "rss_kb_after_first_recall": 56656,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 2666680,
+            "ram_ann_centroids": 486912,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 9600000,
+            "ram_ann_posting_ids": 1600000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 8388480,
+            "ram_id_map": 533336,
+            "ram_key_caches": 0,
+            "ram_total": 23670168
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 8.75,
+          "p95": 9.76
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 99.19,
+          "p95": 107.61
+        },
+        "warm_recall_ms": {
+          "median": 8.82,
+          "p95": 37.04,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 27.86,
+          "single_p95_ms": 29.98,
+          "batch_of_100_median_ms": 41.82,
+          "batch_per_memory_ms": 0.418,
+          "fsyncs_per_commit": 3,
+          "file_growth_per_single_write_bytes": 3399680,
+          "file_growth_per_batch_of_100_bytes": 4222156
+        },
+        "layers": {
+          "brief_cold_ms": 904.27,
+          "brief_warm_median_ms": 0.202,
+          "ingest_one_turn_cold_ms": 888.46,
+          "ingest_one_turn_warm_median_ms": 0.0091
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 8.64,
+          "open_secure_kdf_median_ms": 23.22,
+          "rss_kb_after_key_open": 4752
+        }
+      }
+    },
+    "library_size_bytes": {
+      "aarch64_linux_python_extension_stripped": 1447184,
+      "aarch64_linux_cli_stripped": 2430640,
+      "aarch64_macos_python_extension_stripped": 1368552,
+      "aarch64_macos_cli_stripped": 2356072,
+      "source": "aarch64 Linux: .github/workflows/size.yml run 42441201795 (ubuntu-24.04-arm) at e91ab0a; macOS: local P-0 build."
+    },
+    "recall_gates": {
+      "ann_recall_grid_v2": "recall@10 unchanged in all 100 cells (worst delta 0.000); default 100K cell (n_probe 159, n_rerank 500) 0.982, 10.65 -> 6.97 ms",
+      "ranking_v2": "default hit@1 0.9231 -> 0.9231, MRR 0.9487 -> 0.9487; phase6 hit@1 0.5667 / MRR 0.6779 unchanged"
+    },
+    "remeasured": [
+      "sizes",
+      "library_size_bytes",
+      "recall_gates"
+    ],
+    "remeasured_note": "All measured fresh for v0.10.0 on 2026-11-07. Single-run numbers; at 100K the warm-recall p95 and RSS vary between runs on this laptop (the P-0 block records +-30%)."
   }
 }

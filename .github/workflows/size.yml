@@ -36,7 +36,17 @@ jobs:
 
       - name: Build the Python extension (release, as maturin does)
         working-directory: mnemo-python
-        run: cargo build --release --features pyo3/extension-module
+        shell: bash
+        # On macOS an extension module leaves the Python symbols to be
+        # resolved at load time; maturin passes `-undefined dynamic_lookup`
+        # for that, and a plain `cargo build` doesn't, so add it here.
+        run: |
+          if [ "$(uname)" = "Darwin" ]; then
+            cargo rustc --release --lib --features pyo3/extension-module -- \
+              -C link-arg=-undefined -C link-arg=dynamic_lookup
+          else
+            cargo build --release --features pyo3/extension-module
+          fi
 
       - name: Build the CLI (release)
         working-directory: mnemo

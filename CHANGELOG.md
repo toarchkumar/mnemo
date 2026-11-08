@@ -8,6 +8,96 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-07
+
+PERF-1, the first release of the on-device track: size and speed, with no
+file format change. v0.10.0 files open in v0.9.x and earlier v8 readers.
+Measured with `examples/device_budget.rs` on an Apple M1 Pro (384-dim
+vectors, ~300 bytes of text, IVF+PQ index); full numbers in
+`test/scripts/perf_v0.5.0.json` (`device_budget_v0_10_0` against the P-0
+`device_budget` baseline, marked `remeasured`).
+
+| at 100K memories | v0.9.1 | v0.10.0 |
+|---|---|---|
+| Open (fast KDF) | 384 ms | **9 ms** |
+| Open with a raw key | — | **9 ms** (vs 23–25 ms with the secure passphrase KDF) |
+| Single durable write | 449 ms | **26–28 ms** |
+| File growth per single write | 20.8 MB | **3.4 MB** |
+| Warm recall (median) | 23–27 ms | **8.4–8.8 ms** |
+| RSS of one handle after 1,000 recalls | 115–158 MB | **34–54 MB** |
+
+Recall@10 (`ann_recall_grid_v2`, every cell) and ranking_v2 hit@1 are
+unchanged.
+
+### Changed
+
+- **Opening no longer reads the WAL region.** Recovery checks the first
+  frame header and stops when its transaction is already checkpointed;
+  before, every open read, checksummed and copied the whole region (26 MB
+  at 100K) to discard it. The CRC-32 is now table-driven (slice-by-8),
+  bit-identical to the old one, which also speeds every commit.
+- **The ANN index is persisted every 64 commits or 1,000 changed vectors,**
+  and on `close()`, the new `Mnemo::flush_index()`, a build/rebuild/drop,
+  and snapshot restore, instead of on every flush. A plain flush rewrites
+  only the catalog. Records written since the persisted index (found by
+  page order, so updates count too) are re-assigned when it's next loaded,
+  and deleted ids are pruned. `INDEX_PERSIST_EVERY_COMMITS` and
+  `INDEX_PERSIST_EVERY_CHANGES` are exported. The MCP server closes the
+  file on stdin EOF, so the index is persisted then.
+- **The ANN index loads on first use** (the first recall, `stats()`, or a
+  flush once 1,000 records are newer than it), not at open. `has_index()`
+  is true for a persisted, unloaded index.
+- **Turns, essence items and thread links stay out of the ANN index**
+  (R-004.2). `build_index` indexes facts only, and an index persisted by an
+  earlier version is pruned on load. A recall whose filter pins
+  `_mnemo.thread` scans that thread's records exactly; one restricted to
+  those kinds skips the index.
+- **One lazy handle scan** builds the key-slot, superseded, essence,
+  onboarding and thread caches, which `put` and `delete` then keep current.
+  Warm `about()` + `about_essence()` + `essence()` take 0.2 ms at 100K, and
+  ingesting one turn takes 0.008 ms with no full scan (it was two full
+  scans per call). The first such call on a fresh handle still decrypts
+  every record once (≈ 1 s at 100K); `set_embedder` triggers it, because
+  it reads the manifest through `about()`.
+- **Smaller in-memory maps:** the id → catalog-row map is a 4-byte-per-slot
+  table and the ANN assignment a compact `u128 → u32` map (8.6 → 3.1 MB at
+  100K).
+- **The page cache default is 1024 pages (8 MiB), down from 8192 (64
+  MiB).** At 10K and 100K memories the old cache was most of a handle's RSS.
+  Workloads that rerank many candidates over a file that fits in memory can
+  raise it with `set_cache_capacity` (at 10K, the 500-rerank grid cells
+  take about 4.8 ms instead of 2.7 ms at the new default).
+- **The PQ shortlist scan** sums a flat distance table with four unrolled
+  accumulators (the default 100K grid cell: 10.65 → 6.97 ms).
+- **`delete` and `update` keep the 12.1 key caches** instead of dropping
+  them.
+
+### Added
+
+- **Raw-key databases (R-004.5):** `Mnemo::create_with_key`,
+  `open_with_key`, `open_read_only_with_key`, `rekey_with_key`,
+  `compact_file_with_key` and `generate_key`, for 32-byte keys held by an
+  OS keychain. The header records the Argon2id floor (`KdfParams::raw_key`,
+  8 KiB, one pass), so opening skips the KDF cost. Python:
+  `mnemo.open_with_key(path, key, dimensions=None, read_only=False)`,
+  `mnemo.generate_key()` and `db.rekey_with_key(key)`. `KdfParams` derives
+  `PartialEq` and `Eq`.
+- **`examples/device_budget.rs`** (P-0): disk per memory by part, RSS of one
+  handle, open, first and warm recall, durable writes and their file
+  growth, the `about`/essence and ingest caches, and raw-key open, at
+  1K/10K/100K. Each phase runs in its own process; `--only` and `--sizes`
+  pick a subset.
+- **`.github/workflows/size.yml`:** a manual job reporting the stripped
+  Python extension and CLI sizes on arm64 Linux and macOS.
+- `ann_recall_grid_v2` honours `ANN_GRID_OUT=path` to write its block to a
+  scratch file.
+
+### Fixed
+
+- **CLI `recall` lock fallback (R-004.4):** the "running read-only" notice
+  printed even when the read-only open then failed. It's printed only after
+  that open succeeds.
+
 ## [0.9.1] — 2026-11-07
 
 PR 12.7d: the gaps left in Phase 12.7, found in the v0.9.0 catch-up and
@@ -2393,7 +2483,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/toarchkumar/mnemo/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/toarchkumar/mnemo/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/toarchkumar/mnemo/compare/v0.8.1...v0.9.0
 [0.5.2]: https://github.com/toarchkumar/mnemo/compare/v0.5.1...v0.5.2
