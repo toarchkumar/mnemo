@@ -93,7 +93,7 @@ pub const INDEX_PERSIST_EVERY_CHANGES: usize = 1_000;
 
 /// FMT-9d: default weight ε of the normalised BM25 score in hybrid recall
 /// (`relevance = similarity + ε · bm25 / max bm25`).
-pub const DEFAULT_TEXT_WEIGHT: f32 = 0.5;
+pub const DEFAULT_KEYWORD_WEIGHT: f32 = 0.5;
 
 /// FMT-9b: default [`Mnemo::set_vector_cache_budget`]: the fp16 vector
 /// column stays resident while it fits (100K × 384 dims is about 77 MB) and
@@ -122,6 +122,12 @@ pub const V9_DEFAULT_MAX_SNAPSHOTS: usize = 16;
 const V9_SNAPSHOT_KEEP_SECS: i64 = 24 * 3600;
 /// FMT-9c: the pin cap never drops below 128 pages (1 MiB).
 const V9_PIN_FLOOR_PAGES: u64 = 128;
+
+/// FMT-9d: the layout byte at the start of a v9 ANN index run (1: the
+/// whole IVF+PQ index, followed by delta runs). A reader treats an unknown
+/// layout as no index, so a later layout (partition-major, PERF-2) ships
+/// without a format bump.
+const V9_INDEX_LAYOUT: u8 = 1;
 
 /// FMT-9b: how many sparse vector pages one commit folds into its new
 /// pages (the vacuum). Bounded so a commit's cost stays bounded.
@@ -1061,16 +1067,18 @@ pub struct RecallRequest {
     /// ([`Mnemo::recall_budgeted`]): `true` iff at least one scored
     /// hit was dropped by this budget, `false` otherwise.
     pub max_bytes: Option<usize>,
-    /// FMT-9d (Phase 2, v9 files): keyword query for hybrid recall. Its
-    /// BM25 scores, divided by the best one for this query, are added to
-    /// each candidate's similarity with weight [`RecallRequest::text_weight`]
-    /// before the usual scoring. With an empty `query` vector
-    /// ([`RecallRequest::text`]), recall is keyword-only. `None` (the
-    /// default) is plain vector recall.
-    pub text_query: Option<String>,
+    /// FMT-9d (Phase 2, v9 files): **identifiers or exact terms to match**
+    /// (a version, a PR number, a function name) for hybrid recall. Don't
+    /// paste the question: the vector covers its meaning, and its common
+    /// words would match the wrong records. BM25 scores, divided by this
+    /// query's best, are added to each candidate's similarity with weight
+    /// [`RecallRequest::keyword_weight`] before the usual scoring. With an
+    /// empty `query` vector ([`RecallRequest::keywords_only`]), recall is
+    /// keyword-only. `None` (the default) is plain vector recall.
+    pub keywords: Option<String>,
     /// FMT-9d: weight ε of the normalised BM25 score in hybrid recall
-    /// (default [`DEFAULT_TEXT_WEIGHT`]).
-    pub text_weight: f32,
+    /// (default [`DEFAULT_KEYWORD_WEIGHT`]).
+    pub keyword_weight: f32,
     /// FMT-9d: BM25 term-frequency saturation `k1` (default 1.2).
     pub bm25_k1: f32,
     /// FMT-9d: BM25 length normalisation `b` (default 0.75).
@@ -1092,29 +1100,31 @@ impl RecallRequest {
             track_access: true,
             filter: Filter::default(),
             max_bytes: None,
-            text_query: None,
-            text_weight: DEFAULT_TEXT_WEIGHT,
+            keywords: None,
+            keyword_weight: DEFAULT_KEYWORD_WEIGHT,
             bm25_k1: 1.2,
             bm25_b: 0.75,
         }
     }
 
-    /// FMT-9d (v9 files): a keyword-only request: BM25 over `text`, no
-    /// query vector, so it works without an embedder.
-    pub fn text(text: impl Into<String>) -> Self {
-        Self::new(Vec::new()).text_query(text)
+    /// FMT-9d (v9 files): a keyword-only request: BM25 over `keywords`
+    /// (identifiers or exact terms), no query vector, so it works without
+    /// an embedder.
+    pub fn keywords_only(keywords: impl Into<String>) -> Self {
+        Self::new(Vec::new()).keywords(keywords)
     }
 
-    /// FMT-9d (v9 files): add a keyword query (hybrid recall when the
-    /// request also has a vector). See [`RecallRequest::text_query`].
-    pub fn text_query(mut self, text: impl Into<String>) -> Self {
-        self.text_query = Some(text.into());
+    /// FMT-9d (v9 files): add identifiers or exact terms to match (hybrid
+    /// recall). Pass identifiers, not the question. See the `keywords`
+    /// field.
+    pub fn keywords(mut self, text: impl Into<String>) -> Self {
+        self.keywords = Some(text.into());
         self
     }
 
     /// FMT-9d: the weight ε of the keyword score in hybrid recall.
-    pub fn text_weight(mut self, w: f32) -> Self {
-        self.text_weight = w;
+    pub fn keyword_weight(mut self, w: f32) -> Self {
+        self.keyword_weight = w;
         self
     }
 
@@ -1442,6 +1452,9 @@ pub struct Mnemo {
     recs: RecPages,
     /// FMT-9d: the BM25 keyword index (v9; unused on v8).
     bm25: Bm25State,
+    /// FMT-9d: test hook: write this layout byte instead of the current
+    /// one (to exercise the unknown-layout path).
+    index_layout_override: Option<u8>,
     /// FMT-9d: during one recall, each keyword match's normalised BM25
     /// score, by id.
     kw: Option<std::collections::HashMap<u128, f32>>,
@@ -1984,9 +1997,23 @@ fn load_index(
         idx.rebuild_assignment();
         return Ok(Some(idx));
     }
+    // v9 index runs start with a layout byte. An index is derived data, so
+    // a layout this build doesn't know means "no index" (recall scans
+    // exactly; `rebuild_index` writes a current one), never an error.
     let err = std::cell::RefCell::new(None);
-    let res: std::result::Result<IvfPqIndex, _> =
-        rmp_serde::from_read(RunReader::new(pager, &err, start, pages, len, gen));
+    let mut rd = RunReader::new(pager, &err, start, pages, len, gen);
+    let mut layout = [0u8; 1];
+    if rd.read_exact(&mut layout).is_err() {
+        drop(rd);
+        return match err.into_inner() {
+            Some(page_err) => Err(page_err),
+            None => Ok(None),
+        };
+    }
+    if layout[0] != V9_INDEX_LAYOUT {
+        return Ok(None);
+    }
+    let res: std::result::Result<IvfPqIndex, _> = rmp_serde::from_read(rd);
     let mut idx = match (res, err.into_inner()) {
         (Ok(i), _) => i,
         (Err(_), Some(page_err)) => return Err(page_err),
@@ -2456,6 +2483,7 @@ impl Mnemo {
             recs: RecPages::default(),
             bm25: Bm25State::default(),
             kw: None,
+            index_layout_override: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain: Vec::new(),
             delta_rows: 0,
@@ -2787,6 +2815,7 @@ impl Mnemo {
                 ..Bm25State::default()
             },
             kw: None,
+            index_layout_override: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -2983,6 +3012,7 @@ impl Mnemo {
                 ..Bm25State::default()
             },
             kw: None,
+            index_layout_override: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -6014,6 +6044,13 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// **Not a stable API.** FMT-9d: write the next whole index with this
+    /// layout byte (an unknown one exercises the "treat as no index" path).
+    #[doc(hidden)]
+    pub fn __set_index_layout_for_testing(&mut self, layout: u8) {
+        self.index_layout_override = Some(layout);
+    }
+
     /// **Not a stable API.** FMT-9d: BM25 segments on disk.
     #[doc(hidden)]
     pub fn __bm25_segments(&self) -> usize {
@@ -6342,7 +6379,7 @@ impl Mnemo {
         // match non-fact kinds skips the ANN, which doesn't hold them.
         // FMT-9d: keyword matches, normalised by the best one.
         self.kw = None;
-        if let Some(text) = &req.text_query {
+        if let Some(text) = &req.keywords {
             let scores = self.bm25_scores(text, req.bm25_k1, req.bm25_b)?;
             let max = scores.values().copied().fold(0.0f32, f32::max);
             if max > 0.0 {
@@ -6422,7 +6459,7 @@ impl Mnemo {
         if req.query.is_empty() {
             (kw, kw)
         } else {
-            (sim + req.text_weight * kw, sim)
+            (sim + req.keyword_weight * kw, sim)
         }
     }
 
@@ -6658,13 +6695,12 @@ impl Mnemo {
     pub fn recall_budgeted(&mut self, req: &RecallRequest) -> Result<RecallResponse> {
         // FMT-9d: keyword recall needs a v9 file's BM25 index; a
         // keyword-only request has no vector.
-        if req.text_query.is_some() && !self.is_v9() {
+        if req.keywords.is_some() && !self.is_v9() {
             return Err(MnemoError::Invalid(
-                "keyword recall (text_query) needs a v9 file; run `mnemo compact` to upgrade"
-                    .into(),
+                "keyword recall (keywords) needs a v9 file; run `mnemo compact` to upgrade".into(),
             ));
         }
-        let keyword_only = req.query.is_empty() && req.text_query.is_some();
+        let keyword_only = req.query.is_empty() && req.keywords.is_some();
         if !keyword_only && req.query.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -7718,7 +7754,13 @@ impl Mnemo {
         } else {
             match &self.ann {
                 Some(ann) => {
-                    Some(rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?)
+                    let mut b =
+                        rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+                    // FMT-9: v9 index runs carry a layout byte first.
+                    if self.is_v9() {
+                        b.insert(0, self.index_layout_override.unwrap_or(V9_INDEX_LAYOUT));
+                    }
+                    Some(b)
                 }
                 None => None,
             }

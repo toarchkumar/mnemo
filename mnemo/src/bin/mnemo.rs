@@ -294,13 +294,18 @@ enum Command {
         /// per line. Mutually exclusive with `--query` and `--text`.
         #[arg(long, conflicts_with_all = ["query", "text"])]
         query_file: Option<String>,
-        /// Query text. With `--embed-cmd` and `--embed-name` it's embedded
-        /// (Phase 3); on a v9 file it's also matched by keyword (BM25,
-        /// hybrid recall). Without an embedder, a v9 file does keyword-only
-        /// recall; a v8 file needs the embedder. Mutually exclusive with
-        /// `--query`/`--query-file`.
+        /// Query text to embed via `--embed-cmd` and `--embed-name`
+        /// (Phase 3). Without an embedder, a v9 file matches it by keyword
+        /// instead (keyword-only recall); a v8 file needs the embedder.
+        /// Mutually exclusive with `--query`/`--query-file`.
         #[arg(long, conflicts_with_all = ["query", "query_file"])]
         text: Option<String>,
+        /// FMT-9d (v9 files): identifiers or exact terms to match (a
+        /// version, a PR number, a function name), not the question. Added
+        /// to vector recall as a BM25 term (hybrid recall); on its own it
+        /// is keyword-only recall.
+        #[arg(long)]
+        keywords: Option<String>,
         #[arg(long, default_value_t = 10)]
         top_k: usize,
         /// Output format.
@@ -1739,6 +1744,7 @@ fn run() -> std::result::Result<(), String> {
             query,
             query_file,
             text,
+            keywords,
             top_k,
             format,
             r#type,
@@ -1758,8 +1764,10 @@ fn run() -> std::result::Result<(), String> {
         } => {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity};
             let pp = passphrase(&pp)?;
-            if query.is_none() && query_file.is_none() && text.is_none() {
-                return Err("recall requires one of --query / --query-file / --text".into());
+            if query.is_none() && query_file.is_none() && text.is_none() && keywords.is_none() {
+                return Err(
+                    "recall requires one of --query / --query-file / --text / --keywords".into(),
+                );
             }
 
             // Open the `.mnemo` file for recall:
@@ -1807,8 +1815,9 @@ fn run() -> std::result::Result<(), String> {
             // handle (`set_embedder`) and run it; it uses the same
             // lock-fallback as the vector branch. The vector branches
             // defer the open until after we've built `req`.
-            // FMT-9d: on a v9 file `--text` is also a keyword query.
-            let mut keyword: Option<String> = None;
+            // FMT-9d: `--keywords` adds a BM25 term; `--text` without an
+            // embedder is keyword-only on v9.
+            let mut keyword: Option<String> = keywords;
             let (q, mut db_opt, mut effective_no_track) = match text {
                 Some(text) if embed_cmd.is_none() => {
                     // No embedder: keyword-only recall, which needs v9.
@@ -1819,7 +1828,9 @@ fn run() -> std::result::Result<(), String> {
                                     (or a v9 file, which can recall by keyword)"
                             .to_string());
                     }
-                    keyword = Some(text);
+                    if keyword.is_none() {
+                        keyword = Some(text);
+                    }
                     (Vec::new(), Some(db), effective_no_track)
                 }
                 Some(text) => {
@@ -1831,9 +1842,6 @@ fn run() -> std::result::Result<(), String> {
                     })?;
                     let (mut db, effective_no_track) =
                         open_recall(&path, &pp, no_track).map_err(fmt)?;
-                    if db.__format_version() >= 9 {
-                        keyword = Some(text.clone());
-                    }
                     let identity = EmbedderIdentity {
                         name: ename,
                         dimensions: db.dimensions(),
@@ -1853,13 +1861,14 @@ fn run() -> std::result::Result<(), String> {
                     };
                     (vector, Some(db), effective_no_track)
                 }
+                None if query.is_none() && query_file.is_none() => (Vec::new(), None, no_track),
                 None => (resolve_query(query, query_file)?, None, no_track),
             };
 
             let metric = parse_metric(&metric)?;
             let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
             if let Some(k) = keyword {
-                req = req.text_query(k);
+                req = req.keywords(k);
             }
             if let Some(s) = r#type {
                 req = req.types(parse_memory_types(&s)?);

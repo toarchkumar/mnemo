@@ -1118,7 +1118,7 @@ def test_open_with_key():
 
 
 def test_keyword_and_hybrid_recall_on_v9():
-    """FMT-9d: `text_query` on a v9 file (created through the dev switch)."""
+    """FMT-9d: `keywords` on a v9 file (created through the dev switch)."""
     old = os.environ.get("MNEMO_DEV_FORMAT")
     os.environ["MNEMO_DEV_FORMAT"] = "9"
     try:
@@ -1131,12 +1131,12 @@ def test_keyword_and_hybrid_recall_on_v9():
             db.remember("the user likes tea", "semantic", [0.0, 0.0, 1.0, 0.0])
             db.flush()
             # Keyword-only: no vector, no embedder.
-            hits = db.recall([], text_query="BP.1", top_k=3)
+            hits = db.recall([], keywords="BP.1", top_k=3)
             assert hits[0]["content"].startswith("shipped BP.1"), hits
             assert all("tea" not in h["content"] for h in hits)
             # Hybrid: the keyword match lifts a weaker vector match.
-            hits = db.recall([0.0, 0.0, 1.0, 0.2], text_query="BP.1",
-                             text_weight=2.0, top_k=1)
+            hits = db.recall([0.0, 0.0, 1.0, 0.2], keywords="BP.1",
+                             keyword_weight=2.0, top_k=1)
             assert hits[0]["content"].startswith("shipped BP.1"), hits
             db.close()
     finally:

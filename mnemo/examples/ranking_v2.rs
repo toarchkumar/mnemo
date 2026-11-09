@@ -297,7 +297,7 @@ fn run_pass(
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
         {
-            req = req.text_query(q.text.clone()).text_weight(w);
+            req = req.keywords(q.text.clone()).keyword_weight(w);
         }
         let hits = db.recall(&req)?;
         let hit_ids: Vec<(Ulid, f32)> = hits.iter().map(|h| (h.memory.id, h.similarity)).collect();

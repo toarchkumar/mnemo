@@ -71,6 +71,28 @@ still change between PRs.
     applies to v8 only.
   - At 100K, a durable write takes 15 ms (v8: 27 ms) and the file 1.45 KB
     per memory.
+  - Under the default retention, a very small file keeps about its last
+    20 commits of history, since the 1 MiB pin floor fills that fast. Set
+    `set_max_snapshots(n)` to keep exactly `n`.
+- **9d: hybrid recall (Phase 2), v9 files.**
+  - `RecallRequest::keywords(..)` adds identifiers or exact terms to match
+    (a version, a PR number, a function name). Their BM25 scores, divided
+    by the query's best, are added to the similarity with weight
+    `keyword_weight` (`DEFAULT_KEYWORD_WEIGHT` 0.5).
+  - `RecallRequest::keywords_only(..)` recalls by keyword with no vector
+    or embedder.
+  - Pass identifiers, not the question: the vector covers its meaning.
+  - On ranking_v2's Phase 6 identifier queries: pr_exact 0.2 → 1.0,
+    release_exact 0.8 → 1.0, hit@1 0.567 → 0.767. Recall without keywords
+    is unchanged.
+  - **Surfaces:** CLI `recall --keywords "<terms>"` (`--text` without an
+    embedder is keyword-only on v9; with one it stays vector-only), Python
+    `recall(..., keywords=, keyword_weight=)`, Node `keywords`, and MCP
+    `recall`'s `keywords`.
+  - The v9 index run carries a layout byte; a layout this build doesn't
+    know is treated as no index.
+  - First recall at 100K is about 120 ms, up from about 95 ms in v0.10.
+    Partition-major index loading (PERF-2) is planned.
 
 ### Fixed
 

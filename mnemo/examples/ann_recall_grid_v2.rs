@@ -284,10 +284,13 @@ fn sweep_tier(n: usize) -> Value {
 }
 
 fn main() {
-    let tiers: Vec<Value> = [10_000usize, 100_000]
-        .iter()
-        .map(|&n| sweep_tier(n))
-        .collect();
+    // `ANN_GRID_TIERS=20000,50000` picks the corpus sizes (FMT-9: the
+    // no-ANN threshold check); the default is 10K and 100K.
+    let sizes: Vec<usize> = std::env::var("ANN_GRID_TIERS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_else(|| vec![10_000, 100_000]);
+    let tiers: Vec<Value> = sizes.iter().map(|&n| sweep_tier(n)).collect();
 
     // `ANN_GRID_OUT=path` writes only this block to `path` (PERF-1 used it
     // to check the recall gate without rewriting the perf JSON).

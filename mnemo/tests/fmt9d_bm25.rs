@@ -159,7 +159,7 @@ fn thread_turns_are_not_keyword_indexed_and_v8_has_no_index() {
     assert!(top(&mut v8, "gamma").is_empty());
 }
 
-// --- FMT-9d.2: text_query and hybrid recall --------------------------------
+// --- FMT-9d.2: keywords and hybrid recall --------------------------------
 
 #[test]
 fn keyword_only_recall_needs_no_vector() {
@@ -173,7 +173,11 @@ fn keyword_only_recall_needs_no_vector() {
     db.remember(mem("the user prefers tea", 2)).unwrap();
     db.flush().unwrap();
     let hits = db
-        .recall(&RecallRequest::text("BP.1").top_k(5).track_access(false))
+        .recall(
+            &RecallRequest::keywords_only("BP.1")
+                .top_k(5)
+                .track_access(false),
+        )
         .unwrap();
     assert_eq!(hits[0].memory.id, exact);
     assert_eq!(hits.len(), 2, "only keyword matches come back");
@@ -208,7 +212,7 @@ fn hybrid_recall_lifts_an_exact_keyword_match() {
     let hybrid = db
         .recall(
             &RecallRequest::new(q)
-                .text_query("BP.1")
+                .keywords("BP.1")
                 .top_k(2)
                 .track_access(false),
         )
@@ -222,7 +226,7 @@ fn keyword_recall_on_v8_is_a_clear_error() {
     let dir = tempdir().unwrap();
     let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(8)).unwrap();
     db.remember(mem("gamma", 0)).unwrap();
-    match db.recall(&RecallRequest::text("gamma")) {
+    match db.recall(&RecallRequest::keywords_only("gamma")) {
         Err(MnemoError::Invalid(msg)) => assert!(msg.contains("v9"), "{msg}"),
         other => panic!("expected Invalid, got {:?}", other.map(|h| h.len())),
     }
@@ -259,4 +263,82 @@ fn cli_recall_text_without_an_embedder_is_keyword_recall_on_v9() {
     );
     assert!(stdout.contains("Shipped BP.1"), "{stdout}");
     assert!(!stdout.contains("tea"), "{stdout}");
+}
+
+#[test]
+fn cli_keywords_flag_is_keyword_recall_and_text_is_not_mixed_in() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+        db.remember(mem("Shipped BP.1 with the new parser", 0))
+            .unwrap();
+        db.remember(mem("the user prefers tea", 1)).unwrap();
+        db.close().unwrap();
+    }
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args([
+            "recall",
+            path.to_str().unwrap(),
+            "--keywords",
+            "BP.1",
+            "--format",
+            "json",
+        ])
+        .env("MNEMO_PASSPHRASE", "pw")
+        .output()
+        .expect("spawn mnemo recall");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("Shipped BP.1"), "{stdout}");
+    assert!(!stdout.contains("tea"), "{stdout}");
+}
+
+#[test]
+fn an_unknown_index_layout_is_treated_as_no_index() {
+    // The dev override lets a small file build an index; no other test in
+    // this binary builds one.
+    std::env::set_var("MNEMO_DEV_ANN_MIN_FACTS", "0");
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let ids: Vec<Ulid> = {
+        let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+        let ids = (0..300)
+            .map(|i| db.remember(mem(&format!("note {i}"), i)).unwrap())
+            .collect();
+        db.__set_index_layout_for_testing(99);
+        assert!(db.build_index().unwrap().partitions > 0);
+        db.close().unwrap();
+        ids
+    };
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let hits = db
+        .recall(
+            &RecallRequest::new(mem("", 42).vector)
+                .metric(mnemo_engine::Metric::L2)
+                .top_k(1)
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hits[0].memory.id, ids[42], "exact recall still works");
+    assert!(
+        !db.has_index(),
+        "a layout this build doesn't know is no index"
+    );
+    // Rebuilding writes a current one.
+    db.build_index().unwrap();
+    db.close().unwrap();
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    db.recall(
+        &RecallRequest::new(mem("", 7).vector)
+            .top_k(1)
+            .track_access(false),
+    )
+    .unwrap();
+    assert!(db.has_index());
 }

@@ -493,11 +493,12 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged).",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). FMT-9d (v9 files): put identifiers or exact terms from the request (a version like v0.9.0, a PR number, a function name) in `keywords` to add keyword matching; do not paste the question there. `keywords` alone (no `query`/`text`) is keyword-only recall.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": { "type": "array", "items": { "type": "number" }, "description": "Explicit query vector; mutually exclusive with `text`." },
+                        "keywords": { "type": "string", "description": "Identifiers or exact terms to match (a version, a PR number, a function name). Not the question. Needs a v9 file." },
                         "text": { "type": "string", "description": "Query text; embedded by the server's registered embedder. Mutually exclusive with `query`." },
                         "top_k": { "type": "integer", "default": 10 },
                         "types": { "type": "array", "items": { "type": "string" } },
@@ -1441,10 +1442,12 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
                 .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'text' must be a string"))?;
             embed_text_via_server(db, "recall", text)?
         }
+        // FMT-9d: `keywords` alone is keyword-only recall.
+        (None, None) if args.get("keywords").is_some() => Vec::new(),
         (None, None) => {
             return Err(RpcError::new(
                 INVALID_PARAMS,
-                "recall: missing 'query' or 'text'",
+                "recall: missing 'query', 'text' or 'keywords'",
             ))
         }
     };
@@ -1480,6 +1483,12 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
         .top_k(top_k)
         .metric(metric)
         .track_access(true);
+    if let Some(k) = args.get("keywords") {
+        let k = k
+            .as_str()
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'keywords' must be a string"))?;
+        req = req.keywords(k);
+    }
     if let Some(types) = args.get("types").and_then(|v| v.as_array()) {
         let parsed: Vec<MemoryType> = types
             .iter()
