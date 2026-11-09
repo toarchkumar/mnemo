@@ -799,6 +799,36 @@ impl Default for Bm25Manifest {
 struct DocStats {
     docs: std::collections::HashMap<u32, (usize, u16)>,
     avgdl: f32,
+    /// FMT-9f: the sum of the live documents' lengths, so `put` and
+    /// `delete` keep `avgdl` current without a rescan of the rows.
+    total: u64,
+}
+
+impl DocStats {
+    /// FMT-9f: drop document `doc` (if live) and keep `avgdl` current.
+    fn remove(&mut self, doc: u32) {
+        if let Some((_, len)) = self.docs.remove(&doc) {
+            self.total = self.total.saturating_sub(len as u64);
+            self.refresh();
+        }
+    }
+
+    /// FMT-9f: add document `doc` at catalog row `row`.
+    fn insert(&mut self, doc: u32, row: usize, len: u16) {
+        if let Some((_, old)) = self.docs.insert(doc, (row, len)) {
+            self.total = self.total.saturating_sub(old as u64);
+        }
+        self.total += len as u64;
+        self.refresh();
+    }
+
+    fn refresh(&mut self) {
+        self.avgdl = if self.docs.is_empty() {
+            1.0
+        } else {
+            self.total as f32 / self.docs.len() as f32
+        };
+    }
 }
 
 /// FMT-9d: the handle's BM25 state.
@@ -3283,6 +3313,14 @@ impl Mnemo {
     /// FMT-9d: make sure the live-document stats and the segment dicts are
     /// loaded. Stats come from the rows; dicts from each segment's head.
     fn ensure_bm25(&mut self) -> Result<()> {
+        self.ensure_bm25_stats();
+        self.ensure_bm25_dicts()
+    }
+
+    /// FMT-9d: the live-document stats, from the rows (once per handle, or
+    /// after a catalog rebase moves rows; `put` and `delete` keep them
+    /// current, FMT-9f).
+    fn ensure_bm25_stats(&mut self) {
         if self.bm25.stats.is_none() {
             let mut docs = std::collections::HashMap::new();
             let mut total = 0u64;
@@ -3297,13 +3335,19 @@ impl Mnemo {
                     }
                 }
             }
-            let avgdl = if docs.is_empty() {
-                1.0
-            } else {
-                total as f32 / docs.len() as f32
+            let mut stats = DocStats {
+                docs,
+                avgdl: 1.0,
+                total,
             };
-            self.bm25.stats = Some(DocStats { docs, avgdl });
+            stats.refresh();
+            self.bm25.stats = Some(stats);
         }
+    }
+
+    /// FMT-9d: the segment dicts, read from each segment's head once; after
+    /// that a commit adds or replaces only the segments it wrote (FMT-9f).
+    fn ensure_bm25_dicts(&mut self) -> Result<()> {
         if self.bm25.dicts.is_none() {
             let mut dicts = Vec::with_capacity(self.bm25.manifest.segments.len());
             for &t in &self.bm25.manifest.segments {
@@ -3380,7 +3424,8 @@ impl Mnemo {
             .collect();
         // Mostly dead (a mass delete): merge everything, so the dead
         // postings go and the old segments' pages can be reused or cut off.
-        self.ensure_bm25()?;
+        // FMT-9f: only the stats; the dicts aren't needed to write a segment.
+        self.ensure_bm25_stats();
         let written: u64 = self.bm25.manifest.seg_docs.iter().map(|&d| d as u64).sum();
         let live_docs = self.bm25.stats.as_ref().map_or(0, |s| s.docs.len()) as u64;
         let mostly_dead = !segs.is_empty() && written > 64 && live_docs * 2 < written;
@@ -4144,7 +4189,9 @@ impl Mnemo {
                 self.bm25.pending.push((r.doc, terms));
             }
         }
-        self.bm25.stats = None;
+        // FMT-9f: keep the BM25 stats current (below, once the row is
+        // placed) instead of rescanning every row at the next commit.
+        let bm25_new = tags.filter(|r| r.doc != 0 && bm25_kind(r.kind));
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
         let (prev_accessed, prev_count) = match self.index.get(id_u, &self.catalog) {
@@ -4185,6 +4232,11 @@ impl Mnemo {
                         self.release_pages(old.start_page, old.page_count as u64);
                     }
                 }
+                if let (Some(stats), Some(old)) = (self.bm25.stats.as_mut(), self.catalog[idx].v9) {
+                    if !self.catalog[idx].deleted && old.doc != 0 {
+                        stats.remove(old.doc);
+                    }
+                }
                 self.catalog[idx] = entry;
                 self.touch(idx);
             }
@@ -4192,6 +4244,11 @@ impl Mnemo {
                 self.index.insert(id_u, self.catalog.len(), &self.catalog);
                 self.touch(self.catalog.len());
                 self.catalog.push(entry);
+            }
+        }
+        if let (Some(stats), Some(r)) = (self.bm25.stats.as_mut(), bm25_new) {
+            if let Some(idx) = self.index.get(id_u, &self.catalog) {
+                stats.insert(r.doc, idx, r.doc_len);
             }
         }
         self.dirty_catalog = true;
@@ -4418,7 +4475,12 @@ impl Mnemo {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
             self.touch(idx);
-            self.bm25.stats = None;
+            // FMT-9f: drop its document from the stats in place.
+            if let (Some(stats), Some(r)) = (self.bm25.stats.as_mut(), entry.v9) {
+                if r.doc != 0 {
+                    stats.remove(r.doc);
+                }
+            }
             if self.is_v9() {
                 self.kill_record(idx, &entry);
                 self.kill_vector(idx, &entry);
@@ -7287,9 +7349,9 @@ impl Mnemo {
         // FMT-9b: a v9 file below V9_ANN_MIN_FACTS recalls by an exact fp16
         // scan, which is faster than the index there and costs no disk.
         // Report it as an index with no partitions, and drop a stale one.
-        // `MNEMO_DEV_ANN_MIN_FACTS` (hidden; tests and benchmarks only)
-        // overrides the threshold, so the index suites and the recall grid
-        // can exercise a v9 ANN on small files.
+        // `MNEMO_DEV_ANN_MIN_FACTS` overrides the threshold. Unsupported,
+        // for tests (and the recall-grid bench) only: it lets the index
+        // suites exercise a v9 ANN on small files. Not documented.
         let min_facts = std::env::var("MNEMO_DEV_ANN_MIN_FACTS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
@@ -8079,10 +8141,33 @@ impl Mnemo {
             self.index_chain_ops = n;
         }
         if let Some((segs, seg_docs)) = new_bm25 {
+            // FMT-9f: keep the loaded dicts and read only the new segment's
+            // (a merge replaced the segments from `kept` on), instead of
+            // dropping them all and reloading every dict on next use.
+            let kept = self
+                .bm25
+                .manifest
+                .segments
+                .iter()
+                .zip(&segs)
+                .take_while(|(a, b)| a == b)
+                .count();
+            if let Some(mut dicts) = self.bm25.dicts.take() {
+                dicts.truncate(kept);
+                let mut ok = dicts.len() == kept;
+                for &t in &segs[kept..] {
+                    match load_segment_dict(&mut self.pager, tuple_ptr(t)) {
+                        Ok(d) if ok => dicts.push(d),
+                        _ => ok = false,
+                    }
+                }
+                if ok {
+                    self.bm25.dicts = Some(dicts);
+                }
+            }
             self.bm25.manifest.segments = segs;
             self.bm25.manifest.seg_docs = seg_docs;
             self.bm25.pending.clear();
-            self.bm25.dicts = None;
         }
         if persist_index {
             self.index_rebase = false;

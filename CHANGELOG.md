@@ -159,6 +159,17 @@ exact identifiers.
     the shipped default cells, recall@10 against v8 is 0.994 vs 0.932
     at 20K, 0.974 vs 0.966 at 50K and 0.978 vs 0.982 at 100K, at 1.0 /
     1.9 / 3.5 ms per query (v8: 1.6 / 3.7 / 7.4 ms).
+  - **Fixed: v9 commits no longer rescan the file for keyword search.**
+    Each write used to rebuild the BM25 document stats from every row and
+    reload every segment's dictionary at the next commit, which cost about
+    9 ms per commit at 100K memories. Both are now kept current
+    incrementally. A durable single write at 100K is about 16.5 ms
+    (it was about 23 ms during FMT-9 development; v0.10 on v8: about
+    28 ms). A batch of 100 is about 31 ms.
+  - The first recall on a fresh handle at 10K memories (no ANN index on
+    v9 below 20K) is about 9 ms on the M1 Pro, down from about 11 ms in
+    v0.10. Most of it is filling the in-memory vector column the first
+    time (decrypting its pages); making that lazier is planned (PERF-2).
   - Fixed: after a v9 index base in a layout this build doesn't know
     loaded as "no index", `build_index` and `drop_index` now also free
     its delta runs (they were left unreferenced until compaction).
