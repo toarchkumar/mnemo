@@ -1,0 +1,11 @@
+// Copy to Local.xcconfig and fill in.
+//
+// DEVELOPMENT_TEAM: your team id. With a free Apple ID (a "Personal Team"),
+// open Xcode > Settings > Accounts, sign in, and copy the team id shown
+// there (10 characters), or pick the team in the target's Signing &
+// Capabilities tab once and copy the value Xcode writes.
+DEVELOPMENT_TEAM = ABCDE12345
+
+// A bundle id of your own: personal teams can't share one, and the App
+// Group is derived from it (group.<bundle id>).
+MNEMO_BUNDLE_ID = com.example.yourname.mnemo-sample

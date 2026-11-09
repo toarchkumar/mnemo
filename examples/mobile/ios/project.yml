@@ -1,0 +1,97 @@
+# The MNemo iOS sample (MOBILE-1d), with the local Swift package from
+# mnemo/bindings/swift. Generate the Xcode project with XcodeGen:
+#
+#   ../../../mnemo/bindings/swift/scripts/build-xcframework.sh   # once, and after engine changes
+#   cp Local.xcconfig.example Local.xcconfig                     # then set DEVELOPMENT_TEAM
+#   xcodegen generate && open MnemoSample.xcodeproj
+#
+# Targets:
+# - MnemoSample: the notes demo, the Benchmark and the background test.
+# - SizeProbe / SizeBaseline: two one-screen apps, with and without MNemo,
+#   for CI's binary-size delta (the size report in examples/mobile/README.md).
+name: MnemoSample
+options:
+  bundleIdPrefix: io.github.toarchkumar.mnemo
+  deploymentTarget:
+    iOS: "16.0"
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
+packages:
+  Mnemo:
+    path: ../../../mnemo/bindings/swift
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.11.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  MnemoSample:
+    type: application
+    platform: iOS
+    sources: [MnemoSample]
+    dependencies:
+      - package: Mnemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MNEMO_BUNDLE_ID)
+        INFOPLIST_KEY_CFBundleDisplayName: MNemo
+        # The Benchmark's JSON lands in Documents, visible in the Files app.
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        # The App Group group.<bundle id>, for the background test.
+        CODE_SIGN_ENTITLEMENTS: MnemoSample/MnemoSample.entitlements
+        # The build-info script runs git.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postCompileScripts:
+      - name: Write BuildInfo.json
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          ROOT="${SRCROOT}/../../.."
+          COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+          if git -C "$ROOT" diff --quiet HEAD -- mnemo examples/mobile/ios 2>/dev/null; then DIRTY=false; else DIRTY=true; fi
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/mnemo/bindings/uniffi/Cargo.toml" | head -1)
+          OUT="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          mkdir -p "$OUT"
+          printf '{"mnemo_version":"%s","commit":"%s","dirty":%s,"configuration":"%s","xcode":"%s"}\n' \
+            "$VERSION" "$COMMIT" "$DIRTY" "$CONFIGURATION" "$XCODE_PRODUCT_BUILD_VERSION" > "$OUT/BuildInfo.json"
+  SizeProbe:
+    type: application
+    platform: iOS
+    sources: [SizeProbe]
+    dependencies:
+      - package: Mnemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MNEMO_BUNDLE_ID).sizeprobe
+  SizeBaseline:
+    type: application
+    platform: iOS
+    sources: [SizeBaseline]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MNEMO_BUNDLE_ID).sizebaseline
+schemes:
+  MnemoSample:
+    build:
+      targets:
+        MnemoSample: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    archive:
+      config: Release
+  SizeProbe:
+    build:
+      targets:
+        SizeProbe: all
+  SizeBaseline:
+    build:
+      targets:
+        SizeBaseline: all

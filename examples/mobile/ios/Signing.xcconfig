@@ -1,0 +1,6 @@
+// Signing for the sample. Put your own values in Local.xcconfig (copy
+// Local.xcconfig.example; it's gitignored), so `xcodegen generate` never
+// overwrites them.
+MNEMO_BUNDLE_ID = io.github.toarchkumar.mnemo.sample
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"

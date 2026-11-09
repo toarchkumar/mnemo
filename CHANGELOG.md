@@ -91,6 +91,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `libloading`, via the experimental Node binding). New jobs: an Android
   `x86_64` build, a release build of the binding on each mobile target
   with a 5 MB stripped-size gate, and `msrv-uniffi`.
+- **The sample apps** (MOBILE-1d, `examples/mobile/`), built against the
+  local packages:
+  - **iOS (SwiftUI, XcodeGen):** a notes demo using Apple's built-in
+    `NLEmbedding` sentence embedding; a Benchmark screen with the
+    `device_budget` cells at 1K and 10K and JSON export; and a background
+    test that writes to a store in an App Group container, so a device run
+    can check for `0xdead10cc`. It also shows the file's protection class.
+  - **Android (Compose):** the same demo with a labelled demo embedder, the
+    Benchmark screen, and a self-test for the R8-minified release build.
+  - `examples/mobile/README.md` is the run sheet for the on-device checks.
+- CI: the `swift` job builds the iOS sample for the simulator and reports
+  MNemo's stripped binary-size delta. The `kotlin` job builds the Android
+  sample's release APK with R8, runs `zipalign -c -P 16`, and reports the
+  APK's size. The `android-emulator` workflow installs that APK and runs
+  its self-test.
 
 ## [0.11.0] — 2026-11-08
 

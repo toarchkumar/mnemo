@@ -3,7 +3,8 @@ name: Android emulator
 # The Kotlin package's instrumented tests (MOBILE-1c) on Android emulators:
 # the Android Keystore, the ON_STOP flush through the real process
 # lifecycle, the default directory, and loading the native libraries on a
-# 4 KB and a 16 KB page-size image. Nightly, on release tags, and by hand
+# 4 KB and a 16 KB page-size image; then the Android sample's R8-minified
+# release APK and its self-test (MOBILE-1d). Nightly, on release tags, and by hand
 # (Actions > Android emulator > Run workflow). The JVM host tests run on
 # every PR in ci.yml's `kotlin` job.
 on:
@@ -88,9 +89,20 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: mnemo/bindings/kotlin
+          # Then the sample's R8-minified release APK (MOBILE-1d): install it,
+          # launch its self-test, and read the result from logcat. It proves
+          # the library's consumer rules keep what JNA and the bindings need
+          # at run time, not just at build time.
           script: |
             adb shell getconf PAGE_SIZE
             gradle --no-daemon --stacktrace connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.expectPageSize=${{ matrix.page }}
+            gradle --no-daemon --stacktrace -p ../../../examples/mobile/android assembleRelease
+            adb install -r ../../../examples/mobile/android/app/build/outputs/apk/release/app-release.apk
+            adb logcat -c
+            adb shell am start -W -n io.github.toarchkumar.mnemo.sample/.MainActivity --ez selftest true
+            for i in $(seq 1 60); do adb logcat -d -s MnemoSelfTest:I | grep -q MNEMO_SELFTEST && break; sleep 1; done
+            adb logcat -d -s MnemoSelfTest:I AndroidRuntime:E | tee selftest.log
+            grep -q "MNEMO_SELFTEST ok" selftest.log
 
       - name: Test counts
         if: always()
@@ -116,4 +128,5 @@ jobs:
           path: |
             mnemo/bindings/kotlin/build/reports/androidTests/
             mnemo/bindings/kotlin/build/outputs/androidTest-results/
+            mnemo/bindings/kotlin/selftest.log
           if-no-files-found: ignore
