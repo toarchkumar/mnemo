@@ -366,12 +366,12 @@ jobs:
         working-directory: mnemo/bindings/swift
         run: swift test
 
-      - name: xcodebuild test (iOS simulator)
-        working-directory: mnemo/bindings/swift
+      - name: xcodebuild test (iOS simulator, hosted by TestHost for the Keychain)
+        working-directory: mnemo/bindings/swift/TestHost
         run: |
           set -o pipefail
-          xcodebuild -list
-          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; s=json.load(sys.stdin)["workspace"]["schemes"]; print("Mnemo-Package" if "Mnemo-Package" in s else "Mnemo")')
+          brew install xcodegen
+          xcodegen generate
           UDID=$(xcrun simctl list devices available --json | python3 -c '
           import json, sys
           devices = json.load(sys.stdin)["devices"]
@@ -381,8 +381,9 @@ jobs:
                       if d["name"].startswith("iPhone"):
                           print(d["udid"]); sys.exit()
           ')
-          echo "scheme $SCHEME, simulator $UDID"
-          xcodebuild test -scheme "$SCHEME" -destination "id=$UDID" 2>&1 | tee xcodebuild.log | grep -E "Test (run|Suite|case)|✔|✘|passed|failed|error:" || true
+          echo "simulator $UDID"
+          xcodebuild test -project MnemoTestHost.xcodeproj -scheme MnemoHostTests -destination "id=$UDID" 2>&1 \
+            | tee xcodebuild.log | grep -E "^(✔|✘|◇ Test run)|Test run with|error:" || true
           tail -5 xcodebuild.log
           grep -q "TEST SUCCEEDED" xcodebuild.log
 

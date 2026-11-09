@@ -1,0 +1,53 @@
+# A minimal iOS app that hosts the package's tests on a simulator, because
+# the Keychain needs an app's entitlements (`swift test`'s bare runner gets
+# errSecMissingEntitlement, -34018). Generate the project with XcodeGen:
+#
+#   cd mnemo/bindings/swift/TestHost && xcodegen generate
+#   xcodebuild test -project MnemoTestHost.xcodeproj -scheme MnemoHostTests \
+#     -destination 'platform=iOS Simulator,name=iPhone 16'
+#
+# The test bundle compiles the same sources as the package's test target
+# (../Tests/MnemoTests), so every suite runs here, the iOS-only ones included.
+name: MnemoTestHost
+options:
+  bundleIdPrefix: io.github.toarchkumar.mnemo
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  Mnemo:
+    path: ..
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+targets:
+  MnemoTestHost:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.toarchkumar.mnemo.testhost
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+  MnemoHostTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../Tests/MnemoTests
+    dependencies:
+      - target: MnemoTestHost
+      - package: Mnemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.toarchkumar.mnemo.testhost.tests
+schemes:
+  MnemoHostTests:
+    build:
+      targets:
+        MnemoTestHost: all
+        MnemoHostTests: [test]
+    test:
+      targets: [MnemoHostTests]

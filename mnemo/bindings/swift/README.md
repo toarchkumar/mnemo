@@ -15,8 +15,17 @@ edits that repo by hand.
 cd mnemo/bindings/swift
 scripts/build-xcframework.sh   # build/MnemoFFI.xcframework + Sources/Mnemo/Generated/
 swift test                     # macOS
-xcodebuild test -scheme Mnemo -destination 'platform=iOS Simulator,name=iPhone 16'
+
+# iOS simulator: the tests run inside a small host app (TestHost/), because
+# the Keychain needs an app's entitlements. The project comes from XcodeGen.
+cd TestHost && xcodegen generate
+xcodebuild test -project MnemoTestHost.xcodeproj -scheme MnemoHostTests \
+  -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
+
+Running the package's own scheme on a simulator (`xcodebuild test -scheme
+Mnemo`) works too, except for the Keychain tests, which fail with
+`errSecMissingEntitlement` (-34018) outside an app.
 
 The script needs the Rust targets `aarch64-apple-ios`,
 `aarch64-apple-ios-sim`, `x86_64-apple-ios` and `aarch64-apple-darwin`. Set
