@@ -74,6 +74,9 @@ if [ -n "$ABIS" ]; then
 fi
 
 echo "==> sizes (bytes)"
-find "$OUT/host" "$OUT/jniLibs" -name 'libmnemo_uniffi.*' 2>/dev/null | sort | while read -r f; do
+# Only the directories this run made (jniLibs is absent with MNEMO_ABIS="").
+DIRS=()
+for d in "$OUT/host" "$OUT/jniLibs"; do [ -d "$d" ] && DIRS+=("$d"); done
+find "${DIRS[@]}" -name 'libmnemo_uniffi.*' | sort | while read -r f; do
   printf '%s %s\n' "${f#"$OUT"/}" "$(wc -c < "$f" | tr -d ' ')"
 done
