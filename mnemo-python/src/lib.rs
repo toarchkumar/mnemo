@@ -1305,10 +1305,16 @@ impl Mnemo {
     /// `n_probe` / `n_rerank` (PR ANN-1): per-query ANN index dials.
     /// `None` (default) uses the defaults the index was built with.
     /// See [`recall_text`] for the full description.
+    ///
+    /// `text_query` (FMT-9d, v9 files): a keyword query, matched by BM25
+    /// and added to each candidate's similarity with weight `text_weight`
+    /// (default 0.5) — hybrid recall. Pass an empty `query` (`[]`) for
+    /// keyword-only recall, which needs no embedder.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
-                        filter=None, max_bytes=None))]
+                        filter=None, max_bytes=None, text_query=None,
+                        text_weight=None))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -1321,10 +1327,18 @@ impl Mnemo {
         n_rerank: Option<usize>,
         filter: Option<Bound<'_, PyDict>>,
         max_bytes: Option<usize>,
+        text_query: Option<String>,
+        text_weight: Option<f32>,
     ) -> PyResult<PyObject> {
         let mut req = RecallRequest::new(query)
             .top_k(top_k)
             .track_access(track_access);
+        if let Some(t) = text_query {
+            req = req.text_query(t);
+        }
+        if let Some(w) = text_weight {
+            req = req.text_weight(w);
+        }
         if let Some(types) = memory_types {
             let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
             req = req.types(parsed?);

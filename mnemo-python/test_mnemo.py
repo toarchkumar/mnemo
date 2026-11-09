@@ -1116,6 +1116,36 @@ def test_open_with_key():
         db.close()
     print("ok  open_with_key / generate_key / rekey_with_key (PERF-1 step 7)")
 
+
+def test_keyword_and_hybrid_recall_on_v9():
+    """FMT-9d: `text_query` on a v9 file (created through the dev switch)."""
+    old = os.environ.get("MNEMO_DEV_FORMAT")
+    os.environ["MNEMO_DEV_FORMAT"] = "9"
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.mnemo")
+            db = mnemo.open(path, "passphrase", dimensions=4)
+            db.remember("shipped BP.1 with the new parser", "semantic",
+                        [1.0, 0.0, 0.0, 0.0])
+            db.remember("BP review, item 1", "semantic", [0.0, 1.0, 0.0, 0.0])
+            db.remember("the user likes tea", "semantic", [0.0, 0.0, 1.0, 0.0])
+            db.flush()
+            # Keyword-only: no vector, no embedder.
+            hits = db.recall([], text_query="BP.1", top_k=3)
+            assert hits[0]["content"].startswith("shipped BP.1"), hits
+            assert all("tea" not in h["content"] for h in hits)
+            # Hybrid: the keyword match lifts a weaker vector match.
+            hits = db.recall([0.0, 0.0, 1.0, 0.2], text_query="BP.1",
+                             text_weight=2.0, top_k=1)
+            assert hits[0]["content"].startswith("shipped BP.1"), hits
+            db.close()
+    finally:
+        if old is None:
+            del os.environ["MNEMO_DEV_FORMAT"]
+        else:
+            os.environ["MNEMO_DEV_FORMAT"] = old
+    print("ok  keyword and hybrid recall (v9)")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1155,4 +1185,5 @@ if __name__ == "__main__":
     test_thread_export_is_ingest_shape_and_round_trips()
     test_about_essence()
     test_open_with_key()
+    test_keyword_and_hybrid_recall_on_v9()
     print("\nall Python binding tests passed")

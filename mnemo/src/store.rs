@@ -91,6 +91,10 @@ pub const INDEX_PERSIST_EVERY_COMMITS: u32 = 64;
 /// re-assigned when the index is next loaded, so this bounds that work.
 pub const INDEX_PERSIST_EVERY_CHANGES: usize = 1_000;
 
+/// FMT-9d: default weight ε of the normalised BM25 score in hybrid recall
+/// (`relevance = similarity + ε · bm25 / max bm25`).
+pub const DEFAULT_TEXT_WEIGHT: f32 = 0.5;
+
 /// FMT-9b: default [`Mnemo::set_vector_cache_budget`]: the fp16 vector
 /// column stays resident while it fits (100K × 384 dims is about 77 MB) and
 /// is read through the page cache above it. PLANNER-A, 2026-11-07.
@@ -1057,6 +1061,20 @@ pub struct RecallRequest {
     /// ([`Mnemo::recall_budgeted`]): `true` iff at least one scored
     /// hit was dropped by this budget, `false` otherwise.
     pub max_bytes: Option<usize>,
+    /// FMT-9d (Phase 2, v9 files): keyword query for hybrid recall. Its
+    /// BM25 scores, divided by the best one for this query, are added to
+    /// each candidate's similarity with weight [`RecallRequest::text_weight`]
+    /// before the usual scoring. With an empty `query` vector
+    /// ([`RecallRequest::text`]), recall is keyword-only. `None` (the
+    /// default) is plain vector recall.
+    pub text_query: Option<String>,
+    /// FMT-9d: weight ε of the normalised BM25 score in hybrid recall
+    /// (default [`DEFAULT_TEXT_WEIGHT`]).
+    pub text_weight: f32,
+    /// FMT-9d: BM25 term-frequency saturation `k1` (default 1.2).
+    pub bm25_k1: f32,
+    /// FMT-9d: BM25 length normalisation `b` (default 0.75).
+    pub bm25_b: f32,
 }
 
 impl RecallRequest {
@@ -1074,7 +1092,30 @@ impl RecallRequest {
             track_access: true,
             filter: Filter::default(),
             max_bytes: None,
+            text_query: None,
+            text_weight: DEFAULT_TEXT_WEIGHT,
+            bm25_k1: 1.2,
+            bm25_b: 0.75,
         }
+    }
+
+    /// FMT-9d (v9 files): a keyword-only request: BM25 over `text`, no
+    /// query vector, so it works without an embedder.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::new(Vec::new()).text_query(text)
+    }
+
+    /// FMT-9d (v9 files): add a keyword query (hybrid recall when the
+    /// request also has a vector). See [`RecallRequest::text_query`].
+    pub fn text_query(mut self, text: impl Into<String>) -> Self {
+        self.text_query = Some(text.into());
+        self
+    }
+
+    /// FMT-9d: the weight ε of the keyword score in hybrid recall.
+    pub fn text_weight(mut self, w: f32) -> Self {
+        self.text_weight = w;
+        self
     }
 
     /// Phase 12.6: attach a pre-scoring filter. See [`Filter`] and
@@ -1401,6 +1442,9 @@ pub struct Mnemo {
     recs: RecPages,
     /// FMT-9d: the BM25 keyword index (v9; unused on v8).
     bm25: Bm25State,
+    /// FMT-9d: during one recall, each keyword match's normalised BM25
+    /// score, by id.
+    kw: Option<std::collections::HashMap<u128, f32>>,
     /// FMT-9c.2: catalog rows changed since the last commit (v9 writes
     /// them as a delta run instead of the whole catalog).
     dirty_rows: std::collections::BTreeSet<usize>,
@@ -2411,6 +2455,7 @@ impl Mnemo {
             col: VecColumn::default(),
             recs: RecPages::default(),
             bm25: Bm25State::default(),
+            kw: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain: Vec::new(),
             delta_rows: 0,
@@ -2741,6 +2786,7 @@ impl Mnemo {
                 manifest: bm25_manifest,
                 ..Bm25State::default()
             },
+            kw: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -2936,6 +2982,7 @@ impl Mnemo {
                 manifest: bm25_manifest,
                 ..Bm25State::default()
             },
+            kw: None,
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -6293,13 +6340,43 @@ impl Mnemo {
         // R-004.2: a filter pinning `_mnemo.thread` scans just that
         // thread's records (from the handle caches); one that can only
         // match non-fact kinds skips the ANN, which doesn't hold them.
+        // FMT-9d: keyword matches, normalised by the best one.
+        self.kw = None;
+        if let Some(text) = &req.text_query {
+            let scores = self.bm25_scores(text, req.bm25_k1, req.bm25_b)?;
+            let max = scores.values().copied().fold(0.0f32, f32::max);
+            if max > 0.0 {
+                self.kw = Some(
+                    scores
+                        .into_iter()
+                        .map(|(row, s)| (self.catalog[row].id, s / max))
+                        .collect(),
+                );
+            } else {
+                self.kw = Some(std::collections::HashMap::new());
+            }
+        }
         if let Some(thread) = filter_thread_pin(&req.filter) {
             let thread = thread.to_string();
             let entries = self.thread_entries(&thread)?;
             return self.score_entries(req, now, &entries);
         }
+        // Keyword-only: the candidates are the matches.
+        if req.query.is_empty() {
+            let ids: Vec<u128> = self
+                .kw
+                .as_ref()
+                .map_or(Vec::new(), |k| k.keys().copied().collect());
+            let entries: Vec<CatalogEntry> = ids
+                .into_iter()
+                .filter_map(|id| self.index.get(id, &self.catalog))
+                .map(|i| self.catalog[i].clone())
+                .filter(|e| !e.deleted)
+                .collect();
+            return self.score_entries(req, now, &entries);
+        }
         let force_exact = force_exact || filter_bypasses_ann(&req.filter);
-        let entries: Vec<CatalogEntry> = match (&self.ann, force_exact) {
+        let mut entries: Vec<CatalogEntry> = match (&self.ann, force_exact) {
             (Some(ann), false) => {
                 let ids = ann.query(&req.query, req.n_probe, req.n_rerank);
                 ids.iter()
@@ -6315,8 +6392,38 @@ impl Mnemo {
                 .cloned()
                 .collect(),
         };
+        // FMT-9d: an ANN shortlist plus the keyword matches it missed.
+        if let Some(kw) = &self.kw {
+            if entries.len() < self.catalog.len() {
+                let have: std::collections::HashSet<u128> = entries.iter().map(|e| e.id).collect();
+                let extra: Vec<u128> = kw.keys().copied().filter(|id| !have.contains(id)).collect();
+                for id in extra {
+                    if let Some(i) = self.index.get(id, &self.catalog) {
+                        if !self.catalog[i].deleted {
+                            entries.push(self.catalog[i].clone());
+                        }
+                    }
+                }
+            }
+        }
 
         self.score_entries(req, now, &entries)
+    }
+
+    /// FMT-9d: a candidate's relevance: its vector similarity plus ε times
+    /// its normalised keyword score (keyword-only requests: just the
+    /// keyword score). Returns `(relevance, reported similarity)`.
+    fn relevance(&self, req: &RecallRequest, id: u128, sim: f32) -> (f32, f32) {
+        let kw = self
+            .kw
+            .as_ref()
+            .and_then(|k| k.get(&id).copied())
+            .unwrap_or(0.0);
+        if req.query.is_empty() {
+            (kw, kw)
+        } else {
+            (sim + req.text_weight * kw, sim)
+        }
     }
 
     /// Score one candidate set for [`Mnemo::score_once`].
@@ -6388,11 +6495,16 @@ impl Mnemo {
             {
                 continue;
             }
-            let sim = memory::similarity(req.metric, &req.query, &m.vector);
+            let sim = if req.query.is_empty() {
+                0.0
+            } else {
+                memory::similarity(req.metric, &req.query, &m.vector)
+            };
+            let (rel, sim) = self.relevance(req, e.id, sim);
             let age_secs = (now - m.created_at) as f32;
             let score = req
                 .weights
-                .score(sim, age_secs, m.importance, m.access_count);
+                .score(rel, age_secs, m.importance, m.access_count);
             scored.push(RecallResult {
                 memory: m,
                 score,
@@ -6456,14 +6568,17 @@ impl Mnemo {
             let Some(idx) = self.index.get(e.id, &self.catalog) else {
                 continue;
             };
-            if self.col.resident
+            if !req.query.is_empty()
+                && self.col.resident
                 && idx < self.col.have.len()
                 && !self.col.have[idx]
                 && !self.col.hot.contains_key(&idx)
             {
                 self.fill_column_page(idx)?;
             }
-            let sim = if let Some((h, n)) = self.col.hot.get(&idx) {
+            let sim = if req.query.is_empty() {
+                0.0
+            } else if let Some((h, n)) = self.col.hot.get(&idx) {
                 veccol::similarity_f16(req.metric, q, q_norm, h, *n)
             } else if self.col.resident && self.col.have.get(idx).copied().unwrap_or(false) {
                 veccol::similarity_f16(
@@ -6477,8 +6592,9 @@ impl Mnemo {
                 let (h, n) = self.column_entry(e)?;
                 veccol::similarity_f16(req.metric, q, q_norm, &h, n)
             };
+            let (rel, sim) = self.relevance(req, e.id, sim);
             let score = req.weights.score(
-                sim,
+                rel,
                 (now - r.created_at) as f32,
                 r.importance,
                 e.access_count,
@@ -6540,7 +6656,16 @@ impl Mnemo {
     /// alone exceeds the budget. [`RecallResponse::truncated`] is
     /// `true` iff at least one hit was dropped by the budget.
     pub fn recall_budgeted(&mut self, req: &RecallRequest) -> Result<RecallResponse> {
-        if req.query.len() != self.dimensions {
+        // FMT-9d: keyword recall needs a v9 file's BM25 index; a
+        // keyword-only request has no vector.
+        if req.text_query.is_some() && !self.is_v9() {
+            return Err(MnemoError::Invalid(
+                "keyword recall (text_query) needs a v9 file; run `mnemo compact` to upgrade"
+                    .into(),
+            ));
+        }
+        let keyword_only = req.query.is_empty() && req.text_query.is_some();
+        if !keyword_only && req.query.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
                 got: req.query.len(),
@@ -6688,6 +6813,7 @@ impl Mnemo {
             false
         };
 
+        self.kw = None;
         Ok(RecallResponse {
             hits: scored,
             truncated,

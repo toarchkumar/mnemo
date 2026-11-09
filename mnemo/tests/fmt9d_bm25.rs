@@ -1,7 +1,9 @@
 //! FMT-9d.1: the v9 BM25 keyword index. Every test asks for its format
 //! explicitly.
 
-use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, Ulid};
+use mnemo_engine::{
+    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, RecallRequest, Ulid,
+};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -155,4 +157,106 @@ fn thread_turns_are_not_keyword_indexed_and_v8_has_no_index() {
     let mut v8 = Mnemo::create(dir.path().join("v8.mnemo"), "pw", cfg(8)).unwrap();
     v8.remember(mem("gamma on v8", 0)).unwrap();
     assert!(top(&mut v8, "gamma").is_empty());
+}
+
+// --- FMT-9d.2: text_query and hybrid recall --------------------------------
+
+#[test]
+fn keyword_only_recall_needs_no_vector() {
+    let dir = tempdir().unwrap();
+    let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(9)).unwrap();
+    let exact = db
+        .remember(mem("Shipped BP.1 with the new parser", 0))
+        .unwrap();
+    db.remember(mem("BP review: item 1 of the plan", 1))
+        .unwrap();
+    db.remember(mem("the user prefers tea", 2)).unwrap();
+    db.flush().unwrap();
+    let hits = db
+        .recall(&RecallRequest::text("BP.1").top_k(5).track_access(false))
+        .unwrap();
+    assert_eq!(hits[0].memory.id, exact);
+    assert_eq!(hits.len(), 2, "only keyword matches come back");
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[test]
+fn hybrid_recall_lifts_an_exact_keyword_match() {
+    let dir = tempdir().unwrap();
+    let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(9)).unwrap();
+    // The query vector is closest to "tea"; the keyword says "BP.1".
+    let tea = db
+        .remember(Memory::new(
+            "the user prefers tea",
+            MemoryType::Semantic,
+            vec![0.0, 0.0, 1.0, 0.0],
+        ))
+        .unwrap();
+    let bp = db
+        .remember(Memory::new(
+            "shipped BP.1 with the new parser",
+            MemoryType::Semantic,
+            vec![0.6, 0.0, 0.8, 0.0],
+        ))
+        .unwrap();
+    db.flush().unwrap();
+    let q = vec![0.0, 0.0, 1.0, 0.05];
+    let vec_only = db
+        .recall(&RecallRequest::new(q.clone()).top_k(2).track_access(false))
+        .unwrap();
+    assert_eq!(vec_only[0].memory.id, tea);
+    let hybrid = db
+        .recall(
+            &RecallRequest::new(q)
+                .text_query("BP.1")
+                .top_k(2)
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hybrid[0].memory.id, bp, "the keyword match wins");
+    assert!(hybrid[0].similarity < 1.0, "similarity stays the vector's");
+}
+
+#[test]
+fn keyword_recall_on_v8_is_a_clear_error() {
+    let dir = tempdir().unwrap();
+    let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(8)).unwrap();
+    db.remember(mem("gamma", 0)).unwrap();
+    match db.recall(&RecallRequest::text("gamma")) {
+        Err(MnemoError::Invalid(msg)) => assert!(msg.contains("v9"), "{msg}"),
+        other => panic!("expected Invalid, got {:?}", other.map(|h| h.len())),
+    }
+}
+
+#[test]
+fn cli_recall_text_without_an_embedder_is_keyword_recall_on_v9() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    {
+        let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+        db.remember(mem("Shipped BP.1 with the new parser", 0))
+            .unwrap();
+        db.remember(mem("the user prefers tea", 1)).unwrap();
+        db.close().unwrap();
+    }
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args([
+            "recall",
+            path.to_str().unwrap(),
+            "--text",
+            "BP.1",
+            "--format",
+            "json",
+        ])
+        .env("MNEMO_PASSPHRASE", "pw")
+        .output()
+        .expect("spawn mnemo recall");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("Shipped BP.1"), "{stdout}");
+    assert!(!stdout.contains("tea"), "{stdout}");
 }

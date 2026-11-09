@@ -130,14 +130,20 @@ impl Database {
 
     /// Multi-signal recall. Returns hits ordered by score.
     #[napi]
+    /// `text_query` (FMT-9d, v9 files): keyword query for hybrid recall;
+    /// pass an empty `vector` for keyword-only recall.
     pub fn recall(
         &mut self,
         vector: Vec<f64>,
         top_k: Option<u32>,
         memory_types: Option<Vec<String>>,
+        text_query: Option<String>,
     ) -> Result<Vec<RecallHit>> {
         let v: Vec<f32> = vector.into_iter().map(|x| x as f32).collect();
         let mut req = RecallRequest::new(v).top_k(top_k.unwrap_or(10) as usize);
+        if let Some(t) = text_query {
+            req = req.text_query(t);
+        }
         if let Some(types) = memory_types {
             let mut mts = Vec::with_capacity(types.len());
             for t in &types {

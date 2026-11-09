@@ -294,9 +294,11 @@ enum Command {
         /// per line. Mutually exclusive with `--query` and `--text`.
         #[arg(long, conflicts_with_all = ["query", "text"])]
         query_file: Option<String>,
-        /// Query text to embed via `--embed-cmd` (Phase 3). Mutually
-        /// exclusive with `--query`/`--query-file`. Requires
-        /// `--embed-cmd` and `--embed-name`.
+        /// Query text. With `--embed-cmd` and `--embed-name` it's embedded
+        /// (Phase 3); on a v9 file it's also matched by keyword (BM25,
+        /// hybrid recall). Without an embedder, a v9 file does keyword-only
+        /// recall; a v8 file needs the embedder. Mutually exclusive with
+        /// `--query`/`--query-file`.
         #[arg(long, conflicts_with_all = ["query", "query_file"])]
         text: Option<String>,
         #[arg(long, default_value_t = 10)]
@@ -1805,7 +1807,21 @@ fn run() -> std::result::Result<(), String> {
             // handle (`set_embedder`) and run it; it uses the same
             // lock-fallback as the vector branch. The vector branches
             // defer the open until after we've built `req`.
+            // FMT-9d: on a v9 file `--text` is also a keyword query.
+            let mut keyword: Option<String> = None;
             let (q, mut db_opt, mut effective_no_track) = match text {
+                Some(text) if embed_cmd.is_none() => {
+                    // No embedder: keyword-only recall, which needs v9.
+                    let (db, effective_no_track) =
+                        open_recall(&path, &pp, no_track).map_err(fmt)?;
+                    if db.__format_version() < 9 {
+                        return Err("--text requires --embed-cmd and --embed-name \
+                                    (or a v9 file, which can recall by keyword)"
+                            .to_string());
+                    }
+                    keyword = Some(text);
+                    (Vec::new(), Some(db), effective_no_track)
+                }
                 Some(text) => {
                     let ecmd = embed_cmd.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
@@ -1815,6 +1831,9 @@ fn run() -> std::result::Result<(), String> {
                     })?;
                     let (mut db, effective_no_track) =
                         open_recall(&path, &pp, no_track).map_err(fmt)?;
+                    if db.__format_version() >= 9 {
+                        keyword = Some(text.clone());
+                    }
                     let identity = EmbedderIdentity {
                         name: ename,
                         dimensions: db.dimensions(),
@@ -1839,6 +1858,9 @@ fn run() -> std::result::Result<(), String> {
 
             let metric = parse_metric(&metric)?;
             let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
+            if let Some(k) = keyword {
+                req = req.text_query(k);
+            }
             if let Some(s) = r#type {
                 req = req.types(parse_memory_types(&s)?);
             }
