@@ -106,7 +106,14 @@ import UIKit
         let values = try store.fileURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
         #expect(values.isExcludedFromBackup == (policy == .deviceOnly))
         let attributes = try FileManager.default.attributesOfItem(atPath: store.fileURL.path)
-        #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
+        let protection = attributes[.protectionKey] as? FileProtectionType
+        #if targetEnvironment(simulator)
+        // The simulator has no Data Protection (files live on the Mac's file
+        // system) and reports no class; a reported class must still match.
+        #expect(protection == nil || protection == .completeUntilFirstUserAuthentication)
+        #else
+        #expect(protection == .completeUntilFirstUserAuthentication)
+        #endif
         try await reopened.close()
         try keychain.deleteKey(id: id)
     }
