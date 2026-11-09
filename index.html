@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.10.0</span>
+        <span class="pill"><span class="dot"></span>v0.11.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.10.0.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.11.0.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -704,15 +704,15 @@ AI sessions stay aligned without relying on chat history.
     <div class="head">
       <p class="eyebrow">Performance</p>
       <h2 class="title">Measured, not promised</h2>
-      <p class="lead">We only publish numbers we've measured. These are from v0.10.0 on an Apple M1 Pro (release build, 384-dimension vectors, about 300 bytes of text per memory). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
+      <p class="lead">We only publish numbers we've measured. These are from v0.11.0 on an Apple M1 Pro (release build, 384-dimension vectors, about 300 bytes of text per memory). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
     </div>
     <div class="grid grid-3">
-      <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Exact-key cache hit</div><div class="d">Looking up a cached LLM or tool result in an open file.</div></div>
-      <div class="card stat"><div class="v">~0.4<span> ms</span></div><div class="l">Similar-prompt cache hit</div><div class="d">Matching by meaning across a 500-entry cache.</div></div>
-      <div class="card stat"><div class="v">~9<span> ms</span></div><div class="l">Open a 100K-memory file</div><div class="d">With a random key from the OS keychain: 0.9 ms at 10K memories. With a passphrase, add ~16 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
-      <div class="card stat"><div class="v">~16<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by disk syncs: 16 ms up to 10K memories, 28 ms at 100K. Commit 100 at once and each costs under half a millisecond.</div></div>
-      <div class="card stat"><div class="v">~34<span> MB</span></div><div class="l">Memory for an open 100K-memory file</div><div class="d">About 13 MB at 10K memories, and 11 MB at 1K: small enough for phones and tablets. The library itself is about 1.4 MB.</div></div>
-      <div class="card stat"><div class="v">~8.8<span> ms</span></div><div class="l">Indexed search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings. 1.4 ms at 10K memories, 0.4 ms at 1K.</div></div>
+      <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">About 6× smaller than v0.10: memories share pages, vectors are stored at half precision, and saves write only what changed.</div></div>
+      <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Cache hit</div><div class="d">Looking up a cached LLM or tool result by its exact key. Matching a prompt by meaning across 500 entries takes ~0.4 ms.</div></div>
+      <div class="card stat"><div class="v">~3<span> ms</span></div><div class="l">Open a 10K-memory file</div><div class="d">With a random key from the OS keychain: 0.4 ms at 1K memories, 30 ms at 100K. With a passphrase, add ~15 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
+      <div class="card stat"><div class="v">~16<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by disk syncs, from 1K to 100K memories. Commit 100 at once and each costs about 0.2–0.3 ms.</div></div>
+      <div class="card stat"><div class="v">~17<span> MB</span></div><div class="l">Memory for an open 10K-memory file</div><div class="d">About 3 MB at 1K memories: small enough for phones and tablets. At 100K it's about 112 MB, because vectors stay in memory for fast search. The library itself is about 2.6 MB.</div></div>
+      <div class="card stat"><div class="v">~2.5<span> ms</span></div><div class="l">Search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings. 2.2 ms at 10K and 0.2 ms at 1K, where every search is exact.</div></div>
     </div>
     <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
   </div>
@@ -728,9 +728,11 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.10</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.11</span></h3>
         <ul>
-          <li>Smaller and faster: at 100K memories, opening went from 384 ms to 9 ms, saving from 449 ms to 28 ms, and memory use dropped about 3×; plus keychain-friendly random keys</li>
+          <li>A compact file format: files about 6× smaller, saves that write only what changed, and old conversation turns compressed</li>
+          <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
+          <li>Smaller and faster (v0.10): at 100K memories, opening went from 384 ms to 9 ms, saving from 449 ms to 28 ms, and memory use dropped about 3×; plus keychain-friendly random keys</li>
           <li>Session continuity: a full copy of each working thread, plus an essence of where things stand, so a new session carries on where the last one stopped</li>
           <li>Facts that change: a newer version replaces the old one and history is kept; edit memories in place</li>
           <li>Recall filtered by session or tag, and recall within a size budget for small context windows</li>
@@ -751,9 +753,8 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>A compact file format: memories packed together and saves that write only what changed, aiming for files about 4× smaller</li>
-          <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
           <li>iOS and Android packages</li>
+          <li>A faster first search on large files, by loading only what a search needs</li>
         </ul>
       </div>
       <div class="card">

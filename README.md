@@ -63,7 +63,7 @@ with mnemo_engine.open("agent.mnemo", "a long passphrase", dimensions=384) as db
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.8.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.11.0", "semantic", key="current-release")
 ```
 
 CLI, with any program that turns text into vectors (a reference script is in
@@ -99,6 +99,57 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.11.0: files about 6× smaller
+
+A new file format, v9. At 100K memories, compared with v0.10.0:
+
+- **1.5 KB per memory on disk instead of 8.7 KB.** Memories share pages,
+  vectors are stored at half precision, and a save writes only what
+  changed. Old snapshots are kept for a window (the newest 16, plus any
+  from the last 24 hours), and their space is then reused.
+- **Faster saves and searches.** Storing one memory durably takes 16 ms
+  instead of 28 ms, and a warm search takes 2.5 ms instead of 8.8 ms.
+- **Keyword search for exact names.** Pass versions, PR numbers or
+  function names as `keywords`, and they're matched exactly alongside the
+  meaning-based search. Don't paste the whole question there.
+- **Exact search on smaller files.** Below 20K memories there's no index:
+  every search checks every memory, so it always finds the true best
+  matches.
+- **Old conversation turns are compressed** once they're a week old, so
+  files with long threads end up about a third smaller.
+
+```python
+db.recall_text("what changed in that release?", keywords="v0.10.0")
+```
+
+```sh
+mnemo recall agent.mnemo --keywords "v0.10.0"   # keyword-only; add --text to combine
+```
+
+**The trade-offs.** At 100K memories, an open file uses about 112 MB of
+memory instead of 34 MB, because vectors stay in memory for fast search
+(lower the limit with `set_vector_cache_budget`). Opening takes 30 ms
+instead of 9 ms, and the first search 112 ms instead of 99 ms. The library
+is about 1.2 MB larger (2.6 MB for the Python package, 3.6 MB for the
+CLI), about 0.5 MB of it for compression.
+
+## Upgrading to v0.11.0
+
+- **Existing files keep working as they are** (format v8). To get the
+  smaller format, run `mnemo compact agent.mnemo`, or `compact_file` in
+  Python or Rust.
+- **Upgrade every tool that reads a file before you compact it.** v0.10
+  and earlier can't open v9 files. They report `unsupported .mnemo format
+  version 9 (this build supports v1)`, which means you need v0.11 or
+  later. `mnemo compact --format v8` keeps a file readable by older
+  versions for one more release.
+- **Vectors come back at half precision** from `get` and `recall` (about
+  0.1% error). In Rust, create the file with
+  `MnemoConfig::store_float_vectors` to keep full precision.
+- **Rust 1.75 to 1.83:** if your project depends on `mnemo-engine`, run
+  `cargo update -p jobserver --precise 0.1.34` once. Cargo before 1.84
+  doesn't choose dependency versions by Rust version.
 
 ## What's new in v0.10.0: smaller and faster
 
@@ -191,21 +242,23 @@ start. Working on this repository itself? Start at [AGENTS.md](AGENTS.md).
 
 ## Performance
 
-Measured with v0.10.0 on an Apple M1 Pro (release build, 384-dimension
-vectors, about 300 bytes of text per memory, indexed):
+Measured with v0.11.0 (format v9) on an Apple M1 Pro (release build,
+384-dimension vectors, about 300 bytes of text per memory; files of 20K
+memories or more are indexed):
 
 | | 1K memories | 10K | 100K |
 |---|---|---|---|
-| Open with a raw key (from a keychain) | 0.2 ms | 0.9 ms | 9 ms |
-| Open with a passphrase (Argon2id, slow on purpose) | ~16 ms | ~16 ms | ~23 ms |
-| First search after opening (loads the index) | 3 ms | 11 ms | 99 ms |
-| Search, warm | 0.4 ms | 1.4 ms | 8.8 ms |
-| Store one memory durably | 16 ms | 16 ms | 28 ms |
-| … each, when 100 are committed together | 0.26 ms | 0.26 ms | 0.42 ms |
-| Memory used by an open file (after 1,000 searches) | 11 MB | 13 MB | 34 MB |
-| Disk per memory | 10 KB | 8.9 KB | 8.7 KB |
+| Open with a raw key (from a keychain) | 0.4 ms | 2.9 ms | 30 ms |
+| Open with a passphrase (Argon2id, slow on purpose) | ~15 ms | ~17 ms | ~44 ms |
+| First search after opening (loads the vectors and index) | 0.9 ms | 9 ms | 112 ms |
+| Search, warm | 0.2 ms | 2.2 ms | 2.5 ms |
+| Store one memory durably | 16 ms | 15 ms | 16 ms |
+| … each, when 100 are committed together | 0.23 ms | 0.20 ms | 0.32 ms |
+| Memory used by an open file (after 1,000 searches) | 3 MB | 17 MB | 112 MB |
+| Disk per memory | 1.4 KB | 1.3 KB | 1.5 KB |
 
-The library adds about 1.4 MB (Python package) or 2.4 MB (CLI), stripped.
+The library adds about 2.6 MB (Python package) or 3.6 MB (CLI), stripped,
+on ARM Linux.
 An exact-key cache hit takes ~1 µs, and a similar-prompt hit over 500
 entries ~0.4 ms. Full results:
 [`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
@@ -215,9 +268,9 @@ questions), the right memory comes first for 92% of them, up from 77% in
 v0.6 and 62% when ranking on similarity alone. The ranking stays the same
 however often the memories are recalled.
 
-Indexed search finds 96–98% of the true top-10 matches at the default
-settings (0.964 at 10K, 0.982 at 100K, 0.970 at 1M); v0.10.0 kept every
-measured accuracy cell unchanged.
+Indexed search finds 97–99% of the true top-10 matches at the default
+settings (0.994 at 20K, 0.974 at 50K, 0.978 at 100K). Below 20K memories,
+search is exact. Ranking quality is unchanged in v0.11.0.
 
 **Upgrading an index from v0.5.x?** It improves automatically (about 76–83%
 of the true top-10), and rebuilding it restores the full accuracy: run
@@ -238,11 +291,10 @@ in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
-- **Files still grow with each save and use about 8.7 KB per memory.**
-  Each save adds a new copy of the memory list (about 3.4 MB at 100K
-  memories), and each memory takes a whole 8 KB page. `mnemo compact`
-  reclaims the space. The next file format (v0.11) saves only what changed,
-  reuses old space and packs memories together.
+- **The first search on a large file is slow.** It loads the vectors
+  and the index: about 112 ms at 100K memories, and about 9 ms at 10K.
+  Searches after that take 2–3 ms. Loading only what a search needs is
+  planned.
 - **Saving threads isn't automatic yet.** You (or your agent) call
   `thread ingest` and the essence tools. A Claude Code plugin with hooks
   that save before compaction and load at session start is on the roadmap,
@@ -252,10 +304,9 @@ in Rust. Each re-clusters the index with the new defaults.
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
-- **Exact names and numbers.** Meaning-based search is weak on exact
-  identifiers such as version numbers, PR numbers or function names (a
-  question about "BP.1" can surface the wrong memory). Keyword search
-  combined with vector search is on the roadmap.
+- **v8 files don't get the v0.11 improvements** (smaller files,
+  keyword search, compression) until you run `mnemo compact`. See
+  "Upgrading to v0.11.0".
 
 See the [changelog](CHANGELOG.md) for release history.
 
