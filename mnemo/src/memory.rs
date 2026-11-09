@@ -197,7 +197,7 @@ impl Memory {
         );
         // Sentinel vector: a single-axis unit spike `[1, 0, 0, …]`.
         // A zero vector would now trip the Phase 3 `put` guard
-        // (all-zero refused — see store.rs). This spike is non-zero
+        // (all-zero refused — see store/records.rs). This spike is non-zero
         // (so it passes), unit-normalized (so it reads cleanly to any
         // downstream inspector), and uncorrelated with any real
         // embedder's output (so it ranks near-last on any user query —

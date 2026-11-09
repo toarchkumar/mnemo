@@ -32,7 +32,7 @@
 //! * Backdating happens by setting `m.created_at = now - offset;
 //!   m.accessed_at = now - offset;` before `remember`. The store's
 //!   `put` preserves the caller's fields verbatim on a new catalog
-//!   row (store.rs), so no new API is needed (verified by the
+//!   row (store/), so no new API is needed (verified by the
 //!   2026-11-05 PLANNER DECISION addendum).
 //! * Labels are not persisted on `Memory`; the harness keeps a
 //!   side map `label → ulid` and translates every `RecallResult`

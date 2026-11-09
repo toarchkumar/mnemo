@@ -73,7 +73,8 @@ exactly (`=x.y.z`) for reproducibility.
 - New CLI commands follow the pattern in `mnemo/src/bin/mnemo.rs`: a
   `Subcommand` variant + a match arm in `run()` + an entry in the README's
   CLI table.
-- New library methods go on `Mnemo` in `mnemo/src/store.rs`; mirror in the
+- New library methods go on `Mnemo` in the matching `mnemo/src/store/`
+  submodule (see "Add a library method" below); mirror in the
   Python binding (`mnemo-python/src/lib.rs`) if user-facing.
 
 ## Dogfood the engine on yourself
@@ -111,7 +112,7 @@ file. The `.gitignore` already excludes them.
 | Task | Where |
 |---|---|
 | Add a CLI command | `mnemo/src/bin/mnemo.rs` (Subcommand + match arm + README table) |
-| Add a library method | `mnemo/src/store.rs` impl Mnemo (+ re-export in `lib.rs` if needed) |
+| Add a library method | An `impl Mnemo` block in the `mnemo/src/store/` submodule for its area: `open.rs` (create/open, accessors, per-handle settings), `crud.rs` (remember/get/delete, embedder, handle caches), `keyed.rs` (keyed upserts, `update`, history), `threads.rs`, `essence.rs`, `continuation.rs` (`thread_start`, `commit_deltas`), `recall.rs` (about, search, recall), `ann.rs` (IVF+PQ index), `flush.rs` (flush, close, cache settings), `cache_api.rs` (result cache), `snapshots.rs` (PITR, sessions), `maintenance.rs` (export, rekey, verify, stats, compact), `records.rs` (v9 record internals and `put`), `hooks.rs` (hidden test hooks). Public types and constants stay in `store/mod.rs`; private helpers are `pub(super)` only when a sibling needs them, never `pub`. Re-export in `lib.rs` if needed |
 | Add a Python method | `mnemo-python/src/lib.rs` (impl Mnemo block) + `mnemo-python/README.md` API table |
 | Add an integration test | `mnemo/tests/integration.rs` (uses `KdfParams::fast()` for speed). **Vector tip:** `Mnemo::remember` refuses all-zero vectors since PR 10a (Phase 3) — in a loop like `for i in 0..N { … vec!(i as f32, 0., 0., 0.) }`, the first iteration ships `[0, 0, 0, 0]` and panics. Prefer `(i as f32) + 1.0` on the first component, or any other scheme that keeps the vector non-zero on every iteration. |
 | Add a CLI smoke test | `mnemo/tests/cli_smoke.rs` (uses `CARGO_BIN_EXE_mnemo` + tempfile) |
@@ -122,7 +123,7 @@ file. The `.gitignore` already excludes them.
 | Change the manifest scaffold | `mnemo/src/memory.rs` (`Memory::scaffold_manifest`) |
 | Add a mutating method | must guard on `self.read_only` → `MnemoError::ReadOnly` (see `remember`, `flush`, `rekey` for the pattern) and be routed via `Mnemo::open` (not `open_read_only`) in the CLI |
 | Add an MCP tool | `mnemo/src/mcp.rs` — extend the JSON schema in `tools_list()` and add a `tool_*` handler dispatched from `tools_call()`. Mutating tools must `db.flush()` before returning. |
-| Touch the result cache | `mnemo/src/result_cache.rs` (types + on-disk shapes) and `mnemo/src/store.rs`'s cache API block. **Not `cache.rs`** — that's the page cache. Cache-mutating methods must gate on `self.read_only`, dirty `self.dirty_cache`, and call `self.cache_batch.record_dirty()` so the Batched flush policy fires correctly. |
+| Touch the result cache | `mnemo/src/result_cache.rs` (types + on-disk shapes) and `mnemo/src/store/cache_api.rs` (the `Mnemo` cache API). **Not `cache.rs`** — that's the page cache. Cache-mutating methods must gate on `self.read_only`, dirty `self.dirty_cache`, and call `self.cache_batch.record_dirty()` so the Batched flush policy fires correctly. |
 
 ## CI
 
