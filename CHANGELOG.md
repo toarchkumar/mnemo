@@ -56,6 +56,36 @@ Pre-1.0, the minor component carries the breaking-change signal.
     between devices.
 - CI: a `swift` job runs `swift test` on macOS and `xcodebuild test` on an
   iOS simulator.
+- **The Kotlin package** (MOBILE-1c, `mnemo/bindings/kotlin/`, to be
+  published as `io.github.toarchkumar:mnemo-android`, not published yet;
+  Android API 24 or later):
+  - `scripts/build-native.sh` builds `libmnemo_uniffi.so` for `arm64-v8a`
+    and `x86_64` with cargo-ndk, linked for 16 KB pages, and generates the
+    Kotlin bindings. The Gradle library packs them into an AAR with JNA
+    5.19.1 (pinned exactly) as its one native dependency.
+  - `MnemoStore` has suspend functions on `Dispatchers.IO` and opens
+    lazily. It flushes on `ProcessLifecycleOwner` `ON_STOP` and keeps the
+    file open, and it reopens transparently after `close()`. Files live in
+    `noBackupFilesDir/mnemo/`.
+  - `MnemoKeystore` wraps each file's 32-byte key with a non-exportable
+    AES-256-GCM key in the Android Keystore. Each key's id is stamped on
+    its file as an extended attribute (API 26 and later), with a
+    try-each-key fallback, and a missing key gives
+    `MnemoStoreException.KeyMissing`. It doesn't use
+    `androidx.security:security-crypto`.
+  - `exportWithPassphrase` and `importWithPassphrase` move a store
+    between devices.
+  - In Kotlin, the engine's `close` is `MnemoDb.closeFile()`, because
+    `close()` is `AutoCloseable`'s. Error fields named `message` are
+    `reason`, because Kotlin's `Throwable.message` already uses the name.
+- CI: a `kotlin` job builds the `.so` files and runs the JVM host tests on
+  every PR. It also builds the AAR and checks 16 KB alignment (every
+  `LOAD` and the RELRO rule), gates each `.so` at 5 MB, and runs a
+  `publishToMavenLocal` dry run with a POM check. A new
+  `android-emulator` workflow runs the instrumented tests nightly and on
+  tags, on API 35 `x86_64` images with 4 KB and 16 KB pages. A manual
+  `android-publish` workflow runs a signed dry run with the Maven Central
+  secrets.
 - CI: `cargo deny --workspace` now checks every workspace member, which
   adds per-crate license exceptions (MPL-2.0 for UniFFI; ISC for
   `libloading`, via the experimental Node binding). New jobs: an Android

@@ -1,0 +1,74 @@
+name: Android publish (dry run)
+
+# MOBILE-1c prepares Maven Central publishing; the upload itself is
+# MOBILE-1e. Run by hand, this builds io.github.toarchkumar:mnemo-android,
+# signs it with the repository's signing key, publishes it to the runner's
+# Maven Local only, and checks the signatures. Nothing leaves the runner.
+#
+# The four repository secrets map to the vanniktech plugin's properties.
+# The Central Portal token pair is mapped here already, so 1e only swaps
+# the Gradle task for publishAndReleaseToMavenCentral.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings --cfg aes_armv8 --cfg polyval_armv8
+
+jobs:
+  publish-local:
+    name: signed publishToMavenLocal
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NDK_VERSION: 4.1.2
+      GRADLE_VERSION: 9.6.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Install cargo-ndk
+        env:
+          RUSTFLAGS: ""
+        run: cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - name: Build the native libraries and the Kotlin bindings
+        working-directory: mnemo/bindings/kotlin
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/build-native.sh
+
+      - name: Signed publishToMavenLocal
+        working-directory: mnemo/bindings/kotlin
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace publishToMavenLocal
+
+      - name: Check the signatures
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          VERSION=$(sed -n 's/^VERSION_NAME=//p' gradle.properties)
+          DIR="$HOME/.m2/repository/io/github/toarchkumar/mnemo-android/$VERSION"
+          ls -l "$DIR"
+          for f in "$DIR"/mnemo-android-"$VERSION".{aar,pom,module} "$DIR"/mnemo-android-"$VERSION"-{sources,javadoc}.jar; do
+            test -f "$f.asc" || { echo "no signature for $f"; exit 1; }
+          done
+          echo "every artifact is signed"

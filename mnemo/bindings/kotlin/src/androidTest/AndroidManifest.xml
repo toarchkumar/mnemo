@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Started and stopped by the ON_STOP test, so ProcessLifecycleOwner
+             sees the app come to the foreground and leave it. -->
+        <activity
+            android:name="io.github.toarchkumar.mnemo.TestActivity"
+            android:exported="false" />
+    </application>
+</manifest>

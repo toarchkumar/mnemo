@@ -1,0 +1,10 @@
+# Built by scripts/build-native.sh: the bindings, the Android .so files and
+# the host library for the JVM tests
+/generated/
+# Gradle and the IDE
+/build/
+/.gradle/
+/.kotlin/
+/local.properties
+/.idea/
+*.iml

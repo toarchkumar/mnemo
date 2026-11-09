@@ -1,0 +1,22 @@
+# The Kotlin bindings' settings, passed to uniffi-bindgen with --config by
+# scripts/build-native.sh (UniFFI 0.32's global config format). The
+# generated code shares the package of the app-facing layer, so apps import
+# one package.
+[crates.mnemo_uniffi.bindings.kotlin]
+package_name = "io.github.toarchkumar.mnemo"
+cdylib_name = "mnemo_uniffi"
+
+# The engine's close (flush, then release the file and its lock) would clash
+# with the close() UniFFI adds for AutoCloseable, which frees the Kotlin
+# handle. Kotlin gets the engine's as closeFile().
+[crates.mnemo_uniffi.bindings.kotlin.rename]
+"MnemoDb.close" = "close_file"
+# A Kotlin exception can't have a field called `message`: it would clash
+# with Throwable.message (the generated class would declare both). Those
+# fields are `reason` in Kotlin; Throwable.message still carries the text.
+"MnemoError.NotFound.message" = "reason"
+"MnemoError.Invalid.message" = "reason"
+"MnemoError.Io.message" = "reason"
+"MnemoError.Corrupt.message" = "reason"
+"MnemoError.Embedder.message" = "reason"
+"EmbedderError.Failed.message" = "reason"
