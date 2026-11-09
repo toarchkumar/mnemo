@@ -105,12 +105,16 @@ jobs:
         if: always()
         working-directory: mnemo/bindings/kotlin
         run: |
+          set -o pipefail
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import glob, xml.etree.ElementTree as ET
           print("### Instrumented tests (API ${{ matrix.api }}, ${{ matrix.target }}, page ${{ matrix.page }})")
           for path in sorted(glob.glob("build/outputs/androidTest-results/connected/**/TEST-*.xml", recursive=True)):
               s = ET.parse(path).getroot()
-              print(f"- {s.get('name').split('.')[-1]}: {s.get('tests')} tests, "
+              # AGP 9 leaves the suite's name out; take it from a test case.
+              case = next(s.iter("testcase"), None)
+              name = s.get("name") or (case.get("classname") if case is not None else path)
+              print(f"- {name.split('.')[-1]}: {s.get('tests')} tests, "
                     f"{s.get('failures')} failures, {s.get('errors')} errors, {s.get('skipped')} skipped")
               for case in s.iter("testcase"):
                   status = "FAIL" if case.find("failure") is not None or case.find("error") is not None else "ok"
