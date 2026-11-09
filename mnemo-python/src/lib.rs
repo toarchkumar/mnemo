@@ -1198,10 +1198,17 @@ impl Mnemo {
     /// recall at the cost of latency; drop them for the inverse. Only
     /// takes effect on a database that has an ANN index built;
     /// unindexed recall scans every live memory exactly.
+    ///
+    /// `keywords` / `keyword_weight` (FMT-9d, v9 files): as in `recall`.
+    /// Identifiers or exact terms to match (a version, a PR number, a
+    /// function name), not the question: the embedded `query` covers its
+    /// meaning, and the keywords' BM25 score is added with weight
+    /// `keyword_weight` (default 0.5).
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
-                        filter=None, max_bytes=None))]
+                        filter=None, max_bytes=None, keywords=None,
+                        keyword_weight=None))]
     fn recall_text(
         slf: Py<Self>,
         py: Python<'_>,
@@ -1214,6 +1221,8 @@ impl Mnemo {
         n_rerank: Option<usize>,
         filter: Option<Bound<'_, PyDict>>,
         max_bytes: Option<usize>,
+        keywords: Option<String>,
+        keyword_weight: Option<f32>,
     ) -> PyResult<PyObject> {
         // PY-1 (R-001.11): take `slf: Py<Self>` so the Python-level
         // borrow drops before the embedder callback runs — same
@@ -1233,6 +1242,12 @@ impl Mnemo {
         let mut req = RecallRequest::new(vector)
             .top_k(top_k)
             .track_access(track_access);
+        if let Some(t) = keywords {
+            req = req.keywords(t);
+        }
+        if let Some(w) = keyword_weight {
+            req = req.keyword_weight(w);
+        }
         if let Some(types) = memory_types {
             let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
             req = req.types(parsed?);
@@ -1679,6 +1694,16 @@ impl Mnemo {
     /// `Mnemo::set_max_snapshots` docs.
     fn set_max_snapshots(&mut self, max: usize) -> PyResult<()> {
         self.core_mut()?.set_max_snapshots(max);
+        Ok(())
+    }
+
+    /// FMT-9b (v9 files): keep the fp16 vector column in memory while it
+    /// takes at most `bytes` (default 96 MiB, about 125K vectors at 384
+    /// dims). Above it, recall reads vectors through the page cache: less
+    /// memory, slower recall. Applies to this handle only. See the
+    /// Rust-side `Mnemo::set_vector_cache_budget` docs.
+    fn set_vector_cache_budget(&mut self, bytes: usize) -> PyResult<()> {
+        self.core_mut()?.set_vector_cache_budget(bytes);
         Ok(())
     }
 

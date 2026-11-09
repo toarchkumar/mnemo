@@ -1164,6 +1164,37 @@ def test_turn_compression_knob_on_v9():
         db.close()
     print("ok  turn compression knob (v9)")
 
+
+def test_recall_text_keywords_and_vector_cache_budget():
+    """v0.11: `recall_text(keywords=)` (hybrid recall from text) and
+    `set_vector_cache_budget` (a budget below the column pages it)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "passphrase", dimensions=4)
+        # Every text embeds to the same vector, so only the keywords can
+        # separate the candidates.
+        db.set_embedder(lambda texts: [[1.0, 0.5, 0.25, 0.125] for _ in texts],
+                        name="flat-4d", dimensions=4, normalize=False)
+        db.remember_text("shipped BP.1 with the new parser", "semantic")
+        db.remember_text("BP review, item 1", "semantic")
+        db.remember_text("the user likes tea", "semantic")
+        db.flush()
+        hits = db.recall_text("which release had the parser?", top_k=3,
+                              keywords="BP.1", keyword_weight=2.0)
+        assert hits[0]["content"].startswith("shipped BP.1"), hits
+        plain = db.recall_text("which release had the parser?", top_k=3)
+        assert len(plain) == 3
+
+        want = [h["id"] for h in db.recall([1.0, 0.0, 0.0, 0.0], top_k=3,
+                                           track_access=False)]
+        db.set_vector_cache_budget(0)  # paged: same results, less memory
+        got = [h["id"] for h in db.recall([1.0, 0.0, 0.0, 0.0], top_k=3,
+                                          track_access=False)]
+        assert got == want, (got, want)
+        db.set_vector_cache_budget(96 * 1024 * 1024)
+        db.close()
+    print("ok  recall_text keywords + set_vector_cache_budget (v0.11)")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1205,4 +1236,5 @@ if __name__ == "__main__":
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()
+    test_recall_text_keywords_and_vector_cache_budget()
     print("\nall Python binding tests passed")
