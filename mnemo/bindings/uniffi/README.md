@@ -7,7 +7,11 @@ Kotlin package (`mnemo/bindings/kotlin/`) are built from it.
 
 - **UniFFI `=0.32.2`**, proc-macro mode (no UDL file).
 - **Minimum Rust 1.82** for this crate (the `msrv-uniffi` CI job). The
-  engine's own minimum stays 1.75.
+  engine's own minimum stays 1.75. The lockfile holds `toml_writer` and
+  `toml_parser` (pulled in by `uniffi_macros`) at 1.0.2, because newer
+  releases need edition 2024 (Rust 1.85). After a `cargo update`, re-pin
+  them with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo
+  update -p toml_writer -p toml_parser`, or the `msrv-uniffi` job fails.
 - **License note:** UniFFI is MPL-2.0 (file-level copyleft; we don't modify
   it). The Kotlin bindings also load JNA at runtime (Apache-2.0 or
   LGPL-2.1); the Kotlin package's README and NOTICE list it.
