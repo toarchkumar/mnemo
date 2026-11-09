@@ -90,7 +90,11 @@ jobs:
           # launch its self-test, and read the result from logcat. It proves
           # the library's consumer rules keep what JNA and the bindings need
           # at run time, not just at build time.
+          # The package service can come up after boot completes; an install
+          # before then fails, and AGP's test runner reports that as a green
+          # run with no tests. So wait for it, and Test counts fails on 0.
           script: |
+            for i in $(seq 1 90); do adb shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
             adb shell getconf PAGE_SIZE
             ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.expectPageSize=${{ matrix.page }}
             ../../../examples/mobile/android/gradlew --no-daemon --stacktrace -p ../../../examples/mobile/android assembleRelease
@@ -107,7 +111,8 @@ jobs:
         run: |
           set -o pipefail
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
-          import glob, xml.etree.ElementTree as ET
+          import glob, sys, xml.etree.ElementTree as ET
+          total = 0
           print("### Instrumented tests (API ${{ matrix.api }}, ${{ matrix.target }}, page ${{ matrix.page }})")
           for path in sorted(glob.glob("build/outputs/androidTest-results/connected/**/TEST-*.xml", recursive=True)):
               s = ET.parse(path).getroot()
@@ -119,6 +124,10 @@ jobs:
               for case in s.iter("testcase"):
                   status = "FAIL" if case.find("failure") is not None or case.find("error") is not None else "ok"
                   print(f"  - {case.get('name')}: {status}")
+              total += int(s.get("tests") or 0)
+          print(f"- total: {total}")
+          if total == 0:
+              sys.exit("no instrumented tests ran (an install failure is reported as a green run)")
           PY
 
       - name: Upload the test reports
