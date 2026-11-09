@@ -190,6 +190,50 @@ jobs:
         working-directory: mnemo-python
         run: python test_mnemo.py
 
+  # --- Mobile cross-builds (FMT-9e, PLANNER-A condition (ii)). zstd is
+  #     the engine's first C dependency (`zstd-sys`, built by `cc`), so
+  #     every change must still compile the library for the phone
+  #     targets MOBILE-1 ships. Library only (no CLI binary), debug: this
+  #     is a compile gate, not a size or speed check (size.yml covers
+  #     size). Android points `cc` at the runner's NDK clang (API 24);
+  #     iOS uses the runner's Xcode SDK, which `cc` finds via xcrun.
+  mobile:
+    name: mobile (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-ios
+            os: macos-latest
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: ${{ matrix.target }}
+
+      - name: Point cc at the NDK (Android)
+        if: matrix.target == 'aarch64-linux-android'
+        run: |
+          TC="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC_aarch64_linux_android=$TC/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TC/llvm-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TC/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+
+      - name: cargo build --lib
+        working-directory: mnemo
+        run: cargo build --lib --target ${{ matrix.target }}
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the

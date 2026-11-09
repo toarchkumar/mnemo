@@ -93,6 +93,27 @@ still change between PRs.
     know is treated as no index.
   - First recall at 100K is about 120 ms, up from about 95 ms in v0.10.
     Partition-major index loading (PERF-2) is planned.
+- **9e: compressed thread turns, v9 files.**
+  - v9 thread-turn records of 256 bytes or more are zstd-compressed
+    (level 3) before encryption, when that saves at least an eighth.
+    Each record is its own frame, with no dictionary and nothing shared
+    with any other record. Facts, essence items and cache entries aren't
+    compressed, and v8 files never are.
+  - **zstd is now a required dependency** (`zstd` 0.13.4, the engine's
+    first C dependency, through `zstd-sys`). CI cross-builds the library
+    for `aarch64-apple-ios` and `aarch64-linux-android`. The MSRV stays
+    1.75: `Cargo.lock` pins `jobserver` 0.1.34, since 0.1.35 needs Rust
+    1.85. A project that depends on `mnemo-engine` and builds with Rust
+    1.75–1.83 should run `cargo update -p jobserver --precise 0.1.34`
+    once. Cargo before 1.84 doesn't pick dependency versions by
+    `rust-version`.
+  - On a thread-heavy file (10K facts and 50K turns of Markdown,
+    `examples/thread_profile.rs`), the live file is 33% smaller (280 →
+    187 MB, 5.6 → 3.7 KB per turn). Ingest is about 20% slower, and
+    reading back a 500-turn thread (about 1.7 MB of text) takes about
+    7 ms instead of about 4.4 ms. Fact-only files don't change.
+  - A compressed record must state its decompressed size, at most
+    64 MiB; anything else is refused as malformed.
 
 ### Fixed
 

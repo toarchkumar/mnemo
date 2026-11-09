@@ -594,6 +594,107 @@ const REC_SLOT_BYTES: usize = 4;
 /// 212 MB for the 50K-turn profile).
 const V9_TURN_CHUNK_BYTES: usize = 7_900;
 
+/// FMT-9e: the zstd frame magic. A v9 record body is either a MessagePack
+/// `Memory` (which always starts with an array marker, `0x9_` or
+/// `0xdc`/`0xdd`) or, for a compressed thread turn, a zstd frame, so the
+/// first four bytes tell them apart without a row flag.
+const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+/// FMT-9e: zstd level for turn records (the FMT-9a measurement: 2.15× on
+/// this repo's Markdown at level 3).
+const TURN_ZSTD_LEVEL: i32 = 3;
+/// FMT-9e: turn records shorter than this stay uncompressed (a frame's
+/// overhead eats the gain on a one-line turn).
+const TURN_ZSTD_MIN_BYTES: usize = 256;
+/// FMT-9e: the largest decompressed record accepted. A turn record is a
+/// chunk of at most [`V9_TURN_CHUNK_BYTES`] plus its metadata, so this is
+/// a generous bound, not a size limit anyone meets; it stops a damaged
+/// (but authenticated) frame from asking for an unbounded allocation.
+const RECORD_PLAIN_MAX: u64 = 64 << 20;
+
+/// FMT-9e: is turn-record compression on? Always, unless the dev switch
+/// `MNEMO_DEV_TURN_ZSTD=0` turns it off for an A/B measurement (read once
+/// per process). Reading never depends on it.
+fn turn_zstd_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("MNEMO_DEV_TURN_ZSTD").as_deref() != Ok("0"))
+}
+
+/// FMT-9e: compress a v9 thread-turn record body, before the page
+/// encryption. Each record is its own zstd frame with no dictionary and no
+/// compression history from any other record, so how densely one record
+/// compresses says nothing about another's content (design note (d)).
+/// Kept only when it saves at least an eighth; otherwise the plain body is
+/// returned.
+fn compress_turn_record(bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.len() < TURN_ZSTD_MIN_BYTES || !turn_zstd_enabled() {
+        return bytes;
+    }
+    let c = ZSTD_COMPRESSOR.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = zstd::bulk::Compressor::new(TURN_ZSTD_LEVEL).ok();
+        }
+        let out = slot.as_mut().and_then(|z| z.compress(&bytes).ok());
+        if out.is_none() {
+            // Never reuse a context a call failed on.
+            *slot = None;
+        }
+        out
+    });
+    match c {
+        Some(c) if c.len() * 8 <= bytes.len() * 7 => c,
+        _ => bytes,
+    }
+}
+
+// FMT-9e: one zstd context of each kind per thread, made on first use and
+// reused for every record (a fresh context per record made reads about 15%
+// slower). Only the one-shot (`bulk`) calls use them, and each call starts
+// a new frame from a reset session, so no state crosses records; a context
+// a call failed on is dropped, not reused (cf. RUSTSEC-2026-0391, which
+// affected the stream API's `with_context`; zstd 0.13.4 carries its fix).
+// One-shot calls size their tables to the record, so a context stays small.
+thread_local! {
+    static ZSTD_COMPRESSOR: std::cell::RefCell<Option<zstd::bulk::Compressor<'static>>> =
+        const { std::cell::RefCell::new(None) };
+    static ZSTD_DECOMPRESSOR: std::cell::RefCell<Option<zstd::bulk::Decompressor<'static>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// FMT-9e: the plain body of a v9 record: decompressed when it's a zstd
+/// frame, borrowed as is otherwise. The frame must state its content size,
+/// and that size must be at most [`RECORD_PLAIN_MAX`].
+pub(crate) fn plain_record(bytes: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    if !bytes.starts_with(&ZSTD_MAGIC) {
+        return Ok(std::borrow::Cow::Borrowed(bytes));
+    }
+    let bad = |why: &str| MnemoError::Invalid(format!("compressed record: {why}"));
+    let size = match zstd::zstd_safe::get_frame_content_size(bytes) {
+        Ok(Some(n)) if n <= RECORD_PLAIN_MAX => n as usize,
+        Ok(Some(_)) => return Err(bad("too large")),
+        _ => return Err(bad("no content size")),
+    };
+    let out = ZSTD_DECOMPRESSOR.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(zstd::bulk::Decompressor::new().map_err(|e| bad(&e.to_string()))?);
+        }
+        let out = match slot.as_mut() {
+            Some(z) => z.decompress(bytes, size).map_err(|e| bad(&e.to_string())),
+            None => Err(bad("no context")),
+        };
+        if out.is_err() {
+            // Never reuse a context a call failed on.
+            *slot = None;
+        }
+        out
+    })?;
+    if out.len() != size {
+        return Err(bad("length mismatch"));
+    }
+    Ok(std::borrow::Cow::Owned(out))
+}
+
 /// FMT-9c.2: pick the sparse pages (`(page, live rows)`, in page order) one
 /// commit's vacuum folds in: at most [`VACUUM_PAGES_PER_COMMIT`] pages and
 /// [`VACUUM_MAX_ROWS`] rows.
@@ -3752,10 +3853,20 @@ impl Mnemo {
         Ok(buf)
     }
 
+    /// Decode a stored memory record body. FMT-9e: on v9 it may be a zstd
+    /// frame (a compressed turn); v8 records are always plain.
+    fn decode_memory(&self, bytes: &[u8]) -> Result<Memory> {
+        let plain = if self.is_v9() {
+            plain_record(bytes)?
+        } else {
+            std::borrow::Cow::Borrowed(bytes)
+        };
+        rmp_serde::from_slice(&plain).map_err(|err| MnemoError::Serialize(err.to_string()))
+    }
+
     fn read_memory(&mut self, e: &CatalogEntry) -> Result<Memory> {
         let bytes = self.read_record(e)?;
-        let mut m: Memory =
-            rmp_serde::from_slice(&bytes).map_err(|err| MnemoError::Serialize(err.to_string()))?;
+        let mut m: Memory = self.decode_memory(&bytes)?;
         // FMT-9b: a v9 record carries no vector (unless the file keeps
         // float vectors); it comes from the column, fp16-rounded.
         if e.v9.is_some() && !self.float_vectors() {
@@ -3821,6 +3932,14 @@ impl Mnemo {
             rmp_serde::to_vec(&m)
         }
         .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        // FMT-9e: a v9 thread turn is stored zstd-compressed (turns are
+        // most of a thread-heavy file). The catalog's `len` is the stored
+        // length, so packing and vacuum move the frame as is.
+        let bytes = if v9 && meta_str(&m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {
+            compress_turn_record(bytes)
+        } else {
+            bytes
+        };
         // FMT-9b.2: a v9 record that fits a packed page waits for the next
         // flush, which packs it with others; a bigger one owns a run of
         // whole pages, written now as on v8.
@@ -6004,6 +6123,19 @@ impl Mnemo {
         let idx = self.index.get(id.0, &self.catalog)?;
         let e = &self.catalog[idx];
         (!e.deleted).then_some((e.start_page, e.page_count, e.gen))
+    }
+
+    /// **Not a stable API.** FMT-9e: a live memory's stored record length
+    /// and whether the stored body is a zstd frame.
+    #[doc(hidden)]
+    pub fn __record_storage(&mut self, id: &Ulid) -> Result<(u32, bool)> {
+        let idx = self
+            .index
+            .get(id.0, &self.catalog)
+            .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
+        let e = self.catalog[idx].clone();
+        let bytes = self.read_record(&e)?;
+        Ok((e.len, bytes.starts_with(&ZSTD_MAGIC)))
     }
 
     /// **Not a stable API.** FMT-9b: whether the vector column is resident,
@@ -8974,8 +9106,7 @@ impl Mnemo {
         let mut n = entries.len();
         for e in &entries {
             let bytes = self.read_record(e)?;
-            let _m: Memory = rmp_serde::from_slice(&bytes)
-                .map_err(|err| MnemoError::Serialize(err.to_string()))?;
+            let _m: Memory = self.decode_memory(&bytes)?;
             // FMT-9b: and the row's vector column entry.
             if e.v9.is_some() {
                 let (h, _) = self.column_entry(e)?;

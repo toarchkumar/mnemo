@@ -119,11 +119,17 @@ mimalloc = { version = "=0.1.43", default-features = false, optional = true }
 # (`text.rs`). Pure Rust, no dependencies; pinned so tokens, and so the
 # on-disk index, don't shift under a minor update.
 unicode-segmentation = "=1.12.0"
+# FMT-9e: v9 thread-turn records are zstd-compressed before encryption
+# (`store.rs`, `compress_turn_record`). Required, not optional, since
+# every build must read those records. The engine's first C dependency
+# (`zstd-sys`, built by `cc`); CI cross-builds it for iOS and Android.
+# `cc`'s `parallel` feature pulls `jobserver`, pinned in Cargo.lock to
+# 0.1.34 (rust-version 1.63): 0.1.35 needs Rust 1.85, above our 1.75.
+zstd = { version = "=0.13.4", default-features = false }
 # FMT-9a prototype measurement (`examples/fmt9_proto.rs --part compress`):
-# page-compression candidates, compared before the format is frozen. Only
-# built with `--features fmt9_proto`; default consumers never see them.
+# lz4_flex as the pure-Rust page-compression candidate, compared before
+# the format was frozen. Only built with `--features fmt9_proto`.
 lz4_flex = { version = "=0.11.6", default-features = false, features = ["std", "safe-encode", "safe-decode"], optional = true }
-zstd = { version = "=0.13.2", default-features = false, optional = true }
 
 [dev-dependencies]
 tempfile = "=3.10.1"
@@ -183,7 +189,7 @@ benches = ["dep:criterion"]
 # to actually build the example.
 mimalloc_bench = ["dep:mimalloc"]
 # FMT-9a: the compression comparison in examples/fmt9_proto.rs.
-fmt9_proto = ["dep:lz4_flex", "dep:zstd"]
+fmt9_proto = ["dep:lz4_flex"]
 
 [profile.release]
 lto = true

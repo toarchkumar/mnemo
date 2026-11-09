@@ -328,6 +328,16 @@ pub mod __fuzz {
             .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
     }
 
+    /// FMT-9e: decode a v9 `Memory` record body from arbitrary bytes: a
+    /// zstd frame (a compressed thread turn) is decompressed first, under
+    /// the same content-size bound the store applies.
+    pub fn decode_v9_memory(bytes: &[u8]) -> crate::Result<()> {
+        let plain = crate::store::plain_record(bytes)?;
+        rmp_serde::from_slice::<crate::Memory>(&plain)
+            .map(|_| ())
+            .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
+    }
+
     /// Decode a `CacheEntry` record body from arbitrary bytes. Type is
     /// `pub(crate)`, so this wrapper hides it behind a unit return.
     pub fn decode_cache_entry(bytes: &[u8]) -> crate::Result<()> {
