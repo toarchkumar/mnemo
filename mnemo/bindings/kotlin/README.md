@@ -24,16 +24,17 @@ dependencies {
 You need Rust with the targets `aarch64-linux-android` and
 `x86_64-linux-android`, plus
 [cargo-ndk](https://github.com/bbqsrc/cargo-ndk) 4.1.2, an NDK r28 or
-later, JDK 17 and Gradle 9.6.1.
+later, and JDK 17. The committed Gradle wrapper (`./gradlew`) fetches
+Gradle 9.6.1 and checks its SHA-256.
 
 ```bash
 cd mnemo/bindings/kotlin
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>
 scripts/build-native.sh          # generated/: bindings, jniLibs, host library
-gradle testDebugUnitTest         # JVM host tests, against the host library
-gradle assembleRelease           # build/outputs/aar/mnemo-android-release.aar
-gradle publishToMavenLocal       # ~/.m2, unsigned unless a signing key is set
-gradle connectedDebugAndroidTest # instrumented tests on a device or emulator
+./gradlew testDebugUnitTest         # JVM host tests, against the host library
+./gradlew assembleRelease           # build/outputs/aar/mnemo-android-release.aar
+./gradlew publishToMavenLocal       # ~/.m2, unsigned unless a signing key is set
+./gradlew connectedDebugAndroidTest # instrumented tests on a device or emulator
 ```
 
 - **Fewer ABIs.** `MNEMO_ABIS=x86_64 scripts/build-native.sh` builds only

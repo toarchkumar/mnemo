@@ -203,7 +203,7 @@ Either take it from CI, or build it on the Mac.
   ```
 
   ```bash
-  gradle -p examples/mobile/android assembleRelease
+  cd examples/mobile/android && ./gradlew assembleRelease
   ```
 
   Android Studio works as well: open `examples/mobile/android`.

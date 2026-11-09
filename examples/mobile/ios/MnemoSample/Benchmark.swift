@@ -99,7 +99,7 @@ final class DeviceBudget: @unchecked Sendable {
         var vectors = ClusteredVectors(clusters: Corpus.clusters(for: n), seed: 0xBEEF_C0DE)
         let options = RememberOptions(memoryType: .semantic)
         for i in 0..<n {
-            try db.remember(content: Corpus.text(i), vector: vectors.next(), options: options)
+            _ = try db.remember(content: Corpus.text(i), vector: vectors.next(), options: options)
             if i % 1_000 == 999 { report("n = \(n): \(i + 1) memories") }
         }
         try db.flush()
@@ -205,7 +205,7 @@ final class DeviceBudget: @unchecked Sendable {
         for i in 0..<Self.singleWrites {
             let v = vectors.next()
             let t = DispatchTime.now()
-            try db.remember(content: Corpus.text(n + i), vector: v, options: options)
+            _ = try db.remember(content: Corpus.text(n + i), vector: v, options: options)
             try db.flush()
             single.append(millis(since: t))
         }
@@ -215,7 +215,7 @@ final class DeviceBudget: @unchecked Sendable {
             let vs = vectors.take(Self.batchSize)
             let t = DispatchTime.now()
             for j in 0..<Self.batchSize {
-                try db.remember(content: Corpus.text(n + Self.singleWrites + b * Self.batchSize + j),
+                _ = try db.remember(content: Corpus.text(n + Self.singleWrites + b * Self.batchSize + j),
                                 vector: vs[j], options: options)
             }
             try db.flush()

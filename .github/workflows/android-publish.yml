@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CARGO_NDK_VERSION: 4.1.2
-      GRADLE_VERSION: 9.6.1
     steps:
       - uses: actions/checkout@v4
 
@@ -39,10 +38,8 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Gradle
+      - name: Set up Gradle (caching; the committed wrapper runs Gradle 9.6.1)
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Install cargo-ndk
         env:
@@ -60,7 +57,7 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace publishToMavenLocal
+        run: ./gradlew --no-daemon --stacktrace publishToMavenLocal
 
       - name: Check the signatures
         working-directory: mnemo/bindings/kotlin
