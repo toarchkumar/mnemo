@@ -76,6 +76,7 @@ mod records;
 mod snapshots;
 mod threads;
 use crud::*;
+use essence::*;
 use load::*;
 pub(crate) use records::plain_record;
 use records::*;
@@ -1015,42 +1016,6 @@ fn build_id_index(catalog: &[CatalogEntry]) -> IdIndex {
 // Phase 12.7a helpers used by `ingest_thread`.
 // ---------------------------------------------------------------------------
 
-/// One incoming turn after chunking or truncation, ready to embed and
-/// write (Phase 12.7a, split out for 12.7d's batch embed).
-struct PendingTurn {
-    turn_id: String,
-    role: String,
-    created_at: i64,
-    parts: Vec<String>,
-    /// Hex sha256 + original length, set only for a truncated
-    /// tool-result turn. Applied to the single chunk the truncation
-    /// yielded.
-    truncation: Option<(String, u64)>,
-}
-
-/// Output of `Mnemo::plan_ingest`: the turns to write, the first free
-/// `_mnemo.seq`, and the counts gathered so far (skips, chunking,
-/// truncation).
-struct IngestPlan {
-    pending: Vec<PendingTurn>,
-    next_seq: u64,
-    report: IngestReport,
-}
-
-impl IngestPlan {
-    /// Every text to embed, in write order (turns, then parts).
-    fn texts(&self) -> Vec<&str> {
-        self.pending
-            .iter()
-            .flat_map(|p| p.parts.iter().map(String::as_str))
-            .collect()
-    }
-
-    fn text_count(&self) -> usize {
-        self.pending.iter().map(|p| p.parts.len()).sum()
-    }
-}
-
 /// PERF-1 / FMT-9: was this catalog row written after the persisted index
 /// run? v8 allocates pages monotonically, so a record past the run's first
 /// page is newer. v9 reuses pages, so it compares generations instead.
@@ -1073,101 +1038,4 @@ fn is_ann_kind(m: &Memory) -> bool {
             | Some(MNEMO_META_KIND_ESSENCE)
             | Some(MNEMO_META_KIND_THREAD_LINK)
     )
-}
-
-/// Hex-encode a byte slice. Low-dependency alternative to pulling in a
-/// hex crate for the lone call site in `ingest_thread`'s SHA-256
-/// recording.
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
-}
-
-/// Return the longest UTF-8 prefix of `s` whose byte length is `<=
-/// max_bytes`. Always lands on a `char` boundary.
-fn take_utf8_prefix(s: &str, max_bytes: usize) -> String {
-    if s.len() <= max_bytes {
-        return s.to_string();
-    }
-    // Walk forward through char indices; the last index whose byte
-    // offset fits inside `max_bytes` tells us where to cut.
-    let mut cut = 0usize;
-    for (idx, _) in s.char_indices() {
-        if idx > max_bytes {
-            break;
-        }
-        cut = idx;
-    }
-    s[..cut].to_string()
-}
-
-/// Split `s` into chunks, each with `<= max_bytes` of UTF-8 content,
-/// landing on `char` boundaries. Preserves original ordering; a trailing
-/// chunk may be shorter than `max_bytes`.
-/// Phase 12.7b helper: pull the `_mnemo.status` string from an
-/// essence record. Returns `None` for timeline entries (they have no
-/// status) and for malformed records.
-fn status_of(m: &Memory) -> Option<&str> {
-    m.metadata.get(MNEMO_META_STATUS).and_then(|v| v.as_str())
-}
-
-/// Phase 12.7b helper: render one essence item as a markdown bullet.
-/// Timeline entries get a date tag; section items get `[open]` /
-/// `[resolved]` so the reader can scan active work quickly.
-fn render_essence_item(section: EssenceSection, m: &Memory) -> String {
-    if section == EssenceSection::Timeline {
-        let date = format_unix_date(m.created_at);
-        format!("- [{date}] {}\n", m.content)
-    } else {
-        let status = status_of(m).unwrap_or(essence_status::OPEN);
-        format!("- [{status}] {}\n", m.content)
-    }
-}
-
-/// Minimal unix-seconds → `YYYY-MM-DD` formatter (no chrono/time
-/// dependency; mirrors the ISO 8601 parser in `transcript.rs`).
-fn format_unix_date(secs: i64) -> String {
-    let days_total = secs.div_euclid(86_400);
-    let (y, m, d) = civil_from_days(days_total);
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-/// Howard Hinnant's `civil_from_days` — inverse of `days_from_civil`,
-/// adequate for Gregorian dates since 1970. Pure arithmetic, no
-/// dependencies.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
-}
-
-fn chunk_utf8(s: &str, max_bytes: usize) -> Vec<String> {
-    if s.len() <= max_bytes {
-        return vec![s.to_string()];
-    }
-    let mut out = Vec::new();
-    let mut rest = s;
-    while rest.len() > max_bytes {
-        let head = take_utf8_prefix(rest, max_bytes);
-        let head_bytes = head.len();
-        out.push(head);
-        rest = &rest[head_bytes..];
-    }
-    if !rest.is_empty() {
-        out.push(rest.to_string());
-    }
-    out
 }

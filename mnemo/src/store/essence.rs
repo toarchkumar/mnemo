@@ -2,6 +2,54 @@
 
 use super::*;
 
+/// Split `s` into chunks, each with `<= max_bytes` of UTF-8 content,
+/// landing on `char` boundaries. Preserves original ordering; a trailing
+/// chunk may be shorter than `max_bytes`.
+/// Phase 12.7b helper: pull the `_mnemo.status` string from an
+/// essence record. Returns `None` for timeline entries (they have no
+/// status) and for malformed records.
+pub(super) fn status_of(m: &Memory) -> Option<&str> {
+    m.metadata.get(MNEMO_META_STATUS).and_then(|v| v.as_str())
+}
+
+/// Phase 12.7b helper: render one essence item as a markdown bullet.
+/// Timeline entries get a date tag; section items get `[open]` /
+/// `[resolved]` so the reader can scan active work quickly.
+fn render_essence_item(section: EssenceSection, m: &Memory) -> String {
+    if section == EssenceSection::Timeline {
+        let date = format_unix_date(m.created_at);
+        format!("- [{date}] {}\n", m.content)
+    } else {
+        let status = status_of(m).unwrap_or(essence_status::OPEN);
+        format!("- [{status}] {}\n", m.content)
+    }
+}
+
+/// Minimal unix-seconds → `YYYY-MM-DD` formatter (no chrono/time
+/// dependency; mirrors the ISO 8601 parser in `transcript.rs`).
+fn format_unix_date(secs: i64) -> String {
+    let days_total = secs.div_euclid(86_400);
+    let (y, m, d) = civil_from_days(days_total);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Howard Hinnant's `civil_from_days` — inverse of `days_from_civil`,
+/// adequate for Gregorian dates since 1970. Pure arithmetic, no
+/// dependencies.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 impl Mnemo {
     /// Phase 12.7b: add a new essence item to a section (any section
     /// except [`EssenceSection::Timeline`]). Content ≤

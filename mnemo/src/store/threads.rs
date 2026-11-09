@@ -2,6 +2,91 @@
 
 use super::*;
 
+/// One incoming turn after chunking or truncation, ready to embed and
+/// write (Phase 12.7a, split out for 12.7d's batch embed).
+pub(super) struct PendingTurn {
+    pub(super) turn_id: String,
+    pub(super) role: String,
+    pub(super) created_at: i64,
+    pub(super) parts: Vec<String>,
+    /// Hex sha256 + original length, set only for a truncated
+    /// tool-result turn. Applied to the single chunk the truncation
+    /// yielded.
+    pub(super) truncation: Option<(String, u64)>,
+}
+
+/// Output of `Mnemo::plan_ingest`: the turns to write, the first free
+/// `_mnemo.seq`, and the counts gathered so far (skips, chunking,
+/// truncation).
+pub(super) struct IngestPlan {
+    pub(super) pending: Vec<PendingTurn>,
+    pub(super) next_seq: u64,
+    pub(super) report: IngestReport,
+}
+
+impl IngestPlan {
+    /// Every text to embed, in write order (turns, then parts).
+    pub(super) fn texts(&self) -> Vec<&str> {
+        self.pending
+            .iter()
+            .flat_map(|p| p.parts.iter().map(String::as_str))
+            .collect()
+    }
+
+    pub(super) fn text_count(&self) -> usize {
+        self.pending.iter().map(|p| p.parts.len()).sum()
+    }
+}
+
+/// Hex-encode a byte slice. Low-dependency alternative to pulling in a
+/// hex crate for the lone call site in `ingest_thread`'s SHA-256
+/// recording.
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Return the longest UTF-8 prefix of `s` whose byte length is `<=
+/// max_bytes`. Always lands on a `char` boundary.
+fn take_utf8_prefix(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    // Walk forward through char indices; the last index whose byte
+    // offset fits inside `max_bytes` tells us where to cut.
+    let mut cut = 0usize;
+    for (idx, _) in s.char_indices() {
+        if idx > max_bytes {
+            break;
+        }
+        cut = idx;
+    }
+    s[..cut].to_string()
+}
+
+fn chunk_utf8(s: &str, max_bytes: usize) -> Vec<String> {
+    if s.len() <= max_bytes {
+        return vec![s.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut rest = s;
+    while rest.len() > max_bytes {
+        let head = take_utf8_prefix(rest, max_bytes);
+        let head_bytes = head.len();
+        out.push(head);
+        rest = &rest[head_bytes..];
+    }
+    if !rest.is_empty() {
+        out.push(rest.to_string());
+    }
+    out
+}
+
 impl Mnemo {
     /// Ingest a batch of turns into the archive layer of `thread_id`.
     ///
