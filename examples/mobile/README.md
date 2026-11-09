@@ -11,6 +11,17 @@ Two small apps, one per platform, built against the packages in this repo
 | Benchmark | the `device_budget` cells at 1K and 10K, JSON with a Share button | the same |
 | Release check | the background test (`0xdead10cc`), the file's protection class | a self-test of the R8-minified release build (run by CI) |
 
+**`NLEmbedding` on iOS:** its English sentence model is a system asset,
+which iOS downloads separately; macOS keeps it under
+`AssetsV2/com_apple_MobileAsset_LinguisticData`. The simulator runtime
+doesn't include it, so on the simulator the notes demo falls back to the
+labelled demo embedder. A phone that has the asset uses `NLEmbedding`. The
+Notes tab says which one is in use.
+
+**Simulator builds are signed ad hoc** (`project.yml`). An unsigned app
+has no entitlements, so the Keychain would refuse it
+(`errSecMissingEntitlement`, -34018) and there'd be no App Group container.
+
 **Why the Android demo embedder:** MediaPipe's Text Embedder would cost more
 than the 10 MB the sample may add. The current `tasks-text` (1.2.2) ships a
 16.6 MB arm64 native library, and the older 7.7 MB one (0.10.20) isn't

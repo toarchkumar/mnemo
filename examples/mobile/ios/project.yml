@@ -29,6 +29,12 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     MARKETING_VERSION: "0.11.0"
     CURRENT_PROJECT_VERSION: "1"
+    # Simulator builds are signed ad hoc, as TestHost's are: an app with no
+    # signature has no entitlements, so the Keychain refuses it
+    # (errSecMissingEntitlement, -34018) and there's no App Group container.
+    CODE_SIGN_STYLE[sdk=iphonesimulator*]: Manual
+    CODE_SIGN_IDENTITY[sdk=iphonesimulator*]: "-"
+    DEVELOPMENT_TEAM[sdk=iphonesimulator*]: ""
 targets:
   MnemoSample:
     type: application

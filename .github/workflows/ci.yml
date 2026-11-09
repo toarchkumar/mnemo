@@ -388,14 +388,15 @@ jobs:
           grep -q "TEST SUCCEEDED" xcodebuild.log
 
       # The iOS sample app (MOBILE-1d), on the XCFramework built above: a
-      # simulator build, unsigned.
+      # simulator build, signed ad hoc (project.yml), so it has its
+      # entitlements (the Keychain, the App Group) as it would on a device.
       - name: Build the iOS sample (simulator)
         working-directory: examples/mobile/ios
         run: |
           set -o pipefail
           xcodegen generate
           xcodebuild build -project MnemoSample.xcodeproj -scheme MnemoSample -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim CODE_SIGNING_ALLOWED=NO 2>&1 \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim 2>&1 \
             | tee sample.log | grep -E "error:|warning: .*MnemoSample|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" sample.log
 
