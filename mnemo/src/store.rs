@@ -37,7 +37,7 @@ use crate::format::{
     Header, RunPtr, FLAG_ENCRYPTED, PAGE_SIZE, PAYLOAD, VERSION, VERSION_V9, WRAPPED_DEK_LEN,
 };
 use crate::freelist::FreeList;
-use crate::index::{IndexConfig, IndexInfo, IvfPqIndex};
+use crate::index::{IndexConfig, IndexInfo, IndexOp, IvfPqIndex};
 use crate::keyslot::{KeySlot as KeySlotEntry, KeySlotRun};
 use crate::memory::{
     self, status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind,
@@ -796,6 +796,8 @@ struct FlushPrelude {
     cat_bytes: Option<Vec<u8>>,
     /// FMT-9c.2: `cat_bytes` is a delta run, not a base catalog.
     cat_delta: bool,
+    /// FMT-9c.3: `idx_bytes` is an index delta run, not a whole index.
+    idx_delta: bool,
     idx_bytes: Option<Vec<u8>>,
     /// Serialized result-cache directory bytes when `dirty_cache` is
     /// set (Phase 10.1). `None` if the cache didn't change since the
@@ -834,6 +836,9 @@ struct SnapshotGens {
     /// FMT-9c.2: the catalog's delta-chain head at this snapshot.
     #[serde(default)]
     delta: (u64, u64, u64, u64),
+    /// FMT-9c.3: the index's delta-chain head at this snapshot.
+    #[serde(default)]
+    index_delta: (u64, u64, u64, u64),
 }
 
 impl Snapshot {
@@ -845,6 +850,10 @@ impl Snapshot {
     }
     fn delta_head(&self) -> RunPtr {
         self.gens.map_or(RunPtr::default(), |g| tuple_ptr(g.delta))
+    }
+    fn index_delta_head(&self) -> RunPtr {
+        self.gens
+            .map_or(RunPtr::default(), |g| tuple_ptr(g.index_delta))
     }
 }
 
@@ -1262,6 +1271,16 @@ pub struct Mnemo {
     /// and how many rows they hold in all.
     delta_chain: Vec<RunPtr>,
     delta_rows: usize,
+    /// FMT-9c.3: the ANN index's delta runs on top of its base run, oldest
+    /// first, and how many changes they hold in all.
+    index_chain: Vec<RunPtr>,
+    index_chain_ops: usize,
+    /// FMT-9c.3: the next commit writes the whole index (after a build,
+    /// rebuild or restore).
+    index_rebase: bool,
+    /// FMT-9c.3: this flush's index changes, when it writes them as a
+    /// delta run.
+    index_delta_ops: Option<Vec<IndexOp>>,
     /// FMT-9c.2: the next commit writes a whole base catalog (after a
     /// restore, or when the chain has grown too long).
     catalog_rewrite: bool,
@@ -1629,6 +1648,51 @@ fn apply_delta_chain(
         }
     }
     Ok((catalog, chain, rows))
+}
+
+/// FMT-9c.3: one delta run of a v9 ANN index: the changes a commit made,
+/// and the previous delta in the chain.
+#[derive(Serialize)]
+struct IndexDeltaRef<'a> {
+    prev: (u64, u64, u64, u64),
+    ops: &'a [IndexOp],
+}
+
+#[derive(Deserialize)]
+struct IndexDeltaOwned {
+    prev: (u64, u64, u64, u64),
+    ops: Vec<IndexOp>,
+}
+
+/// FMT-9c.3: walk the index delta chain from `head` and replay it onto a
+/// just-loaded base index, oldest first. Returns the chain and its change
+/// count.
+fn apply_index_chain(
+    pager: &mut Pager,
+    ann: &mut IvfPqIndex,
+    head: RunPtr,
+) -> Result<(Vec<RunPtr>, usize)> {
+    let mut deltas: Vec<(RunPtr, Vec<IndexOp>)> = Vec::new();
+    let mut at = head;
+    while !at.is_empty() {
+        if deltas.len() > 4096 {
+            return Err(MnemoError::Invalid("index delta chain too long".into()));
+        }
+        let buf = read_run_bytes(pager, at.start, at.pages, at.len, at.gen)?;
+        let d: IndexDeltaOwned =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        deltas.push((at, d.ops));
+        at = tuple_ptr(d.prev);
+    }
+    deltas.reverse();
+    let mut chain = Vec::with_capacity(deltas.len());
+    let mut n = 0usize;
+    for (ptr, ops) in deltas {
+        n += ops.len();
+        chain.push(ptr);
+        ann.apply_ops(ops)?;
+    }
+    Ok((chain, n))
 }
 
 /// Load a **v4** catalog run using the frozen [`CatalogEntryV4`] shape.
@@ -2155,7 +2219,7 @@ impl Mnemo {
             free: RunPtr::default(),
             keys: RunPtr::default(),
             bm25: RunPtr::default(),
-            vec_col: RunPtr::default(),
+            index_delta: RunPtr::default(),
             catalog_delta: RunPtr::default(),
         };
 
@@ -2213,6 +2277,10 @@ impl Mnemo {
             delta_chain: Vec::new(),
             delta_rows: 0,
             catalog_rewrite: false,
+            index_chain: Vec::new(),
+            index_chain_ops: 0,
+            index_rebase: false,
+            index_delta_ops: None,
             snapshot_cap_explicit: config.max_snapshots != DEFAULT_MAX_SNAPSHOTS,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2534,6 +2602,10 @@ impl Mnemo {
             delta_chain,
             delta_rows,
             catalog_rewrite: false,
+            index_chain: Vec::new(),
+            index_chain_ops: 0,
+            index_rebase: false,
+            index_delta_ops: None,
             snapshot_cap_explicit: false,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2720,6 +2792,10 @@ impl Mnemo {
             delta_chain,
             delta_rows,
             catalog_rewrite: false,
+            index_chain: Vec::new(),
+            index_chain_ops: 0,
+            index_rebase: false,
+            index_delta_ops: None,
             snapshot_cap_explicit: false,
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
@@ -2810,6 +2886,38 @@ impl Mnemo {
         if self.is_v9() && n > 0 && page != 0 {
             self.pending_free.push((page, n));
         }
+    }
+
+    /// FMT-9c.3: the generation the persisted index is current to: its
+    /// base run's, or its newest delta run's.
+    fn index_gen_now(&self) -> u64 {
+        self.header.index_gen.max(self.header.index_delta.gen)
+    }
+
+    /// FMT-9c.3: should this v9 flush persist the index, and how? Every
+    /// commit that changed it writes those changes as a delta run (so the
+    /// index is never stale after a crash); a build, rebuild, drop or
+    /// restore, or a chain past 64 runs or a quarter of the index, writes
+    /// the whole index instead. Sets `index_delta_ops` for a delta.
+    fn plan_index_v9(&mut self) -> bool {
+        self.index_delta_ops = None;
+        let Some(ann) = self.ann.as_mut() else {
+            // Dropped (persisted as "no index"), or not loaded (unchanged).
+            return self.dirty_index;
+        };
+        let ops = ann.take_log();
+        let n = ann.len();
+        if self.index_rebase {
+            return true;
+        }
+        if ops.is_empty() {
+            return false;
+        }
+        if self.index_chain.len() >= 64 || (self.index_chain_ops + ops.len()) * 4 > n.max(256) {
+            return true;
+        }
+        self.index_delta_ops = Some(ops);
+        true
     }
 
     /// FMT-9c.2: catalog row `idx` changed (v9 writes it in the next
@@ -5526,6 +5634,13 @@ impl Mnemo {
         )
     }
 
+    /// **Not a stable API.** FMT-9c.3: `(index delta runs on the chain,
+    /// first page of the base index run)`.
+    #[doc(hidden)]
+    pub fn __index_shape(&self) -> (usize, u64) {
+        (self.index_chain.len(), self.header.index_start)
+    }
+
     /// **Not a stable API.** FMT-9: the header's next unallocated page.
     #[doc(hidden)]
     pub fn __next_page(&self) -> u64 {
@@ -6297,8 +6412,12 @@ impl Mnemo {
         }
         let items: Vec<(u128, &[f32])> =
             mems.iter().map(|m| (m.id.0, m.vector.as_slice())).collect();
-        let idx = IvfPqIndex::build(self.dimensions, &items, cfg)?;
+        let mut idx = IvfPqIndex::build(self.dimensions, &items, cfg)?;
         let info = idx.info();
+        if self.is_v9() {
+            idx.enable_log();
+            self.index_rebase = true;
+        }
         self.ann = Some(idx);
         self.ann_unloaded = false;
         self.dirty_index = true;
@@ -6427,7 +6546,16 @@ impl Mnemo {
             self.header.index_gen,
             self.dimensions,
         )?;
-        let (index_start, index_gen) = (self.header.index_start, self.header.index_gen);
+        // FMT-9c.3: replay the v9 index delta chain, then record changes.
+        if self.is_v9() {
+            if let Some(ann) = self.ann.as_mut() {
+                let (chain, n) = apply_index_chain(&mut self.pager, ann, self.header.index_delta)?;
+                self.index_chain = chain;
+                self.index_chain_ops = n;
+                ann.enable_log();
+            }
+        }
+        let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
         self.reconcile_ann_with_catalog(index_start, index_gen)?;
         let non_facts: Vec<u128> = match &self.layers {
             Some(l) => l
@@ -6623,7 +6751,7 @@ impl Mnemo {
         // INDEX_PERSIST_EVERY_CHANGES of them, load it now so this flush
         // persists a current index and keeps that work bounded.
         if self.ann_unloaded && self.dirty_catalog {
-            let (index_start, index_gen) = (self.header.index_start, self.header.index_gen);
+            let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
             let v9 = self.is_v9();
             let pending = self
                 .catalog
@@ -6639,11 +6767,15 @@ impl Mnemo {
         // records written since then are re-assigned when it's next loaded
         // (`reconcile_ann_with_catalog`). `ann == None` with `dirty_index` set is a
         // dropped index, which is persisted at once.
-        let persist_index = self.dirty_index
-            && (self.index_persist.forced
-                || self.ann.is_none()
-                || self.index_persist.commits + 1 >= INDEX_PERSIST_EVERY_COMMITS
-                || self.index_persist.changes >= INDEX_PERSIST_EVERY_CHANGES);
+        let persist_index = if self.is_v9() {
+            self.plan_index_v9()
+        } else {
+            self.dirty_index
+                && (self.index_persist.forced
+                    || self.ann.is_none()
+                    || self.index_persist.commits + 1 >= INDEX_PERSIST_EVERY_COMMITS
+                    || self.index_persist.changes >= INDEX_PERSIST_EVERY_CHANGES)
+        };
         let free_work =
             self.is_v9() && (self.free_dirty || !self.pending_free.is_empty() || self.dirty_keys);
         if !self.dirty_catalog && !persist_index && !self.dirty_cache && !free_work {
@@ -6729,9 +6861,32 @@ impl Mnemo {
                 self.header.catalog_gen = gen;
             }
         }
-        if persist_index {
+        let mut new_ichain: Option<(Vec<RunPtr>, usize)> = None;
+        if persist_index && ctx.idx_delta {
+            if let Some(bytes) = &ctx.idx_bytes {
+                let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
+                let ptr = RunPtr {
+                    start,
+                    pages: pages as u64,
+                    len: bytes.len() as u64,
+                    gen,
+                };
+                self.header.index_delta = ptr;
+                let mut chain = self.index_chain.clone();
+                chain.push(ptr);
+                let n = self.index_delta_ops.as_ref().map_or(0, |o| o.len());
+                new_ichain = Some((chain, self.index_chain_ops + n));
+            }
+        } else if persist_index {
             if v9 && self.header.index_pages > 0 {
                 superseded.push((self.header.index_start, self.header.index_pages));
+            }
+            if v9 {
+                for r in &self.index_chain {
+                    superseded.push((r.start, r.pages));
+                }
+                self.header.index_delta = RunPtr::default();
+                new_ichain = Some((Vec::new(), 0));
             }
             match &ctx.idx_bytes {
                 Some(bytes) => {
@@ -6823,6 +6978,7 @@ impl Mnemo {
                     catalog: self.header.catalog_gen,
                     index: self.header.index_gen,
                     delta: ptr_tuple(self.header.catalog_delta),
+                    index_delta: ptr_tuple(self.header.index_delta),
                 }),
             });
             if v9 {
@@ -6970,6 +7126,14 @@ impl Mnemo {
             self.delta_chain = chain;
             self.delta_rows = rows;
         }
+        if let Some((chain, n)) = new_ichain {
+            self.index_chain = chain;
+            self.index_chain_ops = n;
+        }
+        if persist_index {
+            self.index_rebase = false;
+            self.index_delta_ops = None;
+        }
         if ctx.cat_bytes.is_some() {
             self.dirty_rows.clear();
             self.catalog_rewrite = false;
@@ -7038,15 +7202,23 @@ impl Mnemo {
                     .map_err(|e| MnemoError::Serialize(e.to_string()))?,
             )
         };
-        let idx_bytes: Option<Vec<u8>> = if persist_index {
+        // FMT-9c.3: a v9 commit usually writes just its index changes.
+        let idx_delta = persist_index && self.index_delta_ops.is_some();
+        let idx_bytes: Option<Vec<u8>> = if !persist_index {
+            None
+        } else if let Some(ops) = &self.index_delta_ops {
+            let d = IndexDeltaRef {
+                prev: ptr_tuple(self.header.index_delta),
+                ops,
+            };
+            Some(rmp_serde::to_vec(&d).map_err(|e| MnemoError::Serialize(e.to_string()))?)
+        } else {
             match &self.ann {
                 Some(ann) => {
                     Some(rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?)
                 }
                 None => None,
             }
-        } else {
-            None
         };
         // Serialize the result-cache directory when it's dirty. An
         // empty directory serializes to a small header + 0-element
@@ -7134,6 +7306,7 @@ impl Mnemo {
         Ok(FlushPrelude {
             cat_bytes,
             cat_delta,
+            idx_delta,
             idx_bytes,
             cache_bytes,
         })
@@ -7848,8 +8021,14 @@ impl Mnemo {
             snap.index_gen(),
             self.dimensions,
         )?;
+        let mut ann = ann;
         if self.is_v9() {
             self.reclaim_for_restore(&catalog);
+            if let Some(a) = ann.as_mut() {
+                apply_index_chain(&mut self.pager, a, snap.index_delta_head())?;
+                a.enable_log();
+            }
+            self.index_rebase = true;
         }
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
@@ -7866,7 +8045,8 @@ impl Mnemo {
         self.agent_set = None;
         // PERF-1: the snapshot's index may predate its catalog; bring it up
         // to date before it's persisted again.
-        self.reconcile_ann_with_catalog(snap.index_start, snap.index_gen())?;
+        let snap_index_gen = snap.index_gen().max(snap.index_delta_head().gen);
+        self.reconcile_ann_with_catalog(snap.index_start, snap_index_gen)?;
         // Re-commit as a fresh transaction: crash-safe, and itself recorded
         // as a new snapshot so a restore can always be undone.
         self.dirty_catalog = true;
@@ -8278,6 +8458,11 @@ impl Mnemo {
             self.delta_chain
                 .iter()
                 .map(|r| (r.start, r.pages, "catalog delta run")),
+        );
+        live.extend(
+            self.index_chain
+                .iter()
+                .map(|r| (r.start, r.pages, "index delta run")),
         );
         for (p, c, what) in live {
             if c == 0 {

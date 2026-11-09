@@ -310,3 +310,42 @@ fn restore_replays_the_snapshots_delta_chain() {
     assert_eq!(db.len(), 2003);
     assert_eq!(db.verify().unwrap(), 2003);
 }
+
+// --- FMT-9c.3: index deltas ------------------------------------------------
+
+#[test]
+fn index_changes_persist_as_deltas_every_commit() {
+    // Build an index on a small file (the dev override lowers the 20K
+    // threshold; no other test in this binary builds an index).
+    std::env::set_var("MNEMO_DEV_ANN_MIN_FACTS", "0");
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
+    for i in 0..2000 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.flush().unwrap();
+    let info = db.build_index().unwrap();
+    assert!(info.partitions > 0);
+    db.flush().unwrap();
+    let (chain, base) = db.__index_shape();
+    assert_eq!(chain, 0);
+    let fresh: Vec<Ulid> = (0..5)
+        .map(|i| {
+            let id = db.remember(mem(100_000 + i)).unwrap();
+            db.flush().unwrap();
+            id
+        })
+        .collect();
+    assert_eq!(db.__index_shape(), (5, base), "one index delta per commit");
+    // Simulate a crash: no close, so nothing beyond the commits is written.
+    drop(db);
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    for (i, id) in fresh.iter().enumerate() {
+        let q = mem(100_000 + i).vector;
+        let shortlist = db.__ann_shortlist(&q, Some(1_000), Some(4_000)).unwrap();
+        assert!(shortlist.contains(id), "delta {i} replayed into the index");
+    }
+    assert_eq!(db.__index_shape().0, 5);
+    assert_eq!(db.verify().unwrap(), 2005);
+}

@@ -134,7 +134,7 @@ const _: () = assert!(HEADER_CACHE_LEN_OFF + 8 <= PAGE_SIZE);
 //   326..358  free-list run      (start, pages, len, gen)
 //   358..390  key-slot run       (start, pages, len, gen)
 //   390..422  BM25 manifest run  (start, pages, len, gen)   [9d]
-//   422..454  vector-column run  (start, pages, len, gen)   [9b]
+//   422..454  index delta head  (start, pages, len, gen)   [9c]
 //   454..486  catalog-delta head (start, pages, len, gen)   [9c]
 //   486..508  reserved, must be zero
 //   508..512  CRC-32 over bytes 0..508 (seal included)
@@ -285,8 +285,9 @@ pub struct Header {
     pub keys: RunPtr,
     /// v9 (9d): the BM25 segment manifest. Reserved; zero until 9d.
     pub bm25: RunPtr,
-    /// v9 (9b): the vector column. Reserved; zero until 9b.
-    pub vec_col: RunPtr,
+    /// v9 (9c.3): head of the ANN index delta chain (zero when the base
+    /// index run is current).
+    pub index_delta: RunPtr,
     /// v9 (9c): head of the catalog delta chain. Reserved; zero until 9c.
     pub catalog_delta: RunPtr,
 }
@@ -513,7 +514,7 @@ impl Header {
             } else {
                 RunPtr::default()
             },
-            vec_col: if v9 {
+            index_delta: if v9 {
                 RunPtr::read(b, o + 128)
             } else {
                 RunPtr::default()
@@ -563,7 +564,7 @@ impl Header {
         self.free.write(b, o + 32);
         self.keys.write(b, o + 64);
         self.bm25.write(b, o + 96);
-        self.vec_col.write(b, o + 128);
+        self.index_delta.write(b, o + 128);
         self.catalog_delta.write(b, o + 160);
         // Reserved bytes and everything past the 512-byte header stay zero
         // (the buffer starts zeroed; stated here so the layout is explicit).
@@ -705,7 +706,7 @@ mod tests {
                 gen: 3,
             },
             bm25: RunPtr::default(),
-            vec_col: RunPtr::default(),
+            index_delta: RunPtr::default(),
             catalog_delta: RunPtr::default(),
         }
     }

@@ -62,6 +62,15 @@ still change between PRs.
     hours, never pinning more than a quarter of the file (or 1 MiB). An
     explicit `set_max_snapshots(n)` keeps exactly `n`.
   - Restoring past the window names it.
+- **9c.2 and 9c.3: deltas.**
+  - On v9 a commit writes only the catalog rows it changed, and only the
+    ANN index changes it made, as small delta runs. Each chain is folded
+    into a new base at 64 runs or a quarter of the base.
+  - Deleted rows are dropped from the catalog when a new base is written.
+  - The index is never stale after a crash: the every-64-commits rule
+    applies to v8 only.
+  - At 100K, a durable write takes 15 ms (v8: 27 ms) and the file 1.45 KB
+    per memory.
 
 ### Fixed
 

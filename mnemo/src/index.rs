@@ -540,6 +540,14 @@ struct Posting {
     codes: Vec<u8>,
 }
 
+/// FMT-9c.3: one recorded change to an index: a vector added to a
+/// partition with its PQ code, or an id removed.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub(crate) enum IndexOp {
+    Add(u128, u32, Vec<u8>),
+    Remove(u128),
+}
+
 /// An IVF + PQ approximate-nearest-neighbour index over the database's vectors.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IvfPqIndex {
@@ -555,6 +563,11 @@ pub struct IvfPqIndex {
     /// serialized.
     #[serde(skip)]
     assignment: U128Map,
+    /// FMT-9c.3: when `Some`, every change is also recorded here, so a v9
+    /// commit can persist just the changes (a delta run) instead of the
+    /// whole index. Never serialized.
+    #[serde(skip)]
+    log: Option<Vec<IndexOp>>,
     // Serialized shape is frozen at v0.5.2's: dims, n_partitions,
     // n_probe, n_rerank, centroids, pq, partitions. Do NOT append new
     // fields here under the same `format::VERSION` — rmp-serde 1.3.0's
@@ -643,6 +656,7 @@ impl IvfPqIndex {
             pq,
             partitions: vec![Posting::default(); n_partitions],
             assignment: U128Map::with_capacity(n),
+            log: None,
         };
         for &(id, v) in items {
             index.add(id, v);
@@ -775,6 +789,9 @@ impl IvfPqIndex {
         self.remove(id);
         let part = self.nearest_centroid(vector);
         let code = self.pq.encode(vector);
+        if let Some(log) = &mut self.log {
+            log.push(IndexOp::Add(id, part as u32, code.clone()));
+        }
         let p = &mut self.partitions[part];
         p.ids.push(id);
         p.codes.extend_from_slice(&code);
@@ -783,6 +800,11 @@ impl IvfPqIndex {
 
     /// Remove a vector if present (no-op otherwise).
     pub fn remove(&mut self, id: u128) {
+        if self.assignment.contains_key(id) {
+            if let Some(log) = &mut self.log {
+                log.push(IndexOp::Remove(id));
+            }
+        }
         if let Some(part) = self.assignment.remove(id) {
             let m = self.pq.m();
             let p = &mut self.partitions[part as usize];
@@ -791,6 +813,47 @@ impl IvfPqIndex {
                 p.codes.drain(pos * m..(pos + 1) * m);
             }
         }
+    }
+
+    /// FMT-9c.3: start recording changes (see [`IndexOp`]).
+    pub(crate) fn enable_log(&mut self) {
+        if self.log.is_none() {
+            self.log = Some(Vec::new());
+        }
+    }
+
+    /// FMT-9c.3: the changes recorded since the last call.
+    pub(crate) fn take_log(&mut self) -> Vec<IndexOp> {
+        self.log.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// FMT-9c.3: replay recorded changes (a delta run) onto a loaded
+    /// index. Not recorded again. A change that doesn't fit this index
+    /// (a partition or code length out of range) is an error.
+    pub(crate) fn apply_ops(&mut self, ops: Vec<IndexOp>) -> Result<()> {
+        let log = self.log.take();
+        let m = self.pq.m();
+        let mut res = Ok(());
+        for op in ops {
+            match op {
+                IndexOp::Add(id, part, code) => {
+                    if part as usize >= self.n_partitions || code.len() != m {
+                        res = Err(MnemoError::Invalid(
+                            "index delta does not fit the index".into(),
+                        ));
+                        break;
+                    }
+                    self.remove(id);
+                    let p = &mut self.partitions[part as usize];
+                    p.ids.push(id);
+                    p.codes.extend_from_slice(&code);
+                    self.assignment.insert(id, part);
+                }
+                IndexOp::Remove(id) => self.remove(id),
+            }
+        }
+        self.log = log;
+        res
     }
 
     /// Run the tiered query: IVF probe → PQ scan → top-`n_rerank` candidates.
