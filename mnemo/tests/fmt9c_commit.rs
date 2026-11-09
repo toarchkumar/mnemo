@@ -41,7 +41,6 @@ fn a_big_catalog_does_not_grow_the_wal() {
     );
     db.remember(mem(9999)).unwrap();
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 3001);
 }
@@ -84,7 +83,6 @@ fn the_file_shrinks_when_its_tail_is_free() {
     }
     assert_eq!(db.verify().unwrap(), 13);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 13);
 }
@@ -217,7 +215,6 @@ fn small_commits_append_catalog_deltas_and_reopen() {
         "one delta per commit"
     );
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.__catalog_shape().0, 1020);
     for (i, id) in ids.iter().enumerate() {
@@ -243,7 +240,6 @@ fn the_chain_folds_into_a_new_base() {
     assert_eq!(rows, 140);
     assert!(chain < 40, "the chain was folded ({chain} deltas)");
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 140);
 }
@@ -269,7 +265,6 @@ fn deleted_rows_are_dropped_from_a_new_base() {
     }
     assert!(db.get(&ids[0]).is_err());
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 40);
     assert_eq!(db.verify().unwrap(), 40);
@@ -305,7 +300,6 @@ fn restore_replays_the_snapshots_delta_chain() {
     assert_eq!(db.len(), 2003);
     assert_eq!(db.__catalog_shape().1, 0, "a restore writes a base");
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 2003);
     assert_eq!(db.verify().unwrap(), 2003);

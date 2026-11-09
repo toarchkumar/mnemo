@@ -816,20 +816,49 @@ impl Mnemo {
         })
     }
 
-    /// Flush and close. Equivalent to `flush()` on a read-write handle; on
-    /// a read-only handle it's a no-op (no dirty state to persist). The
-    /// file is released on drop, which also drops the OS advisory lock.
-    /// **Caution:** the handle keeps the file and its lock until it is
-    /// dropped, so `drop` it before reopening the same file (or the open
-    /// fails with [`MnemoError::Locked`]).
-    pub fn close(&mut self) -> Result<()> {
-        if self.read_only {
-            return Ok(());
+    /// Flush and close: consumes the handle and releases the file and its
+    /// OS advisory lock before returning, so the same file can be reopened
+    /// right away (by this process or another). On a read-write handle it
+    /// flushes first, persisting a dirty ANN index too; on a read-only
+    /// handle there's nothing to persist.
+    ///
+    /// Using the handle after `close` is a compile error. If the flush
+    /// fails, the error is returned and the handle is dropped all the same:
+    /// changes since the last successful [`Mnemo::flush`] are lost, as
+    /// they would be on a plain `drop` (which never flushes).
+    ///
+    /// A struct that owns a handle and closes it from `&mut self` keeps it
+    /// in an `Option` and `take()`s it:
+    ///
+    /// ```no_run
+    /// use mnemo_engine::{Mnemo, Result};
+    ///
+    /// struct App {
+    ///     db: Option<Mnemo>,
+    /// }
+    ///
+    /// impl App {
+    ///     fn shutdown(&mut self) -> Result<()> {
+    ///         match self.db.take() {
+    ///             Some(db) => db.close(),
+    ///             None => Ok(()), // already closed
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// Changed in v0.12.0: `close` took `&mut self` and left the file and
+    /// lock held until the handle was dropped.
+    pub fn close(mut self) -> Result<()> {
+        if !self.read_only {
+            // PERF-1: closing persists a dirty ANN index too, so the next
+            // open has nothing to re-assign.
+            self.index_persist.forced = true;
+            self.flush()?;
         }
-        // PERF-1: closing persists a dirty ANN index too, so the next open
-        // has nothing to re-assign.
-        self.index_persist.forced = true;
-        self.flush()
+        // Dropping the handle closes the file, which releases the lock.
+        drop(self);
+        Ok(())
     }
 
     /// PERF-1: flush, persisting the ANN index even if the

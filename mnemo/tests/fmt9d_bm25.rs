@@ -64,7 +64,6 @@ fn the_index_survives_reopen_and_follows_deletes_and_rewrites() {
         .unwrap();
     let b = db.remember(mem("release v0.10.0 is planned", 1)).unwrap();
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(top(&mut db, "v0.9.0"), vec![a]);
     db.delete(&a).unwrap();
@@ -79,7 +78,6 @@ fn the_index_survives_reopen_and_follows_deletes_and_rewrites() {
     assert!(top(&mut db, "v0.10.0").is_empty());
     assert_eq!(top(&mut db, "v0.11.0"), vec![b]);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(top(&mut db, "v0.11.0"), vec![b]);
     assert!(top(&mut db, "v0.9.0").is_empty());
@@ -106,7 +104,6 @@ fn segments_merge_and_nothing_is_lost() {
         db.__bm25_segments()
     );
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for (i, id) in ids.iter().enumerate() {
         assert_eq!(top(&mut db, &format!("number{i}")), vec![*id]);
@@ -137,7 +134,6 @@ fn restore_brings_back_the_keyword_index_of_its_snapshot() {
     assert_eq!(top(&mut db, "alpha"), vec![kept]);
     assert!(top(&mut db, "beta").is_empty());
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(top(&mut db, "alpha"), vec![kept]);
     assert_eq!(db.verify().unwrap(), 1);
@@ -344,7 +340,6 @@ fn an_unknown_index_layout_is_treated_as_no_index() {
     db.flush().unwrap();
     assert_eq!(db.__index_shape().0, 0, "the old chain was released");
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     db.recall(
         &RecallRequest::new(mem("", 7).vector)

@@ -8,6 +8,23 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **`Mnemo::close` takes `self`** (it took `&mut self`). It flushes as
+  before (nothing on a read-only handle), then drops the handle, so the
+  file and its OS lock are released when it returns and the same file can
+  be reopened at once. Using a handle after `close` is now a compile error
+  rather than a runtime `Locked` on the next open. Code that keeps a
+  handle in a struct and closes it from `&mut self` stores an
+  `Option<Mnemo>` and calls `self.db.take()` (see the `close` docs). If
+  the flush fails, the handle is still dropped. `Drop` alone still
+  doesn't flush. Python's `close()` already released the lock and is
+  unchanged. Node's `close()` now releases it too, and the Node methods
+  throw "database is closed" afterwards (`len()` and `snapshots()` now
+  return errors instead of values).
+- Internal: `store.rs` is split into private submodules under
+  `mnemo/src/store/` (REFAC-1). No public API change.
+
 ## [0.11.0] — 2026-11-08
 
 FMT-9: the on-disk format is v9. New files are v9; v8 files keep opening

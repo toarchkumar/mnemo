@@ -1486,18 +1486,19 @@ impl Mnemo {
     /// `close()` itself is idempotent.
     ///
     /// PY-1 (SEC-1 reproduction entry 2026-11-01 VERIFIED): pre-PY-1
-    /// `close()` only called `Core::close` (which flushes but holds the
-    /// handle), so `db.close()` followed by `reopen(path)` in the same
+    /// `close()` only called `Core::close`, which then flushed but held
+    /// the handle, so `db.close()` followed by `reopen(path)` in the same
     /// process raised `Locked` until Python's GC collected the object.
-    /// Now the core is wrapped in `Option` and `close` `take()`s +
-    /// drops it, releasing the lock synchronously.
+    /// The core is wrapped in `Option`, and `close` `take()`s it and hands
+    /// it to `Core::close`, which (since REFAC-1) consumes it and releases
+    /// the lock before returning.
     fn close(&mut self) -> PyResult<()> {
-        if let Some(mut core) = self.inner.take() {
-            // Mirrors Core::close: flush on a writable handle, no-op on
-            // a read-only one (close() itself does the mode check).
+        if let Some(core) = self.inner.take() {
+            // `Core::close` consumes the core (REFAC-1): it flushes a
+            // writable handle (a read-only one has nothing to persist),
+            // then drops it, closing the file and releasing the OS
+            // advisory lock synchronously.
             core.close().map_err(to_py)?;
-            // `core` drops here → File handle closes → OS advisory
-            // lock releases synchronously.
         }
         Ok(())
     }

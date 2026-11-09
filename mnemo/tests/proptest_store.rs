@@ -698,13 +698,11 @@ proptest! {
             }
             if *should_reopen {
                 db.close().unwrap();
-                drop(db);
                 db = Mnemo::open(&path, "pw").unwrap();
             }
         }
         db.flush().unwrap();
         db.close().unwrap();
-        drop(db);
 
         // Count stored (nonce) entries vs scanned pages. BTreeSet
         // deduplicates — a repeat would make the set shorter than the
@@ -1091,7 +1089,7 @@ proptest! {
                     gone = gone_durable.clone();
                 }
                 IdxOp::Close => {
-                    db.close().unwrap();
+                    db.flush_index().unwrap();
                     durable = staged.clone();
                     gone_durable = gone.clone();
                     db = reopen(db, &path);

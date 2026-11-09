@@ -56,7 +56,6 @@ fn v9_vectors_are_fp16_rounded_unless_float_vectors_are_kept() {
             .remember(Memory::new("x", MemoryType::Semantic, v.clone()))
             .unwrap();
         db.close().unwrap();
-        drop(db);
         let mut db = Mnemo::open(&path, "pw").unwrap();
         let got = db.get(&id).unwrap().vector;
         assert_eq!(got.len(), DIMS);
@@ -182,7 +181,6 @@ fn column_survives_reopen_and_pages_when_over_budget() {
     let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
     let ids: Vec<Ulid> = (0..300).map(|i| db.remember(mem(i)).unwrap()).collect();
     db.close().unwrap();
-    drop(db);
 
     let req = RecallRequest::new(vector(42)).top_k(5).track_access(false);
     let mut db = Mnemo::open(&path, "pw").unwrap();
@@ -242,7 +240,6 @@ fn vector_pages_are_packed_vacuumed_and_freed() {
     db.flush().unwrap();
     assert!(db.__next_page() <= tail + 2);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 10);
 }
@@ -388,7 +385,6 @@ fn small_records_share_pages_and_survive_reopen() {
     // ~130-byte records, ~60 per page.
     assert!(pages <= 25, "1000 small records on {pages} pages");
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for (i, id) in ids.iter().enumerate().step_by(37) {
         assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
@@ -426,7 +422,6 @@ fn single_commits_fill_pages_and_deletes_vacuum_them() {
     }
     assert_eq!(db.verify().unwrap(), 30);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 30);
 }
@@ -441,7 +436,7 @@ fn big_records_span_whole_pages() {
         .remember(Memory::new(big.clone(), MemoryType::Semantic, vector(1)))
         .unwrap();
     let small = db.remember(mem(2)).unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let (_, pages, _) = db.__record_location(&id).unwrap();
     assert_eq!(pages, 3, "a 20 KB record owns three pages");
     assert_eq!(db.__record_location(&small).unwrap().1, 1);
@@ -484,7 +479,7 @@ fn long_turns_chunk_to_fit_one_packed_page() {
         }],
     )
     .unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let chunks = db.thread_export("chat").unwrap();
     assert_eq!(chunks.len(), 4, "30,000 bytes in 7,900-byte chunks");
     for m in &chunks {
@@ -509,7 +504,6 @@ fn a_record_deleted_before_its_first_flush_reopens_cleanly() {
     let gone = db.remember(mem(2)).unwrap();
     db.delete(&gone).unwrap();
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 1);
     db.get(&keep).unwrap();

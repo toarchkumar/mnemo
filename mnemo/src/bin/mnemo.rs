@@ -2675,10 +2675,8 @@ fn demo(path: &str) -> Result<()> {
     }
 
     println!("\nreopening to confirm persistence and encryption ...");
+    // `close` consumes the handle and releases the file and its lock.
     db.close()?;
-    // `close` flushes but keeps the file and its lock until the handle is
-    // dropped; release them before reopening (R-005.1).
-    drop(db);
     let db = Mnemo::open(path, pp)?;
     println!("reopened: {} memories survive the round-trip", db.len());
 

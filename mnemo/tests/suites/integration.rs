@@ -69,7 +69,6 @@ fn create_insert_search_reopen_recall() {
     db.close().unwrap();
 
     // Reopen and recall.
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 2);
     let res = db
@@ -77,6 +76,32 @@ fn create_insert_search_reopen_recall() {
         .unwrap();
     assert_eq!(res.len(), 2);
     assert_eq!(res[0].memory.content, "hello world");
+}
+
+/// REFAC-1: `close` consumes the handle and releases the file and its lock
+/// before returning, so the same file reopens right after it, in the same
+/// scope, with no `drop` (writable, read-only, then writable again).
+#[test]
+fn close_releases_the_file_so_it_reopens_in_the_same_scope() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("reopen.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let id = db
+        .remember(Memory::new(
+            "kept",
+            MemoryType::Semantic,
+            vec4(1.0, 0.0, 0.0, 0.0),
+        ))
+        .unwrap();
+    db.close().unwrap();
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.get(&id).unwrap().content, "kept", "close flushed");
+    db.close().unwrap();
+    let ro = Mnemo::open_read_only(&path, "pw").unwrap();
+    assert_eq!(ro.len(), 1);
+    ro.close().unwrap();
+    let db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(db.len(), 1);
 }
 
 /// Regression test for v7's header AEAD seal. Pre-v7, the only integrity
@@ -108,9 +133,6 @@ fn header_tamper_is_detected_by_v7_seal() {
     .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
-    // Release the exclusive lock before the reopen; without this the
-    // match below would trip on `Locked` instead of `HeaderTampered`.
-    drop(db);
 
     // Seal tag offset matches `format::HEADER_SEAL_TAG_OFF` (both formats).
     const SEAL_TAG_OFF: usize = 254;
@@ -182,10 +204,8 @@ fn page_swap_attack_is_detected_by_aad() {
     let _ = db.get(&id_a).unwrap();
     let _ = db.get(&id_b).unwrap();
     db.close().unwrap();
-    // Windows LockFileEx is mandatory — release the write lock before
     // the raw file read below (see file_is_encrypted_at_rest for the
     // full rationale).
-    drop(db);
 
     // With the default 8-page WAL reservation and 4-dim records, each
     // record fits in a single page; record A lands at page 9 and record
@@ -321,11 +341,7 @@ fn file_is_encrypted_at_rest() {
     .unwrap();
     db.flush().unwrap();
     db.close().unwrap();
-    // Release the exclusive lock BEFORE the raw file read. `flock(2)` on
-    // Unix is advisory (`std::fs::read` doesn't care), but `LockFileEx`
     // on Windows is *mandatory* — any other open of the file's byte
-    // range fails with ERROR_LOCK_VIOLATION while the lock is held.
-    drop(db);
 
     let raw = std::fs::read(&path).unwrap();
     let needle = secret.as_bytes();
@@ -349,10 +365,7 @@ fn wrong_passphrase_is_rejected() {
     ))
     .unwrap();
     db.close().unwrap();
-    // Drop the write handle before reopening: otherwise the exclusive
-    // OS lock would cause both open attempts below to return `Locked`,
     // masking the passphrase-check we're actually asserting.
-    drop(db);
 
     assert!(Mnemo::open(&path, "wrong").is_err());
     assert!(Mnemo::open(&path, "correct").is_ok());
@@ -373,10 +386,7 @@ fn rekey_changes_the_passphrase() {
     db.flush().unwrap();
     db.rekey("new-pw", KdfParams::fast()).unwrap();
     db.close().unwrap();
-    // Drop the write handle before either of the reopen assertions —
-    // otherwise the exclusive OS lock would turn both into `Locked`
     // (which would still pass `.is_err()` but for the wrong reason).
-    drop(db);
 
     assert!(
         Mnemo::open(&path, "old-pw").is_err(),
@@ -475,9 +485,6 @@ fn delete_then_compact_drops_tombstones() {
     db.flush().unwrap();
     assert_eq!(db.len(), 1);
     db.close().unwrap();
-    // Release the write lock before `compact_file` — it opens the file
-    // itself and needs the exclusive lock we're still holding.
-    drop(db);
 
     let report = Mnemo::compact_file(path_str, "pw").unwrap();
     assert_eq!(report.before, 1);
@@ -757,7 +764,6 @@ fn index_survives_reopen() {
     db.build_index().unwrap();
     db.close().unwrap();
 
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert!(db.has_index(), "index must survive reopen");
     let q: Vec<f32> = (0..dims).map(|_| rng.normalish()).collect();
@@ -819,17 +825,12 @@ fn index_drop_and_compact_rebuild() {
     db.drop_index();
     db.close().unwrap();
 
-    // Index was dropped before closing — must be absent on reopen.
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert!(!db.has_index());
 
     // Rebuild, then compact: the compacted file should still carry an index.
     db.build_index().unwrap();
     db.close().unwrap();
-    // Release the write lock before `compact_file` — see the note in
-    // `delete_then_compact_drops_tombstones`.
-    drop(db);
     Mnemo::compact_file(path_str, "pw").unwrap();
 
     let db = Mnemo::open(&path, "pw").unwrap();
@@ -863,8 +864,6 @@ fn wal_crash_recovery_replays_committed_txn() {
         .unwrap();
     }
     db.close().unwrap();
-    // Windows mandatory-lock: release before raw read.
-    drop(db);
     let snapshot = read_bytes(&path); // page 0 here points at the 5-memory state
 
     // State B: three more memories, cleanly flushed.
@@ -878,8 +877,6 @@ fn wal_crash_recovery_replays_committed_txn() {
         .unwrap();
     }
     db.close().unwrap();
-    // Release before the second raw read.
-    drop(db);
     let file_b = read_bytes(&path);
 
     // Frankenfile: state B's file with page 0 rewound to state A. This is
@@ -919,8 +916,6 @@ fn wal_heals_torn_header() {
         .unwrap();
     }
     db.close().unwrap();
-    // Windows mandatory-lock: release before raw file I/O.
-    drop(db);
 
     // Corrupt the header page — simulate a torn write to page 0.
     let mut bytes = read_bytes(&path);
@@ -951,8 +946,6 @@ fn wal_discards_uncommitted_garbage() {
         .unwrap();
     }
     db.close().unwrap();
-    // Windows mandatory-lock: release before raw file I/O.
-    drop(db);
 
     // Overwrite exactly the WAL region with 0xFF. The actual size lives in
     // the header (offset 194), so we read it rather than hardcoding — the
@@ -991,8 +984,6 @@ fn wal_region_grows_for_large_catalog() {
             .unwrap();
     }
     db.close().unwrap();
-    // Windows mandatory-lock: release before raw file I/O.
-    drop(db);
 
     // wal_pages lives at byte offset 194 of the (plaintext) header page,
     // in both formats. 64 was the v0.1.0 default; even after dropping the
@@ -1043,7 +1034,6 @@ fn fresh_file_uses_small_wal_by_default() {
         .unwrap();
         db.flush().unwrap();
         db.close().unwrap();
-        drop(db);
         let bytes = fs::metadata(path).unwrap().len();
         let raw = read_bytes(path);
         let wal_pages = u64::from_le_bytes(raw[194..202].try_into().unwrap());
@@ -1251,7 +1241,6 @@ fn bounded_cache_survives_eviction() {
 
     // The bound survives a reopen + re-shrink too.
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     db.set_cache_capacity(4);
     for (id, i) in &ids {
@@ -1281,7 +1270,6 @@ fn snapshots_record_every_flush() {
     }
     db.close().unwrap();
 
-    drop(db);
     let db = Mnemo::open(&path, "pw").unwrap();
     let snaps = db.snapshots();
     assert_eq!(snaps.len(), 3);
@@ -1393,7 +1381,6 @@ fn restore_rewinds_and_rolls_forward() {
 
     // The rewind persists across a reopen.
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 1);
 
@@ -1474,9 +1461,6 @@ fn compaction_collapses_history() {
     }
     assert_eq!(db.snapshots().len(), 4);
     db.close().unwrap();
-    // Release the write lock before `compact_file` — it opens the file
-    // itself and needs the exclusive lock we're still holding.
-    drop(db);
 
     Mnemo::compact_file(path_str, "pw").unwrap();
 
@@ -1554,7 +1538,6 @@ fn session_close_consolidates_to_episodic() {
 
     // The consolidation is durable.
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     for id in &ids {
         assert_eq!(db.get(id).unwrap().memory_type, MemoryType::Episodic);
@@ -4801,7 +4784,7 @@ fn index_persists_lazily_and_reopen_reassigns_newer_records() {
     let late = db
         .remember(Memory::new("late", MemoryType::Semantic, v.clone()))
         .unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     if FORMAT == 8 {
         assert_ne!(db.__budget_report().unwrap().index_start_page, persisted);
     }
@@ -5016,7 +4999,6 @@ fn non_fact_kinds_stay_out_of_the_ann() {
     .unwrap();
     assert_eq!(db.stats().unwrap().index.unwrap().vectors, 62);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.stats().unwrap().index.unwrap().vectors, 62);
 
@@ -5121,7 +5103,6 @@ fn ann_index_loads_on_first_recall_not_at_open() {
     }
     db.build_index().unwrap();
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert!(
@@ -5166,7 +5147,6 @@ fn unloaded_index_is_refreshed_once_pending_reaches_the_bound() {
     }
     db.build_index().unwrap();
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     let start = db.__budget_report().unwrap().index_start_page;

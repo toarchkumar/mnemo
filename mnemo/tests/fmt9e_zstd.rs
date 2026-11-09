@@ -82,7 +82,6 @@ fn long_turns_are_stored_compressed_and_read_back_exactly() {
         assert!((len as usize) < m.content.len() / 2, "stored {len} B");
     }
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     let back = db.thread_export_turns("chat").unwrap();
@@ -101,7 +100,7 @@ fn a_chunked_turn_compresses_each_chunk_and_packs_them() {
     let mut db = open_db(&path, 9);
     let long = prose(1, 30_000);
     db.ingest_thread("chat", &[turn(1, long.clone())]).unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let chunks = db.thread_export("chat").unwrap();
     assert_eq!(chunks.len(), 4, "30,000 bytes in 7,900-byte chunks");
     let mut pages = std::collections::HashSet::new();
@@ -190,7 +189,6 @@ fn compressed_turns_survive_vacuum_restore_and_compaction() {
         assert_eq!(a.content, b.content);
     }
     db.close().unwrap();
-    drop(db);
 
     Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
@@ -252,7 +250,6 @@ fn a_cold_handle_decodes_only_the_threads_it_uses() {
     .unwrap();
     let victim = db.thread_export("chat-2").unwrap()[0].id;
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     db.set_embedder(LenEmbedder).unwrap();
@@ -336,7 +333,6 @@ fn recent_turns_stay_plain_until_they_age_past_the_cutoff() {
     db.flush().unwrap();
     assert_eq!(compressed_count(&mut db, "live"), 300);
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     let back = db.thread_export_turns("live").unwrap();
@@ -354,7 +350,7 @@ fn compaction_compresses_recent_turns_too() {
     let mut db = open_db(&path, 9);
     let turns: Vec<ThreadTurn> = (0..20).map(|i| recent_turn(i, prose(i, 2_000))).collect();
     db.ingest_thread("live", &turns).unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     assert_eq!(compressed_count(&mut db, "live"), 0);
     drop(db);
     Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();

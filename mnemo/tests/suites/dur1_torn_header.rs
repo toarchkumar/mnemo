@@ -59,7 +59,6 @@ fn sector_0_zeroed_heals_from_wal() {
         db.remember(mem(i)).unwrap();
     }
     db.close().unwrap();
-    drop(db);
 
     // Zero the first 512-byte sector (which contains the entire 294-byte
     // header). Everything past the sector is untouched.
@@ -82,7 +81,6 @@ fn sector_0_random_garbage_heals_from_wal() {
         db.remember(mem(i)).unwrap();
     }
     db.close().unwrap();
-    drop(db);
 
     // Overwrite the first sector with a deterministic non-zero pattern
     // that doesn't collide with the real MAGIC.
@@ -109,7 +107,6 @@ fn header_magic_and_version_bytes_corrupted_heal() {
         db.remember(mem(i)).unwrap();
     }
     db.close().unwrap();
-    drop(db);
 
     let mut bytes = read_bytes(&path);
     for b in bytes.iter_mut().take(6) {
@@ -142,7 +139,6 @@ fn header_seal_fields_stale_report_tampering() {
         db.remember(mem(i)).unwrap();
     }
     db.close().unwrap();
-    drop(db);
 
     let mut bytes = read_bytes(&path);
     // Flip one bit in the seal tag (inside 242..294). On v8 that's
@@ -179,7 +175,6 @@ fn header_sealed_field_altered_with_recomputed_crc_reports_tampering() {
         db.remember(mem(i)).unwrap();
     }
     db.close().unwrap();
-    drop(db);
 
     let mut bytes = read_bytes(&path);
     // `catalog_start` is a u64 at offset 42 (inside the 0..238 CRC
@@ -242,7 +237,6 @@ fn relocated_txn_larger_than_64_pages_heals_torn_page_0() {
     db.flush().unwrap();
     let wal_pages_before = db.stats().unwrap().wal_pages;
     db.close().unwrap();
-    drop(db);
     if FORMAT == 8 {
         assert!(
             wal_pages_before > 64,

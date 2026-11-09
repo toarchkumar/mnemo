@@ -78,7 +78,23 @@ pub struct SnapshotObject {
 /// An encrypted, single-file agent-memory database.
 #[napi(js_name = "Database")]
 pub struct Database {
-    inner: Mnemo,
+    /// `None` once `close()` has run: the core is dropped, releasing the
+    /// file and its lock, and every method then throws.
+    inner: Option<Mnemo>,
+}
+
+impl Database {
+    fn db(&self) -> Result<&Mnemo> {
+        self.inner
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("database is closed"))
+    }
+
+    fn db_mut(&mut self) -> Result<&mut Mnemo> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| Error::from_reason("database is closed"))
+    }
 }
 
 #[napi]
@@ -91,7 +107,7 @@ impl Database {
             ..Default::default()
         };
         Mnemo::create(&path, &passphrase, cfg)
-            .map(|inner| Database { inner })
+            .map(|inner| Database { inner: Some(inner) })
             .map_err(to_napi)
     }
 
@@ -99,7 +115,7 @@ impl Database {
     #[napi(factory)]
     pub fn open(path: String, passphrase: String) -> Result<Database> {
         Mnemo::open(&path, &passphrase)
-            .map(|inner| Database { inner })
+            .map(|inner| Database { inner: Some(inner) })
             .map_err(to_napi)
     }
 
@@ -122,7 +138,7 @@ impl Database {
         if let Some(a) = agent {
             m = m.with_agent(a);
         }
-        self.inner
+        self.db_mut()?
             .remember(m)
             .map(|id| id.to_string())
             .map_err(to_napi)
@@ -152,7 +168,7 @@ impl Database {
             }
             req = req.types(mts);
         }
-        let hits = self.inner.recall(&req).map_err(to_napi)?;
+        let hits = self.db_mut()?.recall(&req).map_err(to_napi)?;
         Ok(hits
             .into_iter()
             .map(|h| RecallHit {
@@ -172,7 +188,7 @@ impl Database {
     pub fn get(&mut self, id: String) -> Result<MemoryObject> {
         let uid = Ulid::from_string(&id)
             .map_err(|_| Error::from_reason(format!("invalid memory id '{id}'")))?;
-        let m = self.inner.get(&uid).map_err(to_napi)?;
+        let m = self.db_mut()?.get(&uid).map_err(to_napi)?;
         Ok(MemoryObject {
             id: m.id.to_string(),
             content: m.content,
@@ -191,31 +207,36 @@ impl Database {
     pub fn delete(&mut self, id: String) -> Result<()> {
         let uid = Ulid::from_string(&id)
             .map_err(|_| Error::from_reason(format!("invalid memory id '{id}'")))?;
-        self.inner.delete(&uid).map_err(to_napi)
+        self.db_mut()?.delete(&uid).map_err(to_napi)
     }
 
     /// Persist pending changes as one atomic, write-ahead-logged transaction.
     #[napi]
     pub fn flush(&mut self) -> Result<()> {
-        self.inner.flush().map_err(to_napi)
+        self.db_mut()?.flush().map_err(to_napi)
     }
 
-    /// Flush and finish using the database.
+    /// Flush and finish using the database: releases the file and its
+    /// lock, so the same path can be reopened at once. Idempotent; every
+    /// other method throws after it.
     #[napi]
     pub fn close(&mut self) -> Result<()> {
-        self.inner.close().map_err(to_napi)
+        match self.inner.take() {
+            Some(db) => db.close().map_err(to_napi),
+            None => Ok(()),
+        }
     }
 
     /// Live (non-deleted) memory count.
     #[napi]
-    pub fn len(&self) -> u32 {
-        self.inner.len() as u32
+    pub fn len(&self) -> Result<u32> {
+        Ok(self.db()?.len() as u32)
     }
 
     /// Summary statistics.
     #[napi]
     pub fn stats(&mut self) -> Result<DbStats> {
-        let s = self.inner.stats().map_err(to_napi)?;
+        let s = self.db_mut()?.stats().map_err(to_napi)?;
         Ok(DbStats {
             memories: s.memories as u32,
             deleted: s.deleted as u32,
@@ -228,8 +249,9 @@ impl Database {
 
     /// List restorable snapshots (point-in-time recovery), oldest first.
     #[napi]
-    pub fn snapshots(&self) -> Vec<SnapshotObject> {
-        self.inner
+    pub fn snapshots(&self) -> Result<Vec<SnapshotObject>> {
+        Ok(self
+            .db()?
             .snapshots()
             .into_iter()
             .map(|s| SnapshotObject {
@@ -237,14 +259,14 @@ impl Database {
                 created_at: s.created_at,
                 memory_count: s.memory_count as i64,
             })
-            .collect()
+            .collect())
     }
 
     /// Restore the database to the snapshot from transaction `txnId`.
     /// Returns the restored memory count.
     #[napi]
     pub fn restore_to(&mut self, txn_id: i64) -> Result<i64> {
-        self.inner
+        self.db_mut()?
             .restore_to(txn_id as u64)
             .map(|s| s.memory_count as i64)
             .map_err(to_napi)

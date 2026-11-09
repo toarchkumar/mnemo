@@ -105,7 +105,6 @@ fn a_v0_10_0_file_opens_writes_and_compacts_to_v9() {
         ))
         .unwrap();
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, PASSPHRASE).unwrap();
     assert_eq!(db.stats().unwrap().format_version, 8, "writes keep v8");
     assert_eq!(db.len(), before + 1);

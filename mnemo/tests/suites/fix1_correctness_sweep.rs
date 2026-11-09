@@ -247,7 +247,6 @@ fn rekey_with_kdf_params_preserves_cost() {
     assert_eq!(after.t_cost, before.t_cost);
     assert_eq!(after.p_cost, before.p_cost);
     db.close().unwrap();
-    drop(db);
     assert!(Mnemo::open(&path, "new").is_ok());
 }
 
@@ -357,7 +356,6 @@ fn batched_max_age_triggers_flush_on_read() {
     // Reopen — the earlier cached write must be durable, which it
     // wouldn't be if the batch had stayed pending.
     db.close().unwrap();
-    drop(db);
     let mut reopened = Mnemo::open(&path, "pp").unwrap();
     assert_eq!(reopened.cache_get("ns", "k").unwrap().unwrap().value, b"v");
 }

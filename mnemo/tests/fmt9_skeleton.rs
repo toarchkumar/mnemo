@@ -85,7 +85,6 @@ fn v9_round_trips_through_close_and_reopen() {
     assert_eq!(db.__format_version(), 9);
     let ids: Vec<Ulid> = (0..12).map(|i| db.remember(mem(i)).unwrap()).collect();
     db.close().unwrap();
-    drop(db);
 
     // The header is a v9 page: version 9, and nothing past byte 512.
     let page0 = read_page(&path, 0);
@@ -162,7 +161,6 @@ fn freed_pages_are_reused_once_unpinned() {
     );
     assert_eq!(db.verify().unwrap(), 20);
     db.close().unwrap();
-    drop(db);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.len(), 20);
@@ -232,7 +230,6 @@ fn retained_snapshots_pin_freed_pages_and_restore_stays_intact() {
     }
     assert_eq!(db.verify().unwrap(), 10);
     db.close().unwrap();
-    drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.verify().unwrap(), 10);
 }
@@ -245,7 +242,7 @@ fn rollback_of_a_reused_page_fails_authentication() {
     db.set_max_snapshots(1);
     let victim = db.remember(mem(0)).unwrap();
     let keep = db.remember(mem(1)).unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let (vp, vc, vgen) = db.__record_location(&victim).unwrap();
     assert_eq!(vc, 2, "a span of two pages");
     drop(db);
@@ -271,7 +268,6 @@ fn rollback_of_a_reused_page_fails_authentication() {
     }
     let landed = landed.expect("the victim's page was reused");
     db.close().unwrap();
-    drop(db);
 
     // Untampered, the new record reads fine.
     let mut db = Mnemo::open(&path, "pw").unwrap();
@@ -297,7 +293,6 @@ fn v9_header_seal_covers_every_field() {
     let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
     db.remember(mem(0)).unwrap();
     db.close().unwrap();
-    drop(db);
     let pristine = std::fs::read(&path).unwrap();
 
     // dimensions (14), the KDF m_cost (74), a free-list pointer byte (326),
@@ -328,7 +323,7 @@ fn key_slot_run_is_persisted_copy_on_write_and_authenticated() {
     db.set_max_snapshots(1);
     db.remember(mem(0)).unwrap();
     db.__add_key_slot_for_testing("laptop").unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let (p1, n1, g1) = db.__key_slot_run();
     assert!(n1 > 0);
     drop(db);
@@ -336,7 +331,7 @@ fn key_slot_run_is_persisted_copy_on_write_and_authenticated() {
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.__key_slot_labels(), vec!["laptop".to_string()]);
     db.__add_key_slot_for_testing("recovery").unwrap();
-    db.close().unwrap();
+    db.flush_index().unwrap();
     let (p2, n2, g2) = db.__key_slot_run();
     assert!(g2 > g1, "the run is rewritten under a newer generation");
     assert!((p2, n2) != (p1, n1) || g2 != g1);
@@ -401,7 +396,6 @@ fn compacting_a_v9_file_keeps_v9() {
     let ids: Vec<Ulid> = (0..6).map(|i| db.remember(mem(i)).unwrap()).collect();
     db.delete(&ids[0]).unwrap();
     db.close().unwrap();
-    drop(db);
     let report = Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
     assert_eq!(report.after, 5);
     let mut db = Mnemo::open(&path, "pw").unwrap();
@@ -479,7 +473,6 @@ mod crash {
             db.remember(mem(i)).unwrap();
         }
         db.close().unwrap();
-        drop(db);
         let mut db = Mnemo::open(&path, "pw").unwrap();
         assert_eq!(db.verify().unwrap(), 15);
     }

@@ -253,7 +253,6 @@ fn main() {
     let ingest_ms = ms(t);
     let records = db.len();
     db.close().expect("close");
-    drop(db);
     let file_bytes = std::fs::metadata(&path).expect("stat").len();
 
     let before = measure_reads(&path, n_threads, n_turns);
