@@ -142,6 +142,47 @@ class MnemoStore private constructor(
     /** The number of live memories. */
     suspend fun count(): ULong = withDatabase { it.len() }
 
+    // --- essence writes -------------------------------------------------
+
+    /**
+     * Adds an item to an essence [section] (at most 280 bytes, status `open`)
+     * and returns its id. With an embedder set, the text is embedded first.
+     */
+    suspend fun essenceAdd(
+        section: EssenceSection,
+        text: String,
+        scope: EssenceScope = EssenceScope.Project,
+        refs: List<String>? = null,
+    ): String = withDatabase { it.essenceAdd(scope, section, text, refs) }
+
+    /** Appends a timeline entry (at most 600 bytes; append-only) and returns its id. */
+    suspend fun essenceAppendTimeline(
+        text: String,
+        scope: EssenceScope = EssenceScope.Project,
+        refs: List<String>? = null,
+    ): String = withDatabase { it.essenceAppendTimeline(scope, text, refs) }
+
+    /** Replaces an item's text and refs. Timeline entries can't be edited. */
+    suspend fun essenceUpdate(id: String, text: String, refs: List<String>? = null): WriteOutcome =
+        withDatabase { it.essenceUpdate(id, text, refs) }
+
+    /** Marks an item resolved; it stays in the history. */
+    suspend fun essenceResolve(id: String): WriteOutcome = withDatabase { it.essenceResolve(id) }
+
+    /** Removes an item from the essence (a soft delete). */
+    suspend fun essenceRemove(id: String) = withDatabase { it.essenceRemove(id) }
+
+    // --- index ----------------------------------------------------------
+
+    /**
+     * Builds the IVF+PQ index. On a v9 file below 20,000 facts it builds
+     * nothing and reports `partitions == 0u`: an exact scan is faster there.
+     */
+    suspend fun buildIndex(): IndexInfo = withDatabase { it.buildIndex() }
+
+    /** Whether the file has an IVF+PQ index. */
+    suspend fun hasIndex(): Boolean = withDatabase { it.hasIndex() }
+
     // --- threads --------------------------------------------------------
 
     /** Appends a thread's turns; turns already stored are skipped. Needs an embedder. */

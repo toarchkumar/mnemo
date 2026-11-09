@@ -6,10 +6,10 @@ Two small apps, one per platform, built against the packages in this repo
 | | iOS (`ios/`) | Android (`android/`) |
 |---|---|---|
 | UI | SwiftUI, XcodeGen project | Jetpack Compose, Gradle |
-| Notes demo | notes, a keyed fact with history, recall with and without keywords, a thread | the same |
+| Notes demo | notes, a keyed fact with history, recall with and without keywords, a thread with decisions and a timeline in its essence | the same |
 | Embedder | Apple's built-in `NLEmbedding` sentence embedding (no model in the app) | a **demo** embedder that hashes words (see below) |
 | Benchmark | the `device_budget` cells at 1K and 10K, JSON with a Share button | the same |
-| Release check | the background test (`0xdead10cc`), the file's protection class | a self-test of the R8-minified release build (run by CI) |
+| Release check | the background test (`0xdead10cc`) in two modes, the file's protection class | a self-test of the R8-minified release build (run by CI) |
 
 **`NLEmbedding` on iOS:** its English sentence model is a system asset,
 which iOS downloads separately; macOS keeps it under
@@ -163,7 +163,17 @@ real hardware.
 2. **File protection should read
    `NSFileProtectionCompleteUntilFirstUserAuthentication`** for the file
    and its directory. That's the second release check.
-3. **Run the test:**
+3. **Run the test twice,** once in each mode. The **Keep writing in the
+   background** switch picks the mode:
+   - **off:** the loop pauses as the app leaves the foreground, as a
+     well-behaved app's work would, and the test checks the transition's
+     own close;
+   - **on:** the loop keeps writing after the transition, so every write is
+     a background call. The store reopens the file, writes, and closes it
+     again inside an expiring activity. This is the case that used to hold
+     the lock into suspension.
+
+   For each mode:
    1. Tap **Start the write loop** and let it write for 10 seconds or
       so.
    2. Go to the Home Screen and lock the phone.
@@ -188,7 +198,7 @@ real hardware.
      Open it and search for `dead10cc`. "No entry", or entries without
      `0xdead10cc`, is a pass.
 5. **Report:**
-   - pass or fail;
+   - pass or fail, for each mode;
    - the protection class shown;
    - whether the App Group was used;
    - any `MnemoSample` crash entry, as a file or a screenshot.
@@ -287,8 +297,9 @@ Alongside them, `device` and `build` hold the fields from design note Q7.
 `corpus`:
 
 - every open uses a raw key, so there's no KDF;
-- the mobile API builds no IVF+PQ index, so recall reads the vector
-  column;
+- recall is an exact scan: the build phase runs `build_index` as the
+  desktop bench does, but 1K and 10K are below the 20,000 facts where a v9
+  file builds an IVF+PQ index (`index_partitions` is 0);
 - `layers`, the secure-KDF open and the fsync counts aren't measured.
 
 **Memory is measured per platform:**

@@ -246,6 +246,61 @@ import Testing
         try await store.close()
     }
 
+    @Test func essenceWritesRoundTrip() async throws {
+        let embedder = WordEmbedder()
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "essence", dimensions: 32, directory: try scratchDirectory()),
+            keyStore: MemoryKeyStore(), embedder: embedder)
+        let thread = EssenceScope.thread(threadId: "chat")
+        let decision = try await store.essenceAdd(.decisions, "drink tea at standups", scope: thread)
+        try await store.essenceAppendTimeline("shipped the demo", scope: thread)
+        #expect(embedder.callCount == 2)
+        var render = try await store.essence(thread)
+        #expect(render.contains("drink tea at standups") && render.contains("shipped the demo"))
+
+        #expect(try await store.essenceUpdate(id: decision, text: "drink coffee at standups") == .updated)
+        #expect(try await store.essenceUpdate(id: decision, text: "drink coffee at standups") == .unchanged)
+        render = try await store.essence(thread)
+        #expect(render.contains("drink coffee") && !render.contains("drink tea"))
+        try await store.essenceResolve(id: decision)
+
+        let open = try await store.essenceAdd(.open, "which milk?", scope: thread)
+        #expect(try await store.essence(thread).contains("which milk?"))
+        try await store.essenceRemove(id: open)
+        #expect(try await store.essence(thread).contains("which milk?") == false)
+
+        await #expect(throws: MnemoError.self) {
+            try await store.essenceAdd(.next, String(repeating: "x", count: 281), scope: thread)
+        }
+        try await store.close()
+    }
+
+    @Test func buildIndexBelowTheThresholdBuildsNothing() async throws {
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "index", dimensions: 4, directory: try scratchDirectory()),
+            keyStore: MemoryKeyStore())
+        for i in 0..<50 { try await store.remember("memory \(i)", vector: vec(i)) }
+        #expect(try await store.hasIndex() == false)
+        let info = try await store.buildIndex()
+        #expect(info.vectors == 50 && info.partitions == 0)
+        #expect(try await store.hasIndex() == false)
+
+        // A v8 file builds one at any size.
+        let v8 = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "index8", dimensions: 4, directory: try scratchDirectory(),
+                                                   formatVersion: 8),
+            keyStore: MemoryKeyStore())
+        for i in 0..<300 {
+            let x = Float(i) + 1
+            try await v8.remember("memory \(i)", vector: [sin(x) + 1.5, cos(x), sin(x * 0.37), 1])
+        }
+        let built = try await v8.buildIndex()
+        #expect(built.vectors == 300 && built.partitions > 0)
+        #expect(try await v8.hasIndex())
+        try await store.close()
+        try await v8.close()
+    }
+
     @Test func invalidNamesAreRefused() throws {
         for name in ["", "../escape", ".hidden", "a/b"] {
             #expect(throws: MnemoStoreError.self) {

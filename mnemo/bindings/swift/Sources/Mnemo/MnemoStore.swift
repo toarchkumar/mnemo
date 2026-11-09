@@ -76,12 +76,18 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
 ///
 /// - Opens lazily, on the first call. A new file gets a fresh random key,
 ///   stored in the key store under a new id, which is stamped on the file.
-/// - On iOS, when the app enters the background or is about to terminate,
-///   the store flushes and closes its file inside an expiring activity, so
-///   the process isn't suspended holding the file lock (`0xdead10cc`). The
-///   next call reopens it. A call that races the transition either runs
-///   before the close or reopens after it; it never sees
-///   ``MnemoError/Closed``.
+/// - On iOS, the store never lets the app be suspended holding the file
+///   lock (`0xdead10cc`):
+///   - when the app enters the background or is about to terminate, it
+///     flushes and closes its file inside an expiring activity;
+///   - while the app isn't active, every call runs inside its own expiring
+///     activity: it reopens the file, does its work, then flushes and
+///     closes it again before the activity ends. That covers work the app
+///     does in the background (a background fetch, a `Task` still running)
+///     and an app launched straight into the background;
+///   - once the app is active again, the file stays open between calls.
+///
+///   A call never sees ``MnemoError/Closed`` because of a transition.
 /// - Calls run on the actor, never on the main thread, and are serialized.
 ///   Each is a blocking call into the engine, so keep batches reasonable.
 /// - The file lives in `Application Support/mnemo/` by default, with the
@@ -98,9 +104,13 @@ public actor MnemoStore {
     private var db: MnemoDb?
     private var keyID: String?
     private nonisolated let lifecycle = LifecycleObserver()
+    private nonisolated let activityReason: String
 
     /// How many times a background transition has closed the file (tests).
     private(set) var backgroundCloses = 0
+    /// How many times a call made in the background has closed the file
+    /// after itself (tests).
+    private(set) var backgroundCallCloses = 0
     /// The last error a background flush or close hit, if any.
     public private(set) var lastBackgroundError: (any Error)?
 
@@ -119,6 +129,7 @@ public actor MnemoStore {
         self.fileURL = try configuration.fileURL()
         self.keyStore = keyStore
         self.embedder = embedder
+        activityReason = "MNemo: \(configuration.name) in the background"
         lifecycle.start(reason: "MNemo: flush and close \(configuration.name)") { [weak self] in
             await self?.closeForBackground()
         }
@@ -129,70 +140,120 @@ public actor MnemoStore {
     /// Stores a memory with a caller-supplied vector.
     @discardableResult
     public func remember(_ content: String, vector: [Float],
-                         options: RememberOptions = RememberOptions()) throws -> WriteResult {
-        try withDatabase { try $0.remember(content: content, vector: vector, options: options) }
+                         options: RememberOptions = RememberOptions()) async throws -> WriteResult {
+        try await withDatabase { try $0.remember(content: content, vector: vector, options: options) }
     }
 
     /// Stores a memory, embedding `content` with the store's embedder.
     @discardableResult
     public func rememberText(_ content: String,
-                             options: RememberOptions = RememberOptions()) throws -> WriteResult {
-        try withDatabase { try $0.rememberText(content: content, options: options) }
+                             options: RememberOptions = RememberOptions()) async throws -> WriteResult {
+        try await withDatabase { try $0.rememberText(content: content, options: options) }
     }
 
     /// Changes fields of a memory. A content change is re-embedded when the
     /// patch has no vector and an embedder is set.
     @discardableResult
-    public func update(id: String, patch: MemoryPatch) throws -> WriteOutcome {
-        try withDatabase { try $0.update(id: id, patch: patch) }
+    public func update(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
+        try await withDatabase { try $0.update(id: id, patch: patch) }
     }
 
     /// Deletes a memory.
-    public func delete(id: String) throws {
-        try withDatabase { try $0.delete(id: id) }
+    public func delete(id: String) async throws {
+        try await withDatabase { try $0.delete(id: id) }
     }
 
     // MARK: Reads
 
     /// One memory by id.
-    public func get(id: String) throws -> MemoryRecord {
-        try withDatabase { try $0.get(id: id) }
+    public func get(id: String) async throws -> MemoryRecord {
+        try await withDatabase { try $0.get(id: id) }
     }
 
     /// Every version of a keyed memory, newest first.
-    public func history(key: String) throws -> [MemoryRecord] {
-        try withDatabase { try $0.history(key: key) }
+    public func history(key: String) async throws -> [MemoryRecord] {
+        try await withDatabase { try $0.history(key: key) }
     }
 
     /// Recall by vector. An empty vector with `options.keywords` set is a
     /// keyword-only recall.
-    public func recall(vector: [Float], options: RecallOptions = RecallOptions()) throws -> RecallPage {
-        try withDatabase { try $0.recall(vector: vector, options: options) }
+    public func recall(vector: [Float], options: RecallOptions = RecallOptions()) async throws -> RecallPage {
+        try await withDatabase { try $0.recall(vector: vector, options: options) }
     }
 
     /// Recall by text, embedded with the store's embedder.
-    public func recallText(_ query: String, options: RecallOptions = RecallOptions()) throws -> RecallPage {
-        try withDatabase { try $0.recallText(query: query, options: options) }
+    public func recallText(_ query: String, options: RecallOptions = RecallOptions()) async throws -> RecallPage {
+        try await withDatabase { try $0.recallText(query: query, options: options) }
     }
 
     /// The file's self-description (manifest and orientation memories).
-    public func about() throws -> [MemoryRecord] {
-        try withDatabase { try $0.about() }
+    public func about() async throws -> [MemoryRecord] {
+        try await withDatabase { try $0.about() }
     }
 
     /// The essence of the project or of one thread, within `maxBytes`.
-    public func essence(_ scope: EssenceScope = .project, maxBytes: UInt64 = 4096) throws -> String {
-        try withDatabase { try $0.essence(scope: scope, maxBytes: maxBytes) }
+    public func essence(_ scope: EssenceScope = .project, maxBytes: UInt64 = 4096) async throws -> String {
+        try await withDatabase { try $0.essence(scope: scope, maxBytes: maxBytes) }
+    }
+
+    // MARK: Essence writes
+
+    /// Adds an item to an essence section (at most 280 bytes, status
+    /// `open`) and returns its id. With an embedder set, the text is
+    /// embedded first.
+    @discardableResult
+    public func essenceAdd(_ section: EssenceSection, _ text: String, scope: EssenceScope = .project,
+                           refs: [String]? = nil) async throws -> String {
+        try await withDatabase { try $0.essenceAdd(scope: scope, section: section, text: text, refs: refs) }
+    }
+
+    /// Appends a timeline entry (at most 600 bytes; append-only) and returns
+    /// its id.
+    @discardableResult
+    public func essenceAppendTimeline(_ text: String, scope: EssenceScope = .project,
+                                      refs: [String]? = nil) async throws -> String {
+        try await withDatabase { try $0.essenceAppendTimeline(scope: scope, text: text, refs: refs) }
+    }
+
+    /// Replaces an item's text and refs. Timeline entries can't be edited.
+    @discardableResult
+    public func essenceUpdate(id: String, text: String, refs: [String]? = nil) async throws -> WriteOutcome {
+        try await withDatabase { try $0.essenceUpdate(id: id, text: text, refs: refs) }
+    }
+
+    /// Marks an item resolved; it stays in the history.
+    @discardableResult
+    public func essenceResolve(id: String) async throws -> WriteOutcome {
+        try await withDatabase { try $0.essenceResolve(id: id) }
+    }
+
+    /// Removes an item from the essence (a soft delete).
+    public func essenceRemove(id: String) async throws {
+        try await withDatabase { try $0.essenceRemove(id: id) }
+    }
+
+    // MARK: Index
+
+    /// Builds the IVF+PQ index. On a v9 file below 20,000 facts it builds
+    /// nothing and reports `partitions == 0`: an exact scan is faster there.
+    @discardableResult
+    public func buildIndex() async throws -> IndexInfo {
+        try await withDatabase { try $0.buildIndex() }
+    }
+
+    /// Whether the file has an IVF+PQ index.
+    public func hasIndex() async throws -> Bool {
+        try await withDatabase { try $0.hasIndex() }
     }
 
     /// File statistics.
-    public func stats() throws -> DbStats {
-        try withDatabase { try $0.stats() }
+    public func stats() async throws -> DbStats {
+        try await withDatabase { try $0.stats() }
     }
 
     /// The number of live memories.
-    public func count() throws -> UInt64 {
-        try withDatabase { try $0.len() }
+    public func count() async throws -> UInt64 {
+        try await withDatabase { try $0.len() }
     }
 
     // MARK: Threads
@@ -200,31 +261,31 @@ public actor MnemoStore {
     /// Appends a thread's turns; turns already stored are skipped. Needs an
     /// embedder.
     @discardableResult
-    public func ingestThread(_ threadID: String, turns: [ThreadTurn]) throws -> IngestReport {
-        try withDatabase { try $0.ingestThread(threadId: threadID, turns: turns) }
+    public func ingestThread(_ threadID: String, turns: [ThreadTurn]) async throws -> IngestReport {
+        try await withDatabase { try $0.ingestThread(threadId: threadID, turns: turns) }
     }
 
     /// A thread's turns, oldest first.
-    public func threadExport(_ threadID: String) throws -> [ExportedTurn] {
-        try withDatabase { try $0.threadExport(threadId: threadID) }
+    public func threadExport(_ threadID: String) async throws -> [ExportedTurn] {
+        try await withDatabase { try $0.threadExport(threadId: threadID) }
     }
 
     /// Deletes a thread's turns; returns how many records went.
     @discardableResult
-    public func threadForget(_ threadID: String) throws -> UInt64 {
-        try withDatabase { try $0.threadForget(threadId: threadID) }
+    public func threadForget(_ threadID: String) async throws -> UInt64 {
+        try await withDatabase { try $0.threadForget(threadId: threadID) }
     }
 
     // MARK: Result cache
 
     /// Stores a value in the result cache under an exact key.
-    public func cachePut(namespace: String, key: String, value: Data, ttlSecs: UInt64? = nil) throws {
-        try withDatabase { try $0.cachePut(namespace: namespace, key: key, value: value, ttlSecs: ttlSecs) }
+    public func cachePut(namespace: String, key: String, value: Data, ttlSecs: UInt64? = nil) async throws {
+        try await withDatabase { try $0.cachePut(namespace: namespace, key: key, value: value, ttlSecs: ttlSecs) }
     }
 
     /// A cached value, or `nil`.
-    public func cacheGet(namespace: String, key: String) throws -> Data? {
-        try withDatabase { try $0.cacheGet(namespace: namespace, key: key) }
+    public func cacheGet(namespace: String, key: String) async throws -> Data? {
+        try await withDatabase { try $0.cacheGet(namespace: namespace, key: key) }
     }
 
     // MARK: Lifecycle
@@ -252,7 +313,9 @@ public actor MnemoStore {
 
     /// Rewrites the file compactly, closing it first. The next call reopens it.
     @discardableResult
-    public func compact() throws -> CompactReport {
+    public func compact() async throws -> CompactReport {
+        let activity = lifecycle.isForeground ? nil : await LifecycleObserver.beginActivity(reason: activityReason)
+        defer { activity?.end() }
         try close()
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw MnemoError.NotFound(message: fileURL.path)
@@ -271,8 +334,8 @@ public actor MnemoStore {
     /// Writes a copy that opens with `passphrase` alone, for moving the
     /// database to another device or app. `destination` must not exist.
     /// Takes a few seconds: the passphrase goes through the KDF.
-    public func exportWithPassphrase(to destination: URL, passphrase: String) throws {
-        try withDatabase { try $0.exportWithPassphrase(dest: destination.path, passphrase: passphrase) }
+    public func exportWithPassphrase(to destination: URL, passphrase: String) async throws {
+        try await withDatabase { try $0.exportWithPassphrase(dest: destination.path, passphrase: passphrase) }
     }
 
     /// Imports a passphrase export as a new store: the copy is re-protected
@@ -308,6 +371,9 @@ public actor MnemoStore {
     /// Whether the file is open (tests).
     var isOpen: Bool { db != nil }
 
+    /// Whether the store treats the app as active (tests).
+    nonisolated var appIsActive: Bool { lifecycle.isForeground }
+
     /// The background transition: flush, close, release the lock. Errors are
     /// kept in ``lastBackgroundError``; the next call reopens either way.
     func closeForBackground() {
@@ -326,17 +392,50 @@ public actor MnemoStore {
         backgroundCloses += 1
     }
 
-    /// Runs `body` on the open handle, opening it first if needed. Actor
-    /// isolation means nothing closes the handle while `body` runs; if the
-    /// engine reports `Closed` anyway, the store reopens once and retries
-    /// (`Closed` is reported before any work is done, so the retry is safe).
-    private func withDatabase<T>(_ body: (MnemoDb) throws -> T) throws -> T {
+    /// Runs `body` on the open handle, opening it first if needed.
+    ///
+    /// While the app isn't active, the call holds an expiring activity, and
+    /// the file is flushed and closed again before the activity ends, so the
+    /// app is never suspended holding the lock. Calls while it's active
+    /// leave the file open.
+    private func withDatabase<T>(_ body: (MnemoDb) throws -> T) async throws -> T {
+        if lifecycle.isForeground { return try onHandle(body) }
+        let activity = await LifecycleObserver.beginActivity(reason: activityReason)
+        // Deferred blocks run last-first: close, then end the activity.
+        defer { activity.end() }
+        defer { closeAfterBackgroundCall() }
+        return try onHandle(body)
+    }
+
+    /// Actor isolation means nothing closes the handle while `body` runs; if
+    /// the engine reports `Closed` anyway, the store reopens once and
+    /// retries (`Closed` is reported before any work is done, so the retry
+    /// is safe).
+    private func onHandle<T>(_ body: (MnemoDb) throws -> T) throws -> T {
         do {
             return try body(try handle())
         } catch MnemoError.Closed {
             db = nil
             return try body(try handle())
         }
+    }
+
+    /// After a call made in the background: flush and close, unless the app
+    /// became active meanwhile. Errors go to ``lastBackgroundError``.
+    private func closeAfterBackgroundCall() {
+        guard !lifecycle.isForeground, let db else { return }
+        self.db = nil
+        do {
+            try db.flush()
+        } catch {
+            lastBackgroundError = error
+        }
+        do {
+            try db.close()
+        } catch {
+            lastBackgroundError = error
+        }
+        backgroundCallCloses += 1
     }
 
     private func handle() throws -> MnemoDb {

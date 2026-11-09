@@ -488,3 +488,171 @@ fn threads_keyed_writes_filters_keywords_cache_and_compaction() {
     let reopened = MnemoDb::open_with_key(db.path(), key).unwrap();
     assert_eq!(reopened.history("drink".into()).unwrap().len(), 2);
 }
+
+#[test]
+fn essence_writes_round_trip_and_embed_with_no_lock_held() {
+    // An embedder that reads the handle it embeds for: it deadlocks if an
+    // essence write embeds with the lock held. Run with a timeout.
+    struct Reentrant {
+        db: Mutex<Option<Arc<MnemoDb>>>,
+        calls: AtomicUsize,
+    }
+    impl MnemoEmbedder for Reentrant {
+        fn identity(&self) -> EmbedderIdentity {
+            EmbedderIdentity {
+                name: "reentrant".into(),
+                dimensions: DIMS,
+                normalize: false,
+            }
+        }
+        fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedderError> {
+            let db = self.db.lock().unwrap().clone().unwrap();
+            db.len().map_err(|e| EmbedderError::Failed {
+                message: e.to_string(),
+            })?;
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(texts.iter().map(|t| mock_vector(t)).collect())
+        }
+    }
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    let e = Arc::new(Reentrant {
+        db: Mutex::new(Some(db.clone())),
+        calls: AtomicUsize::new(0),
+    });
+    db.set_embedder(e.clone()).unwrap();
+    let thread = || EssenceScope::Thread {
+        thread_id: "chat".into(),
+    };
+
+    let (tx, rx) = mpsc::channel();
+    let worker = db.clone();
+    std::thread::spawn(move || {
+        let scope = || EssenceScope::Thread {
+            thread_id: "chat".into(),
+        };
+        let decision = worker.essence_add(
+            scope(),
+            EssenceSection::Decisions,
+            "drink tea at standups".into(),
+            None,
+        );
+        let timeline = worker.essence_append_timeline(scope(), "shipped the demo".into(), None);
+        let _ = tx.send((decision, timeline));
+    });
+    let (decision, timeline) = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("deadlock: an essence write embedded with the handle lock held");
+    let decision = decision.unwrap();
+    timeline.unwrap();
+    assert_eq!(e.calls.load(Ordering::SeqCst), 2, "each write embedded once");
+
+    let render = db.essence(thread(), 4096).unwrap();
+    assert!(render.contains("drink tea at standups"), "{render}");
+    assert!(render.contains("shipped the demo"), "{render}");
+
+    // Update in place, then the same text again is a no-op.
+    let outcome = db
+        .essence_update(decision.clone(), "drink coffee at standups".into(), None)
+        .unwrap();
+    assert!(matches!(outcome, WriteOutcome::Updated), "{outcome:?}");
+    let again = db
+        .essence_update(decision.clone(), "drink coffee at standups".into(), None)
+        .unwrap();
+    assert!(matches!(again, WriteOutcome::Unchanged), "{again:?}");
+    let render = db.essence(thread(), 4096).unwrap();
+    assert!(render.contains("drink coffee") && !render.contains("drink tea"), "{render}");
+
+    // Resolve, and remove another item from the render.
+    db.essence_resolve(decision).unwrap();
+    let open = db
+        .essence_add(thread(), EssenceSection::Open, "which milk?".into(), None)
+        .unwrap();
+    assert!(db.essence(thread(), 4096).unwrap().contains("which milk?"));
+    db.essence_remove(open).unwrap();
+    assert!(!db.essence(thread(), 4096).unwrap().contains("which milk?"));
+
+    // Errors: a bad id, an over-long item, editing the timeline.
+    assert!(matches!(
+        db.essence_resolve("not-an-id".into()),
+        Err(MnemoError::Invalid { .. })
+    ));
+    assert!(matches!(
+        db.essence_add(thread(), EssenceSection::Next, "x".repeat(281), None),
+        Err(MnemoError::Invalid { .. })
+    ));
+    let entry = db
+        .essence_append_timeline(thread(), "milestone".into(), None)
+        .unwrap();
+    assert!(db.essence_update(entry, "rewritten".into(), None).is_err());
+    *e.db.lock().unwrap() = None;
+}
+
+#[test]
+fn essence_writes_work_without_an_embedder() {
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    db.essence_add(
+        EssenceScope::Project,
+        EssenceSection::Conventions,
+        "tabs, not spaces".into(),
+        Some(vec!["style-guide".into()]),
+    )
+    .unwrap();
+    db.essence_append_timeline(EssenceScope::Project, "first release".into(), None)
+        .unwrap();
+    let render = db.essence(EssenceScope::Project, 4096).unwrap();
+    assert!(render.contains("tabs, not spaces") && render.contains("first release"), "{render}");
+}
+
+fn fill(db: &MnemoDb, n: u32) {
+    for i in 0..n {
+        let x = i as f32 + 1.0;
+        db.remember(
+            format!("memory {i}"),
+            vec![x.sin() + 1.5, x.cos(), (x * 0.37).sin(), 1.0],
+            remember_opts(),
+        )
+        .unwrap();
+    }
+    db.flush().unwrap();
+}
+
+#[test]
+fn build_index_and_has_index() {
+    // v9 (the default) below V9_ANN_MIN_FACTS: an exact scan is faster, so
+    // build_index builds nothing and says so.
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    assert!(!db.has_index().unwrap());
+    fill(&db, 600);
+    let info = db.build_index().unwrap();
+    assert_eq!((info.vectors, info.partitions), (600, 0), "{info:?}");
+    assert!(!db.has_index().unwrap());
+    db.close().unwrap();
+
+    // v8 builds an IVF+PQ index at any size, and recall uses it.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v8.mnemo").display().to_string();
+    let db = MnemoDb::create_with_key(
+        path,
+        generate_key(),
+        MnemoConfig {
+            format_version: 8,
+            ..config()
+        },
+    )
+    .unwrap();
+    fill(&db, 600);
+    let info = db.build_index().unwrap();
+    assert_eq!(info.vectors, 600);
+    assert!(info.partitions > 0 && info.subspaces > 0, "{info:?}");
+    assert!(db.has_index().unwrap());
+    assert!(db.stats().unwrap().has_index);
+    let hits = db
+        .recall(vec![2.0, 0.5, 0.1, 1.0], recall_opts())
+        .unwrap()
+        .hits;
+    assert_eq!(hits.len(), 10);
+    db.close().unwrap();
+}

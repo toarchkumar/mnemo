@@ -27,6 +27,33 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Added
 
+- **The mobile API (MOBILE-1d.2):**
+  - **Essence writes** in `mnemo-uniffi` and both store layers:
+    `essence_add`, `essence_update`, `essence_resolve`, `essence_remove`
+    and `essence_append_timeline`. That's `essenceAdd(section, text,
+    scope:)` and so on in Swift and Kotlin, with a new `EssenceSection`
+    enum for the seven editable sections; ids are strings. With an
+    embedder set, the text is embedded before the handle is locked.
+  - **The index:** `build_index` (`buildIndex()`, returning an
+    `IndexInfo`) and `has_index` (`hasIndex()`). On a v9 file below
+    20,000 facts, `build_index` builds nothing and reports
+    `partitions: 0`, as the engine does.
+  - **The engine** gains `Mnemo::essence_add_with_vector` and
+    `Mnemo::essence_append_timeline_with_vector`, which take the item's
+    vector from the caller (the binding's embed-then-lock split, like
+    `ingest_thread_with_vectors`).
+- **Swift `MnemoStore` closes after calls made in the background.**
+  - It now tracks whether the app is active (`didEnterBackground`,
+    `willEnterForeground`, `didBecomeActive`, plus `UIApplication`'s state
+    at start).
+  - While the app isn't active, each call runs inside an expiring
+    activity and flushes and closes the file before the activity ends. So
+    work the app does in the background (or an app launched into the
+    background) can't leave the lock held into suspension (`0xdead10cc`).
+  - Calls made while the app is active keep the file open, as before.
+  - The store's methods that touch the file are now `async`; callers
+    already `await` the actor.
+
 - **`Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors`**
   split `ingest_thread` in two, so a caller can embed between the calls
   without holding the handle (the UniFFI binding does). The first returns

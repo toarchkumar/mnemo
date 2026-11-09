@@ -70,8 +70,8 @@ class DeviceBudget(private val context: Context, private val report: (String) ->
                     .put("text_bytes", Corpus.TEXT_BYTES)
                     .put("generator", "device_budget.rs text_for + corpus.rs gen_clustered_vectors (seeds 0xBEEFC0DE, 0xDE71CE00, 0x57170001)")
                     .put("key", "raw 32-byte key (createWithKey / openWithKey): no KDF on open")
-                    .put("index", "none: the mobile API builds no IVF+PQ index, so recall reads the vector column")
-                    .put("not_measured", "layers, open_secure_kdf_*, *_fsyncs (not in the mobile API)"),
+                    .put("index", "exact scan: build_index runs, but 1K and 10K are below V9_ANN_MIN_FACTS (20,000), where a v9 file builds no IVF+PQ index (as on desktop)")
+                    .put("not_measured", "layers, open_secure_kdf_*, *_fsyncs (not in the mobile API), indexed recall (25K+)"),
             )
             .put("results", results)
             .put("elapsed_secs", millisSince(started) / 1_000)
@@ -89,6 +89,7 @@ class DeviceBudget(private val context: Context, private val report: (String) ->
         corpus(n).delete()
         val started = System.nanoTime()
         val key = generateKey()
+        var partitions = 0L
         try {
             withDb(MnemoDb.createWithKey(corpus(n).path, key, CONFIG)) { db ->
                 val vectors = ClusteredVectors(Corpus.clusters(n), 0xBEEF_C0DEuL)
@@ -97,12 +98,17 @@ class DeviceBudget(private val context: Context, private val report: (String) ->
                     if (i % 1_000 == 999) report("n = $n: ${i + 1} memories")
                 }
                 db.flush()
+                // As device_budget.rs does. Below V9_ANN_MIN_FACTS (20,000)
+                // a v9 file builds nothing, so recall is an exact scan.
+                partitions = db.buildIndex().partitions.toLong()
+                db.flush()
             }
             keyFile(n).writeBytes(key)
         } finally {
             key.fill(0)
         }
         return JSONObject().put("built", true).put("build_secs", millisSince(started) / 1_000)
+            .put("index_partitions", partitions)
     }
 
     private fun phaseFile(n: Int, key: ByteArray): JSONObject {

@@ -61,6 +61,17 @@ let byWord = try await store.recall(vector: [], options: RecallOptions(keywords:
   is a no-op), `threadExport(_:)` returns them, `threadForget(_:)` deletes
   them, and `essence(.thread(threadId:))` summarizes one within a byte
   budget.
+- **The essence:** what an agent derives from a thread, as small items.
+  - `essenceAdd(.decisions, "…", scope:)` adds an item (280 bytes at
+    most) and returns its id.
+  - `essenceUpdate(id:text:)`, `essenceResolve(id:)` and
+    `essenceRemove(id:)` change one.
+  - `essenceAppendTimeline("…", scope:)` adds a milestone (600 bytes,
+    append-only).
+  - `essence(_:maxBytes:)` renders them.
+- **The index:** `buildIndex()` builds the IVF+PQ index, and `hasIndex()`
+  says whether there is one. On v9 files below 20,000 facts it builds
+  nothing (`partitions == 0`), because an exact scan is faster there.
 - **Keyed facts:** `RememberOptions(key:)` writes a new version and
   supersedes the old one. `history(key:)` lists the versions, newest first.
 - **The result cache:** `cachePut` and `cacheGet`, by exact key.
@@ -110,12 +121,26 @@ iOS kills a suspended app that holds a file lock in a shared container
   `willTerminateNotification`, it flushes and closes the file inside an
   expiring background activity. That releases the lock before suspension,
   and every write made so far is durable.
-- **Reopening.** The next call reopens the file transparently. A call that
-  races the transition either finishes before the close or reopens after
-  it. It never fails with `Closed`.
-- **Calls while backgrounded.** A call made while the app is in the
-  background reopens the file. Make it inside your own background task,
-  and the next transition closes it again.
+- **Calls while the app isn't active close after themselves.** The store
+  tracks the app's state: `didEnterBackground` marks it inactive, and
+  `willEnterForeground` or `didBecomeActive` marks it active again.
+  - While it's inactive, every call runs inside its own expiring
+    activity. It reopens the file, does its work, then flushes and closes
+    the file again before the activity ends. So work the app does in the
+    background (a background fetch, a push, a `Task` still running) never
+    leaves the lock held into suspension.
+  - A call that races the transition either finishes before the close or
+    runs as a background call. It never fails with `Closed`.
+  - Each such call pays an open (a few milliseconds with a raw key), so
+    batch background work where you can.
+- **Launched into the background.** An app launched straight into the
+  background (a background fetch, a push) gets no `didEnterBackground`.
+  So the store reads `UIApplication`'s state once, on the main thread, and
+  starts out inactive when the app is in the background. In an app
+  extension, which gets no `UIApplication` notifications, the store treats
+  the process as active, so close it yourself when the extension's work
+  ends.
+- **Back in the foreground,** the file stays open between calls again.
 - **Errors.** A failed background flush is kept in
   `lastBackgroundError`. The data written before the last successful
   flush is safe.

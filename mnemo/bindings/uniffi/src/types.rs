@@ -239,6 +239,76 @@ pub enum EssenceScope {
     Thread { thread_id: String },
 }
 
+/// A section of the essence that holds editable items. The timeline is
+/// append-only and has its own call (`essence_append_timeline`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum EssenceSection {
+    /// What the thread is trying to do.
+    Intent,
+    /// How the user works: conventions that survive across threads.
+    Conventions,
+    /// Decisions made and why.
+    Decisions,
+    /// The current state of the work.
+    State,
+    /// Open problems.
+    Open,
+    /// What to do next.
+    Next,
+    /// Lessons learned: mistakes caught and their fixes.
+    Lessons,
+}
+
+impl From<EssenceSection> for mnemo_engine::EssenceSection {
+    fn from(s: EssenceSection) -> Self {
+        match s {
+            EssenceSection::Intent => Self::Intent,
+            EssenceSection::Conventions => Self::Conventions,
+            EssenceSection::Decisions => Self::Decisions,
+            EssenceSection::State => Self::State,
+            EssenceSection::Open => Self::Open,
+            EssenceSection::Next => Self::Next,
+            EssenceSection::Lessons => Self::Lessons,
+        }
+    }
+}
+
+impl From<EssenceScope> for mnemo_engine::EssenceScope {
+    fn from(s: EssenceScope) -> Self {
+        match s {
+            EssenceScope::Project => Self::Project,
+            EssenceScope::Thread { thread_id } => Self::Thread(thread_id),
+        }
+    }
+}
+
+/// What `build_index` built: the IVF+PQ index's shape.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct IndexInfo {
+    /// Vectors in the index.
+    pub vectors: u64,
+    /// IVF partitions.
+    pub partitions: u32,
+    /// PQ subspaces.
+    pub subspaces: u32,
+    /// Partitions probed per query by default.
+    pub n_probe: u32,
+    /// Candidates reranked per query by default.
+    pub n_rerank: u32,
+}
+
+impl From<mnemo_engine::IndexInfo> for IndexInfo {
+    fn from(i: mnemo_engine::IndexInfo) -> Self {
+        Self {
+            vectors: i.vectors as u64,
+            partitions: i.partitions as u32,
+            subspaces: i.subspaces as u32,
+            n_probe: i.n_probe as u32,
+            n_rerank: i.n_rerank as u32,
+        }
+    }
+}
+
 /// File statistics.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct DbStats {

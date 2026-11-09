@@ -34,6 +34,7 @@ fun NotesScreen(model: NotesViewModel = viewModel()) {
     var keywords by rememberSaveable { mutableStateOf(false) }
     var turn by rememberSaveable { mutableStateOf("") }
     var role by rememberSaveable { mutableStateOf("user") }
+    var derived by rememberSaveable { mutableStateOf("") }
     val small = MaterialTheme.typography.bodySmall
 
     LazyColumn(
@@ -90,11 +91,16 @@ fun NotesScreen(model: NotesViewModel = viewModel()) {
             OutlinedTextField(turn, { turn = it }, Modifier.fillMaxWidth(), label = { Text("A turn of the conversation") })
             Button({ model.addTurn(role, turn); turn = "" }) { Text("Add turn") }
             model.turns.forEach { Text("${it.role}: ${it.content}", style = small) }
+            OutlinedTextField(derived, { derived = it }, Modifier.fillMaxWidth(), label = { Text("A decision or a milestone") })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button({ model.addEssence(derived, timeline = false); derived = "" }) { Text("Add decision") }
+                OutlinedButton({ model.addEssence(derived, timeline = true); derived = "" }) { Text("Add to timeline") }
+            }
             Text("Essence", style = MaterialTheme.typography.labelMedium)
             Text(model.essence.ifEmpty { "(empty)" }, style = small.copy(fontFamily = FontFamily.Monospace))
             Text(
-                "Turns are kept losslessly. The essence holds the items an agent derives from them; " +
-                    "the mobile API reads it but doesn't write essence items yet.",
+                "Turns are kept losslessly. The essence holds the small items an agent derives from them, " +
+                    "such as decisions (editable) and timeline milestones (append-only).",
                 style = small,
                 modifier = Modifier.padding(bottom = 24.dp),
             )

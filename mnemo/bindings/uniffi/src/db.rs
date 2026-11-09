@@ -128,6 +128,23 @@ impl MnemoDb {
     }
 
     /// Embed one text with no lock held.
+    /// `text`'s vector when an embedder is set (embedded with no lock
+    /// held), `None` otherwise.
+    fn embed_if_set(&self, text: &str) -> Result<Option<Vec<f32>>, MnemoError> {
+        let set = self
+            .embedder
+            .read()
+            .map_err(|_| MnemoError::Corrupt {
+                message: POISONED.into(),
+            })?
+            .is_some();
+        if set {
+            self.embed_one(text).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn embed_one(&self, text: &str) -> Result<Vec<f32>, MnemoError> {
         let e = self.embedder()?;
         let mut v = embed_checked(&e, vec![text.to_string()], self.dimensions)?;
@@ -478,11 +495,84 @@ impl MnemoDb {
 
     /// The essence render for a scope, within `max_bytes`.
     pub fn essence(&self, scope: EssenceScope, max_bytes: u64) -> Result<String, MnemoError> {
-        let scope = match scope {
-            EssenceScope::Project => mnemo_engine::EssenceScope::Project,
-            EssenceScope::Thread { thread_id } => mnemo_engine::EssenceScope::Thread(thread_id),
-        };
-        self.with(|db| db.essence(scope, max_bytes as usize))
+        self.with(|db| db.essence(scope.into(), max_bytes as usize))
+    }
+
+    // --- essence writes -----------------------------------------------------
+
+    /// Add an item to an essence section (at most 280 bytes; status
+    /// `open`). Returns its id. With an embedder set, `text` is embedded
+    /// before the handle is locked.
+    pub fn essence_add(
+        &self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: String,
+        refs: Option<Vec<String>>,
+    ) -> Result<String, MnemoError> {
+        let vector = self.embed_if_set(&text)?;
+        self.with(|db| match vector {
+            Some(v) => db.essence_add_with_vector(scope.into(), section.into(), &text, refs, v),
+            None => db.essence_add(scope.into(), section.into(), &text, refs),
+        })
+        .map(|id| id.to_string())
+    }
+
+    /// Append a timeline entry (at most 600 bytes, append-only). Returns its
+    /// id. Embeds like `essence_add`.
+    pub fn essence_append_timeline(
+        &self,
+        scope: EssenceScope,
+        text: String,
+        refs: Option<Vec<String>>,
+    ) -> Result<String, MnemoError> {
+        let vector = self.embed_if_set(&text)?;
+        self.with(|db| match vector {
+            Some(v) => db.essence_append_timeline_with_vector(scope.into(), &text, refs, v),
+            None => db.essence_append_timeline(scope.into(), &text, refs),
+        })
+        .map(|id| id.to_string())
+    }
+
+    /// Replace an item's text (and refs). Timeline entries can't be edited.
+    /// `Unchanged` when nothing differs.
+    pub fn essence_update(
+        &self,
+        id: String,
+        text: String,
+        refs: Option<Vec<String>>,
+    ) -> Result<WriteOutcome, MnemoError> {
+        let id = parse_id(&id)?;
+        self.with(|db| db.essence_update(&id, &text, refs))
+            .map(Into::into)
+    }
+
+    /// Mark an item resolved (it stays in the file and in history).
+    pub fn essence_resolve(&self, id: String) -> Result<WriteOutcome, MnemoError> {
+        let id = parse_id(&id)?;
+        self.with(|db| db.essence_resolve(&id)).map(Into::into)
+    }
+
+    /// Remove an item from the render (a soft delete).
+    pub fn essence_remove(&self, id: String) -> Result<(), MnemoError> {
+        let id = parse_id(&id)?;
+        self.with(|db| db.essence_remove(&id))
+    }
+
+    // --- the ANN index ------------------------------------------------------
+
+    /// Build (or rebuild) the IVF+PQ index over every fact. On a v9 file
+    /// below 20,000 facts (`V9_ANN_MIN_FACTS`) it builds nothing and
+    /// reports `partitions: 0`: an exact scan is faster there, and it drops
+    /// a stale index. v8 files build one at any size. The handle is locked
+    /// for the build.
+    pub fn build_index(&self) -> Result<IndexInfo, MnemoError> {
+        self.with(|db| db.build_index()).map(Into::into)
+    }
+
+    /// Whether the file has an ANN index.
+    pub fn has_index(&self) -> Result<bool, MnemoError> {
+        self.with(|db| Ok(db.has_index()))
     }
 
     /// File statistics.

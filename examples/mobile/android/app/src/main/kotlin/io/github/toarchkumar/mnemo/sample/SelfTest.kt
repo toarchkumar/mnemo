@@ -2,6 +2,8 @@ package io.github.toarchkumar.mnemo.sample
 
 import android.content.Context
 import android.util.Log
+import io.github.toarchkumar.mnemo.EssenceScope
+import io.github.toarchkumar.mnemo.EssenceSection
 import io.github.toarchkumar.mnemo.MnemoStore
 import io.github.toarchkumar.mnemo.MnemoStoreConfiguration
 import io.github.toarchkumar.mnemo.RecallOptions
@@ -27,6 +29,11 @@ object SelfTest {
             store.rememberText("the user prefers green tea", RememberOptions(key = "drink"))
             store.rememberText("the user prefers coffee now", RememberOptions(key = "drink"))
             store.ingestThread("t", listOf(ThreadTurn(turnId = "1", role = "user", content = "hello there")))
+            val scope = EssenceScope.Thread("t")
+            store.essenceAdd(EssenceSection.DECISIONS, "say hello first", scope)
+            store.essenceAppendTimeline("greeted", scope)
+            check(store.essence(scope).contains("say hello first")) { "essence" }
+            check(store.buildIndex().vectors >= 1uL) { "index" }
             val hits = store.recallText("tea", RecallOptions(topK = 3u, keywords = "tea")).hits
             check(hits.isNotEmpty()) { "no recall hits" }
             check(store.history("drink").size == 2) { "history" }

@@ -73,6 +73,17 @@ val byWord = store.recall(emptyList(), RecallOptions(keywords = "UA 931"))
   `threadForget(threadId)` deletes them, and
   `essence(EssenceScope.Thread(threadId))` summarizes one within a byte
   budget.
+- **The essence:** what an agent derives from a thread, as small items.
+  - `essenceAdd(EssenceSection.DECISIONS, "…", scope)` adds an item (280
+    bytes at most) and returns its id.
+  - `essenceUpdate(id, text)`, `essenceResolve(id)` and `essenceRemove(id)`
+    change one.
+  - `essenceAppendTimeline("…", scope)` adds a milestone (600 bytes,
+    append-only).
+  - `essence(scope, maxBytes)` renders them.
+- **The index:** `buildIndex()` builds the IVF+PQ index, and `hasIndex()`
+  says whether there is one. On v9 files below 20,000 facts it builds
+  nothing (`partitions == 0u`), because an exact scan is faster there.
 - **Keyed facts:** `RememberOptions(key = ...)` writes a new version and
   supersedes the old one. `history(key)` lists the versions, newest first.
 - **The result cache:** `cachePut` and `cacheGet`, by exact key.

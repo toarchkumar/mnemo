@@ -254,6 +254,57 @@ class StoreTests {
         store.close()
     }
 
+    @Test fun essenceWritesRoundTrip(): Unit = runBlocking {
+        val embedder = WordEmbedder()
+        val store = store("essence", dimensions = 32u, embedder = embedder)
+        val thread = EssenceScope.Thread("chat")
+        val decision = store.essenceAdd(EssenceSection.DECISIONS, "drink tea at standups", thread)
+        store.essenceAppendTimeline("shipped the demo", thread)
+        assertEquals(2, embedder.callCount)
+        var render = store.essence(thread)
+        assertTrue(render, render.contains("drink tea at standups") && render.contains("shipped the demo"))
+
+        assertEquals(WriteOutcome.UPDATED, store.essenceUpdate(decision, "drink coffee at standups"))
+        assertEquals(WriteOutcome.UNCHANGED, store.essenceUpdate(decision, "drink coffee at standups"))
+        render = store.essence(thread)
+        assertTrue(render, render.contains("drink coffee") && !render.contains("drink tea"))
+        store.essenceResolve(decision)
+
+        val open = store.essenceAdd(EssenceSection.OPEN, "which milk?", thread)
+        assertTrue(store.essence(thread).contains("which milk?"))
+        store.essenceRemove(open)
+        assertFalse(store.essence(thread).contains("which milk?"))
+
+        expectThrows<MnemoException.Invalid> { store.essenceAdd(EssenceSection.NEXT, "x".repeat(281), thread) }
+        store.close()
+    }
+
+    @Test fun buildIndexBelowTheThresholdBuildsNothing(): Unit = runBlocking {
+        val store = store("index")
+        repeat(50) { store.remember("memory $it", vec(it)) }
+        assertFalse(store.hasIndex())
+        val info = store.buildIndex()
+        assertEquals(50uL, info.vectors)
+        assertEquals(0u, info.partitions)
+        assertFalse(store.hasIndex())
+
+        // A v8 file builds one at any size.
+        val v8 = MnemoStore(
+            MnemoStoreConfiguration("index8", 4u, scratchDirectory(), formatVersion = 8u),
+            InMemoryKeyStorage(),
+        )
+        repeat(300) {
+            val x = it + 1f
+            v8.remember("memory $it", listOf(kotlin.math.sin(x) + 1.5f, kotlin.math.cos(x), kotlin.math.sin(x * 0.37f), 1f))
+        }
+        val built = v8.buildIndex()
+        assertEquals(300uL, built.vectors)
+        assertTrue(built.partitions > 0u)
+        assertTrue(v8.hasIndex())
+        store.close()
+        v8.close()
+    }
+
     @Test fun invalidNamesAreRefused() {
         for (name in listOf("", "../escape", ".hidden", "a/b")) {
             assertThrowsStoreFile { MnemoStore(MnemoStoreConfiguration(name, 4u, scratchDirectory()), InMemoryKeyStorage()) }

@@ -101,6 +101,22 @@ final class NotesModel: ObservableObject {
         }
     }
 
+    /// An essence item derived from the thread: a decision (an editable
+    /// item) or a timeline milestone (append-only).
+    func addEssence(_ text: String, timeline: Bool) async {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let scope = EssenceScope.thread(threadId: Self.threadID)
+        await run {
+            if timeline {
+                try await $0.essenceAppendTimeline(text, scope: scope)
+            } else {
+                try await $0.essenceAdd(.decisions, text, scope: scope)
+            }
+            self.essence = try await $0.essence(scope, maxBytes: 2_048)
+        }
+    }
+
     private func run(_ body: (MnemoStore) async throws -> Void) async {
         guard let store else { return }
         do {

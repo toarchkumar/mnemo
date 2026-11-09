@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.toarchkumar.mnemo.EssenceScope
+import io.github.toarchkumar.mnemo.EssenceSection
 import io.github.toarchkumar.mnemo.ExportedTurn
 import io.github.toarchkumar.mnemo.MemoryRecord
 import io.github.toarchkumar.mnemo.MemoryType
@@ -85,6 +86,17 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             turns = store.threadExport(THREAD)
             essence = store.essence(EssenceScope.Thread(THREAD), 2_048uL)
             count = store.count()
+        }
+    }
+
+    /** An essence item derived from the thread: a decision (editable) or a timeline milestone. */
+    fun addEssence(text: String, timeline: Boolean) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        val scope = EssenceScope.Thread(THREAD)
+        launchSafely {
+            if (timeline) store.essenceAppendTimeline(t, scope) else store.essenceAdd(EssenceSection.DECISIONS, t, scope)
+            essence = store.essence(scope, 2_048uL)
         }
     }
 

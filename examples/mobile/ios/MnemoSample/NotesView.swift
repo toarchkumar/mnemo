@@ -10,6 +10,7 @@ struct NotesView: View {
     @State private var useKeywords = false
     @State private var turn = ""
     @State private var role = "user"
+    @State private var derived = ""
 
     var body: some View {
         NavigationStack {
@@ -84,6 +85,17 @@ struct NotesView: View {
                     ForEach(model.turns, id: \.turnId) { t in
                         Text("\(t.role): \(t.content)").font(.footnote)
                     }
+                    TextField("A decision or a milestone", text: $derived, axis: .vertical)
+                    HStack {
+                        Button("Add decision") {
+                            Task { await model.addEssence(derived, timeline: false); derived = "" }
+                        }
+                        Spacer()
+                        Button("Add to timeline") {
+                            Task { await model.addEssence(derived, timeline: true); derived = "" }
+                        }
+                    }
+                    .buttonStyle(.borderless)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Essence").font(.caption).foregroundStyle(.secondary)
                         Text(model.essence.isEmpty ? "(empty)" : model.essence)
@@ -92,7 +104,7 @@ struct NotesView: View {
                 } header: {
                     Text("A thread")
                 } footer: {
-                    Text("Turns are kept losslessly. The essence holds the items an agent derives from them (decisions, open questions, a timeline); the mobile API reads it but doesn't write essence items yet.")
+                    Text("Turns are kept losslessly. The essence holds the small items an agent derives from them, such as decisions (editable) and timeline milestones (append-only), so a new session can carry on where the last one stopped.")
                 }
             }
             .navigationTitle("MNemo notes")

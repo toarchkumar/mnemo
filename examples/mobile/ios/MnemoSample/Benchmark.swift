@@ -66,8 +66,8 @@ final class DeviceBudget: @unchecked Sendable {
                 "text_bytes": Corpus.textBytes,
                 "generator": "device_budget.rs text_for + corpus.rs gen_clustered_vectors (seeds 0xBEEFC0DE, 0xDE71CE00, 0x57170001)",
                 "key": "raw 32-byte key (createWithKey / openWithKey): no KDF on open",
-                "index": "none: the mobile API builds no IVF+PQ index, so recall reads the vector column",
-                "not_measured": "layers, open_secure_kdf_*, *_fsyncs (not in the mobile API)",
+                "index": "exact scan: build_index runs, but 1K and 10K are below V9_ANN_MIN_FACTS (20,000), where a v9 file builds no IVF+PQ index (as on desktop)",
+                "not_measured": "layers, open_secure_kdf_*, *_fsyncs (not in the mobile API), indexed recall (25K+)",
             ],
             "results": results,
             "elapsed_secs": millis(since: started) / 1_000,
@@ -103,9 +103,14 @@ final class DeviceBudget: @unchecked Sendable {
             if i % 1_000 == 999 { report("n = \(n): \(i + 1) memories") }
         }
         try db.flush()
+        // As device_budget.rs does. Below V9_ANN_MIN_FACTS (20,000) a v9
+        // file builds nothing here, so recall is an exact scan.
+        let index = try db.buildIndex()
+        try db.flush()
         try db.close()
         try key.write(to: keyURL(n), options: .atomic)
-        return ["built": true, "build_secs": millis(since: start) / 1_000]
+        return ["built": true, "build_secs": millis(since: start) / 1_000,
+                "index_partitions": index.partitions]
     }
 
     private func phaseFile(_ n: Int, key: Data) throws -> [String: Any] {

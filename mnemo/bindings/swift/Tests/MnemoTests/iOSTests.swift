@@ -25,7 +25,9 @@ import UIKit
         #expect(await store.lastBackgroundError == nil)
         try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 5)
 
-        // Back in the foreground: the next call reopens transparently.
+        // Back in the foreground: the next call reopens transparently and
+        // the file stays open.
+        await post(UIApplication.willEnterForegroundNotification)
         #expect(try await store.count() == 5)
         #expect(await store.isOpen)
 
@@ -36,6 +38,74 @@ import UIKit
         }
         #expect(try await eventually { await store.backgroundCloses == 2 })
         try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 6)
+    }
+
+    @Test func aCallInTheBackgroundReopensCompletesAndLeavesTheFileClosed() async throws {
+        let keys = MemoryKeyStore()
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "bgcall", dimensions: 4, directory: try scratchDirectory()),
+            keyStore: keys)
+        try await store.remember("before", vector: vec(0))
+        await post(UIApplication.didEnterBackgroundNotification)
+        #expect(try await eventually { await store.backgroundCloses == 1 })
+        #expect(store.appIsActive == false)
+
+        // Work the app does in the background: it reopens, completes, and
+        // the store closes the file again before the call returns.
+        try await store.remember("in the background", vector: vec(1))
+        #expect(await store.isOpen == false)
+        #expect(await store.backgroundCallCloses == 1)
+        #expect(await store.lastBackgroundError == nil)
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 2)
+
+        // Reads too.
+        #expect(try await store.count() == 2)
+        #expect(await store.isOpen == false)
+        #expect(await store.backgroundCallCloses == 2)
+    }
+
+    @Test func aBurstOfBackgroundCallsEndsClosed() async throws {
+        let keys = MemoryKeyStore()
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "burst", dimensions: 4, directory: try scratchDirectory()),
+            keyStore: keys)
+        try await store.remember("warm", vector: vec(0))
+        await post(UIApplication.didEnterBackgroundNotification)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for i in 1...40 {
+                group.addTask { try await store.remember("burst \(i)", vector: vec(i)) }
+            }
+            try await group.waitForAll()
+        }
+        #expect(await store.isOpen == false)
+        #expect(await store.backgroundCallCloses >= 1)
+        #expect(await store.lastBackgroundError == nil)
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 41)
+    }
+
+    @Test func afterWillEnterForegroundTheHandleStaysOpen() async throws {
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "fg", dimensions: 4, directory: try scratchDirectory()),
+            keyStore: MemoryKeyStore())
+        try await store.remember("one", vector: vec(0))
+        await post(UIApplication.didEnterBackgroundNotification)
+        #expect(try await eventually { await store.backgroundCloses == 1 })
+        await post(UIApplication.willEnterForegroundNotification)
+        #expect(store.appIsActive)
+
+        try await store.remember("two", vector: vec(1))
+        #expect(await store.isOpen)
+        #expect(try await store.count() == 2)
+        #expect(await store.isOpen)
+        #expect(await store.backgroundCallCloses == 0)
+
+        // didBecomeActive alone (no willEnterForeground) also counts.
+        await post(UIApplication.didEnterBackgroundNotification)
+        #expect(try await eventually { await store.backgroundCloses == 2 })
+        await post(UIApplication.didBecomeActiveNotification)
+        try await store.remember("three", vector: vec(2))
+        #expect(await store.isOpen)
+        try await store.close()
     }
 
     @Test func callsRacingTheNotificationCompleteOrReopen() async throws {
@@ -58,8 +128,14 @@ import UIKit
             try await group.waitForAll()
         }
         #expect(try await store.count() == 81)
-        #expect(try await eventually { await store.backgroundCloses >= 1 })
-        try await store.close()
+        // Once the app is in the background, a call closes the file after
+        // itself, so a notification's close often finds it closed already.
+        // Either way the file ends closed, with no error.
+        #expect(try await eventually {
+            await store.backgroundCloses + store.backgroundCallCloses >= 1
+        })
+        #expect(await store.isOpen == false)
+        #expect(await store.lastBackgroundError == nil)
     }
 
     @Test(arguments: [KeyPolicy.deviceOnly, .iCloudSynced])
@@ -123,5 +199,9 @@ import UIKit
         #expect(dir.lastPathComponent == "mnemo")
         #expect(dir.deletingLastPathComponent().lastPathComponent == "Application Support")
     }
+}
+/// Posts a lifecycle notification on the main thread, as UIKit does.
+private func post(_ name: Notification.Name) async {
+    await MainActor.run { NotificationCenter.default.post(name: name, object: nil) }
 }
 #endif

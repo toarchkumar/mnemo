@@ -12,6 +12,10 @@ final class BackgroundTest: ObservableObject {
     static let dimensions: UInt32 = 16
 
     @Published private(set) var running = false
+    /// The second mode: the loop keeps writing after the app leaves the
+    /// foreground, so each write is a background call that reopens the
+    /// file and closes it again (inside an expiring activity).
+    @Published var keepWritingInBackground = false
     @Published private(set) var writes = 0
     @Published private(set) var stored: UInt64 = 0
     @Published private(set) var location = ""
@@ -89,14 +93,16 @@ final class BackgroundTest: ObservableObject {
                 Task { await verify() }
             }
         case .inactive:
-            if loop != nil {
+            if loop != nil, !keepWritingInBackground {
                 loop?.cancel()
                 loop = nil
                 log("inactive: write loop paused")
             }
         case .background:
             backgroundAt = Date()
-            log("background: MnemoStore flushes and closes the file")
+            log(keepWritingInBackground
+                ? "background: still writing; each write reopens and closes the file"
+                : "background: MnemoStore flushes and closes the file")
         @unknown default:
             break
         }
@@ -112,7 +118,7 @@ final class BackgroundTest: ObservableObject {
         guard let store else { return }
         do {
             stored = try await store.count()
-            if let bgError = await store.lastBackgroundError {
+                if let bgError = await store.lastBackgroundError {
                 log("background close error: \(bgError)")
             }
             log("stored \(stored), wrote \(writes)\(stored >= UInt64(writes) ? "" : ": WRITES MISSING")")
@@ -155,6 +161,8 @@ struct BackgroundTestView: View {
                     LabeledContent("Writes", value: "\(test.writes)")
                     LabeledContent("Stored (after return)", value: "\(test.stored)")
                     if let error = test.error { Text(error).font(.footnote).foregroundStyle(.red) }
+                    Toggle("Keep writing in the background", isOn: $test.keepWritingInBackground)
+                        .disabled(test.running)
                     Button(test.running ? "Stop the write loop" : "Start the write loop") {
                         test.running ? test.stop() : test.start()
                     }
@@ -165,7 +173,7 @@ struct BackgroundTestView: View {
                     Button("Read again") { Task { await test.readProtection() } }
                 }
                 Section("Steps") {
-                    Text("1. Start the write loop.\n2. Go to the Home Screen and lock the phone.\n3. Wait at least 30 seconds (a minute is better).\n4. Come back: the app should still be running (no relaunch), and the log shows \"stored N, wrote N\".\n5. Check the device logs for 0xdead10cc (see the README).")
+                    Text("1. Choose the mode, then start the write loop.\n2. Go to the Home Screen and lock the phone.\n3. Wait at least 30 seconds (a minute is better).\n4. Come back: the app should still be running (no relaunch), and the log shows \"stored N, wrote N\".\n5. Check the device logs for 0xdead10cc (see the README).\n6. Run it again in the other mode.")
                         .font(.footnote)
                 }
                 Section("Log") {

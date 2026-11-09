@@ -73,6 +73,25 @@ impl Mnemo {
         self.essence_add_with(scope, section, text, refs, None)
     }
 
+    /// [`Mnemo::essence_add`] with the item's vector supplied by the
+    /// caller instead of the registered embedder, so a caller can embed
+    /// `text` without holding the handle (the UniFFI binding does, as with
+    /// [`Mnemo::ingest_thread_with_vectors`]). Same validation, same record.
+    pub fn essence_add_with_vector(
+        &mut self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: &str,
+        refs: Option<Vec<String>>,
+        vector: Vec<f32>,
+    ) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        Self::check_essence_add(section, text)?;
+        self.essence_add_with(scope, section, text, refs, Some(vector))
+    }
+
     /// Validation shared by [`Mnemo::essence_add`] and `commit_deltas`.
     pub(super) fn check_essence_add(section: EssenceSection, text: &str) -> Result<()> {
         if section == EssenceSection::Timeline {
@@ -125,6 +144,22 @@ impl Mnemo {
         }
         Self::check_essence_append(text)?;
         self.essence_append_with(scope, text, refs, None)
+    }
+
+    /// [`Mnemo::essence_append_timeline`] with a caller-supplied vector
+    /// (see [`Mnemo::essence_add_with_vector`]).
+    pub fn essence_append_timeline_with_vector(
+        &mut self,
+        scope: EssenceScope,
+        text: &str,
+        refs: Option<Vec<String>>,
+        vector: Vec<f32>,
+    ) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        Self::check_essence_append(text)?;
+        self.essence_append_with(scope, text, refs, Some(vector))
     }
 
     /// Validation shared by [`Mnemo::essence_append_timeline`] and
