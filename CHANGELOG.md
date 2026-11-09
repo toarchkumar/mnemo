@@ -94,24 +94,37 @@ still change between PRs.
   - First recall at 100K is about 120 ms, up from about 95 ms in v0.10.
     Partition-major index loading (PERF-2) is planned.
 - **9e: compressed thread turns, v9 files.**
-  - v9 thread-turn records of 256 bytes or more are zstd-compressed
-    (level 3) before encryption, when that saves at least an eighth.
-    Each record is its own frame, with no dictionary and nothing shared
-    with any other record. Facts, essence items and cache entries aren't
-    compressed, and v8 files never are.
+  - v9 thread-turn records can be stored zstd-compressed (level 3, before
+    encryption) when that saves at least an eighth. Each record is its
+    own frame, with no dictionary and nothing shared with any other
+    record. Facts, essence items and cache entries aren't compressed, and
+    v8 files never are.
+  - **Compress when cold, by default.** A turn is written plain and
+    compressed once it's older than 7 days (by its `created_at`): each
+    commit compresses up to 256 such turns. `compact_file` compresses
+    every turn, and so does a vacuum that moves one. A turn already past
+    the cutoff when it's ingested (an imported archive) is compressed at
+    write. `Mnemo::set_turn_compress_after(secs)` (Python
+    `set_turn_compress_after`) changes the cutoff for one handle; `0`
+    compresses every turn at write.
   - **zstd is now a required dependency** (`zstd` 0.13.4, the engine's
-    first C dependency, through `zstd-sys`). CI cross-builds the library
-    for `aarch64-apple-ios` and `aarch64-linux-android`. The MSRV stays
-    1.75: `Cargo.lock` pins `jobserver` 0.1.34, since 0.1.35 needs Rust
-    1.85. A project that depends on `mnemo-engine` and builds with Rust
-    1.75–1.83 should run `cargo update -p jobserver --precise 0.1.34`
-    once. Cargo before 1.84 doesn't pick dependency versions by
-    `rust-version`.
-  - On a thread-heavy file (10K facts and 50K turns of Markdown,
-    `examples/thread_profile.rs`), the live file is 33% smaller (280 →
-    187 MB, 5.6 → 3.7 KB per turn). Ingest is about 20% slower, and
-    reading back a 500-turn thread (about 1.7 MB of text) takes about
-    7 ms instead of about 4.4 ms. Fact-only files don't change.
+    first C dependency, through `zstd-sys`; about 0.46 MB of stripped
+    library size). CI cross-builds the library for `aarch64-apple-ios`
+    and `aarch64-linux-android`. The MSRV stays 1.75: `Cargo.lock` pins
+    `jobserver` 0.1.34, since 0.1.35 needs Rust 1.85. A project that
+    depends on `mnemo-engine` and builds with Rust 1.75–1.83 should run
+    `cargo update -p jobserver --precise 0.1.34` once. Cargo before 1.84
+    doesn't pick dependency versions by `rust-version`.
+  - **Faster first thread read.** A fresh handle no longer decodes every
+    turn in the file to build its caches. Turns are decoded per thread
+    the first time that thread is used, and `about()` and essence never
+    decode turns. On 10K facts plus 50K turns, the first thread read on a
+    fresh handle drops from about 390 ms to about 16 ms.
+  - **On that thread-heavy file** (`examples/thread_profile.rs`):
+    compacted, it's 33% smaller (280 → 188 MB, 5.6 → 3.8 KB per turn).
+    Recent turns read and ingest at the uncompressed speed. Reading back
+    a compressed 500-turn thread (about 1.7 MB of text) takes about 6.8 ms
+    instead of about 4.4 ms. Fact-only files don't change.
   - A compressed record must state its decompressed size, at most
     64 MiB; anything else is refused as malformed.
 

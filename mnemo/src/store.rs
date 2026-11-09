@@ -173,6 +173,12 @@ struct LayerCache {
     threads: std::collections::HashMap<String, ThreadCache>,
     /// Thread → (the thread it continues, the link record's id).
     links: std::collections::HashMap<String, (String, u128)>,
+    /// FMT-9e: on v9, thread-turn records the lazy scan didn't decode,
+    /// by their row's `thread_hash`. A thread's bucket is decoded into
+    /// `threads` the first time that thread is used
+    /// ([`Mnemo::warm_thread`]), so a cold handle never decodes (or
+    /// decompresses) the turns of threads it doesn't touch.
+    cold_turns: std::collections::HashMap<u32, Vec<u128>>,
 }
 
 /// One thread's records (turns, essence items, link), the turn ids already
@@ -610,6 +616,13 @@ const TURN_ZSTD_MIN_BYTES: usize = 256;
 /// a generous bound, not a size limit anyone meets; it stops a damaged
 /// (but authenticated) frame from asking for an unbounded allocation.
 const RECORD_PLAIN_MAX: u64 = 64 << 20;
+/// FMT-9e: by default a thread turn is written plain and compressed once
+/// it's a week old (by its `created_at`), so a live session's recent turns
+/// read at full speed and archived history is small.
+pub const DEFAULT_TURN_COMPRESS_AFTER_SECS: i64 = 7 * 24 * 3600;
+/// FMT-9e: at most this many aged turns are compressed per commit, so a
+/// commit's extra work stays bounded (like the vacuum).
+const COLD_TURNS_PER_COMMIT: usize = 256;
 
 /// FMT-9e: is turn-record compression on? Always, unless the dev switch
 /// `MNEMO_DEV_TURN_ZSTD=0` turns it off for an A/B measurement (read once
@@ -908,6 +921,11 @@ impl RecPages {
 const ROW_SUPERSEDED: u8 = 1;
 const ROW_HAS_TTL: u8 = 2;
 const ROW_SHARED: u8 = 4;
+/// FMT-9e: a thread turn whose record compression is settled: stored as
+/// a zstd frame, or tried and not worth it. Unsettled turns are plain and
+/// get compressed once they're older than the handle's
+/// `turn_compress_after` (see [`Mnemo::set_turn_compress_after`]).
+const ROW_SETTLED: u8 = 8;
 const ROW_KIND_FACT: u8 = 0;
 const ROW_KIND_TURN: u8 = 1;
 const ROW_KIND_ESSENCE: u8 = 2;
@@ -1528,6 +1546,9 @@ pub struct Mnemo {
     superseded: Option<std::collections::HashSet<u128>>,
     /// R-004.2: thread layers + onboarding ids, built by the same lazy scan.
     layers: Option<LayerCache>,
+    /// FMT-9e: thread turns are compressed once older than this many
+    /// seconds (`0`: at write). Per handle, not persisted.
+    turn_compress_after: i64,
     /// FMT-9 (a): the committed free list (v9; always empty on v8). Pages
     /// allocated from it since the last commit are already removed.
     free: FreeList,
@@ -2574,6 +2595,7 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free: FreeList::default(),
             pending_free: Vec::new(),
             free_dirty: false,
@@ -2903,6 +2925,7 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),
             free_dirty: false,
@@ -3100,6 +3123,7 @@ impl Mnemo {
             key_index: None,
             superseded: None,
             layers: None,
+            turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),
             free_dirty: false,
@@ -3126,6 +3150,19 @@ impl Mnemo {
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
+    }
+
+    /// FMT-9e: compress v9 thread-turn records once they're older than
+    /// `secs` (by their `created_at`). The default,
+    /// [`DEFAULT_TURN_COMPRESS_AFTER_SECS`], is 7 days: recent turns stay
+    /// plain, so a live session reads them at full speed, and each commit
+    /// compresses up to 256 turns that have aged past the cutoff. `0`
+    /// compresses every turn as it's written. Compaction always compresses
+    /// every turn, and so does a vacuum that moves one. Applies to this
+    /// handle only (not persisted); a no-op on v8 files, which never
+    /// compress. Reading never depends on it.
+    pub fn set_turn_compress_after(&mut self, secs: u64) {
+        self.turn_compress_after = secs.min(i64::MAX as u64) as i64;
     }
 
     /// Override the manifest snapshot cap on this open handle. `0` disables
@@ -3501,6 +3538,92 @@ impl Mnemo {
     /// FMT-9b.2: row `idx` no longer needs its record (`row` is the row as
     /// it was): drop a waiting one, free a span, or take it off its packed
     /// page and free the page once nothing live is left on it.
+    /// FMT-9e: is a turn created at `created_at` past this handle's
+    /// compression cutoff?
+    fn turn_is_cold(&self, created_at: i64) -> bool {
+        self.turn_compress_after == 0
+            || created_at <= memory::now_secs().saturating_sub(self.turn_compress_after)
+    }
+
+    /// FMT-9e: is row `idx` a live, unsettled v9 turn?
+    fn unsettled_turn(&self, idx: usize) -> bool {
+        let e = &self.catalog[idx];
+        !e.deleted
+            && e.v9
+                .is_some_and(|r| r.kind == ROW_KIND_TURN && r.flags & ROW_SETTLED == 0)
+    }
+
+    /// FMT-9e: settle row `idx`'s turn record, whose stored bytes are
+    /// `bytes`: compress them if it pays, and mark the row settled.
+    /// Returns the bytes to store (unchanged if not worth compressing);
+    /// the caller writes them. Updates the row's length.
+    fn settle_turn(&mut self, idx: usize, bytes: Vec<u8>) -> Vec<u8> {
+        let out = if bytes.starts_with(&ZSTD_MAGIC) {
+            bytes
+        } else {
+            compress_turn_record(bytes)
+        };
+        let e = &mut self.catalog[idx];
+        e.len = out.len() as u32;
+        if let Some(r) = e.v9.as_mut() {
+            r.flags |= ROW_SETTLED;
+        }
+        self.touch(idx);
+        self.dirty_catalog = true;
+        out
+    }
+
+    /// FMT-9e: compress up to [`COLD_TURNS_PER_COMMIT`] plain turns that
+    /// have aged past the cutoff. Runs at the top of a flush that's
+    /// already writing, before [`Mnemo::pack_records`], which packs the
+    /// rewritten records.
+    fn settle_cold_turns(&mut self) -> Result<()> {
+        if !self.is_v9() || !self.dirty_catalog {
+            return Ok(());
+        }
+        let picked: Vec<usize> = (0..self.catalog.len())
+            .filter(|&i| {
+                self.unsettled_turn(i)
+                    && self.catalog[i]
+                        .v9
+                        .is_some_and(|r| self.turn_is_cold(r.created_at))
+            })
+            .take(COLD_TURNS_PER_COMMIT)
+            .collect();
+        for idx in picked {
+            let old = self.catalog[idx].clone();
+            let bytes = self.read_record(&old)?;
+            let before = bytes.len();
+            let out = self.settle_turn(idx, bytes);
+            if out.len() == before {
+                continue;
+            }
+            self.kill_record(idx, &old);
+            let gen = self.write_gen();
+            let e = &mut self.catalog[idx];
+            if out.len() + REC_SLOT_BYTES <= REC_PAGE_CAP {
+                e.start_page = 0;
+                e.page_count = 1;
+                e.gen = gen;
+                if let Some(r) = e.v9.as_mut() {
+                    r.rec_slot = 0;
+                }
+                self.recs.hot.insert(idx, out);
+                self.recs.pending.push(idx);
+            } else {
+                let (start, pc, gen) = self.write_record(&out)?;
+                let e = &mut self.catalog[idx];
+                e.start_page = start;
+                e.page_count = pc;
+                e.gen = gen;
+                if let Some(r) = e.v9.as_mut() {
+                    r.rec_slot = REC_SPAN;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn kill_record(&mut self, idx: usize, row: &CatalogEntry) {
         self.recs.hot.remove(&idx);
         let Some(r) = row.v9 else { return };
@@ -3556,7 +3679,11 @@ impl Mnemo {
                 let page = self.pager.read_page_uncached(p, self.catalog[first].gen)?;
                 for idx in rows {
                     let slot = self.catalog[idx].v9.map_or(0, |r| r.rec_slot);
-                    let b = record_slot(&page, slot)?;
+                    let mut b = record_slot(&page, slot)?;
+                    // FMT-9e: a vacuum that moves a plain turn compresses it.
+                    if self.unsettled_turn(idx) {
+                        b = self.settle_turn(idx, b);
+                    }
                     self.recs.hot.insert(idx, b);
                     if seen.insert(idx) {
                         order.push(idx);
@@ -3865,8 +3992,13 @@ impl Mnemo {
     }
 
     fn read_memory(&mut self, e: &CatalogEntry) -> Result<Memory> {
-        let bytes = self.read_record(e)?;
-        let mut m: Memory = self.decode_memory(&bytes)?;
+        let m = self.read_memory_meta(e)?;
+        self.finish_memory(e, m)
+    }
+
+    /// Complete a record decoded by [`Mnemo::read_memory_meta`]: its
+    /// vector and the catalog's live access stats.
+    fn finish_memory(&mut self, e: &CatalogEntry, mut m: Memory) -> Result<Memory> {
         // FMT-9b: a v9 record carries no vector (unless the file keeps
         // float vectors); it comes from the column, fp16-rounded.
         if e.v9.is_some() && !self.float_vectors() {
@@ -3916,7 +4048,7 @@ impl Mnemo {
                 let old_entry = self.catalog[idx].clone();
                 if !old_entry.deleted {
                     let old = self.read_memory(&old_entry)?;
-                    self.note_removed(&old);
+                    self.note_removed(&old)?;
                 }
             }
         }
@@ -3935,7 +4067,14 @@ impl Mnemo {
         // FMT-9e: a v9 thread turn is stored zstd-compressed (turns are
         // most of a thread-heavy file). The catalog's `len` is the stored
         // length, so packing and vacuum move the frame as is.
-        let bytes = if v9 && meta_str(&m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {
+        // FMT-9e (compress when cold): a turn is compressed at write only
+        // when it's already past the handle's cutoff (an imported
+        // archive, or `set_turn_compress_after(0)`); otherwise the commit
+        // that sees it age compresses it.
+        let is_turn = v9 && meta_str(&m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN);
+        let settle =
+            is_turn && (bytes.len() < TURN_ZSTD_MIN_BYTES || self.turn_is_cold(m.created_at));
+        let bytes = if settle {
             compress_turn_record(bytes)
         } else {
             bytes
@@ -3986,6 +4125,9 @@ impl Mnemo {
             gen,
             v9: tags.map(|mut r| {
                 r.rec_slot = if packed { 0 } else { REC_SPAN };
+                if settle {
+                    r.flags |= ROW_SETTLED;
+                }
                 r
             }),
         };
@@ -4038,7 +4180,7 @@ impl Mnemo {
                 self.index_persist.changes += 1;
             }
         }
-        self.note_added(&m);
+        self.note_added(&m)?;
 
         // FIX-1 R-001.8 part 2: keep the lazy agent set in sync. If
         // it hasn't been built yet (no `stats()` call this session),
@@ -4230,7 +4372,7 @@ impl Mnemo {
         let entry = self.catalog[idx].clone();
         if self.layers.is_some() && !entry.deleted {
             let old = self.read_memory(&entry)?;
-            self.note_removed(&old);
+            self.note_removed(&old)?;
         }
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
@@ -4266,7 +4408,11 @@ impl Mnemo {
 
     /// Keep the handle caches (12.1 key slots, superseded set, R-004.2
     /// layers) current after `put` writes `m`. No-op until they're built.
-    fn note_added(&mut self, m: &Memory) {
+    /// FMT-9e: a cold thread is warmed first, so its layer entry is whole.
+    fn note_added(&mut self, m: &Memory) -> Result<()> {
+        if let Some(thread) = meta_str(m, MNEMO_META_THREAD) {
+            self.warm_thread(thread)?;
+        }
         let id = m.id.0;
         if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
             if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
@@ -4278,11 +4424,15 @@ impl Mnemo {
         if let Some(layers) = self.layers.as_mut() {
             layers.add(m);
         }
+        Ok(())
     }
 
     /// Undo [`Mnemo::note_added`] for the stored version of a record that's
     /// about to be overwritten or deleted.
-    fn note_removed(&mut self, m: &Memory) {
+    fn note_removed(&mut self, m: &Memory) -> Result<()> {
+        if let Some(thread) = meta_str(m, MNEMO_META_THREAD) {
+            self.warm_thread(thread)?;
+        }
         let id = m.id.0;
         if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
             sup.remove(&id);
@@ -4296,6 +4446,45 @@ impl Mnemo {
         if let Some(layers) = self.layers.as_mut() {
             layers.remove(m);
         }
+        Ok(())
+    }
+
+    /// FMT-9e: decode `thread`'s cold turn records (see
+    /// [`LayerCache::cold_turns`]) into the layer cache. Every record in
+    /// the thread's hash bucket is decoded and filed under its own thread,
+    /// so a hash collision just warms both threads. A no-op when the
+    /// caches aren't built or the bucket is already warm.
+    fn warm_thread(&mut self, thread: &str) -> Result<()> {
+        self.warm_thread_decoded(thread).map(|_| ())
+    }
+
+    /// [`Mnemo::warm_thread`], returning the records it decoded (without
+    /// vectors), so a caller about to read the thread decodes each once.
+    fn warm_thread_decoded(
+        &mut self,
+        thread: &str,
+    ) -> Result<std::collections::HashMap<u128, Memory>> {
+        let mut decoded = std::collections::HashMap::new();
+        let h = fnv1a32(&[thread.as_bytes()]);
+        let Some(ids) = self.layers.as_mut().and_then(|l| l.cold_turns.remove(&h)) else {
+            return Ok(decoded);
+        };
+        for e in self.live_entries(ids) {
+            let m = self.read_memory_meta(&e)?;
+            if let Some(layers) = self.layers.as_mut() {
+                layers.add(&m);
+            }
+            decoded.insert(e.id, m);
+        }
+        Ok(decoded)
+    }
+
+    /// Decode a record's memory without its vector or live access stats:
+    /// what the handle caches need (metadata, scope, agent), without the
+    /// v9 vector-column read [`Mnemo::read_memory`] adds.
+    fn read_memory_meta(&mut self, e: &CatalogEntry) -> Result<Memory> {
+        let bytes = self.read_record(e)?;
+        self.decode_memory(&bytes)
     }
 
     /// The live catalog entries for `ids` (ids that are gone are skipped).
@@ -4324,14 +4513,24 @@ impl Mnemo {
     /// Catalog entries of every record filed under `thread`, from the
     /// handle caches.
     fn thread_entries(&mut self, thread: &str) -> Result<Vec<CatalogEntry>> {
+        Ok(self.thread_entries_decoded(thread)?.0)
+    }
+
+    /// [`Mnemo::thread_entries`], plus the records that warming a cold
+    /// thread just decoded (see [`Mnemo::warm_thread_decoded`]).
+    fn thread_entries_decoded(
+        &mut self,
+        thread: &str,
+    ) -> Result<(Vec<CatalogEntry>, std::collections::HashMap<u128, Memory>)> {
         self.ensure_key_caches()?;
+        let decoded = self.warm_thread_decoded(thread)?;
         let ids: Vec<u128> = self
             .layers
             .as_ref()
             .and_then(|l| l.threads.get(thread))
             .map(|tc| tc.records.iter().copied().collect())
             .unwrap_or_default();
-        Ok(self.live_entries(ids))
+        Ok((self.live_entries(ids), decoded))
     }
 
     // --- Phase 12.1: edit in place + keyed supersession -----------------
@@ -4373,7 +4572,26 @@ impl Mnemo {
         let mut layers = LayerCache::default();
         let mut non_facts: Vec<u128> = Vec::new();
         for e in &entries {
-            let m = self.read_memory(e)?;
+            // FMT-9e: a v9 turn row with no key slot and no supersession
+            // contributes only to its thread's layer entry, so it's left
+            // undecoded in the thread's cold bucket (most of a
+            // thread-heavy file). Its row says it isn't a fact.
+            if let Some(r) = e.v9 {
+                if r.kind == ROW_KIND_TURN
+                    && r.thread_hash != 0
+                    && r.key_hash == 0
+                    && r.flags & ROW_SUPERSEDED == 0
+                {
+                    layers
+                        .cold_turns
+                        .entry(r.thread_hash)
+                        .or_default()
+                        .push(e.id);
+                    non_facts.push(e.id);
+                    continue;
+                }
+            }
+            let m = self.read_memory_meta(e)?;
             layers.add(&m);
             if !is_ann_kind(&m) {
                 non_facts.push(e.id);
@@ -4884,6 +5102,7 @@ impl Mnemo {
         // come from the handle caches: one lazy scan per handle, then O(1)
         // per ingest instead of two full decrypt scans each time.
         self.ensure_key_caches()?;
+        self.warm_thread(thread_id)?;
         let cached = self.layers.as_ref().and_then(|l| l.threads.get(thread_id));
         let existing_turn_ids: std::collections::HashSet<&str> = cached
             .map(|tc| tc.turns.keys().map(String::as_str).collect())
@@ -5014,10 +5233,15 @@ impl Mnemo {
     /// `_mnemo.sha256` + `_mnemo.length`.
     pub fn thread_export(&mut self, thread_id: &str) -> Result<Vec<Memory>> {
         // R-004.2: the thread's own records, from the handle caches.
-        let entries = self.thread_entries(thread_id)?;
+        // FMT-9e: a cold thread's records were just decoded to warm it;
+        // reuse them instead of decoding (and decompressing) twice.
+        let (entries, mut decoded) = self.thread_entries_decoded(thread_id)?;
         let mut out: Vec<Memory> = Vec::new();
         for e in &entries {
-            let m = self.read_memory(e)?;
+            let m = match decoded.remove(&e.id) {
+                Some(m) => self.finish_memory(e, m)?,
+                None => self.read_memory(e)?,
+            };
             if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
                 continue;
             }
@@ -6125,6 +6349,13 @@ impl Mnemo {
         (!e.deleted).then_some((e.start_page, e.page_count, e.gen))
     }
 
+    /// **Not a stable API.** FMT-9e: how many thread-hash buckets of turn
+    /// records the handle caches hold undecoded (`None` until built).
+    #[doc(hidden)]
+    pub fn __cold_thread_buckets(&self) -> Option<usize> {
+        self.layers.as_ref().map(|l| l.cold_turns.len())
+    }
+
     /// **Not a stable API.** FMT-9e: a live memory's stored record length
     /// and whether the stored body is a zstd frame.
     #[doc(hidden)]
@@ -7189,6 +7420,7 @@ impl Mnemo {
                 .iter()
                 .copied()
                 .chain(l.threads.values().flat_map(|t| t.records.iter().copied()))
+                .chain(l.cold_turns.values().flatten().copied())
                 .collect(),
             None => Vec::new(),
         };
@@ -7428,6 +7660,9 @@ impl Mnemo {
         // FMT-9: a v9 session's first sealed page needs the generation
         // lease (normally taken by its first record write already).
         self.ensure_gen_lease()?;
+        // FMT-9e: turns that aged past the cutoff are rewritten compressed
+        // (bounded per commit), then packed with the other waiting records.
+        self.settle_cold_turns()?;
         // FMT-9b: column entries first; they move rows' vector locations,
         // so they must land before the catalog is serialized.
         self.pack_records()?;
@@ -9294,6 +9529,9 @@ impl Mnemo {
                 ..Default::default()
             },
         )?;
+        // FMT-9e: compaction rewrites everything, so it compresses every
+        // thread turn, recent or not.
+        new.turn_compress_after = 0;
         // ANN-1.1: compaction is "re-tune for the current size" by
         // default. Pass IndexConfig::default() so partitions,
         // subspaces, n_probe and n_rerank are all re-derived from the

@@ -5,18 +5,23 @@
 //! 30% medium, 10% long tool-style output) cut from this repo's Markdown,
 //! then reports:
 //!
-//! - file bytes, live bytes after `compact_file`, and bytes per turn;
+//! - file bytes before and after `compact_file`, and bytes per turn;
 //! - ingest time (one `ingest_thread` + `flush` per thread);
-//! - reading a whole thread back (`thread_export_turns`): cold on a fresh
-//!   handle, and warm (median of 20 threads).
+//! - reading a whole thread back (`thread_export_turns`), before and
+//!   after compaction: the first thread on a fresh handle (`cold`, which
+//!   builds the handle caches), 20 other threads' first reads
+//!   (`first_touch`, median) and the same 20 read again (`warm`, median).
+//!
+//! Turns are stamped with the ingest time, so they're "recent". Three modes:
 //!
 //! ```text
-//! cargo run --release --example thread_profile                         # zstd turns (the default)
-//! MNEMO_DEV_TURN_ZSTD=0 cargo run --release --example thread_profile   # the uncompressed baseline
+//! cargo run --release --example thread_profile                         # default: compress when cold (7 days)
+//! cargo run --release --example thread_profile -- --compress-after 0   # compress every turn at write
+//! MNEMO_DEV_TURN_ZSTD=0 cargo run --release --example thread_profile   # never compress (baseline)
 //! cargo run --release --example thread_profile -- --facts 1000 --turns 5000
 //! ```
 //!
-//! Writes `target/thread_profile/thread_profile_{zstd,plain}.json`.
+//! Writes `target/thread_profile/thread_profile_{cold,eager,plain}.json`.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -132,6 +137,37 @@ impl TextCursor {
     }
 }
 
+/// Read threads back on a fresh handle: the first (cold, it builds the
+/// handle caches), then 20 others once (first touch) and again (warm).
+fn measure_reads(path: &std::path::Path, n_threads: usize, n_turns: usize) -> serde_json::Value {
+    let mut db = Mnemo::open(path, PASSPHRASE).expect("open");
+    let t = Instant::now();
+    let first = db.thread_export_turns("thread-0").expect("export");
+    let cold_ms = ms(t);
+    assert_eq!(first.len(), TURNS_PER_THREAD.min(n_turns));
+    let picks: Vec<usize> = (0..20.min(n_threads.saturating_sub(1)))
+        .map(|k| 1 + (k * 7 + 3) % (n_threads - 1))
+        .collect();
+    let time_all = |db: &mut Mnemo| {
+        let mut xs: Vec<f64> = picks
+            .iter()
+            .map(|th| {
+                let t = Instant::now();
+                let turns = db
+                    .thread_export_turns(&format!("thread-{th}"))
+                    .expect("export");
+                assert!(!turns.is_empty());
+                ms(t)
+            })
+            .collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        xs.get(xs.len() / 2).copied().unwrap_or(0.0)
+    };
+    let first_touch = time_all(&mut db);
+    let warm = time_all(&mut db);
+    json!({ "cold_ms": cold_ms, "first_touch_median_ms": first_touch, "warm_median_ms": warm })
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1_000.0
 }
@@ -147,9 +183,18 @@ fn main() {
     };
     let n_facts = arg("--facts", 10_000);
     let n_turns = arg("--turns", 50_000);
-    let tag = match std::env::var("MNEMO_DEV_TURN_ZSTD").as_deref() {
-        Ok("0") => "plain",
-        _ => "zstd",
+    let compress_after: Option<u64> = args
+        .iter()
+        .position(|a| a == "--compress-after")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse().ok());
+    let tag = match (
+        std::env::var("MNEMO_DEV_TURN_ZSTD").as_deref(),
+        compress_after,
+    ) {
+        (Ok("0"), _) => "plain",
+        (_, Some(0)) => "eager",
+        _ => "cold",
     };
     let base = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
     let dir = PathBuf::from(base).join("thread_profile");
@@ -169,6 +214,9 @@ fn main() {
     };
     let mut db = Mnemo::create(&path, PASSPHRASE, cfg).expect("create");
     db.set_embedder(HashEmbedder).expect("embedder");
+    if let Some(secs) = compress_after {
+        db.set_turn_compress_after(secs);
+    }
 
     let t = Instant::now();
     for i in 0..n_facts {
@@ -195,7 +243,7 @@ fn main() {
                 turn_id: format!("th{th}-t{j}"),
                 role: if j % 2 == 0 { "user" } else { "assistant" }.into(),
                 content: cur.take(len),
-                timestamp: Some(1_700_000_000 + (th * TURNS_PER_THREAD + j) as i64),
+                timestamp: None,
             })
             .collect();
         db.ingest_thread(&format!("thread-{th}"), &turns)
@@ -208,29 +256,10 @@ fn main() {
     drop(db);
     let file_bytes = std::fs::metadata(&path).expect("stat").len();
 
-    // Reading threads back on a fresh handle: the first is cold.
-    let mut db = Mnemo::open(&path, PASSPHRASE).expect("open");
-    let t = Instant::now();
-    let first = db.thread_export_turns("thread-0").expect("export");
-    let cold_ms = ms(t);
-    assert_eq!(first.len(), TURNS_PER_THREAD.min(n_turns));
-    let mut warm = Vec::new();
-    let mut read_bytes = 0usize;
-    for k in 0..20.min(n_threads) {
-        let th = (k * 7 + 3) % n_threads;
-        let t = Instant::now();
-        let turns = db
-            .thread_export_turns(&format!("thread-{th}"))
-            .expect("export");
-        warm.push(ms(t));
-        read_bytes += turns.iter().map(|x| x.content.len()).sum::<usize>();
-    }
-    warm.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let warm_ms = warm[warm.len() / 2];
-    drop(db);
-
+    let before = measure_reads(&path, n_threads, n_turns);
     Mnemo::compact_file(path.to_str().expect("utf-8 path"), PASSPHRASE).expect("compact");
     let live_bytes = std::fs::metadata(&path).expect("stat").len();
+    let after = measure_reads(&path, n_threads, n_turns);
 
     let out = json!({
         "turn_records": tag,
@@ -245,9 +274,8 @@ fn main() {
         "facts_ms": facts_ms,
         "ingest_ms": ingest_ms,
         "ingest_ms_per_thread": ingest_ms / n_threads as f64,
-        "thread_read_cold_ms": cold_ms,
-        "thread_read_warm_median_ms": warm_ms,
-        "warm_read_text_bytes": read_bytes,
+        "reads_before_compact": before,
+        "reads_after_compact": after,
     });
     println!("{}", serde_json::to_string_pretty(&out).unwrap());
     let json_path = dir.join(format!("thread_profile_{tag}.json"));

@@ -1146,6 +1146,34 @@ def test_keyword_and_hybrid_recall_on_v9():
             os.environ["MNEMO_DEV_FORMAT"] = old
     print("ok  keyword and hybrid recall (v9)")
 
+
+def test_turn_compression_knob_on_v9():
+    """FMT-9e: set_turn_compress_after on a v9 file (dev switch); turns
+    round-trip whether they're stored plain or compressed."""
+    old = os.environ.get("MNEMO_DEV_FORMAT")
+    os.environ["MNEMO_DEV_FORMAT"] = "9"
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.mnemo")
+            db = mnemo.open(path, "passphrase", dimensions=4)
+            db.set_embedder(_fake_embedder(4), name="fake-4d", dimensions=4, normalize=True)
+            text = "the agent decided to flush after tests pass " * 60
+            db.ingest_thread("recent", [{"turn_id": "r", "role": "user", "content": text}])
+            db.set_turn_compress_after(0)
+            db.ingest_thread("now", [{"turn_id": "n", "role": "user", "content": text}])
+            db.flush()
+            db.close()
+            db = mnemo.open(path, "passphrase", dimensions=4)
+            assert db.thread_export("recent")[0]["content"] == text
+            assert db.thread_export("now")[0]["content"] == text
+            db.close()
+    finally:
+        if old is None:
+            del os.environ["MNEMO_DEV_FORMAT"]
+        else:
+            os.environ["MNEMO_DEV_FORMAT"] = old
+    print("ok  turn compression knob (v9)")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1186,4 +1214,5 @@ if __name__ == "__main__":
     test_about_essence()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
+    test_turn_compression_knob_on_v9()
     print("\nall Python binding tests passed")

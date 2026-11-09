@@ -170,6 +170,7 @@ its own agent.
 | `set_cache_flush_policy(policy, max_dirty=None, max_age_secs=None)` | `policy="strict"` (default; every put durable on return) or `"batched"` (engine auto-flushes at `max_dirty` puts or `max_age_secs` seconds). Under `batched`, `cache_put` and friends no longer force an eager flush — call `db.flush()` yourself if you need it before a specific boundary |
 | `set_cache_budget(namespace, max_entries, max_bytes)` | Per-namespace LRU cap (defaults 10 000 entries / 64 MiB). On the next `cache_put` the LRU is evicted until both limits are satisfied |
 | `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
+| `set_turn_compress_after(secs)` | v9 files: compress thread turns once they're older than `secs` (default 7 days; `0` compresses at write). This handle only |
 | `memories()` | Enumerate every live (non-deleted, non-expired) memory as a list of dicts |
 | `dimensions()` | Embedding dimensionality this database was created with (also on `stats()["dimensions"]`) |
 | `rekey(new_passphrase, fast=False)` | Change the passphrase. Re-derives the KEK and re-wraps the DEK; encrypted pages are not rewritten (O(1) in db size). `fast=True` uses the cheap-Argon2 test params — omit for production |

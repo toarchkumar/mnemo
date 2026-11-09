@@ -1682,6 +1682,15 @@ impl Mnemo {
         Ok(())
     }
 
+    /// FMT-9e: compress v9 thread turns once they're older than `secs`
+    /// (default 7 days; `0` compresses every turn at write). Applies to
+    /// this handle only. See the Rust-side `Mnemo::set_turn_compress_after`
+    /// docs.
+    fn set_turn_compress_after(&mut self, secs: u64) -> PyResult<()> {
+        self.core_mut()?.set_turn_compress_after(secs);
+        Ok(())
+    }
+
     /// Summary statistics as a dict.
     fn stats(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let s = self.core_mut()?.stats().map_err(to_py)?;

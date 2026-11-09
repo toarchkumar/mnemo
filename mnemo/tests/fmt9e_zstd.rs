@@ -232,3 +232,135 @@ fn malformed_frames_are_errors_not_panics() {
 fn rmp_like_payload() -> Vec<u8> {
     prose(3, 2_000).into_bytes()
 }
+
+#[test]
+fn a_cold_handle_decodes_only_the_threads_it_uses() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = open_db(&path, 9);
+    for th in 0..3 {
+        let turns: Vec<ThreadTurn> = (0..10)
+            .map(|i| turn(th * 100 + i, prose(th * 100 + i, 1_200)))
+            .collect();
+        db.ingest_thread(&format!("chat-{th}"), &turns).unwrap();
+    }
+    db.remember(Memory::new(
+        "a fact".to_string(),
+        MemoryType::Semantic,
+        vec![1.0, 0.5, 0.25, 0.125],
+    ))
+    .unwrap();
+    let victim = db.thread_export("chat-2").unwrap()[0].id;
+    db.close().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    db.set_embedder(LenEmbedder).unwrap();
+    // `set_embedder` reads `about()`, which builds the caches without
+    // decoding a single turn.
+    assert_eq!(
+        db.__cold_thread_buckets(),
+        Some(3),
+        "about() decodes no turns"
+    );
+    assert_eq!(db.thread_export_turns("chat-1").unwrap().len(), 10);
+    assert_eq!(
+        db.__cold_thread_buckets(),
+        Some(2),
+        "the other two threads' turns stay undecoded"
+    );
+
+    // Re-ingesting a cold thread's turns is still a no-op (its turn ids
+    // are found once it's warmed), and new turns continue its sequence.
+    let again: Vec<ThreadTurn> = (0..10).map(|i| turn(i, prose(i, 1_200))).collect();
+    let rep = db.ingest_thread("chat-0", &again).unwrap();
+    assert_eq!(rep.skipped_existing_turns, 10);
+    assert_eq!(rep.added_records, 0);
+    db.ingest_thread("chat-0", &[turn(10, prose(10, 1_200))])
+        .unwrap();
+    assert_eq!(db.thread_export_turns("chat-0").unwrap().len(), 11);
+    assert_eq!(db.__cold_thread_buckets(), Some(1));
+
+    // Deleting a turn of the last cold thread warms it first, so its
+    // layer entry stays exact.
+    db.delete(&victim).unwrap();
+    assert_eq!(db.__cold_thread_buckets(), Some(0));
+    assert_eq!(db.thread_export_turns("chat-2").unwrap().len(), 9);
+    assert_eq!(db.thread_forget("chat-2").unwrap(), 9);
+    assert!(db.thread_export("chat-2").unwrap().is_empty());
+    assert_eq!(db.verify().unwrap(), db.len());
+}
+
+fn recent_turn(i: usize, content: String) -> ThreadTurn {
+    ThreadTurn {
+        timestamp: None,
+        ..turn(i, content)
+    }
+}
+
+fn compressed_count(db: &mut Mnemo, thread: &str) -> usize {
+    let ids: Vec<_> = db
+        .thread_export(thread)
+        .unwrap()
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    ids.iter()
+        .filter(|id| db.__record_storage(id).unwrap().1)
+        .count()
+}
+
+#[test]
+fn recent_turns_stay_plain_until_they_age_past_the_cutoff() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = open_db(&path, 9);
+    let turns: Vec<ThreadTurn> = (0..300).map(|i| recent_turn(i, prose(i, 1_500))).collect();
+    db.ingest_thread("live", &turns).unwrap();
+    db.flush().unwrap();
+    assert_eq!(
+        compressed_count(&mut db, "live"),
+        0,
+        "recent turns are plain"
+    );
+
+    // Once they're past the cutoff, each commit that writes compresses up
+    // to 256 of them.
+    db.set_turn_compress_after(0);
+    db.ingest_thread("other", &[recent_turn(1_000, prose(1_000, 200))])
+        .unwrap();
+    db.flush().unwrap();
+    assert_eq!(compressed_count(&mut db, "live"), 256);
+    db.ingest_thread("other", &[recent_turn(1_001, prose(1_001, 200))])
+        .unwrap();
+    db.flush().unwrap();
+    assert_eq!(compressed_count(&mut db, "live"), 300);
+    db.close().unwrap();
+    drop(db);
+
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let back = db.thread_export_turns("live").unwrap();
+    assert_eq!(back.len(), 300);
+    for (a, b) in turns.iter().zip(&back) {
+        assert_eq!(a.content, b.content);
+    }
+    assert_eq!(db.verify().unwrap(), db.len());
+}
+
+#[test]
+fn compaction_compresses_recent_turns_too() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("t.mnemo");
+    let mut db = open_db(&path, 9);
+    let turns: Vec<ThreadTurn> = (0..20).map(|i| recent_turn(i, prose(i, 2_000))).collect();
+    db.ingest_thread("live", &turns).unwrap();
+    db.close().unwrap();
+    assert_eq!(compressed_count(&mut db, "live"), 0);
+    drop(db);
+    Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    assert_eq!(compressed_count(&mut db, "live"), 20);
+    let back = db.thread_export_turns("live").unwrap();
+    assert_eq!(back.len(), 20);
+    assert_eq!(back[7].content, turns[7].content);
+}
