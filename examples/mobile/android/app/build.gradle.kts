@@ -24,6 +24,12 @@ android {
         versionName = mnemoVersion
         buildConfigField("String", "MNEMO_COMMIT", "\"${commit.get()}\"")
         buildConfigField("String", "MNEMO_VERSION", "\"$mnemoVersion\"")
+        // MNemo ships arm64-v8a and x86_64. JNA's AAR brings its dispatch
+        // library for five more ABIs, where the app would install and then
+        // fail to load libmnemo_uniffi.so, so keep only the two.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {

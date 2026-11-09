@@ -210,6 +210,22 @@ val store = MnemoStore.importWithPassphrase(
 - The destination must not exist yet, and the source is never modified.
 - Have the user choose the passphrase. Never store it next to the export.
 
+## ABIs
+
+The AAR carries `libmnemo_uniffi.so` for `arm64-v8a` and `x86_64` only,
+which covers current phones and the emulator. JNA's AAR adds its dispatch
+library for five more ABIs (`armeabi`, `armeabi-v7a`, `mips`, `mips64`,
+`x86`). On those, an app would install and then fail to load MNemo. So
+filter the app to the two ABIs, as the sample does:
+
+```kotlin
+android {
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+}
+```
+
 ## Minification (R8)
 
 The AAR ships consumer rules (`consumer-rules.pro`) that keep JNA and the
