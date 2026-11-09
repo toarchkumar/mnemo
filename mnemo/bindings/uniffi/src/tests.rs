@@ -545,7 +545,11 @@ fn essence_writes_round_trip_and_embed_with_no_lock_held() {
         .expect("deadlock: an essence write embedded with the handle lock held");
     let decision = decision.unwrap();
     timeline.unwrap();
-    assert_eq!(e.calls.load(Ordering::SeqCst), 2, "each write embedded once");
+    assert_eq!(
+        e.calls.load(Ordering::SeqCst),
+        2,
+        "each write embedded once"
+    );
 
     let render = db.essence(thread(), 4096).unwrap();
     assert!(render.contains("drink tea at standups"), "{render}");
@@ -561,7 +565,10 @@ fn essence_writes_round_trip_and_embed_with_no_lock_held() {
         .unwrap();
     assert!(matches!(again, WriteOutcome::Unchanged), "{again:?}");
     let render = db.essence(thread(), 4096).unwrap();
-    assert!(render.contains("drink coffee") && !render.contains("drink tea"), "{render}");
+    assert!(
+        render.contains("drink coffee") && !render.contains("drink tea"),
+        "{render}"
+    );
 
     // Resolve, and remove another item from the render.
     db.essence_resolve(decision).unwrap();
@@ -602,7 +609,10 @@ fn essence_writes_work_without_an_embedder() {
     db.essence_append_timeline(EssenceScope::Project, "first release".into(), None)
         .unwrap();
     let render = db.essence(EssenceScope::Project, 4096).unwrap();
-    assert!(render.contains("tabs, not spaces") && render.contains("first release"), "{render}");
+    assert!(
+        render.contains("tabs, not spaces") && render.contains("first release"),
+        "{render}"
+    );
 }
 
 fn fill(db: &MnemoDb, n: u32) {

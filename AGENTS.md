@@ -140,8 +140,8 @@ push to `main` and every PR. Two jobs:
 - `python bindings (linux)` — `maturin build --release` + `pip install`
   the wheel + `python test_mnemo.py` against `mnemo-python/`.
 
-`cargo fmt --check` is deliberately not yet wired (no codebase-wide
-format pass has happened); if you do that pass, add the check.
+The `rust` jobs also gate on `cargo fmt --check` (since PR 9), so run
+`cargo fmt` (from `mnemo/`) before pushing.
 
 ## Format-version policy
 
