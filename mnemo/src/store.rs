@@ -56,6 +56,7 @@ use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
     CacheStats, CachedValue, CounterState, DirectoryIndex, SemanticCachePutOpts,
 };
+use crate::text;
 use crate::veccol;
 use crate::wal;
 
@@ -561,6 +562,11 @@ struct RowV9 {
     importance: f32,
     /// `created_at + ttl_secs` when `ROW_HAS_TTL` is set.
     expires_at: i64,
+    /// FMT-9d: the row's BM25 document id (`0`: not keyword-indexed) and
+    /// its token count. Live rows define which documents are live, and
+    /// N and avgdl, so segments never hold lengths or tombstones.
+    doc: u32,
+    doc_len: u16,
 }
 
 /// FMT-9b.2: `RowV9::rec_slot` of a record too big for a packed page; it
@@ -634,6 +640,130 @@ fn record_slot(page: &[u8], slot: u16) -> Result<Vec<u8>> {
     let off = u16::from_le_bytes([dir[0], dir[1]]) as usize;
     let len = u16::from_le_bytes([dir[2], dir[3]]) as usize;
     page.get(off..off + len).map(|b| b.to_vec()).ok_or_else(bad)
+}
+
+/// FMT-9d: the BM25 manifest run: tokenizer, the next document id, and the
+/// segment runs (oldest first).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct Bm25Manifest {
+    tokenizer: u8,
+    next_doc: u32,
+    segments: Vec<(u64, u64, u64, u64)>,
+    /// Documents each segment was written with (live or not since).
+    #[serde(default)]
+    seg_docs: Vec<u32>,
+}
+
+impl Default for Bm25Manifest {
+    fn default() -> Self {
+        Bm25Manifest {
+            tokenizer: text::TOKENIZER_V1,
+            next_doc: 1,
+            segments: Vec::new(),
+            seg_docs: Vec::new(),
+        }
+    }
+}
+
+/// FMT-9d: live documents: `doc -> (row, length)`, their count and mean
+/// length. Rebuilt from the rows after any write.
+#[derive(Debug, Default)]
+struct DocStats {
+    docs: std::collections::HashMap<u32, (usize, u16)>,
+    avgdl: f32,
+}
+
+/// FMT-9d: the handle's BM25 state.
+#[derive(Debug, Default)]
+struct Bm25State {
+    manifest: Bm25Manifest,
+    /// Per segment, its dict, once loaded (resident; postings stay on disk).
+    dicts: Option<Vec<Vec<text::DictEntry>>>,
+    /// Documents written since the last commit, which writes them as a
+    /// new segment.
+    pending: Vec<(u32, Vec<(String, u8)>)>,
+    stats: Option<DocStats>,
+    /// Documents in the segment the current flush is merging.
+    merged_docs: u32,
+}
+
+/// FMT-9d: a manifest's segment runs and their document counts.
+type Bm25Segments = (Vec<(u64, u64, u64, u64)>, Vec<u32>);
+
+/// FMT-9d: segments past this many are merged into one by the next commit.
+const BM25_MAX_SEGMENTS: usize = 8;
+
+/// FMT-9d: is this row keyword-indexed? Facts and onboarding records;
+/// thread turns, essence items and links stay out (FMT-9a: turn postings
+/// would be 3× all the fact data).
+fn bm25_kind(kind: u8) -> bool {
+    kind == ROW_KIND_FACT || kind == ROW_KIND_ONBOARDING
+}
+
+/// FMT-9d: read `len` bytes at byte `off` of a page run.
+fn read_run_range(pager: &mut Pager, ptr: RunPtr, off: u64, len: u64) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(len as usize);
+    if len == 0 {
+        return Ok(out);
+    }
+    if off + len > ptr.len {
+        return Err(MnemoError::Invalid("BM25 range past its run".into()));
+    }
+    let p = PAYLOAD as u64;
+    let (first, last) = (off / p, (off + len - 1) / p);
+    for i in first..=last {
+        let page = pager.read_page(ptr.start + i, ptr.gen)?;
+        let lo = if i == first { (off % p) as usize } else { 0 };
+        let hi = if i == last {
+            ((off + len - 1) % p) as usize + 1
+        } else {
+            PAYLOAD
+        };
+        out.extend_from_slice(&page[lo..hi]);
+    }
+    Ok(out)
+}
+
+/// FMT-9d: a segment's dict (the `[u32 len][dict]` head of its run).
+fn load_segment_dict(pager: &mut Pager, ptr: RunPtr) -> Result<Vec<text::DictEntry>> {
+    let head = read_run_range(pager, ptr, 0, 4)?;
+    let n = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as u64;
+    let bytes = read_run_range(pager, ptr, 4, n)?;
+    rmp_serde::from_slice(&bytes).map_err(|e| MnemoError::Serialize(e.to_string()))
+}
+
+/// FMT-9d: a term's postings in one segment (empty when absent).
+fn segment_postings(
+    pager: &mut Pager,
+    ptr: RunPtr,
+    dict: &[text::DictEntry],
+    term: &str,
+) -> Result<Vec<(u32, u8)>> {
+    let Ok(i) = dict.binary_search_by(|e| e.term.as_str().cmp(term)) else {
+        return Ok(Vec::new());
+    };
+    let head = read_run_range(pager, ptr, 0, 4)?;
+    let base = 4 + u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as u64;
+    let e = &dict[i];
+    let bytes = read_run_range(pager, ptr, base + e.off as u64, e.len as u64)?;
+    text::decode_postings(&bytes)
+}
+
+/// FMT-9d: load the BM25 manifest (an empty pointer yields a fresh one).
+fn load_bm25_manifest(pager: &mut Pager, ptr: RunPtr) -> Result<Bm25Manifest> {
+    if ptr.is_empty() {
+        return Ok(Bm25Manifest::default());
+    }
+    let buf = read_run_bytes(pager, ptr.start, ptr.pages, ptr.len, ptr.gen)?;
+    let m: Bm25Manifest =
+        rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+    if m.tokenizer != text::TOKENIZER_V1 {
+        return Err(MnemoError::Invalid(format!(
+            "BM25 tokenizer {} is newer than this build understands",
+            m.tokenizer
+        )));
+    }
+    Ok(m)
 }
 
 /// FMT-9b.2: the handle's view of packed record pages.
@@ -798,6 +928,8 @@ struct FlushPrelude {
     cat_delta: bool,
     /// FMT-9c.3: `idx_bytes` is an index delta run, not a whole index.
     idx_delta: bool,
+    /// FMT-9d: this commit's BM25 segment, and the segments it replaces.
+    bm25_seg: Option<(Vec<u8>, Option<usize>)>,
     idx_bytes: Option<Vec<u8>>,
     /// Serialized result-cache directory bytes when `dirty_cache` is
     /// set (Phase 10.1). `None` if the cache didn't change since the
@@ -839,6 +971,9 @@ struct SnapshotGens {
     /// FMT-9c.3: the index's delta-chain head at this snapshot.
     #[serde(default)]
     index_delta: (u64, u64, u64, u64),
+    /// FMT-9d: the BM25 manifest at this snapshot.
+    #[serde(default)]
+    bm25: (u64, u64, u64, u64),
 }
 
 impl Snapshot {
@@ -1264,6 +1399,8 @@ pub struct Mnemo {
     col: VecColumn,
     /// FMT-9b.2: packed record pages (v9; unused on v8).
     recs: RecPages,
+    /// FMT-9d: the BM25 keyword index (v9; unused on v8).
+    bm25: Bm25State,
     /// FMT-9c.2: catalog rows changed since the last commit (v9 writes
     /// them as a delta run instead of the whole catalog).
     dirty_rows: std::collections::BTreeSet<usize>,
@@ -2273,6 +2410,7 @@ impl Mnemo {
             gen_leased: false,
             col: VecColumn::default(),
             recs: RecPages::default(),
+            bm25: Bm25State::default(),
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain: Vec::new(),
             delta_rows: 0,
@@ -2546,6 +2684,7 @@ impl Mnemo {
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
         let recs = RecPages::from_catalog(&catalog);
+        let bm25_manifest = load_bm25_manifest(&mut pager, header.bm25)?;
         let max_snapshots = if header.version >= VERSION_V9 {
             V9_DEFAULT_MAX_SNAPSHOTS
         } else {
@@ -2598,6 +2737,10 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            bm25: Bm25State {
+                manifest: bm25_manifest,
+                ..Bm25State::default()
+            },
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -2742,6 +2885,7 @@ impl Mnemo {
         let key_slots = load_key_slots(&mut pager, header.keys)?;
         let col = VecColumn::from_catalog(&catalog);
         let recs = RecPages::from_catalog(&catalog);
+        let bm25_manifest = load_bm25_manifest(&mut pager, header.bm25)?;
         let max_snapshots = if header.version >= VERSION_V9 {
             V9_DEFAULT_MAX_SNAPSHOTS
         } else {
@@ -2788,6 +2932,10 @@ impl Mnemo {
             gen_leased: false,
             col,
             recs,
+            bm25: Bm25State {
+                manifest: bm25_manifest,
+                ..Bm25State::default()
+            },
             dirty_rows: std::collections::BTreeSet::new(),
             delta_chain,
             delta_rows,
@@ -2888,6 +3036,158 @@ impl Mnemo {
         }
     }
 
+    /// FMT-9d: make sure the live-document stats and the segment dicts are
+    /// loaded. Stats come from the rows; dicts from each segment's head.
+    fn ensure_bm25(&mut self) -> Result<()> {
+        if self.bm25.stats.is_none() {
+            let mut docs = std::collections::HashMap::new();
+            let mut total = 0u64;
+            for (i, e) in self.catalog.iter().enumerate() {
+                if e.deleted {
+                    continue;
+                }
+                if let Some(r) = e.v9 {
+                    if r.doc != 0 && bm25_kind(r.kind) {
+                        docs.insert(r.doc, (i, r.doc_len));
+                        total += r.doc_len as u64;
+                    }
+                }
+            }
+            let avgdl = if docs.is_empty() {
+                1.0
+            } else {
+                total as f32 / docs.len() as f32
+            };
+            self.bm25.stats = Some(DocStats { docs, avgdl });
+        }
+        if self.bm25.dicts.is_none() {
+            let mut dicts = Vec::with_capacity(self.bm25.manifest.segments.len());
+            for &t in &self.bm25.manifest.segments {
+                dicts.push(load_segment_dict(&mut self.pager, tuple_ptr(t))?);
+            }
+            self.bm25.dicts = Some(dicts);
+        }
+        Ok(())
+    }
+
+    /// FMT-9d: BM25 scores of the live keyword-indexed rows that match
+    /// `query`: catalog row → score. Empty on v8 (no keyword index).
+    fn bm25_scores(
+        &mut self,
+        query: &str,
+        k1: f32,
+        b: f32,
+    ) -> Result<std::collections::HashMap<usize, f32>> {
+        let mut scores: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+        if !self.is_v9() {
+            return Ok(scores);
+        }
+        self.ensure_bm25()?;
+        let terms: std::collections::BTreeSet<String> = text::tokenize(query).into_iter().collect();
+        let segs: Vec<RunPtr> = self
+            .bm25
+            .manifest
+            .segments
+            .iter()
+            .map(|&t| tuple_ptr(t))
+            .collect();
+        let stats = self.bm25.stats.as_ref().expect("loaded above");
+        let dicts = self.bm25.dicts.as_ref().expect("loaded above");
+        let n = stats.docs.len();
+        for term in &terms {
+            let mut posts: Vec<(u32, u8)> = Vec::new();
+            for (si, seg) in segs.iter().enumerate() {
+                posts.extend(segment_postings(&mut self.pager, *seg, &dicts[si], term)?);
+            }
+            for (doc, tfs) in &self.bm25.pending {
+                if let Ok(i) = tfs.binary_search_by(|(t, _)| t.as_str().cmp(term)) {
+                    posts.push((*doc, tfs[i].1));
+                }
+            }
+            posts.retain(|(d, _)| stats.docs.contains_key(d));
+            if posts.is_empty() {
+                continue;
+            }
+            let idf = text::idf(n, posts.len());
+            for (d, tf) in posts {
+                let (row, len) = stats.docs[&d];
+                *scores.entry(row).or_default() += text::bm25(tf, idf, len, stats.avgdl, k1, b);
+            }
+        }
+        Ok(scores)
+    }
+
+    /// FMT-9d: the next commit's BM25 segment: the pending documents, plus,
+    /// past [`BM25_MAX_SEGMENTS`], the small segments (all but the first),
+    /// or all of them once the small ones outgrow a tenth of the first.
+    /// Dead documents are dropped from merged segments. Returns the segment
+    /// bytes and, for a merge, the index from which it replaces the
+    /// segments (`None`: it's appended).
+    fn bm25_next_segment(&mut self) -> Result<Option<(Vec<u8>, Option<usize>)>> {
+        if !self.is_v9() || self.bm25.pending.is_empty() {
+            return Ok(None);
+        }
+        let segs: Vec<RunPtr> = self
+            .bm25
+            .manifest
+            .segments
+            .iter()
+            .map(|&t| tuple_ptr(t))
+            .collect();
+        // Mostly dead (a mass delete): merge everything, so the dead
+        // postings go and the old segments' pages can be reused or cut off.
+        self.ensure_bm25()?;
+        let written: u64 = self.bm25.manifest.seg_docs.iter().map(|&d| d as u64).sum();
+        let live_docs = self.bm25.stats.as_ref().map_or(0, |s| s.docs.len()) as u64;
+        let mostly_dead = !segs.is_empty() && written > 64 && live_docs * 2 < written;
+        if segs.len() < BM25_MAX_SEGMENTS && !mostly_dead {
+            return Ok(Some((text::build_segment(&self.bm25.pending)?, None)));
+        }
+        let small: u64 = segs.iter().skip(1).map(|p| p.len).sum();
+        let from = if mostly_dead || small * 10 > segs[0].len {
+            0
+        } else {
+            1
+        };
+        let live: std::collections::HashSet<u32> = self
+            .bm25
+            .stats
+            .as_ref()
+            .expect("loaded above")
+            .docs
+            .keys()
+            .copied()
+            .collect();
+        let mut by_doc: std::collections::BTreeMap<u32, Vec<(String, u8)>> =
+            std::collections::BTreeMap::new();
+        for seg in &segs[from..] {
+            let bytes = read_run_bytes(&mut self.pager, seg.start, seg.pages, seg.len, seg.gen)?;
+            let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+            let dict: Vec<text::DictEntry> = rmp_serde::from_slice(&bytes[4..4 + n])
+                .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+            let post = &bytes[4 + n..];
+            for e in dict {
+                let range = e.off as usize..(e.off + e.len) as usize;
+                let list = text::decode_postings(post.get(range).ok_or_else(|| {
+                    MnemoError::Invalid("BM25 dict entry past its postings".into())
+                })?)?;
+                for (d, tf) in list {
+                    if live.contains(&d) {
+                        by_doc.entry(d).or_default().push((e.term.clone(), tf));
+                    }
+                }
+            }
+        }
+        for (d, tfs) in &self.bm25.pending {
+            if live.contains(d) {
+                by_doc.insert(*d, tfs.clone());
+            }
+        }
+        let docs: Vec<(u32, Vec<(String, u8)>)> = by_doc.into_iter().collect();
+        self.bm25.merged_docs = docs.len() as u32;
+        Ok(Some((text::build_segment(&docs)?, Some(from))))
+    }
+
     /// FMT-9c.3: the generation the persisted index is current to: its
     /// base run's, or its newest delta run's.
     fn index_gen_now(&self) -> u64 {
@@ -2955,6 +3255,7 @@ impl Mnemo {
         self.col = VecColumn::from_catalog(&self.catalog);
         self.recs = RecPages::from_catalog(&self.catalog);
         self.dirty_rows.clear();
+        self.bm25.stats = None;
     }
 
     /// FMT-9b: the file keeps float vectors in its records.
@@ -3457,6 +3758,18 @@ impl Mnemo {
             self.write_record(&bytes)?
         };
         let rec_len = bytes.len();
+        // FMT-9d: a keyword-indexed v9 row gets a new BM25 document.
+        let mut tags = v9.then(|| row_tags(&m));
+        if let Some(r) = tags.as_mut() {
+            if bm25_kind(r.kind) {
+                let (terms, len) = text::term_freqs(&m.content);
+                r.doc = self.bm25.manifest.next_doc;
+                r.doc_len = len;
+                self.bm25.manifest.next_doc += 1;
+                self.bm25.pending.push((r.doc, terms));
+            }
+        }
+        self.bm25.stats = None;
         // For overwrites preserve the existing access stats; for inserts
         // seed them from the memory (which carries them in its body).
         let (prev_accessed, prev_count) = match self.index.get(id_u, &self.catalog) {
@@ -3475,8 +3788,7 @@ impl Mnemo {
             accessed_at: prev_accessed,
             access_count: prev_count,
             gen,
-            v9: v9.then(|| {
-                let mut r = row_tags(&m);
+            v9: tags.map(|mut r| {
                 r.rec_slot = if packed { 0 } else { REC_SPAN };
                 r
             }),
@@ -3728,6 +4040,7 @@ impl Mnemo {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
             self.touch(idx);
+            self.bm25.stats = None;
             if self.is_v9() {
                 self.kill_record(idx, &entry);
                 self.kill_vector(idx, &entry);
@@ -5641,6 +5954,25 @@ impl Mnemo {
         (self.index_chain.len(), self.header.index_start)
     }
 
+    /// **Not a stable API.** FMT-9d: BM25 keyword scores for `query`, best
+    /// first: `(id, score)`, with k1 1.2 and b 0.75.
+    #[doc(hidden)]
+    pub fn __bm25(&mut self, query: &str) -> Result<Vec<(Ulid, f32)>> {
+        let scores = self.bm25_scores(query, 1.2, 0.75)?;
+        let mut out: Vec<(Ulid, f32)> = scores
+            .into_iter()
+            .map(|(row, s)| (Ulid(self.catalog[row].id), s))
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        Ok(out)
+    }
+
+    /// **Not a stable API.** FMT-9d: BM25 segments on disk.
+    #[doc(hidden)]
+    pub fn __bm25_segments(&self) -> usize {
+        self.bm25.manifest.segments.len()
+    }
+
     /// **Not a stable API.** FMT-9: the header's next unallocated page.
     #[doc(hidden)]
     pub fn __next_page(&self) -> u64 {
@@ -6861,6 +7193,44 @@ impl Mnemo {
                 self.header.catalog_gen = gen;
             }
         }
+        // FMT-9d: the BM25 segment, then the manifest that lists it.
+        let mut new_bm25: Option<Bm25Segments> = None;
+        if let Some((bytes, replace_from)) = &ctx.bm25_seg {
+            let (start, pages) = self.seal_run(bytes, gen, &mut frames)?;
+            let mut segs = self.bm25.manifest.segments.clone();
+            let mut seg_docs = self.bm25.manifest.seg_docs.clone();
+            seg_docs.resize(segs.len(), 0);
+            let docs = if let Some(from) = *replace_from {
+                for t in segs.drain(from..) {
+                    superseded.push((t.0, t.1));
+                }
+                seg_docs.truncate(from);
+                self.bm25.merged_docs
+            } else {
+                self.bm25.pending.len() as u32
+            };
+            segs.push((start, pages as u64, bytes.len() as u64, gen));
+            seg_docs.push(docs);
+            let man = Bm25Manifest {
+                tokenizer: text::TOKENIZER_V1,
+                next_doc: self.bm25.manifest.next_doc,
+                segments: segs.clone(),
+                seg_docs: seg_docs.clone(),
+            };
+            let mbytes =
+                rmp_serde::to_vec(&man).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+            if !self.header.bm25.is_empty() {
+                superseded.push((self.header.bm25.start, self.header.bm25.pages));
+            }
+            let (ms, mp) = self.seal_run(&mbytes, gen, &mut frames)?;
+            self.header.bm25 = RunPtr {
+                start: ms,
+                pages: mp as u64,
+                len: mbytes.len() as u64,
+                gen,
+            };
+            new_bm25 = Some((segs, seg_docs));
+        }
         let mut new_ichain: Option<(Vec<RunPtr>, usize)> = None;
         if persist_index && ctx.idx_delta {
             if let Some(bytes) = &ctx.idx_bytes {
@@ -6979,6 +7349,7 @@ impl Mnemo {
                     index: self.header.index_gen,
                     delta: ptr_tuple(self.header.catalog_delta),
                     index_delta: ptr_tuple(self.header.index_delta),
+                    bm25: ptr_tuple(self.header.bm25),
                 }),
             });
             if v9 {
@@ -7130,6 +7501,12 @@ impl Mnemo {
             self.index_chain = chain;
             self.index_chain_ops = n;
         }
+        if let Some((segs, seg_docs)) = new_bm25 {
+            self.bm25.manifest.segments = segs;
+            self.bm25.manifest.seg_docs = seg_docs;
+            self.bm25.pending.clear();
+            self.bm25.dicts = None;
+        }
         if persist_index {
             self.index_rebase = false;
             self.index_delta_ops = None;
@@ -7271,6 +7648,11 @@ impl Mnemo {
         // Grow WAL if needed (DUR-1: relocation is WAL-logged and does
         // its own fsyncs). The cache directory rides in the same
         // transaction so its page count contributes to the reservation.
+        // FMT-9d: the BM25 segment (and its manifest, one page).
+        let bm25_seg = self.bm25_next_segment()?;
+        let bm25_pc = bm25_seg
+            .as_ref()
+            .map_or(0, |(b, _)| b.len().div_ceil(PAYLOAD).max(1));
         // FMT-9c: on v9 only runs of up to V9_WAL_RUN_MAX_PAGES go through
         // the WAL; longer ones are written in place.
         let v9 = self.is_v9();
@@ -7288,6 +7670,8 @@ impl Mnemo {
                 + in_wal(man_pc_est)
                 + in_wal(free_pc_est)
                 + in_wal(keys_pc)
+                + in_wal(bm25_pc)
+                + usize::from(bm25_pc > 0)
                 + 1,
         )?;
 
@@ -7304,6 +7688,7 @@ impl Mnemo {
         // `write_counter`.
 
         Ok(FlushPrelude {
+            bm25_seg,
             cat_bytes,
             cat_delta,
             idx_delta,
@@ -8029,6 +8414,36 @@ impl Mnemo {
                 a.enable_log();
             }
             self.index_rebase = true;
+            // FMT-9d: the snapshot's BM25 segments (quarantined while it's
+            // retained) describe its documents.
+            let bptr = snap.gens.map_or(RunPtr::default(), |g| tuple_ptr(g.bm25));
+            let manifest = load_bm25_manifest(&mut self.pager, bptr)?;
+            // Its runs come back off the free list; the current ones it
+            // doesn't share are freed, and the header points at its run.
+            let runs = |ptr: RunPtr, m: &Bm25Manifest| {
+                let mut v: Vec<(u64, u64)> = m.segments.iter().map(|t| (t.0, t.1)).collect();
+                if !ptr.is_empty() {
+                    v.push((ptr.start, ptr.pages));
+                }
+                v
+            };
+            let then = runs(bptr, &manifest);
+            let now = runs(self.header.bm25, &self.bm25.manifest);
+            self.pending_free.retain(|r| !then.contains(r));
+            for &(p, c) in &then {
+                self.free.unfree(p, c);
+            }
+            for r in now {
+                if !then.contains(&r) {
+                    self.release_pages(r.0, r.1);
+                }
+            }
+            self.header.bm25 = bptr;
+            self.free_dirty = true;
+            self.bm25 = Bm25State {
+                manifest,
+                ..Bm25State::default()
+            };
         }
         self.index = build_id_index(&catalog);
         self.catalog = catalog;
@@ -8463,6 +8878,18 @@ impl Mnemo {
             self.index_chain
                 .iter()
                 .map(|r| (r.start, r.pages, "index delta run")),
+        );
+        live.push((
+            self.header.bm25.start,
+            self.header.bm25.pages,
+            "BM25 manifest",
+        ));
+        live.extend(
+            self.bm25
+                .manifest
+                .segments
+                .iter()
+                .map(|t| (t.0, t.1, "BM25 segment")),
         );
         for (p, c, what) in live {
             if c == 0 {

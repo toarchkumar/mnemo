@@ -115,6 +115,10 @@ criterion = { version = "=0.5.1", features = ["html_reports"], optional = true }
 # fields are only honoured on top-level deps, and we need the example
 # binary (built from this crate) to link against it when requested.
 mimalloc = { version = "=0.1.43", default-features = false, optional = true }
+# FMT-9d (Phase 2): UAX #29 word segmentation for the BM25 tokenizer
+# (`text.rs`). Pure Rust, no dependencies; pinned so tokens, and so the
+# on-disk index, don't shift under a minor update.
+unicode-segmentation = "=1.12.0"
 # FMT-9a prototype measurement (`examples/fmt9_proto.rs --part compress`):
 # page-compression candidates, compared before the format is frozen. Only
 # built with `--features fmt9_proto`; default consumers never see them.

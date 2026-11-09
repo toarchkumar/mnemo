@@ -64,6 +64,7 @@ mod pager;
 mod result_cache;
 mod session;
 mod store;
+mod text;
 mod transcript;
 mod veccol;
 mod wal;
