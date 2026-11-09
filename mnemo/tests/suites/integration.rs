@@ -104,6 +104,55 @@ fn close_releases_the_file_so_it_reopens_in_the_same_scope() {
     assert_eq!(db.len(), 1);
 }
 
+/// MOBILE-1a: `ingest_thread_texts` + `ingest_thread_with_vectors` split
+/// an ingest so the caller embeds in between (the UniFFI binding does, with
+/// no lock held). The texts are the new chunks only; a count that no longer
+/// matches the plan writes nothing.
+#[test]
+fn ingest_thread_in_two_steps_with_caller_vectors() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("two-step.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    let turns = vec![
+        ThreadTurn {
+            turn_id: "a".into(),
+            role: "user".into(),
+            content: "short".into(),
+            timestamp: None,
+        },
+        ThreadTurn {
+            turn_id: "b".into(),
+            role: "assistant".into(),
+            content: "x".repeat(20_000),
+            timestamp: None,
+        },
+    ];
+    let texts = db.ingest_thread_texts("chat", &turns).unwrap();
+    assert!(texts.len() >= 3, "one record for 'a', chunks for 'b'");
+    assert_eq!(texts[0], "short");
+    let vectors: Vec<Vec<f32>> = (0..texts.len())
+        .map(|i| vec4(1.0 + i as f32, 0.5, 0.25, 0.125))
+        .collect();
+    // The wrong count writes nothing.
+    assert!(db
+        .ingest_thread_with_vectors("chat", &turns, &vectors[1..])
+        .is_err());
+    assert!(db.thread_export_turns("chat").unwrap().is_empty());
+    let report = db
+        .ingest_thread_with_vectors("chat", &turns, &vectors)
+        .unwrap();
+    assert_eq!(report.added_records, texts.len());
+    // Everything is archived now, so nothing is left to embed.
+    assert!(db.ingest_thread_texts("chat", &turns).unwrap().is_empty());
+    let again = db.ingest_thread_with_vectors("chat", &turns, &[]).unwrap();
+    assert_eq!(again.skipped_existing_turns, 2);
+    db.close().unwrap();
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let back = db.thread_export_turns("chat").unwrap();
+    assert_eq!(back.len(), 2);
+    assert_eq!(back[1].content, turns[1].content);
+}
+
 /// Regression test for v7's header AEAD seal. Pre-v7, the only integrity
 /// check on the mutable header fields was an unkeyed CRC-32 — an attacker
 /// with write access could rewrite, say, `catalog_start` to point at an

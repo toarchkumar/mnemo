@@ -140,6 +140,46 @@ impl Mnemo {
         self.apply_ingest(thread_id, plan, vectors, None)
     }
 
+    /// MOBILE-1a: the texts [`Mnemo::ingest_thread`] would embed for
+    /// `turns`, in order (one per new chunk or truncated record; turns
+    /// already in the thread are skipped). With
+    /// [`Mnemo::ingest_thread_with_vectors`] it splits an ingest in two, so
+    /// a caller can run its embedder between the calls without holding
+    /// anything the handle needs, as the UniFFI binding does. Empty when
+    /// nothing is new. Writes nothing.
+    pub fn ingest_thread_texts(
+        &mut self,
+        thread_id: &str,
+        turns: &[ThreadTurn],
+    ) -> Result<Vec<String>> {
+        let plan = self.plan_ingest(thread_id, turns)?;
+        Ok(plan.texts().into_iter().map(str::to_string).collect())
+    }
+
+    /// MOBILE-1a: [`Mnemo::ingest_thread`] with caller-supplied vectors,
+    /// one per text [`Mnemo::ingest_thread_texts`] returned for the same
+    /// `thread_id` and `turns`, in the same order. No embedder is needed.
+    /// The ingest is planned again here; if the thread changed in between
+    /// (so the count no longer matches) it returns
+    /// [`MnemoError::Invalid`] and writes nothing, and the caller can ask
+    /// for the texts again.
+    pub fn ingest_thread_with_vectors(
+        &mut self,
+        thread_id: &str,
+        turns: &[ThreadTurn],
+        vectors: &[Vec<f32>],
+    ) -> Result<IngestReport> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let plan = self.plan_ingest(thread_id, turns)?;
+        if plan.pending.is_empty() && vectors.is_empty() {
+            return Ok(plan.report);
+        }
+        self.check_vectors("ingest_thread_with_vectors", vectors, plan.text_count())?;
+        self.apply_ingest(thread_id, plan, vectors.to_vec(), None)
+    }
+
     /// Check a batch of embedder output before anything is written:
     /// one vector per input, the file's width, finite and non-zero.
     pub(super) fn check_vectors(
