@@ -1,10 +1,8 @@
 //! FMT-9a skeleton: the v9 header, the quarantined free list (a), the
 //! key-slot run (b) and the page generation in the AAD.
 //!
-//! v9 is still created only through the hidden `MnemoConfig::format_version`
-//! switch; every test here asks for it explicitly (and `v8_is_untouched`
-//! asks for v8), so the file runs the same with or without
-//! `MNEMO_DEV_FORMAT=9`.
+//! Every test asks for its format explicitly (`v8_is_untouched` asks for
+//! v8), so the file doesn't depend on the default (v9 from v0.11).
 
 use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, Ulid};
 use tempfile::tempdir;

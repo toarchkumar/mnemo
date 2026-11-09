@@ -190,6 +190,36 @@ jobs:
         working-directory: mnemo-python
         run: python test_mnemo.py
 
+  # --- Format compatibility (FMT-9f): a v8 file built by the published
+  #     v0.10.0 CLI opens and writes under this build, compacts to v9 and
+  #     recalls the same; v0.10.0 refuses the v9 copy. See
+  #     `mnemo/tests/v0_10_fixture.rs`.
+  compat:
+    name: compat (v0.10.0 fixture, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: compat
+
+      - name: Install the v0.10.0 CLI
+        # Its own published lockfile; the workflow's `-D warnings` would
+        # fail an old release on lints added by a newer rustc.
+        env:
+          RUSTFLAGS: ""
+        run: cargo install mnemo-engine --version =0.10.0 --locked --root "$RUNNER_TEMP/v0_10"
+
+      - name: cargo test --test v0_10_fixture
+        working-directory: mnemo
+        run: MNEMO_V0_10_BIN="$RUNNER_TEMP/v0_10/bin/mnemo" cargo test --test v0_10_fixture -- --nocapture
+
   # --- Mobile cross-builds (FMT-9e, PLANNER-A condition (ii)). zstd is
   #     the engine's first C dependency (`zstd-sys`, built by `cc`), so
   #     every change must still compile the library for the phone

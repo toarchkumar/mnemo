@@ -62,12 +62,17 @@ enum Command {
         #[arg(long)]
         new_passphrase: Option<String>,
     },
-    /// Rebuild the file, dropping tombstoned and expired memories.
+    /// Rebuild the file, dropping tombstoned and expired memories. Writes
+    /// the current format, v9, so this is also how a v8 file is upgraded.
     Compact {
         /// Path to the `.mnemo` file.
         path: String,
         #[arg(long)]
         passphrase: Option<String>,
+        /// Target format: `v9` (the default) or `v8`, to keep the file
+        /// readable by v0.10 and earlier. `v8` is kept for one release.
+        #[arg(long, default_value = "v9")]
+        format: String,
     },
     /// Decrypt and re-verify every live record.
     Verify {
@@ -793,6 +798,16 @@ enum CacheOp {
 ///
 /// When `--passphrase` is used the passphrase ends up in shell history and
 /// process listings; we warn once to stderr to make that obvious.
+/// FMT-9f: the hint `info` and `about` print for a v8 file.
+fn upgrade_hint(path: &str, format_version: u16) -> Option<String> {
+    (format_version < 9).then(|| {
+        format!(
+            "v{format_version} file: run `mnemo compact {path}` to upgrade to v9 \
+             (upgrade every tool that reads it first)"
+        )
+    })
+}
+
 fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
     if let Some(p) = arg {
         eprintln!(
@@ -1249,6 +1264,10 @@ fn run() -> std::result::Result<(), String> {
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
             println!("path:        {path}");
+            println!("format:      v{}", s.format_version);
+            if let Some(hint) = upgrade_hint(&path, s.format_version) {
+                println!("             {hint}");
+            }
             println!("memories:    {}", s.memories);
             println!("tombstoned:  {}", s.deleted);
             println!("dimensions:  {}", s.dimensions);
@@ -1309,11 +1328,17 @@ fn run() -> std::result::Result<(), String> {
         Command::Compact {
             path,
             passphrase: pp,
+            format,
         } => {
+            let target = match format.trim_start_matches('v') {
+                "9" => 9,
+                "8" => 8,
+                other => return Err(format!("--format must be v8 or v9, not {other}")),
+            };
             let pp = passphrase(&pp)?;
-            let report = Mnemo::compact_file(&path, &pp).map_err(fmt)?;
+            let report = Mnemo::compact_file_to(&path, &pp, target).map_err(fmt)?;
             println!(
-                "compacted {path}: {} -> {} live memories",
+                "compacted {path} (v{target}): {} -> {} live memories",
                 report.before, report.after
             );
         }
@@ -1566,6 +1591,8 @@ fn run() -> std::result::Result<(), String> {
                     let doc = serde_json::json!({
                         "path": path,
                         "stats": {
+                            "format_version": stats.format_version,
+                            "upgrade_hint": upgrade_hint(&path, stats.format_version),
                             "memories": stats.memories,
                             "dimensions": stats.dimensions,
                             "file_bytes": stats.file_bytes,
@@ -1604,6 +1631,9 @@ fn run() -> std::result::Result<(), String> {
                             ""
                         },
                     );
+                    if let Some(hint) = upgrade_hint(&path, stats.format_version) {
+                        println!("# {hint}");
+                    }
                     if entries.is_empty() {
                         println!();
                         println!(

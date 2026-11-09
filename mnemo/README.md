@@ -679,7 +679,7 @@ cargo run --bin mnemo -- <command>
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase       |
-| `compact` | Rebuild the file, dropping tombstones and expired    |
+| `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which upgrades a v8 file (`--format v8` keeps v8 for one release) |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |

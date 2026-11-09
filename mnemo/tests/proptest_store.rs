@@ -41,6 +41,10 @@ use tempfile::TempDir;
 const DIMS: usize = 4;
 
 fn fast_cfg() -> MnemoConfig {
+    // FMT-9f: the index properties need an ANN on small v9 files (below
+    // `V9_ANN_MIN_FACTS`); the hidden test override drops the threshold
+    // for this test binary.
+    std::env::set_var("MNEMO_DEV_ANN_MIN_FACTS", "0");
     MnemoConfig {
         dimensions: DIMS,
         kdf: KdfParams::fast(),

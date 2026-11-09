@@ -219,9 +219,14 @@ fn build_db(fixture: &Fixture, now: i64) -> MnemoResult<(Mnemo, HashMap<String, 
     drop(tmp); // let Mnemo::create own the file
 
     let dims = fixture.memories[0].vector.len();
+    // FMT-9f: v9 by default; `MNEMO_BENCH_FORMAT=8` measures v8.
     let cfg = MnemoConfig {
         dimensions: dims,
         kdf: KdfParams::fast(),
+        format_version: match std::env::var("MNEMO_BENCH_FORMAT").as_deref() {
+            Ok("8") => 8,
+            _ => 0,
+        },
         ..Default::default()
     };
     let mut db = Mnemo::create(&path, "harness-pw", cfg)?;
@@ -290,9 +295,8 @@ fn run_pass(
             .top_k(top_k)
             .weights(weights)
             .track_access(track_access);
-        // FMT-9d: `RANKING_TEXT_WEIGHT=<eps>` (on a v9 file, via
-        // `MNEMO_DEV_FORMAT=9`) runs hybrid recall: the query text as a
-        // BM25 keyword query with weight eps.
+        // FMT-9d: `RANKING_TEXT_WEIGHT=<eps>` (on a v9 file) runs hybrid
+        // recall: the query text as a BM25 keyword query with weight eps.
         if let Some(w) = std::env::var("RANKING_TEXT_WEIGHT")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())

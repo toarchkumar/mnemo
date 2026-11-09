@@ -42,7 +42,18 @@ pub fn fast_kdf_cfg(dimensions: usize) -> MnemoConfig {
     MnemoConfig {
         dimensions,
         kdf: KdfParams::fast(),
+        format_version: bench_format(),
         ..Default::default()
+    }
+}
+
+/// FMT-9f: the format bench files are created in: `MNEMO_BENCH_FORMAT=8`
+/// for v8, otherwise the engine default (v9 from v0.11).
+#[allow(dead_code)]
+pub fn bench_format() -> u16 {
+    match std::env::var("MNEMO_BENCH_FORMAT").as_deref() {
+        Ok("8") => 8,
+        _ => 0,
     }
 }
 

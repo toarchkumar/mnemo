@@ -312,6 +312,13 @@ fn an_unknown_index_layout_is_treated_as_no_index() {
             .collect();
         db.__set_index_layout_for_testing(99);
         assert!(db.build_index().unwrap().partitions > 0);
+        db.flush().unwrap();
+        // FMT-9f: a few commits write index deltas on top of that base.
+        for i in 0..3 {
+            db.remember(mem(&format!("late {i}"), 400 + i)).unwrap();
+            db.flush().unwrap();
+        }
+        assert_eq!(db.__index_shape().0, 3, "three delta runs on the chain");
         db.close().unwrap();
         ids
     };
@@ -329,8 +336,13 @@ fn an_unknown_index_layout_is_treated_as_no_index() {
         !db.has_index(),
         "a layout this build doesn't know is no index"
     );
+    // FMT-9f (the 9d leak): the unknown base's delta runs are still
+    // tracked, so the rebuild below frees them with the base.
+    assert_eq!(db.__index_shape().0, 3, "the chain is tracked, not leaked");
     // Rebuilding writes a current one.
     db.build_index().unwrap();
+    db.flush().unwrap();
+    assert_eq!(db.__index_shape().0, 0, "the old chain was released");
     db.close().unwrap();
     drop(db);
     let mut db = Mnemo::open(&path, "pw").unwrap();

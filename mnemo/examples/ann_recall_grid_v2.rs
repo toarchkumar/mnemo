@@ -100,15 +100,21 @@ fn gen_clustered_vectors(n: usize, dims: usize, k_clusters: usize, seed: u64) ->
     out
 }
 
+/// FMT-9f: the file format the corpora are built in: `ANN_GRID_FORMAT=8`
+/// or `9` (the default, as for new files from v0.11).
+fn grid_format() -> u16 {
+    std::env::var("ANN_GRID_FORMAT")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(9)
+}
+
 fn cached_corpus_path(n: usize) -> PathBuf {
     let base = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
     PathBuf::from(base).join("benches").join(format!(
         "corpus_{n}_{DIMENSIONS}d{}.mnemo",
-        // FMT-9: v9 corpora (`MNEMO_DEV_FORMAT=9`) are cached apart.
-        match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
-            Ok("9") => "_v9",
-            _ => "",
-        }
+        // v9 corpora are cached apart from the v8 ones.
+        if grid_format() == 9 { "_v9" } else { "" }
     ))
 }
 
@@ -130,6 +136,7 @@ fn ensure_corpus(n: usize) -> PathBuf {
     let cfg = MnemoConfig {
         dimensions: DIMENSIONS,
         kdf: KdfParams::fast(),
+        format_version: grid_format(),
         ..Default::default()
     };
     let mut db = Mnemo::create(&path, PASSPHRASE, cfg).expect("create");
@@ -283,7 +290,77 @@ fn sweep_tier(n: usize) -> Value {
     })
 }
 
+/// FMT-9f: the shipped default cell, exactly: the index built with
+/// `IndexConfig::default()` and recalls that pin neither dial, so the
+/// engine's own `n_probe` and rerank depth apply (on v9, at least
+/// `V9_RERANK_PER_HIT` × `top_k`).
+fn defaults_tier(n: usize) -> Value {
+    let path = ensure_corpus(n);
+    println!(
+        "\n[ann-grid-v2] defaults tier={n} (format v{})",
+        grid_format()
+    );
+    let queries = gen_clustered_vectors(QUERY_COUNT, DIMENSIONS, 100, 0xDEAD_BEEF);
+    let mut db = Mnemo::open(&path, PASSPHRASE).unwrap();
+    let truth: Vec<HashSet<String>> = queries
+        .iter()
+        .map(|q| {
+            db.search(q, TOP_K, Metric::Cosine)
+                .unwrap()
+                .into_iter()
+                .map(|(m, _)| m.id.to_string())
+                .collect()
+        })
+        .collect();
+    db.drop_index();
+    db.build_index_with(IndexConfig::default())
+        .expect("build index");
+    let info = db.stats().unwrap().index.expect("an index");
+    let t0 = Instant::now();
+    let mut sum = 0f32;
+    for (q, truth_ids) in queries.iter().zip(truth.iter()) {
+        let req = RecallRequest::new(q.clone())
+            .top_k(TOP_K)
+            .track_access(false);
+        let hits = db.recall(&req).expect("recall");
+        let got: HashSet<String> = hits.into_iter().map(|h| h.memory.id.to_string()).collect();
+        sum += truth_ids.intersection(&got).count() as f32 / TOP_K as f32;
+    }
+    let mean_secs = t0.elapsed().as_secs_f64() / QUERY_COUNT as f64;
+    let recall = sum / QUERY_COUNT as f32;
+    println!(
+        "    {} partitions, recall@10 {recall:.4}, {:.3} ms/query",
+        info.partitions,
+        mean_secs * 1e3
+    );
+    json!({
+        "corpus_size": n,
+        "format": grid_format(),
+        "partitions": info.partitions,
+        "recall_at_10": round4(recall as f64),
+        "mean_query_secs": round6(mean_secs),
+    })
+}
+
 fn main() {
+    // `ANN_GRID_DEFAULTS=1`: only the shipped default cell per tier.
+    if std::env::var("ANN_GRID_DEFAULTS").as_deref() == Ok("1") {
+        let sizes: Vec<usize> = std::env::var("ANN_GRID_TIERS")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+            .unwrap_or_else(|| vec![20_000, 50_000, 100_000]);
+        let tiers: Vec<Value> = sizes.iter().map(|&n| defaults_tier(n)).collect();
+        let out = std::env::var("ANN_GRID_OUT")
+            .unwrap_or_else(|_| format!("target/ann_grid_defaults_v{}.json", grid_format()));
+        fs::write(
+            &out,
+            serde_json::to_string_pretty(&json!({ "tiers": tiers })).unwrap() + "\n",
+        )
+        .unwrap();
+        println!("\n[ann-grid-v2] wrote {out}");
+        return;
+    }
+
     // `ANN_GRID_TIERS=20000,50000` picks the corpus sizes (FMT-9: the
     // no-ANN threshold check); the default is 10K and 100K.
     let sizes: Vec<usize> = std::env::var("ANN_GRID_TIERS")

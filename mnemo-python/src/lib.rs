@@ -1707,6 +1707,7 @@ impl Mnemo {
         // flush on this handle issued. `0` on a fresh handle before
         // any flush. Useful for diagnosing write-latency work.
         d.set_item("fsyncs_last_flush", s.fsyncs_last_flush)?;
+        d.set_item("format_version", s.format_version)?;
         d.set_item("snapshots", self.core_mut()?.snapshots().len())?;
         match s.index {
             Some(ix) => {

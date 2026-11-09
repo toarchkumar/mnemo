@@ -788,11 +788,18 @@ fn cli_remember_and_recall_text_round_trip() {
 
 #[test]
 fn cli_recall_text_without_embed_cmd_errors_cleanly() {
+    // FMT-9f: on a v8 file `--text` needs an embedder. On v9 (the default)
+    // it's keyword recall without one: see
+    // `cli_recall_text_without_embed_cmd_is_keyword_recall_on_v9`.
     let dir = tempdir().unwrap();
     let path = dir.path().join("em-noec.mnemo");
     let pp = "em-pw";
     {
-        let _ = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        let cfg = MnemoConfig {
+            format_version: 8,
+            ..fast_cfg(4)
+        };
+        let _ = Mnemo::create(&path, pp, cfg).unwrap();
     }
     let out = Command::new(bin())
         .args([
@@ -818,6 +825,88 @@ fn cli_recall_text_without_embed_cmd_errors_cleanly() {
         combined.to_lowercase().contains("embed"),
         "error should mention embedder, got: {combined}"
     );
+}
+
+#[test]
+fn cli_recall_text_without_embed_cmd_is_keyword_recall_on_v9() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("em-kw.mnemo");
+    let pp = "em-pw";
+    {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        db.remember(Memory::new(
+            "alpha shipped",
+            MemoryType::Semantic,
+            vec![1.0, 0.0, 0.0, 0.0],
+        ))
+        .unwrap();
+        db.close().unwrap();
+    }
+    let out = Command::new(bin())
+        .args(["recall", path.to_str().unwrap(), "--text", "alpha"])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo recall");
+    assert!(
+        out.status.success(),
+        "keyword recall on v9: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("alpha shipped"));
+}
+
+/// FMT-9f: `info` and `about` hint at the upgrade on a v8 file; `compact`
+/// writes v9; `compact --format v8` keeps v8.
+#[test]
+fn cli_compact_upgrades_a_v8_file_and_info_hints_until_then() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("up.mnemo");
+    let p = path.to_str().unwrap();
+    let pp = "up-pw";
+    {
+        let cfg = MnemoConfig {
+            format_version: 8,
+            ..fast_cfg(4)
+        };
+        let mut db = Mnemo::create(&path, pp, cfg).unwrap();
+        for i in 0..3 {
+            db.remember(Memory::new(
+                format!("m{i}"),
+                MemoryType::Semantic,
+                vec![1.0 + i as f32, 0.0, 0.0, 0.0],
+            ))
+            .unwrap();
+        }
+        db.close().unwrap();
+    }
+    let run = |args: &[&str]| {
+        let out = Command::new(bin())
+            .args(args)
+            .env("MNEMO_PASSPHRASE", pp)
+            .output()
+            .expect("spawn mnemo");
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    let info = run(&["info", p]);
+    assert!(info.contains("format:      v8"), "{info}");
+    assert!(info.contains("mnemo compact"), "{info}");
+    assert!(run(&["about", p]).contains("mnemo compact"));
+
+    let out = run(&["compact", p, "--format", "v8"]);
+    assert!(out.contains("(v8)"), "{out}");
+    assert!(run(&["info", p]).contains("format:      v8"));
+
+    let out = run(&["compact", p]);
+    assert!(out.contains("(v9)"), "{out}");
+    let info = run(&["info", p]);
+    assert!(info.contains("format:      v9"), "{info}");
+    assert!(!info.contains("mnemo compact"), "{info}");
+    assert!(info.contains("memories:    3"), "{info}");
 }
 
 #[test]
@@ -1435,7 +1524,13 @@ fn cli_index_rebuild_runs_rebuild_index() {
     let path = dir.path().join("rb.mnemo");
     let pp = "bp1-pw";
     {
-        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        // A v8 file: a 40-memory v9 file has no ANN index (below
+        // `V9_ANN_MIN_FACTS`), and this test is about the CLI flag.
+        let cfg = MnemoConfig {
+            format_version: 8,
+            ..fast_cfg(4)
+        };
+        let mut db = Mnemo::create(&path, pp, cfg).unwrap();
         for i in 0..40 {
             let v = vec![((i % 4) + 1) as f32, 1.0, 2.0, 3.0];
             db.remember(Memory::new(format!("m{i}"), MemoryType::Semantic, v))

@@ -105,6 +105,14 @@ pub const DEFAULT_VECTOR_CACHE_BUDGET: usize = 96 * 1024 * 1024;
 /// codebook alone would cost more disk than it saves time.
 pub const V9_ANN_MIN_FACTS: usize = 20_000;
 
+/// FMT-9f (PLANNER-A, 2026-11-08): on v9 an unpinned recall reranks at
+/// least this many candidates per requested hit (500 for `top_k` 10), or
+/// the index's own auto depth when that's deeper (above 100K). The v9
+/// index is trained on fp16-rounded vectors, and at 20K–50K the auto
+/// depth (×10–×25) lost up to 0.03 recall@10 against v8; ×50 is within
+/// 0.005 at every measured tier. v8 is unchanged.
+pub const V9_RERANK_PER_HIT: usize = 50;
+
 /// FMT-9c: page runs longer than this are written copy-on-write straight
 /// to their home pages (and fsynced) before the commit, instead of through
 /// the WAL, on v9. The WAL then carries only the header and small runs, so
@@ -474,12 +482,10 @@ pub struct MnemoConfig {
     ///
     /// Apply to an already-open database with [`Mnemo::set_max_snapshots`].
     pub max_snapshots: usize,
-    /// FMT-9 development switch: the on-disk format a new file is created
-    /// in. `0` (the default) means the current default, v8, unless the
-    /// `MNEMO_DEV_FORMAT=9` environment variable is set; `8` or `9` pick
-    /// one explicitly. **Not a stable API:** v9 is under construction until
-    /// PR 9f, its layout can change between the 9a–9f PRs, and 9f removes
-    /// this field when v9 becomes the default.
+    /// The on-disk format a new file is created in. `0` (the default)
+    /// means v9, the current format. `8` creates a v8 file, for tools that
+    /// still need to read it with v0.10 or earlier; it's kept for one
+    /// release (v0.12 makes v8 read-only). **Not a stable API.**
     #[doc(hidden)]
     pub format_version: u16,
     /// FMT-9b (v9 files only; ignored for v8): also keep each memory's
@@ -506,10 +512,8 @@ impl Default for MnemoConfig {
 /// FMT-9: resolve [`MnemoConfig::format_version`] for a new file.
 fn resolve_format_version(requested: u16) -> Result<u16> {
     match requested {
-        0 => Ok(match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
-            Ok("9") => VERSION_V9,
-            _ => VERSION,
-        }),
+        // FMT-9f: new files are v9; the `MNEMO_DEV_FORMAT` switch is gone.
+        0 => Ok(crate::format::DEFAULT_NEW_VERSION),
         VERSION | VERSION_V9 => Ok(requested),
         v => Err(MnemoError::Invalid(format!(
             "format_version {v} is not supported for new files (use 8 or 9)"
@@ -1426,6 +1430,9 @@ pub struct Stats {
     /// before deciding whether cutting fsync count is a viable
     /// durability-preserving fix.
     pub fsyncs_last_flush: u32,
+    /// FMT-9f: the file's on-disk format (`8` or `9`). A v8 file still
+    /// opens and writes as v8; `mnemo compact` upgrades it to v9.
+    pub format_version: u16,
 }
 
 /// Result of a [`Mnemo::compact_file`] run.
@@ -2009,6 +2016,28 @@ fn apply_index_chain(
         ann.apply_ops(ops)?;
     }
     Ok((chain, n))
+}
+
+/// FMT-9f: the runs of an index delta chain whose base didn't load (a
+/// layout this build doesn't know), oldest first, without replaying them,
+/// so the next `build_index` or `drop_index` frees them with the base.
+/// Best effort: a delta this build can't decode ends the walk, and the
+/// runs before it stay unreferenced until the next compaction.
+fn index_chain_runs(pager: &mut Pager, head: RunPtr) -> Vec<RunPtr> {
+    let mut runs = Vec::new();
+    let mut at = head;
+    while !at.is_empty() && runs.len() <= 4096 {
+        let Ok(buf) = read_run_bytes(pager, at.start, at.pages, at.len, at.gen) else {
+            break;
+        };
+        let Ok(d) = rmp_serde::from_slice::<IndexDeltaOwned>(&buf) else {
+            break;
+        };
+        runs.push(at);
+        at = tuple_ptr(d.prev);
+    }
+    runs.reverse();
+    runs
 }
 
 /// Load a **v4** catalog run using the frozen [`CatalogEntryV4`] shape.
@@ -3538,6 +3567,17 @@ impl Mnemo {
     /// FMT-9b.2: row `idx` no longer needs its record (`row` is the row as
     /// it was): drop a waiting one, free a span, or take it off its packed
     /// page and free the page once nothing live is left on it.
+    /// FMT-9f: the rerank depth for an ANN query: the caller's pin, else
+    /// on v9 at least [`V9_RERANK_PER_HIT`] × `top_k`, else the index's
+    /// own default (`None`).
+    fn rerank_for(&self, ann: &IvfPqIndex, req: &RecallRequest) -> Option<usize> {
+        if req.n_rerank.is_some() || !self.is_v9() {
+            return req.n_rerank;
+        }
+        let (_, auto) = ann.effective_defaults();
+        Some(auto.max(V9_RERANK_PER_HIT.saturating_mul(req.top_k)))
+    }
+
     /// FMT-9e: is a turn created at `created_at` past this handle's
     /// compression cutoff?
     fn turn_is_cold(&self, created_at: i64) -> bool {
@@ -6778,7 +6818,8 @@ impl Mnemo {
         let force_exact = force_exact || filter_bypasses_ann(&req.filter);
         let mut entries: Vec<CatalogEntry> = match (&self.ann, force_exact) {
             (Some(ann), false) => {
-                let ids = ann.query(&req.query, req.n_probe, req.n_rerank);
+                let n_rerank = self.rerank_for(ann, req);
+                let ids = ann.query(&req.query, req.n_probe, n_rerank);
                 ids.iter()
                     .filter_map(|&id| self.index.get(id, &self.catalog))
                     .map(|i| self.catalog[i].clone())
@@ -7121,7 +7162,7 @@ impl Mnemo {
             if let Some(ann) = &self.ann {
                 let (default_probe, default_rerank) = ann.effective_defaults();
                 let base_probe = req.n_probe.unwrap_or(default_probe);
-                let base_rerank = req.n_rerank.unwrap_or(default_rerank);
+                let base_rerank = self.rerank_for(ann, req).unwrap_or(default_rerank);
                 let widen_probe = base_probe.saturating_mul(2);
                 let widen_rerank = base_rerank.saturating_mul(2);
                 // Attempt 2: widen once, 2× from the effective base.
@@ -7246,8 +7287,9 @@ impl Mnemo {
         // FMT-9b: a v9 file below V9_ANN_MIN_FACTS recalls by an exact fp16
         // scan, which is faster than the index there and costs no disk.
         // Report it as an index with no partitions, and drop a stale one.
-        // `MNEMO_DEV_ANN_MIN_FACTS` overrides the threshold so the v8 index
-        // suites can run on v9 files during FMT-9 (removed in 9f).
+        // `MNEMO_DEV_ANN_MIN_FACTS` (hidden; tests and benchmarks only)
+        // overrides the threshold, so the index suites and the recall grid
+        // can exercise a v9 ANN on small files.
         let min_facts = std::env::var("MNEMO_DEV_ANN_MIN_FACTS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
@@ -7410,6 +7452,12 @@ impl Mnemo {
                 self.index_chain = chain;
                 self.index_chain_ops = n;
                 ann.enable_log();
+            } else if self.header.index_pages > 0 {
+                // FMT-9f (the 9d leak): an unknown-layout base loads as no
+                // index; still track its delta runs, so rebuilding or
+                // dropping the index frees them along with the base.
+                self.index_chain = index_chain_runs(&mut self.pager, self.header.index_delta);
+                self.index_chain_ops = 0;
             }
         }
         let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
@@ -9483,6 +9531,7 @@ impl Mnemo {
             },
             wal_pages: self.header.wal_pages,
             fsyncs_last_flush: self.fsyncs_last_flush,
+            format_version: self.header.version,
         })
     }
 
@@ -9503,15 +9552,35 @@ impl Mnemo {
     /// the cache; the Planner's interim README caveat (c417d2e) called
     /// that out — this PR removes the surprise.
     pub fn compact_file(path: &str, passphrase: &str) -> Result<CompactReport> {
-        Self::compact_file_secret(path, passphrase.as_bytes())
+        Self::compact_file_secret(path, passphrase.as_bytes(), 0)
     }
 
     /// PERF-1 step 7: [`Mnemo::compact_file`] for a raw-key database.
     pub fn compact_file_with_key(path: &str, key: &[u8; crypto::KEY_LEN]) -> Result<CompactReport> {
-        Self::compact_file_secret(path, key)
+        Self::compact_file_secret(path, key, 0)
     }
 
-    fn compact_file_secret(path: &str, secret: &[u8]) -> Result<CompactReport> {
+    /// FMT-9f: [`Mnemo::compact_file`] into an explicit format: `9` (what
+    /// `compact_file` does) or `8`, which keeps a v8 file readable by
+    /// v0.10 and earlier. The v8 target is kept for one release.
+    pub fn compact_file_to(
+        path: &str,
+        passphrase: &str,
+        format_version: u16,
+    ) -> Result<CompactReport> {
+        if format_version != VERSION && format_version != VERSION_V9 {
+            return Err(MnemoError::Invalid(format!(
+                "compact target format {format_version} isn't supported (use 8 or 9)"
+            )));
+        }
+        Self::compact_file_secret(path, passphrase.as_bytes(), format_version)
+    }
+
+    fn compact_file_secret(
+        path: &str,
+        secret: &[u8],
+        format_version: u16,
+    ) -> Result<CompactReport> {
         let mut old = Mnemo::open_secret(path, secret)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
@@ -9523,9 +9592,11 @@ impl Mnemo {
             MnemoConfig {
                 dimensions: dims,
                 kdf,
-                // FMT-9a: compaction keeps the source's format (v8 stays
-                // v8, v9 stays v9). 9f makes it write v9.
-                format_version: old.header.version.max(VERSION),
+                // FMT-9f: compaction writes v9 (upgrading a v8 file),
+                // unless `compact_file_to` asked for v8. A v9 file that
+                // keeps float vectors keeps them.
+                format_version,
+                store_float_vectors: old.float_vectors(),
                 ..Default::default()
             },
         )?;

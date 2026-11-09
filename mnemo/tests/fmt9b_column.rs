@@ -1,6 +1,5 @@
 //! FMT-9b.1: the v9 catalog row (tags and scoring inputs) and the fp16
-//! vector column. Every test asks for v9 explicitly, so the file runs the
-//! same with or without `MNEMO_DEV_FORMAT=9`.
+//! vector column. Every test asks for v9 explicitly.
 
 use mnemo_engine::{
     Embedder, EmbedderIdentity, Filter, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig,

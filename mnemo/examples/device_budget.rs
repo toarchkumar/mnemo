@@ -73,12 +73,14 @@ fn out_dir() -> PathBuf {
     PathBuf::from(base).join("device_budget")
 }
 
-/// FMT-9: `_v9` when the run creates v9 files (`MNEMO_DEV_FORMAT=9`), so
-/// v8 and v9 corpora and results don't overwrite each other.
+/// FMT-9: `_v9` for v9 files (the default from v0.11), none for v8
+/// (`MNEMO_BENCH_FORMAT=8`), so v8 and v9 corpora and results don't
+/// overwrite each other.
 fn format_suffix() -> &'static str {
-    match std::env::var("MNEMO_DEV_FORMAT").as_deref() {
-        Ok("9") => "_v9",
-        _ => "",
+    if corpus::bench_format() == 8 {
+        ""
+    } else {
+        "_v9"
     }
 }
 

@@ -8,14 +8,34 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-### FMT-9 (format v9), in progress — not yet the default
+### Changed — the on-disk format is v9 (FMT-9)
 
-v9 is being built PR by PR (9a–9f) and ships in v0.11.0. Until 9f, new files
-are still v8, v8 files read and write exactly as before (their bytes are
-unchanged), and a v9 file can only be made through the hidden
-`MnemoConfig::format_version = 9` (or `MNEMO_DEV_FORMAT=9`) development
-switch. **Don't keep data in a v9 file before v0.11.0:** its layout can
-still change between PRs.
+**New files are v9.** The format details are under the 9a–9f items below;
+in short, a 100K-memory file is about 1.5 KB per memory instead of about
+8.7 KB, durable writes and warm recall are faster, and recall can match
+exact identifiers.
+
+**Upgrading (9f):**
+- **v8 files keep working.** They open and write as v8, so v0.10 and
+  earlier can still read them. `mnemo info` and `mnemo about` print a
+  hint to upgrade.
+- **`mnemo compact <file>` upgrades a file to v9** (`Mnemo::compact_file`
+  in Rust, `compact_file` in Python). **Upgrade every tool that reads the
+  file before you compact it:** v0.10 and earlier can't open v9, and
+  report `unsupported .mnemo format version 9`. Compaction keeps every
+  live memory and the result cache, drops past snapshots (as before), and
+  stores vectors as fp16 (see 9b.1).
+- `mnemo compact --format v8` (Rust `Mnemo::compact_file_to(path,
+  passphrase, 8)`) compacts and keeps v8, for one more release. v0.12
+  makes v8 read-only.
+- A file newer than v9 now reports `unsupported .mnemo format version N:
+  this build opens v4 to v9; a newer file needs a newer mnemo-engine`
+  (the old message said "supports v1").
+- `Stats::format_version` (Python `stats()["format_version"]`) reports a
+  file's format.
+- The `MNEMO_DEV_FORMAT` development switch is gone.
+  `MnemoConfig::format_version` (hidden) stays: `0` is v9, and `8` makes
+  a v8 file.
 
 - **9a skeleton.**
   - A v9 header that fits in 512 bytes. The seal now covers every byte of
@@ -127,6 +147,24 @@ still change between PRs.
     instead of about 4.4 ms. Fact-only files don't change.
   - A compressed record must state its decompressed size, at most
     64 MiB; anything else is refused as malformed.
+  - A file that isn't written to again keeps its aged turns plain until
+    its next write or compaction (only writing commits do this work, so
+    idle flushes stay no-ops).
+- **9f: v9 becomes the default** (see "Upgrading" above).
+  - **v9 index defaults:** an unpinned recall on v9 reranks at least
+    `V9_RERANK_PER_HIT` (50) × `top_k` candidates (500 for `top_k` 10),
+    or the index's own auto depth where that's deeper (above 100K). PQ
+    subspaces stay at `dims / 4` (96 at 384 dims), the default since
+    v0.6. v8 is unchanged. The v9 index is trained on fp16 vectors; at
+    the shipped default cells, recall@10 against v8 is 0.994 vs 0.932
+    at 20K, 0.974 vs 0.966 at 50K and 0.978 vs 0.982 at 100K, at 1.0 /
+    1.9 / 3.5 ms per query (v8: 1.6 / 3.7 / 7.4 ms).
+  - Fixed: after a v9 index base in a layout this build doesn't know
+    loaded as "no index", `build_index` and `drop_index` now also free
+    its delta runs (they were left unreferenced until compaction).
+  - The DUR-1, SEC-1, FIX-1 and integration suites run on both formats,
+    and CI opens, writes and compacts a file built by the published
+    v0.10.0 CLI.
 
 ### Fixed
 

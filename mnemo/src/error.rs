@@ -14,7 +14,10 @@ pub enum MnemoError {
     BadMagic,
 
     /// The on-disk format version is newer than this build understands.
-    #[error("unsupported .mnemo format version {0} (this build supports v1)")]
+    #[error(
+        "unsupported .mnemo format version {0}: this build opens v4 to v9; \
+         a newer file needs a newer mnemo-engine"
+    )]
     UnsupportedVersion(u16),
 
     /// The header page failed its CRC check — a torn page-0 write or

@@ -38,11 +38,15 @@ pub const MAGIC: &[u8; 4] = b"MNEM";
 pub const VERSION: u16 = 8;
 /// FMT-9: the v9 format (slotted pages, page reuse through a quarantined
 /// free list, a generation in every page's AAD, a sealed 512-byte header,
-/// and a key-slot run). **Under construction:** until PR 9f a v9 file is
-/// created only through the hidden [`crate::MnemoConfig::format_version`]
-/// switch (or `MNEMO_DEV_FORMAT=9`), and the layout can still change
-/// between the 9a–9f PRs. New files stay v8 until 9f flips the default.
+/// a key-slot run, the fp16 vector column, packed records, catalog and
+/// index deltas, BM25, compressed turns). **New files are v9 from
+/// v0.11.0** ([`DEFAULT_NEW_VERSION`]). v8 files still open and write as
+/// v8 ([`VERSION`] stays the in-place migration target for v4–v7 files);
+/// `Mnemo::compact_file` rewrites a file as v9. v9 isn't an in-place
+/// upgrade: its layout differs throughout.
 pub const VERSION_V9: u16 = 9;
+/// FMT-9f: the format a new file is created in (and `compact_file` writes).
+pub const DEFAULT_NEW_VERSION: u16 = VERSION_V9;
 /// Highest version this build can open.
 pub const MAX_VERSION: u16 = VERSION_V9;
 /// Lowest version this build can auto-migrate on open. Files older than
