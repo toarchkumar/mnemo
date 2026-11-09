@@ -105,11 +105,8 @@ struct FixMem {
 
 #[derive(Deserialize, Clone)]
 struct FixQuery {
-    // Human-readable query text. Deserialized so the fixture round-trips
-    // cleanly; the harness itself doesn't use it (every lookup goes
-    // through `vector` + `expected_labels`). Kept for the "name the
-    // query every run misses" callout logged alongside DONE.
-    #[allow(dead_code)]
+    // Query text: the keyword query under `RANKING_TEXT_WEIGHT` (FMT-9d
+    // hybrid recall), and the "name the query every run misses" callout.
     text: String,
     category: String,
     expected_labels: Vec<String>,
@@ -289,10 +286,19 @@ fn run_pass(
     let mut ranks = Vec::with_capacity(fixture.queries.len());
     let mut top1 = Vec::with_capacity(fixture.queries.len());
     for q in &fixture.queries {
-        let req = RecallRequest::new(q.vector.clone())
+        let mut req = RecallRequest::new(q.vector.clone())
             .top_k(top_k)
             .weights(weights)
             .track_access(track_access);
+        // FMT-9d: `RANKING_TEXT_WEIGHT=<eps>` (on a v9 file, via
+        // `MNEMO_DEV_FORMAT=9`) runs hybrid recall: the query text as a
+        // BM25 keyword query with weight eps.
+        if let Some(w) = std::env::var("RANKING_TEXT_WEIGHT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            req = req.text_query(q.text.clone()).text_weight(w);
+        }
         let hits = db.recall(&req)?;
         let hit_ids: Vec<(Ulid, f32)> = hits.iter().map(|h| (h.memory.id, h.similarity)).collect();
         let rank = rank_of_expected(&hit_ids, &q.expected_labels, &rev);
@@ -453,6 +459,12 @@ fn main() -> MnemoResult<()> {
         "[ranking_v2] phase6 regression: hit@1={:.4} hit@5={:.4} MRR={:.4}",
         phase6_report.hit_at_1, phase6_report.hit_at_5, phase6_report.mrr,
     );
+    for (cat, m) in &phase6_report.per_category {
+        eprintln!(
+            "[ranking_v2]   phase6 {cat}: hit@1={:.4} MRR={:.4}",
+            m.hit_at_1, m.mrr
+        );
+    }
     let phase6_fail_hit1 = phase6_report.hit_at_1 < args.phase6_min_hit_at_1;
     let phase6_fail_mrr = phase6_report.mrr < args.phase6_min_mrr;
     if phase6_fail_hit1 || phase6_fail_mrr {
