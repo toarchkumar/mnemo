@@ -1,0 +1,7 @@
+# Built by scripts/build-xcframework.sh
+/build/
+/Sources/Mnemo/Generated/
+# SwiftPM and Xcode
+/.build/
+/.swiftpm/
+*.xcresult

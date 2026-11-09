@@ -39,6 +39,23 @@ Pre-1.0, the minor component carries the breaking-change signal.
   and a 2 MiB page cache), and passphrase export and import for moving a
   key-bound file between devices. It needs Rust 1.82 or later; the engine
   stays at 1.75.
+- **The Swift package** (MOBILE-1b, `mnemo/bindings/swift/`, not
+  published yet; iOS 15 and macOS 12 or later):
+  - `scripts/build-xcframework.sh` builds `MnemoFFI.xcframework` (iOS
+    device, iOS simulator, macOS arm64) and generates the Swift bindings.
+  - `actor MnemoStore` opens lazily. It flushes and closes the file when
+    the app enters the background or terminates, and reopens on the next
+    call; a call that races the close never sees `Closed`. Files live in
+    `Application Support/mnemo/`, protected until first unlock, and are
+    excluded from backup under the default key policy.
+  - `MnemoKeychain` stores keys with `KeyPolicy.deviceOnly` (the default)
+    or `.iCloudSynced`, with an optional access group. Each key's id is
+    stamped on its file as an extended attribute. A missing key gives
+    `MnemoStoreError.keyMissing`.
+  - `exportWithPassphrase` and `importWithPassphrase` move a store
+    between devices.
+- CI: a `swift` job runs `swift test` on macOS and `xcodebuild test` on an
+  iOS simulator.
 - CI: `cargo deny --workspace` now checks every workspace member, which
   adds per-crate license exceptions (MPL-2.0 for UniFFI; ISC for
   `libloading`, via the experimental Node binding). New jobs: an Android

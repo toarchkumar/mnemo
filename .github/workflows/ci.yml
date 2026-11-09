@@ -329,6 +329,63 @@ jobs:
         working-directory: mnemo
         run: cargo test -p mnemo-uniffi
 
+  # --- The Swift package (MOBILE-1b): builds the XCFramework, runs
+  #     `swift test` on macOS and `xcodebuild test` on an iOS simulator
+  #     (the background-transition, race and Keychain tests run only there).
+  swift:
+    name: swift (macos-latest, iOS simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Apple targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: swift
+
+      - name: Build the XCFramework and the Swift bindings
+        working-directory: mnemo/bindings/swift
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          scripts/build-xcframework.sh 2>&1 | tee build.log
+          {
+            echo "### MnemoFFI.xcframework (bytes)"
+            echo '```'
+            sed -n '/==> sizes/,$p' build.log | tail -n +2
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: swift test (macOS)
+        working-directory: mnemo/bindings/swift
+        run: swift test
+
+      - name: xcodebuild test (iOS simulator)
+        working-directory: mnemo/bindings/swift
+        run: |
+          set -o pipefail
+          xcodebuild -list
+          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; s=json.load(sys.stdin)["workspace"]["schemes"]; print("Mnemo-Package" if "Mnemo-Package" in s else "Mnemo")')
+          UDID=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime in sorted(devices, reverse=True):
+              if "iOS" in runtime:
+                  for d in devices[runtime]:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit()
+          ')
+          echo "scheme $SCHEME, simulator $UDID"
+          xcodebuild test -scheme "$SCHEME" -destination "id=$UDID" 2>&1 | tee xcodebuild.log | grep -E "Test (run|Suite|case)|✔|✘|passed|failed|error:" || true
+          tail -5 xcodebuild.log
+          grep -q "TEST SUCCEEDED" xcodebuild.log
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the
