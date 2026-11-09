@@ -140,12 +140,20 @@ format pass has happened); if you do that pass, add the check.
 
 ## Format-version policy
 
-The on-disk format is `mnemo/src/format.rs::VERSION` (currently 8).
-`MIGRATABLE_FROM` is the lowest version this build can auto-upgrade on
-open — files older than that are rejected with
-`MnemoError::UnsupportedVersion`. Files in `[MIGRATABLE_FROM, VERSION)`
-are migrated in place on first open and rewritten under `VERSION` on
-the next flush.
+The format constants live in `mnemo/src/format.rs`:
+
+- `DEFAULT_NEW_VERSION` (currently 9) is the format new files are created
+  in, and the one `Mnemo::compact_file` writes.
+- `VERSION` (8) is the in-place migration target: files in
+  `[MIGRATABLE_FROM, VERSION)` (v4–v7) are migrated in place on first open
+  and rewritten as v8 on the next flush. `MIGRATABLE_FROM` (4) is the
+  lowest version this build can auto-upgrade; older files are rejected
+  with `MnemoError::UnsupportedVersion`.
+- `MAX_VERSION` (9) is the newest version this build opens. v8 and v9 files
+  both open and write in their own format.
+- **v8 → v9 happens only through compaction** (`mnemo compact`,
+  `Mnemo::compact_file`). v9's layout differs throughout, so there's no
+  in-place upgrade.
 
 **Standing MessagePack rule:** `rmp_serde::to_vec` encodes Rust structs as
 positional MessagePack arrays (not named maps), and `rmp-serde` (1.3) rejects

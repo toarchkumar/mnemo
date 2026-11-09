@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-08
+
+FMT-9: the on-disk format is v9. New files are v9; v8 files keep opening
+and writing as v8 until you run `mnemo compact`. v0.10 and earlier can't
+open v9 files, so upgrade every tool that reads a file before compacting
+it. Measured with `examples/device_budget.rs` on an Apple M1 Pro (384-dim
+vectors, ~300 bytes of text); full numbers in
+`test/scripts/perf_v0.5.0.json` (`device_budget_v0_11_0`, marked
+`remeasured`).
+
 ### Changed — the on-disk format is v9 (FMT-9)
 
 **New files are v9.** The format details are under the 9a–9f items below;
@@ -173,6 +183,8 @@ exact identifiers.
   - Fixed: after a v9 index base in a layout this build doesn't know
     loaded as "no index", `build_index` and `drop_index` now also free
     its delta runs (they were left unreferenced until compaction).
+  - Python: `recall_text(..., keywords=, keyword_weight=)` (hybrid recall
+    from text, as in `recall`) and `set_vector_cache_budget(bytes)`.
   - The DUR-1, SEC-1, FIX-1 and integration suites run on both formats,
     and CI opens, writes and compacts a file built by the published
     v0.10.0 CLI.

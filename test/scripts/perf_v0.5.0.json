@@ -5326,5 +5326,235 @@
       "recall_gates"
     ],
     "remeasured_note": "All measured fresh for v0.10.0 on 2026-11-07. Single-run numbers; at 100K the warm-recall p95 and RSS vary between runs on this laptop (the P-0 block records +-30%)."
+  },
+  "device_budget_v0_11_0": {
+    "machine": {
+      "cpu": "Apple M1 Pro",
+      "os": "Darwin 25.6.0",
+      "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+    },
+    "methodology": "Same harness and corpora as the v0.10.0 block (examples/device_budget.rs), on v0.11.0 (FMT-9: format v9 files, the default for new files; fresh v9 corpora). Differences from v8: records share packed pages and carry no vector; vectors live in an fp16 column (resident under the 96 MiB budget); catalog and index changes are written as deltas; files under 20K facts have no ANN index (exact fp16 scan); a v9 recall reranks at least 50 x top_k candidates. `record_and_vector_pages` covers both. `batch_of_100_steady_state_median_ms` is the median of 80 consecutive batches of 100 on a copy of the 100K corpus (the harness's own batch median is over 5 batches and swings 33-43 ms between runs).",
+    "sizes": {
+      "1000": {
+        "disk_bytes_per_memory": {
+          "total": 1417.2,
+          "total_after_compact": 1417.2,
+          "record_and_vector_pages": 1212.4,
+          "record_payload": 376.0,
+          "index_run": 0.0,
+          "catalog_run": 65.5,
+          "wal": 65.5,
+          "unreferenced": 57.3
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 2960,
+          "peak_rss_kb": 6448,
+          "rss_kb_before_open": 3472,
+          "rss_kb_open": 4784,
+          "rss_kb_after_first_recall": 5952,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 0,
+            "ram_ann_centroids": 0,
+            "ram_ann_codebook": 0,
+            "ram_ann_posting_codes": 0,
+            "ram_ann_posting_ids": 0,
+            "ram_cache_dir": 0,
+            "ram_catalog": 128000,
+            "ram_id_map": 5336,
+            "ram_key_caches": 0,
+            "ram_total": 906336,
+            "ram_vector_column": 773000
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 0.5,
+          "p95": 0.53
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 0.89,
+          "p95": 0.91
+        },
+        "warm_recall_ms": {
+          "median": 0.212,
+          "p95": 0.236,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 15.97,
+          "single_p95_ms": 19.96,
+          "batch_of_100_median_ms": 22.89,
+          "batch_per_memory_ms": 0.229,
+          "fsyncs_per_commit": 3,
+          "fsyncs_last_batch_commit": 4,
+          "file_growth_per_single_write_bytes": 57344,
+          "file_growth_per_batch_of_100_bytes": 145817
+        },
+        "layers": {
+          "brief_cold_ms": 2.02,
+          "brief_warm_median_ms": 0.22,
+          "ingest_one_turn_cold_ms": 11.22,
+          "ingest_one_turn_warm_median_ms": 0.0121
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 0.38,
+          "open_secure_kdf_median_ms": 14.75,
+          "rss_kb_after_key_open": 22576
+        }
+      },
+      "10000": {
+        "disk_bytes_per_memory": {
+          "total": 1329.6,
+          "total_after_compact": 1329.6,
+          "record_and_vector_pages": 1210.0,
+          "record_payload": 376.0,
+          "index_run": 0.0,
+          "catalog_run": 65.5,
+          "wal": 6.6,
+          "unreferenced": 45.9
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 17232,
+          "peak_rss_kb": 20704,
+          "rss_kb_before_open": 3456,
+          "rss_kb_open": 5984,
+          "rss_kb_after_first_recall": 15696,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 0,
+            "ram_ann_centroids": 0,
+            "ram_ann_codebook": 0,
+            "ram_ann_posting_codes": 0,
+            "ram_ann_posting_ids": 0,
+            "ram_cache_dir": 0,
+            "ram_catalog": 1280000,
+            "ram_id_map": 53336,
+            "ram_key_caches": 0,
+            "ram_total": 9063336,
+            "ram_vector_column": 7730000
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 3.22,
+          "p95": 3.39
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 8.77,
+          "p95": 9.45
+        },
+        "warm_recall_ms": {
+          "median": 2.195,
+          "p95": 2.381,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 14.8,
+          "single_p95_ms": 18.96,
+          "batch_of_100_median_ms": 19.95,
+          "batch_per_memory_ms": 0.2,
+          "fsyncs_per_commit": 3,
+          "fsyncs_last_batch_commit": 3,
+          "file_growth_per_single_write_bytes": 57344,
+          "file_growth_per_batch_of_100_bytes": 178585
+        },
+        "layers": {
+          "brief_cold_ms": 10.82,
+          "brief_warm_median_ms": 0.139,
+          "ingest_one_turn_cold_ms": 20.72,
+          "ingest_one_turn_warm_median_ms": 0.009
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 2.9,
+          "open_secure_kdf_median_ms": 16.94,
+          "rss_kb_after_key_open": 23776
+        }
+      },
+      "100000": {
+        "disk_bytes_per_memory": {
+          "total": 1499.1,
+          "total_after_compact": 1498.9,
+          "record_and_vector_pages": 1209.3,
+          "record_payload": 376.0,
+          "index_run": 173.6,
+          "catalog_run": 66.8,
+          "wal": 0.7,
+          "unreferenced": 48.5
+        },
+        "ram": {
+          "handle_rss_kb_after_1000_warm": 115104,
+          "peak_rss_kb": 118592,
+          "rss_kb_before_open": 3472,
+          "rss_kb_open": 20960,
+          "rss_kb_after_first_recall": 49600,
+          "engine_heap_bytes": {
+            "ram_ann_assignment": 2666680,
+            "ram_ann_centroids": 486912,
+            "ram_ann_codebook": 394760,
+            "ram_ann_posting_codes": 9600000,
+            "ram_ann_posting_ids": 1600000,
+            "ram_cache_dir": 0,
+            "ram_catalog": 12800000,
+            "ram_id_map": 533336,
+            "ram_key_caches": 0,
+            "ram_total": 105381688,
+            "ram_vector_column": 77300000
+          }
+        },
+        "open_fast_kdf_ms": {
+          "median": 29.66,
+          "p95": 29.74
+        },
+        "first_recall_fresh_handle_ms": {
+          "median": 112.5,
+          "p95": 114.15
+        },
+        "warm_recall_ms": {
+          "median": 2.47,
+          "p95": 3.948,
+          "queries": 1000
+        },
+        "durable_writes": {
+          "single_median_ms": 16.13,
+          "single_p95_ms": 18.18,
+          "batch_of_100_median_ms": 36.6,
+          "batch_per_memory_ms": 0.366,
+          "fsyncs_per_commit": 3,
+          "fsyncs_last_batch_commit": 4,
+          "file_growth_per_single_write_bytes": 65126,
+          "file_growth_per_batch_of_100_bytes": 206438,
+          "batch_of_100_steady_state_median_ms": 32.0
+        },
+        "layers": {
+          "brief_cold_ms": 75.12,
+          "brief_warm_median_ms": 0.116,
+          "ingest_one_turn_cold_ms": 85.82,
+          "ingest_one_turn_warm_median_ms": 0.0073
+        },
+        "raw_key_open": {
+          "open_with_key_median_ms": 30.1,
+          "open_secure_kdf_median_ms": 44.22,
+          "rss_kb_after_key_open": 38688
+        }
+      }
+    },
+    "library_size_bytes": {
+      "aarch64_linux_python_extension_stripped": 2626864,
+      "aarch64_linux_cli_stripped": 3610328,
+      "aarch64_macos_python_extension_stripped": 2510096,
+      "aarch64_macos_cli_stripped": 3465328,
+      "source": ".github/workflows/size.yml run 42565781687 at 4c40091 (ubuntu-24.04-arm and macos-latest). zstd (FMT-9e) accounts for about 0.46 MB of the CLI (local build, fe71574 vs 445fff9)."
+    },
+    "recall_gates": {
+      "ann_recall_grid_v2_default_cells": "v8 vs v9 at the shipped default cells (ANN_GRID_DEFAULTS=1, 50 queries): 20K 0.932 vs 0.994 (1.59 vs 1.00 ms), 50K 0.966 vs 0.974 (3.71 vs 1.90 ms), 100K 0.982 vs 0.978 (7.42 vs 3.55 ms); gate +-0.005 met at every tier",
+      "ranking_v2": "v9: default hit@1 0.9231, MRR 0.9487 (v0.10: 0.9231 / 0.9487); phase6 hit@1 0.5667 / MRR 0.6779 (unchanged); v8 on the same build identical. Hybrid (keywords, eps 0.5): phase6 0.7667 / 0.8483, pr_exact 1.0, release_exact 1.0, as at 9d"
+    },
+    "first_recall_10k_profile": {
+      "note": "macOS `sample`, 800 fresh read-only opens of the 10K corpus, first recall each (median 9.05 ms). Shares of the first recall: vector-column fill 65.6% (AES-GCM decrypt 48.4%, read+lseek per page 15.5%, fp16 copy 4.1%, alloc/zero/free 2.0%), exact fp16 scan 22.5%, scoring and sort 4.9%, other 6.8%; the catalog loads at open (3.3 ms), not in the first recall. PERF-2 starts from this."
+    },
+    "remeasured": [
+      "sizes",
+      "library_size_bytes",
+      "recall_gates",
+      "first_recall_10k_profile"
+    ],
+    "remeasured_note": "All measured fresh for v0.11.0 on 2026-11-08 (single runs except where noted). At 100K the single-write p95, the batch median and RSS vary between runs on this laptop."
   }
 }
