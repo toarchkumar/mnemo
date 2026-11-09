@@ -2,6 +2,155 @@
 
 use super::*;
 
+/// Chunk size for the torn-header scan's streaming read of the file.
+/// We walk the file 1 MiB at a time looking for 8 KiB-aligned `MWAL`
+/// magic. There is **no** cap on how far a given candidate's frame
+/// chain may extend — a 1M-vector IVF+PQ relocation can push a single
+/// transaction well past 16 MiB — so each candidate is read frame by
+/// frame via [`wal::scan_committed_txn`] rather than slurped into a
+/// bounded buffer. (DUR-1 R-002.1 part 2.)
+const TORN_HEADER_SCAN_CHUNK: usize = 1 << 20; // 1 MiB
+
+/// Walk the file for every 8 KiB-aligned page whose first four bytes are
+/// `MWAL`, treating each as a candidate WAL-region start, and return the
+/// frames of the highest-`txn_id` committed transaction whose header
+/// frame fully validates under `passphrase`.
+///
+/// A candidate is accepted only if:
+/// * `wal::scan_committed_txn` returns a committed transaction (chained
+///   CRC verifies, single `txn_id`, `KIND_COMMIT` closes it);
+/// * that transaction contains a `(0, header_page)` frame;
+/// * the header parses with `wal_start == candidate_page_no` and
+///   `wal_seq == txn_id` (so a frame cannot forge a region it was not
+///   written into);
+/// * deriving the KEK from `passphrase + header.salt`, unwrapping the
+///   wrapped DEK, and validating the header seal all succeed.
+///
+/// Returns `Ok(None)` when the scan finds no valid candidate — the
+/// caller is expected to propagate the original parse error so
+/// non-mnemo files still report `BadMagic`.
+///
+/// DUR-1 (R-002.1 part 2): there is no fixed scan window — the whole
+/// file is scanned. Reading at page granularity (not byte granularity)
+/// is sufficient because every WAL region in the format is page-aligned
+/// and every WAL commit writes its first frame at the region's start.
+fn scan_header_recovery_candidates(
+    file: &mut File,
+    secret: &[u8],
+) -> Result<Option<Vec<wal::Frame>>> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len < PAGE_SIZE as u64 * 2 {
+        return Ok(None); // No room for even one WAL page past the header.
+    }
+
+    let mut best: Option<(u64, Vec<wal::Frame>)> = None;
+    let page_sz = PAGE_SIZE as u64;
+    let mut offset = page_sz; // Skip page 0.
+
+    // Stream through the file in 1 MiB chunks, scanning each chunk for
+    // page-aligned `MWAL` candidates. Each candidate's frame chain is
+    // then read incrementally via `wal::scan_committed_txn`, which has
+    // no window cap — a 1M-vector IVF+PQ relocation can span tens of
+    // MiB in one committed transaction.
+    let mut chunk = vec![0u8; TORN_HEADER_SCAN_CHUNK];
+    while offset < file_len {
+        let want = (TORN_HEADER_SCAN_CHUNK as u64).min(file_len - offset) as usize;
+        chunk.resize(want, 0);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut filled = 0;
+        while filled < want {
+            match file.read(&mut chunk[filled..])? {
+                0 => break,
+                n => filled += n,
+            }
+        }
+        if filled == 0 {
+            break;
+        }
+        let mut inner = 0usize;
+        while inner + 4 <= filled {
+            if &chunk[inner..inner + 4] == wal::FRAME_MAGIC_BYTES {
+                let page_no = (offset + inner as u64) / page_sz;
+                if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, secret)? {
+                    let keep = match &best {
+                        None => true,
+                        Some((id, _)) => txn_id > *id,
+                    };
+                    if keep {
+                        best = Some((txn_id, frames));
+                    }
+                }
+            }
+            inner += PAGE_SIZE;
+        }
+        offset += filled as u64;
+    }
+
+    Ok(best.map(|(_, f)| f))
+}
+
+/// Try to recover a committed transaction from `candidate_page_no`,
+/// returning `(txn_id, frames)` only if the candidate's
+/// `(0, header_page)` frame fully validates: the frame chain commits
+/// (via [`wal::scan_committed_txn`]'s streaming reader), the header
+/// parses with `wal_start == candidate_page_no` **and**
+/// `wal_seq == txn_id`, the DEK unwraps under `passphrase`, and the
+/// AES-GCM seal validates. DUR-1 (R-002.1 item 2) requires the
+/// `wal_seq == txn_id` check and no fixed scan window — the streaming
+/// reader handles transactions of arbitrary size.
+fn try_recover_candidate(
+    file: &mut File,
+    candidate_page_no: u64,
+    secret: &[u8],
+) -> Result<Option<(u64, Vec<wal::Frame>)>> {
+    let Some((txn_id, frames)) = wal::scan_committed_txn(file, candidate_page_no)? else {
+        return Ok(None);
+    };
+
+    // Must contain a header frame at page 0.
+    let header_bytes = match frames.iter().find(|(p, _)| *p == 0) {
+        Some((_, b)) => b,
+        None => return Ok(None),
+    };
+    if header_bytes.len() != PAGE_SIZE {
+        return Ok(None);
+    }
+    let mut hbuf = [0u8; PAGE_SIZE];
+    hbuf.copy_from_slice(header_bytes);
+    let candidate = match Header::from_page(&hbuf) {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    // The frame's claimed region must match where we found it, and the
+    // header frame's `wal_seq` must match the committed transaction's
+    // `txn_id` — this is what pins the frame to the region it was
+    // written into and keeps a stale checkpointed-and-copied frame
+    // from being accepted as a new region's root.
+    if candidate.wal_start != candidate_page_no || candidate.wal_seq != txn_id {
+        return Ok(None);
+    }
+    // DEK unwrap under this candidate's own salt + KDF params.
+    let kdf = KdfParams {
+        m_cost: candidate.m_cost,
+        t_cost: candidate.t_cost,
+        p_cost: candidate.p_cost,
+    };
+    let kek = match crypto::derive_kek(secret, &candidate.salt, kdf) {
+        Ok(k) => k,
+        Err(_) => return Ok(None),
+    };
+    let dek = match crypto::unwrap_dek(&kek, &candidate.dek_nonce, &candidate.wrapped_dek) {
+        Ok(d) => d,
+        Err(_) => return Ok(None),
+    };
+    if candidate.validate_seal(&dek).is_err() {
+        return Ok(None);
+    }
+
+    Ok(Some((txn_id, frames)))
+}
+
 impl Mnemo {
     /// Create a brand-new encrypted database at `path`.
     pub fn create(
