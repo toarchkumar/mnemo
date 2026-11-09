@@ -66,15 +66,16 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-07)
+## Status (2026-11-08)
 
-**Published:** v0.9.0 (threads and essence) on crates.io and PyPI, file
-format v8. **In progress:** v0.9.1 (12.7d: `commit_deltas` embeds,
-`thread_export` shape, `about()` essence, tests, benches). **Target market
-(user decision 2026-11-07):** on-device agents and apps, from desktop to
-tablets, phones and other small devices. **Next:** the on-device track,
-which puts size and speed first (see "Authoritative execution order").
-Read the WORKLOG from the 2026-11-07 entries on for the live thread.
+**Published:** v0.10.0 (PERF-1) on crates.io and PyPI, file format v8.
+**In progress:** FMT-9 → v0.11.0 (format v9). 9a–9e are done; 9f
+(migration, dual-format tests, release gates) is next, then READY before
+the tag. **Target market (user decision 2026-11-07):** on-device agents
+and apps, from desktop to tablets, phones and other small devices. **After
+v0.11:** REFAC-1 → MOBILE-1 (v0.12) → PERF-2 → Phase 12 → 13 → 14 (see
+"Authoritative execution order"). Read the WORKLOG from the 2026-11-07
+entries on for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1515,6 +1516,17 @@ of this file applies to every one.
 > 3. **FMT-9 → v0.11.0:** format v9 (record packing, int8 vectors, zstd
 >    before encryption, Phase 2 keyword search, and header room for 13.2
 >    key slots). The design note comes first.
+> 3a. **PERF-2 (Phase 11.1; after MOBILE-1 unless the user moves it):**
+>    partition-major index loading plus a lazy vector-column fill, so first
+>    recall at 100K drops from about 120 ms toward the ≤ 15 ms goal. The
+>    v9 index run's layout byte lets it ship without a file-format bump.
+>    (Widened 2026-11-08: also the no-index exact scan's first recall, 10K
+>    about 9 ms → ≤ 5 ms.)
+>    (Also 2026-11-08: the 10K warm exact scan, 2.2 ms → ≤ 2 ms, and the
+>    4th fsync on some batch commits.)
+> 3b. **REFAC-1 (after FMT-9f, before MOBILE-1; no release of its own):**
+>    split `store.rs` into private submodules with no public API change, and
+>    decide whether `close()` should release the file and lock (R-005.1/.2).
 > 4. **MOBILE-1 → v0.12.0:** Swift and Kotlin bindings, iOS/Android
 >    builds in CI, platform embedders, the keychain/keystore key (12.3's
 >    generated-key half), and device benchmarks.
@@ -1575,8 +1587,7 @@ caches) so PERF-1 targets the biggest item.
 signs it off.**
 - **Record packing:** several small records per page, with large records
   spanning pages.
-- **Scalar int8 vector storage,** optionally with float only for rerank,
-  gated by the recall harness.
+- **fp16 vector column** (decided 2026-11-07 after the FMT-9a measurement: int8 failed the recall gate at −0.0165, fp16 passed at −0.0005). Optional float column at create; int8 only as a possible future shortlist accelerator,
 - **zstd per page before encryption,** if the numbers justify it.
 - **Phase 2 BM25 keyword index,** for hybrid recall (this fixes exact
   identifiers like "BP.1").
@@ -9417,3 +9428,1997 @@ Answers:
 the checkpoint) → 9b → 9c → 9d → 9e (only if it pays) → 9f. Each is a PR
 with its own DONE. **Log READY before tagging v0.11.0** (README and site:
 the format change, upgrade steps, new numbers).
+
+### 2026-11-07 — WORKER — DONE — v0.10.0 shipped (PERF-1); starting FMT-9a
+Tag **`v0.10.0`** points at `d143585` (coordination backup, which
+includes the FMT-9 design note and your sign-off). CI is green on main,
+and the release workflow is green.
+
+| hash | subject |
+|---|---|
+| `3097eaf` | `chore(release): v0.10.0 — bump manifests and Cargo.lock; cut CHANGELOG; record device_budget_v0_10_0; size.yml links the macOS extension` |
+| `01db7e7` | `docs(v0.10.0): on-device positioning and the PERF-1 numbers on README and landing page` (your handoff) |
+| `d143585` | `chore(plan): sync coordination files` (tag) |
+
+The PERF-1 code commits before them are listed in the READY above.
+
+**Runs and artifacts:**
+- ci.yml on `d143585`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42447795783>
+- release.yml on `v0.10.0`: ✓ <https://github.com/toarchkumar/mnemo/actions/runs/42448338053>
+- GitHub release: <https://github.com/toarchkumar/mnemo/releases/tag/v0.10.0>
+- PyPI: <https://pypi.org/project/mnemo-engine/0.10.0/>. The JSON API shows
+  0.10.0 with 6 files.
+- crates.io: <https://crates.io/crates/mnemo-engine/0.10.0>. The API shows it
+  published 2026-11-08 04:51:56 UTC, not yanked.
+- Size job (Library size #2):
+  <https://github.com/toarchkumar/mnemo/actions/runs/42443699380>. It passed
+  on arm64 Linux and macOS.
+
+**Still owed to you:** the 0.9.x-index pruning check (deviation 4) is
+yours, after publishing. The `set_embedder` cold-scan fix is queued for
+v0.10.1 or FMT-9, whichever comes first; FMT-9's catalog-row tags (c)
+remove that scan anyway.
+
+**Next:** FMT-9a. It covers the prototype measurement: the packer, int8
+against float rerank under the recall and ranking gates, BM25 sizes, the
+10K-facts-plus-50K-turns thread-heavy profile, the 20K ANN threshold, and
+a NEON codegen check with a phone estimate. Then the v9 skeleton (header
+v9, the key-slot run, the quarantined free list with its crash tests, and
+the generation AAD). The checkpoint DONE comes after the measurement.
+
+### 2026-11-07 — WORKER — READY — FMT-9a checkpoint: int8 rerank fails the recall gate, fp16 passes; waiting for your call before 9b
+**Stopped as you asked: the int8 gate fails.** Every other projection is
+within 30%, and the ranking gate passes. Measured with the new
+`examples/fmt9_proto.rs` on the v0.10.0 `device_budget` corpora (M1 Pro,
+384 dims, 200 queries, the real ANN shortlist via the hidden
+`Mnemo::__ann_shortlist`). Nothing is committed yet; the harness commit is
+below.
+
+**Gate results:**
+
+| | measured | gate |
+|---|---|---|
+| **int8 rerank** of the default ANN shortlist, recall@10 vs float rerank | **−0.0115** (10K: 0.9680 → 0.9565), **−0.0165** (100K: 0.9695 → 0.9530) | ≥ −0.005 **✗** |
+| int8 exact scan, recall@10 vs the exact float top-10 | 0.9835 (10K) / 0.9790 (100K) | (the < 20K path; same loss) |
+| **fp16 rerank** (half precision), same shortlist | **+0.0000** (10K), **−0.0005** (100K) | ✓ |
+| fp16 exact scan | 1.0000 / 0.9995 | ✓ |
+| ranking_v2 with int8-stored vectors (`RANKING_QUANTIZE_INT8=1`) | hit@1 0.9231, MRR 0.9487, Phase 6 0.5667 / 0.6779: **all unchanged** | ✓ |
+
+The ranking fixture is small (40 memories), so it can't see the 1–2% of
+top-10 neighbours that int8 swaps. The recall grid does.
+
+**Projections against measurements** (projections from the design note):
+
+| item | projected | measured | off by |
+|---|---|---|---|
+| v9 record (no vector) | ≈ 380 B | 376 B, 21 per page | −1% |
+| records per memory, slack included | 394 B | 390 B | −1% |
+| int8 vector entry, page-granular | 392 B | 410 B (20 per 8 KB page) | +5% |
+| v9 catalog row | 58 B | 39–47 B | −19% to −33%: smaller, which is fine |
+| BM25, facts | ≈ 170 B | 145–172 B (shrinks as the vocabulary saturates) | ≤ 15% |
+| int8 exact scan at 10K | < 1 ms | 0.16 ms (int8×int8), 0.42 ms (float×int8) | ✓ |
+
+**ANN threshold.** Exact int8×int8 scans take 0.16 / 0.33 / 0.80 / 1.62 ms
+at 10K / 20K / 50K / 100K. Float query × int8 takes 0.42 / 0.83 / 2.1 /
+4.2 ms. Phone estimates (×4): 0.6 / 1.3 / 3.2 / 6.5 ms and 1.7 / 3.3 /
+8.5 / 16.9 ms. **The 20K threshold holds:** an exact scan at 20K is about
+1.3 ms on a phone. **NEON:** the float×int8 kernel vectorizes (`scvtf` and
+`fmul` on `.4s` lanes). The int8×int8 kernel uses vector registers
+(`movi.2d v0–v3`) and runs 2.6× faster. My awk stopped at its early
+`ret`, so I haven't listed its loop's instructions yet.
+
+**Thread-heavy profile** (10K facts + 50K turns; 169 MB of turn text from
+a 60/30/10% short/medium/long mix):
+- **Today's 8 KB chunks span two pages almost every time.** An 8,192-byte
+  (or 8,000-byte) chunk plus its ~180 B of metadata is too big for one
+  page's 8,144 usable bytes: 25K span pages and **300 MB** of turn
+  records. **At 7,900-byte chunks there are no spans: 212.5 MB (−29%).**
+  v9 should chunk at `page capacity − metadata`, not at 8 KiB.
+- **Whole file:** 250 MB with turns outside BM25, 284 MB with them in. The
+  turn postings are **33.7 MB**, 3× all the fact data. **Decision: turns
+  stay out of BM25 by default,** with an optional per-thread segment, as
+  you leaned.
+- **RAM:** ≈ 9 MB of catalog rows plus resident fact vectors. Turn vectors
+  are paged, since turns are read by thread.
+
+**Compression** (packed fact-record pages of this repo's Markdown):
+**lz4_flex 1.57×, zstd-3 2.15×.**
+- Fact-heavy files: records are ≈ 31% of a file, so lz4 saves ≈ 11% and
+  zstd ≈ 17%, under the 20% bar.
+- Thread-heavy files: turn records are ≈ 85%, so lz4 saves ≈ 31% and zstd
+  ≈ 45%. That's over the bar, and **zstd leads by ≈ 14 points.** By your
+  rule (prefer pure Rust unless zstd saves ≥ 10 points more), that picks
+  zstd for turn-heavy files.
+- Pages are fixed at 8 KB, so compression pays only if a page then holds
+  more. For turns that means compressing each chunk, so a page holds
+  ≈ 2× the raw text.
+- `lz4_flex` 0.11.6 declares `rust_version` 1.81, above our 1.75 MSRV.
+
+**Decision needed: the vector column.**
+
+| option | disk at 100K (projected) | RAM, 1 handle at 100K | warm recall at 100K | recall gate |
+|---|---|---|---|---|
+| **A. fp16 only** (768 + 4 norm = 772 B, 10 per page → ≈ 819 B) | **≈ 1.6–1.7 KB** ✓ | resident would be 77 MB, past the 64 MiB budget, so paged: **≈ 40 MB** ✓ | ≈ 2 ms scan + ≈ 2.5 ms paged rerank (500 × read, decrypt, convert; no record deserialization) ≈ **4.5–5 ms** (target ≤ 5, borderline) | ✓ (−0.0005) |
+| **B. int8 shortlist + fp16 final rerank** (both columns) | ≈ 2.1 KB **✗** (+5%) | ≈ 80 MB, int8 resident | ≈ 3 ms ✓ | ✓ |
+| **C. int8 only** (as designed) | ≈ 1.24 KB ✓ | ≈ 79 MB | ≈ 3 ms ✓ | **✗ (−0.0165)** |
+
+- **Small files under option A:** 10K at 1.6 KB per memory. A resident
+  fp16 column is 7.7 MB, so a phone handle is ≈ 22 MB at the 8 MiB page
+  cache, or ≈ 16 MB at 2 MiB (MOBILE-1's default). The phone exact scan is
+  ≈ 1.8 ms (target ≤ 2).
+- **My recommendation: A.** It's the only option that meets both the
+  recall gate and the disk target. If 9b's measured warm recall misses
+  5 ms at 100K, B is the fallback. The 2 KB target stays honest for files
+  where a ≈ 2.1 KB profile isn't needed.
+- **An untested middle road:** per-dimension int8 (a global per-dim scale
+  and offset) usually cuts quantization error. I didn't measure it. Say
+  if you want it measured before deciding.
+
+**Smaller decisions folded into 9b if you agree:**
+- the ANN threshold at 20K;
+- turns out of BM25 by default;
+- turn chunks sized to fit one page (7,900 B at 384 dims, computed from
+  page capacity);
+- compression deferred to 9e with zstd for turn records (dependency
+  question above).
+
+**What to commit now** (measurement only, no format change):
+- `examples/fmt9_proto.rs`;
+- the `fmt9_proto` feature with its optional `lz4_flex` and `zstd`;
+- the `RANKING_QUANTIZE_INT8` switch in `ranking_v2`;
+- the hidden `__ann_shortlist` hook.
+
+I'll go on to 9b only once you've picked a vector option.
+
+### 2026-11-07 — PLANNER-A — VERIFIED + DECISION — v0.10.0 accepted; the 0.9.x-index pruning check passes; FMT-9a checkpoint: option A (fp16 column) with a resident-by-default budget; go on to 9b
+**v0.10.0 accepted** (tag → d143585; PyPI and crates.io confirmed in your
+DONE). **Deviation 4 checked by me:** a file built with the **0.9.1
+wheel** (300 facts, 300 turns, 20 essence items and a thread link,
+`build_index`) has a persisted index of **621 vectors**. Under the
+**0.10.0 wheel**, read-only and read-write opens both report **300**
+(facts only), default recall returns only facts, and the pruned index
+stays at 300 after close. Closed.
+
+**FMT-9a: an excellent checkpoint.** Stopping on the int8 gate was exactly
+right. **Decision: option A, an fp16-only vector column,** with one change
+to your projection:
+- **Residency default:** keep the column resident when it fits
+  `vector_cache_budget`, and **raise the desktop default to 96 MiB**. That
+  keeps 100K resident (about 77 MB): about 80–90 MB of RAM (target
+  ≤ 120 ✓) and warm recall at about 2.5–3 ms instead of about 4.5–5 ms
+  paged. Above the budget, the column is paged, as you designed.
+  MOBILE-1 sets the mobile default (16 MiB holds 10K resident at about
+  7.7 MB). 9b's `device_budget` run must show 100K warm recall ≤ 5 ms and
+  RSS ≤ 120 MB. If not, log READY with the numbers.
+- **Why not per-dimension int8:** it needs per-dimension statistics
+  trained on the data, and those drift as the file grows, so new vectors
+  clip unless you re-train on rebuild. fp16 needs no training and passes
+  the gate with margin. Keep int8 as a possible *future* ANN-shortlist
+  accelerator only, not a stored format.
+- `get()`/`recall()` return fp16-rounded vectors by default (an error of
+  about 1e-3; document it). `store_float_vectors` stays an option at
+  create. The **semantic result cache stays float** (unchanged).
+- Disk lands at about 1.6–1.7 KB per memory at 100K (target ≤ 2 KB ✓).
+  The README's "about 4× smaller" will be stated from 9f's measurement.
+
+**Smaller decisions, all accepted:**
+- the ANN threshold at 20K (the phone exact scan at 20K is about 1.3 ms
+  int8, so fp16 roughly doubles to about 2.6 ms; confirm in 9b);
+- turns stay out of BM25 by default, with an optional per-thread segment;
+- turn chunks are sized from page capacity (no spans for normal chunks);
+- compression is deferred to 9e and applies to turn records only.
+
+**9e conditions for zstd:**
+- (i) since compressed pages must be readable everywhere, zstd becomes a
+  required dependency of the engine (not optional);
+- (ii) 9e adds CI builds for `aarch64-apple-ios` and
+  `aarch64-linux-android`, which must pass before it merges;
+- (iii) check the `zstd` crate's MSRV against our 1.75. If it needs a
+  bump, log NEEDS-USER rather than bumping.
+
+**Commit the harness now,** as listed:
+`examples/fmt9_proto.rs`, the `fmt9_proto` feature, the
+`RANKING_QUANTIZE_INT8` switch and `__ann_shortlist`. Keep
+`fmt9_proto` (and `lz4_flex`'s MSRV 1.81) out of the MSRV CI job.
+
+**Next: continue 9b → 9c → 9d → 9e → 9f** under the signed-off note and
+these decisions, each with its own DONE. Log READY before tagging v0.11.0.
+
+### 2026-11-07 — WORKER — DONE — FMT-9a skeleton: v9 header, quarantined free list, generation AAD, key-slot run
+**Shipped (one commit):**
+- **v9 is behind a hidden switch.** New files stay v8, and v8 bytes don't
+  change. The switch is `MnemoConfig::format_version` (`0` = default, or
+  `8`/`9`), also settable as `MNEMO_DEV_FORMAT=9`; 9f removes it. The v9
+  row, snapshot and cache fields are added as trailing fields that are left
+  out of the encoding when zero, so v8 encodings stay exactly as before.
+- **(b) Header:** a v9 header fits in **512 bytes**:
+  - Bytes 0..294 keep the v8 offsets.
+  - Then come the generations of the catalog, index, manifest and cache
+    runs, plus 5 run pointers: free list, key slots, and BM25, vector
+    column and catalog delta (the last three reserved).
+  - Bytes 486..508 are reserved and must be zero; the CRC sits at 508..512.
+  - The **seal covers every byte of 0..508**, so dimensions, flags, KDF
+    parameters and salt are now sealed too. Parsing requires the canonical
+    form, which rejects nonzero reserved bytes.
+- **(a) Free list** (`freelist.rs`):
+  - Freed runs are coalesced and checked for double frees.
+  - Allocation is first fit, and only when the run's `freed_at` is at or
+    below both the committed txn and the oldest retained snapshot's txn.
+  - These are freed in the freeing transaction's own commit: overwritten
+    and deleted records, tombstoned cache entries, replaced catalog, index,
+    manifest, cache-directory, key-slot and free-list runs, and a WAL
+    region after relocation or rekey.
+  - The list is staged and adopted only once the commit succeeds, so a
+    retried flush can't free the same runs twice.
+  - New WAL regions always come from the tail.
+  - `restore_to` takes the snapshot's records back off the list and frees
+    the current records the snapshot doesn't have.
+  - `verify()` now checks that the free list doesn't overlap anything live.
+- **Generation in the AAD:** v9 page AAD is `page_no || generation`.
+  - Every pointer stores the generation it expects: header pointers,
+    catalog rows, cache entries and snapshots.
+  - PERF-1's "written after the index" test compares generations on v9,
+    since page numbers stop being monotonic once pages are reused.
+- **Generation lease (decision for you):** each writable session makes one
+  header-only commit before its first v9 write, which uses up one txn id.
+  - **Why:** otherwise a crashed session's orphan pages or uncommitted WAL
+    frames would carry the same `(page, generation)` as the next session's
+    writes, because allocation is deterministic. An attacker with a copy of
+    the crashed file could then swap an orphan back in.
+  - **Cost:** about 2 fsyncs, once per session, on the first write.
+  - **Alternative:** a random per-session value stored next to the
+    generation, at 4 B more per pointer.
+- **Key-slot run** (`keyslot.rs`): a format byte plus slots, each with a
+  label, role, KDF parameters, salt and wrapped DEK. It's written
+  copy-on-write and its pointer is sealed. Only a hidden test hook adds
+  slots (Phase 13.2 adds real ones).
+- **Compaction** keeps the source's format.
+- **Deferred to 9c:** shrinking the file when the list reaches the tail,
+  alongside retention.
+
+**Tests:**
+- New unit tests:
+  - format: 4 (round trip within 512 B, seal coverage, torn and
+    non-canonical headers, version 10 refused);
+  - free list: 3, plus a **property test that no allocation returns a
+    quarantined or live page**;
+  - key slots: 1.
+- New `tests/fmt9_skeleton.rs` with 12 tests:
+  - round trip; v8 untouched;
+  - reuse once unpinned; snapshots pin pages, and a restore stays intact
+    through later churn;
+  - **rollback of a reused page fails with `PageAuthFailed`**;
+  - the header seal covers every field;
+  - the key-slot run is copy-on-write and authenticated;
+  - a relocated WAL region is freed; compacting keeps v9; an unsupported
+    format version is refused at create;
+  - **crash after reused data pages and before commit lands on the
+    previous state**;
+  - **at every crash point the free list is pre or post**, including the
+    replay after commit.
+- **Results:**
+  - Default run: everything green.
+  - Two `cli_smoke` lock failures appeared once and passed 3/3 on rerun,
+    so they look flaky.
+  - fmt and clippy (`-D warnings`): clean.
+
+**The whole existing suite on v9** (`MNEMO_DEV_FORMAT=9 cargo test --no-fail-fast --features failpoints`):
+- **Passing:** unit, cli_smoke 38, fix1 11, proptest_store 9 (including
+  the failpoint pre/post properties), sec1 3, wal_recover_alloc, and
+  fmt9 12.
+- **7 failures, all v8 assumptions:**
+  - **Four snapshot tests** (`snapshots_record_every_flush`,
+    `max_snapshots_prunes_oldest_entries`,
+    `restore_rewinds_and_rolls_forward`, `restore_to_a_past_instant`)
+    expect txn ids 1, 2, 3… The lease uses one id per session, so v9
+    snapshot ids have gaps.
+  - **Three header tamper tests** (`integration::header_tamper_is_detected_by_v7_seal`,
+    `dur1::header_seal_fields_stale_report_tampering`,
+    `dur1::header_sealed_field_altered_with_recomputed_crc_reports_tampering`)
+    use v8 offsets: the CRC at 238, and seal bytes outside the CRC.
+  - **Behaviour change:** in v9 the CRC also covers the seal. A flipped
+    seal byte now fails as a torn header, and the DUR-1 scan restores the
+    last committed (sealed) header from the WAL, exactly as a flipped
+    CRC-covered byte already does in v8. Option B is unchanged where it
+    applies: a CRC-valid header with an invalid seal is still reported as
+    `HeaderTampered`, which the new v9 seal tests check.
+  - 9f will make these 7 work on both formats.
+
+**Next:** 9b (slotted pages, record packing and spans, the fp16 vector
+column with a 96 MiB resident budget, and v9 catalog rows with tags).
+
+### 2026-11-07 — WORKER — NOTE — FMT-9a fix is green; the 9b plan, in two steps, and a gap in my design note
+**9a:** the MSRV fix (`fix(FMT-9a): MSRV dead-code`) is in and CI is
+green. Rust 1.75 doesn't count a constant used only in a const assert as
+used, so the v9 layout constants are now used in the header writer.
+
+**A gap in the signed-off note, filled here (tell me if you disagree):**
+the note says recall decrypts only the final `top_k` records. But today's
+score also uses `memory_type`, `agent_id`/`scope`, `created_at`,
+`importance`, the TTL and the superseded flag, and all of these live in the
+encrypted record. The planned row tags (kind, flags, thread_hash,
+key_hash) don't carry them. **So the v9 catalog row also carries the
+scoring inputs:** `memory_type u8`, scope in `flags`, `agent_hash u32`,
+`created_at i64`, `importance f32` and `expires_at` (only when a TTL is
+set). That's about 18 B more per row. Ranking stays exact: every candidate
+is scored from its row plus its fp16 vector, and records are decrypted only
+for (a) the hits that survive into `top_k` and (b) candidates under a
+metadata filter, which needs the record body. Hash collisions on
+`agent_hash` only cause false positives, which are checked against the
+decrypted record before a hit is returned.
+
+**The hashes are FNV-1a 32**, in code (no new dependency), instead of
+xxh3. A collision only causes a false positive.
+
+**9b in two steps, with one DONE at the end:**
+- **9b.1:**
+  - The v9 catalog row: tags, scoring inputs, and the vector-column
+    location.
+  - v9 records are stored without the vector.
+  - **The fp16 vector column:** 772 B entries (fp16 plus norm), 10 per
+    `vector` page, written copy-on-write like data pages. It stays
+    resident while it fits `vector_cache_budget`, a new handle setting with
+    a 96 MiB default, and is paged above that. `store_float_vectors` is an
+    option at create.
+  - Recall scores from the row and the column, then decrypts the `top_k`
+    hits.
+  - **Exact scan below 20K;** at that size `build_index` is a no-op with a
+    note.
+  - Records still take whole page runs until 9b.2.
+- **9b.2:** slotted pages, packing (one open page per scope), spans for
+  records over a page, turn chunks sized to page capacity, and the vacuum.
+- **Gate (after 9b.2, from your decision):** `device_budget` at 100K shows
+  warm recall ≤ 5 ms and RSS ≤ 120 MB, the recall grid holds fp16 within
+  0.005 of float, and ranking_v2 is within 0.02. Otherwise READY with the
+  numbers.
+
+### 2026-11-07 — WORKER — NOTE — FMT-9b.1 measured: both 9b gates are met at 100K (warm 3.4 ms, RSS 112 MB); going on to 9b.2
+`device_budget`, M1 Pro, 384 dims, 300 B of text. v9 via `MNEMO_DEV_FORMAT=9`,
+saved as `device_budget_v9.json`.
+
+| at 100K | v0.10.0 (v8) | 9b.1 (v9) | target |
+|---|---|---|---|
+| **warm recall** | 8.6–8.8 ms | **3.39 ms** ✓ | ≤ 5 (your 9b gate) |
+| **handle RSS** | 34–42 MB | **111.8 MB** ✓ | ≤ 120 (your 9b gate) |
+| first recall | 95–99 ms | 132 ms | ≤ 60 (the 9c stretch) |
+| open | 9 ms | 25 ms | ≤ 50 ✓ |
+| durable write | 27–28 ms | 41.5 ms | ≤ 20 (9c) |
+| disk per memory | 8.7 KB | 9.6 KB | ≤ 2 KB (9b.2 + 9c) |
+| 10K warm (exact scan) | 1.3 ms (ANN) | 2.76 ms | ≤ 2 (design target) |
+| 10K RSS | 13.9 MB | 15.7 MB ✓ | ≤ 20 |
+
+**What it took to fit 120 MB.** The first measurement was 143 MB. Four
+changes brought it down:
+- **The column fills a vector page at a time** as recall touches rows. It's
+  allocated zeroed, so untouched rows cost no memory, and the fill bypasses
+  the page cache.
+- **The page cache is 2 MiB on v9** (`V9_DEFAULT_CACHE_PAGES`); v8 keeps
+  8 MiB. v9 recall decrypts only the `top_k` hits.
+- **The catalog is decoded into an exactly sized `Vec`.** serde's default
+  doubling left a 131,072-row capacity behind for 100K rows.
+- **v9 streams the catalog and index runs** (`RunReader`) instead of
+  buffering them whole, which removes about 17 MB that the allocator kept
+  after the 17 MB index buffer was freed. Streaming decodes more slowly
+  (first recall 99 → 132 ms), so **v8 still decodes from a buffer**, as in
+  v0.10.0.
+
+**The engine's RAM at 100K (v9), 100.5 MB:**
+- vector column: 77.3 MB;
+- ANN index: 14.7 MB;
+- catalog: 12.8 MB at 128 B per row;
+- id map: 0.5 MB.
+
+**Two loose ends:**
+- **v8 RSS rose from 35 to 42 MB.** `CatalogEntry` now carries the v9 row
+  inline (an `Option<RowV9>`), so a v8 row went from 64 to 128 B in RAM.
+  9c moves the v9 rows into a parallel array, empty on v8.
+- **The 10K exact scan (2.76 ms) misses its 2 ms design target.** Widening
+  fp16 back to float inside the dot costs about 2 values per ns. That's the
+  kernel's limit, not overhead: making the conversion branch-free changed
+  nothing. Options: a float column resident below 20K (+7.7 MB at 10K,
+  which takes RSS to about 23 MB, over 20), or accept it. I'd accept it
+  unless you'd rather have the RAM trade.
+
+**Next:** 9b.2 (slotted pages, packing, spans, turn chunks sized to page
+capacity, the vacuum), then the 9b DONE with the disk numbers.
+
+### 2026-11-08 — PLANNER-A — REVIEW — REV-005 triaged (R-005.1, R-005.2 ACCEPTED); one small fix at the next FMT-9 boundary; REFAC-1 added after FMT-9f
+**Triage** (ledger rows and Planner Triage lines updated in
+`reviewer_notes.md`):
+- **R-005.1 (MEDIUM): `mnemo demo` fails with `Locked`.** Verified at
+  bin/mnemo.rs ~L2617: `close(&mut self)` flushes but keeps the file and
+  lock until drop, and the reopen evaluates first. It has been broken
+  since file locking arrived in v0.4.0, not a new regression.
+  - **Worker: at the next sub-PR boundary** (after the current FMT-9 PR's
+    DONE, before starting the next one), make **one small standalone
+    commit**: `drop(db);` before the reopen in `demo()`, a one-line caution
+    in `close()`'s rustdoc, and a cli_smoke test that runs `mnemo demo` to
+    a clean exit. It ships with v0.11.0. Don't interrupt the PR in flight.
+- **R-005.2 (LOW).** Part 1 is stale: the node binding's dependency
+  already uses `package = "mnemo-engine"` (fixed in NAME-1). Add a
+  one-line "experimental preview, not published; the real package comes in
+  Phase 5" note in `mnemo/bindings/node/` (any time, docs only). Part 2
+  becomes **REFAC-1**, now item 3b in the override block: split `store.rs`
+  (8,113 lines) into private submodules **after FMT-9f** and before
+  MOBILE-1, with no public API change, together with deciding whether
+  `close()` should release the file and lock itself (the general fix
+  behind R-005.1).
+
+No change to the FMT-9 order or its gates.
+
+### 2026-11-08 — WORKER — DONE — FMT-9b: v9 rows with tags, the fp16 vector column, packed record pages; both 9b gates met at 100K, disk at 1.8 KB per memory
+**Commits:** 9b.1 (the row and the column), two 9b.1 perf passes (`4ac0e54`,
+then exact-capacity and streamed loads), 9b.2 (`0123936`, plus fmt
+`f8ce24d`). Everything is behind the dev switch; v8 encodings are unchanged.
+
+**What 9b adds:**
+- **The v9 catalog row** carries:
+  - the kind (fact, turn, essence, thread link or onboarding), and the
+    superseded, TTL and shared flags;
+  - the memory type, and FNV-1a hashes of the thread, the key slot and the
+    agent;
+  - `created_at`, `importance` and `expires_at`;
+  - the locations of the record slot and the vector entry.
+
+  Recall checks and scores every candidate from the row plus the fp16
+  column, then decrypts in score order until `top_k` hits survive. The agent
+  check is repeated on the decrypted record, since the row only has a hash.
+  A metadata filter takes the general path, with vectors from the column.
+- **The fp16 column:**
+  - 772 B entries, 10 per vector page at 384 dims.
+  - Resident under `set_vector_cache_budget`, with a 96 MiB default; it's
+    allocated zeroed and filled a page at a time on first touch.
+  - Paged above the budget.
+  - `store_float_vectors` at create keeps exact vectors in the records.
+- **Packed record pages:**
+  - A 16 B page header, a slot directory, then the records.
+  - Records wait in memory until the flush packs them, filling each page.
+    Records over 8,144 B own whole pages (a span), as in v8.
+  - The vacuum folds up to 4 pages that are under 3/4 full into each commit
+    that writes records or vectors.
+  - Packed pages and vector pages are freed when their last live row goes.
+  - v9 turn chunks are 7,900 B.
+- **No ANN below 20K facts:** `build_index` reports 0 partitions, and recall
+  does an exact fp16 scan. `MNEMO_DEV_ANN_MIN_FACTS` overrides the
+  threshold so the v8 index suites can run on v9; 9f removes it.
+- **v9 loads:**
+  - The page cache is 2 MiB.
+  - The catalog and index runs are streamed (`RunReader`) and the catalog
+    is sized exactly. v8 keeps buffered decoding; its catalog is sized
+    exactly too.
+- **Limit:** v9 supports at most 4,072 dimensions, since one fp16 entry
+  must fit a page.
+
+**Gates:**
+
+| gate | result |
+|---|---|
+| 100K warm recall ≤ 5 ms | **2.47 ms** ✓ (v0.10.0: 8.6) |
+| 100K handle RSS ≤ 120 MB | **112.4 MB** ✓ |
+| disk ≤ 2 KB per memory | **1.55 / 1.38 / 1.80 KB** at 1K / 10K / 100K ✓ (v0.10.0: 10.2 / 8.9 / 8.7) |
+| ranking_v2 within 0.02 | **identical:** MRR 0.9487, the usage loop 0.9103 with no drift, Phase 6 0.5667 / 0.6779 ✓ |
+| recall grid, fp16 within 0.005 of float | 100K default cell (probe 0.5, rerank ×50): 0.9820 → **0.9780 (−0.004)** ✓ |
+
+**About that last gate:**
+- **10K:** the grid forced an index at 10K. Its default cell (probe 1.0,
+  rerank ×10) moves 0.9640 → 0.9480 (−0.016). Across all 53 cells the
+  change is −0.010 on average (median −0.006, worst −0.036, at 8% probe).
+- **Why:** on v9, `build_index` trains IVF+PQ on the fp16-rounded vectors,
+  so the partitions and codes differ. The 9a run, where only the rerank
+  changed, showed 0.0000 and −0.0005. A lower-recall shortlist hits the
+  rerank-limited cells hardest.
+- **Why it doesn't apply in practice:** a real v9 file has no ANN index
+  below 20K. It scans exactly, and the 9a exact fp16 scan at 10K scored
+  **recall 1.0000**, up from the ANN's 0.964. So the 10K tier's real v9
+  recall improves.
+- **Before 9f:** I'd like to re-run the grid at 20K and 50K, where v9 does
+  use the index, to confirm the 100K result isn't luck.
+
+**Other numbers:**
+
+| at 100K | v9 (9b) | target |
+|---|---|---|
+| first recall | 131.8 ms | ≤ 60, the 9c stretch: probed-partition loading |
+| open | 27.5 ms | ≤ 50 ✓ |
+| durable write | 40.4 ms | ≤ 20, 9c: catalog deltas and big runs outside the WAL |
+| 10K warm (exact scan) | 2.19 ms | ≤ 2 (design target; fp16 widening costs about 2 values per ns) |
+| 10K RSS | 15.8 MB | ≤ 20 ✓ |
+
+**Tests:**
+- `tests/fmt9b_column.rs` has 14 tests: fp16 vs float vectors, v9 ranking
+  vs v8, row-path filters, resident vs paged, vector-page packing and
+  freeing, restore, the 20K cutoff, scope and metadata filters, the
+  dimension limit, packing, single-commit vacuum, spans, turn chunks, and a
+  regression for a record deleted before its first flush.
+- `fmt9_skeleton` now uses span-sized records to keep its page-reuse
+  semantics.
+- On v9 the whole suite passes (with the 20K override) except the 7 known
+  v8-assumption tests (snapshot ids and header offsets), which 9f fixes.
+
+**Bugs found and fixed on the way:**
+- A record deleted before its first flush encoded a zero generation. That
+  dropped the field and shifted the row's v9 fields, so the reopen failed.
+- `__crash_partial_flush_for_testing` skipped v9 packing.
+- The test comparison of ids across two files couldn't work, since files
+  never share ids.
+
+**Decisions I made in 9b (tell me if you'd reverse any):**
+- the scoring inputs in the row (my NOTE above);
+- FNV-1a instead of xxh3;
+- the 2 MiB page cache on v9;
+- streamed loads only on v9;
+- the vacuum threshold at 3/4, 4 pages per commit;
+- accepting 2.19 ms at 10K over a float column that would cost RAM.
+
+**Next: 9c:**
+- catalog and index deltas (incremental commits);
+- big runs copy-on-write outside the WAL, with the fsync-ordering proof
+  and failpoint tests;
+- snapshot retention: 16 snapshots and 24 h, capped at 25% pinned, with a
+  clear error past it;
+- truncating the file when a free run reaches its tail;
+- moving the v9 rows to a parallel array, so v8 rows shrink back to 64 B;
+- as a stretch, partition-major index loading for the first-recall target.
+
+### 2026-11-08 — WORKER — DONE — FMT-9c: big runs outside the WAL, tail truncation, retention, catalog and index deltas; 100K durable write 15 ms; partition-major loading not done
+**Commits:**
+- 9c.1 (`0874257`): runs over 2 pages are written in place outside the
+  WAL, tail truncation, retention, and same-transaction coalescing.
+- R-005 (`b08469b`), plus fmt.
+- 9c.2: catalog deltas.
+- 9c.3: index deltas.
+
+All of it is behind the dev switch; v8 is unchanged.
+
+**What 9c adds:**
+- **Big runs CoW outside the WAL.** On v9, a run over 2 pages (a base
+  catalog, the index, a large manifest or free list) is sealed straight to
+  its home pages, and the pages are fsynced before `wal::commit`. The WAL
+  carries the header and small runs only, so it stays at 64 KiB instead of
+  growing to 26 MB.
+  - **The fsync-ordering proof:** it's the one that already covers data
+    pages. The pages come from the tail or from quarantined free runs, so
+    nothing committed or retained references them. They're durable before
+    the commit that points at them. A crash before the commit leaves them
+    unreferenced, and a crash after leaves them durable.
+  - **Failpoint test:** `a_crash_during_out_of_wal_runs_is_pre_or_post`
+    fails every third write of a 3,000-row commit and checks for the pre-
+    or the post-commit state. The proptest suite also passes on v9.
+- **Tail truncation.** Once the free runs at the end of the file are
+  reusable, they come off: `next_page` moves down in the commit, and the
+  file is cut after the checkpoint. A crash in between leaves a longer
+  file, which is harmless.
+  - **A fix found here:** free runs used to coalesce with any neighbour and
+    take the later `freed_at`, so the file's tail, re-freed by every
+    commit, never became reusable. Runs now coalesce only within one
+    transaction. Neighbours merge only once both are eligible, at
+    allocation time, which is safe because eligibility only ever grows.
+- **Retention.** Your decision was "as proposed, with a clear error past
+  it". **Two choices are mine; tell me if you'd reverse either:**
+  - **The default policy** keeps the newest 16 snapshots plus any from the
+    last 24 hours. Retained snapshots never pin more than a quarter of the
+    live pages, **or 1 MiB, whichever is larger**. Without that floor, a
+    small file lost its history after one or two commits, because each
+    commit's freed catalog and manifest pages already exceed 25% of a tiny
+    file.
+  - **An explicit count** (`set_max_snapshots(n)`, or a non-default
+    `MnemoConfig::max_snapshots`) **is a hard cap:** exactly the newest
+    `n`, with no 24-hour extension and no pin cap. Otherwise the 24-hour
+    rule kept every snapshot on an active file, and `set_max_snapshots`
+    meant nothing.
+  - **The cap also counts what the current commit frees.**
+  - **The error:** `restore_to` past the window says so, and names the
+    oldest snapshot kept.
+- **Catalog deltas (9c.2).**
+  - Each commit writes its changed or added rows (`dirty_rows`) as a delta
+    run, linked to the previous delta, and the header points at the head.
+    Open and restore replay the chain onto the base.
+  - The chain is folded into a new base at 64 runs, at a quarter of the
+    base's rows, after a restore, or at the first commit. The old base and
+    its whole chain are freed by that commit.
+  - **Deleted rows are dropped** from a new base once they're over 25% of
+    rows; the id index and the page maps are rebuilt.
+  - **The vacuum moves at most 64 rows per commit** (and 4 pages), since
+    every moved row lands in the delta.
+- **Index deltas (9c.3).**
+  - `IvfPqIndex` records its adds and removes in a list that's never
+    serialized, so the v8 encoding is unchanged.
+  - Every v9 commit that changed the index writes them as an index delta
+    run. That replaces PERF-1's persist-every-64-commits policy on v9, so
+    the index is never stale after a crash.
+  - A build, rebuild, drop or restore writes a whole index, as does a chain
+    of 64 runs or a quarter of the index.
+  - Loading the index and restoring a snapshot replay the chain before
+    `reconcile_ann_with_catalog`, which now compares against the newest
+    delta's generation.
+  - The v9 header slot reserved for a vector-column pointer is now the
+    index-delta head (the column is located through the rows).
+
+**Numbers** (`device_budget`, v9, M1 Pro):
+
+| at 100K | v0.10.0 (v8) | 9b | 9c | target |
+|---|---|---|---|---|
+| durable write | 27 ms | 40.4 ms | **15.3 ms** ✓ | ≤ 20 |
+| disk per memory | 8.7 KB | 1.80 KB | **1.45 KB** ✓ | ≤ 2 KB |
+| warm recall | 8.6 ms | 2.47 ms | **2.58 ms** ✓ | ≤ 5 |
+| handle RSS | 42 MB | 112 MB | **113 MB** ✓ | ≤ 120 |
+| open | 9 ms | 27.5 ms | **29 ms** ✓ | ≤ 50 |
+| first recall | 95 ms | 132 ms | **116–130 ms** ✗ | ≤ 60 (stretch) |
+
+At 10K: 1.28 KB per memory, a 14 ms write, 2.25 ms warm recall and 18 MB of
+RSS.
+
+**Not done: partition-major index loading,** your 9c stretch.
+- First recall at 100K still loads the whole ~17 MB index (now streamed)
+  and fills the column pages it touches.
+- Loading only the probed partitions means persisting the index as a
+  partition table plus one run per partition. Each commit would then
+  rewrite only the partitions it changed, replacing the 9c.3 deltas. It
+  also needs a lazy id→partition map, because removes and overwrites must
+  find an entry's partition before it's loaded.
+- That's a sizeable change to the index format. **I'd like your call:** do
+  it before 9d, fold it into a later perf PR, or accept 116–130 ms for
+  v0.11.0.
+
+**Tests:**
+- `tests/fmt9c_commit.rs` has 9 tests: the WAL stays small, the file
+  shrinks, retention under churn and its error, crash pre/post, deltas per
+  commit, the chain folding, tombstones dropped, a restore replaying a
+  snapshot's chain, and index deltas replayed after an unclean drop.
+- A free-list tail test was added; the coalescing test was updated.
+- Default runs are green.
+- On v9, 11 tests fail, all v8 assumptions; **9f makes them work on both
+  formats:**
+  - the 7 from before;
+  - `dur1::relocated_txn_larger_than_64_pages_heals_torn_page_0` and
+    `integration::wal_region_grows_for_large_catalog` (big transactions no
+    longer go through the WAL);
+  - `index_is_persisted_every_n_commits` and
+    `index_persists_lazily_and_reopen_reassigns_newer_records` (v9 persists
+    the index every commit).
+
+**Next:** 9d (BM25 and hybrid recall, the CLI `--text`, and the bindings),
+unless you want the partition-major loading first.
+
+### 2026-11-08 — WORKER — NOTE — FMT-9d plan (BM25 and hybrid recall)
+**9d.1, the engine:**
+- **`text.rs`:**
+  - Words come from pinned `unicode-segmentation` (UAX #29), lowercased,
+    plus **compound tokens**: a whitespace-separated run, stripped of
+    leading and trailing punctuation, kept whole when it has inner
+    punctuation ("bp.1", "v0.9.0", "pr-10b.2").
+  - No stemming. Tokenizer id 1 goes in the BM25 manifest, so a CJK
+    tokenizer can be added later.
+- **Documents:**
+  - Each indexed v9 row gets a stable `doc u32`, assigned on write; an
+    overwrite gets a new doc id.
+  - Its token count goes in the row as `doc_len u16` (two new `RowV9`
+    fields).
+  - Liveness, N and avgdl come from the rows, so segments never store
+    lengths or tombstones, and a catalog rebase never remaps postings.
+- **Only facts and onboarding rows are indexed** (turns stay out, as
+  decided).
+- **Storage:** the header's `bm25` pointer leads to a manifest: tokenizer
+  id, `next_doc`, and the segment runs.
+  - A segment is `[u32 dict length][dict: (term, offset, length)][postings
+    blob: (doc delta varint, tf u8)]`. The dict is resident once loaded;
+    postings are read by byte range through the page cache.
+  - Each commit writes the docs added since the last one as a new segment.
+    Past 8 segments, the commit merges them all into one, dropping dead
+    docs.
+  - Old segments are freed through the quarantine, and snapshots record the
+    manifest, so `restore_to` gets the matching BM25 state.
+- **Query:** BM25 with k1 1.2 and b 0.75 (overridable) over live docs, plus
+  the docs waiting for the next flush.
+- **Dictionary entries are rmp strings, not front-coded** (v1); I expect
+  about 10–20% more BM25 bytes than the 145–172 B per memory measured
+  in 9a.
+
+**9d.2, the API:**
+- `RecallRequest::text_query(..)` and a BM25 weight ε in `ScoreWeights`,
+  added as `ε·bm25_norm` with per-query max normalisation (Phase 2).
+- **Text only:** that recall works with no vector.
+- **The CLI:** `recall --text` on a v9 file without an embedder becomes
+  keyword recall (v8 keeps today's "needs an embedder" error). With an
+  embedder it's hybrid.
+- **Bindings:** Python and Node mirror `text_query`.
+
+**9d.3, the gate:**
+- ranking_v2's identifier categories improve: pr_exact 0.2, release_exact
+  0.8 and decision_exact 0.0 today.
+- No category regresses by more than 0.02.
+
+### 2026-11-08 — WORKER — READY — FMT-9d gate: keyword (hybrid) recall fixes the identifier queries but costs 0.04–0.06 MRR on natural-language queries; need your call on how text_query is used
+**State:**
+- **9d.1 (`0ce03ca`, the BM25 index) and 9d.2 (`d7023eb`, the API) are in;
+  CI is green.**
+  - `RecallRequest::text_query` (hybrid) and `RecallRequest::text`
+    (keyword-only, with no vector or embedder).
+  - Each keyword score is divided by the query's best and added to the
+    similarity with weight ε (`text_weight`, `DEFAULT_TEXT_WEIGHT` 0.5).
+  - CLI `recall --text` on a v9 file: keyword-only without an embedder,
+    hybrid with one.
+  - Python `recall(..., text_query=, text_weight=)` and Node `textQuery`.
+- **Without a `text_query`, recall is unchanged:** v9 ranking_v2 gives
+  0.9487 on the v2 fixture and 0.5667 / 0.6779 on Phase 6, the same as v8.
+
+**The sweep** (`RANKING_TEXT_WEIGHT=ε`, on v9 files: every query's own
+text passed as `text_query`):
+
+| ε | v2 fixture MRR (track off) | Phase 6 hit@1 / MRR | pr_exact | release_exact | decision_exact | release_semantic | function_semantic |
+|---|---|---|---|---|---|---|---|
+| none | **0.9487** | 0.5667 / 0.6779 | 0.2 | 0.8 | 0.0 | 0.4 | 0.25 |
+| 0.25 | 0.9103 (−0.038) | 0.6667 / 0.7872 | 0.4 | 1.0 | 0.0 | 0.6 | 0.25 |
+| **0.5** | 0.8846 (−0.064) | **0.7667 / 0.8483** | **1.0** | **1.0** | 0.0 | 0.6 | 0.25 |
+| 1.0 | 0.8462 (−0.103) | 0.7667 / 0.8361 | 1.0 | 1.0 | 0.0 | 0.4 | 0.25 (MRR −0.08) |
+| 2.0 | 0.8462 | 0.7333 / 0.8111 | 1.0 | 0.8 | 0.0 | 0.4 | 0.25 (MRR −0.10) |
+
+**Reading it:**
+- **The identifier gate is met at ε 0.5:** pr_exact goes 0.2 → **1.0**, and
+  release_exact 0.8 → **1.0**. Phase 6 overall goes 0.567 → **0.767** hit@1
+  and 0.678 → **0.848** MRR, and no Phase 6 category drops.
+- **decision_exact stays at 0.0 (MRR 0.25).** The query "all-zero vector"
+  matches the expected record, but several records share "vector", so the
+  keyword term doesn't lift it to first. That's a fixture or corpus
+  limit, not a bug.
+- **The "no regression elsewhere" half fails if callers send full
+  sentences as `text_query`.** The v2 fixture's queries are questions
+  ("what's the current mnemo release?"). Their common words match the
+  stale versions too, so at ε 0.5 MRR drops 0.064, well past 0.02.
+
+**Options** (A and B need no engine change beyond guidance; C and D are
+changes):
+- **A. Keyword input is opt-in and meant for identifiers** (my
+  recommendation, to combine with D):
+  - Keep ε 0.5.
+  - Document `text_query` as "the identifiers or keywords to match (a
+    version, a PR number, a function name)", not a copy of the
+    natural-language question.
+  - Default recall is unchanged, so nothing regresses for existing callers.
+- **B. Smaller ε (0.25).** pr_exact only reaches 0.4, and the v2 fixture
+  still drops 0.038. Worse on both sides.
+- **C. Weight the keyword term by how identifier-like the query is,** for
+  example by full weight only when a query token has a digit or inner
+  punctuation. That's a heuristic: "PR BP", "EmbedCmd" and
+  "ScoreWeights" have neither. I'd rather not.
+- **D. Fix the one place where NL text flows in automatically.** CLI
+  `recall --text` with an embedder is currently hybrid on v9, so a
+  sentence becomes the keyword query. I'd make it vector-only there and
+  add an explicit `--keywords "<terms>"` flag for hybrid. Keyword-only
+  `--text` without an embedder stays, since it's the only way to recall
+  there. The MCP `recall` tool would get the same separate `keywords`
+  parameter in 9f's docs pass.
+- **Also possible later:** reciprocal rank fusion, as a Phase 2 candidate.
+  Measuring it is a separate harness run, and I haven't done it.
+
+**My recommendation: A + D.** It meets the gate for callers who pass
+identifiers, keeps today's ranking for everyone else, and makes the CLI
+explicit. Waiting for your call before changing the CLI and logging the
+9d DONE.
+
+**Also for you:**
+- **The Node binding doesn't build on our toolchain, on `main` too
+  (pre-existing).** napi's build script emits `cargo::` lines (Rust 1.77+)
+  and `mnemo-node` declares 1.75. The fix is raising that crate's
+  `rust-version` to 1.77 or pinning an older `napi-build`. Nothing in CI
+  builds it (an experimental preview).
+- **Under the default retention, a tiny file keeps about 20 commits of
+  history.** The 1 MiB pin floor is about 128 pages, and a small commit
+  frees about 6 (catalog delta, record and vector pages, BM25 segment and
+  manifest, snapshot manifest, free list). Fine in my view; mentioning it
+  because tests that restore far back need an explicit
+  `set_max_snapshots`.
+
+### 2026-11-08 — PLANNER-A — DECISION — FMT-9b/9c accepted; 9d: keyword input is explicit (A + D, named `keywords` everywhere); first recall at 100K is accepted for v0.11 behind an index-run version byte; partition-major loading moves to PERF-2
+**9b and 9c accepted.** At 100K: disk 1.45 KB per memory, durable write
+15.3 ms, warm recall 2.58 ms, RSS 113 MB and open 29 ms, all within their
+targets. At 10K: 1.28 KB, a 14 ms write, 2.25 ms warm recall and 18 MB.
+- Carrying the **scoring inputs in the v9 row** is accepted. It's a good
+  catch: the note's "decrypt only top_k" needed them.
+- FNV-1a hashes are fine.
+- The R-005.1 commit (b08469b) is in. Thanks.
+
+**9d: hybrid recall. Decision: A + D, with one naming change.**
+- **Keyword input is explicit and meant for identifiers.** Default recall
+  is unchanged, and ε stays 0.5. Since nothing has shipped yet, **name it
+  `keywords` on every surface:** Rust `RecallRequest::keywords(..)`
+  (rename `text_query`), Python `keywords=`, Node `keywords`, MCP
+  `keywords`, CLI `--keywords "<terms>"`.
+  - Docs and tool descriptions: "identifiers or exact terms to match (a
+    version, a PR number, a function name). Don't paste the question."
+  - The MCP `recall` description should tell the model to put
+    identifiers in `keywords`.
+- **D:** the CLI `recall --text` with an embedder is vector-only, and
+  `--keywords` adds the keyword term. `--text` without an embedder on v9
+  stays keyword-only (the only option there). Keep the keyword-only
+  request type, but rename it to match (`RecallRequest::keywords_only`, or
+  similar; your call, keep it consistent).
+- **The gate is met as redefined:** with identifiers passed as keywords,
+  pr_exact goes 0.2 → 1.0, release_exact 0.8 → 1.0, Phase 6 hit@1
+  0.567 → 0.767 and MRR 0.678 → 0.848, and recall without keywords is
+  unchanged. decision_exact is a fixture limit (a shared term), not a
+  bug.
+- **Later candidate:** reciprocal rank fusion, as a separate Phase 2
+  measurement. Not in v0.11.
+
+**First recall at 100K (116–130 ms; target ≤ 60).** Accepted for v0.11,
+**on one condition:** the v9 ANN index run carries a **layout version
+byte**. A reader that sees an index layout it doesn't know treats the file
+as having no index (exact scan, or `rebuild_index`), never as an error.
+The index is derived data, so a later partition-major layout can then ship
+without a file-format bump.
+- **Partition-major loading plus a lazy column fill becomes PERF-2**
+  (Phase 11.1, after MOBILE-1 unless the user moves it up). The ≤ 15 ms
+  desktop goal stays open.
+- 100K is desktop scale. Phone-class files (< 20K) have no index, and
+  their first recall is cheap; confirm that number in 9f's
+  `device_budget`.
+- README and CHANGELOG state it honestly: 100K first recall is about
+  120 ms, up from about 95 ms in v0.10.
+
+**Before 9f: re-run the recall grid at 20K and 50K** (fp16-trained index),
+as you proposed. Gate: the default cell within 0.005 of the float-trained
+index. If 20K fails, raise the no-ANN threshold to the smallest size that
+passes; exact fp16 scans are recall 1.0. Record the threshold in the
+CHANGELOG.
+
+**Smaller items:**
+- **mnemo-node:** raise its own `rust-version` to 1.77. The engine's MSRV
+  stays 1.75, and nothing publishes it.
+- **Tiny-file retention (about 20 commits): fine.** One CHANGELOG line, and
+  tests that restore far back set `set_max_snapshots` explicitly.
+- The 11 v8-assumption tests become dual-format in 9f, as you planned.
+
+**Next: finish 9d** with the rename and D, plus its DONE. Then 9e
+(compression: turns only, under the 2026-11-07 conditions), 9f
+(migration, dual-format tests, gates), and **READY before tagging
+v0.11.0.**
+
+### 2026-11-08 — WORKER — NOTE — handoff: stopped partway through finishing 9d (the `keywords` rename and D); a new worker session takes over
+**Where I stopped:** the code for your 9d decision (the
+`2026-11-08 — PLANNER-A — DECISION — FMT-9b/9c accepted; 9d …` entry) is
+written, but **it hadn't been compiled or tested when the session ended.**
+The user is running one verify-then-commit block (in the chat). If it's
+green, the work below is committed as **`feat(FMT-9d): keywords
+everywhere …`** (on top of `a82140e`). If anything failed, it's still
+uncommitted. **Check `git log -1` and `git status` first.**
+
+**Committed and pushed before this (CI green):**
+- `0ce03ca` 9d.1, the BM25 index;
+- `d7023eb` 9d.2, the API under the old `text_query` name;
+- `a82140e`, the ranking_v2 `RANKING_TEXT_WEIGHT` switch (the env var is
+  still named that; it now calls `.keywords(..)`).
+
+**The finishing change (committed if the block was green):**
+- **The rename to `keywords` everywhere:**
+  - Rust: `RecallRequest::keywords(..)` (builder and field),
+    `RecallRequest::keywords_only(..)` (was `text`), `keyword_weight` and
+    `DEFAULT_KEYWORD_WEIGHT` (was `text_weight` / `DEFAULT_TEXT_WEIGHT`).
+  - Python: `recall(..., keywords=, keyword_weight=)`.
+  - Node: `recall(vector, top_k, types, keywords)`.
+  - MCP `recall`: a new `keywords` parameter. On its own it's keyword-only
+    recall. The description says to put identifiers there, not the
+    question.
+  - The docs say "identifiers or exact terms … not the question".
+- **D, the CLI:**
+  - `recall --keywords "<terms>"` adds the BM25 term, or is keyword-only
+    on its own.
+  - `--text` with an embedder is vector-only again.
+  - `--text` without an embedder on v9 stays keyword-only.
+  - v8 still errors.
+- **The index layout byte:** a v9 ANN index base run is now
+  `[V9_INDEX_LAYOUT = 1][rmp index]`. An unknown layout loads as no index
+  (`ann` is `None`, the delta chain is skipped), so recall scans exactly.
+  The test hook `__set_index_layout_for_testing`.
+  - **Known leak:** after an unknown-layout load, `build_index` frees the
+    old base run but not its (unloaded) delta runs. They stay unreferenced
+    until compaction.
+- **Smaller items:**
+  - mnemo-node `rust-version` is now 1.77 (the engine stays at 1.75).
+  - CHANGELOG: a tiny-file retention line and a 9d section (the hybrid
+    numbers, and first recall about 120 ms at 100K, up from about 95).
+  - `examples/ann_recall_grid_v2.rs` takes `ANN_GRID_TIERS=20000,50000`.
+- **Tests added in `tests/fmt9d_bm25.rs`:**
+  `cli_keywords_flag_is_keyword_recall_and_text_is_not_mixed_in` and
+  `an_unknown_index_layout_is_treated_as_no_index`.
+  - The latter sets `MNEMO_DEV_ANN_MIN_FACTS=0` in-process; no other test
+    in that binary builds an index.
+
+**Files:** `mnemo/src/{store,lib,mcp}.rs`, `mnemo/src/bin/mnemo.rs`,
+`mnemo/tests/fmt9d_bm25.rs`, `mnemo/examples/{ranking_v2,ann_recall_grid_v2}.rs`,
+`mnemo/bindings/node/{Cargo.toml,src/lib.rs}`,
+`mnemo-python/{src/lib.rs,test_mnemo.py}`, `CHANGELOG.md`.
+
+**Not mine, left alone:** `reviewer_notes.md` (modified) and `.claude/`
+(untracked). `PLAN.md` isn't committed, per the rule.
+
+**Next steps, in order:**
+1. **If the finishing commit isn't there:**
+   - Run `cargo fmt`, then
+     `cargo clippy --all-targets --features failpoints,benches -- -D warnings`
+     and `cargo test --features failpoints` in `mnemo/`.
+   - Run `cargo build -p mnemo-node`.
+   - In `mnemo-python`, run `maturin develop --release` and
+     `python test_mnemo.py`.
+   - Fix anything that fails, then commit the files above by explicit path.
+2. **The full v9 run:** run
+   `MNEMO_DEV_FORMAT=9 MNEMO_DEV_ANN_MIN_FACTS=0 cargo test --no-fail-fast --features failpoints`.
+   Expect the 11 known v8-assumption failures plus
+   `cli_smoke::cli_recall_text_without_embed_cmd_errors_cleanly`, which is
+   now keyword recall on v9: 12 in all. 9f makes them dual-format.
+3. **Your pre-9f grid check:**
+   - Run the grid at 20K and 50K on v8 and on v9 (v9 with
+     `MNEMO_DEV_ANN_MIN_FACTS=0`), with `ANN_GRID_TIERS=20000,50000` and
+     `ANN_GRID_OUT=target/ann_grid_v{8,9}_mid.json`. It takes about
+     10 minutes.
+   - Compare the default cells. The gate is within 0.005. If 20K fails,
+     raise `V9_ANN_MIN_FACTS` to the smallest passing size, and record it
+     in the CHANGELOG.
+4. **Log the 9d DONE:** the commits, the ranking numbers (from the READY
+   entry), the grid result, and the leak noted above.
+5. **Then 9e:** compression of turn records only, with zstd as a required
+   dependency, CI builds for `aarch64-apple-ios` and
+   `aarch64-linux-android`, and NEEDS-USER if zstd needs an MSRV bump.
+6. **Then 9f** (migration, dual-format tests, gates), and **READY before
+   tagging v0.11.0.**
+
+**Where things live:**
+- The planner's decisions are the 2026-11-07 and 2026-11-08 PLANNER-A
+  entries.
+- My earlier entries:
+  - 9a, 9b and 9c DONE, the 9d plan NOTE, and the 9d READY.
+  - Each pastes its numbers. The v9 `device_budget` results are in
+    `mnemo/target/device_budget/device_budget_v9.json` (local, not
+    committed).
+
+### 2026-11-08 — WORKER — NOTE — handoff update: the 9d finishing change is verified; the 20K/50K grid check FAILS, and needs PLANNER-A's call
+**This supersedes the previous NOTE's "Where I stopped".** The finishing
+change from that NOTE is **verified green** on the user's Mac:
+- clippy `-D warnings` is clean;
+- the default `cargo test --features failpoints` passes everywhere,
+  including `fmt9d_bm25` (11/11);
+- `cargo build -p mnemo-node` builds at rust-version 1.77;
+- `test_mnemo.py` passes in full.
+
+The user is committing it by explicit path as `feat(FMT-9d): keywords
+everywhere …`, with the same file list as the previous NOTE. **Check
+`git log -1`:** if it isn't there, commit those files (they're verified).
+
+**The pre-9f grid check, 20K and 50K** (`ANN_GRID_TIERS=20000,50000`, v8
+vs v9 with `MNEMO_DEV_ANN_MIN_FACTS=0`; the outputs are in
+`mnemo/target/ann_grid_v{8,9}_mid.json`, local):
+- **Across all 102 cells:** v9 − v8 averages **−0.017** (min −0.050, max
+  +0.016).
+- **The default config (`configs[0]`, 48 PQ subspaces)** at the shipped
+  defaults. Neither tier has its exact default cell in the grid, so these
+  are the nearest cells:
+
+| tier | shipped default (probe, rerank) | nearest grid cells: v8 → v9 (Δ) | gate (±0.005) |
+|---|---|---|---|
+| 20K | 100 of 142 partitions (0.70), rerank 100 (×10) | (0.5, ×10) 0.690 → 0.678 (−0.012); (1.0, ×10) 0.692 → 0.664 (−0.028) | **✗** |
+| 50K | 112 of 224 (0.5), rerank 250 (×25) | (0.5, ×20) 0.770 → 0.738 (−0.032); (0.5, ×50) 0.896 → 0.862 (−0.034) | **✗** |
+| 100K (earlier) | 159 of 317 (0.5), rerank 500 (×50) | (0.5, ×50) 0.982 → 0.978 (−0.004) | ✓ |
+
+- **The 96-subspace config (`configs[1]`)** is close to v8 at the
+  wide-rerank cells, for example (0.5, ×50): 20K −0.002, 50K −0.004.
+
+**Reading it:**
+- **The fp16 rerank itself isn't the loss.** In 9a, with the same index,
+  it cost 0.0000 / −0.0005. So the drop comes from the IVF+PQ index being
+  **trained and encoded on fp16-rounded vectors** (on v9, `build_index`
+  reads them from the column).
+- **It's systematic, not noise,** at 20K and 50K. The smaller the rerank
+  depth, the bigger it is.
+- 100K passing at its default cell may be partly luck.
+
+**The rule says** to raise the no-ANN threshold to the smallest size that
+passes. That would be 100K, but an exact fp16 scan at 50K–100K costs
+about 10–20 ms warm on the M1 (fp16 widening at about 2 values per ns).
+That breaks the warm-recall target. **So I didn't change the threshold.
+Options for you:**
+- **(a) Build or train the index from float vectors when they're
+  available.** Not possible by default: v9 doesn't keep floats unless
+  `store_float_vectors` is set.
+- **(b) Default to 96 PQ subspaces on v9.** That's about 2× the PQ codes,
+  roughly +4.8 MB RSS and +48 B of disk per memory at 100K. It matches v8
+  at the wide-rerank cells.
+- **(c) A deeper default rerank on v9** (for example ×50 everywhere). The
+  rerank is a cheap fp16 scan of the resident column, about 0.1 ms per
+  500 candidates.
+- **(d) Raise the threshold anyway**, accepting slower warm recall at
+  20K–100K.
+- **(e) Accept the loss.**
+- **My lean is (c), or (b) + (c).** It needs a grid run at the new
+  defaults before deciding. **This is the next worker's first task once
+  you decide.**
+
+**Uncommitted and not mine:** `reviewer_notes.md` and `.claude/`.
+`PLAN.md` isn't committed, per the rule.
+
+**Next steps for the new worker:**
+1. Confirm the 9d commit is in and CI is green.
+2. Get PLANNER-A's call on the grid result above. Apply it, re-run the
+   20K/50K grid, and set or keep `V9_ANN_MIN_FACTS`.
+3. Log the 9d DONE: the commits, the ranking numbers from the READY
+   entry, the grid outcome, and the known leak (unknown-layout
+   `build_index` doesn't free the old delta runs).
+4. Then 9e, 9f, and READY before tagging v0.11.0, as in the previous
+   NOTE.
+
+### 2026-11-08 — WORKER — NOTE — catch-up (new worker session)
+- **ACTIVE:** FMT-9 (v0.11.0), sub-step **9d**, under the
+  `2026-11-08 — PLANNER-A — DECISION — FMT-9b/9c accepted; 9d …` entry.
+- **Committed and pushed:** `fe71574` (`feat(FMT-9d): keywords
+  everywhere …`) is on `main` and matches `origin/main`. It's the
+  finishing change from the two handoff NOTEs above (the `keywords`
+  rename, CLI option D, the index layout byte, mnemo-node 1.77). Its CI
+  run (42552846044) was still running at this note: cargo-deny and the
+  Python job are green, the rest pending. Earlier 9d commits: `0ce03ca`,
+  `d7023eb`, `a82140e`. Newest tag `v0.10.0`; nothing unpushed.
+- **Uncommitted in the tree, not mine:** `PLAN.md` (the WORKLOG since the
+  last backup, all roles) and `reviewer_notes.md` (the Reviewer's), both
+  left for the pre-tag backup; `.claude/` (untracked, the user's tooling).
+  No code changes are uncommitted.
+- **Open from the last NOTE:** the pre-9f grid check (20K/50K) fails the
+  ±0.005 gate and is waiting for PLANNER-A's call. That gate belongs to
+  9f, so it doesn't block 9e. The grid files already on disk
+  (`mnemo/target/ann_grid_v{8,9}_mid.json`) answer most of options (b)
+  and (c) without a new run (v9 − v8 at the same cell; probe fraction
+  0.5):
+
+| config | rerank | 20K Δ | 50K Δ | v9 recall@10 (20K / 50K) |
+|---|---|---|---|---|
+| 48 subspaces (today) | ×20 | −0.034 | −0.032 | 0.806 / 0.738 |
+| 48 subspaces, (c) alone | ×50 | −0.006 | −0.034 | 0.916 / 0.862 |
+| 48 subspaces, (c) alone | ×100 | 0.000 | −0.018 | 0.952 / 0.928 |
+| **96 subspaces, (b) + (c)** | **×50** | **−0.002** | **−0.004** | **0.960 / 0.974** |
+| 96 subspaces, (b) alone | ×20 | −0.006 | −0.010 | 0.948 / 0.952 |
+
+  - **(c) alone doesn't pass at 50K,** even at ×100.
+  - **(b) + (c) at ×50 passes both tiers,** and its absolute recall is
+    well above today's v8 defaults (0.92 / 0.86 at the nearest cells).
+    The query cost is 0.55 ms at 20K and 1.27 ms at 50K. It costs about
+    +48 B of disk per memory and about +4.8 MB of RAM at 100K for the
+    larger PQ codes.
+  - These are 50-query cells (about ±0.013 standard error each), but the
+    sign is consistent across cells. If you pick (b) + (c), I'll set the
+    v9 defaults and re-run 20K/50K/100K at the exact default cells to
+    confirm before 9f.
+- **Next step:** log the 9d DONE (the grid stays open for your call),
+  then start 9e (zstd for turn records), beginning with condition (iii),
+  the `zstd` crate's MSRV against 1.75.
+
+### 2026-11-08 — WORKER — DONE — FMT-9d: BM25 keyword index and explicit `keywords` recall (A + D); the pre-9f grid check stays open for PLANNER-A
+**Commits (all on `main`, CI green; the last is run 42552846044):**
+- `0ce03ca` 9d.1, the v9 BM25 index;
+- `d7023eb` 9d.2, the recall API (under the old `text_query` name);
+- `a82140e`, the ranking_v2 switch;
+- `fe71574`, your decision applied: `keywords` on every surface
+  (`RecallRequest::keywords` / `keywords_only`, `keyword_weight`,
+  `DEFAULT_KEYWORD_WEIGHT` 0.5; Python `keywords=`; Node `keywords`;
+  MCP `keywords`; CLI `--keywords`). Also CLI option D, the index layout
+  byte, mnemo-node at rust-version 1.77, and the CHANGELOG.
+
+**Ranking (from the 9d READY; at ε 0.5 with identifiers passed as
+keywords):** pr_exact 0.2 → 1.0, release_exact 0.8 → 1.0, Phase 6 hit@1
+0.567 → 0.767 and MRR 0.678 → 0.848. Recall without keywords is
+unchanged (v2 fixture 0.9487). decision_exact stays 0.0, a fixture limit.
+
+**Tests:**
+- default `cargo test --features failpoints` is green (verified on the
+  user's Mac for `fe71574`, and in CI);
+- `fmt9d_bm25` 11/11;
+- the full v9 run (`MNEMO_DEV_FORMAT=9 MNEMO_DEV_ANN_MIN_FACTS=0`) has
+  exactly the 12 expected failures: the 11 v8-assumption tests plus
+  `cli_recall_text_without_embed_cmd_errors_cleanly` (now keyword recall
+  on v9). 9f makes them dual-format.
+
+**Open, not done in 9d:**
+- **The 20K/50K grid gate fails** (see the handoff update NOTE and my
+  catch-up NOTE, which has the (b)/(c) numbers from the existing grid
+  files). It gates 9f, so 9e goes ahead. **Waiting for your call.**
+- **Known leak:** after an unknown-layout index load, `build_index` frees
+  the old base run but not its unloaded delta runs. They stay
+  unreferenced until compaction. Unreachable in practice until a second
+  layout exists; I'll fix it in 9f unless you say otherwise.
+
+**Local toolchain note (not a repo issue):** on this Mac the Command Line
+Tools linker (ld-1267) can't read the macOS 27.0 SDK's `.tbd` files
+("unknown architecture arm64e.x1"), and Xcode.app fails to load (a
+system update looks half-installed). Builds work with
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`, which
+I set per command. No system setting was changed.
+
+**Dogfood memory:** skipped. `test/.env` is present, but this Mac has
+no Python env with `mnemo_engine` and the sentence-transformers embedder
+that `project_memory.py` needs. I'll list the facts to persist in 9f's
+DONE.
+
+### 2026-11-08 — PLANNER-A — NOTE — 9e guidance from the worker's progress so far: when compression ships, and passphrase hygiene
+**The Worker's process is on track:**
+- it checked that compaction keeps v9 before trusting the numbers;
+- it measured against a same-size baseline;
+- it reuses zstd contexts per thread;
+- it runs benches before clippy;
+- it uses CI for the iOS and Android builds (no local NDK, and Xcode is
+  unavailable).
+
+All good.
+
+**The 9e rule: "≥ 20% disk saving" alone isn't enough under the
+on-device focus.** Speed counts too. So far, the full profile shows −33%
+live size, but +20% ingest, +55% warm thread reads, and cold first reads
+going from 390 to 633 ms.
+1. **Fix the cold path first.** A cold read decoding every turn is the
+   bug to find. v9 row tags should let a cold `thread_export` or
+   `--thread` recall touch only that thread's rows and decode only the
+   pages it reads, and `about`/`essence` should never decode turn bodies.
+   Re-measure after the fix.
+2. **Default on only if all of these hold** on the thread-heavy profile:
+   a disk saving of at least 20%, ingest slower by at most 15%, warm
+   thread reads slower by at most 15%, and cold first reads slower by at
+   most 15%.
+3. **Otherwise, try "compress when cold"** (preferred over shipping it
+   off): new turns are written uncompressed, and turn pages are
+   recompressed when they're vacuumed, compacted, or older than a cutoff
+   (start at 7 days, configurable). Recent turns stay fast and archived
+   history gets small. Same pages, same codec byte, so no extra format
+   work.
+4. If neither meets the bar, **ship the codec byte and the reader, but
+   leave compression off by default** (a per-file opt-in). Every v9 reader
+   can still open compressed files, so it can be turned on later without a
+   format change.
+5. Report all three options' numbers in the 9e DONE. The zstd MSRV check
+   and the two mobile CI builds are still required before merge.
+
+**Passphrase hygiene:** a passphrase for `test/project.mnemo` was pasted
+into the Worker chat. Treat it as exposed. **The user** rekeys it (`mnemo
+rekey test/project.mnemo`; omit `--new-passphrase` so it prompts twice
+without echo), then updates `test/.env`. Agents don't run the rekey; they
+never handle passphrases. Nobody pastes a passphrase into any chat again:
+scripts read `test/.env`. Note for 12.7 dogfooding: a transcript that
+contains a secret must be `thread forget`-ed or never ingested.
+
+### 2026-11-08 — PLANNER-A — NOTE — Correction: test/project.mnemo is public-by-design; no rekey needed
+The user clarified that `test/project.mnemo` is a dogfood example meant to
+be usable by anyone, so its passphrase isn't a secret. **The rekey in the
+previous note is withdrawn.**
+- **Consequence: treat its contents as public.** Nothing secret goes into
+  it. That includes 12.7 dogfooding: only ingest transcripts that contain
+  nothing private, and `thread forget` any that do.
+- The no-passphrase-handling rules stay for **real** files and keys
+  (user files, release credentials, keychain keys). Scripts still read the
+  dogfood passphrase from `test/.env` rather than chat.
+- The `.gitignore` rule (no `.mnemo` files or `test/.env` in git) stays
+  unless the user decides to publish the example file. That's a separate
+  decision: an encrypted binary in git churns history, so it's better
+  attached to a release than committed.
+
+### 2026-11-08 — WORKER — DONE — FMT-9e: zstd-compressed thread turns; 33% smaller thread-heavy files; iOS and Android CI builds
+**Commit:** `445fff9` (`feat(FMT-9e): …`), pushed. CI run 42554851488 is green on every job (the three OS test jobs, MSRV 1.75, cargo-deny, Python, fuzz-smoke, and the two new mobile builds).
+
+**What it does:**
+- On v9, a thread-turn record of 256 B or more is compressed with zstd
+  level 3 before encryption, and kept only when it saves at least an
+  eighth. Facts, essence items, links, cache entries and every v8 record
+  stay plain.
+- **Each record is its own frame:** no dictionary and no history shared
+  with another record. That satisfies the single-scope rule of design
+  note (d) per record, not just per page.
+- **No row flag:** a stored body is either MessagePack (it always starts
+  with an array marker) or a zstd frame (magic `28 B5 2F FD`). The
+  catalog's `len` is the stored length, so packing, vacuum, restore and
+  compaction move frames as they are (compaction re-writes through
+  `remember`, so it compresses too).
+- **Reading is bounded:** the frame must state its decompressed size, at
+  most 64 MiB, or it's refused as malformed. A zstd context that ever
+  fails a call is dropped, not reused.
+- **Per-thread contexts** are reused (one-shot calls only). That made
+  warm reads about 15% faster than a fresh context per record.
+- Dev switch `MNEMO_DEV_TURN_ZSTD=0` turns compression off for A/B runs.
+  Reading never depends on it.
+
+**Your three conditions:**
+- (i) `zstd` is a required dependency (`=0.13.4`).
+- (ii) CI has a new `mobile` job: `cargo build --lib` for
+  `aarch64-apple-ios` (macOS runner) and `aarch64-linux-android` (NDK
+  clang, API 24). Both passed on the first push. I couldn't build either target locally
+  (no NDK, and Xcode.app fails to load on this Mac).
+- (iii) MSRV: `zstd`, `zstd-safe` and `zstd-sys` declare 1.64, and `cc`
+  1.65. The one problem was transitive: `cc`'s `parallel` feature pulls
+  `jobserver`, and 0.1.35 declares **1.85**. `cc` accepts ≥ 0.1.32, so
+  both lockfiles pin **0.1.34 (1.63)**. **No MSRV bump**, so no
+  NEEDS-USER. The pin also brings `getrandom` 0.3.4 and the WASI-only
+  `wasip2` / `wit-bindgen`, which aren't built on our targets. MSRV CI
+  confirms: green
+  - **Your call:** the lockfile pin covers only builds from this repo. A
+    crates.io dependent on Rust 1.75–1.83 gets `jobserver` 0.1.35 and
+    fails, because Cargo before 1.84 doesn't resolve by `rust-version`.
+    The CHANGELOG tells those users to run `cargo update -p jobserver
+    --precise 0.1.34`. The alternative is a direct `jobserver = "=0.1.34"`
+    dependency that does nothing except force the version. I didn't add
+    it.
+
+**Advisory caught locally:** `cargo deny` flagged the originally pinned
+zstd 0.13.2 (RUSTSEC-2026-0391, public upstream: the stream API's
+`with_context` carried an abandoned stream's state into the next one).
+We use only the one-shot API, but I moved to the fixed 0.13.4 anyway and
+added the drop-on-error rule above. `cargo deny check` is now clean.
+
+**Measured** (`examples/thread_profile.rs`, new; v9, 10K facts of
+~300 B plus 50K turns cut from this repo's Markdown, with the FMT-9a
+length mix, in threads of 500; M1 Pro, two runs each, which agree within
+1%):
+
+| | plain | zstd | Δ |
+|---|---|---|---|
+| live file (after `compact_file`) | 279.5 MB | 186.6 MB | **−33.2%** |
+| per turn | 5.59 KB | 3.73 KB | |
+| file before compaction | 301.3 MB | 208.6 MB | −30.8% |
+| ingest, per 500-turn thread (with flush) | 32.2 ms | 38.8 ms | +20% |
+| read a 500-turn thread (~1.7 MB), warm median | 4.4 ms | 6.8 ms | +55% |
+| first thread read on a fresh handle | 391 ms | 638 ms | +63% |
+
+- **Past the 20% bar** you set, though under 9a's 45% projection. Each
+  chunk also carries an fp16 vector (772 B at 384 dims) that doesn't
+  compress, and 9a projected the records alone.
+- **Fact-only files don't change** (facts aren't compressed), so the
+  `device_budget` cells stand.
+- **Library size:** zstd adds **463 KB** to the stripped CLI (macOS
+  arm64, built locally at `fe71574` and `445fff9`: 3.00 → 3.47 MB), in
+  line with the note's ~0.5 MB estimate. `size.yml` (run 42554882997)
+  now reports Linux aarch64 at 2.63 MB for the Python extension and
+  3.61 MB for the CLI (macOS 2.49 / 3.45). The last run before this,
+  at `3097eaf` (before 9b–9d), was 1.45 / 2.43; the rest of that growth
+  came with 9b–9d. Still under the 5 MB target.
+
+**One finding for you (pre-existing, not 9e's):** the cold first thread
+read costs 391 ms even uncompressed, because `ensure_key_caches` decodes
+**every live record** once per handle to build the key, superseded and
+layer caches. Compression adds the decompression of all 50K turns to
+that one-time scan (+250 ms). On a phone (about 4× slower) that's 1.5 s
+today and 2.5 s with 9e, on the first thread or key operation of a
+session. On v9 the rows already carry kind and the thread, key and agent
+hashes, so that scan could skip turn records, or read them only for the
+thread asked for. I'd suggest a small PERF item, possibly in REFAC-1 or
+before MOBILE-1. Your call; I haven't changed it.
+
+**Tests:**
+- new `tests/fmt9e_zstd.rs` (5): long turns compress and round-trip
+  across reopen; 30 KB turns compress per chunk, and the chunks share
+  packed pages; short turns, facts and v8 stay plain; frames survive
+  vacuum, `restore_to` and `compact_file`; malformed frames (no content
+  size, over 64 MiB, truncated, garbage) are errors, and a good frame
+  still decodes after them;
+- `fuzz_record_decode` also feeds every input with the zstd magic
+  prepended;
+- default `cargo test --features failpoints`: 295 passed, 0 failed;
+- the v9 run: 283 passed, and the same 12 known v8-assumption failures as before 9e;
+- clippy `-D warnings` and `fmt --check` are clean, `cargo build -p
+  mnemo-node` builds, and `cargo deny check` is clean.
+
+**Files:** `mnemo/{Cargo.toml,Cargo.lock}`, `mnemo/src/{store,lib}.rs`,
+`mnemo/tests/fmt9e_zstd.rs`, `mnemo/examples/thread_profile.rs`,
+`mnemo/fuzz/fuzz_targets/fuzz_record_decode.rs`,
+`.github/workflows/ci.yml`, `mnemo-python/Cargo.lock`, `CHANGELOG.md`.
+
+**Not mine, left alone:** `reviewer_notes.md` and `.claude/`. `PLAN.md`
+isn't committed, per the rule.
+
+**Next:** 9f is gated on your call on the 20K/50K grid (my catch-up NOTE
+has the (b)/(c) table). Until then I'm stopping here.
+
+### 2026-11-08 — WORKER — NOTE — Correction: the 9e DONE above isn't a DONE yet; following your 9e guidance
+I wrote the DONE above before reading your two NOTEs (posted while I
+worked). Under your rule 2, `445fff9` (compression on by default) **fails**
+the bar: +20% ingest, +55% warm reads and +63% cold reads, against
+≤ 15% each. Read that entry as **9e step 0**: the codec, the reader, the
+tests, the MSRV pin and the mobile CI are in and green, and its numbers
+and findings stand. v9 isn't the default and isn't released, so nobody
+gets the always-on behaviour.
+
+**Now, in your order:**
+1. Fix the cold path. On v9, `ensure_key_caches` skips turn bodies and
+   builds a thread's turn set from row tags (`kind`, `thread_hash`),
+   decoding only that thread's rows when it's first used. `about` and
+   `essence` never decode turns. Then re-measure.
+2. If the bar is still missed, measure "compress when cold": write new
+   turns plain, and compress them on vacuum, compaction, or after a 7-day
+   cutoff.
+3. Otherwise, opt-in per file.
+
+The 9e DONE will report all three options' numbers. 9f stays gated on
+your grid call.
+
+Noted on the passphrase: I didn't use it, and scripts read `test/.env`.
+
+### 2026-11-08 — PLANNER-A — NOTE — Handover for a new PLANNER-A session (this one is a local, pre-Oct-6 Cowork task; the user is moving the Planner to a cloud session linked to the Mac)
+**Who you are:** PLANNER-A owns the roadmap, specs, dispatches, release
+verification, Reviewer triage, and the README/`index.html` content (see
+the Planner handover above). PLANNER-B is a backup ideator only.
+
+**The setup now:**
+- The **Worker runs in Claude Code** in the user's terminal. It has
+  `.claude/settings.json`: an allow list plus a deny list of force-push,
+  reset, rebase, amend and `add -A`. It reads PLAN.md itself, so a relay
+  is just "there's a new PLANNER-A entry at the end of PLAN.md".
+- The Reviewer is separate and read-only.
+- `test/project.mnemo` is a **public-by-design** dogfood file: no rekey,
+  and nothing private goes in it.
+
+**Where things stand (2026-11-08):**
+- **Shipped:** v0.10.0 (PERF-1).
+- **In progress:** FMT-9 → v0.11.0. 9a, 9b, 9c and 9d are done (9d is
+  `fe71574`: `keywords` hybrid recall, CLI `--keywords`). The Worker is on
+  **9e** (turn compression) under my 2026-11-08 NOTE's decision rule: fix
+  the cold path; default-on only if disk ≥ 20% and ingest, warm and cold
+  reads are each ≤ 15% slower; otherwise "compress when cold", or off by
+  default. The zstd MSRV check and the iOS/Android CI builds must pass.
+- **Then:** 9f (migration, dual-format tests, gates, **READY before the
+  v0.11.0 tag**). When READY arrives, verify on the published wheel and
+  write the README/site v0.11.0 docs. The format change, the
+  `compact`-to-upgrade path and the new numbers are in the 9b/9c/9d DONE
+  entries.
+- **After v0.11:** REFAC-1 (split `store.rs`, and `close()` releasing the
+  lock) → MOBILE-1 (v0.12) → PERF-2 (partition-major index loading,
+  100K first recall at about 120 ms → toward 15 ms) → Phase 12 → 13 → 14.
+- **Open user decisions:** none blocking. Licensing waits until 14.1.
+  Where Phase 13 goes relative to Phase 2 is already settled (keyword
+  search shipped in FMT-9).
+
+**Working style the user expects:**
+- plain English and short status;
+- relay prompts in the blockquote format;
+- verify claims in the code and on published artifacts before answering;
+- a WebSearch before stating product or pricing facts;
+- one Planner session editing PLAN.md at a time.
+
+### 2026-11-08 — WORKER — DONE — FMT-9e: compress-when-cold by default (option 3), and the cold path fixed (first thread read 391 → 16 ms)
+**Commits:**
+- `445fff9`, the codec, reader, MSRV pin and mobile CI (the "step 0"
+  entry above);
+- `6d85831`, your guidance applied.
+
+CI run 42557580844 is green on every job, including the mobile builds and the Python job (which runs the new Python test).
+
+**1. The cold path (your step 1).** The cause was `ensure_key_caches`,
+whose lazy scan decoded every live record.
+- **Fix:** on v9, a turn row with no key slot and no supersession is left
+  undecoded, in a bucket by its row's `thread_hash`. A thread's bucket is
+  decoded the first time the thread is used (`thread_export`, ingest,
+  forget, or a write or delete in that thread), and `thread_export`
+  reuses those decoded records instead of decoding twice.
+- `about()` and essence never decode turns (a test asserts it).
+- The scan also stopped reading the vector column, which the caches
+  never needed.
+- **Edge:** a turn record tagged `area = onboarding` would only reach
+  `about()` once its thread is warm. A record's row kind is a turn
+  before onboarding is checked, so I treat that as not a real case.
+- **Result:** the first thread read on a fresh handle (10K facts and 50K
+  turns, uncompressed) goes from **391 ms to 15.6 ms**.
+
+**2. The three options** (`examples/thread_profile.rs`; 10K facts plus
+50K turns stamped "now", threads of 500; two runs each, agreeing within a
+few percent, nothing else running; deltas against plain):
+
+| | plain (off) | **cold policy (default, 7 days)** | eager (compress at write) |
+|---|---|---|---|
+| file, all turns recent | 301.3 MB | 300.5 MB (−0.3%) | 210.1 MB (−30%) |
+| live after `compact_file` | 279.5 MB | **187.7 MB (−33%)** | 187.8 MB (−33%) |
+| ingest per 500-turn thread | 34.6 ms | **−5%** (noise; recent turns are plain) | +16% ✗ |
+| recent turns: first read on a fresh handle | 15.6 ms | **+2%** | +22% ✗ |
+| recent turns: a thread's first read / re-read (median of 20) | 4.6 / 4.6 ms | **0% / ~0%** | +54% / +50% ✗ |
+| compressed history (after compaction): fresh handle | 16.0 ms | +15% | +12% |
+| compressed history: first read / re-read | 4.4 / 4.4 ms | +53% / +56% | +57% / +50% |
+
+**Reading it against your rule 2:**
+- **Eager fails** ingest (+16%), and warm and cold reads (+50%, +22%).
+  It isn't the default; `set_turn_compress_after(0)` opts into it.
+- **The cold policy meets every speed line for recent turns,** and the
+  disk saving (−33%) arrives as turns age past the cutoff or the file is
+  compacted.
+- **The cost moves to archived history:** reading a thread whose turns
+  were compressed is +55% (4.4 → 6.8 ms for 1.7 MB of text). That's
+  zstd decompression (~700 MB/s here), and no policy removes it.
+- So I've made **option 3 the default**, as your note prefers. If the
+  archived-read cost is too much, option 4 (off by default) needs only a
+  default change, plus a persisted per-file flag if you want it per file
+  rather than per handle. **Please confirm option 3 at 9f/READY.**
+
+**How "cold" works:**
+- A turn is written plain unless it's already older than the cutoff (by
+  `created_at`; an imported archive compresses at write).
+- Each commit that is already writing compresses up to 256 aged turns:
+  read, compress, re-pack.
+- A vacuum that moves a plain turn compresses it, and `compact_file`
+  compresses every turn.
+- A spare row-flag bit, `ROW_SETTLED = 8`, marks a turn whose
+  compression is decided (compressed, or not worth it), so it's never
+  retried. No struct change.
+- `Mnemo::set_turn_compress_after(secs)` sets the cutoff, default
+  `DEFAULT_TURN_COMPRESS_AFTER_SECS` (7 days), per handle and not
+  persisted. Python has `set_turn_compress_after`; Node isn't mirrored
+  (experimental).
+- **Limitation:** a file with no further writes never compresses its
+  aged turns until compaction, since only writing commits do the work.
+  That's deliberate, so idle flushes stay no-ops.
+
+**Your conditions (unchanged from step 0):**
+- zstd is required (`=0.13.4`, which has the RUSTSEC-2026-0391 fix);
+- the iOS and Android CI builds are green;
+- no MSRV bump: `jobserver` is pinned to 0.1.34 in both lockfiles;
+- the stripped library grows by **0.46 MB** for zstd.
+
+**Still your call:** the lockfile pin doesn't reach crates.io dependents
+on Rust 1.75–1.83. The CHANGELOG tells them to run `cargo update -p
+jobserver --precise 0.1.34`. A direct `jobserver = "=0.1.34"` dependency
+would force it.
+
+**Tests:** `tests/fmt9e_zstd.rs` (8):
+- the step 0 five;
+- a cold handle decodes only the threads it uses;
+- recent turns stay plain until they age, 256 per commit;
+- compaction compresses recent turns.
+
+Python `test_turn_compression_knob_on_v9` is new, and it's run by CI
+only: there's no local venv. Results:
+- default `cargo test --features failpoints`: 298 passed, 0 failed;
+- the v9 run: 286 passed, and the same 12 known v8-assumption failures;
+- clippy (engine and Python) and `fmt --check` are clean, `cargo deny
+  check` is clean, and `cargo build -p mnemo-node` builds.
+
+**Files:** `mnemo/src/{store,lib}.rs`, `mnemo/tests/fmt9e_zstd.rs`,
+`mnemo/examples/thread_profile.rs`,
+`mnemo-python/{src/lib.rs,README.md,test_mnemo.py}`, `CHANGELOG.md`.
+
+**Dogfood memory:** skipped (no Python env here; see the 9d DONE).
+Facts to persist in 9f:
+- v9 turns compress when cold (7 days);
+- the cache scan is lazy per thread;
+- zstd 0.13.4 is required, with `jobserver` pinned to 0.1.34 for the
+  MSRV;
+- building on this Mac needs `SDKROOT` set to MacOSX26.5.
+
+**Next:** 9f, still gated on your 20K/50K grid call (my catch-up NOTE
+has the (b)/(c) table). I'm stopping here until you decide.
+
+### 2026-11-08 — PLANNER-A — VERIFIED + DECISION + DISPATCH — FMT-9e accepted (compress when cold is the default); the 20K/50K grid: (b) + (c) on v9; go on to 9f
+**9e accepted** (`445fff9` + `6d85831`, CI run 42557580844 green). This is
+the first entry from the new PLANNER-A session (cloud, linked to the Mac).
+- **Option 3 is confirmed as the default:** new turns are plain, and turns
+  compress after 7 days, on compaction, or when a vacuum moves them. It
+  meets every speed line for recent turns and gives −33% on compacted
+  thread-heavy files.
+- **The archived-read cost is accepted.** +55% is 4.4 → 6.8 ms for 1.7 MB
+  of text, on history that's older than a week. Disk counts more on
+  devices.
+- **The cold-path fix is a good find** (first thread read 391 → 16 ms). It
+  also answers the PERF item you suggested in the step 0 entry, so nothing
+  new goes on the queue.
+- Accepted as you described them: the onboarding-tagged-turn edge, idle
+  files compressing only at the next write or compaction (one CHANGELOG
+  line), the per-handle cutoff not persisted, and Node not mirrored.
+
+**jobserver: no direct dependency.** Keep the lockfile pin and the
+CHANGELOG instruction. A forced `=0.1.34` in the published crate would
+clash with any dependent whose own tree needs 0.1.35 or later, and it would
+stay long after the problem has gone. I'll add the one-line `cargo update`
+instruction to the root README's install notes in the v0.11.0 docs.
+
+**The 20K/50K grid: (b) + (c), on v9 only.** v9 indexes use 96 PQ
+subspaces and a rerank depth of ×50 (500 candidates for top_k 10) at
+every size that builds an index. v8 stays as it is. `V9_ANN_MIN_FACTS`
+stays at 20K.
+- This is the only option that passed at both tiers (−0.002 and −0.004),
+  and its absolute recall is higher than v8's defaults.
+- The cost (about +48 B of disk per memory, about +4.8 MB of RAM at 100K,
+  about 1.3 ms per query at 50K) fits the targets on paper. Confirm it in
+  step 1 below.
+
+**DISPATCH: 9f (the last FMT-9 step), then READY before the v0.11.0 tag.**
+1. **Apply the new v9 index defaults** and confirm them before anything
+   else:
+   - re-run `ann_recall_grid_v2` at 20K, 50K and 100K at the **exact
+     default cells** (v8 vs v9). Gate: v9 within 0.005 of v8 at each tier;
+   - re-run `device_budget` on v9 at 10K and 100K. Gates: 100K RSS
+     ≤ 120 MB, disk ≤ 2 KB per memory, warm recall ≤ 5 ms; 10K first
+     recall ≤ 5 ms (no index below 20K);
+   - if any gate fails, stop and log a READY with the numbers. Don't pick
+     a different option yourself.
+2. **Migration, as signed off in the design note:**
+   - new files are v9, and the `MNEMO_DEV_FORMAT` switch goes away;
+   - v8 files open and write as v8, and `about` and `stats` hint "run
+     `mnemo compact` to upgrade to v9";
+   - `compact` writes v9, and `compact --format v8` stays for one release;
+   - v0.10 and earlier refuse v9 with an `UnsupportedVersion` message that
+     names the version needed.
+3. **Tests on both formats:**
+   - make the 12 known v8-assumption tests dual-format;
+   - v8 fixtures built by 0.10.0 open and write under 0.11, then compact
+     to v9, and recall and ranking on the v9 copy pass the gates;
+   - the DUR-1, SEC-1 and FIX-1 suites run on both formats.
+4. **Fix the 9d leak:** after an unknown-layout index load, `build_index`
+   also frees the old delta runs. Add a test.
+5. **The release gates, as in the FMT-9 spec:**
+   - the ranking_v2 harness: hit@1 no more than 0.02 below v0.10;
+   - the full `device_budget` at 1K, 10K and 100K, written to
+     `perf_v0.5.0.json` and marked `remeasured`;
+   - the stripped library size (still ≤ 5 MB);
+   - the measured disk per memory, which the README's "about 4× smaller"
+     claim will be stated from.
+6. **CHANGELOG:** the format move to v9, the compact-to-upgrade path,
+   "upgrade every tool that reads a file before compacting it", the new
+   index defaults, and the idle-file compression line.
+7. **Dogfood memory:** if a Python env with `mnemo_engine` is available,
+   persist the facts listed in your 9e DONE, plus "new files are v9" and
+   the new index defaults. Otherwise say so in the READY, as before.
+8. **Log READY with the release commit staged, then stop.** I verify on
+   the published artifacts after the tag, and the README and `index.html`
+   v0.11.0 text comes from me as a HANDOFF before you tag.
+
+**Status updated** (a shared section, minimal edit): published v0.10.0,
+in progress FMT-9f → v0.11.0.
+
+### 2026-11-08 — WORKER — READY — FMT-9f step 1: one gate fails (10K first recall 9.0 ms, gate ≤ 5); the grid passes; 9f's code is committed; release gates and staging not started
+**I stopped, as the dispatch says.** One step 1 gate fails, so I haven't
+started step 5 (the release gates), the version bump or the release
+commit. Steps 2–4 don't depend on that gate, and they were already
+written, so I finished verifying them and committed them (CI below), to
+keep the tree clean.
+
+**Step 1: the index defaults.**
+- **A correction to my catch-up NOTE first.** The shipped PQ default is
+  already `dims / 4` = **96** subspaces (since ANN-1; the 100K v9 budget
+  shows 9.6 MB of PQ codes, 96 B per vector). The grid harness's
+  `default_48` label is stale, and I repeated the previous worker's
+  "48 (today)" in my table. So (b) was a no-op, and its cost (+48 B disk,
+  +4.8 MB RAM) doesn't exist. Against the real default (96), 20K already
+  passed, and 50K needed only the deeper rerank. Your decision stands
+  as (c).
+- **Applied:** on v9 an unpinned recall reranks
+  `max(auto depth, V9_RERANK_PER_HIT (50) × top_k)` candidates, which is
+  500 for `top_k` 10. I kept the auto depth where it's deeper (1,000 at
+  1M), rather than cutting it to ×50 there. Say if you meant ×50
+  exactly. v8 is unchanged.
+- **The grid at the exact default cells** (new `ANN_GRID_DEFAULTS=1`
+  mode: default-built index, unpinned recalls; 50 queries; fresh v9
+  corpora):
+
+| tier | v8 | v9 | Δ | gate ±0.005 |
+|---|---|---|---|---|
+| 20K | 0.932 (1.59 ms) | 0.994 (1.00 ms) | +0.062 | ✓ |
+| 50K | 0.966 (3.71 ms) | 0.974 (1.90 ms) | +0.008 | ✓ |
+| 100K | 0.982 (7.42 ms) | 0.978 (3.55 ms) | −0.004 | ✓ |
+
+- **`device_budget` on v9** (full run at 1K/10K/100K on fresh corpora,
+  M1 Pro):
+
+| | 1K | 10K | 100K | gate |
+|---|---|---|---|---|
+| disk per memory | 1,417 B | 1,330 B | 1,499 B | ≤ 2 KB ✓ |
+| handle RSS (after 1,000 warm) | 3.0 MB | 15.9 MB | 112.3 MB (peak 115.8) | 100K ≤ 120 MB ✓ |
+| open (fast KDF) | 0.49 ms | 3.25 ms | 29.8 ms | — |
+| **first recall, fresh handle** (median of 20) | 0.88 ms | **9.05 ms** | 113.9 ms | **10K ≤ 5 ms ✗** |
+| warm recall (median / p95) | 0.22 ms | 2.19 / 2.30 ms | 2.37 / 3.72 ms | 100K ≤ 5 ms ✓ |
+| durable single write | 15.0 ms | 15.9 ms | **22.5 ms** | (not a 9f gate; the table's target is ≤ 20) |
+
+**The failing gate: 10K first recall is 9.05 ms** (p95 9.75).
+- **It isn't new.** Every v9 run measured it: 9.18 ms at 9c/9d. v0.10's
+  v8 file is 10.9 ms. The spec's "phone-class files have no index, so
+  first recall is cheap" doesn't hold for the cold half.
+- **Where it goes:** the warm recall (the exact fp16 scan) is 2.2 ms, so
+  about **6.9 ms is one-time work on the first recall**. My estimate,
+  which I haven't profiled, is that it's mostly filling the resident
+  vector column: 1,000 vector pages, 7.7 MB decrypted, page by page.
+- **Options, your call** (I haven't picked one):
+  - **(a)** Accept about 9 ms for v0.11 (it beats v0.10's 10.9), and
+    move the ≤ 5 ms phone target to MOBILE-1 or PERF-2.
+  - **(b)** First, a short profiling pass on where the 6.9 ms goes:
+    decrypt, page reads, allocation, or the catalog. Then decide.
+  - **(c)** Make the first exact scan cheaper, for example by scanning
+    straight from the vector pages while it fills, instead of fill then
+    scan, or by a contiguous column run read in one go. That's an engine
+    change, so it needs your sign-off.
+
+**Also found: the 100K durable single write is about 23 ms** (two
+re-runs: 22.6 and 23.5 ms, p95 24.5–27.3), against 15.3 ms in the 9c
+DONE.
+- **9d introduced it.** Two runs each of the writes phase, this machine,
+  fresh corpora:
+
+| commit | single write median / p95 | batch of 100 |
+|---|---|---|
+| `cc4f818` (end of 9c) | **14.0** / 17.1–18.2 ms | 31.7–32.6 ms |
+| `fe71574` (end of 9d) | **22.7** / 23.9–24.7 ms | 40.6–40.9 ms |
+| `6d85831` (end of 9e) | 23.5 / 24.7–24.9 ms | 40.6 ms |
+| `25dee3f` (9f) | 22.6–23.5 / 24.5–27.3 ms | 40.5–41.6 ms |
+
+- So this is about +9 ms per commit at 100K, from the BM25 work (a new
+  segment and manifest every commit, or the doc-stats rebuild from the
+  rows). I haven't profiled it, and the fsync count is still 3.
+- 10K writes are 15.9 ms. Not a 9f gate, but the on-device table says
+  ≤ 20 ms.
+
+**Steps 2–4, committed:**
+- `25dee3f`, the migration, dual-format tests, the leak fix and compat
+  CI;
+- `1ce47d6`, the Python test fix.
+
+CI run 42562849151 is green on every job, including the new `compat` job against the published v0.10.0, the mobile builds and the Python job. (Run 42562531920 on `25dee3f` failed only the Python job; `1ce47d6` fixed it.)
+
+- **Migration:**
+  - New files are v9 (`format::DEFAULT_NEW_VERSION`), and the
+    `MNEMO_DEV_FORMAT` switch is gone (from benches and tests too:
+    benches use `MNEMO_BENCH_FORMAT=8`, the grid `ANN_GRID_FORMAT=8`).
+  - v8 files open and write as v8.
+  - `mnemo info` and `mnemo about` (table and JSON) print "v8 file: run
+    `mnemo compact <path>` to upgrade to v9 (upgrade every tool that
+    reads it first)".
+  - `Stats::format_version` (Python `stats()["format_version"]`).
+  - `compact` writes v9. `compact --format v8` and
+    `Mnemo::compact_file_to(path, passphrase, 8)` keep v8 for one
+    release. A v9 file that keeps float vectors keeps them.
+- **Older builds:** v0.10.0, tested for real (installed from crates.io),
+  refuses a v9 file with `unsupported .mnemo format version 9 (this
+  build supports v1)`.
+  - It names the version, but its "supports v1" text is stale, and a
+    released build can't be changed.
+  - This build's message for files newer than v9 is now "this build
+    opens v4 to v9; a newer file needs a newer mnemo-engine".
+  - The README's upgrade note should quote 0.10's message as it is.
+- **Tests on both formats:**
+  - The integration, DUR-1, SEC-1 and FIX-1 suites now compile twice,
+    as `v8::*` and `v9::*`. Each body moved to `tests/suites/<name>.rs`,
+    with a `FORMAT` constant.
+  - The 12 known v8-assumption tests now have v9 expectations rather
+    than skips:
+    - the header tamper tests recompute the CRC at 508 on v9, since the
+      v9 CRC covers the seal;
+    - the WAL-growth tests assert v9 keeps the WAL at 8 pages;
+    - the snapshot and restore tests take txn ids from `snapshots()`
+      (v9's first commit is the generation lease);
+    - the index-persistence tests assert a delta on every v9 commit;
+    - the CLI `--text` test splits into v8 (needs an embedder) and v9
+      (keyword recall).
+  - New: `cli_compact_upgrades_a_v8_file_and_info_hints_until_then`.
+- **The v0.10.0 fixture:** `tests/v0_10_fixture.rs` plus a new CI job,
+  `compat`, which runs `cargo install mnemo-engine --version =0.10.0`.
+  - The 0.10.0 CLI builds a v8 file from
+    `tests/fixtures/v0_10_0_memories.jsonl` (240 memories, 8 clusters),
+    with an index.
+  - This build opens and writes it as v8, and 0.10.0 still verifies it
+    afterwards.
+  - `compact` upgrades it to v9. Recall per cluster is identical, and
+    `verify` passes.
+  - 0.10.0 refuses the v9 copy.
+  - No `.mnemo` file is committed. It passed locally against the real
+    0.10.0.
+  - "Ranking passes the gates" on the v9 copy is step 5 (ranking_v2), not
+    run yet.
+- **The 9d leak (step 4):** when the base index's layout is unknown, its
+  delta runs are walked (best effort, not replayed) into the handle's
+  chain, so `build_index` and `drop_index` free them with the base. The
+  `an_unknown_index_layout…` test now writes three deltas on top of the
+  unknown base and asserts the chain is tracked, then released.
+- **One deviation:** I **kept `MNEMO_DEV_ANN_MIN_FACTS`**, as a hidden
+  tests-and-benchmarks override. The previous worker's code comment said
+  it would go in 9f, but your dispatch removes only `MNEMO_DEV_FORMAT`.
+  - Without it, every small-file index test (integration, proptest,
+    Python) has no ANN on v9, and the 20K grid tier builds no index.
+  - The test binaries set it to `0` once for the whole process.
+  - Say if you want it gone. The alternative is a hidden per-handle
+    setter, which touches more tests.
+- **CHANGELOG:** written for the format move, the upgrade path (with
+  "upgrade every tool that reads the file before you compact it"), 0.10's
+  message, the new index defaults with the grid numbers, the leak fix,
+  and the idle-file compression line. There's no `[0.11.0]` header yet,
+  since that's the release commit.
+
+**Not done (stopped):**
+- step 5: ranking_v2, writing the `device_budget` block into
+  `perf_v0.5.0.json` (the numbers above are ready for it), and the
+  stripped library size on the release build. Disk per memory is the
+  table above;
+- the version bump to 0.11.0 and the staged release commit.
+
+**Dogfood memory:** still skipped. I set up a venv in the scratchpad with
+maturin and this build (`test_mnemo.py` passes in full there), but
+`project_memory.py` also needs sentence-transformers (torch and a model
+download, about 1 GB), which I didn't install unasked.
+
+**For you, beyond the gate:**
+- `AGENTS.md`'s "Format-version policy" still says the format is
+  `format.rs::VERSION (currently 8)`. New files are now
+  `DEFAULT_NEW_VERSION` = 9; `VERSION` stays 8 as the in-place migration
+  target for v4–v7 files. That section sits next to the MessagePack rule
+  you own, so I left it for you.
+- The root README's install notes need the `jobserver` line (you said
+  you'd add it) and the upgrade note.
+
+**Uncommitted and not mine:** `PLAN.md`, `reviewer_notes.md` and
+`.claude/`.
+
+**Next:** waiting for your call on the 10K first-recall gate and on the 9d
+write regression. Then step 5, the release commit staged, and
+READY again.
+
+### 2026-11-08 — PLANNER-A — DECISION — FMT-9f step 1: accept 10K first recall at ~9 ms for v0.11 (the fix moves to PERF-2); fix the 9d write regression before the tag; the rest accepted
+**Thanks for the correction on PQ.** The default was already 96 subspaces,
+so (b) was a no-op and its cost in my last entry doesn't exist. The
+decision is (c) alone, as you applied it.
+
+**Accepted as you did them:**
+- the rerank rule `max(auto depth, 50 × top_k)`: keep the deeper auto
+  depth at 1M;
+- the grid at the exact default cells (20K +0.062, 50K +0.008, 100K
+  −0.004), all inside the gate;
+- `device_budget`: disk 1.3–1.5 KB per memory, 100K RSS 112 MB, 100K
+  warm recall 2.4 ms;
+- steps 2–4 (`25dee3f`, `1ce47d6`, CI green with the new `compat` job);
+- keeping `MNEMO_DEV_ANN_MIN_FACTS` as a hidden test and bench override.
+  Keep it out of the README and API docs, and say "unsupported, for tests"
+  in its code comment.
+
+**1. 10K first recall (9.05 ms; the gate was ≤ 5): accepted for v0.11,
+option (a).**
+- It isn't a regression: v0.10 is 10.9 ms on the same file. The ≤ 5 ms
+  phone target was a proposal from the on-device table, and I made it a
+  9f gate without checking that the cold half had ever met it. That's my
+  mistake, not a 9f failure.
+- Your estimate (filling the resident vector column page by page) is
+  exactly the "lazy vector-column fill" already in **PERF-2's** scope. So
+  PERF-2 now covers the no-index exact scan as well as the 100K index.
+  Its gates are 10K first recall ≤ 5 ms and 100K ≤ 15 ms.
+- In this PR, **profile it only** (no engine change): split the ~6.9 ms
+  into decrypt, page reads, allocation and catalog, and paste the split
+  in the READY. PERF-2 starts from it.
+- README and CHANGELOG: 10K first recall is about 9 ms on the M1 Pro,
+  down from about 11 ms in v0.10.
+
+**2. The 100K durable write (14 → 23 ms since 9d): fix it before the
+tag.**
+- Unlike first recall, this is a regression this release introduced, and
+  it puts 100K over the ≤ 20 ms target. The FMT-9 spec says a commit
+  writes O(change), not O(n). A fixed +9 ms per commit at 100K looks like
+  per-commit work that grows with the file: rebuilding doc stats from the
+  rows, or rewriting the BM25 manifest whole.
+- **Profile first.** If it's O(n) work like that, make it incremental:
+  carry the doc stats as deltas in the segment, and append to the
+  manifest. That stays inside v9, which hasn't shipped, so the format is
+  still free to change.
+- **Gates:**
+  - 100K durable single write ≤ 17 ms (within about 3 ms of 9c's 14 ms);
+  - batch of 100 back to about 33 ms;
+  - 10K unchanged or better;
+  - fsyncs per commit ≤ 3;
+  - `fmt9d_bm25` and the ranking numbers unchanged.
+- **If the fix needs more than a contained change** (a redesign of BM25
+  segments, say), stop and log READY with the profile. Then I'll decide
+  whether to ship at ~23 ms and move it to PERF-2.
+
+**3. AGENTS.md "Format-version policy": it's a technical section, so it's
+yours.** Update it in the release commit. The text should say:
+- new files are `DEFAULT_NEW_VERSION` (9);
+- `VERSION` (8) is the in-place migration target for v4–v7;
+- `MAX_VERSION` (9) is the newest that opens;
+- v8 → v9 happens only through `compact`.
+
+AGENTS.md has no Planner edits pending, so you're clear to touch it.
+
+**4. Dogfood memory:** skipping it is fine. Don't install torch for it.
+Keep the facts list for when an env exists.
+
+**Then:** step 5 (ranking_v2, `device_budget` into `perf_v0.5.0.json`
+marked `remeasured`, stripped library size), the 0.11.0 version bump, and
+the release commit staged. Log READY and stop. My README (the `jobserver`
+line, the upgrade note quoting 0.10's message as it is, the new numbers)
+and `index.html` HANDOFF follows that READY, before you tag.
+
+**Shared-section edit:** the execution order's PERF-2 item (3a) now also
+covers the no-index first recall (10K about 9 ms → ≤ 5 ms).
+
+### 2026-11-08 — WORKER — READY — v0.11.0: the 9d write regression is fixed (100K single write 16.1 ms), the release gates are met, and the release commit is staged; holding for your README and index.html HANDOFF before the tag
+**State:**
+- **Code on `main`, all pushed:**
+  - `25dee3f` (9f);
+  - `1ce47d6` (the Python test fix);
+  - `4c40091`, the write fix. Its CI run 42565755244 is green on every job, compat and mobile included.
+- **The release commit is staged and not committed:**
+  - manifests 0.11.0 (engine, Python `Cargo.toml` and `pyproject.toml`,
+    mnemo-node) and both `Cargo.lock`s;
+  - CHANGELOG `[0.11.0] — 2026-11-08`;
+  - AGENTS.md's "Format-version policy";
+  - the `device_budget_v0_11_0` block in `perf_v0.5.0.json`.
+- When your HANDOFF arrives, I'll commit, in this order:
+  1. the release commit;
+  2. your README and `index.html` HANDOFF;
+  3. the `chore(plan)` backup of `PLAN.md` and `reviewer_notes.md`.
+
+  Then push, wait for green CI, and tag `v0.11.0`.
+
+**1. The write regression (your step 2).**
+- **Profile:** macOS `sample` of 300 single durable writes on a copy of
+  the 100K corpus, about 24 ms per commit.
+  - **34% (about 8 ms) was BM25 work that grew with the file:**
+    - `put`/`delete` cleared the doc stats, so every commit rebuilt them
+      from all 100K rows (a HashMap of 100K entries, about 4.6 ms);
+    - every commit dropped the segment dicts, so the next one reloaded
+      and decoded every segment's dict (the base segment has about 100K
+      terms, about 3.5 ms), and the drop cost another 0.9 ms.
+  - **54% was the three F_FULLFSYNCs.**
+- **Fix (`4c40091`, contained; no format change):**
+  - `DocStats` carries a running length total. `put` and `delete` update
+    it in place; only a catalog rebase, which moves rows, still rebuilds.
+  - The commit path loads only the stats, never the dicts.
+  - After a commit, loaded dicts are kept, and only the segment(s) the
+    commit wrote are read; a merge truncates first.
+  - Second profile: the BM25 share is gone, and 74% is fsync.
+- **Gates:**
+
+| gate | result |
+|---|---|
+| 100K single write ≤ 17 ms | **16.13 ms** (p95 18.2) in the release run; 15.7–16.6 in four other runs ✓ |
+| 100K batch of 100 ≈ 33 ms | **32.0 ms** median over 80 consecutive batches ✓. The harness's own median is over only 5 batches and was 32.7–42.7 across five runs (36.6 in the release run); p95 spikes come from the tiered segment merges. 9c measured 31.7–32.6 |
+| 10K unchanged or better | single 14.8 ms (was 15.9), batch 20.0 ms (was 19.7) ✓ |
+| ≤ 3 fsyncs per commit | single writes: 3 ✓. **A batch commit can be 4** (the last batch at 1K and 100K; 3 at 10K). That's 9c's in-place write of a run over two pages (the run, then the WAL, then the checkpoint), and the 9c-era run shows 4 for batches too. So it's not from 9d or 9f. I didn't change it, since it's the signed-off 9c ordering. Say if you want it on PERF-2 |
+| fmt9d_bm25 and ranking unchanged | 11/11; ranking as below ✓ |
+
+- A/B checks:
+  - skipping the per-commit BM25 segment write saves about 1 ms;
+  - skipping 9e's aged-turn scan saves nothing measurable.
+
+  So what remains over 9c's 14 ms is mostly the fsyncs covering those
+  extra pages. That's O(change), as the spec asks.
+
+**2. The 10K first-recall profile (your step 1; profile only, no
+change).** macOS `sample`, 800 fresh read-only opens of the 10K corpus,
+then the first recall each time (median 9.05 ms):
+
+| part | share | about ms |
+|---|---|---|
+| **vector-column fill** (`fill_column_page`, 1,000 pages) | 65.6% | 5.9 |
+| · AES-GCM decrypt | 48.4% | 4.4 |
+| · page reads (a separate `lseek` + `read` per page) | 15.5% | 1.4 |
+| · fp16 copy into the column | 4.1% | 0.37 |
+| · allocation, zeroing, free | 2.0% | 0.18 |
+| exact fp16 scan (`similarity_f16`) | 22.5% | 2.0 |
+| scoring (including tanh) and the top-k sort | 4.9% | 0.45 |
+| other | 6.8% | 0.6 |
+| catalog | 0% (loaded at open, 3.3 ms) | — |
+
+For PERF-2: the decrypt is about 1.75 GB/s with hardware AES, so a lazy
+or partial fill is the lever, along with one `pread` per run instead of
+an `lseek` + `read` per page. The split is also in the perf block
+(`first_recall_10k_profile`).
+
+**3. The release gates (step 5):**
+- **ranking_v2 on v9:** default hit@1 **0.9231**, MRR **0.9487**
+  (v0.10: 0.9231 / 0.9487). Phase 6 0.5667 / 0.6779, unchanged. v8 on
+  the same build is identical. Hybrid (ε 0.5): Phase 6 0.7667 / 0.8483,
+  pr_exact 1.0, release_exact 1.0, exactly as at 9d.
+- **device_budget** (full 1K / 10K / 100K, written to
+  `device_budget_v0_11_0`, marked `remeasured`):
+
+| | 1K | 10K | 100K |
+|---|---|---|---|
+| disk per memory | 1,417 B | 1,330 B | **1,499 B** (v0.10: 8,714) |
+| handle RSS | 2.9 MB | 16.8 MB | 112.4 MB |
+| open (fast KDF) | 0.50 ms | 3.22 ms | 29.7 ms |
+| first recall, fresh handle | 0.89 ms | 8.77 ms | 112.5 ms |
+| warm recall (median) | 0.21 ms | 2.19 ms | 2.47 ms |
+| durable single write | 16.0 ms | 14.8 ms | 16.1 ms |
+
+- **Disk per memory for the README's "about N× smaller" claim:** 100K
+  is 8,714 B (v0.10) → 1,499 B, i.e. **5.8×** smaller. At 10K it's
+  8,878 → 1,330 B, **6.7×**.
+- **Stripped library size** (`size.yml` run 42565781687 at `4c40091`):
+  Linux aarch64 2.63 MB for the Python extension and 3.61 MB for the
+  CLI; macOS 2.51 / 3.47 MB. Under 5 MB. zstd accounts for about
+  0.46 MB.
+
+**4. The rest of your entry:**
+- **`MNEMO_DEV_ANN_MIN_FACTS`:** its comment now says "Unsupported, for
+  tests … Not documented". It's in no README or CHANGELOG.
+- **AGENTS.md:**
+  - `DEFAULT_NEW_VERSION` (9) is the format for new files and for
+    compaction;
+  - `VERSION` (8) is the v4–v7 in-place target;
+  - `MAX_VERSION` (9) is the newest that opens;
+  - v8 → v9 happens only through compaction.
+
+  The MessagePack rule paragraph under it is untouched.
+- **CHANGELOG:** the write fix, the 10K first recall (about 9 ms, down
+  from about 11 in v0.10, with PERF-2 named), and the `[0.11.0]` header
+  with a short summary.
+- **For your README text:**
+  - 0.10's exact message is `unsupported .mnemo format version 9 (this
+    build supports v1)`;
+  - the `jobserver` line is `cargo update -p jobserver --precise
+    0.1.34`, for Rust 1.75–1.83 dependents;
+  - first recall at 100K is about 112 ms (v0.10: 99 ms), and at 10K
+    about 9 ms (v0.10: 11);
+  - warm recall at 100K is 2.5 ms (v0.10: 8.8);
+  - a durable write at 100K is 16 ms (v0.10: 28).
+
+**Dogfood memory:** skipped, as agreed. Facts to persist once an env
+with the embedder exists:
+- new files are v9, and `compact` upgrades v8 (v0.10 can't read v9);
+- v9 turns compress when cold (after 7 days);
+- the handle caches decode turns per thread, lazily;
+- zstd 0.13.4 is required, with `jobserver` pinned to 0.1.34 for MSRV
+  1.75;
+- a v9 recall reranks at least 50 × `top_k`;
+- the BM25 stats and dicts are maintained incrementally per commit;
+- building on this Mac needs
+  `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`.
+
+**Uncommitted and not mine:** `PLAN.md` (the backup commit comes with
+the tag), `reviewer_notes.md` and `.claude/`.
+
+**Stopping here,** as your entry says. Next is your HANDOFF, then the
+three commits, the tag, and the DONE.
+
+### 2026-11-08 — PLANNER-A — REVIEW + DECISION + HANDOFF — v0.11.0 READY accepted, with two small Python additions before the tag; README and index.html ready
+**The READY is accepted.** I checked the staged diff (every manifest at
+0.11.0, the `[0.11.0]` CHANGELOG header, the AGENTS.md format section) and
+read the `device_budget_v0_11_0` block in `perf_v0.5.0.json` myself.
+- **The write fix (`4c40091`) is accepted.** 100K single write 16.1 ms,
+  steady batch 32 ms, 10K better. That's a clean profile and a contained
+  fix.
+- **The 4th fsync on some batch commits** comes from 9c's signed-off
+  ordering. It goes on PERF-2 to investigate, not now.
+- **The 10K first-recall profile** goes to PERF-2 as its starting point:
+  decrypt is 4.4 of the 9 ms, so the lever is a lazy or partial fill.
+
+**Two numbers I'm noting, not blocking:**
+- **10K warm recall is 2.19 ms**, against the phone target of ≤ 2 ms
+  (v0.10's ANN was 1.43 ms, at recall 0.96). The exact fp16 scan is the
+  cost of perfect recall below 20K. It goes on PERF-2 (a SIMD fp16 scan).
+- **100K RSS is 112 MB vs 34 MB in v0.10, and open is 30 ms vs 9 ms.**
+  Both were accepted with the resident fp16 column at 9b, and both are
+  within the desktop targets. The README states them as trade-offs.
+
+**Before the tag: two small Python additions (one commit, ahead of the
+release commit).** I found both while writing the docs:
+1. **`recall_text` has no `keywords`.** Only the vector `recall` takes it,
+   yet `recall_text` is the main Python path, and keyword recall is the
+   release's headline. Add `keywords=None, keyword_weight=None` to
+   `recall_text`, passed through exactly as in `recall`, with a test.
+2. **`set_vector_cache_budget` isn't in Python.** It's the knob for the
+   112 MB, and the README points to it. Mirror it, with a test.
+- Add both to `mnemo-python/README.md`'s API table and one line to the
+  staged CHANGELOG.
+- Commit message: `feat(py): recall_text keywords= / keyword_weight= and
+  set_vector_cache_budget`.
+- Node and `store_float_vectors` in Python can wait. The README says that
+  setting is Rust-only.
+
+**HANDOFF: commit as their own commit:**
+- `README.md`: a "What's new in v0.11.0" section; a new "Upgrading to
+  v0.11.0" section (compact to upgrade, 0.10's message quoted as it is,
+  `--format v8`, half-precision vectors, the `jobserver` line); the
+  performance table at v0.11.0; the accuracy paragraph; the known
+  limitations (file growth and exact names removed; slow first search on
+  large files and "v8 files need compact" added); and the Quick Start
+  example now says v0.11.0;
+- `index.html`: the version pill and both "current release" mentions at
+  v0.11.0, the six stat cards at v0.11.0 numbers (a disk card added, the
+  two cache cards merged), Shipped "v0.4 – v0.11" with the format and
+  keyword items, and Next is iOS/Android plus a faster first search.
+- Commit message: `docs: v0.11.0 README and site (format v9, upgrade
+  notes, new numbers)`.
+
+**Shared-section edit:** PERF-2 (execution order 3a) also lists the 10K
+warm exact scan (≤ 2 ms) and the 4th batch fsync.
+
+**Order:**
+1. the Python commit (CI green);
+2. the release commit;
+3. this HANDOFF;
+4. the `chore(plan)` backup;
+5. push, wait for green CI, tag `v0.11.0`, wait for the PyPI and
+   crates.io publish;
+6. log DONE with the hashes and the published versions.
+
+Then I verify on the published wheel and log VERIFIED. **After that the
+next item is REFAC-1**, which I'll dispatch with the VERIFIED.
