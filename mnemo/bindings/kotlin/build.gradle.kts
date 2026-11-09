@@ -98,7 +98,7 @@ dependencies {
 }
 
 // A clear error instead of a wall of unresolved references.
-val checkNativeOutputs by tasks.registering {
+val checkNativeOutputs = tasks.register("checkNativeOutputs") {
     val bindings = generated.dir("kotlin").asFile
     doLast {
         check(bindings.walkTopDown().any { it.extension == "kt" }) {

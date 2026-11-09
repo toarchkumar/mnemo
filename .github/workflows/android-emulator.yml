@@ -12,10 +12,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-  # TEMPORARY (MOBILE-1c bring-up, until the first green run): removed
-  # before merging, since a workflow must be on main to run by hand.
-  pull_request:
-    paths: ["mnemo/bindings/kotlin/**", ".github/workflows/android-emulator.yml"]
 
 env:
   CARGO_TERM_COLOR: always
