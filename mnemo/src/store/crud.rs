@@ -1,0 +1,444 @@
+//! Public CRUD (remember, get, delete, embedder), and the handle caches (key slots, superseded set, thread layers).
+
+use super::*;
+
+impl Mnemo {
+    /// Register a text embedder for this handle. Enables
+    /// [`Mnemo::remember_text`] and the text-side `RecallRequest`
+    /// convenience path. Does two checks before storing the embedder:
+    ///
+    /// 1. **Dimension check.** The embedder's `identity().dimensions`
+    ///    must equal [`Mnemo::dimensions`] (the width this database
+    ///    was created with). Mismatch returns
+    ///    [`MnemoError::DimensionMismatch`].
+    /// 2. **Manifest identity check.** If the scaffold / onboarding
+    ///    manifest already records an embedder — the canonical shape
+    ///    is `metadata.embedder = { name, dimensions, normalize }`,
+    ///    with the legacy flat `embedder_name` / `embedder_dimensions`
+    ///    / `embedder_normalize` keys accepted as an alias — the new
+    ///    embedder's identity must match exactly. A different name —
+    ///    even at the same dimensions — returns
+    ///    [`MnemoError::Invalid`] with
+    ///    [`EmbedderIdentity::MISMATCH_MSG`] in the message. If the
+    ///    manifest has no embedder metadata yet, this call upserts
+    ///    the nested object into the first onboarding/manifest memory
+    ///    (write + flush so a subsequent reopen sees the identity).
+    ///
+    /// **Read-only handles.** `set_embedder` on an `open_read_only`
+    /// handle performs both checks and adopts the embedder in memory;
+    /// it never writes. Readers (CLI `--text`, agent-side `recall_text`)
+    /// can therefore use the text path next to a writer that holds
+    /// the exclusive lock.
+    ///
+    /// On both failure paths the handle's embedder slot is left
+    /// unchanged. On success the embedder is wrapped in an `Arc<dyn
+    /// Embedder>` and consulted by every text-side call made through
+    /// this handle. The slot is per-handle and not persisted — a
+    /// fresh open must re-register (same identity, so the manifest
+    /// check round-trips cleanly).
+    pub fn set_embedder<E: Embedder + 'static>(&mut self, embedder: E) -> Result<()> {
+        let identity = embedder.identity();
+        if identity.dimensions != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: identity.dimensions,
+            });
+        }
+
+        // Find a scaffold/onboarding manifest to inspect (or upsert
+        // into). `about()` already filters + sorts the onboarding set.
+        let onboarding = self.about()?;
+        let mut upsert_target: Option<usize> = None;
+        for (i, m) in onboarding.iter().enumerate() {
+            if let Some(saw) = embed::read_identity_from_metadata(&m.metadata) {
+                if saw != identity {
+                    return Err(embed::identity_mismatch_err(&saw, &identity));
+                }
+                // Match — nothing to persist; adopt + done. Works the
+                // same on read-only and read-write handles.
+                self.embedder = Some(std::sync::Arc::new(embedder));
+                return Ok(());
+            }
+            if upsert_target.is_none() {
+                upsert_target = Some(i);
+            }
+        }
+
+        // No existing identity on the manifest. On a read-write handle
+        // upsert into the first onboarding memory so later opens see
+        // it; on a read-only handle skip the write (readers must not
+        // mutate the file), but still adopt the embedder in memory.
+        if !self.read_only {
+            if let Some(idx) = upsert_target {
+                let mut m = onboarding[idx].clone();
+                embed::write_identity_into_metadata(&mut m.metadata, &identity);
+                // Reuse the memory's existing id so this is an in-place
+                // update of the scaffold manifest, not a new entry.
+                self.put(m)?;
+                self.flush()?;
+            }
+        }
+
+        self.embedder = Some(std::sync::Arc::new(embedder));
+        Ok(())
+    }
+
+    /// Borrow the currently-registered embedder, if any. Returns
+    /// `None` when no embedder has been set via
+    /// [`Mnemo::set_embedder`]. Bindings use this to drive their own
+    /// text-side convenience methods without duplicating the identity
+    /// check.
+    pub fn embedder(&self) -> Option<&dyn Embedder> {
+        self.embedder.as_deref()
+    }
+
+    /// Shared handle to the registered embedder, cloned so the caller
+    /// can drop the borrow on this `Mnemo` before invoking `embed()`.
+    /// FIX-1 / PY-1 (R-001.11): the Python binding needs this so an
+    /// embedder callback that re-enters `Mnemo` (e.g. a Python
+    /// embedder that calls `db.dimensions()` or `db.cache_get(...)`)
+    /// doesn't hit PyO3's "Already borrowed" — we clone the Arc under
+    /// a short `&self` borrow, release that borrow, then invoke
+    /// `embed()` with no `&mut Mnemo` held.
+    pub fn embedder_arc(&self) -> Option<std::sync::Arc<dyn Embedder>> {
+        self.embedder.clone()
+    }
+
+    /// Embed `content` with the registered embedder and `remember` the
+    /// result. Returns the new memory's ULID. Convenience path for
+    /// callers who have a string, want it stored, and don't need any
+    /// of the per-memory options [`Memory`] exposes (agent, importance,
+    /// metadata, ttl, scope) — build a [`Memory`] by hand and call
+    /// [`Mnemo::remember`] for those.
+    ///
+    /// Fails with [`MnemoError::Invalid`] if no embedder has been
+    /// registered on this handle (call [`Mnemo::set_embedder`] first);
+    /// with [`MnemoError::DimensionMismatch`] if the embedder returned
+    /// the wrong width for this database.
+    pub fn remember_text(&mut self, content: &str, memory_type: MemoryType) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            MnemoError::Invalid(
+                "no embedder registered on this handle; call set_embedder first".into(),
+            )
+        })?;
+        let mut vectors = embedder.embed(&[content])?;
+        let vector = vectors.pop().ok_or_else(|| {
+            MnemoError::Invalid("embedder returned no vector for the input text".into())
+        })?;
+        if vector.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: vector.len(),
+            });
+        }
+        let memory = Memory::new(content.to_string(), memory_type, vector);
+        self.remember(memory)
+    }
+
+    /// Store a memory. Returns its ULID. If the memory's ID is nil a fresh
+    /// one is assigned; an existing ID overwrites in place.
+    pub fn remember(&mut self, memory: Memory) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        self.put(memory)
+    }
+
+    /// Fetch a memory by ID.
+    pub fn get(&mut self, id: &Ulid) -> Result<Memory> {
+        let idx = self
+            .index
+            .get(id.0, &self.catalog)
+            .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
+        let entry = self.catalog[idx].clone();
+        if entry.deleted {
+            return Err(MnemoError::NotFound(id.to_string()));
+        }
+        self.read_memory(&entry)
+    }
+
+    /// Soft-delete a memory (tombstoned; space reclaimed by `compact`).
+    pub fn delete(&mut self, id: &Ulid) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let idx = self
+            .index
+            .get(id.0, &self.catalog)
+            .ok_or_else(|| MnemoError::NotFound(id.to_string()))?;
+        // R-004.2 / 12.1: with the handle caches built, read the record
+        // being deleted (one decrypt) so the key slot, superseded set and
+        // thread layers drop exactly what it contributed.
+        let entry = self.catalog[idx].clone();
+        if self.layers.is_some() && !entry.deleted {
+            let old = self.read_memory(&entry)?;
+            self.note_removed(&old)?;
+        }
+        if !self.catalog[idx].deleted {
+            self.catalog[idx].deleted = true;
+            self.dirty_catalog = true;
+            self.touch(idx);
+            // FMT-9f: drop its document from the stats in place.
+            if let (Some(stats), Some(r)) = (self.bm25.stats.as_mut(), entry.v9) {
+                if r.doc != 0 {
+                    stats.remove(r.doc);
+                }
+            }
+            if self.is_v9() {
+                self.kill_record(idx, &entry);
+                self.kill_vector(idx, &entry);
+            } else {
+                self.release_pages(entry.start_page, entry.page_count as u64);
+            }
+        }
+        if let Some(ann) = &mut self.ann {
+            if ann.contains(id.0) {
+                ann.remove(id.0);
+                self.dirty_index = true;
+                self.index_persist.changes += 1;
+            }
+        }
+        // FIX-1 R-001.8 part 2: we can't tell whether this delete
+        // removed the last memory of its agent without a decrypt
+        // (the catalog entry doesn't carry `agent_id` in format v8),
+        // so just invalidate the lazy set. The next `stats()` call
+        // rebuilds from live memories.
+        self.agent_set = None;
+        // Phase 12.1: delete of a keyed record removes it from the slot,
+        // and delete of a superseded record frees a `history` entry. When
+        // the caches are built, `note_removed` above did that exactly;
+        // otherwise they're built from scratch on first use anyway.
+        Ok(())
+    }
+
+    /// Keep the handle caches (12.1 key slots, superseded set, R-004.2
+    /// layers) current after `put` writes `m`. No-op until they're built.
+    /// FMT-9e: a cold thread is warmed first, so its layer entry is whole.
+    pub(super) fn note_added(&mut self, m: &Memory) -> Result<()> {
+        if let Some(thread) = meta_str(m, MNEMO_META_THREAD) {
+            self.warm_thread(thread)?;
+        }
+        let id = m.id.0;
+        if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
+            if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+                sup.insert(id);
+            } else if let Some(Value::String(k)) = m.metadata.get(MNEMO_META_KEY) {
+                keys.insert(Self::key_slot_for(m, k), id);
+            }
+        }
+        if let Some(layers) = self.layers.as_mut() {
+            layers.add(m);
+        }
+        Ok(())
+    }
+
+    /// Undo [`Mnemo::note_added`] for the stored version of a record that's
+    /// about to be overwritten or deleted.
+    pub(super) fn note_removed(&mut self, m: &Memory) -> Result<()> {
+        if let Some(thread) = meta_str(m, MNEMO_META_THREAD) {
+            self.warm_thread(thread)?;
+        }
+        let id = m.id.0;
+        if let (Some(keys), Some(sup)) = (self.key_index.as_mut(), self.superseded.as_mut()) {
+            sup.remove(&id);
+            if let Some(Value::String(k)) = m.metadata.get(MNEMO_META_KEY) {
+                let slot = Self::key_slot_for(m, k);
+                if keys.get(&slot) == Some(&id) {
+                    keys.remove(&slot);
+                }
+            }
+        }
+        if let Some(layers) = self.layers.as_mut() {
+            layers.remove(m);
+        }
+        Ok(())
+    }
+
+    /// FMT-9e: decode `thread`'s cold turn records (see
+    /// [`LayerCache::cold_turns`]) into the layer cache. Every record in
+    /// the thread's hash bucket is decoded and filed under its own thread,
+    /// so a hash collision just warms both threads. A no-op when the
+    /// caches aren't built or the bucket is already warm.
+    pub(super) fn warm_thread(&mut self, thread: &str) -> Result<()> {
+        self.warm_thread_decoded(thread).map(|_| ())
+    }
+
+    /// [`Mnemo::warm_thread`], returning the records it decoded (without
+    /// vectors), so a caller about to read the thread decodes each once.
+    pub(super) fn warm_thread_decoded(
+        &mut self,
+        thread: &str,
+    ) -> Result<std::collections::HashMap<u128, Memory>> {
+        let mut decoded = std::collections::HashMap::new();
+        let h = fnv1a32(&[thread.as_bytes()]);
+        let Some(ids) = self.layers.as_mut().and_then(|l| l.cold_turns.remove(&h)) else {
+            return Ok(decoded);
+        };
+        for e in self.live_entries(ids) {
+            let m = self.read_memory_meta(&e)?;
+            if let Some(layers) = self.layers.as_mut() {
+                layers.add(&m);
+            }
+            decoded.insert(e.id, m);
+        }
+        Ok(decoded)
+    }
+
+    /// Decode a record's memory without its vector or live access stats:
+    /// what the handle caches need (metadata, scope, agent), without the
+    /// v9 vector-column read [`Mnemo::read_memory`] adds.
+    pub(super) fn read_memory_meta(&mut self, e: &CatalogEntry) -> Result<Memory> {
+        let bytes = self.read_record(e)?;
+        self.decode_memory(&bytes)
+    }
+
+    /// The live catalog entries for `ids` (ids that are gone are skipped).
+    pub(super) fn live_entries(&self, ids: impl IntoIterator<Item = u128>) -> Vec<CatalogEntry> {
+        ids.into_iter()
+            .filter_map(|id| {
+                self.index
+                    .get(id, &self.catalog)
+                    .map(|i| self.catalog[i].clone())
+            })
+            .filter(|e| !e.deleted)
+            .collect()
+    }
+
+    /// Catalog entries of the essence items, from the handle caches.
+    pub(super) fn essence_entries(&mut self) -> Result<Vec<CatalogEntry>> {
+        self.ensure_key_caches()?;
+        let ids: Vec<u128> = self
+            .layers
+            .as_ref()
+            .map(|l| l.essence.iter().copied().collect())
+            .unwrap_or_default();
+        Ok(self.live_entries(ids))
+    }
+
+    /// Catalog entries of every record filed under `thread`, from the
+    /// handle caches.
+    pub(super) fn thread_entries(&mut self, thread: &str) -> Result<Vec<CatalogEntry>> {
+        Ok(self.thread_entries_decoded(thread)?.0)
+    }
+
+    /// [`Mnemo::thread_entries`], plus the records that warming a cold
+    /// thread just decoded (see [`Mnemo::warm_thread_decoded`]).
+    pub(super) fn thread_entries_decoded(
+        &mut self,
+        thread: &str,
+    ) -> Result<(Vec<CatalogEntry>, std::collections::HashMap<u128, Memory>)> {
+        self.ensure_key_caches()?;
+        let decoded = self.warm_thread_decoded(thread)?;
+        let ids: Vec<u128> = self
+            .layers
+            .as_ref()
+            .and_then(|l| l.threads.get(thread))
+            .map(|tc| tc.records.iter().copied().collect())
+            .unwrap_or_default();
+        Ok((self.live_entries(ids), decoded))
+    }
+
+    // --- Phase 12.1: edit in place + keyed supersession -----------------
+
+    /// Scope-aware key-slot identifier for `memory` and a caller key.
+    ///
+    /// * [`Scope::Private`] → owned by the memory's `agent_id`.
+    /// * [`Scope::Shared`]  → one slot across the whole file.
+    pub(super) fn key_slot_for(memory: &Memory, key: &str) -> crate::store::KeySlot {
+        let scope_owner = match memory.scope {
+            Scope::Private => Some(memory.agent_id.clone()),
+            Scope::Shared => None,
+        };
+        crate::store::KeySlot {
+            scope_owner,
+            key: key.to_string(),
+        }
+    }
+
+    /// The handle's one lazy scan: builds the 12.1 `key_index` +
+    /// `superseded` caches and the R-004.2 layer cache (essence ids,
+    /// onboarding ids, threads, links) from live records, and prunes
+    /// non-fact ids from a loaded ANN index (files written before v0.10.0
+    /// indexed every kind). Decrypts every live record once per handle;
+    /// `put` and `delete` keep the result current after that.
+    pub(super) fn ensure_key_caches(&mut self) -> Result<()> {
+        if self.key_index.is_some() && self.superseded.is_some() && self.layers.is_some() {
+            return Ok(());
+        }
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .cloned()
+            .collect();
+        let mut keys: std::collections::HashMap<crate::store::KeySlot, u128> =
+            std::collections::HashMap::new();
+        let mut superseded: std::collections::HashSet<u128> = std::collections::HashSet::new();
+        let mut layers = LayerCache::default();
+        let mut non_facts: Vec<u128> = Vec::new();
+        for e in &entries {
+            // FMT-9e: a v9 turn row with no key slot and no supersession
+            // contributes only to its thread's layer entry, so it's left
+            // undecoded in the thread's cold bucket (most of a
+            // thread-heavy file). Its row says it isn't a fact.
+            if let Some(r) = e.v9 {
+                if r.kind == ROW_KIND_TURN
+                    && r.thread_hash != 0
+                    && r.key_hash == 0
+                    && r.flags & ROW_SUPERSEDED == 0
+                {
+                    layers
+                        .cold_turns
+                        .entry(r.thread_hash)
+                        .or_default()
+                        .push(e.id);
+                    non_facts.push(e.id);
+                    continue;
+                }
+            }
+            let m = self.read_memory_meta(e)?;
+            layers.add(&m);
+            if !is_ann_kind(&m) {
+                non_facts.push(e.id);
+            }
+            if m.metadata.get(MNEMO_META_SUPERSEDED_BY).is_some() {
+                superseded.insert(e.id);
+                continue;
+            }
+            if let Some(Value::String(k)) = m.metadata.get(MNEMO_META_KEY) {
+                let slot = Self::key_slot_for(&m, k);
+                // Catalog order is insertion order; a later live record
+                // with the same slot would only exist if a prior build
+                // of this code allowed it. Keep the later id (newer
+                // ULID), in case of a tie.
+                keys.entry(slot)
+                    .and_modify(|cur| {
+                        if *cur < e.id {
+                            *cur = e.id;
+                        }
+                    })
+                    .or_insert(e.id);
+            }
+        }
+        self.key_index = Some(keys);
+        self.superseded = Some(superseded);
+        self.layers = Some(layers);
+        if let Some(ann) = &mut self.ann {
+            let mut pruned = 0usize;
+            for id in non_facts {
+                if ann.contains(id) {
+                    ann.remove(id);
+                    pruned += 1;
+                }
+            }
+            if pruned > 0 {
+                self.dirty_index = true;
+                self.index_persist.changes += pruned;
+            }
+        }
+        Ok(())
+    }
+}
