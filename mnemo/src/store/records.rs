@@ -2,6 +2,489 @@
 
 use super::*;
 
+/// FMT-9b.2: `RowV9::rec_slot` of a record too big for a packed page; it
+/// owns `page_count` whole pages from `start_page`, as in v8.
+pub(super) const REC_SPAN: u16 = u16::MAX;
+/// FMT-9b.2: `kind` byte of a packed record page.
+pub(super) const PAGE_KIND_RECORD: u8 = 1;
+/// FMT-9b.2: bytes of a packed record page available to slots and data.
+pub(super) const REC_PAGE_CAP: usize = PAYLOAD - veccol::PAGE_HEADER;
+/// FMT-9b.2: bytes per slot-directory entry (offset u16, length u16).
+pub(super) const REC_SLOT_BYTES: usize = 4;
+/// FMT-9b.2: thread-archive chunk size on v9. A chunk plus its record's
+/// metadata (~200 B) then fits one packed page (the FMT-9a measurement:
+/// 8 KB chunks spill into a second page almost every time, 300 MB vs
+/// 212 MB for the 50K-turn profile).
+pub(super) const V9_TURN_CHUNK_BYTES: usize = 7_900;
+
+/// FMT-9e: the zstd frame magic. A v9 record body is either a MessagePack
+/// `Memory` (which always starts with an array marker, `0x9_` or
+/// `0xdc`/`0xdd`) or, for a compressed thread turn, a zstd frame, so the
+/// first four bytes tell them apart without a row flag.
+pub(super) const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+/// FMT-9e: zstd level for turn records (the FMT-9a measurement: 2.15× on
+/// this repo's Markdown at level 3).
+pub(super) const TURN_ZSTD_LEVEL: i32 = 3;
+/// FMT-9e: turn records shorter than this stay uncompressed (a frame's
+/// overhead eats the gain on a one-line turn).
+pub(super) const TURN_ZSTD_MIN_BYTES: usize = 256;
+/// FMT-9e: the largest decompressed record accepted. A turn record is a
+/// chunk of at most [`V9_TURN_CHUNK_BYTES`] plus its metadata, so this is
+/// a generous bound, not a size limit anyone meets; it stops a damaged
+/// (but authenticated) frame from asking for an unbounded allocation.
+pub(super) const RECORD_PLAIN_MAX: u64 = 64 << 20;
+
+/// FMT-9e: at most this many aged turns are compressed per commit, so a
+/// commit's extra work stays bounded (like the vacuum).
+pub(super) const COLD_TURNS_PER_COMMIT: usize = 256;
+
+/// FMT-9e: is turn-record compression on? Always, unless the dev switch
+/// `MNEMO_DEV_TURN_ZSTD=0` turns it off for an A/B measurement (read once
+/// per process). Reading never depends on it.
+pub(super) fn turn_zstd_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("MNEMO_DEV_TURN_ZSTD").as_deref() != Ok("0"))
+}
+
+/// FMT-9e: compress a v9 thread-turn record body, before the page
+/// encryption. Each record is its own zstd frame with no dictionary and no
+/// compression history from any other record, so how densely one record
+/// compresses says nothing about another's content (design note (d)).
+/// Kept only when it saves at least an eighth; otherwise the plain body is
+/// returned.
+pub(super) fn compress_turn_record(bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.len() < TURN_ZSTD_MIN_BYTES || !turn_zstd_enabled() {
+        return bytes;
+    }
+    let c = ZSTD_COMPRESSOR.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = zstd::bulk::Compressor::new(TURN_ZSTD_LEVEL).ok();
+        }
+        let out = slot.as_mut().and_then(|z| z.compress(&bytes).ok());
+        if out.is_none() {
+            // Never reuse a context a call failed on.
+            *slot = None;
+        }
+        out
+    });
+    match c {
+        Some(c) if c.len() * 8 <= bytes.len() * 7 => c,
+        _ => bytes,
+    }
+}
+
+// FMT-9e: one zstd context of each kind per thread, made on first use and
+// reused for every record (a fresh context per record made reads about 15%
+// slower). Only the one-shot (`bulk`) calls use them, and each call starts
+// a new frame from a reset session, so no state crosses records; a context
+// a call failed on is dropped, not reused (cf. RUSTSEC-2026-0391, which
+// affected the stream API's `with_context`; zstd 0.13.4 carries its fix).
+// One-shot calls size their tables to the record, so a context stays small.
+thread_local! {
+    static ZSTD_COMPRESSOR: std::cell::RefCell<Option<zstd::bulk::Compressor<'static>>> =
+        const { std::cell::RefCell::new(None) };
+    static ZSTD_DECOMPRESSOR: std::cell::RefCell<Option<zstd::bulk::Decompressor<'static>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// FMT-9e: the plain body of a v9 record: decompressed when it's a zstd
+/// frame, borrowed as is otherwise. The frame must state its content size,
+/// and that size must be at most [`RECORD_PLAIN_MAX`].
+pub(crate) fn plain_record(bytes: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    if !bytes.starts_with(&ZSTD_MAGIC) {
+        return Ok(std::borrow::Cow::Borrowed(bytes));
+    }
+    let bad = |why: &str| MnemoError::Invalid(format!("compressed record: {why}"));
+    let size = match zstd::zstd_safe::get_frame_content_size(bytes) {
+        Ok(Some(n)) if n <= RECORD_PLAIN_MAX => n as usize,
+        Ok(Some(_)) => return Err(bad("too large")),
+        _ => return Err(bad("no content size")),
+    };
+    let out = ZSTD_DECOMPRESSOR.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(zstd::bulk::Decompressor::new().map_err(|e| bad(&e.to_string()))?);
+        }
+        let out = match slot.as_mut() {
+            Some(z) => z.decompress(bytes, size).map_err(|e| bad(&e.to_string())),
+            None => Err(bad("no context")),
+        };
+        if out.is_err() {
+            // Never reuse a context a call failed on.
+            *slot = None;
+        }
+        out
+    })?;
+    if out.len() != size {
+        return Err(bad("length mismatch"));
+    }
+    Ok(std::borrow::Cow::Owned(out))
+}
+
+/// FMT-9c.2: pick the sparse pages (`(page, live rows)`, in page order) one
+/// commit's vacuum folds in: at most [`VACUUM_PAGES_PER_COMMIT`] pages and
+/// [`VACUUM_MAX_ROWS`] rows.
+pub(super) fn vacuum_pick(sparse: Vec<(u64, usize)>) -> Vec<u64> {
+    let mut rows = 0usize;
+    let mut out = Vec::new();
+    for (p, n) in sparse {
+        if out.len() == VACUUM_PAGES_PER_COMMIT {
+            break;
+        }
+        if rows + n > VACUUM_MAX_ROWS {
+            continue;
+        }
+        rows += n;
+        out.push(p);
+    }
+    out
+}
+
+/// FMT-9b.2: encode a packed record page: the header, the slot directory,
+/// then the records in slot order.
+pub(super) fn encode_record_page(gen: u64, recs: &[&[u8]]) -> Vec<u8> {
+    let dir = recs.len() * REC_SLOT_BYTES;
+    let data: usize = recs.iter().map(|r| r.len()).sum();
+    let mut out = Vec::with_capacity(veccol::PAGE_HEADER + dir + data);
+    out.extend_from_slice(&[PAGE_KIND_RECORD, 0, 0, 0]);
+    out.extend_from_slice(&(recs.len() as u16).to_le_bytes());
+    out.extend_from_slice(&((dir + data) as u16).to_le_bytes());
+    out.extend_from_slice(&gen.to_le_bytes());
+    let mut off = veccol::PAGE_HEADER + dir;
+    for r in recs {
+        out.extend_from_slice(&(off as u16).to_le_bytes());
+        out.extend_from_slice(&(r.len() as u16).to_le_bytes());
+        off += r.len();
+    }
+    for r in recs {
+        out.extend_from_slice(r);
+    }
+    out
+}
+
+/// FMT-9b.2: the bytes of slot `slot` of a packed record page.
+pub(super) fn record_slot(page: &[u8], slot: u16) -> Result<Vec<u8>> {
+    let bad = || MnemoError::Invalid("malformed record page".into());
+    if page.len() < veccol::PAGE_HEADER || page[0] != PAGE_KIND_RECORD {
+        return Err(bad());
+    }
+    let n = u16::from_le_bytes([page[4], page[5]]);
+    if slot >= n {
+        return Err(bad());
+    }
+    let d = veccol::PAGE_HEADER + slot as usize * REC_SLOT_BYTES;
+    let dir = page.get(d..d + REC_SLOT_BYTES).ok_or_else(bad)?;
+    let off = u16::from_le_bytes([dir[0], dir[1]]) as usize;
+    let len = u16::from_le_bytes([dir[2], dir[3]]) as usize;
+    page.get(off..off + len).map(|b| b.to_vec()).ok_or_else(bad)
+}
+
+/// FMT-9d: the BM25 manifest run: tokenizer, the next document id, and the
+/// segment runs (oldest first).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub(super) struct Bm25Manifest {
+    pub(super) tokenizer: u8,
+    pub(super) next_doc: u32,
+    pub(super) segments: Vec<(u64, u64, u64, u64)>,
+    /// Documents each segment was written with (live or not since).
+    #[serde(default)]
+    pub(super) seg_docs: Vec<u32>,
+}
+
+impl Default for Bm25Manifest {
+    fn default() -> Self {
+        Bm25Manifest {
+            tokenizer: text::TOKENIZER_V1,
+            next_doc: 1,
+            segments: Vec::new(),
+            seg_docs: Vec::new(),
+        }
+    }
+}
+
+/// FMT-9d: live documents: `doc -> (row, length)`, their count and mean
+/// length. Rebuilt from the rows after any write.
+#[derive(Debug, Default)]
+pub(super) struct DocStats {
+    pub(super) docs: std::collections::HashMap<u32, (usize, u16)>,
+    pub(super) avgdl: f32,
+    /// FMT-9f: the sum of the live documents' lengths, so `put` and
+    /// `delete` keep `avgdl` current without a rescan of the rows.
+    pub(super) total: u64,
+}
+
+impl DocStats {
+    /// FMT-9f: drop document `doc` (if live) and keep `avgdl` current.
+    pub(super) fn remove(&mut self, doc: u32) {
+        if let Some((_, len)) = self.docs.remove(&doc) {
+            self.total = self.total.saturating_sub(len as u64);
+            self.refresh();
+        }
+    }
+
+    /// FMT-9f: add document `doc` at catalog row `row`.
+    pub(super) fn insert(&mut self, doc: u32, row: usize, len: u16) {
+        if let Some((_, old)) = self.docs.insert(doc, (row, len)) {
+            self.total = self.total.saturating_sub(old as u64);
+        }
+        self.total += len as u64;
+        self.refresh();
+    }
+
+    pub(super) fn refresh(&mut self) {
+        self.avgdl = if self.docs.is_empty() {
+            1.0
+        } else {
+            self.total as f32 / self.docs.len() as f32
+        };
+    }
+}
+
+/// FMT-9d: the handle's BM25 state.
+#[derive(Debug, Default)]
+pub(super) struct Bm25State {
+    pub(super) manifest: Bm25Manifest,
+    /// Per segment, its dict, once loaded (resident; postings stay on disk).
+    pub(super) dicts: Option<Vec<Vec<text::DictEntry>>>,
+    /// Documents written since the last commit, which writes them as a
+    /// new segment.
+    pub(super) pending: Vec<(u32, Vec<(String, u8)>)>,
+    pub(super) stats: Option<DocStats>,
+    /// Documents in the segment the current flush is merging.
+    pub(super) merged_docs: u32,
+}
+
+/// FMT-9d: a manifest's segment runs and their document counts.
+pub(super) type Bm25Segments = (Vec<(u64, u64, u64, u64)>, Vec<u32>);
+
+/// FMT-9d: segments past this many are merged into one by the next commit.
+pub(super) const BM25_MAX_SEGMENTS: usize = 8;
+
+/// FMT-9d: is this row keyword-indexed? Facts and onboarding records;
+/// thread turns, essence items and links stay out (FMT-9a: turn postings
+/// would be 3× all the fact data).
+pub(super) fn bm25_kind(kind: u8) -> bool {
+    kind == ROW_KIND_FACT || kind == ROW_KIND_ONBOARDING
+}
+
+/// FMT-9d: read `len` bytes at byte `off` of a page run.
+pub(super) fn read_run_range(
+    pager: &mut Pager,
+    ptr: RunPtr,
+    off: u64,
+    len: u64,
+) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(len as usize);
+    if len == 0 {
+        return Ok(out);
+    }
+    if off + len > ptr.len {
+        return Err(MnemoError::Invalid("BM25 range past its run".into()));
+    }
+    let p = PAYLOAD as u64;
+    let (first, last) = (off / p, (off + len - 1) / p);
+    for i in first..=last {
+        let page = pager.read_page(ptr.start + i, ptr.gen)?;
+        let lo = if i == first { (off % p) as usize } else { 0 };
+        let hi = if i == last {
+            ((off + len - 1) % p) as usize + 1
+        } else {
+            PAYLOAD
+        };
+        out.extend_from_slice(&page[lo..hi]);
+    }
+    Ok(out)
+}
+
+/// FMT-9d: a segment's dict (the `[u32 len][dict]` head of its run).
+pub(super) fn load_segment_dict(pager: &mut Pager, ptr: RunPtr) -> Result<Vec<text::DictEntry>> {
+    let head = read_run_range(pager, ptr, 0, 4)?;
+    let n = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as u64;
+    let bytes = read_run_range(pager, ptr, 4, n)?;
+    rmp_serde::from_slice(&bytes).map_err(|e| MnemoError::Serialize(e.to_string()))
+}
+
+/// FMT-9d: a term's postings in one segment (empty when absent).
+pub(super) fn segment_postings(
+    pager: &mut Pager,
+    ptr: RunPtr,
+    dict: &[text::DictEntry],
+    term: &str,
+) -> Result<Vec<(u32, u8)>> {
+    let Ok(i) = dict.binary_search_by(|e| e.term.as_str().cmp(term)) else {
+        return Ok(Vec::new());
+    };
+    let head = read_run_range(pager, ptr, 0, 4)?;
+    let base = 4 + u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as u64;
+    let e = &dict[i];
+    let bytes = read_run_range(pager, ptr, base + e.off as u64, e.len as u64)?;
+    text::decode_postings(&bytes)
+}
+
+/// FMT-9d: load the BM25 manifest (an empty pointer yields a fresh one).
+pub(super) fn load_bm25_manifest(pager: &mut Pager, ptr: RunPtr) -> Result<Bm25Manifest> {
+    if ptr.is_empty() {
+        return Ok(Bm25Manifest::default());
+    }
+    let buf = read_run_bytes(pager, ptr.start, ptr.pages, ptr.len, ptr.gen)?;
+    let m: Bm25Manifest =
+        rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+    if m.tokenizer != text::TOKENIZER_V1 {
+        return Err(MnemoError::Invalid(format!(
+            "BM25 tokenizer {} is newer than this build understands",
+            m.tokenizer
+        )));
+    }
+    Ok(m)
+}
+
+/// FMT-9b.2: the handle's view of packed record pages.
+#[derive(Debug, Default)]
+pub(super) struct RecPages {
+    /// Rows whose records aren't on a page yet; the next flush packs them.
+    pub(super) hot: std::collections::HashMap<usize, Vec<u8>>,
+    /// Rows to pack, in order (may repeat; the flush skips repeats).
+    pub(super) pending: Vec<usize>,
+    /// Packed page → the live rows on it.
+    pub(super) page_rows: std::collections::HashMap<u64, Vec<usize>>,
+}
+
+impl RecPages {
+    pub(super) fn from_catalog(catalog: &[CatalogEntry]) -> RecPages {
+        let mut recs = RecPages::default();
+        for (i, e) in catalog.iter().enumerate() {
+            if e.deleted || e.start_page == 0 {
+                continue;
+            }
+            if let Some(r) = e.v9 {
+                if r.rec_slot != REC_SPAN {
+                    recs.page_rows.entry(e.start_page).or_default().push(i);
+                }
+            }
+        }
+        recs
+    }
+}
+
+pub(super) const ROW_SUPERSEDED: u8 = 1;
+pub(super) const ROW_HAS_TTL: u8 = 2;
+pub(super) const ROW_SHARED: u8 = 4;
+/// FMT-9e: a thread turn whose record compression is settled: stored as
+/// a zstd frame, or tried and not worth it. Unsettled turns are plain and
+/// get compressed once they're older than the handle's
+/// `turn_compress_after` (see [`Mnemo::set_turn_compress_after`]).
+pub(super) const ROW_SETTLED: u8 = 8;
+pub(super) const ROW_KIND_FACT: u8 = 0;
+pub(super) const ROW_KIND_TURN: u8 = 1;
+pub(super) const ROW_KIND_ESSENCE: u8 = 2;
+pub(super) const ROW_KIND_THREAD_LINK: u8 = 3;
+pub(super) const ROW_KIND_ONBOARDING: u8 = 4;
+
+/// 32-bit FNV-1a over `parts` (separated), never `0` ("none" in a row).
+pub(super) fn fnv1a32(parts: &[&[u8]]) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for (i, p) in parts.iter().enumerate() {
+        if i > 0 {
+            h ^= 0xff;
+            h = h.wrapping_mul(0x0100_0193);
+        }
+        for &b in p.iter() {
+            h ^= b as u32;
+            h = h.wrapping_mul(0x0100_0193);
+        }
+    }
+    h.max(1)
+}
+
+pub(super) fn memory_type_code(t: MemoryType) -> u8 {
+    match t {
+        MemoryType::Episodic => 0,
+        MemoryType::Semantic => 1,
+        MemoryType::Procedural => 2,
+        MemoryType::Working => 3,
+    }
+}
+
+/// FMT-9b: a memory's row tags and scoring inputs (the vector location is
+/// filled in when its column entry is written).
+pub(super) fn row_tags(m: &Memory) -> RowV9 {
+    let kind = match meta_str(m, MNEMO_META_KIND) {
+        Some(MNEMO_META_KIND_TURN) => ROW_KIND_TURN,
+        Some(MNEMO_META_KIND_ESSENCE) => ROW_KIND_ESSENCE,
+        Some(MNEMO_META_KIND_THREAD_LINK) => ROW_KIND_THREAD_LINK,
+        _ if is_onboarding(m) => ROW_KIND_ONBOARDING,
+        _ => ROW_KIND_FACT,
+    };
+    let mut flags = 0u8;
+    if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+        flags |= ROW_SUPERSEDED;
+    }
+    if m.ttl_secs.is_some() {
+        flags |= ROW_HAS_TTL;
+    }
+    if m.scope == Scope::Shared {
+        flags |= ROW_SHARED;
+    }
+    let key_hash = meta_str(m, MNEMO_META_KEY).map_or(0, |k| {
+        let slot = Mnemo::key_slot_for(m, k);
+        fnv1a32(&[
+            slot.scope_owner.as_deref().unwrap_or("").as_bytes(),
+            slot.key.as_bytes(),
+        ])
+    });
+    RowV9 {
+        kind,
+        flags,
+        memory_type: memory_type_code(m.memory_type),
+        thread_hash: meta_str(m, MNEMO_META_THREAD).map_or(0, |t| fnv1a32(&[t.as_bytes()])),
+        key_hash,
+        agent_hash: fnv1a32(&[m.agent_id.as_bytes()]),
+        created_at: m.created_at,
+        importance: m.importance,
+        expires_at: m.ttl_secs.map_or(0, |t| m.created_at.saturating_add(t)),
+        ..RowV9::default()
+    }
+}
+
+/// FMT-9b: the handle's view of the fp16 vector column.
+#[derive(Debug, Default)]
+pub(super) struct VecColumn {
+    /// Resident fp16 values by catalog row (`rows × dims`), once loaded.
+    pub(super) data: Vec<u16>,
+    pub(super) norms: Vec<f32>,
+    /// Which rows of `data` are filled. The column is allocated zeroed for
+    /// every row (the OS maps those pages lazily) and filled a vector page
+    /// at a time as recall touches rows, so the first recall reads only the
+    /// pages its candidates live on.
+    pub(super) have: Vec<bool>,
+    pub(super) resident: bool,
+    /// Rows whose entries aren't on a page yet; the next flush writes them.
+    /// A row here has no page entry (its old one was released).
+    pub(super) hot: std::collections::HashMap<usize, (Vec<u16>, f32)>,
+    /// Rows to write, in order (may repeat; the flush skips repeats).
+    pub(super) pending: Vec<usize>,
+    /// Vector page → the live rows whose entries it holds.
+    pub(super) page_rows: std::collections::HashMap<u64, Vec<usize>>,
+}
+
+impl VecColumn {
+    pub(super) fn from_catalog(catalog: &[CatalogEntry]) -> VecColumn {
+        let mut col = VecColumn::default();
+        for (i, e) in catalog.iter().enumerate() {
+            if e.deleted {
+                continue;
+            }
+            if let Some(r) = e.v9 {
+                if r.vec_page != 0 {
+                    col.page_rows.entry(r.vec_page).or_default().push(i);
+                }
+            }
+        }
+        col
+    }
+}
+
 impl Mnemo {
     /// FMT-9: true for a v9 file (page reuse, generations in the AAD).
     pub(super) fn is_v9(&self) -> bool {

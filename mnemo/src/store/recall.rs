@@ -2,6 +2,36 @@
 
 use super::*;
 
+/// The thread a recall filter pins with `_mnemo.thread` equality, if any.
+fn filter_thread_pin(f: &Filter) -> Option<&str> {
+    f.terms.iter().find_map(|t| match t {
+        FilterTerm::Eq(k, Value::String(s)) if k == MNEMO_META_THREAD => Some(s.as_str()),
+        _ => None,
+    })
+}
+
+/// Whether a recall filter can only match records that aren't in the ANN
+/// (R-004.2): it pins `_mnemo.thread`, or restricts `_mnemo.kind` to turns,
+/// essence items or thread links. Such recalls scan exactly instead.
+fn filter_bypasses_ann(f: &Filter) -> bool {
+    let non_ann = |v: &Value| {
+        matches!(
+            v.as_str(),
+            Some(MNEMO_META_KIND_TURN)
+                | Some(MNEMO_META_KIND_ESSENCE)
+                | Some(MNEMO_META_KIND_THREAD_LINK)
+        )
+    };
+    filter_thread_pin(f).is_some()
+        || f.terms.iter().any(|t| match t {
+            FilterTerm::Eq(k, v) => k == MNEMO_META_KIND && non_ann(v),
+            FilterTerm::In(k, vs) => {
+                k == MNEMO_META_KIND && !vs.is_empty() && vs.iter().all(non_ann)
+            }
+            _ => false,
+        })
+}
+
 impl Mnemo {
     /// Return every live memory (used by tooling and compaction).
     pub fn memories(&mut self) -> Result<Vec<Memory>> {

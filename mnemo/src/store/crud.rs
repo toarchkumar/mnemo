@@ -2,6 +2,115 @@
 
 use super::*;
 
+/// R-004.2: where the thread layers and the onboarding briefing live,
+/// built by the handle's one lazy scan (`ensure_key_caches`, together with
+/// the 12.1 key caches) and then kept current by `put` and `delete`. It
+/// lets `about`, `essence`, `ingest_thread`, `thread_export` and
+/// thread-pinned recall read just their own records instead of decrypting
+/// the whole file each time.
+#[derive(Debug, Default)]
+pub(super) struct LayerCache {
+    /// Live essence item ids.
+    pub(super) essence: std::collections::HashSet<u128>,
+    /// Live ids tagged `metadata.area = "onboarding"` (superseded versions
+    /// included; `about` drops those when it reads them).
+    pub(super) onboarding: std::collections::HashSet<u128>,
+    /// Per `_mnemo.thread`: its records and archive state.
+    pub(super) threads: std::collections::HashMap<String, ThreadCache>,
+    /// Thread → (the thread it continues, the link record's id).
+    pub(super) links: std::collections::HashMap<String, (String, u128)>,
+    /// FMT-9e: on v9, thread-turn records the lazy scan didn't decode,
+    /// by their row's `thread_hash`. A thread's bucket is decoded into
+    /// `threads` the first time that thread is used
+    /// ([`Mnemo::warm_thread`]), so a cold handle never decodes (or
+    /// decompresses) the turns of threads it doesn't touch.
+    pub(super) cold_turns: std::collections::HashMap<u32, Vec<u128>>,
+}
+
+/// One thread's records (turns, essence items, link), the turn ids already
+/// archived (with how many records each has: long turns are chunked), and
+/// the highest `_mnemo.seq` seen.
+#[derive(Debug, Default)]
+pub(super) struct ThreadCache {
+    pub(super) records: std::collections::HashSet<u128>,
+    pub(super) turns: std::collections::HashMap<String, u32>,
+    pub(super) max_seq: Option<u64>,
+}
+
+pub(super) fn meta_str<'a>(m: &'a Memory, key: &str) -> Option<&'a str> {
+    m.metadata.get(key).and_then(|v| v.as_str())
+}
+
+pub(super) fn is_onboarding(m: &Memory) -> bool {
+    meta_str(m, "area").is_some_and(|s| s.eq_ignore_ascii_case("onboarding"))
+}
+
+impl LayerCache {
+    pub(super) fn add(&mut self, m: &Memory) {
+        let id = m.id.0;
+        let kind = meta_str(m, MNEMO_META_KIND);
+        if kind == Some(MNEMO_META_KIND_ESSENCE) {
+            self.essence.insert(id);
+        }
+        if is_onboarding(m) {
+            self.onboarding.insert(id);
+        }
+        let Some(thread) = meta_str(m, MNEMO_META_THREAD) else {
+            return;
+        };
+        let tc = self.threads.entry(thread.to_string()).or_default();
+        tc.records.insert(id);
+        if kind == Some(MNEMO_META_KIND_TURN) {
+            if let Some(turn_id) = meta_str(m, MNEMO_META_TURN_ID) {
+                *tc.turns.entry(turn_id.to_string()).or_insert(0) += 1;
+            }
+            if let Some(seq) = m.metadata.get(MNEMO_META_SEQ).and_then(|v| v.as_u64()) {
+                tc.max_seq = Some(tc.max_seq.map_or(seq, |s| s.max(seq)));
+            }
+        }
+        if kind == Some(MNEMO_META_KIND_THREAD_LINK) {
+            if let Some(from) = meta_str(m, MNEMO_META_CONTINUES) {
+                self.links
+                    .entry(thread.to_string())
+                    .or_insert_with(|| (from.to_string(), id));
+            }
+        }
+    }
+
+    /// Undo [`LayerCache::add`] for the stored version of a record that is
+    /// being overwritten or deleted. A thread with no records left is
+    /// dropped, so a forgotten thread's `_mnemo.seq` restarts at 0. Partial
+    /// deletes keep the old maximum (sequence gaps are harmless).
+    pub(super) fn remove(&mut self, m: &Memory) {
+        let id = m.id.0;
+        self.essence.remove(&id);
+        self.onboarding.remove(&id);
+        let Some(thread) = meta_str(m, MNEMO_META_THREAD) else {
+            return;
+        };
+        if self.links.get(thread).is_some_and(|(_, link)| *link == id) {
+            self.links.remove(thread);
+        }
+        let Some(tc) = self.threads.get_mut(thread) else {
+            return;
+        };
+        tc.records.remove(&id);
+        if meta_str(m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {
+            if let Some(turn_id) = meta_str(m, MNEMO_META_TURN_ID) {
+                if let Some(n) = tc.turns.get_mut(turn_id) {
+                    *n -= 1;
+                    if *n == 0 {
+                        tc.turns.remove(turn_id);
+                    }
+                }
+            }
+        }
+        if tc.records.is_empty() {
+            self.threads.remove(thread);
+        }
+    }
+}
+
 impl Mnemo {
     /// Register a text embedder for this handle. Enables
     /// [`Mnemo::remember_text`] and the text-side `RecallRequest`
