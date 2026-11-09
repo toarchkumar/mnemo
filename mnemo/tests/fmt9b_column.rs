@@ -198,8 +198,17 @@ fn column_survives_reopen_and_pages_when_over_budget() {
         "over budget: read through the page cache"
     );
     assert_eq!(ids_of(&paged), ids_of(&resident));
+    // Both reads decode the same fp16 entries, so similarity matches
+    // exactly. The score also weighs recency, which moves between the two
+    // recalls, so it only matches closely.
     for (a, b) in paged.iter().zip(&resident) {
-        assert_eq!(a.score, b.score);
+        assert_eq!(a.similarity, b.similarity);
+        assert!(
+            (a.score - b.score).abs() < 1e-4,
+            "score {} vs {}",
+            a.score,
+            b.score
+        );
     }
     assert_eq!(db.verify().unwrap(), 300);
 }
