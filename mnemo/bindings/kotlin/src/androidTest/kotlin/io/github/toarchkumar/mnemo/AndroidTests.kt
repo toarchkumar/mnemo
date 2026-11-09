@@ -7,6 +7,7 @@ import android.system.Os
 import android.system.OsConstants
 import android.util.Log
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -115,12 +116,16 @@ class AndroidTests {
         assertEquals(0, store.backgroundFlushes)
 
         // Foreground, then background: ProcessLifecycleOwner sends ON_STOP
-        // about 700 ms after the last activity stops.
-        ActivityScenario.launch(TestActivity::class.java).use { scenario ->
-            scenario.moveToState(Lifecycle.State.RESUMED)
-            scenario.moveToState(Lifecycle.State.CREATED)
-            assertTrue("ON_STOP flushed", eventually(10_000) { store.backgroundFlushes >= 1 })
-        }
+        // about 700 ms after the last activity stops. (Not moveToState(CREATED):
+        // ActivityScenario stops an activity by starting one of its own on top,
+        // so the app never leaves the foreground. Closing it does.)
+        val scenario = ActivityScenario.launch(TestActivity::class.java)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        assertTrue("ProcessLifecycleOwner saw the activity start",
+            eventually { processState().isAtLeast(Lifecycle.State.STARTED) })
+        scenario.close()
+        assertTrue("ON_STOP flushed", eventually(10_000) { store.backgroundFlushes >= 1 })
+        assertEquals(Lifecycle.State.CREATED, processState())
         assertTrue("the file stays open", store.isOpen)
         assertNull(store.lastBackgroundError)
         assertCopyHolds(store.file, keystore, 3uL)
@@ -142,6 +147,15 @@ class AndroidTests {
         for (i in 0 until 50) store.remember("note $i", vec(i))
         assertEquals(50uL, store.count())
         store.close()
+    }
+
+    /** The process lifecycle's state, read on the main thread. */
+    private fun processState(): Lifecycle.State {
+        var state = Lifecycle.State.INITIALIZED
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            state = ProcessLifecycleOwner.get().lifecycle.currentState
+        }
+        return state
     }
 
     private companion object {
