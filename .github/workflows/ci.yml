@@ -80,6 +80,14 @@ jobs:
         # `cargo bench --no-run --features benches` would check.
         run: cargo clippy --all-targets --features failpoints,benches -- -D warnings
 
+      # MOBILE-1a: the UniFFI binding crate (a non-default workspace member,
+      # so the two steps above don't build it).
+      - name: cargo test + clippy -p mnemo-uniffi
+        working-directory: mnemo
+        run: |
+          cargo test -p mnemo-uniffi
+          cargo clippy -p mnemo-uniffi --all-targets -- -D warnings
+
       # `cargo fmt --check` gate. Phase 1.4 wires this into CI so
       # rustfmt drift is caught at PR time instead of at release
       # (which is where PR 6 first noticed a repo-wide fmt gap).
@@ -109,7 +117,9 @@ jobs:
 
       - name: cargo deny check
         working-directory: mnemo
-        run: cargo deny check
+        # `--workspace`: every member (the engine, mnemo-node, mnemo-uniffi),
+        # not only the root package.
+        run: cargo deny --workspace check
 
   # --- MSRV check: ensure the codebase still builds against the floor
   #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
@@ -238,6 +248,9 @@ jobs:
             os: macos-latest
           - target: aarch64-linux-android
             os: ubuntu-latest
+          # MOBILE-1a: the emulator ABI (x86_64) is shipped in the AAR too.
+          - target: x86_64-linux-android
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -253,16 +266,68 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Point cc at the NDK (Android)
-        if: matrix.target == 'aarch64-linux-android'
+        if: endsWith(matrix.target, '-linux-android')
         run: |
           TC="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "CC_aarch64_linux_android=$TC/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
-          echo "AR_aarch64_linux_android=$TC/llvm-ar" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TC/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          T="${{ matrix.target }}"
+          U=$(echo "$T" | tr 'a-z-' 'A-Z_')
+          echo "CC_${T//-/_}=$TC/${T}24-clang" >> "$GITHUB_ENV"
+          echo "AR_${T//-/_}=$TC/llvm-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_${U}_LINKER=$TC/${T}24-clang" >> "$GITHUB_ENV"
+          echo "NDK_BIN=$TC" >> "$GITHUB_ENV"
 
       - name: cargo build --lib
         working-directory: mnemo
         run: cargo build --lib --target ${{ matrix.target }}
+
+      # MOBILE-1a: the UniFFI binding, release (LTO), for the same target.
+      - name: cargo build -p mnemo-uniffi (release)
+        working-directory: mnemo
+        run: cargo build -p mnemo-uniffi --lib --release --target ${{ matrix.target }}
+
+      # Gate (MOBILE-1a §Q9): the stripped .so is at most 5 MB per ABI.
+      # The ELF alignment is printed for 1c, which gates on it.
+      - name: stripped size and ELF alignment (Android)
+        if: endsWith(matrix.target, '-linux-android')
+        working-directory: mnemo
+        run: |
+          SO="target/${{ matrix.target }}/release/libmnemo_uniffi.so"
+          "$NDK_BIN/llvm-strip" -o stripped.so "$SO"
+          BYTES=$(stat -c %s stripped.so)
+          echo "libmnemo_uniffi.so (${{ matrix.target }}): $BYTES bytes stripped"
+          echo "### libmnemo_uniffi.so (${{ matrix.target }}): $BYTES bytes stripped" >> "$GITHUB_STEP_SUMMARY"
+          "$NDK_BIN/llvm-readelf" -Wl stripped.so | grep -E 'LOAD|RELRO|Type'
+          test "$BYTES" -le 5242880
+
+      - name: static library size (iOS, informational)
+        if: matrix.target == 'aarch64-apple-ios'
+        working-directory: mnemo
+        run: |
+          A="target/${{ matrix.target }}/release/libmnemo_uniffi.a"
+          ls -l "$A"
+          echo "### libmnemo_uniffi.a (${{ matrix.target }}): $(stat -f %z "$A") bytes (before app linking; 1d reports the App Thinning delta)" >> "$GITHUB_STEP_SUMMARY"
+
+  # --- MOBILE-1a: the UniFFI binding crate on its own declared minimum Rust
+  #     (`rust-version` in mnemo/bindings/uniffi/Cargo.toml). The engine's
+  #     MSRV job (1.75) never builds it: it's a non-default workspace member.
+  msrv-uniffi:
+    name: msrv-uniffi (rust 1.82, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.82
+        uses: dtolnay/rust-toolchain@1.82
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: msrv-uniffi-1.82
+
+      - name: cargo test -p mnemo-uniffi
+        working-directory: mnemo
+        run: cargo test -p mnemo-uniffi
 
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).

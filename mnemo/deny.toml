@@ -93,10 +93,31 @@ allow = [
 # the crate omits SPDX metadata. Default 0.8 is conservative — lower
 # it only if a specific crate needs a `[[licenses.clarify]]` entry.
 confidence-threshold = 0.8
-# Per-crate license overrides go here if a crate ships an unusual
-# LICENSE mix cargo-deny can't parse. Empty at PR 9 landing;
-# expand as CI surfaces cases.
-exceptions = []
+# Per-crate license overrides. Each is for named crates only, never a
+# blanket allow.
+#
+# MOBILE-1a: UniFFI is MPL-2.0, a weak, file-level copyleft. Linking it
+# into an app is fine; only modified MPL files would have to stay open,
+# and we don't modify them. `uniffi_bindgen`, `uniffi_build` and
+# `uniffi_udl` are only pulled in by the binding crate's `cli` feature
+# (the generator).
+#
+# `libloading` (ISC, permissive) comes in through napi for the
+# experimental mnemo-node binding. It was never seen before because CI
+# only checked the root package; `cargo deny --workspace` now covers every
+# member.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "uniffi" },
+    { allow = ["MPL-2.0"], crate = "uniffi_core" },
+    { allow = ["MPL-2.0"], crate = "uniffi_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_internal_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_meta" },
+    { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
+    { allow = ["MPL-2.0"], crate = "uniffi_bindgen" },
+    { allow = ["MPL-2.0"], crate = "uniffi_build" },
+    { allow = ["MPL-2.0"], crate = "uniffi_udl" },
+    { allow = ["ISC"], crate = "libloading" },
+]
 
 # ---------------------------------------------------------------------
 # Bans — duplicate versions, wildcard deps, per-crate allow/deny.

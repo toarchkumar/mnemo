@@ -1,0 +1,42 @@
+# MOBILE-1a: the UniFFI binding of the MNemo engine, the source of the Swift
+# (MOBILE-1b) and Kotlin (MOBILE-1c) packages. A workspace member but not a
+# default member, so the engine's own MSRV job (1.75) never builds it.
+#
+# UniFFI declares no `rust-version`; its CHANGELOG last stated an MSRV of
+# 1.82.0 (v0.29.1), and the `msrv-uniffi` CI job proves this crate builds
+# on the version declared here.
+[package]
+name = "mnemo-uniffi"
+version = "0.11.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+description = "UniFFI (Swift and Kotlin) bindings for the MNemo encrypted agent-memory engine"
+repository = "https://github.com/toarchkumar/mnemo"
+publish = false
+
+[lib]
+name = "mnemo_uniffi"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+# The binding generator, from the same pinned UniFFI, so the generated
+# Swift and Kotlin always match the runtime:
+#   cargo run -p mnemo-uniffi --features cli --bin uniffi-bindgen -- \
+#     generate --library <path to libmnemo_uniffi> --language swift --out-dir <dir>
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[features]
+cli = ["uniffi/cli"]
+
+[dependencies]
+mnemo_engine = { package = "mnemo-engine", path = "../.." }
+uniffi = { version = "=0.32.2", default-features = false }
+serde_json = "=1.0.128"
+thiserror = "=1.0.64"
+zeroize = "=1.8.1"
+
+[dev-dependencies]
+tempfile = "=3.10.1"

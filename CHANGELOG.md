@@ -25,6 +25,26 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - Internal: `store.rs` is split into private submodules under
   `mnemo/src/store/` (REFAC-1). No public API change.
 
+### Added
+
+- **`Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors`**
+  split `ingest_thread` in two, so a caller can embed between the calls
+  without holding the handle (the UniFFI binding does). The first returns
+  the texts to embed; the second applies the caller's vectors, planning
+  again and refusing a count that no longer matches.
+- **`mnemo-uniffi`** (MOBILE-1a, `mnemo/bindings/uniffi/`, not published
+  yet): the UniFFI binding that the Swift and Kotlin packages are built
+  from. It has a curated API, a foreign-callback embedder that's never
+  called with the handle locked, mobile defaults (a 16 MiB vector budget
+  and a 2 MiB page cache), and passphrase export and import for moving a
+  key-bound file between devices. It needs Rust 1.82 or later; the engine
+  stays at 1.75.
+- CI: `cargo deny --workspace` now checks every workspace member, which
+  adds per-crate license exceptions (MPL-2.0 for UniFFI; ISC for
+  `libloading`, via the experimental Node binding). New jobs: an Android
+  `x86_64` build, a release build of the binding on each mobile target
+  with a 5 MB stripped-size gate, and `msrv-uniffi`.
+
 ## [0.11.0] — 2026-11-08
 
 FMT-9: the on-disk format is v9. New files are v9; v8 files keep opening

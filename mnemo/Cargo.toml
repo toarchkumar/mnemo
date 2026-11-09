@@ -39,7 +39,7 @@ categories = ["database", "cryptography", "command-line-utilities"]
 # (a standalone workspace, not a member of this one); it's built and
 # packaged via `maturin` from its own directory.
 [workspace]
-members = ["bindings/node"]
+members = ["bindings/node", "bindings/uniffi"]
 default-members = ["."]
 
 # NAME-1 (2026-11-05 Planner DECISION): the library/import name is now
