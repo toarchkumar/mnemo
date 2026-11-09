@@ -86,24 +86,13 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: mnemo/bindings/kotlin
-          # Then the sample's R8-minified release APK (MOBILE-1d): install it,
-          # launch its self-test, and read the result from logcat. It proves
-          # the library's consumer rules keep what JNA and the bindings need
-          # at run time, not just at build time.
-          # The package service can come up after boot completes; an install
-          # before then fails, and AGP's test runner reports that as a green
-          # run with no tests. So wait for it, and Test counts fails on 0.
-          script: |
-            for i in $(seq 1 90); do adb shell cmd package list packages >/dev/null 2>&1 && break; sleep 2; done
-            adb shell getconf PAGE_SIZE
-            ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.expectPageSize=${{ matrix.page }}
-            ../../../examples/mobile/android/gradlew --no-daemon --stacktrace -p ../../../examples/mobile/android assembleRelease
-            adb install -r ../../../examples/mobile/android/app/build/outputs/apk/release/app-release.apk
-            adb logcat -c
-            adb shell am start -W -n io.github.toarchkumar.mnemo.sample/.MainActivity --ez selftest true
-            for i in $(seq 1 60); do adb logcat -d -s MnemoSelfTest:I | grep -q MNEMO_SELFTEST && break; sleep 1; done
-            adb logcat -d -s MnemoSelfTest:I AndroidRuntime:E | tee selftest.log
-            grep -q "MNEMO_SELFTEST ok" selftest.log
+          # scripts/emulator-tests.sh: the instrumented tests, then the
+          # sample's R8-minified release APK and its self-test (MOBILE-1d),
+          # which proves the library's consumer rules keep what JNA and the
+          # bindings need at run time. It waits for the system services to
+          # settle and retries a run that executed no tests (an install
+          # failure is otherwise a green run).
+          script: scripts/emulator-tests.sh ${{ matrix.page }}
 
       - name: Test counts
         if: always()
