@@ -68,17 +68,15 @@ An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Wo
 
 ## Status (2026-11-09)
 
-**Published:** v0.11.0 (FMT-9: format v9 by default, about 6× smaller
-files, keyword recall) on crates.io and PyPI; PLANNER-A VERIFIED on the
-published artifacts. **Done since:** REFAC-1 (`store.rs` split; Rust
-`close(self)`, ships in v0.12.0). **In progress:** MOBILE-1 → v0.12.0
-(design note signed off 2026-11-09; 1a–1c (the UniFFI crate, the Swift
-and Kotlin packages) done; 1d, the sample apps and device checks, is
-active). **Target market (user decision
-2026-11-07):** on-device agents and apps, from desktop to tablets, phones
-and other small devices. **Next:** MOBILE-1b–1e → PERF-2 → Phase
-12 → 13 → 14 (see "Authoritative execution order"). Read the WORKLOG from
-the 2026-11-07 entries on for the live thread.
+**Published:** v0.12.0 (the iOS and Android packages; Rust `close(self)`)
+on crates.io, PyPI, Maven Central (`io.github.toarchkumar:mnemo-android`)
+and SPM (`toarchkumar/mnemo-swift`); PLANNER-A VERIFIED. **In progress:**
+v0.12.1, mobile hardening (MOBILE-2a–d, then SEC-2; triaged from
+REVIEWER-B's RB-001). **Target market (user decision 2026-11-07):**
+on-device agents and apps, from desktop to tablets, phones and other
+small devices. **Next:** SAMPLE-1 → INSP-1 (v0.13, with the v8 sunset)
+→ PERF-2 → Phases 12–15 (see "Authoritative execution order"). Read the
+WORKLOG from the 2026-11-09 entries on for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1559,6 +1557,18 @@ of this file applies to every one.
 >    generated-key half), and device benchmarks.
 >    **(User decision 2026-11-09: one ordering change.** PERF-2 (3a) comes
 >    after INSP-1, not straight after MOBILE-1.)
+> 4.5 **v0.12.1, mobile hardening (added 2026-11-09 from RB-001):**
+>    **MOBILE-2** (the release-gate fix, the store flush policy and batch
+>    scope, the embedder outside the store lock, the vector-budget fix and
+>    stats) plus **SEC-2** (security hardening; details in the gitignored
+>    `SECURITY.local.md` until it ships). Then **SAMPLE-1** (small: the
+>    Apple embedder target and the Export button). **Then v0.12.2
+>    (2026-11-10, from RB-002):** MOBILE-2e (the RB-002-confirmed mobile
+>    fixes) plus SEC-2b (security test and docs; details in
+>    `SECURITY.local.md`).
+>    **Also queued from RB-001/RB-002:** HOOKS-1 (with v0.13), DOCS-1
+>    (after INSP-1), FUZZ-2 (required before 14.1), and MOBILE-3 (a
+>    candidate after INSP-1; the user picks its priority).
 > 4a. **INSP-1 → v0.13.0 (user decision 2026-11-09):** the memory
 >    inspector, pulled forward from 14.2, together with 12.5, the readable
 >    export, which it builds on. It's read-only (`--write` stays in 14.2),
@@ -14190,3 +14200,954 @@ since the release dry run covers it, as its own small commit.
 Watch all the jobs. Log DONE with the four registries (crates.io, PyPI,
 Maven Central, the `mnemo-swift` tag) and the run id. Then delete the
 merged branches. I verify on the published artifacts.
+
+### 2026-11-09 — PLANNER-A — REVIEW — RB-001 triaged in part (13 of 32): two HIGH items accepted for v0.12.1, the v0.12.0 run wasn't affected by RB-001.17, and the rest held for RB-002
+**I read RB-001 in full** (the assessment and all 32 items) and
+`SECURITY.local.md`. The assessment is fair and useful. Its central
+point, that the gap is phone *behaviour* rather than speed, matches what
+I'd verified, and it's the reason for a v0.12.1 before INSP-1.
+
+**RB-001.17 against the v0.12.0 release run: not affected.**
+- I can't open the Actions run page from this sandbox, but the
+  registries settle it:
+  - crates.io has `mnemo-engine` 0.12.0 (published 03:18 UTC);
+  - PyPI has 0.12.0 with all five wheels and the sdist;
+  - `mnemo-swift` has `main` and the tag `0.12.0`.
+- `publish-crates` needs `build-cli`, and `publish-pypi` needs
+  `build-wheels` and `build-sdist`, all of which need `create-release`. A
+  failed leg would have skipped the matching publish, so both publishes
+  running means every engine build job succeeded. The hole is real
+  (`release.yml:322-327`), but it didn't open this time.
+- **Maven Central couldn't be reached from here;** the worker's v0.12.0
+  DONE reports it, and I check it at the VERIFIED.
+
+**Triaged (dispositions are in the ledger rows and the items' Planner
+Triage lines):**
+- **RB-001.17 HIGH: ACCEPTED,** MOBILE-2 step 1, before any further tag.
+- **RB-001.18 HIGH and RB-001.2: ACCEPTED,** MOBILE-2: a store flush
+  policy (`.coalesced` default, about 1 s or 64 writes; `.everyWrite`;
+  `.manual`), Android commits after calls made while stopped, a batch
+  scope, honest docs, and a force-stop test.
+- **RB-001.1 HIGH: ACCEPTED,** modified.
+  - MOBILE-2: the column budget sized by live facts, not
+    `catalog.len()` (verified at `records.rs:1096`); `stats()` reports the
+    recall mode; a rows-by-dimension table in the READMEs; an over-budget
+    `device_budget` cell.
+  - The cheap paged path goes to PERF-2. Automatic index building is
+    DEFERRED to PERF-2, with RB-001.9.
+- **RB-001.19 MEDIUM: ACCEPTED,** MOBILE-2. Verified: both store layers
+  run the embedder under their own lock (`MnemoStore.kt:100-101, 321-322`;
+  the Swift actor). That contradicts our 1a claim, which held only at the
+  binding level.
+- **RB-001.3: ACCEPTED** into the PERF-2 spec, in its order (`pread` runs,
+  decrypt in place, gated parallel decrypt).
+- **RB-001.11: ACCEPTED,** modified. SAMPLE-1 builds the Apple embedder
+  chain as an optional Swift library target. The Android recipe is
+  DEFERRED.
+- **RB-001.14: ACCEPTED** as an INSP-1 acceptance test plus SAMPLE-1's
+  Export button, both after SEC-2.
+- **RB-001.25: ACCEPTED,** modified. MOBILE-2 docs state the retention
+  cap; INSP-1's `stats` shows what's actually restorable. The
+  minimum-count option is DEFERRED to Phase 15.
+- **RB-001.30, .31, .32 (SECURITY): ACCEPTED** as SEC-2 in v0.12.1. The
+  triage is in `SECURITY.local.md` only. Some parts of .31 need the user
+  (GitHub environments with a required reviewer, crates.io Trusted
+  Publishing, a deploy key for `mnemo-swift`, a tag ruleset); they're
+  listed for the user in the SEC-2 dispatch.
+
+**Held, waiting on RB-002** (left `OPEN`, marked "Held" in the ledger):
+RB-001.4–.10, .12, .13, .15, .16, .20–.24, and .26–.29.
+- The correctness ones in the mobile layers (.20–.23) are likely
+  MOBILE-2 additions once RB-002 confirms them with tests.
+- .24 (`_mnemo.*` metadata from callers) is likely its own small item
+  before 13.4.
+
+**Order after v0.12.0:**
+1. the v0.12.0 VERIFIED, once the worker's DONE is in;
+2. **v0.12.1** = MOBILE-2 + SEC-2, with its dispatch;
+3. SAMPLE-1;
+4. INSP-1 (v0.13, with the v8 sunset);
+5. PERF-2.
+
+The execution order (item 4.5) is updated. The INSP-1 spec picks up
+RB-001.14 and .25.
+
+### 2026-11-09 — WORKER — BLOCKED — v0.12.0: every registry is published, but the Swift job's last check hung and I cancelled the run
+
+**Release run 42748000883** (tag `v0.12.0` at f79715e) ended `cancelled`. The user
+told me to cancel it. Each job's result:
+
+- **Create GitHub Release, the 5 `cli` jobs, the 5 `wheels` jobs, `sdist`:**
+  success.
+- **publish to crates.io** and **publish to PyPI:** success (03:18 and 03:19 UTC).
+- **mobile (version check)** and **mobile (Android library):** success (the
+  Android job finished at 03:25).
+- **mobile (Swift package): cancelled.** Steps 1–9 succeeded: the XCFramework,
+  the release tree, the SPM consumer on the simulator, the zip attached, and the
+  push to `mnemo-swift` (03:28:23). Step 10, "Resolve the published package",
+  printed nothing from 03:28:23 until I cancelled it at 05:02:46 (94 minutes).
+  The runner then killed an orphan `xcodebuild` (pid 15438). The dry run skipped
+  this step, so the tag was the first time it ran.
+
+**All four registries are published and checked:**
+
+- **crates.io:** `mnemo-engine` max_version 0.12.0.
+- **PyPI:** `mnemo-engine` 0.12.0, with 6 files (5 wheels and the sdist).
+- **Maven Central:** `io.github.toarchkumar:mnemo-android:0.12.0` is on
+  repo1.maven.org (deployment 83afe000-07d0-4d19-85b7-90dab36e306e, AUTOMATIC).
+  - Every file returns 200: the pom (2,659 bytes), the aar (2,692,667), the
+    module, the sources and javadoc jars, each `.asc`, and the `.sha1`/`.md5`.
+    `maven-metadata.xml` has latest and release 0.12.0, and the AAR's SHA-1
+    matches.
+  - The POM has the right coordinates, the name "MNemo for Android", the URL,
+    Apache-2.0, developer Arch Kumar, the SCM, and the dependencies: JNA 5.19.1
+    (aar) and kotlinx-coroutines-core 1.11.0.
+  - gpg reports "Good signature" for both the POM and the AAR, from key
+    CFAFF7A174EBC15ED5475C4619104D9B3DA89A04 (expires 2028-11-08).
+- **SPM:** `toarchkumar/mnemo-swift` is public, with tag `0.12.0` (b0bbf5bf8b4a)
+  and default branch `main`.
+  - Its `Package.swift` points at
+    `releases/download/v0.12.0/MnemoFFI-0.12.0.xcframework.zip`, with checksum
+    `de4e2cf1…a8e9`. That's the SHA-256 of the zip on the Release
+    (10,557,952 bytes).
+- **The GitHub Release v0.12.0** has the XCFramework zip, the AAR, the 5 CLI
+  binaries, the 5 wheels and the sdist.
+
+**The published Swift package works.** I ran step 10 on this Mac (Xcode, a fresh
+derived-data folder): `.package(url: "https://github.com/toarchkumar/mnemo-swift",
+exact: "0.12.0")`. SwiftPM fetched the tag, downloaded the zip from the GitHub
+Release and checked its checksum, and the build printed `** BUILD SUCCEEDED **`
+for `generic/platform=iOS Simulator` in about 10 seconds.
+
+**What's wrong is the check itself** (`release.yml`, the step at line 481):
+
+1. **The wrong scheme.** The step runs `xcodebuild build -scheme Check`. Locally
+   that fails in 6 seconds with `The workspace named "Check" does not contain a
+   scheme named "Check"`, because `xcodebuild -list` names it `Check-Package`.
+   `check-release-package.sh` already chooses this scheme automatically; step 10
+   doesn't. Why CI hung instead of failing isn't confirmed: `-quiet` hid all the
+   output, and the cancelled job's log ends at the step's env block.
+2. **No timeouts.** Neither the job nor the step has `timeout-minutes`, so a hang
+   runs until GitHub's 360-minute default.
+3. **The dry run never runs it** (`if: env.DRY_RUN == 'false'`), so its first
+   real run was on the tag.
+
+**Proposed fix, for PLANNER-A to dispatch** (I haven't changed any code):
+
+- choose the scheme from `xcodebuild -list -json`, as `check-release-package.sh`
+  does;
+- drop `-quiet`, and resolve packages as a separate step first (`xcodebuild
+  -resolvePackageDependencies`), so a hang shows which phase it's in;
+- set `timeout-minutes` on the Swift and Android jobs and on this step (about
+  10 minutes);
+- make the step testable without a tag: in the dry run, run it against the
+  newest version `mnemo-swift` already has (0.12.0 now). The step would then get
+  its first real run before the next tag, not on it.
+
+The fix is CI-only and touches no published artifact. It can go in v0.12.1, or in
+a small workflow PR before it.
+
+**Held, per the instruction "if anything failed, stop and log BLOCKED":**
+
+- the WORKER — DONE for v0.12.0;
+- removing `android-publish.yml`;
+- deleting the `release-0.12.0` and `mobile-1e-release-workflow` branches.
+
+Nothing is committed. Nothing will be re-run by hand: the run can't be retried
+in a way that passes, because the push step refuses a tag `mnemo-swift` already
+has, and step 10 is broken.
+
+### 2026-11-09 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.12.0 verified (the BLOCKED is resolved: everything shipped, and only the post-publish Swift check hung); v0.12.1 = MOBILE-2 + SEC-2 dispatched
+**v0.12.0 VERIFIED.** Your BLOCKED was the right call, and the evidence
+is complete. Release run 42748000883 shows every engine job and the
+Android job succeeding; the Swift job was cancelled at step 10, after its
+push. **My own checks:**
+- PyPI `mnemo-engine==0.12.0` installs in a clean venv. A new file is
+  format 9, keyword recall finds "shipped BP.1", and a reopen recalls
+  correctly.
+- crates.io `max_version` is 0.12.0.
+- `mnemo-swift` at tag `0.12.0` has `Package.swift` pointing at
+  `releases/download/v0.12.0/MnemoFFI-0.12.0.xcframework.zip` with
+  checksum `de4e2cf1…a8e9`. That matches your SHA-256 of the Release zip.
+- Your local `exact: "0.12.0"` SPM build is the end-to-end proof for iOS.
+- **Maven Central:** I can't reach it from my sandbox, so I accept your
+  check: every file 200, `maven-metadata.xml` release 0.12.0, the AAR
+  SHA-1 matching, and "Good signature" from `CFAFF7A1…9A04`.
+
+**Unblocked now:**
+- remove `android-publish.yml` in its own commit;
+- delete `release-0.12.0` and `mobile-1e-release-workflow`, local and
+  remote;
+- log a short DONE for v0.12.0 citing this entry.
+
+The cancelled run stays cancelled. Re-running it can't pass (the push
+refuses an existing tag), and there's nothing left to publish.
+
+**DISPATCH: v0.12.1, mobile hardening.** One PR at a time, in this order,
+each with its own DONE. Then READY before the tag.
+
+**MOBILE-2a, the release workflow** (before anything else, because it's
+the next tag's safety):
+1. **RB-001.17:**
+   - `mobile-prepare` needs every engine job (`create-release`,
+     `build-cli`, `build-wheels`, `build-sdist`, `publish-crates`,
+     `publish-pypi`);
+   - on `push`, each publish job must be `success` unless its `ENABLE_*`
+     variable is off;
+   - the dry run still passes with the engine jobs skipped.
+2. **Your step-10 fix:**
+   - choose the scheme from `xcodebuild -list -json`;
+   - resolve packages as their own step, with no `-quiet`;
+   - `timeout-minutes` on every release job (about 45) and on each
+     network or build step (about 10);
+   - in the dry run, step 10 runs against the newest existing
+     `mnemo-swift` tag (0.12.0 now), so it's tested before every tag.
+3. `RELEASING.md`'s "after the engine jobs succeed" becomes true; correct
+   it if the `ENABLE_*` exception is used.
+
+**MOBILE-2b, durability and batching** (RB-001.18, RB-001.2):
+- **A `flushPolicy` on both stores:**
+  - **`.coalesced(maxDelay ≈ 1 s, maxWrites 64)` is the default.** One
+    timer is armed by the first dirty write, then one commit;
+  - `.everyWrite`, and `.manual` (today's behaviour);
+  - the Benchmarks use `.manual`, so their cells stay comparable.
+- **iOS:** the background close and the close after a background call
+  also cancel a pending coalesced commit (they commit anyway). A timer
+  that fires on a closed store doesn't reopen the file.
+- **Android:** track the process state through `ProcessLifecycleOwner`.
+  A call made while stopped commits before it returns (or within the
+  coalescing window, which runs regardless of lifecycle; your call, and
+  say which).
+- **A batch scope in both,** `withSession { … }`: one open handle, one
+  expiring activity on iOS, and one commit at the end.
+- **Docs:** both READMEs and the method docs state the durability window.
+  The samples' Notes screens rely on the default.
+- **Tests:**
+  - a write followed by a kill with no lifecycle event (`am force-stop` on
+    the emulator; on the iOS simulator, terminate the process from the
+    host), then reopen and count. With the coalesced default, writes older
+    than the window survive;
+  - a burst of 100 writes produces exactly one commit;
+  - `.everyWrite` commits each time.
+
+**MOBILE-2c, the embedder outside the store lock** (RB-001.19):
+- Both stores call the app's embedder **before** taking their lock (the
+  Kotlin `mutex`; Swift outside the actor-isolated `withDatabase`), then
+  pass vectors to the binding's vector APIs. That covers
+  `rememberText`, `recallText`, content-changing `update`,
+  `ingestThread` (the two-step engine split) and the essence writes.
+- **Tests:**
+  - an embedder that calls back into the same store completes (with a
+    deadlock timeout);
+  - a slow embedder doesn't block an unrelated `get`;
+  - the iOS background close isn't delayed by an embed in flight.
+- Correct the READMEs' "never with the database locked" line.
+
+**MOBILE-2d, the vector budget** (RB-001.1, recommendations 1, 3 and 5):
+- **Engine:** size the resident column by live fact rows, not
+  `catalog.len()`. `stats()` (and both store layers) report
+  `recall_mode` (`exact_resident`, `exact_paged`, `indexed`).
+- **The Swift and Kotlin READMEs:** a rows-by-dimension table for the
+  16 MiB default (384, 512, 768).
+- **A `device_budget` cell** over the budget (desktop), so the cliff is
+  measured. The cheap paged path is PERF-2.
+- **RB-001.25 docs:** state the retention cap in the root and engine
+  READMEs.
+
+**SEC-2, security hardening** (RB-001.30, .31, .32): implement them as
+triaged in `SECURITY.local.md` (gitignored; read it there).
+- **Public hygiene until v0.12.1 ships:**
+  - neutral commit messages (for example "harden rekey and export",
+    "release workflow: least-privilege credentials");
+  - no write-up in PR text;
+  - the CHANGELOG `[0.12.1]` Security section comes in the release
+    commit;
+  - after the tag, move the items into `PLAN.md`, per AGENTS.md.
+- **The user's part:** the release-workflow part needs GitHub and
+  crates.io settings that only the user can make. **Prepare the workflow
+  so it works both before and after them** (for example, environments
+  referenced by name), and put the exact click-by-click list in your SEC-2
+  DONE:
+  - three environments with a required reviewer and `v*`-tag deployment
+    rules, with secrets moved into them;
+  - crates.io Trusted Publishing for `toarchkumar/mnemo`, workflow
+    `release.yml`, environment `crates-io`, then delete
+    `CRATES_IO_TOKEN`;
+  - a deploy key (or GitHub App) for `mnemo-swift`;
+  - a tag ruleset on `mnemo-swift`.
+
+  The user does those before the v0.12.1 tag.
+
+**RB-002:** when REVIEWER-B's second pass confirms items (likely RB-001.20
+to .23 in the mobile layers), I'll triage them into MOBILE-2e. Don't pick
+them up from `reviewer_notes.md` directly.
+
+**v0.12.1 READY** comes after all of the above: versions, the CHANGELOG
+(with the Security section and the durability default change, stated
+plainly), the dry run green (now including step 10), and sizes. Then
+stop for my README and site HANDOFF, and for the user's settings.
+
+### 2026-11-09 — WORKER — DONE — v0.12.0 leftovers (per the PLANNER-A VERIFIED + DISPATCH entry above)
+
+- **`android-publish.yml` removed** in its own commit, ce88b06 ("ci: remove
+  android-publish.yml, which release.yml replaced"), through PR 9
+  (toarchkumar/mnemo#9). CI was 18/18 green, and `main` was fast-forwarded
+  to ce88b06. Nothing else referenced the file.
+- **Merged branches deleted, local and remote:** `release-0.12.0`
+  (f79715e) and `mobile-1e-release-workflow` (8a9af2e). I checked that both
+  were ancestors of `origin/main` first. `remove-android-publish` is gone
+  too. The remote now has `main`, `release/0.5.x` and the active
+  `mobile-2a-release-gates`.
+- **v0.12.0 itself:** see my BLOCKED entry and your VERIFIED. Run
+  42748000883 stays cancelled; nothing was re-run.
+
+Next: MOBILE-2a. The PR branch is pushed, and its dry run (42760637871) is
+running.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-2a: the release workflow (the RB-001.17 gate, the published Swift package check tested in the dry run, time limits)
+
+**Commits** (PR 10, toarchkumar/mnemo#10, fast-forwarded to `main` at 86e6836):
+- 6bc592c: the gate, the two-step check and the time limits.
+- 86e6836: the fix for what the first dry run found (below).
+
+**What changed:**
+1. **The RB-001.17 gate.** `mobile (version check)` now needs every engine
+   job (`create-release`, `build-cli`, `build-wheels`, `build-sdist`,
+   `publish-crates`, `publish-pypi`), runs whenever the run isn't
+   cancelled, and its first step checks each result itself:
+   - on a tag, every job must be `success`; a publish job may be
+     `skipped` only when its `ENABLE_*` variable switches that registry off;
+   - on a manual run, every engine job must be `skipped` or `success`.
+
+   I ran the step's script against 8 result combinations: all success and
+   PyPI-switched-off pass; a failed crates publish, a skipped PyPI with
+   the variable on, a failed wheel (publish skipped), a cancelled CLI
+   build, and a failed job on a dispatch are all refused. The two dry runs
+   passed the gate with the engine jobs skipped.
+2. **The step-10 fix** (`scripts/check-published-package.sh`, two steps:
+   "Resolve the published package" and "Build against the published
+   package"):
+   - the scheme comes from `xcodebuild -list -json` (`Check-Package`);
+   - resolution is its own step, with no `-quiet`;
+   - in the dry run it checks the newest `mnemo-swift` tag (0.12.0 now).
+3. **Time limits:** `timeout-minutes: 45` on every release job, and on
+   every step 10 (20 for the CLI, wheel, XCFramework, native-library and
+   AAR builds; 15 for the simulator consumer, the published-package build
+   and the two Central steps).
+4. **RELEASING.md:** "the mobile jobs run only after every engine job
+   succeeded", with the `ENABLE_*` exception stated, and the two new dry
+   run checks.
+
+**The first dry run on the branch (42760637871) failed twice, as it
+should have:**
+- **Swift:** "Resolve the published package" hung right after "Checking
+  out 0.12.0 of package mnemo-swift", where Xcode downloads the binary
+  target. That's the same place as v0.12.0's hang, and the new 10-minute
+  limit stopped it. Locally the same command took 5 s.
+  - Fix (86e6836): `-packageAuthorizationProvider netrc`, so Xcode
+    doesn't look up github.com credentials in the runner's Keychain. The
+    script also clones the published tag and downloads its zip with curl
+    first, checking the checksum, and runs each xcodebuild under a
+    watchdog that prints the live processes and a stack sample of
+    xcodebuild before failing.
+  - In the second dry run the zip downloaded (10,557,952 bytes, checksum
+    matches), resolve took 13 s and the build 25 s. My conclusion is that
+    the Keychain lookup was the cause; I can't prove it beyond this
+    before and after on the same runner image.
+- **Maven Central:** the upload of 0.12.0 failed validation ("Component
+  ... already exists"); the script dropped it (HTTP 204). That's expected
+  between releases: a release dry run runs with the next version.
+  `central-dry-run.sh` now skips with a notice when the version is on
+  repo1.maven.org, and RELEASING.md says so.
+
+**Runs:**
+- **Dry run 42762664305 (86e6836): green.** Version check success. Swift:
+  every step success, including the published-package pair, and the
+  token check pushed and deleted `dry-run-0.12.0` on `mnemo-swift`.
+  Android: success, with the Central step's notice.
+- **CI 42762669469 (86e6836):** success.
+
+**Branches:** `mobile-2a-release-gates` deleted, local and remote.
+
+**Note:** 2b and 2c were first branched from 6bc592c. Because rebase and
+force-push are off-limits, I cherry-picked them onto `main` as new
+branches (`mobile-2b`, PR 11) and deleted the old `mobile-2b-flush-policy`.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-2b: the store flush policy (coalesced by default), withSession, kill tests
+
+**Commits** (PR 11, toarchkumar/mnemo#11, fast-forwarded to `main` at b7292bb):
+- 098099c: the feature;
+- b7292bb: the kill test force-stops the sample first. The self-test's
+  activity was still on top, so the durability intent went to its
+  `onNewIntent` instead.
+
+**What changed:**
+- **`flushPolicy`** on `MnemoStoreConfiguration` (Swift `FlushPolicy`,
+  Kotlin `FlushPolicy`):
+  - `coalesced(maxDelay 1 s, maxWrites 64)` is the default: the first
+    write after a commit arms one timer, then one commit, or one at once
+    on the 64th waiting write;
+  - `everyWrite`;
+  - `manual` (the old behaviour).
+
+  A failed coalesced commit inside a write throws to the writer; one from
+  the timer goes to `lastBackgroundError`.
+- **iOS:** the background close and the close after a background call
+  cancel the pending commit (they commit anyway). A timer firing on a
+  closed store doesn't reopen it, and a background call commits as it
+  closes.
+- **Android:** `ProcessStopObserver` now also sends `ON_START`. The store
+  starts out stopped until `ProcessLifecycleOwner` reaches `STARTED`, so
+  an app started without an activity counts as stopped.
+  - **My call on the dispatch's choice:** a coalesced write made while
+    stopped **commits before it returns**. I didn't use the coalescing
+    window there, because a stopped process can be killed at any moment.
+    `Manual` still never commits on its own.
+- **`withSession { ... }`** on both: one open handle, one expiring
+  activity on iOS, and one commit at the end (not under `manual`). It
+  doesn't retry. A session takes vectors: `update` without a vector for
+  new content throws `Invalid`. If the block throws, the writes it made
+  are still committed.
+- The Benchmarks (iOS and Android) use `manual`; the Notes screens use the
+  default.
+- **Docs:** a "Durability" section in both READMEs (the policy table,
+  sessions), the lifecycle sections, the method docs, AGENTS.md's Swift and
+  Kotlin rows (`write: true` / `write = true` on writes), and the
+  CHANGELOG.
+
+**Tests:**
+- **macOS `swift test`:** 25 (11 new).
+- **iOS simulator (TestHost):** 34, including a new test that a background
+  transition commits and cancels the pending coalesced commit.
+- **JVM:** 12 new, including the stopped-process path. CI's `kotlin` job
+  ran them (green); there's no JDK here.
+- **Emulator** (android-emulator 42764397331, both images green): 5
+  instrumented tests each, including the new lifecycle test (stopped:
+  commits at once; after `ON_START`: coalesced; then `ON_STOP`).
+
+**The kill tests:** write 20, wait past the window, write 5 more, kill,
+relaunch and count.
+- **iOS** (`scripts/kill-test.sh`, `simctl terminate`, iPhone simulator
+  on this Mac): count=20.
+- **Android** (`am force-stop`, in `emulator-tests.sh`): count=20 on the
+  4 KB and the 16 KB images.
+
+Every write older than the window survived. The 5 made just before the
+kill were lost, which shows the kill skipped any flush.
+
+**Deviation:** under the default `maxWrites: 64`, a burst of 100 writes is
+two commits (the 64th write, then the timer). The tests check that 64
+writes are one commit, that 100 writes with `maxWrites: 1000` are one, and
+that 100 writes in a session are one.
+
+**CI:** PR 11 18/18 green at b7292bb. The size gates are unchanged (no
+native change).
+
+**Housekeeping:**
+- The merge first failed: `git fetch` stopped on `bad object
+  refs/remotes/origin/main 2`. `.git/` had two sync-conflict copies,
+  `refs/remotes/origin/main 2` (21:27) and `index 2`, which look like a
+  file-sync tool copying the repository. I moved both into my scratchpad
+  (not deleted), and fetch works again.
+- My cleanup step had already deleted `mobile-2b` and closed PR 11, so I
+  re-pushed the branch at b7292bb, reopened the PR, and fast-forwarded.
+  Nothing was lost.
+- **The user may want to keep the repository out of that sync.**
+
+### 2026-11-09 — WORKER — DONE — MOBILE-2c: the embedder runs outside the store lock
+
+**Commit** d3a769e (PR 12, toarchkumar/mnemo#12, fast-forwarded to
+`main`). CI 18/18 green.
+
+**What changed:**
+- **`mnemo-uniffi`:**
+  - `embed_texts` (a free function: the binding's embedder checks, so
+    errors are unchanged: `Embedder` on a throw or a wrong count,
+    `DimensionMismatch` on a wrong width);
+  - `ingest_thread_plan` and `ingest_thread_with_vectors` (an ingest the
+    caller embeds; the second returns `None`, and writes nothing, if the
+    thread changed since the plan);
+  - `essence_add_with_vector` and `essence_append_timeline_with_vector`
+    (with no vector they behave as before).
+- **Swift:** `rememberText`, `recallText`, `update`, `essenceAdd`,
+  `essenceAppendTimeline` and `ingestThread` are `nonisolated`. They embed
+  through `embedTexts` before reaching the actor, then call actor-isolated
+  vector methods. The embedder is in a lock-guarded `EmbedderBox`, and the
+  binding still gets it through `setEmbedder`, for the identity and
+  manifest checks.
+- **Kotlin:** the same calls embed on the dispatcher, outside the
+  `mutex`, then go through `withDatabase`. `ingestThread` plans, embeds
+  and applies, and retries up to 3 times.
+- `essenceUpdate` needed nothing: the engine reuses the record's vector.
+- The READMEs' embedder line now says what's true (it ran under the
+  store's lock before v0.12.1).
+
+**Tests:**
+- **macOS:** 28. **iOS simulator:** 38, including the new background-close
+  test. **Binding:** 14 (3 new).
+- **JVM:** 3 new; CI's `kotlin` job ran them (green).
+- The cases:
+  - an embedder that calls back into the store (`count()`, with a 5 s
+    deadlock timeout) completes through `rememberText`, `recallText`,
+    `essenceAdd` and `ingestThread`;
+  - with a slow embedder (1.5 s), an unrelated `get` returns in under
+    0.5 s;
+  - iOS: a background close completes in under 1 s while a 2 s embed is
+    in flight, and the write then lands as a background call;
+  - the no-embedder and wrong-width errors.
+
+Next: MOBILE-2d is PR 13.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-2d: the vector budget by live facts, recall_mode, the cliff measured
+
+**Commit** 785a7b7, on `main`. PR 13 (toarchkumar/mnemo#13), CI 18/18
+green. **The PR shows "closed", not "merged":** my first push to `main`
+failed (transient), and the cleanup step after it deleted the branch
+before I saw the error. The retry pushed 785a7b7 to `main`, and GitHub
+then refused to reopen a PR with no new commits. The code is all there.
+
+**Engine:**
+- `scored_row`: live, not superseded, not a turn, essence item or thread
+  link. The column goes resident when the scored rows × entry fit the
+  budget (it was `catalog.len()`).
+- `fill_column_page` skips non-scored rows.
+- `stage_vector` keeps a conservative running count of scored rows
+  (deletes and supersedes don't lower it until reopen), and
+  `set_vector_cache_budget` compares against it.
+- `Stats::recall_mode` (`RecallMode`: `ExactResident`, `ExactPaged`,
+  `Indexed`, with `as_str()`). v8 without an index reports `exact_paged`.
+- Surfaced in the CLI (`recall:` in `info`), MCP (`recall_mode`), Python
+  (`stats()["recall_mode"]`), Node, and the UniFFI `DbStats.recallMode`.
+
+**The cliff** (`device_budget --only overbudget`, cached corpus, M1 Pro):
+
+| Facts | 16 MiB | 4 MiB |
+|---|---|---|
+| 10K | exact_resident, warm 2.17 ms (p95 2.37), first 10.03 | exact_paged, warm 10.89 ms (p95 11.98), first 10.86 |
+| 1K | resident at both | resident at both |
+
+- Recorded as `budget_cliff_v0_12_1` in `perf_v0.5.0.json`.
+- The cell reports times only: both budgets share one process, so a second
+  RSS reading would include what the allocator kept.
+
+**Docs:**
+- the rows-by-dimension table (21,732 / 16,320 / 10,894 facts at
+  384 / 512 / 768) and a "History" note in both mobile READMEs;
+- a "vector column" section and the retention table in the engine README.
+
+**Tests:**
+- 3 new engine tests (`fmt9b_column`): resident with 1,000 turns and 27
+  superseded versions beside 103 facts (this would page on v0.12.0); writes
+  past the budget page it; an index makes it `indexed`;
+- `recallMode` in the Swift, Kotlin and Python round trips;
+- the engine suite: 470 passed. macOS 28, simulator 38, Python all
+  passed.
+
+**Asks for the Planner (Planner-owned file):** the root README should state
+the retention cap as well. Suggested text: "Point-in-time restore reaches
+back to retained snapshots only: on v9, the newest 16 plus any from the
+last 24 hours (never pinning more than a quarter of the file); on v8, the
+newest 256. Raise `max_snapshots` for more history; `compact` drops it."
+
+### 2026-11-09 — WORKER — DONE — SEC-2: rekey and export hardened; release workflow credentials (and the settings only the user can make)
+
+**Commits** (PR 14, toarchkumar/mnemo#14, fast-forwarded to `main` at 9c0e261):
+- 280a54b "feat(SEC-2): harden rekey and export";
+- 95a5dde "ci(SEC-2): release workflow: least-privilege credentials";
+- 9c0e261 drops a redundant import. PR 14's first CI run failed the MSRV
+  job: Rust 1.75 warns on an import `use super::*` already covers, CI
+  builds with `-D warnings`, and newer compilers don't warn. I installed
+  1.75 locally, reproduced the failure, fixed it, and ran the MSRV test
+  targets on 1.75 (42, 252 and 9 tests, all green).
+
+The commit messages and the PR text are neutral, as the dispatch asked. The
+CHANGELOG's Security section is in the release commit (93cb516, not on
+`main` yet).
+
+**RB-001.30, as triaged:**
+1. **Scrub.** `rekey_secret` now zeroes the whole previous WAL region
+   (`wal::scrub_region`: every page, then an fsync), on v8 and v9. It then
+   scans the file for the previous header's 76-byte key wrap (salt, DEK
+   nonce, wrapped DEK) and overwrites every copy (`scrub_bytes`). That
+   covers grown or relocated regions too. The scan reads the file once.
+   Only plaintext page-0 images can hold the wrap, since everything else is
+   ciphertext.
+2. **A fresh-DEK export.**
+   - `Mnemo::export_rekeyed(dest, passphrase, kdf)` and
+     `export_rekeyed_with_key(dest, key)` write through the compaction path
+     under a fresh DEK: live memories, the cache and the index, as v9. They
+     work from a read-only handle and refuse an existing `dest` and the open
+     file itself. `compact_file` and the export now share `copy_live_into`.
+   - The binding's `export_with_passphrase` uses it, under the handle lock
+     (copy and KDF).
+   - `import_with_passphrase` opens the source read-only, then
+     `export_rekeyed_with_key` to the destination with a new device key, so
+     the source is never written.
+   - `MnemoDb` no longer has a `secret` field (`Secret` and `open_copy` are
+     gone).
+3. **`mnemo rekey --rotate`** (rekey, then `compact_file`). A plain
+   `rekey` prints how to rotate. The rustdoc on `rekey` and
+   `rekey_with_key`, the CLI help, the engine README (the key-hierarchy
+   paragraph and the CLI table), and both mobile READMEs and method docs
+   (export and import) say what each does.
+4. **Tests** (`mnemo/tests/rekey_export.rs`, 5):
+   - after a rekey, the old wrap appears nowhere in the file (v8 and v9).
+     It fails with the scrub disabled; I checked;
+   - a plain rekey still opens with an earlier header (the documented
+     limit);
+   - after a rotation, the pre-rotation header plus the old passphrase
+     fails (v8 and v9);
+   - an export and its source don't open each other's headers;
+   - the read-only and raw-key export paths.
+
+   The binding tests add header-splice checks to the export and import
+   tests. A CLI smoke test covers `rekey`'s note and `rekey --rotate`.
+
+**RB-001.32, as triaged:**
+1. Passphrases are wrapped in `Zeroizing` before the first fallible call
+   (`create`, `open`, `open_read_only`).
+2. `MnemoDb` keeps no secret (above).
+3. **`generate_key`: best effort, a deviation.** The key is made in a
+   `Zeroizing` array and copied once into the returned `Vec`. UniFFI moves
+   that `Vec` into its own buffer and frees it without zeroing. Wiping it
+   would need a hand-written `unsafe` FFI converter, so the doc comment says
+   so instead.
+4. **Swift:**
+   - `resolveKey` copies the key store's `Data` into a `KeyBytes` that owns
+     unique storage and zeroes it in place on release. Every
+     `var bytes = key` pattern is gone.
+   - A test checks that the wipe lands at the same address and that the
+     source buffer is untouched.
+   - The README's key section says "best effort", and
+     `Data.zeroize()`'s doc says when it does and doesn't reach the bytes.
+5. Kotlin as is.
+
+**RB-001.31, as triaged:**
+1. **Split build from publish.**
+   - The CLI, wheel and sdist jobs upload artifacts, and a new
+     `attach engine assets` job (contents: write, builds nothing) attaches
+     them.
+   - `build-swift` / `publish-swift` and `build-android` /
+     `publish-android`: the build jobs have no secrets and a read-only
+     token. The publish jobs download the artifacts, then sign, push and
+     upload. `publish-android` runs Gradle only (no cargo, no NDK build).
+   - Each secret is in the `env` of the one step that uses it.
+   - `cargo publish` gets its credential only in the upload step: the crate
+     is verified by `cargo package` first, with no credential, then
+     published with `--no-verify`.
+2. Top-level `contents: read`. Write only on `create-release`, `attach`,
+   `publish-swift` and `publish-android`. `persist-credentials: false` on
+   all 9 checkouts.
+3. **Pinned:**
+   - every action to a commit SHA, with the ref in a comment;
+   - `.github/dependabot.yml` (github-actions, weekly, one group);
+   - `ziglang==0.17.1` and `cargo-zigbuild 0.24.1`, the versions v0.12.0
+     built with.
+4. `central-dry-run.sh` runs `::add-mask::` on the derived base64.
+   `--token` is dropped from `cargo publish`.
+
+   **Built to work before and after the user's settings:**
+   - the publish jobs name their environments (`crates-io`,
+     `mnemo-swift`, `maven-central`; `pypi` already);
+   - crates.io uses Trusted Publishing (`rust-lang/crates-io-auth-action`)
+     only when the repository variable `CRATES_TRUSTED_PUBLISHING` is
+     `true`, and `CRATES_IO_TOKEN` otherwise;
+   - the `mnemo-swift` push uses `MNEMO_SWIFT_DEPLOY_KEY` (SSH, with
+     GitHub's ed25519 host key pinned) when it's set, and
+     `MNEMO_SWIFT_TOKEN` otherwise.
+
+**Runs:**
+- **Dry run on `sec-2` (42768126405): green.** Every job succeeded.
+  - Android: the signed `publishToMavenLocal` with all `.asc` present, in
+    the publish job.
+  - Central: the 0.12.0 notice.
+  - Swift: "pushing with MNEMO_SWIFT_TOKEN (no deploy key set)", then
+    pushed and deleted `dry-run-0.12.0`, then resolved and built
+    `mnemo-swift` 0.12.0.
+  - That run created the `mnemo-swift` and `maven-central` environments,
+    with no rules. GitHub does that when a job first names one; `crates-io`
+    appears the first time its job runs, which is on the tag.
+- **Engine suite:** 461 + the new tests, all green; clippy and fmt clean.
+- **Binding:** 14. **macOS:** 29. **iOS simulator:** 39. **CLI smoke:** 42.
+- **CI on PR 14 at 9c0e261:** 18/18 green (run 42770579989).
+- **Housekeeping:** the release branch was cut before the fix, so I rebuilt
+  it on the fixed `sec-2` (cherry-picked the release commit, now 7ca3de4).
+  I deleted my old, unmerged `release-0.12.1` (93cb516, no PR) and pushed
+  the new one, without a force-push. Its first dry run (42769796530) was
+  cancelled.
+
+---
+
+**The user's settings, click by click.** Do these before the v0.12.1 tag.
+Every step is optional for the workflow itself, which runs as it is today,
+but the protection only exists once they're done.
+
+**A. The four environments** (on toarchkumar/mnemo, under Settings →
+Environments). Do this for each of `crates-io` (click "New environment"
+and name it), `pypi`, `mnemo-swift` and `maven-central`, the last three
+already listed:
+
+1. Open the environment.
+2. Under **Deployment protection rules**, tick **Required reviewers**, add
+   `toarchkumar`, and leave **Prevent self-review** unticked (you're the
+   only reviewer). Click **Save protection rules**.
+3. Under **Deployment branches and tags**, choose **Selected branches and
+   tags**, then **Add deployment branch or tag rule**:
+   - Ref type **Tag**, pattern `v*`, **Add rule**;
+   - again: Ref type **Branch**, pattern `release-*`, **Add rule** (dry
+     runs run from release branches).
+4. Under **Environment secrets**, click **Add environment secret** for each
+   of the secrets below, with the same names and values as the repository
+   secrets:
+   - `maven-central`: `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
+     `MAVEN_SIGNING_KEY` (the whole armored private key),
+     `MAVEN_SIGNING_KEY_PASSWORD`;
+   - `mnemo-swift`: `MNEMO_SWIFT_DEPLOY_KEY` (from C below), and
+     `MNEMO_SWIFT_TOKEN` only until the deploy key works;
+   - `crates-io`: `CRATES_IO_TOKEN` only until B is done;
+   - `pypi`: nothing.
+5. Then, under Settings → Secrets and variables → Actions → **Repository
+   secrets**, delete each secret you moved, using the trash icon.
+
+   GitHub never shows a secret's value again. If you don't have a value at
+   hand, leave that repository secret as it is: the workflow reads either.
+
+**B. crates.io Trusted Publishing:**
+1. Sign in at crates.io, then open **Dashboard** → `mnemo-engine` →
+   **Settings** → **Trusted Publishing** → **Add**.
+2. Publisher **GitHub**, owner `toarchkumar`, repository `mnemo`, workflow
+   filename `release.yml`, environment `crates-io`. Click **Add**.
+3. On GitHub: Settings → Secrets and variables → Actions → **Variables**
+   tab → **New repository variable**: name `CRATES_TRUSTED_PUBLISHING`,
+   value `true`. Click **Add variable**.
+4. After the v0.12.1 release publishes to crates.io through OIDC (the
+   `publish to crates.io` log shows the "crates.io Trusted Publishing"
+   step), delete `CRATES_IO_TOKEN` (repository or environment). Then revoke
+   it on crates.io: Account Settings → **API Tokens** → **Revoke**.
+
+**C. A deploy key for `mnemo-swift`:**
+1. In a terminal:
+   `ssh-keygen -t ed25519 -C "mnemo release" -N "" -f mnemo-swift-deploy`
+   (it writes `mnemo-swift-deploy` and `mnemo-swift-deploy.pub`).
+2. Open toarchkumar/mnemo-swift → Settings → **Deploy keys** → **Add
+   deploy key**: title `mnemo release`, paste the contents of
+   `mnemo-swift-deploy.pub`, tick **Allow write access**, then **Add key**.
+3. Open toarchkumar/mnemo → Settings → Environments → `mnemo-swift` →
+   **Add environment secret**: name `MNEMO_SWIFT_DEPLOY_KEY`, value the
+   whole contents of `mnemo-swift-deploy`, including the BEGIN and END
+   lines.
+4. Delete both local key files.
+5. Run a dry run on the release branch. The "Push to mnemo-swift" step
+   should print "pushing with the deploy key".
+6. Then delete `MNEMO_SWIFT_TOKEN`, and the fine-grained token itself
+   (GitHub → Settings → Developer settings → Personal access tokens →
+   Fine-grained tokens → the token → **Delete**).
+
+**D. A tag ruleset on `mnemo-swift`:**
+1. Open toarchkumar/mnemo-swift → Settings → **Rules** → **Rulesets** →
+   **New ruleset** → **New tag ruleset**.
+2. Name `version tags`, **Enforcement status: Active**.
+3. **Target tags** → **Add target** → **Include all tags**.
+4. Under **Rules**, tick **Restrict updates** and **Restrict deletions**,
+   and leave **Restrict creations** unticked, so a release can still add
+   its new tag. Leave the bypass list empty.
+5. Click **Create**.
+
+With A–D in place, a tag (or a dry run) waits for your approval at each
+publish job. Only `v*` tags and `release-*` branches can reach the
+secrets, and a published Swift tag can't be moved.
+
+### 2026-11-09 — WORKER — READY — v0.12.1: MOBILE-2a–2d and SEC-2 are on `main`; the release commit is staged and its dry run passed
+
+**On `main` (9c0e261):**
+
+| Item | Commits | PR | DONE |
+|---|---|---|---|
+| MOBILE-2a | 6bc592c, 86e6836 | #10 | above |
+| MOBILE-2b | 098099c, b7292bb | #11 | above |
+| MOBILE-2c | d3a769e | #12 | above |
+| MOBILE-2d | 785a7b7 | #13 (shows closed; the commit is on `main`, see its DONE) | above |
+| SEC-2 | 280a54b, 95a5dde, 9c0e261 | #14 | above |
+
+I picked up nothing from RB-002, per the dispatch.
+
+**Staged, not merged and not tagged:**
+- the release commit **7ca3de4 "release: v0.12.1"**, on `release-0.12.1`
+  (PR 15, toarchkumar/mnemo#15);
+- **CI 42771771217 on 7ca3de4: 18/18 green.**
+
+**What the release commit changes:**
+- **Versions** to 0.12.1: `mnemo/Cargo.toml`, `mnemo-uniffi`, the Node
+  binding, `mnemo-python/Cargo.toml` and `pyproject.toml`, both
+  `Cargo.lock` files (version lines only), the Kotlin `VERSION_NAME`, the
+  iOS sample's `MARKETING_VERSION`, the Android sample's dependency, and
+  the `release-check` comment.
+- **Install lines:**
+  - Swift: `.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.1")`;
+  - Kotlin: `implementation("io.github.toarchkumar:mnemo-android:0.12.1")`.
+- **CHANGELOG** `[0.12.1] — 2026-11-09`, with the link references:
+  - **"Upgrading from 0.12.0"** says plainly that the stores now commit on
+    their own, and how to get the old behaviour (`.manual` /
+    `FlushPolicy.Manual`), and to rotate after a suspected passphrase leak;
+  - a **Security** section (rekey, export and import hardened, with the
+    advice to rotate; secrets in memory; the workflow), worded as hardening;
+  - Changed (2b, 2c, 2d) and Release workflow (2a, SEC-2).
+
+**The release dry run on `release-0.12.1` (42770600902, at 7ca3de4):
+green.**
+- **Version check:** engine, `mnemo-uniffi` and `mnemo-android` all
+  0.12.1; the engine jobs were skipped, and none failed.
+- **Swift build:** the XCFramework, the tree, and the SPM consumer on the
+  simulator passed (`** TEST SUCCEEDED **`).
+- **Swift publish:**
+  - "pushing with MNEMO_SWIFT_TOKEN (no deploy key set)", then pushed and
+    deleted `dry-run-0.12.1`;
+  - the published-package check resolved `mnemo-swift` 0.12.0 (the zip
+    downloaded, checksum matched) and built (`** BUILD SUCCEEDED **`).
+- **Android build:** the native libraries, the 16 KB and size gates, the
+  JVM tests, the AAR, the unsigned Maven Local publish, and the consumer.
+- **Android publish:**
+  - the signed `publishToMavenLocal` has all five `.asc` files;
+  - the Central dry run uploaded **0.12.1** as USER_MANAGED (deployment
+    89bf27a2-0a87-44b9-bc78-198f7402d121), which went **VALIDATED** and was
+    dropped (HTTP 204).
+
+**Sizes, against 0.12.0:**
+
+| | 0.12.0 | 0.12.1 |
+|---|---|---|
+| `MnemoFFI-0.12.1.xcframework.zip` | 10,557,952 B | 10,551,129 B (checksum `353bb5d97e6a4eb3da8df195bd718a51f2725b915d29e2cc21e2db8fef62e7d0`) |
+| `libmnemo_uniffi.a`, ios-arm64 | | 9,283,400 |
+| `libmnemo_uniffi.a`, simulator | | 18,662,072 |
+| `libmnemo_uniffi.a`, macos-arm64 | | 9,255,184 |
+| `libmnemo_uniffi.so`, arm64-v8a | 2,564,456 | 2,569,272 (LOAD 0x4000) |
+| `libmnemo_uniffi.so`, x86_64 | 2,994,856 | 2,999,272 (LOAD 0x4000) |
+| AAR | 2,692,667 | 2,728,983 |
+
+The 5 MiB `.so` gate passes.
+
+**Before the tag:**
+
+1. **The user's repository settings:** A–D in my SEC-2 DONE above:
+   environments with a reviewer and `v*` / `release-*` rules, with the
+   secrets moved; crates.io Trusted Publishing and
+   `CRATES_TRUSTED_PUBLISHING=true`; the `mnemo-swift` deploy key; the
+   `mnemo-swift` tag ruleset.
+   - The workflow works before and after each one.
+   - If the deploy key goes in first, a dry run on `release-0.12.1` shows
+     "pushing with the deploy key".
+2. **PLANNER-A:**
+   - the README and site HANDOFF (the version text, and the root README's
+     retention line; suggested text in my 2d DONE);
+   - your acceptance of this READY.
+   - **Note:** `SECURITY.local.md` has an untriaged RB-002 item (RB-002.2)
+     about how SEC-2's revocation is tested. I didn't act on it. The
+     rotation and both export paths already fail the header splice; the
+     plain rekey doesn't, by design, and the docs say so.
+3. **Me, on your word:**
+   - commit the HANDOFF files;
+   - commit the `chore(plan)` backup;
+   - fast-forward `main` to 7ca3de4;
+   - tag `v0.12.1` and push;
+   - watch every job: each publish job waits for the user's approval once
+     the environments have reviewers;
+   - then move the SEC-2 items into PLAN.md, per AGENTS.md.
+
+**State:**
+- The working tree is clean apart from PLAN.md and reviewer_notes.md
+  (uncommitted, as usual) and the untracked `.claude/`.
+- Four findings are saved to `test/project.mnemo`: the macOS runner and
+  netrc, the default flush policy, rekey versus rotate, and the `.git`
+  sync copies.
+
+### 2026-11-10 — PLANNER-A — REVIEW + DECISION + HANDOFF — v0.12.1 READY accepted (ship it as staged); RB-002 and the held RB-001 items triaged; v0.12.2 (MOBILE-2e + SEC-2b) queued
+**READY accepted.**
+- MOBILE-2a–2d and SEC-2 are on `main` (`9c0e261`). The release commit
+  `7ca3de4` has CI 18/18 green, and dry run 42770600902 is green,
+  including the published-package check, the `mnemo-swift` branch cycle
+  and the Central validate-and-drop.
+- The sizes are flat.
+- Deviations accepted:
+  - the coalescing at 64 writes (a burst of 100 is two commits);
+  - `generate_key` best effort, documented;
+  - the release-branch rebuild without a force-push.
+- **The CHANGELOG wording on rekey versus rotate is right.**
+
+**Decision: v0.12.1 ships as staged.** RB-002 confirms more bugs in the
+mobile layers, but none was introduced by v0.12.1, and v0.12.1 fixes
+the worst live ones (writes lost until background; the embedder under
+the lock; the vector-budget cliff; the release gate; the key-handling
+hardening). Holding it would leave those in users' hands longer. The
+RB-002 fixes become v0.12.2, straight after.
+
+**HANDOFF: commit on `release-0.12.1`, as their own commit:**
+- **`README.md`:**
+  - the install lines at 0.12.1;
+  - a new "What's new in v0.12.1: safer phone stores" (the durability
+    default and `.manual`, the embedder outside the lock, the budget by
+    facts and `recall_mode`, and rekey versus `--rotate`, with "if you
+    think a passphrase leaked, rotate");
+  - the retention sentence now states the cap (your 2d suggestion,
+    reworded);
+  - the feature list says "recent commits are kept as restorable
+    snapshots" instead of "every commit".
+- **`index.html`:** the pill and the "current release" line at v0.12.1.
+- **Commit message:** `docs: v0.12.1 README and site (durability default, rekey vs rotate, retention cap)`.
+
+**The tag, after the user's settings A–D** (I'm walking them through it):
+1. this HANDOFF commit;
+2. the `chore(plan)` backup;
+3. fast-forward `main` to the release branch;
+4. tag `v0.12.1` and push. Each publish job waits for the user's approval.
+
+Then log DONE with the four registries and the run id. After the tag,
+move SEC-2's items into `PLAN.md`, per AGENTS.md (their fix has
+shipped), and delete the merged branches. If the user hasn't finished
+A–D when you're ready, tell them which ones are left. The workflow
+works without them, but the tag shouldn't wait more than a day for
+them.
+
+**RB-002 and the held RB-001 items, triaged** (the ledger rows and each
+item's Planner Triage line; RB-002.2's detail is in `SECURITY.local.md`
+only):
+- **→ MOBILE-2e (v0.12.2):**
+  - RB-001.21 **first**: a transient Keystore error must not read as
+    `KeyMissing`, whose documented recovery includes deleting the file;
+    never regenerate the wrapping key over a live alias; fsync the key
+    files;
+  - .22: `close` keeps the handle when its flush fails;
+  - .23: distinct FFI error cases, with a `retryable` flag;
+  - .24: reject caller `_mnemo.*` metadata on every write surface;
+  - .5: `track_access` off by default in the mobile binding;
+  - .20: no call on an expired activity, and honest extension docs;
+  - .26: the decompression bound drops to 1 MiB;
+  - .27: `formatVersion: 8` removed from the mobile configurations;
+  - .28 part 1: a key-policy change applies completely or is refused;
+  - .7: the CI `concurrency` and `paths-ignore` chore;
+  - RB-002.3: a cheap `stats()`;
+  - RB-002.5: the docs, plus `setMaxSnapshots` exposed in both stores;
+  - **RB-002.4's ten in-process tests are MOBILE-2e's acceptance tests.**
+- **→ SEC-2b (v0.12.2):** RB-002.2. The fresh-DEK paths already shipped
+  in SEC-2; SEC-2b adds the graft acceptance test and a docs pass.
+- **→ PERF-2:** RB-001.4 (`F_BARRIERFSYNC`, with crash tests), .8 (bench
+  methodology), and .9 (DEFERRED into its spec).
+- **→ later:**
+  - HOOKS-1 (.29) with v0.13;
+  - DOCS-1 (.16) after INSP-1;
+  - FUZZ-2 (.26's fuzz targets) before 14.1;
+  - SAMPLE-1 gains .15.
+- **DEFERRED:** .10 (MOBILE-3 candidate; the user picks), .12, .13.
+- **REJECTED:** .6 (RB-002 refuted the size gain). RB-001.28 part 2 is
+  refuted too.
+- **RB-002.1: ACCEPTED,** already fixed in MOBILE-2a (v0.12.1).
+  REVIEWER-B verifies it after the tag run.
+
+**RB-002's corrections to RB-001, noted:**
+- RB-001.1's cliff is 4.8–5.1×, not 9×;
+- RB-001.3's coalesced reads are worth about 0.3 ms, not 1.2, so PERF-2
+  leans on parallel decrypt;
+- RB-001.25: `set_max_snapshots` already gives a fixed count, so the
+  "minimum count" moves from Phase 15 to exposing it in v0.12.2.
+
+**MOBILE-2e and SEC-2b start after the v0.12.1 DONE.** I'll write their
+dispatch then, with the step order, so this release isn't held up.
