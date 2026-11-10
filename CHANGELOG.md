@@ -8,6 +8,50 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-11-09
+
+Mobile hardening, and a hardening of rekey and export.
+
+- **Upgrading from 0.12.0:** **the Swift and Kotlin stores now commit
+  writes on their own.** The default flush policy commits within about a
+  second of a write, where 0.12.0 kept foreground writes in memory until
+  the app went to the background. To keep the old behaviour, set
+  `flushPolicy` to `.manual` / `FlushPolicy.Manual`.
+- **After a suspected passphrase leak, rotate**, don't just rekey:
+  `mnemo rekey --rotate` (see Security).
+- The on-disk format is unchanged (v9). v8 files still open and write;
+  v0.13 makes them read-only.
+
+### Security
+
+- **Rekey, export and import are hardened.**
+  - `rekey` now scrubs the previous key wrap from the file: it zeroes the
+    whole previous write-ahead-log region, and overwrites any stale copy
+    of the previous header's wrapped data key.
+  - A rekey still keeps the same data key. That's what makes it cheap,
+    and it means a copy of the file taken before the rekey still opens
+    with the old passphrase. **To revoke an old passphrase (after a
+    suspected leak, say), rotate:** `mnemo rekey --rotate` (a rekey, then a
+    compaction under a fresh data key). The rustdoc, the CLI help and the
+    READMEs say so.
+- **Passphrase export and import write a fresh data key.** The new
+  `Mnemo::export_rekeyed` and `export_rekeyed_with_key` write a compacted
+  copy under a fresh data key and a new secret, sharing no key material
+  with the source. The Swift and Kotlin `exportWithPassphrase` and
+  `importWithPassphrase` use them:
+  - an export no longer shares the device file's data key;
+  - an imported file no longer shares the export's, so the transfer
+    passphrase never opens it.
+- **Secrets in memory:**
+  - the mobile binding no longer keeps the passphrase or key a file was
+    opened with;
+  - passphrases are zeroized on every path, failures included;
+  - the Swift store copies each key it reads into bytes it owns and zeroes
+    those in place. That's still best effort: the platform's and the FFI's
+    own copies aren't reachable.
+- **The release workflow holds its credentials more tightly** (see
+  Release workflow).
+
 ### Changed
 
 - **The Swift and Kotlin stores commit writes on their own by default
@@ -49,7 +93,6 @@ Pre-1.0, the minor component carries the breaking-change signal.
   force-stop`). Each writes, waits past the window, writes a few more, is
   killed with no flush, and checks that every write older than the window
   survived.
-
 - **The vector column is sized by live facts (MOBILE-2d).** On v9, the
   in-memory fp16 column stays resident while the file's live scored facts
   fit the vector cache budget. Before, the check counted the whole catalog
@@ -79,14 +122,36 @@ Pre-1.0, the minor component carries the breaking-change signal.
   Before, a failed build could skip a publish job and let mobile run.
 - **The published Swift package check works and runs in the dry run.**
   It picks the scheme Xcode actually names (`Check-Package`), resolves
-  and builds in separate steps with full output, and fails at once on a
-  credential prompt. The dry run checks the newest version `mnemo-swift`
-  already has, so the check runs before every tag. In v0.12.0 it ran for
-  the first time on the tag and hung after everything had published.
+  and builds in separate steps with full output, takes package
+  credentials from netrc instead of the runner's Keychain (where v0.12.0's
+  check hung), downloads and checks the zip with curl first, and runs
+  xcodebuild under a watchdog. The dry run checks the newest version
+  `mnemo-swift` already has, so the check runs before every tag.
+- **The Maven Central dry run skips a version Central already has**
+  (between releases), with a notice.
 - **Every release job and step has a time limit** (45 minutes per job,
   10 to 20 per step).
 - `android-publish.yml`, the manual Maven Local check from MOBILE-1c, is
   removed: the release workflow's Android job and dry run do the same.
+- **Least-privilege credentials:**
+  - every job has a read-only token unless it creates the release or
+    attaches assets;
+  - no checkout keeps its token;
+  - building and publishing are separate jobs: the CLI, wheel, sdist,
+    XCFramework and Android builds hold no secrets, and small jobs attach,
+    sign and upload what they built;
+  - each secret is visible only to the step that uses it;
+  - the publish jobs run in the `crates-io`, `mnemo-swift` and
+    `maven-central` environments, like `pypi`.
+- **crates.io Trusted Publishing** once the repository variable
+  `CRATES_TRUSTED_PUBLISHING` is `true` (the token until then). The crate
+  is verified with no credential in the environment, then published with
+  `--no-verify`.
+- **An SSH deploy key for `mnemo-swift`** (`MNEMO_SWIFT_DEPLOY_KEY`, with
+  GitHub's host key pinned) when it's set, the personal token until then.
+- **Every action is pinned to a commit**, and Dependabot keeps them
+  current. ziglang and cargo-zigbuild are pinned to the versions v0.12.0
+  built with.
 
 ## [0.12.0] — 2026-11-09
 
@@ -2957,7 +3022,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/toarchkumar/mnemo/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/toarchkumar/mnemo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/toarchkumar/mnemo/compare/v0.9.1...v0.10.0
