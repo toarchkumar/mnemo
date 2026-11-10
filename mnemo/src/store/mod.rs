@@ -719,6 +719,35 @@ pub struct Stats {
     /// FMT-9f: the file's on-disk format (`8` or `9`). A v8 file still
     /// opens and writes as v8; `mnemo compact` upgrades it to v9.
     pub format_version: u16,
+    /// MOBILE-2d: how recall scores vectors on this handle right now.
+    pub recall_mode: RecallMode,
+}
+
+/// MOBILE-2d: how recall scores vectors, from [`Mnemo::stats`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecallMode {
+    /// An exact scan over the fp16 vector column held in memory: a v9 file
+    /// whose live facts fit [`Mnemo::set_vector_cache_budget`]. The fast
+    /// path.
+    ExactResident,
+    /// An exact scan that reads vectors through the page cache: a v9 file
+    /// whose live facts are over the budget, or a v8 file. Slower, and
+    /// slower still as the file grows; raise the budget or build an index.
+    ExactPaged,
+    /// An IVF+PQ index shortlists the candidates
+    /// ([`Mnemo::build_index`]).
+    Indexed,
+}
+
+impl RecallMode {
+    /// `exact_resident`, `exact_paged` or `indexed`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RecallMode::ExactResident => "exact_resident",
+            RecallMode::ExactPaged => "exact_paged",
+            RecallMode::Indexed => "indexed",
+        }
+    }
 }
 
 /// Result of a [`Mnemo::compact_file`] run.

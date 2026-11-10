@@ -26,6 +26,7 @@ import Testing
         let again = try MnemoStore(configuration: config, keyStore: keys)
         #expect(try await again.count() == 2)
         #expect(try await again.stats().dimensions == 4)
+        #expect(try await again.stats().recallMode == .exactResident)
         try await again.close()
     }
 

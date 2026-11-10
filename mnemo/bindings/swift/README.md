@@ -103,6 +103,35 @@ let byWord = try await store.recall(vector: [], options: RecallOptions(keywords:
 - **Also:** `get`, `update`, `delete`, `about`, `stats`, `count`, `flush`,
   `close` and `compact`.
 
+### Memory and recall speed
+
+Recall scans an fp16 copy of the vectors (`dims × 2 + 4` bytes a fact).
+It stays in memory while the file's **live facts** fit the configuration's
+`vectorCacheBudgetBytes` (16 MiB by default). Thread turns, essence items and
+superseded versions don't count. Past the budget, recall reads the vectors
+from the file instead, which is slower, and slower still as the file grows.
+
+| Dimensions | Facts that fit 16 MiB |
+|---|---|
+| 384 | 21,732 |
+| 512 | 16,320 |
+| 768 | 10,894 |
+
+``try await store.stats()`` says which path recall takes now, in `recallMode`:
+`.exactResident` (in memory, the fast path), `.exactPaged` (from the
+file) or `.indexed`. Past the budget, raise `vectorCacheBudgetBytes` if the app can
+spend the memory. Past 20,000 facts, `buildIndex()` builds the IVF+PQ
+index instead.
+
+### History
+
+Every commit leaves a restorable snapshot, but only some are kept. A
+new (v9) file keeps the newest 16 plus any from the last 24 hours, and
+never lets them pin more than a quarter of the file. Under the default
+flush policy a busy app commits about once a second, so the history
+reaches back about a day, not further. A v8 file keeps the newest 256.
+`compact()` drops all of them.
+
 ### Durability
 
 A write is in memory until the store commits it to disk. A crash, a kill

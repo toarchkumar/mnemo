@@ -170,6 +170,7 @@ def test_delete_and_stats():
         s = db.stats()
         assert s["memories"] == 1 and s["encrypted"] is True
         assert s["dimensions"] == 2
+        assert s["recall_mode"] == "exact_resident"
         db.close()
     print("ok  delete / stats")
 

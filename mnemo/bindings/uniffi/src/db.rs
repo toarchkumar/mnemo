@@ -642,6 +642,7 @@ impl MnemoDb {
             format_version: s.format_version,
             has_index: s.index.is_some(),
             wal_pages: s.wal_pages,
+            recall_mode: s.recall_mode.into(),
         })
     }
 

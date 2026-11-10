@@ -11,7 +11,11 @@
 //! - open time and first recall on fresh handles (20 cycles);
 //! - warm recall (median / p95 over 1,000 queries);
 //! - durable writes: single (`remember` + `flush`) and batched (100
-//!   `remember` + one `flush`), with the fsync count per commit.
+//!   `remember` + one `flush`), with the fsync count per commit;
+//! - the budget cliff (MOBILE-2d): one handle at the mobile default vector
+//!   budget (16 MiB) and one below the file's live facts (4 MiB), with
+//!   `stats().recall_mode` and first / warm recall for each. On a file
+//!   with an index both are `indexed`; the cliff shows below 20,000 facts.
 //!
 //! ```text
 //! cargo run --release --example device_budget --features benches
@@ -197,6 +201,50 @@ fn phase_handle(n: usize) -> Value {
         "handle_rss_kb": rss_warm.saturating_sub(rss_before),
         "engine_heap": engine,
     })
+}
+
+/// MOBILE-2d: the mobile default vector budget, and one below the live
+/// facts of the 10K corpus (10,000 x 772 B = 7.7 MB).
+const MOBILE_BUDGET: usize = 16 << 20;
+const OVER_BUDGET: usize = 4 << 20;
+const BUDGET_QUERIES: usize = 200;
+
+fn phase_over_budget(n: usize) -> Value {
+    let qs = queries();
+    let mut cells = serde_json::Map::new();
+    // Times only: both cells share one process, so the second one's RSS
+    // would include what the allocator kept from the first (the handle
+    // phase measures RSS at the default budget).
+    for (name, budget) in [
+        ("mobile_default", MOBILE_BUDGET),
+        ("over_budget", OVER_BUDGET),
+    ] {
+        let mut db = Mnemo::open(corpus_path(n), PASSPHRASE).expect("open");
+        db.set_vector_cache_budget(budget);
+        let mode = db.stats().expect("stats").recall_mode;
+        let t = Instant::now();
+        std::hint::black_box(db.recall(&recall_req(&qs[0])).expect("recall"));
+        let first_ms = ms(t);
+        let mut warm = Vec::with_capacity(BUDGET_QUERIES);
+        for q in qs.iter().take(BUDGET_QUERIES) {
+            let t = Instant::now();
+            std::hint::black_box(db.recall(&recall_req(q)).expect("recall"));
+            warm.push(ms(t));
+        }
+        drop(db);
+        let (med, p95) = median_p95(warm);
+        cells.insert(
+            name.into(),
+            json!({
+                "budget_bytes": budget,
+                "recall_mode": mode.as_str(),
+                "first_recall_ms": first_ms,
+                "warm_recall_median_ms": med,
+                "warm_recall_p95_ms": p95,
+            }),
+        );
+    }
+    Value::Object(cells)
 }
 
 fn phase_cycles(n: usize) -> Value {
@@ -509,6 +557,7 @@ fn main() {
             "writes" => phase_writes(n),
             "layers" => phase_layers(n),
             "keyopen" => phase_keyopen(n),
+            "overbudget" => phase_over_budget(n),
             other => panic!("unknown phase {other}"),
         };
         println!("RESULT {v}");
@@ -543,9 +592,10 @@ fn main() {
         let writes = run("writes");
         let layers = run("layers");
         let keyopen = run("keyopen");
+        let overbudget = run("overbudget");
         results.insert(
             n.to_string(),
-            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers, "keyopen": keyopen }),
+            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers, "keyopen": keyopen, "overbudget": overbudget }),
         );
     }
 
@@ -637,6 +687,31 @@ fn main() {
             (f("rss_kb_after_key_open") - f("rss_kb_before_open")) / 1024.0,
         );
     }
+    println!(
+        "\n{:>7} | {:>14} {:>8} {:>8} {:>8} | {:>14} {:>8} {:>8} {:>8}",
+        "n", "16 MiB mode", "1stRcl", "warm", "p95", "4 MiB mode", "1stRcl", "warm", "p95"
+    );
+    for &n in &sizes {
+        let o = &results[&n.to_string()]["overbudget"];
+        let c = |cell: &str, k: &str| o[cell][k].as_f64().unwrap_or(0.0);
+        let m = |cell: &str| o[cell]["recall_mode"].as_str().unwrap_or("-").to_string();
+        println!(
+            "{:>7} | {:>14} {:>8.2} {:>8.2} {:>8.2} | {:>14} {:>8.2} {:>8.2} {:>8.2}",
+            n,
+            m("mobile_default"),
+            c("mobile_default", "first_recall_ms"),
+            c("mobile_default", "warm_recall_median_ms"),
+            c("mobile_default", "warm_recall_p95_ms"),
+            m("over_budget"),
+            c("over_budget", "first_recall_ms"),
+            c("over_budget", "warm_recall_median_ms"),
+            c("over_budget", "warm_recall_p95_ms"),
+        );
+    }
+    println!(
+        "(the budget cliff: the vector column budget at the mobile default and below the live \
+         facts; {BUDGET_QUERIES} warm recalls; ms)"
+    );
 
     let doc = Value::Object(results);
     let path = out_dir().join(format!("device_budget{}.json", format_suffix()));

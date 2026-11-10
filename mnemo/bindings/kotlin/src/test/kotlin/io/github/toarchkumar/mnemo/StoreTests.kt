@@ -42,6 +42,7 @@ class StoreTests {
         val again = MnemoStore(config, keys)
         assertEquals(2uL, again.count())
         assertEquals(4u, again.stats().dimensions)
+        assertEquals(RecallMode.EXACT_RESIDENT, again.stats().recallMode)
         again.close()
     }
 

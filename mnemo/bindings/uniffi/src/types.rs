@@ -320,6 +320,32 @@ pub struct DbStats {
     pub format_version: u16,
     pub has_index: bool,
     pub wal_pages: u64,
+    /// How recall scores vectors right now (see [`RecallMode`]).
+    pub recall_mode: RecallMode,
+}
+
+/// How recall scores vectors, from `stats()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RecallMode {
+    /// An exact scan over the vector column in memory: the live facts fit
+    /// the vector cache budget (16 MiB by default on phones). The fast path.
+    ExactResident,
+    /// An exact scan that reads vectors from the file: the live facts are
+    /// over the budget (or the file is v8). Slower as the file grows: raise
+    /// `vector_cache_budget_bytes`, or build an index past 20,000 facts.
+    ExactPaged,
+    /// The IVF+PQ index shortlists the candidates.
+    Indexed,
+}
+
+impl From<mnemo_engine::RecallMode> for RecallMode {
+    fn from(m: mnemo_engine::RecallMode) -> Self {
+        match m {
+            mnemo_engine::RecallMode::ExactResident => RecallMode::ExactResident,
+            mnemo_engine::RecallMode::ExactPaged => RecallMode::ExactPaged,
+            mnemo_engine::RecallMode::Indexed => RecallMode::Indexed,
+        }
+    }
 }
 
 /// What `compact_file` did. Every field is a count, not a size: read the

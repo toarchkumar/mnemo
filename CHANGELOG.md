@@ -50,6 +50,26 @@ Pre-1.0, the minor component carries the breaking-change signal.
   killed with no flush, and checks that every write older than the window
   survived.
 
+- **The vector column is sized by live facts (MOBILE-2d).** On v9, the
+  in-memory fp16 column stays resident while the file's live scored facts
+  fit the vector cache budget. Before, the check counted the whole catalog
+  (thread turns, essence items, tombstones and superseded versions), so a
+  file with a long thread history paged its recall long before its facts
+  needed it. Filling the column also skips the rows recall never reads.
+  The 16 MiB phone default holds 21,732 facts at 384 dimensions, 16,320 at
+  512 and 10,894 at 768.
+- **`stats()` reports `recall_mode`:** `exact_resident`, `exact_paged`
+  (over the budget, or a v8 file) or `indexed`. This covers the Rust
+  `Stats` (a new `RecallMode` enum, and a new `recall_mode` field), the CLI
+  (`recall:`), MCP, Python, Node, and the Swift and Kotlin `DbStats`.
+- **The budget cliff is measured:** a new `device_budget` cell (`--only
+  overbudget`). At 10,000 facts and 384 dimensions, warm recall takes 2.17
+  ms resident and 10.89 ms paged (M1 Pro).
+- **The docs state the snapshot retention cap.** A v9 file keeps the
+  newest 16 snapshots plus any from the last 24 hours, pinning at most a
+  quarter of the file; v8 keeps 256. Before, the engine README said
+  history reached back to the last compaction.
+
 ### Release workflow
 
 - **The mobile jobs start only after every engine job succeeded.** The

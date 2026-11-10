@@ -5804,5 +5804,22 @@
       }
     },
     "android": "not run on a device this time (emulator only: android-emulator workflow, 4 KB and 16 KB images)"
+  },
+  "budget_cliff_v0_12_1": {
+    "date": "2026-11-09",
+    "what": "MOBILE-2d: the vector column budget cliff. device_budget --sizes 1000,10000 --only overbudget: one handle on the cached v9 corpus (384 dims, 300-byte texts, fast KDF, no index below 20,000 facts) at the mobile default budget (16 MiB) and at 4 MiB, below the 10K corpus's live facts (10,000 x 772 B = 7.7 MB); 200 warm recalls each; times only (both cells share a process).",
+    "machine": "Apple M1 Pro, macOS 26.7.1, release build",
+    "sizing": "the column is sized by live scored facts (not by catalog.len(), which counted turns, essence items, tombstones and superseded versions)",
+    "cells": {
+      "1000": {
+        "mobile_default": {"recall_mode": "exact_resident", "first_recall_ms": 0.42, "warm_recall_median_ms": 0.26, "warm_recall_p95_ms": 0.31},
+        "over_budget_4mib": {"recall_mode": "exact_resident", "first_recall_ms": 0.28, "warm_recall_median_ms": 0.21, "warm_recall_p95_ms": 0.22}
+      },
+      "10000": {
+        "mobile_default": {"recall_mode": "exact_resident", "first_recall_ms": 10.03, "warm_recall_median_ms": 2.17, "warm_recall_p95_ms": 2.37},
+        "over_budget_4mib": {"recall_mode": "exact_paged", "first_recall_ms": 10.86, "warm_recall_median_ms": 10.89, "warm_recall_p95_ms": 11.98}
+      }
+    },
+    "reading": "past the budget, warm recall at 10K goes from 2.17 ms to 10.89 ms (5.0x): every recall reads the vectors back through the page cache. The cheap paged path is PERF-2."
   }
 }

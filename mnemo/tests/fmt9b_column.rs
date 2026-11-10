@@ -3,7 +3,7 @@
 
 use mnemo_engine::{
     Embedder, EmbedderIdentity, Filter, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig,
-    MnemoError, RecallRequest, Scope, ThreadTurn, Ulid,
+    MnemoError, RecallMode, RecallRequest, Scope, ThreadTurn, Ulid,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -518,4 +518,115 @@ fn a_record_deleted_before_its_first_flush_reopens_cleanly() {
     db.get(&keep).unwrap();
     assert!(db.get(&gone).is_err());
     assert_eq!(db.verify().unwrap(), 1);
+}
+
+/// MOBILE-2d: an entry of the fp16 column (16 dims: 32 value bytes and a
+/// 4-byte norm).
+const ENTRY: usize = DIMS * 2 + 4;
+
+fn turns(n: usize) -> (Vec<ThreadTurn>, Vec<Vec<f32>>) {
+    let turns = (0..n)
+        .map(|i| ThreadTurn {
+            turn_id: format!("t{i}"),
+            role: "user".into(),
+            content: format!("turn number {i}"),
+            timestamp: None,
+        })
+        .collect();
+    (turns, (0..n).map(|i| vector(10_000 + i)).collect())
+}
+
+#[test]
+fn the_resident_column_is_sized_by_live_facts_not_by_the_whole_catalog() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("budget.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    for i in 0..100 {
+        db.remember(mem(i)).unwrap();
+    }
+    // 1,000 thread turns: in the catalog, never scored by recall.
+    let (t, v) = turns(1_000);
+    db.ingest_thread_with_vectors("chat", &t, &v).unwrap();
+    // 30 keyed facts on 3 keys: 3 live versions, 27 superseded.
+    for i in 0..30 {
+        let m = Memory::new(
+            format!("setting {i}"),
+            MemoryType::Semantic,
+            vector(500 + i),
+        );
+        db.remember_keyed(m, &format!("key-{}", i % 3)).unwrap();
+    }
+    db.flush().unwrap();
+    db.close().unwrap();
+
+    // 103 scored rows fit a 120-entry budget; the whole catalog (1,130+
+    // rows) doesn't, which is what v0.12.0 measured.
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    db.set_vector_cache_budget(120 * ENTRY);
+    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::ExactResident);
+    let hits = db.recall(&RecallRequest::new(vector(42)).top_k(1)).unwrap();
+    assert_eq!(hits[0].memory.content, "memory 42");
+    assert!(db.__vector_column().0, "the column went resident");
+
+    // Below the scored rows: paged, and recall still finds it.
+    db.set_vector_cache_budget(50 * ENTRY);
+    assert!(
+        !db.__vector_column().0,
+        "lowering the budget drops the copy"
+    );
+    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::ExactPaged);
+    let hits = db.recall(&RecallRequest::new(vector(42)).top_k(1)).unwrap();
+    assert_eq!(hits[0].memory.content, "memory 42");
+    assert!(!db.__vector_column().0);
+    assert_eq!(RecallMode::ExactPaged.as_str(), "exact_paged");
+    db.close().unwrap();
+}
+
+#[test]
+fn writes_past_the_budget_page_the_column_and_recall_mode_follows() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("grow.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(9)).unwrap();
+    db.set_vector_cache_budget(40 * ENTRY);
+    for i in 0..30 {
+        db.remember(mem(i)).unwrap();
+    }
+    let _ = db.recall(&RecallRequest::new(vector(3)).top_k(1)).unwrap();
+    assert!(db.__vector_column().0);
+    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::ExactResident);
+    // Thread turns don't grow it.
+    let (t, v) = turns(200);
+    db.ingest_thread_with_vectors("chat", &t, &v).unwrap();
+    assert!(
+        db.__vector_column().0,
+        "turns don't count against the budget"
+    );
+    // Facts do: past 40, the column pages.
+    for i in 30..45 {
+        db.remember(mem(i)).unwrap();
+    }
+    assert!(!db.__vector_column().0);
+    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::ExactPaged);
+    let hits = db.recall(&RecallRequest::new(vector(44)).top_k(1)).unwrap();
+    assert_eq!(hits[0].memory.content, "memory 44");
+    db.close().unwrap();
+}
+
+#[test]
+fn an_index_makes_recall_mode_indexed() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v8.mnemo");
+    let mut db = Mnemo::create(&path, "pw", cfg(8)).unwrap();
+    for i in 0..300 {
+        db.remember(mem(i)).unwrap();
+    }
+    assert_eq!(
+        db.stats().unwrap().recall_mode,
+        RecallMode::ExactPaged,
+        "v8 has no column"
+    );
+    db.build_index().unwrap();
+    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::Indexed);
+    assert_eq!(RecallMode::Indexed.as_str(), "indexed");
+    db.close().unwrap();
 }

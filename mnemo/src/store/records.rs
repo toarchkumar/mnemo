@@ -261,6 +261,21 @@ pub(super) type Bm25Segments = (Vec<(u64, u64, u64, u64)>, Vec<u32>);
 /// FMT-9d: segments past this many are merged into one by the next commit.
 pub(super) const BM25_MAX_SEGMENTS: usize = 8;
 
+/// MOBILE-2d: does recall score this row's vector? Live rows that aren't
+/// superseded, thread turns, essence items or thread links. The resident
+/// column is sized by these rows (not by the whole catalog) and filled
+/// only with them.
+pub(super) fn scored_row(e: &CatalogEntry) -> bool {
+    !e.deleted
+        && e.v9.is_some_and(|r| {
+            r.flags & ROW_SUPERSEDED == 0
+                && !matches!(
+                    r.kind,
+                    ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK
+                )
+        })
+}
+
 /// FMT-9d: is this row keyword-indexed? Facts and onboarding records;
 /// thread turns, essence items and links stay out (FMT-9a: turn postings
 /// would be 3× all the fact data).
@@ -459,6 +474,11 @@ pub(super) struct VecColumn {
     /// pages its candidates live on.
     pub(super) have: Vec<bool>,
     pub(super) resident: bool,
+    /// MOBILE-2d: the scored rows ([`scored_row`]) when the column went
+    /// resident, plus scored rows staged since. Deletes and supersedes
+    /// don't lower it until the next reopen, so it can only overstate the
+    /// column's size.
+    pub(super) scored_rows: usize,
     /// Rows whose entries aren't on a page yet; the next flush writes them.
     /// A row here has no page entry (its old one was released).
     pub(super) hot: std::collections::HashMap<usize, (Vec<u16>, f32)>,
@@ -794,8 +814,12 @@ impl Mnemo {
         let d = self.dimensions;
         if self.col.resident {
             let rows = self.catalog.len();
-            let fits = rows * veccol::entry_len(d) <= self.vector_cache_budget;
+            let new_scored = self.catalog.get(idx).is_some_and(scored_row)
+                && !self.col.have.get(idx).copied().unwrap_or(false);
+            let scored = self.col.scored_rows + usize::from(new_scored);
+            let fits = scored * veccol::entry_len(d) <= self.vector_cache_budget;
             if fits {
+                self.col.scored_rows = scored;
                 if self.col.data.len() < rows * d {
                     self.col.data.resize(rows * d, 0);
                     self.col.norms.resize(rows, 0.0);
@@ -1084,6 +1108,25 @@ impl Mnemo {
         veccol::decode_entry(&page, d, r.vec_slot as usize)
     }
 
+    /// MOBILE-2d: the catalog rows recall scores ([`scored_row`]).
+    pub(super) fn scored_rows(&self) -> usize {
+        self.catalog.iter().filter(|e| scored_row(e)).count()
+    }
+
+    /// MOBILE-2d: how recall scores vectors on this handle right now.
+    pub(super) fn recall_mode(&mut self) -> Result<RecallMode> {
+        self.ensure_ann()?;
+        if self.ann.is_some() {
+            return Ok(RecallMode::Indexed);
+        }
+        if self.is_v9()
+            && self.scored_rows() * veccol::entry_len(self.dimensions) <= self.vector_cache_budget
+        {
+            return Ok(RecallMode::ExactResident);
+        }
+        Ok(RecallMode::ExactPaged)
+    }
+
     /// FMT-9b: make the column resident if it fits the budget: allocate it
     /// (zeroed, so untouched rows cost no memory) and copy in the staged
     /// entries. Rows fill a vector page at a time on first use
@@ -1094,9 +1137,13 @@ impl Mnemo {
         }
         let d = self.dimensions;
         let rows = self.catalog.len();
-        if rows * veccol::entry_len(d) > self.vector_cache_budget {
+        let scored = self.scored_rows();
+        if scored * veccol::entry_len(d) > self.vector_cache_budget {
             return Ok(());
         }
+        self.col.scored_rows = scored;
+        // Allocated for every catalog row, zeroed: the OS maps the pages
+        // lazily, and only scored rows are ever filled.
         self.col.data = vec![0u16; rows * d];
         self.col.norms = vec![0f32; rows];
         self.col.have = vec![false; rows];
@@ -1135,6 +1182,11 @@ impl Mnemo {
             .unwrap_or_default();
         for i in rows.into_iter().chain(std::iter::once(idx)) {
             if i >= self.col.have.len() || self.col.have[i] {
+                continue;
+            }
+            // MOBILE-2d: a page also holds turns and essence items; recall
+            // never reads them from the column, so they stay unfilled.
+            if i != idx && !scored_row(&self.catalog[i]) {
                 continue;
             }
             let Some(ri) = self.catalog[i].v9 else {

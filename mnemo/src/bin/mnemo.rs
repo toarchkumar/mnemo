@@ -1278,6 +1278,7 @@ fn run() -> std::result::Result<(), String> {
                 s.wal_pages,
                 s.wal_pages * 8
             );
+            println!("recall:      {}", s.recall_mode.as_str());
             println!("created at:  {}", s.created_at);
             println!("agents:      {}", s.agents.join(", "));
             println!("snapshots:   {}", db.snapshots().len());

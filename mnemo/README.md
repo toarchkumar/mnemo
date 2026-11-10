@@ -428,10 +428,36 @@ navigable history.
 
 A restore is itself an ordinary committed transaction (and a new snapshot), so
 it is crash-safe *and* reversible — having rewound, you can roll forward again.
-History reaches back to the last `compact_file`, which reclaims space by
-rewriting the file and so collapses the manifest to a single snapshot. That
-compaction boundary is the one limit: there is no external log archiving, so
-you cannot restore to an instant older than the last compaction.
+
+**How far back you can restore is capped.** Only retained snapshots can be
+restored, and the cap differs by format:
+
+| Format | Retained by default | Override |
+|---|---|---|
+| v9 (new files) | the newest **16** snapshots, plus any from the **last 24 hours**; retained snapshots never pin more than a quarter of the file (past that, the oldest go first, whatever their age) | `max_snapshots` / `set_max_snapshots` changes the count |
+| v8 | the newest **256** snapshots | `max_snapshots` (`0`: no cap) |
+
+So on a v9 file that flushes often (a phone app under the default
+coalesced flush policy commits about once a second while it's writing),
+"restore to an hour ago" works only within the last 24 hours, and "restore
+to last week" doesn't work unless you raise the count. `restore_to` a
+snapshot that's gone returns `MnemoError::NotFound`. `compact_file`
+collapses the manifest to a single snapshot, and there's no external log
+archiving, so nothing older than the last compaction is ever restorable.
+`snapshots()` lists exactly what's restorable now.
+
+### The vector column (v9)
+
+On a v9 file, recall scans an fp16 copy of the vectors (`dims × 2 + 4`
+bytes a fact). It stays in memory while the file's **live facts** fit
+`set_vector_cache_budget` (96 MiB by default, 16 MiB in the mobile
+packages). Thread turns, essence items, tombstones and superseded
+versions don't count. Past the budget, recall reads the vectors through
+the page cache instead: at 10,000 facts × 384 dimensions, warm recall goes
+from about 2 ms to about 11 ms (M1 Pro). `stats().recall_mode` says which
+path recall takes now: `ExactResident`, `ExactPaged` (over the budget, or
+a v8 file) or `Indexed` (an IVF+PQ index, which v9 builds from 20,000
+facts).
 
 ### Page cache
 
@@ -880,9 +906,11 @@ let cfg = MnemoConfig {
 **2. Cap the snapshot manifest.** Every `flush` appends one snapshot
 entry; without a cap, long-running services accumulate them forever —
 manifest serialize-cost and the manifest run on disk grow O(total
-flushes). The default cap is 256 retained snapshots (the most recent N
-are kept; older ones are pruned at flush time, with their data pages
-left on disk until the next `compact_file`). Override per-database:
+flushes). The default cap on v8 is 256 retained snapshots (the most
+recent N are kept; older ones are pruned at flush time, with their data
+pages left on disk until the next `compact_file`). On v9 it's 16, plus
+any from the last 24 hours (see "Snapshots & point-in-time recovery"),
+and pruned snapshots' pages are reused. Override per-database:
 
 ```rust
 let cfg = MnemoConfig {

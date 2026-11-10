@@ -65,6 +65,9 @@ pub struct DbStats {
     pub file_bytes: f64,
     pub encrypted: bool,
     pub wal_pages: u32,
+    /// How recall scores vectors right now: `exact_resident`, `exact_paged`
+    /// or `indexed`.
+    pub recall_mode: String,
 }
 
 /// One restorable snapshot from [`Database::snapshots`].
@@ -244,6 +247,7 @@ impl Database {
             file_bytes: s.file_bytes as f64,
             encrypted: s.encrypted,
             wal_pages: s.wal_pages as u32,
+            recall_mode: s.recall_mode.as_str().to_string(),
         })
     }
 

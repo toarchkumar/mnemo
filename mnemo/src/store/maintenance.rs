@@ -308,6 +308,7 @@ impl Mnemo {
             .cloned()
             .collect();
         let file_bytes = self.header.next_page * PAGE_SIZE as u64;
+        let recall_mode = self.recall_mode()?;
         Ok(Stats {
             memories: self.len(),
             deleted,
@@ -323,6 +324,7 @@ impl Mnemo {
             wal_pages: self.header.wal_pages,
             fsyncs_last_flush: self.fsyncs_last_flush,
             format_version: self.header.version,
+            recall_mode,
         })
     }
 

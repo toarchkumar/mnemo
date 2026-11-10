@@ -1706,6 +1706,7 @@ fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
         "encrypted": s.encrypted,
         "created_at": s.created_at,
         "wal_pages": s.wal_pages,
+        "recall_mode": s.recall_mode.as_str(),
         "index": s.index,
         "snapshot_count": snapshot_count,
         "cache_pages": cache_pages,

@@ -920,7 +920,7 @@ impl Mnemo {
     /// recall. Lowering it below the resident size drops the resident copy.
     pub fn set_vector_cache_budget(&mut self, bytes: usize) {
         self.vector_cache_budget = bytes;
-        let need = self.catalog.len() * veccol::entry_len(self.dimensions);
+        let need = self.col.scored_rows * veccol::entry_len(self.dimensions);
         if self.col.resident && need > bytes {
             self.col.data = Vec::new();
             self.col.norms = Vec::new();
