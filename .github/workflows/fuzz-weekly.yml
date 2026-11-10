@@ -26,7 +26,7 @@ jobs:
           - fuzz_cache_directory
           - fuzz_mcp_frame
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
@@ -59,7 +59,7 @@ jobs:
       # skips upload on green runs (nothing to save).
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crashes-${{ matrix.target }}
           path: mnemo/fuzz/artifacts/${{ matrix.target }}/
