@@ -18,13 +18,46 @@
 # has none). The dry run checks that version, so the step runs before
 # every tag, not first on one.
 #
-# Resolution uses the command-line git (-scmProvider system) with
-# GIT_TERMINAL_PROMPT=0, so anything that would wait for credentials fails
-# at once instead.
+# Nothing here may wait for a person:
+# - git is the command-line git (-scmProvider system) with
+#   GIT_TERMINAL_PROMPT=0;
+# - package credentials come from netrc (-packageAuthorizationProvider
+#   netrc), not the Keychain, which can block on a CI runner. v0.12.0's
+#   check hung right after "Checking out", where Xcode downloads the
+#   binary target;
+# - the zip is first downloaded with curl and checked against the
+#   checksum in the published Package.swift, so a download problem shows
+#   up as one;
+# - every xcodebuild runs under a watchdog: on a hang it prints the live
+#   processes and a stack sample of xcodebuild, then fails.
 set -euo pipefail
 
 REPO=https://github.com/toarchkumar/mnemo-swift
 export GIT_TERMINAL_PROMPT=0
+XCB_PACKAGES=(-scmProvider system -packageAuthorizationProvider netrc)
+
+# run_watched <seconds> <label> <command...>
+run_watched() {
+  local limit="$1" label="$2"; shift 2
+  "$@" &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$limit" ]; then
+      echo "::error::$label is still running after ${limit}s; the live processes:" >&2
+      ps -A -o pid,ppid,stat,etime,command | grep -i -E 'xcodebuild|swift|git|curl|ssh|security' | grep -v grep >&2 || true
+      for p in $(pgrep -x xcodebuild || true); do
+        echo "--- stack sample of xcodebuild $p ---" >&2
+        sample "$p" 3 2>/dev/null | sed -n '1,80p' >&2 || true
+      done
+      kill "$pid" 2>/dev/null || true
+      pkill -x xcodebuild 2>/dev/null || true
+      return 124
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  wait "$pid"
+}
 
 case "${1:-}" in
   latest)
@@ -56,17 +89,32 @@ import Mnemo
 public func check() -> Int { generateKey().count }
 SWIFT
     cd "$D"
-    echo "==> resolving mnemo-swift $VERSION from $REPO"
-    xcodebuild -resolvePackageDependencies -scmProvider system \
-      -clonedSourcePackagesDirPath "$D/spm"
-    SCHEME=$(xcodebuild -list -json -scmProvider system \
-      -clonedSourcePackagesDirPath "$D/spm" 2>/dev/null | python3 -c '
+    echo "==> the published Package.swift at $VERSION"
+    git clone -q --depth 1 --branch "$VERSION" "$REPO" "$D/mirror"
+    URL=$(sed -n 's/.*url: "\(https:[^"]*\.zip\)".*/\1/p' "$D/mirror/Package.swift")
+    WANT=$(sed -n 's/.*checksum: "\([0-9a-f]*\)".*/\1/p' "$D/mirror/Package.swift")
+    echo "    binary target $URL"
+    echo "    checksum $WANT"
+    echo "==> downloading the zip with curl"
+    curl -fsSL --retry 3 --connect-timeout 20 --max-time 180 -o "$D/zip" "$URL"
+    HAVE=$(shasum -a 256 "$D/zip" | cut -d' ' -f1)
+    if [ "$HAVE" != "$WANT" ]; then
+      echo "checksum mismatch: Package.swift has $WANT, the download is $HAVE" >&2
+      exit 1
+    fi
+    echo "    $(stat -f %z "$D/zip") bytes, checksum matches"
+    echo "==> resolving mnemo-swift $VERSION with xcodebuild"
+    run_watched 300 "xcodebuild -resolvePackageDependencies" \
+      xcodebuild -resolvePackageDependencies "${XCB_PACKAGES[@]}" \
+      -clonedSourcePackagesDirPath "$D/spm" -packageCachePath "$D/cache"
+    SCHEME=$(xcodebuild -list -json "${XCB_PACKAGES[@]}" \
+      -clonedSourcePackagesDirPath "$D/spm" -packageCachePath "$D/cache" 2>/dev/null | python3 -c '
 import json, sys
 schemes = json.load(sys.stdin)["workspace"]["schemes"]
 print("Check-Package" if "Check-Package" in schemes else ("Check" if "Check" in schemes else ""))')
     if [ -z "$SCHEME" ]; then
       echo "no Check or Check-Package scheme:" >&2
-      xcodebuild -list -scmProvider system -clonedSourcePackagesDirPath "$D/spm" >&2 || true
+      xcodebuild -list "${XCB_PACKAGES[@]}" -clonedSourcePackagesDirPath "$D/spm" -packageCachePath "$D/cache" >&2 || true
       exit 1
     fi
     echo "$SCHEME" > "$D/scheme"
@@ -79,9 +127,10 @@ print("Check-Package" if "Check-Package" in schemes else ("Check" if "Check" in 
     VERSION=$(cat "$D/version")
     cd "$D"
     echo "==> building scheme $SCHEME for the iOS simulator"
-    xcodebuild build -scheme "$SCHEME" -destination 'generic/platform=iOS Simulator' \
-      -scmProvider system -disableAutomaticPackageResolution \
-      -clonedSourcePackagesDirPath "$D/spm" -derivedDataPath "$D/dd"
+    run_watched 600 "xcodebuild build" \
+      xcodebuild build -scheme "$SCHEME" -destination 'generic/platform=iOS Simulator' \
+      "${XCB_PACKAGES[@]}" -disableAutomaticPackageResolution \
+      -clonedSourcePackagesDirPath "$D/spm" -packageCachePath "$D/cache" -derivedDataPath "$D/dd"
     echo "==> resolved and built mnemo-swift $VERSION from GitHub"
     ;;
   *)

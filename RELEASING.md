@@ -56,7 +56,10 @@ minutes, so a hang fails the step instead of running for hours.
    - **the Android library:** runs a signed `publishToMavenLocal` and a
      Gradle consumer from `mavenLocal()`;
    - **Maven Central:** uploads a deployment that the Central Portal
-     validates, then drops (`scripts/central-dry-run.sh`).
+     validates, then drops (`scripts/central-dry-run.sh`). Central
+     refuses a version it already has, so a dry run on a version that's
+     already published (between releases, to test a workflow change)
+     skips this step with a notice.
 6. **The coordination files.** Commit `PLAN.md` and `reviewer_notes.md` as
    `chore(plan): sync coordination files` (see AGENTS.md).
 

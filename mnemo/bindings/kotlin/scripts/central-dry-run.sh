@@ -25,6 +25,16 @@ state_of() {   # deployment id -> its deploymentState (or the HTTP code)
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deploymentState"])' "$LOG.body"
 }
 
+# Central refuses a version it already has ("Component ... already
+# exists"), so a dry run between releases (to test a workflow change, say)
+# has nothing to validate. A release dry run runs with the next version.
+VERSION=$(sed -n 's/^VERSION_NAME=//p' gradle.properties)
+POM="https://repo1.maven.org/maven2/io/github/toarchkumar/mnemo-android/$VERSION/mnemo-android-$VERSION.pom"
+if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$POM")" = 200 ]; then
+  echo "::notice::mnemo-android $VERSION is already on Maven Central, which refuses a second upload: nothing to validate (a release dry run runs with the next version)"
+  exit 0
+fi
+
 echo "==> publishToMavenCentral (USER_MANAGED: upload and validate, never release)"
 status=0
 ./gradlew --no-daemon --stacktrace publishToMavenCentral \
