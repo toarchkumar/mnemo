@@ -636,7 +636,6 @@ impl Mnemo {
 /// in WAL regions that were grown, relocated or freed. Every other page is
 /// AES-GCM ciphertext, where a 76-byte random match doesn't happen.
 pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usize> {
-    use std::io::{Read, Seek, SeekFrom, Write};
     if needle.is_empty() {
         return Ok(0);
     }
