@@ -8,6 +8,36 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **The Swift and Kotlin stores commit writes on their own by default
+  (MOBILE-2b).** Before, a write made while the app was in the foreground
+  stayed in memory until the app went to the background, or until `flush()`
+  or `close()`, so a crash or a kill could lose minutes of writes. The new
+  `flushPolicy` setting on `MnemoStoreConfiguration` chooses when:
+  - **coalesced (the default):** the first write after a commit starts a
+    1-second timer, and the store commits once when it fires, or at once
+    on the 64th waiting write. On Android, a write made while the app is
+    stopped commits before it returns;
+  - **every write:** each write commits before it returns;
+  - **manual:** the old behaviour.
+
+  A kill now loses at most the last second or so of writes. The background
+  and `ON_STOP` commits are unchanged, and the coalescing timer never
+  reopens a closed file.
+- **`withSession` batches calls into one commit.** It runs many calls on
+  one open handle with nothing in between, then commits once (Swift:
+  `try await store.withSession { session in ... }`; Kotlin:
+  `store.withSession { session -> ... }`). A session takes vectors; it
+  doesn't embed.
+- The samples' Benchmarks use the manual policy, so their numbers stay
+  comparable with earlier runs. The Notes screens use the default.
+- **Kill tests:** `scripts/kill-test.sh` (iOS simulator, `simctl
+  terminate`) and a step in the Android emulator workflow (`am
+  force-stop`). Each writes, waits past the window, writes a few more, is
+  killed with no flush, and checks that every write older than the window
+  survived.
+
 ### Release workflow
 
 - **The mobile jobs start only after every engine job succeeded.** The

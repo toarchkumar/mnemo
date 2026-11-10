@@ -101,8 +101,42 @@ val byWord = store.recall(emptyList(), RecallOptions(keywords = "UA 931"))
 - **Keyed facts:** `RememberOptions(key = ...)` writes a new version and
   supersedes the old one. `history(key)` lists the versions, newest first.
 - **The result cache:** `cachePut` and `cacheGet`, by exact key.
+- **Batches:** `withSession { session -> ... }` runs many calls on one
+  open handle and commits once at the end (see Durability).
 - **Also:** `get`, `update`, `delete`, `about`, `stats`, `count`, `flush`,
   `close` and `compact`.
+
+### Durability
+
+A write is in memory until the store commits it to disk. A crash, a kill
+(`am force-stop`, the low-memory killer, a swipe from Recents) or a power
+loss keeps every committed write and loses the rest. When the store
+commits is the configuration's `flushPolicy`:
+
+| Policy | A write is durable | Use it for |
+|---|---|---|
+| `FlushPolicy.Coalesced(maxDelayMillis = 1000, maxWrites = 64)` (the default) | in the foreground, at most about 1 second after it returns, or at once when it's the 64th write waiting; while the app is stopped, before it returns | most apps: one commit per burst of writes |
+| `FlushPolicy.EveryWrite` | before it returns | data the app can't lose, at the cost of a commit (a page write and a sync) per write |
+| `FlushPolicy.Manual` | only on the events below (the behaviour before v0.12.1) | benchmarks, and apps that call `flush()` themselves |
+
+"Stopped" is `ProcessLifecycleOwner` below `STARTED`: the app is in the
+background, or the process started without an activity (a service, a
+broadcast, WorkManager). A write made then commits before it returns,
+because the process can be killed at any moment. Whatever the policy, the
+store also commits on every `ON_STOP`, and on `flush()` and `close()`.
+
+`withSession` batches many writes into one commit:
+
+```kotlin
+store.withSession { session ->
+    for ((text, vector) in notes) session.remember(text, vector)
+}
+```
+
+The calls run on one open handle with nothing else in between, and the
+store commits once at the end (not under `Manual`). A session doesn't
+embed, so compute the vectors first. If the block throws, the writes it
+made stay and are committed the same way.
 
 The names follow the Swift package where Kotlin allows. Two differ in the
 generated layer:
@@ -152,11 +186,13 @@ class MyEmbedder : MnemoEmbedder {
 - **Flushing.** When the app's last activity stops, `ProcessLifecycleOwner`
   sends `ON_STOP`, about 700 ms later, and the store flushes. Every write
   made so far is then durable, even if the process is killed in the
-  background.
+  background. From then until the next `ON_START`, each write under the
+  default policy commits before it returns (see Durability).
 - **The file stays open.** Android doesn't kill a cached process for
   holding a file lock, unlike iOS, so the next call needs no reopen.
-- **Errors.** A failed background flush is kept in `lastBackgroundError`.
-  The data written before the last successful flush is safe.
+- **Errors.** A failed background flush, or a failed coalesced commit, is
+  kept in `lastBackgroundError`. The data written before the last
+  successful commit is safe.
 - **Reopening.** After `close()`, or if the engine reports its handle
   closed, the next call reopens the file transparently. No call fails with
   `MnemoException.Closed`.
@@ -262,10 +298,12 @@ name. Nothing else is needed.
   a software AES key in place of the Keystore. They need the host library
   that `scripts/build-native.sh` puts in `generated/host/`.
 - **Instrumented tests** (`src/androidTest`): the Android Keystore, the
-  `ON_STOP` flush through the real process lifecycle, the default
-  directory, and loading the native libraries on the device's page size.
-  The `android-emulator` workflow runs them nightly and on release tags,
-  on API 35 `x86_64` images with 4 KB and 16 KB pages.
+  `ON_STOP` flush and the flush policy through the real process lifecycle,
+  the default directory, and loading the native libraries on the device's
+  page size. The `android-emulator` workflow runs them nightly and on
+  release tags, on API 35 `x86_64` images with 4 KB and 16 KB pages, then
+  the sample's kill test: it writes, is force-stopped with no flush, and a
+  relaunch must find every write older than the coalescing window.
 - **In your app's own JVM tests**, the plain JNA jar has to be on the test
   classpath (`testImplementation("net.java.dev.jna:jna:5.19.1")`), along
   with a host build of `libmnemo_uniffi` on `jna.library.path`.

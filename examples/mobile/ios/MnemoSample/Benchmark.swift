@@ -257,7 +257,9 @@ final class DeviceBudget: @unchecked Sendable {
         let keys = BenchKeyStore()
         try keys.storeKey(key, id: "bench", policy: .deviceOnly)
         let store = try MnemoStore(
-            configuration: MnemoStoreConfiguration(name: "bg", dimensions: UInt32(Corpus.dimensions), directory: dir),
+            // Manual, so the cells stay comparable with earlier runs.
+            configuration: MnemoStoreConfiguration(name: "bg", dimensions: UInt32(Corpus.dimensions), directory: dir,
+                                                   flushPolicy: .manual),
             keyStore: keys)
         _ = try await store.count() // first open: finds the key, stamps its id
         var vectors = ClusteredVectors(clusters: 16, seed: 0xB6_0001)

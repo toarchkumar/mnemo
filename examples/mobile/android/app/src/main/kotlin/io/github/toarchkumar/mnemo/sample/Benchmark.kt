@@ -1,6 +1,7 @@
 package io.github.toarchkumar.mnemo.sample
 
 import android.content.Context
+import io.github.toarchkumar.mnemo.FlushPolicy
 import io.github.toarchkumar.mnemo.MnemoConfig
 import io.github.toarchkumar.mnemo.MnemoDb
 import io.github.toarchkumar.mnemo.MnemoKeyStorage
@@ -270,7 +271,11 @@ class DeviceBudget(private val context: Context, private val report: (String) ->
         try {
             corpus(n).copyTo(File(dir, "bg.mnemo"))
             val keys = BenchKeyStorage().apply { storeKey("bench", key) }
-            val store = MnemoStore(MnemoStoreConfiguration("bg", Corpus.DIMENSIONS.toUInt(), directory = dir), keys)
+            // Manual, so the cells stay comparable with earlier runs.
+            val store = MnemoStore(
+                MnemoStoreConfiguration("bg", Corpus.DIMENSIONS.toUInt(), directory = dir, flushPolicy = FlushPolicy.Manual),
+                keys,
+            )
             store.count() // first open: finds the key, stamps its id
             val vectors = ClusteredVectors(16, 0xB6_0001uL)
             val closes = ArrayList<Double>()

@@ -8,6 +8,8 @@
 #    the image should report.
 # 2. The Android sample's R8-minified release APK: install it, launch its
 #    self-test, and check logcat for "MNEMO_SELFTEST ok" (MOBILE-1d).
+# 3. The kill test: the same APK writes, is force-stopped with no flush,
+#    and a relaunch counts what survived (MOBILE-2b).
 #
 # Emulators, the 16 KB image especially, can restart the system server
 # shortly after boot. An install then fails ("Can't find service:
@@ -79,3 +81,29 @@ for _ in $(seq 1 60); do
 done
 adb logcat -d -s MnemoSelfTest:I AndroidRuntime:E | tee selftest.log
 grep -q "MNEMO_SELFTEST ok" selftest.log
+
+# 3. The kill test for the default flush policy (MOBILE-2b): the sample
+#    writes, waits past the coalescing window, writes a few more, and is
+#    force-stopped with no lifecycle event. A relaunch must find every write
+#    older than the window (see DurabilityTest in the sample).
+SETTLED=20
+wait_for_line() {   # tag, pattern, seconds
+  for _ in $(seq 1 "$3"); do
+    adb logcat -d -s "$1:I" | grep -q "$2" && return 0
+    sleep 1
+  done
+  return 1
+}
+adb logcat -c
+adb shell am start -n io.github.toarchkumar.mnemo.sample/.MainActivity --es durability write
+wait_for_line MnemoDurability "MNEMO_DURABILITY \(late\|failed\)" 60 || { echo "the durability writer never finished" >&2; exit 1; }
+adb shell am force-stop io.github.toarchkumar.mnemo.sample
+adb logcat -d -s MnemoDurability:I | tee durability.log
+grep -q "MNEMO_DURABILITY late" durability.log
+adb logcat -c
+adb shell am start -W -n io.github.toarchkumar.mnemo.sample/.MainActivity --es durability count
+wait_for_line MnemoDurability "MNEMO_DURABILITY \(count\|failed\)" 60 || { echo "the durability reader never finished" >&2; exit 1; }
+adb logcat -d -s MnemoDurability:I AndroidRuntime:E | tee -a durability.log
+count=$(sed -n 's/.*MNEMO_DURABILITY count=\([0-9]*\).*/\1/p' durability.log | tail -1)
+echo "after am force-stop: $count memories (at least $SETTLED expected)"
+[ -n "$count" ] && [ "$count" -ge "$SETTLED" ]

@@ -19,6 +19,9 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
     public var vectorCacheBudgetBytes: UInt64
     /// The page cache, in 8 KB pages (default 256 = 2 MiB).
     public var cachePages: UInt32
+    /// When writes are committed to disk on their own (default
+    /// ``FlushPolicy/coalesced(maxDelay:maxWrites:)``: within about a second).
+    public var flushPolicy: FlushPolicy
 
     public init(
         name: String,
@@ -27,7 +30,8 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
         keyPolicy: KeyPolicy = .deviceOnly,
         formatVersion: UInt16 = 0,
         vectorCacheBudgetBytes: UInt64 = 16 << 20,
-        cachePages: UInt32 = 256
+        cachePages: UInt32 = 256,
+        flushPolicy: FlushPolicy = .default
     ) {
         self.name = name
         self.dimensions = dimensions
@@ -36,6 +40,7 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
         self.formatVersion = formatVersion
         self.vectorCacheBudgetBytes = vectorCacheBudgetBytes
         self.cachePages = cachePages
+        self.flushPolicy = flushPolicy
     }
 
     /// `Application Support/mnemo/` in the app's container.
@@ -88,6 +93,13 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
 ///   - once the app is active again, the file stays open between calls.
 ///
 ///   A call never sees ``MnemoError/Closed`` because of a transition.
+/// - **Durability:** a write is in memory until the store commits it. Under
+///   the default ``FlushPolicy/coalesced(maxDelay:maxWrites:)`` that's within
+///   about a second (or after 64 writes); ``FlushPolicy/everyWrite`` commits
+///   before each write returns. The background close above always commits.
+///   A kill (a crash, the system ending the app, a force quit) loses only
+///   writes that weren't committed yet. ``withSession(_:)`` batches many
+///   calls into one commit.
 /// - Calls run on the actor, never on the main thread, and are serialized.
 ///   Each is a blocking call into the engine, so keep batches reasonable.
 /// - The file lives in `Application Support/mnemo/` by default, with the
@@ -111,7 +123,16 @@ public actor MnemoStore {
     /// How many times a call made in the background has closed the file
     /// after itself (tests).
     private(set) var backgroundCallCloses = 0
-    /// The last error a background flush or close hit, if any.
+    /// How many times the store committed (flushed an open file): its
+    /// policy, ``flush()``, ``close()`` and the background closes (tests).
+    private(set) var commits = 0
+    /// Writes made since the last commit, under the coalesced policy.
+    private var pendingWrites = 0
+    /// The coalesced policy's timer, armed by the first write after a commit.
+    private var commitTimer: Task<Void, Never>?
+    private var timerGeneration = 0
+    /// The last error a flush or close the store ran on its own hit (a
+    /// background close, or a coalesced commit), if any.
     public private(set) var lastBackgroundError: (any Error)?
 
     /// Makes a store. Nothing is opened until the first call.
@@ -141,26 +162,26 @@ public actor MnemoStore {
     @discardableResult
     public func remember(_ content: String, vector: [Float],
                          options: RememberOptions = RememberOptions()) async throws -> WriteResult {
-        try await withDatabase { try $0.remember(content: content, vector: vector, options: options) }
+        try await withDatabase(write: true) { try $0.remember(content: content, vector: vector, options: options) }
     }
 
     /// Stores a memory, embedding `content` with the store's embedder.
     @discardableResult
     public func rememberText(_ content: String,
                              options: RememberOptions = RememberOptions()) async throws -> WriteResult {
-        try await withDatabase { try $0.rememberText(content: content, options: options) }
+        try await withDatabase(write: true) { try $0.rememberText(content: content, options: options) }
     }
 
     /// Changes fields of a memory. A content change is re-embedded when the
     /// patch has no vector and an embedder is set.
     @discardableResult
     public func update(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
-        try await withDatabase { try $0.update(id: id, patch: patch) }
+        try await withDatabase(write: true) { try $0.update(id: id, patch: patch) }
     }
 
     /// Deletes a memory.
     public func delete(id: String) async throws {
-        try await withDatabase { try $0.delete(id: id) }
+        try await withDatabase(write: true) { try $0.delete(id: id) }
     }
 
     // MARK: Reads
@@ -204,7 +225,7 @@ public actor MnemoStore {
     @discardableResult
     public func essenceAdd(_ section: EssenceSection, _ text: String, scope: EssenceScope = .project,
                            refs: [String]? = nil) async throws -> String {
-        try await withDatabase { try $0.essenceAdd(scope: scope, section: section, text: text, refs: refs) }
+        try await withDatabase(write: true) { try $0.essenceAdd(scope: scope, section: section, text: text, refs: refs) }
     }
 
     /// Appends a timeline entry (at most 600 bytes; append-only) and returns
@@ -212,24 +233,24 @@ public actor MnemoStore {
     @discardableResult
     public func essenceAppendTimeline(_ text: String, scope: EssenceScope = .project,
                                       refs: [String]? = nil) async throws -> String {
-        try await withDatabase { try $0.essenceAppendTimeline(scope: scope, text: text, refs: refs) }
+        try await withDatabase(write: true) { try $0.essenceAppendTimeline(scope: scope, text: text, refs: refs) }
     }
 
     /// Replaces an item's text and refs. Timeline entries can't be edited.
     @discardableResult
     public func essenceUpdate(id: String, text: String, refs: [String]? = nil) async throws -> WriteOutcome {
-        try await withDatabase { try $0.essenceUpdate(id: id, text: text, refs: refs) }
+        try await withDatabase(write: true) { try $0.essenceUpdate(id: id, text: text, refs: refs) }
     }
 
     /// Marks an item resolved; it stays in the history.
     @discardableResult
     public func essenceResolve(id: String) async throws -> WriteOutcome {
-        try await withDatabase { try $0.essenceResolve(id: id) }
+        try await withDatabase(write: true) { try $0.essenceResolve(id: id) }
     }
 
     /// Removes an item from the essence (a soft delete).
     public func essenceRemove(id: String) async throws {
-        try await withDatabase { try $0.essenceRemove(id: id) }
+        try await withDatabase(write: true) { try $0.essenceRemove(id: id) }
     }
 
     // MARK: Index
@@ -238,7 +259,7 @@ public actor MnemoStore {
     /// nothing and reports `partitions == 0`: an exact scan is faster there.
     @discardableResult
     public func buildIndex() async throws -> IndexInfo {
-        try await withDatabase { try $0.buildIndex() }
+        try await withDatabase(write: true) { try $0.buildIndex() }
     }
 
     /// Whether the file has an IVF+PQ index.
@@ -262,7 +283,7 @@ public actor MnemoStore {
     /// embedder.
     @discardableResult
     public func ingestThread(_ threadID: String, turns: [ThreadTurn]) async throws -> IngestReport {
-        try await withDatabase { try $0.ingestThread(threadId: threadID, turns: turns) }
+        try await withDatabase(write: true) { try $0.ingestThread(threadId: threadID, turns: turns) }
     }
 
     /// A thread's turns, oldest first.
@@ -273,14 +294,14 @@ public actor MnemoStore {
     /// Deletes a thread's turns; returns how many records went.
     @discardableResult
     public func threadForget(_ threadID: String) async throws -> UInt64 {
-        try await withDatabase { try $0.threadForget(threadId: threadID) }
+        try await withDatabase(write: true) { try $0.threadForget(threadId: threadID) }
     }
 
     // MARK: Result cache
 
     /// Stores a value in the result cache under an exact key.
     public func cachePut(namespace: String, key: String, value: Data, ttlSecs: UInt64? = nil) async throws {
-        try await withDatabase { try $0.cachePut(namespace: namespace, key: key, value: value, ttlSecs: ttlSecs) }
+        try await withDatabase(write: true) { try $0.cachePut(namespace: namespace, key: key, value: value, ttlSecs: ttlSecs) }
     }
 
     /// A cached value, or `nil`.
@@ -299,7 +320,7 @@ public actor MnemoStore {
 
     /// Makes every write so far durable. A no-op while the file is closed.
     public func flush() throws {
-        try db?.flush()
+        try commit()
     }
 
     /// Flushes and closes the file, releasing its lock. The next call reopens
@@ -307,8 +328,30 @@ public actor MnemoStore {
     public func close() throws {
         guard let db else { return }
         self.db = nil
+        cancelPendingCommit()
         try db.flush()
+        commits += 1
         try db.close()
+    }
+
+    /// Runs `body` on one open handle with no other call in between, then
+    /// commits once (unless the policy is ``FlushPolicy/manual``). Use it for
+    /// a batch of writes: 100 writes in a session are one commit. A session
+    /// doesn't embed; compute vectors first. If `body` throws, the writes it
+    /// made stay, and are committed the same way.
+    public func withSession<T: Sendable>(_ body: @Sendable (MnemoSession) throws -> T) async throws -> T {
+        try await withDatabase(write: false) { db in
+            let session = MnemoSession(db: db)
+            defer { session.end() }
+            do {
+                let value = try body(session)
+                try finishSession(writes: session.writes)
+                return value
+            } catch {
+                try? finishSession(writes: session.writes)
+                throw error
+            }
+        }
     }
 
     /// Rewrites the file compactly, closing it first. The next call reopens it.
@@ -379,8 +422,10 @@ public actor MnemoStore {
     func closeForBackground() {
         guard let db else { return }
         self.db = nil
+        cancelPendingCommit()
         do {
             try db.flush()
+            commits += 1
         } catch {
             lastBackgroundError = error
         }
@@ -398,13 +443,89 @@ public actor MnemoStore {
     /// the file is flushed and closed again before the activity ends, so the
     /// app is never suspended holding the lock. Calls while it's active
     /// leave the file open.
-    private func withDatabase<T>(_ body: (MnemoDb) throws -> T) async throws -> T {
-        if lifecycle.isForeground { return try onHandle(body) }
+    ///
+    /// A `write` applies the flush policy afterwards, in the foreground (the
+    /// background path commits as it closes).
+    private func withDatabase<T>(write: Bool = false, _ body: (MnemoDb) throws -> T) async throws -> T {
+        if lifecycle.isForeground {
+            let value = try onHandle(body)
+            if write { try noteWrite() }
+            return value
+        }
         let activity = await LifecycleObserver.beginActivity(reason: activityReason)
         // Deferred blocks run last-first: close, then end the activity.
         defer { activity.end() }
         defer { closeAfterBackgroundCall() }
         return try onHandle(body)
+    }
+
+    // MARK: Flush policy
+
+    /// After a write made in the foreground: commit now, start the coalesced
+    /// timer, or nothing, by policy. A failed commit throws to the writer.
+    private func noteWrite() throws {
+        switch configuration.flushPolicy {
+        case .manual:
+            return
+        case .everyWrite:
+            try commit()
+        case let .coalesced(maxDelay, maxWrites):
+            pendingWrites += 1
+            if pendingWrites >= max(1, maxWrites) {
+                try commit()
+            } else if commitTimer == nil {
+                armCommitTimer(after: maxDelay)
+            }
+        }
+    }
+
+    /// The end of a session: one commit, unless the policy is manual or the
+    /// file was closed meanwhile (a background call closes, and commits).
+    private func finishSession(writes: Int) throws {
+        guard writes > 0, configuration.flushPolicy != .manual, db != nil else { return }
+        try commit()
+    }
+
+    /// Flushes the open file and clears the coalesced state. A no-op while
+    /// the file is closed.
+    private func commit() throws {
+        cancelPendingCommit()
+        guard let db else { return }
+        try db.flush()
+        commits += 1
+    }
+
+    private func cancelPendingCommit() {
+        pendingWrites = 0
+        commitTimer?.cancel()
+        commitTimer = nil
+        timerGeneration &+= 1
+    }
+
+    private func armCommitTimer(after seconds: TimeInterval) {
+        timerGeneration &+= 1
+        let generation = timerGeneration
+        let nanos = UInt64(max(0, seconds) * 1_000_000_000)
+        commitTimer = Task { [weak self] in
+            guard (try? await Task.sleep(nanoseconds: nanos)) != nil else { return }
+            await self?.coalescedCommit(generation: generation)
+        }
+    }
+
+    /// The coalesced timer fired. It commits an open file only: a store that
+    /// closed meanwhile (it committed then) isn't reopened.
+    private func coalescedCommit(generation: Int) {
+        guard generation == timerGeneration else { return }
+        commitTimer = nil
+        guard db != nil, pendingWrites > 0 else {
+            pendingWrites = 0
+            return
+        }
+        do {
+            try commit()
+        } catch {
+            lastBackgroundError = error
+        }
     }
 
     /// Actor isolation means nothing closes the handle while `body` runs; if
@@ -425,8 +546,10 @@ public actor MnemoStore {
     private func closeAfterBackgroundCall() {
         guard !lifecycle.isForeground, let db else { return }
         self.db = nil
+        cancelPendingCommit()
         do {
             try db.flush()
+            commits += 1
         } catch {
             lastBackgroundError = error
         }

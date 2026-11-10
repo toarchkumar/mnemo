@@ -28,6 +28,8 @@ targets:
     type: application
     platform: iOS
     sources: [App]
+    dependencies:
+      - package: Mnemo
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.toarchkumar.mnemo.testhost

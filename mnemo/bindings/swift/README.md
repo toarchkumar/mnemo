@@ -45,6 +45,11 @@ Running the package's own scheme on a simulator (`xcodebuild test -scheme
 Mnemo`) works too, except for the Keychain tests, which fail with
 `errSecMissingEntitlement` (-34018) outside an app.
 
+`scripts/kill-test.sh` is the kill test for the default flush policy. It
+launches the host app on a simulator to write, kills it with `simctl
+terminate` (no lifecycle event, no flush), relaunches it, and checks that
+every write older than the coalescing window survived.
+
 The script needs the Rust targets `aarch64-apple-ios`,
 `aarch64-apple-ios-sim`, `x86_64-apple-ios` and `aarch64-apple-darwin`. Set
 `MNEMO_SLICES=macos` to build only the macOS slice. Run it again after any
@@ -93,8 +98,40 @@ let byWord = try await store.recall(vector: [], options: RecallOptions(keywords:
 - **Keyed facts:** `RememberOptions(key:)` writes a new version and
   supersedes the old one. `history(key:)` lists the versions, newest first.
 - **The result cache:** `cachePut` and `cacheGet`, by exact key.
+- **Batches:** `withSession { session in ... }` runs many calls on one
+  open handle and commits once at the end (see Durability).
 - **Also:** `get`, `update`, `delete`, `about`, `stats`, `count`, `flush`,
   `close` and `compact`.
+
+### Durability
+
+A write is in memory until the store commits it to disk. A crash, a kill
+(the system ending a suspended app, a force quit) or a power loss keeps
+every committed write and loses the rest. When the store commits is the
+configuration's `flushPolicy`:
+
+| Policy | A write is durable | Use it for |
+|---|---|---|
+| `.coalesced(maxDelay: 1, maxWrites: 64)` (the default) | at most about 1 second after it returns, or at once when it's the 64th write waiting | most apps: one commit per burst of writes |
+| `.everyWrite` | before it returns | data the app can't lose, at the cost of a commit (a page write and a sync) per write |
+| `.manual` | only on the events below (the behaviour before v0.12.1) | benchmarks, and apps that call `flush()` themselves |
+
+Whatever the policy, the store also commits when the app goes to the
+background or is about to terminate, after every call made while the app
+isn't active, and on `flush()` and `close()`.
+
+`withSession` batches many writes into one commit:
+
+```swift
+try await store.withSession { session in
+    for (text, vector) in notes { try session.remember(text, vector: vector) }
+}
+```
+
+The calls run on one open handle with nothing else in between, and the
+store commits once at the end (not under `.manual`). A session doesn't
+embed, so compute the vectors first. If the closure throws, the writes it
+made stay and are committed the same way.
 
 ### The embedder
 
@@ -159,9 +196,11 @@ iOS kills a suspended app that holds a file lock in a shared container
   the process as active, so close it yourself when the extension's work
   ends.
 - **Back in the foreground,** the file stays open between calls again.
-- **Errors.** A failed background flush is kept in
-  `lastBackgroundError`. The data written before the last successful
-  flush is safe.
+- **Errors.** A failed background flush, or a failed coalesced commit, is
+  kept in `lastBackgroundError`. The data written before the last
+  successful commit is safe.
+- **The coalescing timer** never reopens the file: a background close
+  commits and cancels it.
 
 Open one `MnemoStore` per file and keep it for the app's lifetime. Every
 open costs a file open and a key lookup (no KDF: device keys are raw keys).

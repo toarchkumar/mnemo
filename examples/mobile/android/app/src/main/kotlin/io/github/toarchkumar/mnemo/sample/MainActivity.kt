@@ -21,7 +21,8 @@ import kotlinx.coroutines.launch
 
 /**
  * The MNemo sample: a notes demo and the device Benchmark. Launched with
- * `--ez selftest true`, it runs [SelfTest] instead and logs the result.
+ * `--ez selftest true`, it runs [SelfTest] instead and logs the result;
+ * with `--es durability write|count`, it runs a step of [DurabilityTest].
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,6 +31,14 @@ class MainActivity : ComponentActivity() {
             setContent { MaterialTheme { Text("MNemo self-test running...") } }
             lifecycleScope.launch {
                 val result = SelfTest.run(applicationContext)
+                setContent { MaterialTheme { Text(result) } }
+            }
+            return
+        }
+        intent.getStringExtra("durability")?.let { mode ->
+            setContent { MaterialTheme { Text("MNemo durability test: $mode") } }
+            lifecycleScope.launch {
+                val result = DurabilityTest.run(applicationContext, mode)
                 setContent { MaterialTheme { Text(result) } }
             }
             return

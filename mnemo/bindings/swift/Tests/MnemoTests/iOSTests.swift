@@ -40,6 +40,33 @@ import UIKit
         try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 6)
     }
 
+    @Test func aBackgroundTransitionCommitsAndCancelsThePendingCoalescedCommit() async throws {
+        let keys = MemoryKeyStore()
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "bgpolicy", dimensions: 4, directory: try scratchDirectory(),
+                                                   flushPolicy: .coalesced(maxDelay: 0.5, maxWrites: 64)),
+            keyStore: keys)
+        await post(UIApplication.didBecomeActiveNotification)
+        for i in 0..<3 { try await store.remember("pending \(i)", vector: vec(i)) }
+        #expect(await store.commits == 0)
+
+        await post(UIApplication.didEnterBackgroundNotification)
+        #expect(try await eventually { await store.backgroundCloses == 1 })
+        #expect(await store.commits == 1)
+        try await Task.sleep(nanoseconds: 900_000_000)
+        #expect(await store.isOpen == false, "the timer doesn't reopen the file")
+        #expect(await store.commits == 1)
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 3)
+
+        // In the background each call commits as it closes; no timer.
+        try await store.remember("in the background", vector: vec(5))
+        #expect(await store.commits == 2)
+        #expect(await store.isOpen == false)
+        await post(UIApplication.willEnterForegroundNotification)
+        #expect(try await store.count() == 4)
+        try await store.close()
+    }
+
     @Test func aCallInTheBackgroundReopensCompletesAndLeavesTheFileClosed() async throws {
         let keys = MemoryKeyStore()
         let store = try MnemoStore(

@@ -6,7 +6,9 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,7 +24,14 @@ import kotlinx.coroutines.withContext
  * - **Calls run on the dispatcher**, never on the caller's thread, one at a
  *   time. Each is a blocking call into the engine, so keep batches
  *   reasonable.
- * - **Flushes on `ON_STOP`.** When the app's last activity stops
+ * - **Durability.** A write is in memory until the store commits it. Under
+ *   the default [FlushPolicy.Coalesced] that's within about a second (or
+ *   after 64 writes) while the app is in the foreground, and before the
+ *   write returns while it's stopped; [FlushPolicy.EveryWrite] commits
+ *   before each write returns. A kill (`am force-stop`, the low-memory
+ *   killer, a crash) loses only writes that weren't committed yet.
+ *   [withSession] batches many calls into one commit.
+ * - **Commits on `ON_STOP`.** When the app's last activity stops
  *   (`ProcessLifecycleOwner`), the store flushes, so every write so far is
  *   durable. The file stays open: Android has no equivalent of iOS's
  *   lock-on-suspend kill.
@@ -82,33 +91,57 @@ class MnemoStore private constructor(
     @Volatile internal var backgroundFlushes = 0
         private set
 
-    /** The last error an `ON_STOP` flush hit, if any. */
+    /**
+     * How many times the store committed (flushed an open file): its policy,
+     * [flush], [close] and `ON_STOP` (tests).
+     */
+    @Volatile internal var commits = 0
+        private set
+
+    /**
+     * Whether the process is stopped (`ProcessLifecycleOwner` below
+     * `STARTED`): in the background, or started without an activity (a
+     * service, a broadcast, WorkManager). Always `false` without Android.
+     */
+    @Volatile internal var processStopped = false
+
+    /** Writes made since the last commit, under the coalesced policy. Guarded by [mutex]. */
+    private var pendingWrites = 0
+    private var commitTimer: Job? = null
+    private var timerGeneration = 0
+
+    /** The last error a flush the store ran on its own hit (`ON_STOP`, a coalesced commit), if any. */
     @Volatile var lastBackgroundError: Throwable? = null
         private set
 
     init {
-        if (observeProcess) ProcessStopObserver.attach(this)
+        if (observeProcess) {
+            // Stopped until ProcessLifecycleOwner says STARTED: an app
+            // started without an activity never sends ON_START.
+            processStopped = true
+            ProcessStopObserver.attach(this)
+        }
     }
 
     // --- writes ---------------------------------------------------------
 
     /** Stores a memory with a caller-supplied vector. */
     suspend fun remember(content: String, vector: List<Float>, options: RememberOptions = RememberOptions()): WriteResult =
-        withDatabase { it.remember(content, vector, options) }
+        withDatabase(write = true) { it.remember(content, vector, options) }
 
     /** Stores a memory, embedding [content] with the store's embedder. */
     suspend fun rememberText(content: String, options: RememberOptions = RememberOptions()): WriteResult =
-        withDatabase { it.rememberText(content, options) }
+        withDatabase(write = true) { it.rememberText(content, options) }
 
     /**
      * Changes fields of a memory. A content change is re-embedded when the
      * patch has no vector and an embedder is set.
      */
     suspend fun update(id: String, patch: MemoryPatch): WriteOutcome =
-        withDatabase { it.update(id, patch) }
+        withDatabase(write = true) { it.update(id, patch) }
 
     /** Deletes a memory. */
-    suspend fun delete(id: String) = withDatabase { it.delete(id) }
+    suspend fun delete(id: String) = withDatabase(write = true) { it.delete(id) }
 
     // --- reads ----------------------------------------------------------
 
@@ -153,24 +186,24 @@ class MnemoStore private constructor(
         text: String,
         scope: EssenceScope = EssenceScope.Project,
         refs: List<String>? = null,
-    ): String = withDatabase { it.essenceAdd(scope, section, text, refs) }
+    ): String = withDatabase(write = true) { it.essenceAdd(scope, section, text, refs) }
 
     /** Appends a timeline entry (at most 600 bytes; append-only) and returns its id. */
     suspend fun essenceAppendTimeline(
         text: String,
         scope: EssenceScope = EssenceScope.Project,
         refs: List<String>? = null,
-    ): String = withDatabase { it.essenceAppendTimeline(scope, text, refs) }
+    ): String = withDatabase(write = true) { it.essenceAppendTimeline(scope, text, refs) }
 
     /** Replaces an item's text and refs. Timeline entries can't be edited. */
     suspend fun essenceUpdate(id: String, text: String, refs: List<String>? = null): WriteOutcome =
-        withDatabase { it.essenceUpdate(id, text, refs) }
+        withDatabase(write = true) { it.essenceUpdate(id, text, refs) }
 
     /** Marks an item resolved; it stays in the history. */
-    suspend fun essenceResolve(id: String): WriteOutcome = withDatabase { it.essenceResolve(id) }
+    suspend fun essenceResolve(id: String): WriteOutcome = withDatabase(write = true) { it.essenceResolve(id) }
 
     /** Removes an item from the essence (a soft delete). */
-    suspend fun essenceRemove(id: String) = withDatabase { it.essenceRemove(id) }
+    suspend fun essenceRemove(id: String) = withDatabase(write = true) { it.essenceRemove(id) }
 
     // --- index ----------------------------------------------------------
 
@@ -178,7 +211,7 @@ class MnemoStore private constructor(
      * Builds the IVF+PQ index. On a v9 file below 20,000 facts it builds
      * nothing and reports `partitions == 0u`: an exact scan is faster there.
      */
-    suspend fun buildIndex(): IndexInfo = withDatabase { it.buildIndex() }
+    suspend fun buildIndex(): IndexInfo = withDatabase(write = true) { it.buildIndex() }
 
     /** Whether the file has an IVF+PQ index. */
     suspend fun hasIndex(): Boolean = withDatabase { it.hasIndex() }
@@ -187,20 +220,20 @@ class MnemoStore private constructor(
 
     /** Appends a thread's turns; turns already stored are skipped. Needs an embedder. */
     suspend fun ingestThread(threadId: String, turns: List<ThreadTurn>): IngestReport =
-        withDatabase { it.ingestThread(threadId, turns) }
+        withDatabase(write = true) { it.ingestThread(threadId, turns) }
 
     /** A thread's turns, oldest first. */
     suspend fun threadExport(threadId: String): List<ExportedTurn> =
         withDatabase { it.threadExport(threadId) }
 
     /** Deletes a thread's turns; returns how many records went. */
-    suspend fun threadForget(threadId: String): ULong = withDatabase { it.threadForget(threadId) }
+    suspend fun threadForget(threadId: String): ULong = withDatabase(write = true) { it.threadForget(threadId) }
 
     // --- result cache ---------------------------------------------------
 
     /** Stores a value in the result cache under an exact key. */
     suspend fun cachePut(namespace: String, key: String, value: ByteArray, ttlSecs: ULong? = null) =
-        withDatabase { it.cachePut(namespace, key, value, ttlSecs) }
+        withDatabase(write = true) { it.cachePut(namespace, key, value, ttlSecs) }
 
     /** A cached value, or `null`. */
     suspend fun cacheGet(namespace: String, key: String): ByteArray? =
@@ -218,10 +251,27 @@ class MnemoStore private constructor(
     }
 
     /** Makes every write so far durable. A no-op while the file is closed. */
-    suspend fun flush() = locked { db?.flush() ?: Unit }
+    suspend fun flush() = locked { commitLocked() }
 
     /** Flushes and closes the file, releasing its lock. The next call reopens it. */
     suspend fun close() = locked { closeLocked() }
+
+    /**
+     * Runs [body] on one open handle with no other call in between, then
+     * commits once (unless the policy is [FlushPolicy.Manual]). Use it for a
+     * batch of writes: 100 writes in a session are one commit. A session
+     * doesn't embed; compute vectors first. If [body] throws, the writes it
+     * made stay, and are committed the same way.
+     */
+    suspend fun <T> withSession(body: (MnemoSession) -> T): T = locked {
+        val session = MnemoSession(handle())
+        try {
+            body(session)
+        } finally {
+            session.end()
+            if (session.writes > 0 && configuration.flushPolicy != FlushPolicy.Manual) commitLocked()
+        }
+    }
 
     /** Rewrites the file compactly, closing it first. The next call reopens it. */
     suspend fun compact(): CompactReport = locked {
@@ -281,16 +331,22 @@ class MnemoStore private constructor(
     /** Whether the file is open (tests). */
     internal val isOpen: Boolean get() = db != null
 
-    /** `ON_STOP`: flush in the background, keep the handle open. */
+    /** `ON_STOP`: mark the process stopped, flush in the background, keep the handle open. */
     internal fun onProcessStop() {
+        processStopped = true
         scope.launch { flushForBackground() }
+    }
+
+    /** `ON_START`: the app is in the foreground again. */
+    internal fun onProcessStart() {
+        processStopped = false
     }
 
     /** The `ON_STOP` flush. Errors are kept in [lastBackgroundError]. */
     internal suspend fun flushForBackground() = locked {
-        val open = db ?: return@locked
+        if (db == null) return@locked
         try {
-            open.flush()
+            commitLocked()
         } catch (e: Exception) {
             lastBackgroundError = e
         }
@@ -327,20 +383,87 @@ class MnemoStore private constructor(
      * anyway, the store reopens once and retries (`Closed` is reported
      * before any work is done, so the retry is safe).
      */
-    private suspend fun <T> withDatabase(body: (MnemoDb) -> T): T = locked {
-        try {
+    private suspend fun <T> withDatabase(write: Boolean = false, body: (MnemoDb) -> T): T = locked {
+        val value = try {
             body(handle())
         } catch (e: MnemoException.Closed) {
             dropHandle()
             body(handle())
         }
+        if (write) noteWriteLocked()
+        value
+    }
+
+    /**
+     * After a write: commit now, start the coalesced timer, or nothing, by
+     * policy. While the process is stopped a coalesced write commits at
+     * once. A failed commit throws to the writer.
+     */
+    private fun noteWriteLocked() {
+        when (val policy = configuration.flushPolicy) {
+            FlushPolicy.Manual -> return
+            FlushPolicy.EveryWrite -> commitLocked()
+            is FlushPolicy.Coalesced -> {
+                pendingWrites += 1
+                if (processStopped || pendingWrites >= maxOf(1, policy.maxWrites)) {
+                    commitLocked()
+                } else if (commitTimer == null) {
+                    armCommitTimerLocked(policy.maxDelayMillis)
+                }
+            }
+        }
+    }
+
+    /** Flushes the open file and clears the coalesced state. A no-op while the file is closed. */
+    private fun commitLocked() {
+        cancelPendingCommitLocked()
+        val open = db ?: return
+        open.flush()
+        commits += 1
+    }
+
+    private fun cancelPendingCommitLocked() {
+        pendingWrites = 0
+        commitTimer?.cancel()
+        commitTimer = null
+        timerGeneration += 1
+    }
+
+    private fun armCommitTimerLocked(millis: Long) {
+        timerGeneration += 1
+        val generation = timerGeneration
+        commitTimer = scope.launch {
+            delay(maxOf(0L, millis))
+            coalescedCommit(generation)
+        }
+    }
+
+    /**
+     * The coalesced timer fired. It commits an open file only: a store that
+     * closed meanwhile (it committed then) isn't reopened.
+     */
+    private suspend fun coalescedCommit(generation: Int) = locked {
+        if (generation != timerGeneration) return@locked
+        commitTimer = null
+        if (db == null || pendingWrites == 0) {
+            pendingWrites = 0
+            return@locked
+        }
+        try {
+            commitLocked()
+        } catch (e: Exception) {
+            lastBackgroundError = e
+        }
+        Unit
     }
 
     private fun closeLocked() {
         val open = db ?: return
+        cancelPendingCommitLocked()
         db = null
         try {
             open.flush()
+            commits += 1
             open.closeFile()
         } finally {
             open.close() // frees the Kotlin handle

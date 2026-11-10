@@ -17,6 +17,8 @@ import java.io.File
  * @property vectorCacheBudgetBytes the in-memory vector column budget
  *   (default 16 MiB).
  * @property cachePages the page cache, in 8 KB pages (default 256 = 2 MiB).
+ * @property flushPolicy when writes are committed to disk on their own
+ *   (default [FlushPolicy.Coalesced]: within about a second).
  */
 data class MnemoStoreConfiguration(
     val name: String,
@@ -25,6 +27,7 @@ data class MnemoStoreConfiguration(
     val formatVersion: UShort = 0u,
     val vectorCacheBudgetBytes: ULong = DEFAULT_VECTOR_CACHE_BUDGET,
     val cachePages: UInt = DEFAULT_CACHE_PAGES,
+    val flushPolicy: FlushPolicy = FlushPolicy.DEFAULT,
 ) {
     /**
      * The database file this configuration names. [context] supplies the

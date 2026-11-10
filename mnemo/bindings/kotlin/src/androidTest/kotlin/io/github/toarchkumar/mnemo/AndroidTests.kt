@@ -109,7 +109,9 @@ class AndroidTests {
     @Test fun onStopFlushesAndKeepsTheFileOpen(): Unit = runBlocking {
         val (keystore, _) = testKeystore()
         val dir = File(context.cacheDir, "stop-${UUID.randomUUID()}").also { cleanup += it }
-        val store = MnemoStore(context, MnemoStoreConfiguration("stop", 4u, dir), keystore)
+        // Manual, so only ON_STOP commits: the default would already have
+        // committed each write (the process is stopped: no activity yet).
+        val store = MnemoStore(context, MnemoStoreConfiguration("stop", 4u, dir, flushPolicy = FlushPolicy.Manual), keystore)
         // The observer is added on the main thread; wait for it.
         InstrumentationRegistry.getInstrumentation().runOnMainSync {}
         for (i in 0 until 3) store.remember("pending $i", vec(i))
@@ -131,6 +133,32 @@ class AndroidTests {
         assertCopyHolds(store.file, keystore, 3uL)
         store.remember("after", vec(3))
         assertEquals(4uL, store.count())
+        store.close()
+    }
+
+    @Test fun theDefaultPolicyFollowsTheProcessLifecycle(): Unit = runBlocking {
+        val keys = InMemoryKeyStorage()
+        val dir = File(context.cacheDir, "policy-${UUID.randomUUID()}").also { cleanup += it }
+        val store = MnemoStore(context, MnemoStoreConfiguration("policy", 4u, dir), keys)
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {}
+        // No activity: the process is stopped, and a write commits before it
+        // returns. (An earlier test's activity may still be stopping: ON_STOP
+        // comes about 700 ms after it.)
+        assertTrue(eventually(10_000) { processState() == Lifecycle.State.CREATED && store.processStopped })
+        store.remember("stopped", vec(0))
+        assertEquals(1, store.commits)
+        assertCopyHolds(store.file, keys, 1uL)
+
+        // An activity started: ON_START, and writes coalesce again.
+        val scenario = ActivityScenario.launch(TestActivity::class.java)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        assertTrue("ON_START reached the store", eventually { !store.processStopped })
+        store.remember("started", vec(1))
+        assertEquals("not committed yet", 1, store.commits)
+        assertTrue("committed within the window", eventually(5_000) { store.commits == 2 })
+        assertCopyHolds(store.file, keys, 2uL)
+        scenario.close()
+        assertTrue("ON_STOP reached the store", eventually(10_000) { store.processStopped })
         store.close()
     }
 
