@@ -18,7 +18,10 @@ The first mobile release, with one breaking change in Rust.
 - Both are built on a new UniFFI binding, `mnemo-uniffi`. The engine (the
   crate and the Python package) ships at the same version.
 - **Upgrading from Rust:** `Mnemo::close` now takes `self`; see Changed.
-  The on-disk format is unchanged (v9; v8 files still open and write).
+  The on-disk format is unchanged (v9).
+- **v8 files still open and write in v0.12; v0.13 makes them read-only,
+  so run `mnemo compact` to upgrade.** (`mnemo compact --format v8` stays
+  for this release too.)
 
 ### Changed
 
