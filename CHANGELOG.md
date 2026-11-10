@@ -8,6 +8,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Release workflow
+
+- **The mobile jobs start only after every engine job succeeded.** The
+  version-check job now needs the GitHub Release, the CLI, wheel and sdist
+  builds and both publish jobs, and checks each result. A publish job may
+  be skipped only when its `ENABLE_*` variable switches that registry off.
+  Before, a failed build could skip a publish job and let mobile run.
+- **The published Swift package check works and runs in the dry run.**
+  It picks the scheme Xcode actually names (`Check-Package`), resolves
+  and builds in separate steps with full output, and fails at once on a
+  credential prompt. The dry run checks the newest version `mnemo-swift`
+  already has, so the check runs before every tag. In v0.12.0 it ran for
+  the first time on the tag and hung after everything had published.
+- **Every release job and step has a time limit** (45 minutes per job,
+  10 to 20 per step).
+- `android-publish.yml`, the manual Maven Local check from MOBILE-1c, is
+  removed: the release workflow's Android job and dry run do the same.
+
 ## [0.12.0] — 2026-11-09
 
 The first mobile release, with one breaking change in Rust.

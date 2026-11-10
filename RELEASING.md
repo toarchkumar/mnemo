@@ -11,9 +11,17 @@ One tag, `vX.Y.Z`, releases everything:
 - **the Android library:** `io.github.toarchkumar:mnemo-android` on Maven
   Central, and the AAR on the GitHub Release.
 
-`.github/workflows/release.yml` does all of it. The mobile jobs run after
-the engine jobs succeed. A mobile failure doesn't undo crates.io or PyPI:
-fix the cause and re-run the failed jobs.
+`.github/workflows/release.yml` does all of it. The mobile jobs run only
+after every engine job succeeded: the GitHub Release, the CLI binaries,
+the wheels, the sdist, and both publish jobs. The one exception is a
+registry switched off with its `ENABLE_CRATES_PUBLISH` or
+`ENABLE_PYPI_PUBLISH` variable: its publish job is skipped, and mobile
+still runs. The `mobile (version check)` job checks this and fails with
+each job's result if anything else happened. A mobile failure doesn't
+undo crates.io or PyPI: fix the cause and re-run the failed jobs.
+
+Every job has a 45-minute limit, and every step a limit of 10 to 20
+minutes, so a hang fails the step instead of running for hours.
 
 ## Before the tag
 
@@ -41,6 +49,10 @@ fix the cause and re-run the failed jobs.
      `mnemo-swift` tree, using that zip;
    - **the `mnemo-swift` token:** pushes and deletes a `dry-run-X.Y.Z`
      branch (or runs `git push --dry-run` while the repository is empty);
+   - **the published-package check:** resolves the newest version
+     `mnemo-swift` already has from GitHub and builds it for the
+     simulator, the same two steps a tag runs on the new version
+     (`scripts/check-published-package.sh`);
    - **the Android library:** runs a signed `publishToMavenLocal` and a
      Gradle consumer from `mavenLocal()`;
    - **Maven Central:** uploads a deployment that the Central Portal
@@ -65,7 +77,8 @@ Check all four registries:
 - **crates.io:** `cargo search mnemo-engine` shows `X.Y.Z`.
 - **PyPI:** `pip index versions mnemo-engine` lists `X.Y.Z`.
 - **SPM:** `mnemo-swift` has the tag `X.Y.Z`, and the workflow's "Resolve
-  the published package" step built against it.
+  the published package" and "Build against the published package" steps
+  succeeded for it.
 - **Maven Central:** the version is on
   `https://central.sonatype.com/artifact/io.github.toarchkumar/mnemo-android`.
   The search index can lag the repository by up to an hour;
