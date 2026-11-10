@@ -8,6 +8,17 @@ on:
       # this workflow just builds and attaches artifacts to the GitHub
       # Release that auto-creates from the tag.
       - "v*"
+  # The dry run of the mobile release (MOBILE-1e): builds and checks the
+  # Swift and Android packages, proves the mnemo-swift token can push, and
+  # uploads a Maven Central deployment that's validated and then dropped.
+  # It creates no GitHub Release and publishes nothing; the engine jobs
+  # (crates.io, PyPI) don't run. Real releases come only from tags.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (the only mode a manual run has)"
+        type: boolean
+        default: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,6 +44,9 @@ jobs:
   #     binary / wheel jobs attach to this release by tag name.
   create-release:
     name: Create GitHub Release
+    # Tags only. Every engine job below needs this one, so a manual dry run
+    # skips them all.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -296,3 +310,291 @@ jobs:
         run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  # === The mobile packages (MOBILE-1e) ===================================
+  #
+  # They run after the engine jobs, on a tag. A mobile failure doesn't undo
+  # crates.io or PyPI: fix it and re-run the failed jobs. On a manual run
+  # (the dry run) the engine jobs are skipped and these run alone, in
+  # dry-run mode.
+
+  # --- The version and the mode, checked once.
+  mobile-prepare:
+    name: mobile (version check)
+    needs: [publish-crates, publish-pypi]
+    # After the engine jobs succeed or are skipped (a dry run, or a
+    # registry switched off), never after one failed.
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      dry_run: ${{ steps.v.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version and mode
+        id: v
+        run: |
+          engine=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/Cargo.toml | head -1)
+          uniffi=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/bindings/uniffi/Cargo.toml | head -1)
+          kotlin=$(sed -n 's/^VERSION_NAME=//p' mnemo/bindings/kotlin/gradle.properties)
+          echo "engine $engine, mnemo-uniffi $uniffi, mnemo-android $kotlin"
+          if [ "$engine" != "$uniffi" ] || [ "$engine" != "$kotlin" ]; then
+            echo "::error::the manifests disagree on the version"; exit 1
+          fi
+          if [ "${{ github.event_name }}" = push ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$engine" ]; then
+              echo "::error::tag v$tag doesn't match the manifests ($engine)"; exit 1
+            fi
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          else
+            if [ "${{ inputs.dry_run }}" != true ]; then
+              echo "::error::a manual run is a dry run; real releases come from a v* tag"; exit 1
+            fi
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$engine" >> "$GITHUB_OUTPUT"
+
+  # --- iOS: the XCFramework zip on the GitHub Release, then the
+  #     toarchkumar/mnemo-swift mirror (Package.swift pointing at that zip
+  #     with its checksum, the generated Swift and the Swift layer's
+  #     sources), committed and tagged with the bare version for SwiftPM.
+  release-swift:
+    name: mobile (Swift package)
+    needs: mobile-prepare
+    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.mobile-prepare.outputs.version }}
+      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Apple targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-darwin
+
+      - name: Build the XCFramework and the Swift bindings
+        working-directory: mnemo/bindings/swift
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          scripts/build-xcframework.sh 2>&1 | tee build.log
+          ZIP="MnemoFFI-$VERSION.xcframework.zip"
+          mv build/MnemoFFI.xcframework.zip "build/$ZIP"
+          CHECKSUM=$(swift package compute-checksum "build/$ZIP")
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "CHECKSUM=$CHECKSUM" >> "$GITHUB_ENV"
+          {
+            echo "### Swift package $VERSION"
+            echo "- \`$ZIP\`: $(stat -f %z "build/$ZIP") bytes, checksum \`$CHECKSUM\`"
+            echo '```'
+            sed -n '/==> sizes/,$p' build.log | tail -n +2
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the mnemo-swift release tree
+        working-directory: mnemo/bindings/swift
+        run: |
+          scripts/make-release-package.sh "$VERSION" \
+            "https://github.com/${{ github.repository }}/releases/download/v$VERSION/$ZIP" \
+            "$CHECKSUM" "$RUNNER_TEMP/mnemo-swift"
+          cat "$RUNNER_TEMP/mnemo-swift/Package.swift"
+
+      # The consumer resolves the release tree with the binary target
+      # pointed at the local zip (after checking its checksum against the
+      # one in Package.swift), builds on the simulator and runs a round trip.
+      - name: SPM consumer on the iOS simulator
+        working-directory: mnemo/bindings/swift
+        run: scripts/check-release-package.sh "$RUNNER_TEMP/mnemo-swift" "build/$ZIP"
+
+      - name: Attach the zip to the GitHub Release
+        if: env.DRY_RUN == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mnemo/bindings/swift/build/${{ env.ZIP }}
+
+      - name: Upload the zip (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-package-dry-run
+          path: |
+            mnemo/bindings/swift/build/${{ env.ZIP }}
+            ${{ runner.temp }}/mnemo-swift/
+
+      # A dry run proves the token can push: a dry-run-<version> branch,
+      # pushed and deleted. On an empty repository the first branch pushed
+      # becomes the default branch, which GitHub won't delete, so there it
+      # runs `git push --dry-run` instead: that authenticates against the
+      # push endpoint and changes nothing. A tag pushes main and tags it.
+      - name: Push to mnemo-swift
+        env:
+          TOKEN: ${{ secrets.MNEMO_SWIFT_TOKEN }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${TOKEN}@github.com/toarchkumar/mnemo-swift.git"
+          WORK="$RUNNER_TEMP/mirror"
+          git init -q "$WORK"
+          cd "$WORK"
+          git config user.name "mnemo release"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads "$REMOTE" main >/dev/null 2>&1; then
+            git fetch -q --depth 1 "$REMOTE" main
+            git checkout -q -b main FETCH_HEAD
+            EMPTY=false
+          else
+            git checkout -q -b main
+            EMPTY=true
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R "$RUNNER_TEMP/mnemo-swift/." .
+          git add -A
+          git commit -q -m "MNemo $VERSION (from ${{ github.repository }}@${GITHUB_SHA::12})"
+          git log --stat -1 | head -20
+          if [ "$DRY_RUN" = true ]; then
+            BRANCH="dry-run-$VERSION"
+            if [ "$EMPTY" = true ]; then
+              echo "mnemo-swift is empty: git push --dry-run (no branch is created)"
+              git push --dry-run "$REMOTE" "HEAD:refs/heads/$BRANCH"
+            else
+              git push -q "$REMOTE" "HEAD:refs/heads/$BRANCH"
+              git ls-remote --exit-code --heads "$REMOTE" "$BRANCH"
+              git push -q "$REMOTE" --delete "$BRANCH"
+              ! git ls-remote --exit-code --heads "$REMOTE" "$BRANCH"
+              echo "pushed and deleted $BRANCH"
+            fi
+          else
+            if git ls-remote --exit-code --tags "$REMOTE" "$VERSION" >/dev/null 2>&1; then
+              echo "::error::mnemo-swift already has tag $VERSION"; exit 1
+            fi
+            git tag -a "$VERSION" -m "MNemo $VERSION"
+            git push -q "$REMOTE" main
+            git push -q "$REMOTE" "refs/tags/$VERSION"
+            echo "pushed main and tag $VERSION"
+          fi
+
+      # After a release: a consumer resolves the published package from
+      # GitHub (the real url and checksum) and builds for the simulator.
+      - name: Resolve the published package
+        if: env.DRY_RUN == 'false'
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/published-consumer"
+          mkdir -p "$D/Sources/Check"
+          cat > "$D/Package.swift" <<SWIFT
+          // swift-tools-version:6.0
+          import PackageDescription
+          let package = Package(
+              name: "Check",
+              platforms: [.iOS(.v15), .macOS(.v12)],
+              dependencies: [.package(url: "https://github.com/toarchkumar/mnemo-swift", exact: "$VERSION")],
+              targets: [.target(name: "Check", dependencies: [.product(name: "Mnemo", package: "mnemo-swift")])]
+          )
+          SWIFT
+          echo 'import Mnemo
+          public func check() -> Int { generateKey().count }' > "$D/Sources/Check/Check.swift"
+          cd "$D"
+          xcodebuild build -scheme Check -destination 'generic/platform=iOS Simulator' -quiet
+          echo "resolved and built mnemo-swift $VERSION from GitHub"
+
+  # --- Android: the AAR on Maven Central (published and released), and
+  #     on the GitHub Release. The dry run uploads a USER_MANAGED
+  #     deployment, waits for validation and drops it, then checks a
+  #     Gradle consumer against the signed artifact in mavenLocal().
+  release-android:
+    name: mobile (Android library)
+    needs: mobile-prepare
+    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.mobile-prepare.outputs.version }}
+      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+      CARGO_NDK_VERSION: 4.1.2
+      # The Maven secrets, mapped to the plugin's properties.
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Validate the Gradle wrappers
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle (caching; the committed wrapper runs Gradle 9.6.1)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install cargo-ndk
+        env:
+          RUSTFLAGS: ""
+        run: cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - name: Build the native libraries and the Kotlin bindings
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "READELF=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" >> "$GITHUB_ENV"
+          ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/build-native.sh
+
+      - name: 16 KB pages and the size gate
+        working-directory: mnemo/bindings/kotlin
+        run: python3 scripts/check-elf.py "$READELF" --max-bytes 5242880 generated/jniLibs/*/libmnemo_uniffi.so
+
+      - name: The AAR, and a signed publishToMavenLocal
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleRelease publishToMavenLocal
+          M2="$HOME/.m2/repository/io/github/toarchkumar/mnemo-android/$VERSION"
+          ls -l "$M2"
+          for f in "$M2"/*.{aar,pom,module,jar}; do
+            [ -f "$f.asc" ] || { echo "::error::no signature for $f"; exit 1; }
+          done
+          python3 scripts/check-package.py "$READELF"
+          cp build/outputs/aar/mnemo-android-release.aar "build/mnemo-android-$VERSION.aar"
+
+      - name: Gradle consumer from mavenLocal()
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          ./gradlew --no-daemon -p release-check test printMnemoArtifact \
+            -PmnemoVersion="$VERSION" -Pjna.library.path="$PWD/generated/host"
+
+      - name: Maven Central (dry run, validated then dropped)
+        if: env.DRY_RUN == 'true'
+        working-directory: mnemo/bindings/kotlin
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: scripts/central-dry-run.sh
+
+      - name: Maven Central (publish and release)
+        if: env.DRY_RUN == 'false'
+        working-directory: mnemo/bindings/kotlin
+        run: ./gradlew --no-daemon --stacktrace publishAndReleaseToMavenCentral
+
+      - name: Attach the AAR to the GitHub Release
+        if: env.DRY_RUN == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mnemo/bindings/kotlin/build/mnemo-android-${{ env.VERSION }}.aar
+
+      - name: Upload the AAR (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-library-dry-run
+          path: mnemo/bindings/kotlin/build/mnemo-android-${{ env.VERSION }}.aar

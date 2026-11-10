@@ -8,3 +8,7 @@
 /local.properties
 /.idea/
 *.iml
+# The release dry run's Gradle consumer
+/release-check/build/
+/release-check/.gradle/
+/release-check/.kotlin/
