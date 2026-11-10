@@ -66,16 +66,19 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-08)
+## Status (2026-11-09)
 
-**Published:** v0.10.0 (PERF-1) on crates.io and PyPI, file format v8.
-**In progress:** FMT-9 → v0.11.0 (format v9). 9a–9e are done; 9f
-(migration, dual-format tests, release gates) is next, then READY before
-the tag. **Target market (user decision 2026-11-07):** on-device agents
-and apps, from desktop to tablets, phones and other small devices. **After
-v0.11:** REFAC-1 → MOBILE-1 (v0.12) → PERF-2 → Phase 12 → 13 → 14 (see
-"Authoritative execution order"). Read the WORKLOG from the 2026-11-07
-entries on for the live thread.
+**Published:** v0.11.0 (FMT-9: format v9 by default, about 6× smaller
+files, keyword recall) on crates.io and PyPI; PLANNER-A VERIFIED on the
+published artifacts. **Done since:** REFAC-1 (`store.rs` split; Rust
+`close(self)`, ships in v0.12.0). **In progress:** MOBILE-1 → v0.12.0
+(design note signed off 2026-11-09; 1a–1c (the UniFFI crate, the Swift
+and Kotlin packages) done; 1d, the sample apps and device checks, is
+active). **Target market (user decision
+2026-11-07):** on-device agents and apps, from desktop to tablets, phones
+and other small devices. **Next:** MOBILE-1b–1e → PERF-2 → Phase
+12 → 13 → 14 (see "Authoritative execution order"). Read the WORKLOG from
+the 2026-11-07 entries on for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1434,7 +1437,7 @@ inspector), and 12.4 (the daemon or shared mode).
   local files), Turso/libSQL (sync for an embedded database), and CRDT and
   local-first literature.
 
-### 14.2 Memory inspector (could move earlier; it only reads)
+### 14.2 Memory inspector (pulled forward as INSP-1 → v0.13.0, read-only, user decision 2026-11-09; `--write` and the Phase 13 views stay here)
 - `mnemo inspect <file>` serves a **local** web view on localhost only,
   unlocked through the keychain (12.3), **read-only by default**. Views:
   - memories (filter, search, keyed history chains);
@@ -1458,6 +1461,30 @@ inspector), and 12.4 (the daemon or shared mode).
 
 **Order:** 14.3 (small) → 14.2 (whenever the user wants it; it can come
 earlier) → 14.1 (design note, then build).
+
+## Phase 15 — Mobile memory screens (added 2026-11-09, user decision; last on the roadmap)
+
+**Goal:** a drop-in "what this app remembers" screen for app developers,
+so an app's own users can see and control what's kept about them. Apps
+increasingly have to offer that kind of control, and making it a one-line
+add is a selling point for the on-device market. These are components for
+other people's apps. **For now** MNemo is an engine with no app of its own.
+A management platform on top (see the open question in the 2026-11-09
+UI-direction NOTE) stays possible.
+- **Packages:** a SwiftUI view and a Jetpack Compose screen, each a small
+  optional package (or target) on top of the MOBILE-1 store layers. Apps
+  that don't want them don't link them.
+- **The screens:**
+  - browse and search memories;
+  - a keyed fact's history;
+  - delete or forget, through the normal APIs, so supersession and
+    thread forget behave as everywhere else;
+  - forget a whole thread;
+  - an export of the user's own data, through 12.5.
+- **For app developers:** theming hooks, localisable strings,
+  accessibility (VoiceOver and TalkBack), and a read-only mode.
+- **Depends on:** MOBILE-1, INSP-1's export, and the 14.2 edit semantics.
+  The design is to be specced when the phase comes up.
 
 ## Health-check addendum (2026-08-07)
 
@@ -1530,8 +1557,22 @@ of this file applies to every one.
 > 4. **MOBILE-1 → v0.12.0:** Swift and Kotlin bindings, iOS/Android
 >    builds in CI, platform embedders, the keychain/keystore key (12.3's
 >    generated-key half), and device benchmarks.
+>    **(User decision 2026-11-09: one ordering change.** PERF-2 (3a) comes
+>    after INSP-1, not straight after MOBILE-1.)
+> 4a. **INSP-1 → v0.13.0 (user decision 2026-11-09):** the memory
+>    inspector, pulled forward from 14.2, together with 12.5, the readable
+>    export, which it builds on. It's read-only (`--write` stays in 14.2),
+>    with views for what exists today: memories (filter, search, keyed
+>    history chains), threads with the essence render, snapshots, and
+>    `about`/`stats`. Views for Phase 13 features are added when those land.
+>    It unlocks with a passphrase prompt or a raw-key file; keychain unlock
+>    comes with 12.3. Spec to come from PLANNER-A at the v0.12 VERIFIED.
+>    **v0.13 also carries the v8 sunset** (moved from v0.12, 2026-11-09):
+>    v8 opens read-only, writes return an error pointing at `mnemo compact`,
+>    and `compact --format v8` goes.
 > 5. **Then resume Phase 12:** 12.4 (its design note compares locking vs
->    daemon) + 12.2 → 12.3 (the rest) → 12.5, then Phase 13, then Phase 14.
+>    daemon) + 12.2 → 12.3 (the rest), then Phase 13, then Phase 14, then
+>    Phase 15 (the mobile memory screens, last on the roadmap).
 >
 > The Claude Code plugin (12.2) waits about three releases because of
 > this; that's the accepted trade-off.
@@ -11422,3 +11463,2730 @@ warm exact scan (≤ 2 ms) and the 4th batch fsync.
 
 Then I verify on the published wheel and log VERIFIED. **After that the
 next item is REFAC-1**, which I'll dispatch with the VERIFIED.
+
+### 2026-11-08 — WORKER — DONE — v0.11.0 shipped (FMT-9, format v9 by default): on crates.io and PyPI; tag `v0.11.0` → `27151f6`
+**Tag `v0.11.0`** (annotated) points at `27151f6`, the coordination
+backup, as with v0.10.0.
+
+**Commits since the v0.11.0 READY, in your order:**
+
+| commit | change | CI |
+|---|---|---|
+| `797fc6b` | `feat(py): recall_text keywords= / keyword_weight= and set_vector_cache_budget` (binding, the README API table, a test) | run 42567638729 green |
+| `a28e5cd` | `release: v0.11.0`: manifests and both lockfiles at 0.11.0, CHANGELOG `[0.11.0]` (plus the Python line), the AGENTS.md format-version policy, `device_budget_v0_11_0` | run 42568485618 green, on `27151f6` |
+| `5228b6a` | `docs: v0.11.0 README and site (format v9, upgrade notes, new numbers)`: your HANDOFF, `README.md` and `index.html`, as handed off | (same run) |
+| `27151f6` | `chore(plan): sync coordination files` (`PLAN.md`, `reviewer_notes.md`) | (same run) |
+
+The FMT-9f code before these is in the READY entries: `25dee3f`,
+`1ce47d6` and `4c40091`.
+
+**Published:**
+- **crates.io:** `mnemo-engine` **0.11.0** (created 2026-11-09T05:53Z,
+  not yanked); `max_version` is 0.11.0.
+- **PyPI:** `mnemo-engine` **0.11.0**, with 6 files: wheels for macOS
+  x86_64 and arm64, manylinux2014 x86_64 and aarch64, and win_amd64, plus
+  the sdist.
+- **GitHub Release `v0.11.0`:** 11 assets.
+
+**The release run needed two re-runs of one job**, both caused by GitHub
+download errors, not our build. Release run 42569490324:
+- attempt 1, `wheels (aarch64-unknown-linux-gnu)`: inside the maturin
+  container, the maturin download returned 92 bytes ("gzip: stdin: not
+  in gzip format");
+- attempt 2, the same job: `setup-python` got an HTTP 504 fetching
+  Python 3.10.22;
+- attempt 3: the wheel built, and **publish to PyPI ran green**. The
+  crates.io publish had already succeeded in attempt 1 (it depends only
+  on the CLI builds). Every other job was green on the first attempt.
+
+**Smoke test of the published wheel** (a fresh venv, `pip install
+mnemo-engine==0.11.0`):
+- `__version__` is 0.11.0;
+- a new file reports `format_version` 9;
+- keyword-only recall finds "shipped BP.1";
+- `recall_text` has `keywords`, and `set_vector_cache_budget` exists.
+
+Your full verification is still to come.
+
+**Dogfood memory:** skipped, as agreed. The facts list is in the
+v0.11.0 READY.
+
+**Left uncommitted:** `.claude/` (the user's tooling). The tree is
+otherwise clean.
+
+**Stopping here.** Next is your VERIFIED, and then the REFAC-1 dispatch.
+
+### 2026-11-08 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.11.0 verified on the published artifacts; FMT-9 complete; REFAC-1 dispatched (split `store.rs`; `close()` consumes the handle)
+**v0.11.0 VERIFIED**, independently, in a clean Linux x86_64 sandbox,
+using only published artifacts:
+- **PyPI** `mnemo-engine==0.11.0` and `==0.10.0` installed side by side.
+  **crates.io** `max_version` is 0.11.0 (05:53Z), and `cargo install
+  mnemo-engine --version =0.11.0` built the CLI (`mnemo 0.11.0`).
+- **Disk:** the same 2,000 memories (384 dims, ~300 B of text) take
+  **8,360 B per memory on 0.10 and 1,327 B on 0.11 (6.3×)**. That matches
+  the README's "about 6×".
+- **Upgrade path:**
+  - a 0.10-written file opens on 0.11 as format 8 and takes a write as
+    v8;
+  - CLI `info` and `about` print the compact hint;
+  - `compact_file` makes it v9 (2,001 → 2,001 live, 1,331 B per memory);
+  - `mnemo verify` passes on the result;
+  - `compact --format v8` keeps v8;
+  - 0.10 refuses the v9 file with exactly `unsupported .mnemo format
+    version 9 (this build supports v1)`, as the README quotes it.
+- **Recall on the upgraded file:**
+  - the vector top-1 is right;
+  - keyword-only `recall([], keywords="BP.1")` finds "shipped BP.1";
+  - **`recall_text(..., keywords="BP.1")` finds it**, while without
+    keywords a dummy embedder doesn't (the hybrid term works);
+  - `set_vector_cache_budget(0)` still recalls correctly;
+  - CLI `recall --keywords "BP.1"` ranks it first.
+- **Minor, no action:** Python `about()` (a list of manifest records)
+  carries no upgrade hint. `stats()["format_version"]` and the CLI cover
+  it.
+- **Not checked from here:** the GitHub Pages deploy of `index.html` and
+  CI run pages (no GitHub API access from this sandbox). The user can
+  glance at the site.
+
+**FMT-9 is complete** (9a–9f, v0.11.0). Thanks: the profiling, the
+self-corrections (the 9e DONE, the PQ default) and the stops at each gate
+made this release go smoothly.
+
+**Decision on `close()` (the R-005.1 general fix): Rust `close(self)`
+consumes the handle.** It flushes as today (read-only: no flush), then
+drops the file and lock before returning, so reuse after close is a
+compile error rather than a runtime `Locked`. Python already behaves this
+way (`inner.take()`), and the Swift and Kotlin wrappers in MOBILE-1 want
+the same semantics.
+- It's an API change, so it ships in **v0.12.0** (MOBILE-1, already a
+  minor) with a CHANGELOG "Changed" entry. Callers holding `&mut Mnemo` in
+  a struct use `Option<Mnemo>` and `.take()`; show that in the rustdoc.
+- If `Drop` doesn't flush today, keep it that way. Only `close` changes.
+
+**DISPATCH: REFAC-1** (execution order 3b; no release of its own; it ships
+in v0.12.0).
+1. **Split `mnemo/src/store.rs`** (9,813 lines: one `impl Mnemo` from
+   about L2490) into private submodules under `mnemo/src/store/`.
+   - `mod.rs` keeps `Mnemo`, `MnemoConfig`, the request and report types
+     and the re-exports. **The public API is unchanged**: same paths
+     (`mnemo_engine::Mnemo`, `RecallRequest`, …), signatures and docs.
+   - A suggested map (adjust as the code dictates, and list the final one
+     in the DONE): open/create and lifecycle (open, flush, close, rekey,
+     snapshots); recall (scoring, ANN and BM25 glue, filters, budgets);
+     write path (remember, update, delete, keyed upsert, `commit_deltas`);
+     threads and essence; result-cache API; compact and migration; v9
+     internals (row codec, record pages, vector column, deltas). The
+     private helper types (`LayerCache`, `DocStats`, `RecPages`,
+     `VecColumn`, `IdIndex`, `IngestPlan`, `RunReader`, `ExactVec`) move
+     with their users.
+   - **Moves only:** no logic change in the move commits. Do it in
+     several commits (one or two modules each), each green on its own, so
+     `git diff --color-moved` shows pure moves. `pub(crate)` or
+     `pub(super)` as needed, never new `pub`.
+   - **Proof of no API change:** a before/after list of the public items
+     (`cargo public-api` if it installs; otherwise rustdoc JSON or a
+     script over `cargo doc` output), with the diff (empty) in the DONE.
+   - Update AGENTS.md's task table ("Add a library method" → the right
+     submodule, "Touch the result cache" → its new file). That's a
+     technical section, so it's yours.
+2. **Then one separate commit for `close(self)`,** as decided above:
+   - rustdoc with the `Option`/`take()` pattern;
+   - a test that the same file reopens right after `close()` in one
+     scope, without `drop`;
+   - the `demo()` `drop(db)` workaround removed;
+   - Python, Node, MCP and the CLI call sites adjusted;
+   - CHANGELOG `[Unreleased]` "Changed".
+3. **Gates:**
+   - default `cargo test --features failpoints` and the dual-format
+     suites green;
+   - clippy `-D warnings`, `fmt --check`, `cargo deny`, MSRV 1.75, the
+     mobile and compat CI jobs, `test_mnemo.py`, and `cargo build -p
+     mnemo-node`;
+   - a quick `device_budget` at 10K within noise of
+     `device_budget_v0_11_0` (no perf change is expected; it's a guard
+     against an accidental inlining loss).
+4. **Log DONE** with the commits, the module map, the public-API diff and
+   the gate results. No version bump and no tag. Then MOBILE-1 is next,
+   and I'll write its spec while you work.
+
+**Status updated** (shared section, minimal edit): published v0.11.0
+(format v9); in progress REFAC-1.
+
+### 2026-11-08 — WORKER — DONE — REFAC-1: `store.rs` split into 15 private submodules (public API unchanged), and `close(self)` consumes the handle
+**Commits (all on `main`, pushed; no version bump, no tag):**
+
+| commit | change |
+|---|---|
+| `b0a0018` | `store.rs` → `store/mod.rs` (rename only) |
+| `e2ac863` | → `open.rs` (create, open, accessors, per-handle settings) and `snapshots.rs` |
+| `8edfb22` | → `records.rs` (v9 record internals and `put`) and `crud.rs` (CRUD, embedder, handle caches) |
+| `2e27f62` | → `keyed.rs` (12.1) and `threads.rs` (12.7a) |
+| `05081c1` | → `essence.rs` (12.7b) and `continuation.rs` (12.7c, `commit_deltas`) |
+| `db6f6dc` | → `recall.rs` (about, search, recall scoring) and `ann.rs` (IVF+PQ) |
+| `df4761e` | → `flush.rs` (commits, WAL, checkpoint, `close`, cache settings) and `cache_api.rs` (result cache) |
+| `ad18fb2` | → `hooks.rs` (the hidden `__*` hooks) and `maintenance.rs` (export, rekey, verify, stats, compaction); the `impl` in `mod.rs` is empty |
+| `1e20240` | helpers → `load.rs` (locking, run readers, the catalog and index delta chains, loaders, the v4 migration); torn-header recovery → `open.rs` |
+| `31f9b28` | helpers → `records.rs` (record-page codec, turn zstd, BM25 state, row and vector-column helpers), `crud.rs` (layer cache), `recall.rs` (filter helpers) |
+| `28fe9df` | helpers → `threads.rs` (ingest plan, text helpers) and `essence.rs` (status and render helpers) |
+| `49feaea` | `docs(REFAC-1)`: the AGENTS.md task table and three code comments point at `store/` |
+| `5254395` | `feat(REFAC-1)!`: `close(self)` |
+
+**How the moves were done and checked:**
+- **The move commits are moves only.** Methods became `impl Mnemo` blocks
+  in child modules. A child's private methods and helpers became
+  `pub(super)` only where `mod.rs` or a sibling calls them; nothing new
+  is `pub`. Where only one module used a helper, I kept it private.
+- **Checked on every commit:** a script compares the multiset of
+  non-blank lines removed and added. It maps `pub(super) ` back and
+  ignores each module's wrapper (`//!`, `use super::*;`, `impl Mnemo {`,
+  `}`) and the `mod x;` / `use x::*;` lines.
+- Every move commit balanced, except where rustfmt rewrapped a signature
+  that `pub(super)` pushed past 100 columns (one or two lines each in
+  `8edfb22`, `2e27f62`, `05081c1`, `db6f6dc`, `1e20240` and `31f9b28`)
+  and the one intended `pub(crate) use records::plain_record;`
+  re-export, which keeps `lib.rs`'s fuzz hook path.
+- Each commit was built with `--tests`, and clippy `-D warnings` and
+  `fmt --check` were clean before committing. The full suite was run at
+  each commit; results are below.
+
+**Module map** (`mnemo/src/store/`, lines):
+
+| file | lines | contents |
+|---|---|---|
+| `mod.rs` | 1,041 | public types and constants (`Mnemo`, `MnemoConfig`, `RecallRequest`, `RecallResult`, `RecallResponse`, `Stats`, `CompactReport`, `SnapshotInfo`, `BudgetReport`, the `DEFAULT_*`/`V9_*` constants); the core private types used everywhere (`CatalogEntry`, `RowV9`, `Snapshot`, `IndexPersist`, `IdIndex`, `FlushPrelude`, `CatalogEntryV4`); `resolve_format_version`; the module list |
+| `records.rs` | 1,540 | v9 internals: page allocation, packed record pages, the fp16 vector column, BM25 state and glue, turn compression, `put` |
+| `flush.rs` | 942 | sealed runs, the WAL, checkpoint, `flush`, `close`, `flush_index`, page-cache and vector-budget settings |
+| `open.rs` | 917 | create and open (read-write, read-only, raw key), torn-header recovery, accessors, per-handle settings |
+| `recall.rs` | 675 | `memories`, `about`, `about_essence`, exact search, recall scoring (ANN and BM25 candidate paths, filters, budgets) |
+| `load.rs` | 576 | file locking, `RunReader`/`ExactVec`, the catalog and index delta chains, the control-plane loaders, the v4 migration |
+| `cache_api.rs` | 567 | the result cache API (exact-key and semantic put/get, purge, budgets, flush policy, eviction) |
+| `essence.rs` | 556 | essence items and render (12.7b), status and date helpers |
+| `crud.rs` | 553 | remember, get, delete, the embedder, the handle caches (key slots, superseded set, `LayerCache`, lazy thread warm-up) |
+| `maintenance.rs` | 519 | export, rekey, verify, stats, compaction (and v8 → v9 upgrade) |
+| `threads.rs` | 480 | the thread archive (ingest, export, forget), the ingest plan, text helpers |
+| `continuation.rs` | 464 | `thread_start` and its prelude, `commit_deltas` |
+| `keyed.rs` | 351 | keyed upserts, `update`, history |
+| `snapshots.rs` | 280 | snapshots, retention, `restore_to`/`restore_to_time`, `session` |
+| `hooks.rs` | 269 | the hidden `__*` test and bench hooks |
+| `ann.rs` | 236 | build, rebuild and drop the index, lazy load, reconcile |
+
+**Proof of no API change.** `cargo public-api` needs nightly, which
+isn't installed. Instead:
+- **The method:** stable rustdoc JSON (`RUSTC_BOOTSTRAP=1 cargo rustdoc
+  --lib -- -Z unstable-options --output-format json`, format 57) and a
+  normalizer script. The script walks the crate from its root through
+  public modules, re-exports, public fields and variants, inherent impls
+  and trait impls. It prints one line per item: path, kind, signature
+  with spans and ids removed, attrs, deprecation, and a hash of the docs.
+  `doc(hidden)` items aren't in rustdoc JSON; the `__*` hooks stay `pub`.
+- **Before** (`27151f6`): 652 public items, 76 of them on `Mnemo`.
+- **After the split** (`28fe9df`): **identical, an empty diff.**
+- **After the `close` commit** (`5254395`): exactly one line differs,
+  `mnemo_engine::Mnemo::close`. Its receiver goes from `&mut self`
+  (`borrowed_ref, is_mutable`) to `self`, and its docs changed. Nothing
+  else changed.
+
+**`close(self)` (`5254395`):**
+- **Behaviour:** `close` flushes (forcing the ANN index to persist, as
+  before) unless the handle is read-only, then drops the handle, which
+  closes the file and releases the lock. If the flush fails, the error is
+  returned and the handle is still dropped. That's documented. `Drop`
+  still doesn't flush.
+- **Rustdoc:** the `Option<Mnemo>` + `take()` pattern as a compiled
+  (`no_run`) doctest, and a "Changed in v0.12.0" note.
+- **Test:** `close_releases_the_file_so_it_reopens_in_the_same_scope`, in
+  the dual-format integration suite (`v8::` and `v9::`). It closes, then
+  reopens writable, then read-only (closed too), then writable again,
+  all in one scope with no `drop`.
+- **Call sites:**
+  - the CLI `demo()` `drop(db)` workaround is removed;
+  - 64 `drop(x)` lines that followed a `close()` were removed across the
+    tests and examples;
+  - 9 test sites that inspected a handle after `close()` now call
+    `flush_index()`, which is `close`'s old meaning;
+  - MCP serve and the CLI already owned their handles.
+- **Bindings:**
+  - **Node:** `Database` holds `Option<Mnemo>`, so `close()` takes it
+    and every method throws "database is closed" afterwards. `len()` and
+    `snapshots()` now return `Result`, which is an experimental-binding
+    API change and is in the CHANGELOG.
+  - **Python:** `close()` already `take()`s its core; only the `mut` and
+    the comment changed.
+- **CHANGELOG `[Unreleased]` "Changed":** the `close` change, the Node
+  note, and one internal line for the split.
+
+**Gates:**
+- **The full suite at every REFAC commit** (in a separate worktree, with
+  `cargo test --features failpoints`, which includes the dual-format
+  integration, DUR-1, SEC-1 and FIX-1 suites): **448 passed, 0 failed at each of the 11 move commits** (`b0a0018` through `28fe9df`), so each is green on its own.
+- **At the `close` commit:** 451 tests. One full run hit
+  `cli_smoke::recall_tracking_flushes_access_count_to_disk` with
+  `Locked` on a read-only open. That's the known fork/flock race between
+  parallel `cli_smoke` threads (diagnosed at PR 6.1, 2026-08-29): a
+  forked child briefly holds the seed writer's file description. It ran
+  while the per-commit loop loaded the machine. It passed 3/3 alone, and
+  the full `cli_smoke` suite passed 41/41 twice after. Not from this
+  change, which closes the same descriptor at the same point.
+- clippy `--all-targets --features failpoints,benches -D warnings` and
+  `fmt --check` are clean, and `cargo deny check` is ok.
+- `cargo build -p mnemo-node` builds, and `test_mnemo.py` passes in full
+  (local venv).
+- **CI on `5254395` (run 42576557214):** green on every job: rust ×3, MSRV 1.75, cargo-deny, Python, `compat` (v0.10.0 fixture), `mobile` iOS and Android, and all five fuzz-smoke targets.
+- **`device_budget` at 10K against `device_budget_v0_11_0`:** within noise, two runs on the same cached corpus:
+
+| | v0.11.0 block | run 1 | run 2 |
+|---|---|---|---|
+| disk per memory | 1,330 B | 1,330 B | 1,330 B |
+| handle RSS | 16.8 MB | 16.0 MB | 15.2 MB |
+| open | 3.22 ms | 3.19 ms | 3.21 ms |
+| first recall | 8.77 ms | 8.48 ms | 8.51 ms |
+| warm recall | 2.20 ms | 2.18 ms | 2.19 ms |
+| single write | 14.8 ms | 14.8 ms | 14.0 ms |
+| batch of 100 | 19.95 ms | 17.0 ms | 19.8 ms |
+
+  No inlining loss.
+
+**Not mine, left alone:** `PLAN.md` (your entries since the backup) and
+`.claude/`.
+
+**Stopping here.** Next is MOBILE-1.
+
+### 2026-11-08 — PLANNER-A — VERIFIED + DISPATCH — REFAC-1 accepted; MOBILE-1 (v0.12.0) dispatched as a design note first (no code)
+**REFAC-1 accepted** (`b0a0018` … `28fe9df`, `49feaea`, `5254395`; CI run
+42576557214 green).
+- **My own check:** the multiset of `pub fn/struct/enum/const/type` names
+  in `store.rs` at `27151f6` equals the one across `store/*.rs` now. With
+  your rustdoc-JSON diff (empty for the split, only `Mnemo::close` after
+  `5254395`), that's enough.
+- 16 files and 9,966 lines. The largest is `records.rs` at 1,540, which
+  is fine.
+- **`close(self)` is accepted as built:** the handle drops even if the
+  flush fails, it's documented, and `Drop` still doesn't flush.
+- The Node `len()`/`snapshots()` → `Result` change is fine
+  (experimental).
+- The `cli_smoke` `Locked` flake is the known PR 6.1 fork/flock race.
+  Noted. **If it shows up in CI, log it.** A per-test file-descriptor
+  `CLOEXEC` audit would be the fix, but it isn't queued.
+
+**DISPATCH: MOBILE-1 → v0.12.0. Design note first, no code**, like FMT-9.
+Log it as `WORKER — PLAN — MOBILE-1 design note` and stop for my
+sign-off. **Scope** (from the On-device track entry): Swift and Kotlin
+packages, keychain and keystore keys (12.3's generated-key half),
+platform embedder hooks, mobile defaults, background-safe use, minimal
+sample apps, a real-device benchmark column, CI builds. The `close(self)`
+change ships in the same release.
+
+**Decisions already made (build the note on them):**
+- **UniFFI**, in a new binding crate (suggested `mnemo/bindings/uniffi/`,
+  a workspace member). It has its own `rust-version` if UniFFI needs one,
+  as mnemo-node does. **The engine's MSRV stays 1.75.** Check UniFFI's
+  current version and its declared MSRV yourself, and pin it exactly.
+- **The binding exposes a curated API, not all 76 methods.** Propose the
+  list in the note. At least:
+  - create and open (passphrase, raw key, read-only), `close`, `flush`;
+  - `remember`/`remember_text` with key, metadata, importance and TTL;
+  - `get`, `update`, `delete`, `history`;
+  - `recall`/`recall_text` with `keywords`, `filter`, `max_bytes` and
+    types;
+  - `about`, `essence` (read), `stats`, `compact_file`;
+  - the exact-key result cache (`cache_put`/`cache_get`);
+  - `set_vector_cache_budget` and `set_cache_capacity`.
+
+  Threads and `commit_deltas` are in or out at your proposal, with a
+  reason. Errors map to one typed error enum per language.
+- **The embedder is a foreign callback** (a UniFFI callback interface), so
+  an app can pass the OS embedding API or a bundled model. Say how it's
+  called (synchronous, no engine lock held during the call, the same
+  identity checks as `set_embedder`) and what happens on a throw.
+- **Mobile defaults:** vector-column budget 16 MiB (10K resident at about
+  7.7 MB) and page cache 2 MiB, as projected at 9a. Set them as the
+  binding's defaults; the engine defaults stay.
+
+**The note must answer these (with evidence where it can):**
+1. **iOS suspension and file locks.** iOS terminates an app with
+   `0xdead10cc` if it's suspended while holding a file lock in an **App
+   Group** container, and MNemo holds an OS lock for a handle's whole
+   life. Options to compare:
+   - (a) the Swift package flushes and closes on `didEnterBackground`
+     inside `beginBackgroundTask`, and reopens on demand (a raw-key open
+     is about 3 ms at 10K, so it's cheap);
+   - (b) document "app container only, not App Group";
+   - (c) wait for the 12.4 per-operation locking.
+
+   Recommend one for v0.12 and say how a test proves it (a device or
+   simulator run of a background transition). Also the default
+   **file-protection class** (`completeUntilFirstUserAuthentication`, so
+   background flushes work), and the fact that it covers the one file.
+2. **Keys:**
+   - iOS Keychain item attributes (accessibility class, this-device-only,
+     no iCloud sync by default);
+   - Android: the 32-byte key wrapped by an AndroidKeyStore key and
+     stored in the app's private files. Check whether
+     `androidx.security:security-crypto` is still recommended before
+     using it;
+   - what happens on a backup-restore or a new device (the key isn't
+     there, so the file can't open: a clear error and a documented
+     recovery: a passphrase slot, or "export before migrating");
+   - keys are never logged, and never cross the FFI as strings.
+3. **Android 16 KB pages:** Google Play requires 16 KB-aligned native
+   libraries for app updates (check the current date on
+   developer.android.com). Build with `-Wl,-z,max-page-size=16384`, and
+   add a CI check of the ELF alignment (`readelf`, LOAD and RELRO).
+   Confirm the engine never assumes a 4 KB OS page; our 8 KB file pages
+   are a file-format constant.
+4. **Targets and packaging:**
+   - iOS: an XCFramework with device arm64 plus simulator arm64 and
+     x86_64, shipped through Swift Package Manager as a binary target (a
+     zip plus checksum on the GitHub Release);
+   - Android: an AAR with arm64-v8a and x86_64 (emulator). Say whether
+     armeabi-v7a is worth it;
+   - minimum OS versions;
+   - the stripped size per architecture against the ≤ 5 MB target.
+5. **Threading:** whether one handle may be used from several threads
+   (an `Arc<Mutex<Mnemo>>` inside the object), and how Swift concurrency
+   and Kotlin coroutines should call it (blocking calls off the main
+   thread; say whether to offer async wrappers in v0.12).
+6. **Testing in CI:**
+   - Swift tests on the macOS host and the iOS simulator;
+   - Kotlin tests on the JVM host and/or an Android emulator job (cost and
+     flakiness, your recommendation);
+   - the existing `mobile` job grows into these.
+7. **The device benchmark column:** which numbers (the `device_budget`
+   cells at 1K and 10K) and how they're run on a real phone, for example
+   a benchmark screen in the sample apps that writes JSON. **The user
+   runs it**; say what device and OS info to record.
+8. **Distribution accounts (user decisions):**
+   - for Android: Maven Central (namespace, signing, which account),
+     JitPack, or GitHub Packages;
+   - for iOS: SPM from this repo's releases, and whether CocoaPods is
+     worth it at all.
+
+   Lay out the options and the setup each needs. I'll take them to the
+   user.
+9. **Effort and PR split** (MOBILE-1a, 1b, …), each with its own DONE,
+   and the gates for each: size, the binding test suites, 16 KB
+   alignment, and the background-transition test.
+
+Then stop for sign-off. **No code until then.**
+
+### 2026-11-08 — WORKER — PLAN — MOBILE-1 design note (Swift and Kotlin via UniFFI → v0.12.0); no code
+I wrote no code. This note builds on your decisions (UniFFI, a curated
+API, a foreign-callback embedder, mobile defaults) and answers your nine
+questions. The facts come from the engine at `5254395` and from sources
+checked today; links are at the end.
+
+#### 0. The crate and the toolchain
+- **The binding crate:** `mnemo/bindings/uniffi/`
+  (`mnemo-uniffi`, `crate-type = ["staticlib", "cdylib", "lib"]`),
+  a workspace member like mnemo-node and not a default member, so the
+  engine's MSRV job (1.75) never builds it.
+- **UniFFI pin: `uniffi = "=0.32.2"`**, the latest stable (released
+  2026-09-22, MPL-2.0), plus `uniffi::build`. Bindings come from the
+  crate's own `uniffi-bindgen` binary (the `cli` feature, the same pinned
+  version), so the bindgen and runtime versions can't drift. I'll use
+  proc macros (`#[uniffi::export]`), not a UDL file.
+- **UniFFI's MSRV:** none of the `uniffi*` crates declares a
+  `rust-version`. Its CHANGELOG last stated an MSRV of **1.82.0** (at
+  v0.29.1, 2025-03) and hasn't changed it since. Its own toolchain file
+  pins **1.90.0**, and its policy is to build with whatever Rust
+  version Firefox currently requires.
+  - **Proposal:** the binding crate declares the lowest version a CI job
+    proves. I'll start at `rust-version = "1.82"`, with a `msrv-uniffi`
+    job on 1.82. If it fails, I raise the declared version to the lowest
+    that builds and log it. The engine stays at 1.75.
+- **License:** MPL-2.0 isn't on `deny.toml`'s allow list. It's weak,
+  file-level copyleft: linking it into an app is fine, and only modified
+  MPL files must stay open.
+  - **Proposal:** a `[licenses].exceptions` entry for the `uniffi*` crates
+    only, not a blanket allow. **Your call.**
+- **Kotlin bindings depend on JNA** (`net.java.dev.jna`, Apache-2.0 or
+  LGPL-2.1, at runtime), which adds its own native `libjnidispatch` per
+  ABI. 1c measures the AAR size with it.
+
+#### 1. The curated API
+One object, `MnemoDb`. Records and options are UniFFI records,
+metadata crosses the FFI as a JSON string, and filters are a typed enum.
+
+| area | functions |
+|---|---|
+| open and lifecycle | `MnemoDb.create(path, passphrase, config)`, `create_with_key(path, key: bytes, config)`, `open(path, passphrase)`, `open_with_key(path, key)`, `open_read_only(path, passphrase)`, `open_read_only_with_key(path, key)`, `close()`, `flush()`; free functions `generate_key() -> bytes`, `compact_file(path, passphrase)`, `compact_file_with_key(path, key)` |
+| writes | `remember(content, vector, RememberOptions)` and `remember_text(content, RememberOptions)`, where `RememberOptions` holds `memory_type`, `importance`, `metadata_json`, `key` (routes to `remember_keyed`) and `ttl_secs`; `update(id, MemoryPatch)`; `delete(id)` |
+| reads | `get(id) -> MemoryRecord`, `history(key) -> [MemoryRecord]` |
+| recall | `recall(vector, RecallOptions)` and `recall_text(query, RecallOptions)`, where `RecallOptions` holds `top_k`, `types`, `keywords`, `keyword_weight`, `filter: [FilterTerm]` (`Exists`, `Eq`, `In`, mirroring the engine's) and `max_bytes` |
+| read surfaces | `about() -> [MemoryRecord]`, `essence(scope, max_bytes) -> String`, `stats() -> DbStats` (with `format_version`) |
+| result cache | `cache_put(namespace, key, value: bytes, ttl_secs)` and `cache_get(namespace, key) -> bytes?` (exact-key only) |
+| tuning | `set_vector_cache_budget(bytes)`, `set_cache_capacity(pages)` |
+| embedder | `set_embedder(callback: MnemoEmbedder)` (see §2) |
+| **threads (proposed in)** | `ingest_thread(thread_id, [ThreadTurn])`, `thread_export(thread_id) -> [ExportedTurn]`, `thread_forget(thread_id)` |
+
+- **Threads in, because:** on-device chat and assistant apps are the
+  main mobile workload. Archiving a conversation and resuming it (with
+  `essence`) is the reason to keep it on the phone, and the 9e cold-turn
+  compression is aimed at exactly this. It's three functions with simple
+  records.
+- **`commit_deltas` out for v0.12, because:** it's the agent-orchestration
+  surface (a nested delta batch with validation). A mobile app has no
+  extractor loop to drive it, and it would be the largest record schema
+  in the binding. It can be added later without breaking anything.
+- **Also out:** semantic cache, sessions, snapshots/PITR, rekey, export,
+  verify, `commit_deltas`, the index-building knobs, and the hidden hooks.
+  Each is easy to add when a mobile user asks.
+- **Errors:** one `MnemoError` per language, a flat enum:
+  - `Locked`, `WrongPassphrase`, `HeaderTampered`,
+    `UnsupportedVersion(found)`, `NotFound`, `ReadOnly`,
+    `DimensionMismatch(expected, got)`, `Invalid(message)`, `Io(message)`;
+  - `Corrupt(message)`, covering `BadMagic`, `HeaderChecksum`,
+    `PageAuthFailed`, `Serialize`, `Crypto` and `Kdf`;
+  - plus two binding-only cases: `Closed`, and `Embedder(message)`
+    (a throw from the callback).
+
+  Swift sees it as `enum MnemoError: Error`, Kotlin as a sealed
+  `MnemoException`.
+- **Mobile defaults:** the constructors call
+  `set_vector_cache_budget(16 MiB)` (10K resident at about 7.7 MB) and
+  `set_cache_capacity(256)` (8 KB pages, so 2 MiB). The engine defaults
+  (96 MiB, 1,024 pages) are unchanged. A `MnemoConfig` record in the
+  binding exposes both, plus `dimensions` and `format` (8 or 9), for
+  apps that want other values.
+
+#### 2. The embedder callback
+- **Shape:** a UniFFI callback interface (a foreign trait):
+
+  ```
+  trait MnemoEmbedder { fn identity() -> EmbedderIdentity;
+                        fn embed(texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedderError>; }
+  ```
+
+  Swift and Kotlin implement it with the OS embedding API or a bundled
+  model.
+- **How it's called:**
+  - synchronously, on the calling thread;
+  - **never while the handle's mutex is held.** `remember_text` and
+    `recall_text` in the binding embed first and then lock (the engine's
+    `remember_text` only embeds and then calls `remember`), so a callback
+    that calls back into the same `MnemoDb` doesn't deadlock. That's the
+    PY-1 pattern.
+- **Identity checks:** `set_embedder` wraps the callback in a Rust
+  adapter that implements `Embedder` (`Send + Sync`, which UniFFI's
+  foreign traits are) and calls the engine's `set_embedder`. So the
+  checks are identical: the dimensions must match, and a manifest
+  identity must match exactly or it's upserted. `identity()` is read
+  once, as in the engine.
+- **On a throw:** the foreign exception becomes `EmbedderError`, which
+  the binding maps to `MnemoError.Embedder(message)`. Embedding happens
+  before any engine call, so nothing is written. A wrong vector count or
+  width is `DimensionMismatch` or `Invalid`.
+
+#### 3. Answers to your nine questions
+**Q1. iOS suspension and file locks.**
+- **The evidence:** Apple's DTS says it's "always unsafe for an app to
+  hold a file lock while it's suspended." In practice, `0xdead10cc`
+  fires for files in shared App Group containers, and it reproduces on
+  physical devices, not the simulator.
+- **MNemo's exposure:** it holds an `flock` for a handle's whole life,
+  exclusive for writers and shared for read-only handles (`load.rs`
+  `open_with_lock`).
+- **Recommendation for v0.12: (a), with (b) as documentation.** The Swift
+  layer's `MnemoStore` (the app-facing wrapper over `MnemoDb`) watches
+  `didEnterBackgroundNotification`:
+  - inside `beginBackgroundTask`, it runs `flush()` and then `close()`
+    (one durable write, about 15 ms) and ends the task;
+  - the next call reopens lazily: a raw-key open is about 3.2 ms at 10K
+    on the M1, so perhaps 10–15 ms on a phone;
+  - it does this whether or not the file is in an App Group, because
+    DTS's statement is general;
+  - **(b)** is then documentation: "App Group containers are supported
+    only through `MnemoStore`'s background handling, and concurrent
+    multi-process use waits for 12.4."
+- **Why not (c):** 12.4 is a whole phase away, and (a) is about 60 lines
+  of Swift.
+- **Passphrase files** would pay the KDF on every reopen, so mobile
+  defaults to raw-key files (§Q2). A passphrase file still works, just
+  with slower resume.
+- **How a test proves it:**
+  - **In CI (iOS simulator):** an XCTest posts
+    `didEnterBackgroundNotification` to a `MnemoStore` with pending
+    writes. It then asserts that the lock is free (a second writable
+    `MnemoDb.open` succeeds), that the writes are durable (that handle
+    sees them), and that the next `MnemoStore` call reopens
+    transparently.
+  - **On a device (the user, manual, because the simulator can't produce
+    `0xdead10cc`):** the sample app puts its file in an App Group, writes
+    in a loop, goes to the background and waits more than 30 s. The
+    device's crash and termination logs then show no `0xdead10cc`. I'll
+    script the steps in the sample's README.
+- **File protection:** the Swift layer creates a dedicated directory,
+  `Application Support/mnemo/`, with
+  `FileProtectionType.completeUntilFirstUserAuthentication`, and sets the
+  same class on the file. Background flushes work after the first unlock
+  (`complete` would fail them while the phone is locked).
+  - It's the directory and not just the file because compaction writes a
+    `<name>.compact-tmp` sibling and renames it over the original, so the
+    new file must inherit the class from the directory.
+  - With that, the class covers everything MNemo writes: the WAL lives
+    inside the one file.
+
+**Q2. Keys.**
+- **iOS:** a Keychain generic-password item:
+  - `kSecAttrService` is `dev.mnemo`, and `kSecAttrAccount` is the file's
+    path relative to its container;
+  - `kSecAttrAccessible` is `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
+    so background reopen works after the first unlock and the key never
+    leaves the device;
+  - `kSecAttrSynchronizable` is `false` (no iCloud Keychain);
+  - the key is the 32 bytes from `generate_key()`, stored as `Data`.
+- **Android:** an AES-256-GCM key in **AndroidKeyStore** (non-exportable,
+  `setUserAuthenticationRequired(false)` so background use works), which
+  wraps the 32-byte MNemo key.
+  - The wrapped key and its IV go in `noBackupFilesDir/mnemo/<name>.key`.
+  - **I won't use `androidx.security:security-crypto`:** all its APIs are
+    deprecated (in 1.1.0), and the package docs now point to
+    `javax.crypto.KeyGenerator` with AndroidKeyStore directly, which is
+    what this does.
+- **Backup-restore or a new device:**
+  - The key is device-only by design, so a restored `.mnemo` file without
+    its key can't be opened. `open_with_key` fails with `WrongPassphrase`.
+  - The Swift and Kotlin helpers turn "no key item for this file" into a
+    clear error, `MnemoError.KeyMissing` (helper-level, not engine), with
+    the documented recovery.
+  - **Proposed v0.12 default:** the `.mnemo` file is excluded from backup
+    too (iOS `isExcludedFromBackup`; Android: the same `noBackupFilesDir`
+    tree). Backups then never carry a file they can't open.
+  - **Apps that want migration** can:
+    - (i) call `export_encrypted` to a passphrase file before migrating
+      (add it to the curated API if you agree);
+    - (ii) wait for 13.2, which turns the v9 key-slot run into a second,
+      passphrase-wrapped slot. The format already has room for it.
+  - **Your call:** device-only plus backup-excluded by default, or
+    included.
+- **Keys never cross the FFI as strings** (bytes only: `Data` /
+  `ByteArray` ↔ `Vec<u8>`, copied into a `Zeroizing<[u8; 32]>` on the
+  Rust side). They're never logged: the error enum carries no key
+  material, and the helpers redact.
+
+**Q3. Android 16 KB pages.**
+- **The rule:** apps targeting Android 15 (API 35) and higher must support
+  16 KB pages on 64-bit devices. "Starting February 1, 2027, if your app
+  updates don't support 16 KB memory page sizes, you won't be able to
+  release these updates" (developer.android.com, checked today).
+- **Build:** NDK **r28+**, which aligns to 16 KB by default. To be safe I
+  also pass `-C link-arg=-Wl,-z,max-page-size=16384` and
+  `-Wl,-z,common-page-size=16384` (zstd's C code is statically linked
+  into the same `.so`, so it's covered).
+- **CI check** on every PR, for each `libmnemo_uniffi.so`:
+  - `llvm-readelf -Wl` must show every `LOAD` with `Align ≥ 0x4000`;
+  - `GNU_RELRO` must end 16 KB-aligned, or own the rest of its `LOAD`
+    (Google's three-way rule);
+  - `zipalign -c -P 16 -v 4` on the sample APK (1d).
+- **The engine assumes no OS page size:** it has no `mmap`,
+  `getpagesize` or `sysconf` anywhere in `src/`. `format::PAGE_SIZE = 8192`
+  is the file format's page, used only for file offsets.
+
+**Q4. Targets and packaging.**
+- **iOS:** an XCFramework of static libraries with three slices:
+  `ios-arm64`, `ios-arm64_x86_64-simulator` (lipo), and `macos-arm64` for
+  host `swift test`. It ships with the generated Swift and module map as
+  an SPM `binaryTarget` (a zip plus `swift package compute-checksum`) on
+  the GitHub Release.
+- **Android:** an AAR with `arm64-v8a` and `x86_64` (the emulator).
+  - **Skip `armeabi-v7a` in v0.12:** it covers only 32-bit-only and very
+    old devices, outside the on-device target class, and it would add a
+    third native build and test leg. It's cheap to add later if asked.
+  - No `x86` (32-bit).
+- **Minimum OS:**
+  - **iOS 15**: the Swift async wrappers run natively without
+    back-deployment, and it covers nearly all active devices;
+  - **Android API 24** (7.0): AndroidKeyStore AES has been available
+    since 23, and our NDK toolchain already targets 24 in CI.
+- **Size against the ≤ 5 MB target:**
+  - **today:** the Python extension (engine plus PyO3) is 2.63 MB
+    stripped on Linux aarch64, the closest proxy;
+  - **expected:** `libmnemo_uniffi.so` at about 2.5–3 MB per ABI;
+  - **gate (1a and 1c):** the stripped `.so` per ABI is ≤ 5 MB, and the
+    AAR's native total including JNA is reported;
+  - **iOS (1d):** the static library's real cost is the app's App
+    Thinning size delta, so the sample app's size report records it per
+    device.
+
+**Q5. Threading.**
+- `Mnemo` is `Send + Sync` (I compile-checked this at `5254395`).
+- **The binding object** is
+  `MnemoDb { inner: Mutex<Option<Mnemo>>, embedder: RwLock<Option<Arc<dyn MnemoEmbedder>>> }`.
+  UniFFI hands it out as an `Arc`. One handle may be used from any
+  thread, and calls are serialized and blocking. `Closed` after `close()`
+  matches Python and Node.
+- **Async (offered in v0.12, in the Swift and Kotlin layers):**
+  - **Swift:** an `actor MnemoStore` whose methods hop off the main actor
+    onto a serial executor and call the blocking core. The background
+    handling (Q1) lives there too.
+  - **Kotlin:** `suspend` wrappers (`withContext(Dispatchers.IO)`).
+  - **Not UniFFI's own async:** the engine is synchronous, and UniFFI
+    async would need a Rust executor with nothing to gain.
+  - The docs say "never call the blocking API on the main thread."
+
+**Q6. Testing in CI** (the existing `mobile` job grows into these):
+- **`swift` (macos-latest):**
+  - build the XCFramework;
+  - `swift test` on the macOS slice (fast);
+  - `xcodebuild test` on an iOS simulator (the latest runtime), including
+    the Q1 background test;
+  - about 15 min.
+- **`kotlin` (ubuntu-latest):**
+  - cargo-ndk builds both ABIs and runs the 16 KB alignment check;
+  - Kotlin unit tests on the **JVM host**, using the generated Kotlin and
+    JNA loading a host `libmnemo_uniffi.so`;
+  - about 8 min.
+- **These two run on every PR.**
+- **`android-emulator`** (`reactivecircus/android-emulator-runner`, KVM,
+  API 35 x86_64, plus one 16 KB system image): instrumented tests,
+  including AndroidKeyStore, which the JVM can't exercise. That's about
+  20–25 min, and emulator jobs are the flakiest thing in CI, so
+  **nightly and on release tags, not per PR.** A failure there is
+  logged, and it blocks the release, not ordinary PRs.
+
+**Q7. The device benchmark column.**
+- **The harness:** each sample app gets a Benchmark screen that runs the
+  `device_budget` cells at 1K and 10K, with the same corpus generator
+  (300 B text and 384-dim vectors, built in-app, raw-key files):
+  - disk per memory;
+  - RSS for one open handle: iOS `task_vm_info.phys_footprint`, Android
+    `Debug.MemoryInfo` total PSS plus `VmRSS`;
+  - raw-key open (median and p95 of 20);
+  - first recall (median of 20 fresh handles);
+  - warm recall (median and p95 of 1,000);
+  - durable single write (median and p95 of 20) and a batch of 100
+    (median of 5);
+  - the Q1 background close-and-reopen time.
+- **Output:** a JSON file with the same keys as `device_budget.json`,
+  written to Documents (iOS) or app files (Android), with a Share button.
+- **The user runs it on real phones.** Each JSON records:
+  - the device model identifier (for example `iPhone16,1`, `Pixel 8`)
+    and the SoC;
+  - RAM, the OS version and build, and the page size (Android
+    `getconf PAGE_SIZE`: 4K or 16K);
+  - free storage, the battery level and charging state, the thermal
+    state, and low-power or battery-saver mode;
+  - a Release build, the MNemo version and commit;
+  - a timestamp.
+- **I add the results** as a `device_budget_mobile` block in
+  `perf_v0.5.0.json`.
+
+**Q8. Distribution (user decisions; the setup each needs):**
+- **Android:**
+  - **(A) Maven Central** (recommended):
+    - a Central Portal account and the namespace `io.github.toarchkumar`,
+      verified instantly by creating a public repo with the key as its
+      name;
+    - a GPG signing key (RSA 4096) and a Portal user token as Actions
+      secrets;
+    - published from CI with a Gradle publishing plugin;
+    - consumers need nothing extra: `implementation("io.github.toarchkumar:mnemo:0.12.0")`.
+  - **(B) JitPack:** no account, but it builds from tags on its own
+    infrastructure. Our Rust, NDK and cargo-ndk build would have to run
+    there, or the AAR would have to be prebuilt and attached. It's
+    fragile.
+  - **(C) GitHub Packages:** consumers must authenticate with a PAT even
+    for public packages, which is real friction for a library.
+- **iOS:**
+  - **SPM from this repo's Releases:** the zip plus a checksum through a
+    `binaryTarget`.
+  - **Where `Package.swift` lives (user decision):** (i) at this repo's
+    root (simple, but SPM clones the whole repository with its history
+    for every consumer), or (ii) a small `mnemo-swift` repo whose
+    `Package.swift` points at the release zip, updated by the release
+    workflow (my recommendation).
+  - **CocoaPods isn't worth it:** trunk goes read-only on
+    **December 2, 2026**, three weeks from now.
+
+**Q9. Effort and PR split** (each its own DONE):
+
+| PR | scope | gates |
+|---|---|---|
+| **1a** (L) | the `mnemo-uniffi` crate: the curated API, the error enum, the callback embedder, the mobile defaults; Rust-level tests of the binding (including a mock embedder, a throw and re-entrancy); the `deny` exception; `msrv-uniffi`; the `mobile` job builds the crate for iOS and Android | binding tests green; stripped `.so` ≤ 5 MB per ABI; the engine MSRV job still 1.75; deny clean |
+| **1b** (L) | the Swift package: XCFramework build script, generated Swift, `MnemoStore` actor (async, background close and reopen, file protection), Keychain key helper; `swift test` on macOS and the iOS simulator | Swift suites green in CI; **the background-transition test** passes |
+| **1c** (L) | the Kotlin package: AAR (Gradle and cargo-ndk), coroutine wrappers, AndroidKeyStore key helper; JVM host tests; the nightly emulator job | Kotlin suites green; **16 KB alignment** (`readelf` LOAD and RELRO) on every PR; one green emulator run |
+| **1d** (M) | sample apps (SwiftUI, Compose): a small notes demo plus the Benchmark screen with JSON export; the README's on-device check for `0xdead10cc` | `zipalign -P 16` on the APK; the iOS size report; **the user runs the device benchmark** → `device_budget_mobile` |
+| **1e** (M) | release: XCFramework zip, checksum and AAR on the GitHub Release; Maven Central publish; the Swift package update; docs; CHANGELOG; v0.12.0 READY (with `close(self)`) | a green release dry run (`workflow_dispatch`); the user's accounts in place |
+
+- **Rough effort:** 1a–1c are each about the size of FMT-9b; 1d and 1e are
+  smaller.
+- **Order:** 1a first, then 1b and 1c (independent), then 1d, then 1e.
+
+#### 4. Decisions I need
+1. The `deny.toml` exception for the `uniffi*` crates (MPL-2.0).
+2. Threads in and `commit_deltas` out, as in §1; and whether to add
+   `export_encrypted` (for migration, Q2).
+3. The key and backup default: device-only and excluded from backup.
+4. Async wrappers in the Swift and Kotlin layers in v0.12 (not UniFFI
+   async).
+5. The emulator job nightly and on tags, not per PR.
+6. For the user: Maven Central (A) or not; `Package.swift` at this repo's
+   root or in a `mnemo-swift` repo; no CocoaPods.
+
+**Sources** (checked 2026-11-08):
+- crates.io API for `uniffi` 0.32.2 and its `uniffi_*` crates (no
+  `rust_version`, MPL-2.0);
+- mozilla/uniffi-rs at `v0.32.2`: `rust-toolchain.toml` (`1.90.0`),
+  `docs/policies/rust-versions.md`, CHANGELOG ("msrv is 1.82.0", v0.29.1);
+- developer.android.com/guide/practices/page-sizes (the February 1, 2027
+  deadline, NDK r28, the RELRO rule, `zipalign -P 16`);
+- developer.android.com reference for `androidx.security.crypto`
+  (deprecated, with KeyGenerator/AndroidKeyStore recommended);
+- Apple Developer Forums threads 655225 and 126438 (`0xdead10cc`; "always
+  unsafe … to hold a file lock while it's suspended"; App Group
+  containers; device-only);
+- blog.cocoapods.org (trunk read-only plan: December 2, 2026);
+- Sonatype Central Portal guides (io.github namespace verification, GPG
+  signing).
+
+**Stopping here for your sign-off.**
+
+### 2026-11-09 — PLANNER-A — DECISION — MOBILE-1 design note SIGNED OFF with changes; the user's distribution and backup decisions; start 1a
+**Signed off.** It's a thorough note: the sources are checked, the API is
+curated with reasons, and the gates are concrete. Answers to §4, in
+order, then changes.
+
+1. **`deny.toml`: yes,** per-crate `[licenses].exceptions` for MPL-2.0 on
+   the `uniffi*` crates only, with a comment (file-level copyleft; we
+   don't modify them).
+   - JNA isn't a cargo dependency, so `deny` won't see it. List it, with
+     its Apache-2.0 / LGPL-2.1 dual license, in the Kotlin package's
+     NOTICE and README.
+2. **Threads in, `commit_deltas` out: yes.**
+   - **A correction on migration:** `export_encrypted` is a byte copy
+     under the *same* key, so on its own it doesn't help a device-bound
+     raw key.
+   - The binding gets two helpers:
+     - `export_with_passphrase(dest, passphrase)`: `export_encrypted`,
+       then open the copy and `rekey` it to the passphrase with the
+       secure KDF, then close. The result opens with only the passphrase,
+       on any device;
+     - `import_with_passphrase(src, passphrase, dest)`: copy, open with
+       the passphrase, `rekey_with_key` to a newly generated device key,
+       and return the key bytes to the helper, which stores them in the
+       Keychain or Keystore.
+   - Tests for both directions: the export opens with the passphrase and
+   fails with the old key; the import opens with the new key and fails
+   with the passphrase. Keys stay `Zeroizing` and never become strings.
+3. **Keys and backup (user decision 2026-11-09): device-only and excluded
+   from backup by default, plus an iOS opt-in for iCloud sync.**
+   - **Default** (iOS and Android): as in the note.
+     `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, not
+     synchronizable, and the file excluded from backup. Android: the
+     AndroidKeyStore wrap and `noBackupFilesDir`.
+   - **iOS opt-in** (`KeyPolicy.iCloudSynced` in the Swift key helper):
+     - `kSecAttrSynchronizable = true` with
+       `kSecAttrAccessibleAfterFirstUnlock` (a synchronizable item can't
+       be `ThisDeviceOnly`);
+     - the file is *not* excluded from backup, so a restore to a new
+       iPhone brings both.
+     - Document the failure mode: if the user has iCloud Keychain turned
+       off, the key doesn't travel. The restored file then gives
+       `KeyMissing`, and the recovery is `export_with_passphrase` before
+       migrating.
+     - Allow an optional `kSecAttrAccessGroup` for apps that share the key
+       with their extensions.
+     - Android has no equivalent (Keystore keys never leave the device),
+       so it's iOS-only by design. Say so in the docs.
+4. **Async wrappers in the Swift and Kotlin layers: yes.** Not UniFFI
+   async.
+5. **The emulator job nightly and on tags: yes.** A red nightly is logged
+   in the WORKLOG within a day, and it blocks the release.
+6. **Distribution (user decisions 2026-11-09):**
+   - **Android: Maven Central**, namespace `io.github.toarchkumar`. **The
+     user** creates the Central Portal account, verifies the namespace,
+     makes the GPG key, and adds the two Actions secrets. **The worker
+     writes the exact step list** (names of the secrets, the key type, the
+     expected Gradle coordinates) in the 1c DONE, so the user can do it
+     before 1e. Agents never handle the GPG private key or the token.
+   - **iOS: a separate `toarchkumar/mnemo-swift` repo** whose
+     `Package.swift` points at the release zip, updated by the release
+     workflow. **The user** creates the empty public repo and a
+     fine-grained token, write access to that repo only, as an Actions
+     secret. List the steps in the 1b DONE.
+   - **No CocoaPods.**
+
+**Changes to the note:**
+- **Android lifecycle:** no `0xdead10cc` there, but the process can be
+  killed at any time after `onStop`. The Kotlin layer flushes on
+  `ProcessLifecycleOwner` `ON_STOP`, keeps the handle open (no lock
+  problem on Android), and has a test.
+- **iOS:** `MnemoStore` also flushes and closes on
+  `willTerminateNotification`. The reopen after background must be safe
+  if a call races the notification (the actor serializes it; test that a
+  call made during the background task completes, or fails `Closed` and
+  then retries transparently).
+- **No panic crosses the FFI.** UniFFI turns a Rust panic into an internal
+  error, but a panic inside the `Mutex` poisons it. Map a poisoned lock to
+  `MnemoError.Corrupt("handle poisoned; reopen")` rather than panicking on
+  every later call, and add a test.
+- **`kSecAttrAccount`:** use a stable id rather than the path relative to
+  the container, so renaming or moving a file doesn't orphan its key. A
+  random id goes in the file's manifest under a reserved `_mnemo.key_id`
+  key. Your call on the mechanism, but say it in the 1b DONE.
+- **The binding's `rust-version`:** start at 1.82 with a `msrv-uniffi`
+  job, as proposed. Fine.
+- **Sizes:** report the AAR's native total, JNA included, and the iOS
+  App Thinning delta. The gate stays ≤ 5 MB per ABI for
+  `libmnemo_uniffi.so`.
+
+**Order and gates as in §Q9: 1a → (1b, 1c) → 1d → 1e**, each with its
+own DONE. v0.12.0 carries `close(self)`, and READY comes before the tag
+as usual. PERF-2 follows MOBILE-1.
+
+**Start 1a now:** the `mnemo-uniffi` crate (curated API including the
+three thread calls and the two passphrase helpers, the error enum
+including `Closed`, `Embedder` and the poisoned-lock case, the callback
+embedder with no lock held during `embed`, the mobile defaults), the
+Rust-level binding tests (mock embedder, a throw, re-entrancy, the
+passphrase round trips), the `deny` exceptions, `msrv-uniffi`, and the
+`mobile` job building the crate for iOS and Android. Log DONE with the
+gates from §Q9 (binding tests, stripped `.so` ≤ 5 MB per ABI, engine MSRV
+still 1.75, deny clean).
+
+### 2026-11-09 — PLANNER-A — NOTE — MOBILE-1: all development stays in this repo; Maven Central and mnemo-swift are release outputs only
+The user asked whether all the work can happen here. Yes; this is now
+explicit.
+- **Source of truth is this repo:**
+  - `mnemo/bindings/uniffi/` (the Rust crate);
+  - `mnemo/bindings/swift/` (the Swift package sources: `MnemoStore`,
+    the key helper, tests, a dev `Package.swift` that uses a local
+    XCFramework path);
+  - `mnemo/bindings/kotlin/` (the Gradle project, coroutine wrappers, the
+    key helper, tests);
+  - the sample apps under `examples/mobile/`.
+- **No separate repo or registry is needed until 1e.** During
+  development, test locally: SPM with a path dependency, Gradle with
+  `mavenLocal()` or an included build.
+- **Maven Central** is a package registry, not a code repo. 1e's release
+  workflow builds the AAR and POM from this repo and publishes them.
+- **`toarchkumar/mnemo-swift`** is a release mirror written only by CI.
+  Each tag copies `Package.swift` (pointing at the release zip and its
+  checksum), the generated Swift, and the Swift layer's sources from
+  `mnemo/bindings/swift/`. Nobody edits it by hand.
+- So the user's account setup (Maven Central, the `mnemo-swift` repo and
+  tokens) is needed only before 1e. 1a–1d don't depend on it.
+
+### 2026-11-09 — PLANNER-A — NOTE — mnemo-swift: the repo exists; the secret name is fixed
+- **The user created `toarchkumar/mnemo-swift`.** They're adding a
+  fine-grained token (only that repo, Contents read and write) as the
+  **Actions secret `MNEMO_SWIFT_TOKEN` in the `mnemo` repo**.
+- **1e's release workflow uses exactly that name.** The token expires,
+  so the 1e docs need a one-line "rotate `MNEMO_SWIFT_TOKEN` before
+  <expiry>" note in the release checklist.
+- **Agents never see the value.**
+
+### 2026-11-09 — PLANNER-A — NOTE — `MNEMO_SWIFT_TOKEN` is in place
+The user created the fine-grained token (only `mnemo-swift`, Contents
+read and write, Metadata read-only) and saved it as the Actions secret
+`MNEMO_SWIFT_TOKEN` in the `mnemo` repo.
+- The token expires about a year from today, so put "rotate
+  `MNEMO_SWIFT_TOKEN` by 2027-11" in the 1e release checklist.
+- The iOS release setup is done. The Android one (the Maven Central
+  account, namespace, GPG key and two secrets) is still to come; the
+  worker lists the steps in the 1c DONE.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-1a: the `mnemo-uniffi` crate
+**Commits on `main`:**
+- `30dfe8f`: engine, `Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors`, with a dual-format test.
+- `9e57c06`: the binding crate, deny, CI, CHANGELOG, and the AGENTS.md task-table row.
+- `7ec5a25`: lockfile pins so the crate builds on 1.82 (see Deviations).
+
+CI on `7ec5a25` is green on all 16 jobs (run 42592180165). No version bump and no tag.
+
+**Crate layout** (`mnemo/bindings/uniffi/`, a workspace member, `publish = false`):
+- UniFFI `=0.32.2` in proc-macro mode, with `default-features = false`. The defaults pull in `cargo_metadata`, which conflicts with the engine's `serde =1.0.210` pin.
+- `crate-type = staticlib, cdylib, lib`.
+- A `uniffi-bindgen` binary behind a `cli` feature, so the generator's dependencies stay out of the shipped library.
+- Modules: `db`, `embedder`, `error`, `types`, `tests`.
+
+**The API** (`MnemoDb` plus free functions):
+- **Open and lifecycle:** `create`, `create_with_key`, `open`, `open_with_key`, `open_read_only`, `open_read_only_with_key`, `close` (idempotent), `flush`, `len`, `is_empty`, `dimensions`, `path`.
+- **Free functions:** `generate_key`, `compact_file`, `compact_file_with_key`, `import_with_passphrase`.
+- **Embedder:** `set_embedder`.
+- **Writes:** `remember` and `remember_text`; a key in `RememberOptions` routes to the keyed upsert. `update(MemoryPatch)` re-embeds a content change itself when an embedder is set and the patch has no vector. `delete`.
+- **Reads:** `get`, `history(key)`, `recall` / `recall_text` (`RecallOptions`: `top_k`, `types`, `keywords`, `keyword_weight`, `filter` terms `Exists`/`Eq`/`In`, `max_bytes`, `track_access`), `about`, `essence(Project | Thread)`, `stats`.
+- **Threads:** `ingest_thread`, `thread_export`, `thread_forget`.
+- **Result cache:** `cache_put`, `cache_get`.
+- **Tuning:** `set_vector_cache_budget`, `set_cache_capacity`.
+- **Moving devices:** `export_with_passphrase` (method), `import_with_passphrase` (free function).
+- **FFI shapes:** metadata crosses as a JSON object string and keys as bytes. Passphrase files use `KdfParams::secure()`. `MemoryRecord` carries no vector.
+- **Mobile defaults:** a 16 MiB vector budget and 256 pages (2 MiB) of page cache, applied at every open. `MnemoConfig` overrides them.
+
+**The embedder:**
+- `MnemoEmbedder` is a foreign trait with `identity()` and `embed(texts)`.
+- It is never called with the handle lock held:
+  - `remember_text`, `recall_text` and `update` embed first, then lock.
+  - `ingest_thread` uses the new engine split. It locks to get the texts to embed, unlocks, embeds, then locks again and calls `ingest_thread_with_vectors`. That call re-plans and writes nothing if the thread changed in between. The binding retries the whole cycle up to 3 times, then reports `Invalid`.
+- A throw becomes `MnemoError::Embedder`, and nothing is written. A wrong vector count is also `Embedder`; a wrong width is `DimensionMismatch`.
+
+**Errors:** `Locked`, `WrongPassphrase`, `HeaderTampered`, `UnsupportedVersion`, `NotFound`, `ReadOnly`, `DimensionMismatch`, `Invalid`, `Io`, `Corrupt`, `Closed`, `Embedder`.
+- `NeedsWriteOpen` maps to `Invalid`.
+- `BadMagic`, `HeaderChecksum`, `PageAuthFailed`, `Crypto`, `Kdf` and `Serialize` map to `Corrupt`.
+- A poisoned handle mutex maps to `Corrupt("handle poisoned by an earlier panic; reopen the file")` on every later call. No panic crosses the FFI.
+- A closed handle reports `Closed`.
+
+**The passphrase helpers:**
+- `export_with_passphrase(dest, pass)` refuses an existing `dest`. It writes `dest.export-tmp` (`export_encrypted`), opens the copy with the stored secret, rekeys it to the passphrase, then renames it into place.
+- `import_with_passphrase(src, pass, dest)` copies to `dest.import-tmp`, opens the copy with the passphrase, rekeys it to a fresh device key, renames it, and returns the key.
+- Each removes its temp file on error, and the source file is never modified. The binding holds secrets only in `Zeroizing` buffers; I never handled a real passphrase.
+
+**§Q9 gates:**
+- **Binding tests: 8/8 green.** Locally (stable and 1.82) and in CI (rust ×3 and `msrv-uniffi`). They cover:
+  - a mock embedder round trip, including identity and width checks;
+  - a throwing embedder: `Embedder`, nothing written;
+  - re-entrancy: the embedder calls back into the same handle, with a 20 s deadlock guard;
+  - the export round trip: the copy opens with the passphrase and not with the key;
+  - the import round trip: the copy opens with the new key and not with the passphrase;
+  - the poisoned lock: `Corrupt`, no panic;
+  - close: then `Closed`, and the file reopens;
+  - a combined test: threads, keyed writes, filters, keywords, the result cache, and compaction.
+- **Stripped `.so` ≤ 5 MB per ABI (gate in the `mobile` job):**
+  - `aarch64-linux-android`: **2,522,632 bytes**;
+  - `x86_64-linux-android`: **2,948,448 bytes**;
+  - both have LOAD segments aligned at `0x4000` (16 KB pages);
+  - `aarch64-apple-ios` builds, and its `.a` size is in the job's step summary (informational; 1d reports the App Thinning delta);
+  - host macOS arm64 stripped dylib, for reference: 2,438,184 bytes.
+- **Engine MSRV still 1.75:** the `msrv` job is green, and the engine's `rust-version` is unchanged.
+- **Deny clean:** `cargo deny --workspace check` reports advisories, bans, licenses and sources ok, locally and in CI.
+- **Engine and other surfaces:**
+  - `cargo test --features failpoints`: 453 passed, 0 failed, including the new `ingest_thread_in_two_steps_with_caller_vectors` on v8 and v9;
+  - clippy is clean for the engine (`--all-targets --features failpoints,benches`) and for `mnemo-uniffi` (with and without `cli`);
+  - `cargo fmt --all --check` passes;
+  - `mnemo-node` builds, and the Python tests pass.
+- **Bindings generate:** Swift and Kotlin generate from the built library, and the generated Swift type-checks.
+
+**Deviations and notes:**
+- **The 1.82 MSRV held, via lockfile pins.** The first CI run failed `msrv-uniffi`: `toml_writer 1.2.0` and `toml_parser 1.1.5` (via `uniffi_macros` → `toml 0.9.5`) need edition 2024 (Rust 1.85). `7ec5a25` holds both at 1.0.2, which the MSRV-aware resolver picked. Only `uniffi_macros` uses them. The binding README says how to re-pin after a `cargo update`. The declared `rust-version` stays **1.82**.
+- **`cargo deny` previously checked only the root package.** CI now runs `cargo deny --workspace check`.
+  - That also put `libloading` (ISC, via `mnemo-node`) under deny for the first time. It gets a per-crate ISC exception.
+  - The MPL-2.0 exceptions are per crate: `uniffi`, `uniffi_core`, `uniffi_macros`, `uniffi_internal_macros`, `uniffi_meta`, `uniffi_pipeline`, `uniffi_bindgen`, `uniffi_build`, `uniffi_udl`.
+- **An unmaintained-crate advisory under all features.** `basic-toml` (RUSTSEC-2026-0374) arrives through askama → `uniffi_bindgen`, only with the `cli` generator feature, so it never ships in the library. The default `cargo deny` run is clean, and I added no ignore. Revisit when UniFFI drops askama's `basic-toml`.
+- **JNA isn't visible to deny** (it's a Gradle dependency). 1c's NOTICE and README must list it (Apache-2.0 or LGPL-2.1).
+- **The `mobile` matrix gained `x86_64-linux-android`,** so the emulator ABI is size-gated too. The NDK environment is now generic per target.
+
+**Next:** 1b (Swift package) and 1c (Kotlin package), per §Q9. Stopping here.
+
+### 2026-11-09 — PLANNER-A — NOTE — Maven Central: the namespace is verified
+The user signed in to the Central Portal with GitHub, and
+`io.github.toarchkumar` shows as **Verified**. So the Android coordinates
+are `io.github.toarchkumar:<artifact>`; propose the artifact name in 1c.
+- **Still to come before 1e:** the GPG signing key and the Portal user
+  token, as Actions secrets in the `mnemo` repo. The worker's 1c DONE
+  lists the exact secret names and steps. The user does those steps;
+  agents never see the key or the token.
+
+### 2026-11-09 — PLANNER-A — NOTE — Maven Central: the secret names are fixed now (the user is setting them up ahead of 1c)
+**Actions secrets in the `mnemo` repo.** The 1c and 1e workflows map
+these to whatever the Gradle publishing plugin expects:
+- `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD`: the Central
+  Portal **user token** pair (not the login);
+- `MAVEN_SIGNING_KEY`: the ASCII-armored GPG private key, RSA 4096;
+- `MAVEN_SIGNING_KEY_PASSWORD`: its passphrase.
+
+The public key goes on `keyserver.ubuntu.com`, which Central checks. The
+1c DONE doesn't need to list setup steps any more, only confirm that the
+workflow uses these names. Agents never see the values.
+
+### 2026-11-09 — PLANNER-A — VERIFIED + DISPATCH — MOBILE-1a accepted; 1b (the Swift package) is next, then 1c
+**1a accepted** (`30dfe8f`, `9e57c06`, `7ec5a25`; CI run 42592180165,
+all 16 jobs green).
+- **I spot-checked `db.rs`:** `recall_text` embeds via `embed_one` before
+  `recall_vector` takes the lock, and `with()` maps a poisoned lock to
+  `Corrupt`.
+- **The two-step thread ingest is accepted:** it re-plans and writes
+  nothing if the thread changed while unlocked, and retries 3 times.
+  `ingest_thread_texts` and `ingest_thread_with_vectors` are new public
+  engine methods, so make sure the root CHANGELOG `[Unreleased]` names
+  them (I believe `30dfe8f` did; confirm in 1b's DONE).
+- **Sizes:** arm64 2.52 MB and x86_64 2.95 MB, both with 16 KB LOAD
+  alignment. Good margin under 5 MB.
+- **Also accepted:**
+  - the lockfile pins that keep the binding at 1.82;
+  - `deny --workspace` (good catch that it only checked the root before);
+  - the ISC exception for `libloading`;
+  - leaving `basic-toml` unignored, since it's cli-only. Re-check at the
+    next UniFFI bump.
+- **Distribution status:**
+  - `MNEMO_SWIFT_TOKEN` is set;
+  - the Maven namespace is verified;
+  - the user adds the four Maven secrets (names in my NOTE above) before
+    1e.
+
+  1c no longer lists setup steps. It only confirms that the workflow
+  uses those names.
+
+**DISPATCH: MOBILE-1b, the Swift package.** 1c (Kotlin) follows; one
+ACTIVE PR at a time.
+- **Layout:** `mnemo/bindings/swift/`, with everything developed in this
+  repo (see my NOTE on layout):
+  - a script that builds the XCFramework (`ios-arm64`,
+    `ios-arm64_x86_64-simulator`, `macos-arm64`) and generates the Swift
+    bindings and module map from `mnemo-uniffi`;
+  - a dev `Package.swift` with a local-path `binaryTarget`;
+  - a library target with the app-facing layer, and a test target.
+- **`actor MnemoStore`** (async over `MnemoDb`, blocking calls off the
+  main actor):
+  - opens lazily;
+  - on `didEnterBackgroundNotification` and `willTerminateNotification`,
+    runs `flush()` then `close()` inside `beginBackgroundTask`, and ends
+    the task;
+  - the next call reopens transparently;
+  - a call that races the notification either completes or reopens; it
+    never surfaces `Closed` to the app.
+- **Files:**
+  - `Application Support/mnemo/`, created with
+    `FileProtectionType.completeUntilFirstUserAuthentication`, the same
+    class set on the file;
+  - `isExcludedFromBackup` set under the default policy.
+- **Keys (`MnemoKeychain`):**
+  - `KeyPolicy.deviceOnly` (the default:
+    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, not
+    synchronizable, file excluded from backup);
+  - `KeyPolicy.iCloudSynced` (synchronizable,
+    `kSecAttrAccessibleAfterFirstUnlock`, file *not* excluded);
+  - an optional `kSecAttrAccessGroup`;
+  - a stable key id, so a rename doesn't orphan the key. Pick the
+    mechanism and state it in the DONE;
+  - a missing key gives a clear `KeyMissing` error.
+
+  Key bytes stay `Data` and are zeroed where Swift allows.
+- **Wrappers:** `exportWithPassphrase` and `importWithPassphrase`, the
+  latter storing the new key in the Keychain under the chosen policy.
+- **Tests:**
+  - `swift test` on the macOS slice: a round trip; a keyword-only recall
+    with no embedder; a Swift embedder, including one that throws; keyed
+    history; threads; the passphrase export and import;
+  - `xcodebuild test` on an iOS simulator: **the background-transition
+    test** (post the notification with pending writes, then assert the
+    lock is free, the writes are durable, and the next call reopens), the
+    race case, and Keychain storage under both policies (use a host app
+    if the simulator needs one for Keychain access);
+  - a `swift` CI job on every PR (macos-latest), alongside the existing
+    jobs.
+- **Docs:** `mnemo/bindings/swift/README.md`:
+  - usage;
+  - never call the blocking API on the main thread;
+  - App Group containers are supported only through `MnemoStore`'s
+    background handling, and multi-process use waits for 12.4;
+  - the backup policies and the `KeyMissing` recovery.
+- **Not in 1b:** the release zip, checksum and `mnemo-swift` push (that's
+  1e), and the sample app (1d).
+- **The DONE:**
+  - the commits and CI;
+  - test counts per suite;
+  - the XCFramework zip size, and the static library size per slice;
+  - the key-id mechanism;
+  - any UniFFI-generated-Swift quirks;
+  - the CHANGELOG confirmation above.
+
+  No version bump.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-1b: the Swift package
+**Commits on `main`:**
+- `c4a3591`: the package, the CI job, the CHANGELOG, the AGENTS.md task-table row.
+- `8a6c632`: the iOS tests run inside an XcodeGen test host app (see Deviations).
+- `ff33114`: the protection-class assertion on the simulator (see Deviations).
+
+CI on `ff33114` is green on all 17 jobs (run 42599788651; runner Xcode 26.6). No version bump.
+
+**Layout** (`mnemo/bindings/swift/`):
+- `scripts/build-xcframework.sh` builds `build/MnemoFFI.xcframework` with three slices: `ios-arm64`, `ios-arm64_x86_64-simulator` (lipo) and `macos-arm64`.
+  - It runs `cargo rustc --crate-type staticlib` per target. With `lib` among the crate types, the static library skips fat LTO and comes out about 4x larger.
+  - It generates the Swift from the macOS dylib with the crate's `uniffi-bindgen` into `Sources/Mnemo/Generated/`.
+  - The module map sits in `Headers/mnemo_uniffiFFI/`, so it can't collide with another XCFramework's.
+  - It uses `xcodebuild -create-xcframework`, and writes the same layout by hand when `xcodebuild` is unusable.
+  - `MNEMO_SLICES=macos` builds only the macOS slice.
+- `Package.swift` (dev): tools 6.0, iOS 15 and macOS 12, the language mode is Swift 5 for the generated code, a local `binaryTarget` `MnemoFFI`, one product `Mnemo` linking `Security`.
+- `Sources/Mnemo/`: `MnemoStore.swift`, `MnemoKeychain.swift`, `FilePolicy.swift` (the key-id xattr, protection, the backup flag), `Lifecycle.swift`, `MnemoStoreError.swift`.
+- `Tests/MnemoTests/`: `StoreTests`, which runs everywhere, and `IOSTests`, under `#if os(iOS)`.
+- `TestHost/`: an XcodeGen `project.yml` plus a SwiftUI app.
+- A nested `.gitignore` keeps `build/`, the generated Swift and the generated `.xcodeproj` out of git.
+
+**`actor MnemoStore`:**
+- Takes `MnemoStoreConfiguration`: `name`, `dimensions`, `directory`, `keyPolicy`, `formatVersion`, and the two cache budgets.
+- Opens lazily, on the first call.
+- On `didEnterBackground` and `willTerminate`, it flushes then closes inside `ProcessInfo.performExpiringActivity` (see Deviations), and the next call reopens.
+- Every call goes through `withDatabase`. Under actor isolation, nothing closes the handle while a call runs. If the engine reports `Closed` anyway, the store reopens and retries once (`Closed` comes before any work is done). A racing call never sees `Closed`.
+- A failed background flush or close is kept in `lastBackgroundError`.
+- **API:**
+  - writes: `remember`, `rememberText`, `update`, `delete`;
+  - reads: `get`, `history`, `recall`, `recallText`, `about`, `essence`, `stats`, `count`;
+  - threads: `ingestThread`, `threadExport`, `threadForget`;
+  - result cache: `cachePut`, `cacheGet`;
+  - lifecycle: `setEmbedder`, `flush`, `close`, `compact`;
+  - moving devices: `exportWithPassphrase(to:passphrase:)` and `static importWithPassphrase(from:passphrase:configuration:keyStore:embedder:) async`.
+- **Files:** `Application Support/mnemo/<name>.mnemo`, or `appGroupDirectory(_:)`. The directory is created with `completeUntilFirstUserAuthentication`, and the class is also set on the file. `isExcludedFromBackup` is set from the policy. Both are reapplied on every open, because a compaction replaces the file.
+
+**`MnemoKeychain` (implements a `MnemoKeyStore` protocol; tests use an in-memory one):**
+- Each key is a generic-password item: `kSecAttrService` `io.github.toarchkumar.mnemo` by default, `kSecAttrAccount` the key id, the data-protection keychain on macOS too, and an optional `kSecAttrAccessGroup`.
+- `.deviceOnly` stores the key with `AfterFirstUnlockThisDeviceOnly`, not synchronizable, and the file is excluded from backup.
+- `.iCloudSynced` stores it with `AfterFirstUnlock`, synchronizable, and the file stays in backups.
+- Reads use `kSecAttrSynchronizableAny`.
+- A missing item throws `MnemoStoreError.keyMissing(keyID:path:)`.
+- Keys are 32 random bytes from the engine's `generate_key`. They're re-read from the Keychain on every open, never cached in the store, and local copies are zeroized with `resetBytes`. Key files are raw-keyed, so no open pays the KDF.
+
+**The key-id mechanism (your call; here's mine):**
+- A random UUID per key is the Keychain account. It's stamped on the file as the extended attribute `io.github.toarchkumar.mnemo.key-id`.
+- **Not the manifest `_mnemo.key_id`:** the manifest sits inside the file, encrypted with the very key the id has to find, so it can't be read before the open.
+- The xattr survives renames and moves on the same volume, and `FileManager` copies.
+- When the xattr is gone (a copy that drops it, a compaction), the store tries each stored key with a cheap read-only raw-key open, then re-stamps the first one that opens the file. `compact()` re-stamps explicitly.
+- No id and no key that fits gives `keyMissing(keyID: nil, path:)`. A stamped id with no key gives `keyMissing(keyID: id, path:)`.
+- The README documents the recovery: wait for iCloud sync, import a passphrase export, or delete the file.
+
+**Wrappers:**
+- `exportWithPassphrase` maps to the binding's method.
+- `importWithPassphrase` calls the free function, stores the returned key under a new id with the configuration's policy, stamps the id, applies protection and backup, and returns the store. If storing the key fails, it deletes the key and the imported file.
+
+**Tests (all green in CI):**
+- **`swift test` (macOS): 12 tests in `StoreTests`, all pass.** They cover:
+  - a round trip across two store instances: one key, stamped, `deviceOnly`;
+  - a keyword-only recall with no embedder;
+  - a Swift embedder: a recall hit, an `EmbedderError` throw, an arbitrary Swift error throw (both become `Embedder`, nothing written), and a width mismatch refused;
+  - keyed history: added, unchanged, superseded, newest first;
+  - threads: ingest, re-ingest skipped, export, forget;
+  - the passphrase round trip: the export opens with the passphrase and not with the device key; the import gets a new id, the `iCloudSynced` policy, is kept in backup, and doesn't open with the passphrase;
+  - a lost xattr recovered among three stored keys and re-stamped; then both `keyMissing` forms;
+  - a background close: the lock is free (a second writer opens the file), the writes are durable, and the next call reopens;
+  - 60 writes racing 10 background closes: all 60 land and none sees `Closed`;
+  - the backup flag under both policies;
+  - compaction keeps the key id and the data;
+  - invalid names are refused.
+- **`xcodebuild test` on the iOS simulator through `TestHost`: 17 tests in 2 suites, all pass (21 cases; two Keychain tests run once per policy).** These are the 12 above plus:
+  - **the background-transition test:** a real `didEnterBackgroundNotification` with 5 unflushed writes. The store closes, `lastBackgroundError` is nil, the lock is free, all 5 writes are durable, and the next call reopens. Then `willTerminateNotification` does the same with 6 writes;
+  - **the race:** 80 writes racing 8 real notifications. All 81 records land, and nothing surfaces `Closed`;
+  - the Keychain under `deviceOnly` and `iCloudSynced`: the round trip, the `synchronizable` and `accessible` attributes, a store replaces, a delete gives `keyMissing`;
+  - an end-to-end store on the real Keychain under both policies: the key id, a reopen, the backup flag, the protection class;
+  - the default directory is `Application Support/mnemo`.
+
+**Sizes (CI, Xcode 26.6, release + fat LTO, not stripped):**
+- `MnemoFFI.xcframework.zip`: **10,477,374 bytes**;
+- `ios-arm64/libmnemo_uniffi.a`: **9,223,392 bytes**;
+- `ios-arm64_x86_64-simulator/libmnemo_uniffi.a` (two architectures): 18,537,480 bytes;
+- `macos-arm64/libmnemo_uniffi.a`: 9,191,648 bytes.
+
+A static library carries symbols the app link strips. 1d reports the App Thinning delta.
+
+**Root CHANGELOG:** confirmed. `[Unreleased]` → Added names `Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors` (from `30dfe8f`). 1b added a "Swift package" entry and the `swift` CI job.
+
+**UniFFI-generated Swift quirks:**
+- It doesn't pass Swift 6 strict concurrency, so the package uses language mode v5. Our own code is written to the stricter rules.
+- The free function `importWithPassphrase` is shadowed by `MnemoStore`'s static method of the same base name, so the call is module-qualified (`Mnemo.importWithPassphrase`).
+- The generated error enums put `public` on its own line (harmless).
+- `MnemoEmbedder` is a class-bound `Sendable` protocol, so a Swift embedder is a `final class … @unchecked Sendable`.
+- A non-`EmbedderError` throw from Swift arrives in Rust as an unexpected callback error, and our `From` impl maps it to `Embedder`. The test covers it.
+
+**Deviations:**
+- **`performExpiringActivity`, not `beginBackgroundTask`.** `UIApplication.shared` is unavailable in app extensions (the App Group case) and in test runners. `ProcessInfo.performExpiringActivity` takes the same background assertion and works in both. If time runs out, the block's second, expired call returns immediately.
+- **The iOS tests run inside a host app.** Under the package's own scheme the Keychain tests failed with `errSecMissingEntitlement` (-34018), because the bare `xctest` runner has no entitlements; the run on `c4a3591` showed it.
+  - `TestHost/project.yml` (XcodeGen, `brew install xcodegen` in CI) builds a minimal ad-hoc-signed SwiftUI app and a unit-test bundle hosted by it, compiling the same `Tests/MnemoTests` sources. So every suite runs on the simulator.
+  - The generated `.xcodeproj` is gitignored.
+- **The simulator reports no file protection class** (no Data Protection; files live on the Mac's file system). On the simulator the test accepts the expected class or none, and on a device it requires the class. Please have 1d's sample app confirm the class on hardware.
+- **Local tooling:** this Mac's Xcode 16.0 `xcodebuild` doesn't load on the current macOS, and the Command Line Tools' `swift-package` crashes (mismatched frameworks), so I couldn't run the simulator locally. I ran the macOS suite locally with Xcode 16's toolchain binaries directly (`swift-build --build-tests` plus `swiftpm-testing-helper`, 12/12). I compiled the library and `IOSTests` against the iOS 18 simulator SDK with Xcode 16's `swiftc`. The simulator runs happened only in CI. The user may want to update Xcode, which needs their action.
+
+**Not in 1b, as dispatched:** the release zip, checksum and `mnemo-swift` push (1e), and the sample app (1d).
+
+**Next:** 1c (the Kotlin package). Stopping here.
+
+### 2026-11-09 — PLANNER-A — VERIFIED + DISPATCH — MOBILE-1b accepted; 1c (the Kotlin package) is next; the repo sits in iCloud-synced Documents
+**1b accepted** (`c4a3591`, `8a6c632`, `ff33114`; CI run 42599788651, all
+17 jobs green).
+- **The key id as an xattr is better than my manifest suggestion,** since
+  the manifest is encrypted under the key it has to find. The try-each-key
+  fallback when the xattr is lost is accepted too.
+- **`performExpiringActivity` is accepted for v0.12, on one condition.** I
+  read `Lifecycle.swift`. The observer runs on the posting thread and
+  returns while the expiring block is dispatched. Whether iOS holds the
+  assertion before the app's background handler returns is the open
+  question, and only a device can answer it.
+  - **1d's on-device `0xdead10cc` check is therefore a release gate:** an
+    App Group file, a write loop, then the background for more than 30 s;
+    no `0xdead10cc` in the device logs, and the protection class
+    confirmed on hardware.
+  - If it fails, the fix is `beginBackgroundTask` when running in an app
+    (keeping `performExpiringActivity` for extensions).
+- **Accepted as described:**
+  - the iOS tests in an XcodeGen host app;
+  - Swift 5 language mode for the generated code;
+  - the module-qualified `importWithPassphrase`;
+  - the sizes (a 9.2 MB unstripped static library for device; the App
+    Thinning delta comes in 1d).
+- **Environment, for the user:**
+  - the Mac's Xcode 16.0 no longer loads on this macOS. 1d needs a
+    current Xcode to install the sample app on an iPhone;
+  - **the repo is in `~/Documents`, which iCloud Drive syncs with "Optimize
+    Mac Storage".** Some new files are already cloud-only (for example
+    `Lifecycle.swift` and `MnemoStoreError.swift`), and reading them
+    returned "Resource deadlock avoided" here.
+
+  That can break builds and git. I've asked the user to mark the folder
+  "Keep Downloaded" (or move the repo out of iCloud Drive). **Worker: if
+  a build or git command fails with EDEADLK or "Resource deadlock
+  avoided", stop and log BLOCKED; don't work around it.**
+
+**DISPATCH: MOBILE-1c, the Kotlin package.**
+- **Layout:** `mnemo/bindings/kotlin/`, a Gradle (Kotlin DSL) Android
+  library module:
+  - `cargo-ndk` builds `arm64-v8a` and `x86_64` with the 16 KB flags;
+  - the generated Kotlin bindings;
+  - JNA pinned exactly (the `@aar` artifact on Android);
+  - `minSdk 24`, with `compileSdk`/`targetSdk` at the current stable
+    level (check it).
+- **`MnemoStore`** (the Kotlin counterpart of the Swift layer):
+  - `suspend` wrappers on `Dispatchers.IO` over `MnemoDb`;
+  - lazy open;
+  - **flushes on `ProcessLifecycleOwner` `ON_STOP` and keeps the handle
+    open** (Android has no lock-on-suspend issue), with a test;
+  - a closed handle reopens transparently, as on iOS;
+  - the same API names as the Swift layer where Kotlin idiom allows.
+- **Files:** `noBackupFilesDir/mnemo/<name>.mnemo` by default (device-only,
+  matching the key).
+- **Keys (`MnemoKeystore`):**
+  - an AES-256-GCM key in AndroidKeyStore (non-exportable,
+    `setUserAuthenticationRequired(false)`), wrapping the 32-byte MNemo
+    key;
+  - the wrapped key and IV in `noBackupFilesDir/mnemo/keys/`;
+  - a stable key id. Mirror the iOS approach if Android file systems keep
+    the xattr reliably; otherwise a small id-to-file mapping. Pick one
+    and say it in the DONE;
+  - the try-each-key fallback, and a clear `KeyMissing`;
+  - an in-memory `MnemoKeyStore` for JVM tests;
+  - no `androidx.security:security-crypto`;
+  - key bytes are a `ByteArray`, zeroed after use.
+- **Wrappers:** `exportWithPassphrase` / `importWithPassphrase`, the latter
+  storing the new key.
+- **Tests:**
+  - **JVM host tests** (every PR): the same cases as the Swift
+    `StoreTests` (round trip, keyword-only recall, a Kotlin embedder
+    including throws, history, threads, the passphrase round trips, the
+    key fallback, a closed handle reopening, races);
+  - **instrumented emulator tests** (nightly and on tags, with
+    `reactivecircus/android-emulator-runner`, API 35 x86_64, **plus one
+    16 KB system image**): AndroidKeyStore, the `ON_STOP` flush, the
+    default directory, and loading the `.so` on a 16 KB device.
+- **CI `kotlin` job on every PR:**
+  - the cargo-ndk build and the JVM tests;
+  - the AAR build;
+  - the 16 KB check (`llvm-readelf`: every LOAD aligned ≥ 0x4000, and the
+    RELRO rule);
+  - a size report: the `.so` per ABI ≤ 5 MB (gate), and the AAR's total
+    native size with JNA (reported).
+- **Publishing, prepared but not run:**
+  - coordinates `io.github.toarchkumar:<artifact>` (propose the name; my
+    default is `mnemo-android`);
+  - a POM that meets Central's rules (name, description, URL, Apache-2.0,
+    developer, SCM), with sources and javadoc jars and signing wired to
+    the secret names `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
+    `MAVEN_SIGNING_KEY` and `MAVEN_SIGNING_KEY_PASSWORD`;
+  - CI proves it with `publishToMavenLocal` (unsigned is fine) and checks
+    the POM fields. The real publish is 1e.
+- **Docs:**
+  - `mnemo/bindings/kotlin/README.md`: usage, the blocking API off the
+    main thread, the backup policy (device-only, no sync option on
+    Android) and the recovery;
+  - a NOTICE that lists JNA (Apache-2.0 / LGPL-2.1);
+  - a root CHANGELOG `[Unreleased]` entry.
+- **The DONE:**
+  - the commits and CI, and test counts per suite;
+  - the `.so` and AAR sizes;
+  - the key-id mechanism and the artifact name;
+  - the first emulator run's result (trigger it by hand once).
+
+  No version bump.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-1c: the Kotlin package
+**Commits on `main`** (draft PR 2, fast-forwarded into `main`, so history stays linear):
+- `bfcb63f`: the package, the `kotlin` CI job, the `android-emulator` and `android-publish` workflows, the CHANGELOG, the AGENTS.md task-table row.
+- `f9b7615`: the `ON_STOP` instrumented test closes its `ActivityScenario` (see Deviations).
+- `20f18e9`: drops the temporary bring-up `pull_request` trigger from the emulator workflow, and uses `tasks.register` (Gradle 9.6 deprecates the `registering` delegate).
+
+No version bump. No EDEADLK or "Resource deadlock avoided" from any build or git command this session.
+
+**CI:**
+- **Branch, run 42654280601 on `20f18e9`:** 18/18 green, the new `kotlin` job included.
+- **`main`, run 42657373702 on the same commit:**
+  - The first attempt failed `rust (macos-latest)` on `fmt9b_column::column_survives_reopen_and_pages_when_over_budget`, at `tests/fmt9b_column.rs:202`: `assert_eq!(a.score, b.score)` gave left 1.2999998, right 1.3000002.
+  - It also cancelled `mobile (aarch64-apple-ios)`.
+  - Re-running the failed jobs: 18/18 green.
+  - This is a flaky existing engine test, not 1c: no engine code changed, and the same commit passed on the branch. The test compares scores exactly across two recalls. The score has a recency term (`store/recall.rs`), and the clock moves between the two calls. The assertion dates from FMT-9b.1 (`7fe63ea`). **Planner:** triage a fix (compare with a tolerance, or pin the clock). I left it alone as out of 1c's scope.
+- **Emulator:**
+  - **First run** (run 42650312833, PR trigger): 3/4 tests on each image; the `ON_STOP` test failed (fixed in `f9b7615`).
+  - **Second run** (run 42652672164): 4/4 on each image.
+  - **Triggered by hand on `main`** (run 42657387916, `workflow_dispatch`): both jobs green.
+    - `google_apis` reports `getconf PAGE_SIZE` 4096.
+    - `google_apis_ps16k` reports 16384. On it, `theNativeLibraryLoadsOnThisPageSize` asserts the page size, loads `libmnemo_uniffi.so` and JNA's dispatch library, and runs a store.
+
+**Test counts:**
+- **JVM host tests** (the `kotlin` job, every PR), 17:
+  - **`StoreTests` (13):**
+    - round trip across stores;
+    - keyword-only recall;
+    - a Kotlin embedder, including `EmbedderException` and an arbitrary throw, both surfacing as `MnemoException.Embedder`, plus the width refusal;
+    - keyed history, newest first;
+    - threads (ingest, export, forget);
+    - the passphrase round trips, including the existing-destination refusal;
+    - the lost key id and missing key;
+    - the `ON_STOP` flush, which keeps the handle open (a copy of the open file holds every write);
+    - a closed store and a closed handle both reopening;
+    - 60 writes racing `close()` and background flushes;
+    - compact;
+    - the result cache;
+    - invalid names.
+  - **`KeystoreFileTests` (4):** these run with a software AES-GCM wrapper:
+    - a round trip, with no plaintext on disk;
+    - tampered, swapped, truncated and non-key files all giving `KeyMissing`;
+    - ids that can't escape the directory;
+    - a store end to end on the key files.
+- **Instrumented tests** (`AndroidTests`), 4 per image:
+  - the real AndroidKeyStore: a non-exportable wrapping key (`encoded == null`), 256-bit, no user auth, tamper and deleted-alias giving `KeyMissing`;
+  - the default `noBackupFilesDir/mnemo/` directory with the default `MnemoKeystore`, and the xattr stamp confirmed on the emulator's file system;
+  - `ON_STOP` through the real `ProcessLifecycleOwner`: it flushes, the file stays open, and the process state is `CREATED` afterwards;
+  - the native library on this page size.
+
+**Sizes** (CI, NDK 30.0.16248370):
+
+| Item | arm64-v8a | x86_64 |
+|---|---|---|
+| `libmnemo_uniffi.so`, stripped (gate 5,242,880) | 2,522,632 bytes | 2,948,448 bytes |
+| JNA 5.19.1 `libjnidispatch.so` | 176,520 bytes | 126,912 bytes |
+| An app's native total for the ABI, with JNA (reported) | 2,699,152 bytes | 3,075,360 bytes |
+
+- **16 KB alignment:** every `LOAD` is aligned 0x4000 in both of our libraries, and `GNU_RELRO` ends 16 KB-aligned. JNA's `libjnidispatch.so` passes the same check too (reported only).
+- **The AAR** is 2,643,292 bytes.
+
+**The key-id mechanism (same as iOS, best effort):**
+- **The stamp.** Each key's random UUID is stamped on its file as the xattr `user.io.github.toarchkumar.mnemo.key-id`:
+  - through `android.system.Os` on API 26 and later;
+  - through NIO `UserDefinedFileAttributeView` on the JVM.
+- **Confirmed on the API 35 emulator** (ext4/f2fs keep `user.*`; `StorageManager`'s cache groups rely on the same namespace).
+- **The fallback.** Writing the stamp is best effort, and the try-each-key fallback is the source of truth. API 24 and 25 have no xattr calls, so there, and on any file system without user attributes or with a copy that dropped the stamp, the store does this:
+  - tries each stored key with a read-only raw-key open (no KDF);
+  - re-stamps the key that opens the file;
+  - otherwise throws `MnemoStoreException.KeyMissing(keyId, path)`.
+- **No mapping file**, so there's no shared state to lock.
+- **Wrapping.** One AES-256-GCM key in AndroidKeyStore (default alias `io.github.toarchkumar.mnemo.wrap`) wraps every MNemo key.
+  - The key is non-exportable, `setUserAuthenticationRequired(false)`, with randomized IVs.
+  - Its creation is serialized in the process, because generating under an existing alias would replace it.
+  - Each wrapped key is written atomically to `noBackupFilesDir/mnemo/keys/<id>.key` (magic `MNK\x01`, IV length, IV, ciphertext and tag), with `mnemo-key:<id>` as the AAD.
+  - Key bytes are `ByteArray`s, zeroed after use. No `security-crypto`.
+
+**The artifact:**
+- **Coordinates:** `io.github.toarchkumar:mnemo-android:0.11.0` (`GROUP` and `VERSION_NAME` in `gradle.properties`).
+- **The POM check.** `publishToMavenLocal` runs unsigned in the `kotlin` job. `scripts/check-package.py` then checks:
+  - the POM's name, description, URL, Apache-2.0 licence, developer and SCM;
+  - JNA as an exact-version `aar` dependency;
+  - the `.aar`, `-sources.jar`, `-javadoc.jar` (empty) and `.module`.
+- **Signing.** The vanniktech plugin 0.37.0 signs only when `signingInMemoryKey` is set.
+- **The secret names.** `android-publish.yml` (workflow_dispatch only, not run) maps the four secrets, then runs a signed `publishToMavenLocal` and checks for the `.asc` files:
+
+  | Secret | Gradle property |
+  |---|---|
+  | `MAVEN_CENTRAL_USERNAME` | `ORG_GRADLE_PROJECT_mavenCentralUsername` |
+  | `MAVEN_CENTRAL_PASSWORD` | `ORG_GRADLE_PROJECT_mavenCentralPassword` |
+  | `MAVEN_SIGNING_KEY` | `ORG_GRADLE_PROJECT_signingInMemoryKey` |
+  | `MAVEN_SIGNING_KEY_PASSWORD` | `ORG_GRADLE_PROJECT_signingInMemoryKeyPassword` |
+
+  1e swaps the task for `publishAndReleaseToMavenCentral` and adds the tag trigger.
+
+**Versions** (all exact, current stable checked today):
+- AGP 9.5.1 (built-in Kotlin), Gradle 9.6.1 (AGP 9.5's minimum and default), Kotlin Gradle plugin 2.4.21;
+- `compileSdk` 37 (AGP 9.5's maximum; `testOptions`/`lint` `targetSdk` 37, since a library has none), `minSdk` 24, JDK 17;
+- JNA 5.19.1 (`api`, `@aar`; the plain jar for JVM tests), kotlinx-coroutines 1.11.0 (`api`), lifecycle-process 2.11.0, cargo-ndk 4.1.2;
+- emulator-runner v2 on API 35 `google_apis` and `google_apis_ps16k`, `x86_64`.
+
+**Layout** (`mnemo/bindings/kotlin/`):
+- **Build files:** `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties` and `uniffi.toml`.
+  - `uniffi.toml` uses UniFFI 0.32's global config format: package `io.github.toarchkumar.mnemo`, plus the renames below.
+  - The project root holds `consumer-rules.pro` (R8 keeps for JNA and the bindings), `README.md` and `NOTICE` (JNA, Apache-2.0 / LGPL-2.1).
+- **`scripts/build-native.sh`** writes everything under the gitignored `generated/`:
+  - the host library and bindings;
+  - cargo-ndk `--platform 24` with `-z max-page-size=16384 -z common-page-size=16384`, then `llvm-strip`;
+  - `MNEMO_ABIS` to choose ABIs.
+- **Checks:** `scripts/check-elf.py` (the `LOAD` and RELRO rules plus the size gate) and `scripts/check-package.py`.
+- **Sources** in `src/main/kotlin/io/github/toarchkumar/mnemo/`:
+  - `MnemoStore` (two constructors: Android with a `Context`, which observes the process; plain JVM with an explicit directory);
+  - `MnemoStoreConfiguration`, `MnemoKeyStorage`, `MnemoKeystore`, `KeyId`, `ProcessStopObserver` (weak reference, added on the main thread), `MnemoStoreException` (`KeyMissing`, `Keystore`, `File`).
+- **Tests:** `src/test`, `src/androidTest`, and `src/sharedTest` (the in-memory key storage and the embedders, compiled into both).
+
+**Deviations:**
+- **The key-storage interface is `MnemoKeyStorage`, not `MnemoKeyStore`.** `MnemoKeyStore` and `MnemoKeystore` differ only in case, so their class files would collide on a case-insensitive file system (macOS's default). The Android class keeps the dispatch's name, `MnemoKeystore`.
+- **Two Kotlin renames in `uniffi.toml`** (documented in the README and AGENTS.md):
+  - The generated `MnemoDb` would have two `close()` methods: the engine's and `AutoCloseable`'s. So the engine's is `closeFile()`.
+  - Error fields called `message` would clash with `Throwable.message` and not compile. So `MnemoException.NotFound`, `Invalid`, `Io`, `Corrupt` and `Embedder`, and `EmbedderException.Failed`, have `reason`.
+- **The in-memory key storage lives in `src/sharedTest`**, not the AAR (as in Swift).
+- **The JVM suite has no backup-flag test**, since Android has no per-file flag. It has the result-cache, the `ON_STOP` flush and the reopen tests instead.
+- **The `ON_STOP` instrumented test closes the scenario.** `ActivityScenario.moveToState(CREATED)` stops an activity by starting one of its own on top, so the app never leaves the foreground and no `ON_STOP` comes. Closing the scenario puts the app in the background. The test also asserts the process lifecycle reached `STARTED` first.
+- **No Gradle wrapper is committed.** Its jar is a binary I'd have had to fetch. CI uses `gradle/actions/setup-gradle@v4` with Gradle 9.6.1, and the README names it. Adding the wrapper (generated by Gradle 9.6.1, checksum-verified) is a small follow-up if wanted.
+- **The emulator workflow had a temporary `pull_request` trigger during bring-up.** `workflow_dispatch` needs the workflow on `main`. The trigger was removed in `20f18e9`.
+- **Local environment:** this Mac has no JDK or Android SDK, and I didn't install one, since accepting the SDK licence is the user's call. So Gradle, the JVM tests and the emulator ran only in CI. Locally I ran the host build and the binding generation (`MNEMO_ABIS="" scripts/build-native.sh`).
+
+**Project memory:** three memories saved to `test/project.mnemo`: the key-id mechanism, the UniFFI Kotlin renames, and the `ActivityScenario` `ON_STOP` pitfall.
+
+`PLAN.md` isn't committed, under the backup rule. 1d (the sample apps) waits on a dispatch.
+
+### 2026-11-09 — PLANNER-A — VERIFIED + DISPATCH — MOBILE-1c accepted; a fix for the flaky column test; 1d (the sample apps and the on-device checks) is next
+**1c accepted** (`bfcb63f`, `f9b7615`, `20f18e9`; branch run
+42654280601 18/18; `main` run 42657373702 green on re-run; emulator run
+42657387916 green on both images).
+- **The ordering held:** one ACTIVE PR, and the draft PR was
+  fast-forwarded, so history stays linear. The 16 KB proof on the
+  `ps16k` image (page size asserted, both `.so`s loaded) is exactly what
+  we wanted.
+- **Accepted as built:**
+  - the xattr stamp as best effort, with try-each-key as the source of
+    truth;
+  - one Keystore wrapping key, with the id-bound AAD;
+  - the `MnemoKeyStorage` rename (the case collision);
+  - the `closeFile()` / `reason` renames;
+  - the empty javadoc jar. Sonatype accepts a placeholder; Dokka can
+    come later;
+  - the sizes: 2.70 / 3.08 MB native per ABI with JNA, and a 2.64 MB AAR.
+- **`VERSION_NAME` is still 0.11.0.** 1e bumps it with the release.
+- **The user** has updated Xcode but hasn't finished its setup yet
+  (`xcode-select -s`, the licence, `-runFirstLaunch`, the iOS
+  platform). The four Maven secrets come before 1e.
+
+**The flaky test, my triage:** `fmt9b_column.rs`
+`column_survives_reopen_and_pages_when_over_budget` compares
+`RecallResult::score` exactly across two recalls a moment apart, and
+`score` includes recency. The test's point is that the paged column
+reads the same vectors as the resident one.
+- **Fix:**
+  - keep the id order check;
+  - compare `similarity` exactly (it's recency-free and comes from the
+    same fp16 entries);
+  - compare `score` within `1e-4`.
+- Grep `tests/` for other exact `score` comparisons across separate
+  recalls and treat them the same way.
+- **One small standalone commit before 1d**, `test: compare recall
+  similarity exactly and score within 1e-4 across separate recalls`.
+
+**DISPATCH: MOBILE-1d, the sample apps and the device checks** (the
+layout is in my NOTE: everything under `examples/mobile/`, using the
+local packages).
+1. **iOS sample** (`examples/mobile/ios/`, SwiftUI, an XcodeGen project
+   like `TestHost`, the local Swift package):
+   - a small notes demo: add a note, a keyed fact with history, recall
+     with and without `keywords`, a thread with its essence;
+   - **embedder:** Apple's built-in `NLEmbedding` sentence embedding
+     through the Swift embedder hook, so no model is bundled.
+2. **Android sample** (`examples/mobile/android/`, Jetpack Compose, the
+   local Kotlin library as an included build):
+   - the same demo;
+   - **embedder:** MediaPipe Text Embedder with a small bundled model, if
+     it adds no more than about 10 MB to the APK. Otherwise use a
+     clearly labelled demo embedder and say so;
+   - a **release build with R8 minify**, which proves
+     `consumer-rules.pro` keeps what JNA and the bindings need.
+3. **A Benchmark screen in both,** as in design note Q7:
+   - the `device_budget` cells at 1K and 10K, on synthetic vectors (not
+     the demo embedder), with raw-key files;
+   - the background close-and-reopen time;
+   - the device and OS fields listed in Q7;
+   - JSON with the same keys as `device_budget.json`, and a Share button.
+4. **The iOS on-device release checks** (Q1; **these gate v0.12**):
+   - a "background test" mode: the file in an **App Group** container, a
+     write loop, the app sent to the background for more than 30 s, then
+     a check of the device logs for `0xdead10cc` (the README gives the
+     exact steps: Console.app or Settings → Privacy & Security → Analytics
+     Data);
+   - the app shows the file's **protection class** read on hardware.
+   - **Check whether App Groups work with a free Apple ID (personal team)
+     or need a paid Apple Developer membership,** and tell the user
+     before they need it. If they need a paid account, note it as
+     NEEDS-USER in the DONE; don't stall the rest.
+   - If `0xdead10cc` appears, fix it in 1d with `beginBackgroundTask`
+     when running in an app (keeping `performExpiringActivity` for
+     extensions), as planned.
+5. **CI:**
+   - build both samples on every PR (an iOS simulator build, and an
+     Android `assembleRelease` with minify);
+   - `zipalign -c -P 16 -v 4` on the APK;
+   - an iOS size report: the App Thinning delta if CI can produce one
+     unsigned, otherwise the stripped binary-size delta of the sample
+     with and without MNemo. Say which one.
+6. **The Gradle wrapper:** add it to the Kotlin package and the Android
+   sample, generated by Gradle 9.6.1 with `distributionSha256Sum` set, if
+   you can generate it verifiably (a CI job that runs `gradle wrapper`
+   and uploads the files is fine). Otherwise leave it and say so.
+7. **`examples/mobile/README.md`, the user's run sheet:**
+   - install on an iPhone (select the team in Xcode, Developer Mode) and
+     on an Android phone (USB debugging, `adb install`, or Android Studio);
+   - run the Benchmark, share the JSON, and where to put it (for example
+     `test/scripts/device_runs/<device>.json`);
+   - run the iOS background test and read the logs.
+8. **Toolchain:** if Xcode isn't selected or its licence isn't accepted,
+   **don't run `sudo`.** Use `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`
+   where that works, and list what the user still has to run. Installing
+   a JDK is fine. Don't accept the Android SDK licence on the user's
+   behalf: CI builds Android.
+
+**The DONE** comes when the code and CI are in:
+- the commits, CI, and test or build results;
+- the APK and IPA sizes, and the R8 result;
+- the App Groups account answer;
+- the run sheet.
+
+**Then stop.** The device JSON and the background-test result come from
+the user. You add them as `device_budget_mobile` in `perf_v0.5.0.json`
+and log a short `WORKER — NOTE — 1d device results` entry. Only then
+does 1e (the release) start.
+
+### 2026-11-09 — PLANNER-A — NOTE — MOBILE-1d step 0: validate the Mac's Xcode setup first (user request)
+**Before the flaky-test commit and the rest of 1d,** check the local
+toolchain and report it. The user updated Xcode but may not have finished
+setting it up.
+- **Run (no `sudo`):**
+  - `sw_vers`;
+  - `xcode-select -p`;
+  - `defaults read /Applications/Xcode.app/Contents/Info CFBundleShortVersionString`;
+  - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -version`;
+  - `... xcodebuild -checkFirstLaunchStatus`;
+  - `... xcrun --show-sdk-version` (macOS and `--sdk iphonesimulator`);
+  - `... xcrun simctl list runtimes`;
+  - `swift package --version`;
+  - `ls /Library/Developer/CommandLineTools/SDKs`;
+  - `ls -l /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`.
+- **The `SDKROOT` workaround:** run one engine build without the
+  `SDKROOT=…MacOSX26.5.sdk` override (`cargo build -p mnemo-engine` in a
+  scratch target dir is enough). If it links, drop the workaround from
+  now on.
+- **Locally:** if `xcodebuild` works, run `scripts/build-xcframework.sh`
+  and the Swift package's macOS tests the normal way (`swift test`).
+  - If the iOS simulator runtime is installed, run the `TestHost` suite
+    on a simulator once.
+  - If the licence is accepted but the runtime is missing, you may run
+    `xcodebuild -downloadPlatform iOS` (no `sudo`; a large download).
+- **Never run `sudo`.** For anything that needs it (`xcode-select -s`,
+  `xcodebuild -license accept`, `-runFirstLaunch` if it asks), log the
+  exact commands the user still has to run.
+- **Log a short `WORKER — NOTE — 1d step 0: Xcode check`** with each
+  result, what works locally now, and the user's remaining commands. Then
+  continue with 1d.
+  - **If Xcode is unusable,** carry on anyway (CI builds iOS) and say so.
+  - **Exception:** stop with BLOCKED only if the engine build fails both
+    with and without `SDKROOT`.
+
+### 2026-11-09 — WORKER — NOTE — 1d step 0: Xcode check
+**Xcode is installed but unusable until its licence is accepted.** The engine
+builds only with the `SDKROOT` workaround. Nothing ran with `sudo`.
+- **The checks:**
+  - `sw_vers`: macOS 26.7.1 (25G241).
+  - `xcode-select -p`: `/Library/Developer/CommandLineTools` (Xcode isn't
+    selected).
+  - `CFBundleShortVersionString`: 27.2.
+  - `DEVELOPER_DIR=… xcodebuild -version`: Xcode 27.2, build 27B52.
+  - `xcodebuild -checkFirstLaunchStatus`: exit 0, no output (first launch
+    looks done).
+  - `xcrun --show-sdk-version` (macOS and `--sdk iphonesimulator`),
+    `xcrun simctl list runtimes`, and `swift package --version` under
+    `DEVELOPER_DIR`: each refuses with "You have not agreed to the Xcode
+    license agreements". **So the iOS runtime list is unknown**, and
+    `-downloadPlatform iOS` wasn't tried (the licence comes first).
+  - `swift package --version` with the Command Line Tools: crashes in dyld
+    (`Symbol not found … BuildServerProtocol`), so the CLT install is
+    internally mismatched.
+  - `ls …/CommandLineTools/SDKs`: MacOSX.sdk, 12.1, 12.3, 13.1, 15.4, 15,
+    26.5, 26, 27.0, 27.
+  - `MacOSX.sdk` links to `MacOSX26.5.sdk`, but `xcrun --show-sdk-path` (CLT)
+    picks `MacOSX27.0.sdk`.
+- **The `SDKROOT` workaround is still needed.**
+  - `env -u SDKROOT cargo build -p mnemo-engine` (scratch target dir) fails
+    to link every build script against `MacOSX27.0.sdk/usr/lib/libSystem.tbd`
+    (the arm64e platform list). The CLT linker is ld-1267 with Apple clang
+    21.0.0, older than that SDK.
+  - The same build with `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`
+    links. So no BLOCKED; I keep the workaround.
+- **What works locally now:** the Rust engine with `SDKROOT`, as before.
+  **Not run:** `scripts/build-xcframework.sh`, the macOS `swift test`, and
+  the simulator `TestHost` suite, all blocked by the licence. CI keeps
+  building and testing iOS, and 1d's iOS sample is checked there.
+- **What the user still runs** (in Terminal; each needs their password):
+  ```bash
+  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+  sudo xcodebuild -license accept
+  sudo xcodebuild -runFirstLaunch
+  xcodebuild -downloadPlatform iOS
+  ```
+  - The fourth needs no `sudo`; I can run it once the licence is accepted.
+  - Selecting Xcode should also clear the `SDKROOT` problem: cargo then
+    links with Xcode's toolchain, which matches its SDK.
+  - Optionally, `softwareupdate --list` then install the newest Command
+    Line Tools, to fix the CLT's dyld crash.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-1d: the sample apps and the device checks (code and CI; the device runs are the user's)
+**The commits on `main`** (draft PR 3, fast-forwarded, so history stays
+linear):
+
+| commit | what |
+|---|---|
+| `bc8e3db` | `test: compare recall similarity exactly and score within 1e-4 across separate recalls`, the standalone flaky-test fix. `grep` found no other exact `score` comparison across separate recalls in `tests/`. |
+| `ac903a6` | the sample apps, the CI steps, the run sheet, CHANGELOG, and an AGENTS.md task row |
+| `8c9ff58` | the Gradle wrapper in both Gradle projects, `wrapper-validation` in CI, `./gradlew` everywhere; three unused-result warnings in the iOS Benchmark |
+| `72fd967`, `f57d801`, `c8f7935` | the emulator workflow: test counts that work with AGP 9's XML, a gate for zero tests, and `scripts/emulator-tests.sh` (see the finding below) |
+
+**CI:**
+- branch runs 42679778736 (`ac903a6`) and 42688505862 (`c8f7935`): 18/18;
+- `main` run 42690613459 (`c8f7935`): 18/18, first attempt.
+- **Emulator** (dispatched by hand on the branch), run 42688507584,
+  `c8f7935`: green on both images.
+  - The page size was asserted on each: 4096 and 16384.
+  - 4/4 instrumented tests on the first attempt on each.
+  - `MNEMO_SELFTEST ok count=3 hits=1 error=Invalid` on both.
+
+**What's in `examples/mobile/`:**
+- **iOS** (`ios/`: SwiftUI, XcodeGen, the local Swift package, iOS 16 for
+  `ShareLink` and `NavigationStack`; the package itself stays at 15):
+  - **the notes demo:** notes, a keyed fact with its history, recall with
+    and without `keywords`, and a thread. The embedder is
+    `NLEmbedding.sentenceEmbedding(for: .english)` (512 dims), with a
+    labelled fallback if it isn't available;
+  - **the Benchmark;**
+  - **the Background tab:** the store sits in `group.<bundle id>`'s
+    container, and a write loop runs while the app is active, pausing at
+    `inactive`, before the background close. The tab shows the file's
+    and the directory's protection class, and after the return checks
+    "stored N, wrote N" and `lastBackgroundError`;
+  - **signing** comes from a gitignored `Local.xcconfig`;
+  - **`SizeProbe` and `SizeBaseline`** are there for the size report.
+- **Android** (`android/`: Compose, the library as an included build with
+  dependency substitution, minSdk 24, compileSdk and targetSdk 37,
+  Compose BOM 2026.09.00):
+  - the same demo, with the labelled demo embedder;
+  - the Benchmark;
+  - a release build minified by R8, with no rules of its own, signed with
+    the debug key so `adb install` works;
+  - the `selftest` launch mode;
+  - `CorpusTest` (3 JVM tests) pins the Kotlin port to the Rust
+    generator's output.
+- **The Benchmark:**
+  - the `device_budget` phases `build`, `file`, `handle`, `cycles`,
+    `keyopen`, `writes` and `background` at 1K and 10K, with the JSON keys
+    of `device_budget.rs`;
+  - `device` and `build` hold the Q7 fields;
+  - `corpus` lists the differences from the desktop bench.
+- **The corpus generators** (`text_for`, `gen_clustered_vectors`) are
+  ported. The Swift output is byte-identical to the Rust output (I
+  compiled both on the Mac and diffed them), and the Kotlin one matches it
+  in CI.
+
+**Sizes:**
+- **APK** (release, R8, both ABIs): 7,877,523 bytes, of which 1,173,128
+  bytes is dex.
+  - MNemo native per ABI, with JNA: arm64-v8a 2,699,152 bytes, x86_64
+    3,075,360 bytes. The libraries are stored uncompressed.
+  - `zipalign -c -P 16 -v 4`: "Verification successful".
+- **iOS** (Release, arm64, unsigned, stripped like an App Store build):
+  - SizeBaseline 72,312 bytes, SizeProbe 2,543,696 bytes, so **MNemo adds
+    2,471,384 bytes**;
+  - the full sample's binary is 2,804,536 bytes; its `.app` is 3,976 KB
+    unstripped.
+  - **This is the stripped-binary delta, not App Thinning,** which needs
+    a signed archive and export. There's no IPA for the same reason (an
+    IPA needs signing). The user's device build gives the real number.
+
+**R8:** the release build minifies with only the library's
+`consumer-rules.pro`. The self-test exercises the paths R8 could break, and
+it passes on the emulator at 4 KB and at 16 KB:
+- JNA, and the embedder callback interface;
+- records in both directions, and a typed error, whose class name
+  survives;
+- the Keystore, and a reopen.
+
+**App Groups: a free Apple ID works.**
+- Apple's "Supported capabilities (iOS)" table ticks App groups in all
+  three columns, including "Apple Developer", the free account; I read
+  the page's HTML on 2026-11-09.
+- A DTS answer (forums thread 834802) says the group id must be unique to
+  the team, which is why the sample derives it from the bundle id.
+- No NEEDS-USER. The limits of a free account (7-day profiles, 3 apps per
+  device) are in the run sheet.
+
+**The run sheet** is `examples/mobile/README.md`:
+- install with Developer Mode, the team in `Local.xcconfig`, and a Release
+  run scheme; or USB debugging and `adb install`, with the APK from CI's
+  `mnemo-android` artifact;
+- run the Benchmark, then share or `adb pull` the JSON into
+  `test/scripts/device_runs/<device>.json`;
+- the background test, read in Console.app or Analytics Data.
+
+**Deviations and findings, for the Planner:**
+1. **The Android embedder is the demo one.** MediaPipe's Text Embedder
+   adds more than 10 MB:
+   - `tasks-text` 1.2.2 ships a 16.6 MB arm64 `libmediapipe_tasks_textgenai_jni.so`,
+     plus a `litertlm-android` dependency;
+   - 0.10.20's 7.7 MB library has 4 KB `LOAD` alignment, so it fails on
+     16 KB pages.
+2. **The mobile API can't build an index or write essence items.**
+   `mnemo-uniffi` exposes no `build_index` and no `essence_add` or
+   timeline calls, so:
+   - mobile recall reads the vector column, and the Benchmark's warm
+     recall is that path, not IVF+PQ (the desktop `device_budget` builds
+     the index);
+   - a thread's essence read from Swift or Kotlin stays empty: the demo
+     shows it and says why.
+
+   Adding either is an API change for you to schedule. The Benchmark
+   numbers should be read with this in mind.
+3. **iOS: a call made while the app is in the background reopens the file
+   and can hold the lock into suspension.** `MnemoStore` closes on
+   `didEnterBackground`, but any later call while the app is still in the
+   background (a background fetch, a `Task` still running) reopens it.
+   - Nothing closes it again before suspension, so that's a remaining
+     `0xdead10cc` path for real apps. The README's "a racing call reopens
+     after it" is true, but it doesn't mention this.
+   - The sample avoids it by pausing its work at `inactive`.
+   - A possible fix: track the background state, and close again at the
+     end of any call made while backgrounded, inside the expiring
+     activity.
+   - Not changed in 1d. The device test checks the plain transition.
+4. **The emulator workflow could pass green with no tests run.** In run
+   42683822061, the 16 KB image's system server restarted after boot, the
+   test APK install failed ("Can't find service: package"), and AGP 9's
+   test runner finished green with `tests="0"`.
+   - Fixed: `scripts/emulator-tests.sh` waits until boot has completed and
+     the services answer five checks in a row, then retries a zero-test
+     run up to three times. The Test counts step fails on a total of 0.
+   - Run 42686182024 shows the gate catching it; 42688507584 is green on
+     the first attempt.
+   - The 1c-era count script had also been crashing silently (AGP 9's
+     XML has no suite name).
+5. **The Gradle wrapper is committed.** It was generated by Gradle 9.6.1
+   in CI run 42679778736.
+   - The jar's SHA-256 (`497c8c2a…a9c7`) matches Gradle's published
+     `gradle-9.6.1-wrapper.jar.sha256`.
+   - `distributionSha256Sum` is `9c0f7fae…9e14`.
+6. **The iOS sample wasn't compiled locally,** because the Xcode licence
+   isn't accepted and I didn't point the CLT compiler at Xcode's SDK
+   around it. CI built it with no errors, and the only warnings in the
+   sample's own code (three unused results) are fixed. The SoC table in
+   the JSON covers iPhone13,x to iPhone17,x and is `null` otherwise; the
+   model identifier always names the device.
+7. **Not measured on mobile:** `layers`, the secure-KDF open, and the
+   fsync counts (they aren't in the mobile API). The JSON says so.
+
+**Memories:** three were saved to `test/project.mnemo`: the App Groups
+answer, the mobile API gaps, and the MediaPipe evidence.
+
+**Next, from the user:**
+- the step-0 commands, for a local Xcode;
+- installing on an iPhone and an Android phone;
+- the Benchmark JSON from each;
+- the background test result, with the protection class and any
+  `MnemoSample` crash entry.
+
+Then I add `device_budget_mobile` to `perf_v0.5.0.json` and log
+`WORKER — NOTE — 1d device results`.
+
+### 2026-11-09 — WORKER — NOTE — 1d step 0 follow-up: Xcode works locally
+The user ran the setup. Xcode now works on this Mac, and the `SDKROOT`
+workaround is gone.
+- **The user ran:**
+  - `sudo xcode-select -s …`, `sudo xcodebuild -license accept` and
+    `sudo xcodebuild -runFirstLaunch`;
+  - `xcodebuild -downloadPlatform iOS` (iOS 27.2 simulator, 8.32 GB). I
+    stopped my own parallel download so only theirs ran;
+  - Homebrew, reinstalled, then `brew install xcodegen` (2.46.0).
+- **First launch was needed.** Before it, `xcodebuild` failed to load:
+  `Symbol not found: _XPCTypeBool` in
+  `/Library/Developer/PrivateFrameworks/CoreDevice.framework`. The system
+  components were still Xcode 16's (`XcodeSystemResources` 16.0, from
+  2024). `-runFirstLaunch` installed 27.2's.
+- **What works locally now:**
+  - the engine builds **without `SDKROOT`**: `xcrun` picks Xcode's
+    `MacOSX.sdk`;
+  - `scripts/build-xcframework.sh`, with the real
+    `xcodebuild -create-xcframework`. The generated Swift is identical to
+    the committed file;
+  - `swift test`: 12/12;
+  - the TestHost suite on an iPhone 17 simulator (iOS 27.2): **17 tests in
+    2 suites passed**;
+  - the iOS sample: it type-checks for devices, builds for the simulator,
+    and launches.
+- **Found on the first simulator launch**, and fixed in
+  `mobile-1d-sim-signing` (PR 4): the unsigned simulator build had no
+  entitlements, so every Keychain call failed (-34018). Simulator builds
+  are now signed ad hoc, like TestHost's. The App Group container
+  `group.io.github.toarchkumar.mnemo.sample` exists on the simulator.
+- **`NLEmbedding.sentenceEmbedding(for: .english)` is `nil` on the
+  simulator.** The model is a downloaded LinguisticData system asset
+  (present on macOS: 512 dims, revision 1), and the simulator runtime
+  doesn't include it. The sample shows its labelled fallback there; a phone
+  with the asset uses `NLEmbedding`. This is in the run sheet.
+- **Still open for the user:** a Command Line Tools update installed later
+  reset `xcode-select` to the Command Line Tools, so I used
+  `DEVELOPER_DIR` above. Rerun
+  `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`, which
+  the iOS Simulator panel also needs.
+
+### 2026-11-09 — PLANNER-A — NOTE — Maven Central secrets are in place; all release credentials are set
+The user added all four Maven secrets to the `mnemo` repo:
+`MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `MAVEN_SIGNING_KEY`
+and `MAVEN_SIGNING_KEY_PASSWORD`.
+- **The signing key:** RSA 4096, public fingerprint
+  `CFAFF7A174EBC15ED5475C4619104D9B3DA89A04`. It's published on
+  `keyserver.ubuntu.com` (the user confirmed it with a search), and it
+  **expires 2028-11-08**.
+- **The Portal user token** is named `mnemo-github-actions` and
+  **expires 2027-11-09**.
+- **For 1e's release checklist:**
+  - renew `MAVEN_CENTRAL_*` and `MNEMO_SWIFT_TOKEN` by 2027-11;
+  - extend or replace the GPG key by 2028-11. Extending its expiry and
+    re-sending it to the keyserver keeps the same key.
+- **Optional, at any time:** a manual `android-publish` workflow run
+  (signed `publishToMavenLocal`, no upload) proves the signing secrets
+  early. The worker can trigger it, or the user from the Actions tab.
+- **The user's Mac this session:**
+  - the native arm64 Homebrew is installed at `/opt/homebrew` (the Intel
+    one in `/usr/local` stays, for the Game Porting Toolkit);
+  - `xcode-select` points at the Command Line Tools, because the new
+    Xcode isn't set up yet and failed to load its CoreDevice
+    framework;
+  - `git` and `clang` work.
+
+  1d's step-0 Xcode check reports the rest.
+
+### 2026-11-09 — PLANNER-A — REVIEW + DECISION + DISPATCH — MOBILE-1d accepted with three pre-device fixes (1d.2); a correction to my Mac note
+**A correction to my NOTE just above:** it predates the worker's step-0
+follow-up. Xcode 27.2 now works (`-runFirstLaunch` installed its
+system components), and the `SDKROOT` workaround is gone.
+- `xcode-select` points at the Command Line Tools because I had the user
+  switch it there while Xcode was broken, not because of a CLT update.
+- **The user now re-runs** `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+
+**1d accepted** (`bc8e3db`, `ac903a6`, `8c9ff58`, `72fd967`, `f57d801`,
+`c8f7935`; `main` run 42690613459 18/18; emulator run 42688507584 green
+on both page sizes).
+- **Especially good:**
+  - the zero-test gate on the emulator, which caught a run that passed
+    green with nothing executed;
+  - the byte-identical corpus ports;
+  - the R8 self-test at 4 KB and 16 KB;
+  - the App Groups answer, with a source;
+  - the verified wrapper checksum.
+- **Accepted:**
+  - the Android demo embedder (MediaPipe is over 10 MB, or 4 KB-aligned);
+  - the stripped-binary size delta: **+2.47 MB on iOS**, with the App
+    Thinning figure to come from the user's signed build;
+  - the APK at 7.9 MB, with `zipalign -P 16` passing;
+  - iOS 16 for the sample (the package stays at 15).
+- **PR 4 (`2f04a16`, simulator ad-hoc signing)** isn't on `main` yet.
+  Fast-forward it once its CI is green.
+
+**Before the user installs on phones, three fixes, as 1d.2** (so the
+device runs test the final code and the user installs once):
+1. **Close again after work done in the background** (your finding 3;
+   this is a real `0xdead10cc` path, so it's a release blocker).
+   - `MnemoStore` tracks whether the app is active (from
+     `didEnterBackground`, `willEnterForeground` and
+     `didBecomeActive`).
+   - While it's not active, every call runs inside an expiring activity,
+     and the store flushes and closes when the call ends, before the
+     activity is released.
+   - Calls made while the app is active behave as today.
+   - **Tests:**
+     - a call after `didEnterBackground` reopens, completes, and leaves
+       the file closed and the lock free;
+     - a burst of background calls ends closed;
+     - after `willEnterForeground`, the handle stays open between calls.
+   - **The sample's Background tab** gets a second mode, "keep writing in
+     the background": a `Task` that keeps writing after the transition,
+     for the device test.
+   - **README:** correct the "a racing call reopens" line, so it states
+     the close-after-background-call rule.
+2. **The binding exposes `build_index` and `has_index`.**
+   - Swift: `buildIndex()`; Kotlin: `buildIndex()`.
+   - The Benchmark keeps exact scan at 1K and 10K (below `V9_ANN_MIN_FACTS`,
+     the same as desktop; say so in its JSON). It adds an
+     `indexed_recall` cell only if a 25K run fits the device's time
+     budget. Your call.
+3. **The binding exposes the essence writes:** `essence_add`,
+   `essence_update`, `essence_resolve`, `essence_remove` and
+   `essence_append_timeline`.
+   - Records only: the section is an enum, ids are strings.
+   - The same lock rule: no embedder call while the lock is held.
+   - Mirror them in both store layers.
+   - Tests in all three suites (Rust binding, Swift, Kotlin).
+   - **The demo's thread screen** writes a decision and a timeline entry,
+     then shows the essence.
+
+**Gates for 1d.2:**
+- every suite green, plus the emulator run;
+- the size gates unchanged (≤ 5 MB per ABI);
+- the CHANGELOG `[Unreleased]` lists the new binding calls;
+- a local run of the TestHost simulator suite, now that Xcode works.
+
+**Log DONE for 1d.2, then stop.** The user then runs the device sheet
+(`examples/mobile/README.md`) on the final code. Their JSON and the
+background-test results (both modes) go into `device_budget_mobile` and a
+`WORKER — NOTE — 1d device results`. **1e (the release) starts after
+that.**
+
+### 2026-11-09 — PLANNER-A — NOTE — `xcode-select` points at Xcode again
+The user ran `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+`DEVELOPER_DIR` overrides are no longer needed; confirm it with
+`xcode-select -p` at the start of 1d.2.
+
+### 2026-11-09 — WORKER — NOTE — catch-up (since the "1d step 0 follow-up" note)
+**Nothing running now, and none of 1d.2 started.**
+- **Since that note:**
+  - **PR 4** (`2f04a16`, ad-hoc simulator signing): branch run 42698331396
+    18/18, then `main` fast-forwarded to `2f04a16`. **`main` run
+    42701562509: 18/18.**
+  - **Branches deleted, local and remote:** `mobile-1c` (`20f18e9`),
+    `mobile-1d` (`c8f7935`) and `mobile-1d-sim-signing` (`2f04a16`). Each
+    is an ancestor of `origin/main`, checked before deleting. That leaves
+    `main` and `release/0.5.x`.
+  - I shut down the iPhone 17 simulator I had booted.
+- **What I ran with the user** (results as in the follow-up note):
+  - **The user's setup:** Homebrew, `brew install xcodegen` (2.46.0), the
+    iOS 27.2 simulator download (I stopped my duplicate).
+  - **Local runs**, before `xcode-select` was switched back, with
+    `DEVELOPER_DIR`:
+    - `swift test`: 12/12;
+    - the TestHost suite on iPhone 17 (iOS 27.2): 17 tests in 2 suites;
+    - the iOS sample: it built and launched, and showed the -34018
+      Keychain failure, which PR 4 fixed. Checked after the fix: the store
+      opens, and the App Group container exists.
+- **A correction:** my follow-up note blamed a Command Line Tools update
+  for `xcode-select` pointing at the CLT. That was an inference; PLANNER-A
+  says the user switched it there while Xcode was broken. `xcode-select -p`
+  now reads `/Applications/Xcode.app/Contents/Developer`, so `DEVELOPER_DIR`
+  isn't needed any more.
+- **Uncommitted:** only `PLAN.md` (the WORKLOG, kept for the backup
+  commit) and the untracked `.claude/`.
+  - Gitignored build output stays: the two generated `.xcodeproj` files,
+    `examples/mobile/ios/build/`, and the Swift package's `build/`,
+    `.build/` and `Sources/Mnemo/Generated/`.
+  - No code is uncommitted.
+- **Overlap with "MOBILE-1d accepted with three pre-device fixes (1d.2)":**
+  - its "fast-forward PR 4" step is **done** (above);
+  - its gate "a local run of the TestHost simulator suite" was met on the
+    pre-1d.2 code (17/17). It **has to run again** after the 1d.2 changes;
+  - none of the three fixes (close after background calls, `build_index`
+    and `has_index`, the essence writes) has started, and nothing in the
+    working tree touches them.
+
+### 2026-11-09 — PLANNER-A — NOTE — the catch-up checks out; start 1d.2
+- **Confirmed in the repo:**
+  - `main` = `origin/main` = `2f04a16`;
+  - the only branches are `main` and `release/0.5.x`;
+  - no uncommitted code.
+- **PR 4's fast-forward is done**, so 1d.2 begins at its fix 1. Go ahead
+  with the three fixes and gates in my "MOBILE-1d accepted with three
+  pre-device fixes (1d.2)" entry. Re-run the TestHost suite locally after
+  the changes.
+
+### 2026-11-09 — WORKER — DONE — MOBILE-1d.2: the three pre-device fixes
+**The commits on `main`** (draft PR 5, fast-forwarded):
+
+| commit | what |
+|---|---|
+| `6b121a3` | `build-native.sh`'s host-only mode (`MNEMO_ABIS=""`) exits 0 (a small 1c bug: `find` failed on the missing `jniLibs/` under `pipefail`) |
+| `945fa61` | the three fixes, the samples, the READMEs, the CHANGELOG |
+| `e1423ed` | rustfmt of the new binding tests (CI's `cargo fmt --check`); AGENTS.md's CI section now says the rust jobs gate on fmt (they have since PR 9; the old line said it wasn't wired) |
+| `894ef01` | the Android sample's `abiFilters` (below), and the Kotlin README's ABIs section |
+| `752f279` | `UIRequiresFullScreen` for the whole iPhone-only sample project (no orientation warning) |
+
+**CI and the gates:**
+- **CI:** `main` run 42712651838 (`752f279`): 18/18.
+  - Branch runs: 42706719220 (`945fa61`) failed only on `cargo fmt
+    --check`; 42708682474, 42708945809 and 42710705363 are 18/18.
+- **Emulator** (by hand on the branch), run 42709009765 (`894ef01`, the
+  final Android code): green.
+  - Page sizes 4096 and 16384 asserted.
+  - 4/4 instrumented tests on the first attempt on each.
+  - `MNEMO_SELFTEST ok count=5`: the self-test now also writes essence
+    items and builds the index under R8.
+- **Tests:**
+  - the `mnemo-uniffi` binding: 11 (3 new);
+  - engine plus integration, locally: 453 (CI's ubuntu job: 464 with the
+    binding);
+  - Swift: `swift test` 14 (2 new), and **TestHost on the simulator, run
+    locally** (iPhone 17, iOS 27.2, after the changes): 22 in 2 suites
+    (3 new iOS tests). CI ran the same 14 and 22;
+  - Kotlin JVM: StoreTests 15 (2 new), KeystoreFileTests 4.
+- **Size gates unchanged:**
+  - `.so` stripped: arm64 2,564,232 bytes and x86_64 2,994,728 bytes
+    (gate 5,242,880), every LOAD 16 KB-aligned. That's +41 KB and +46 KB
+    for the new calls.
+  - The APK is 7,267,900 bytes (down from 7,877,523, thanks to the ABI
+    filter); `zipalign -P 16` verifies.
+  - iOS stripped delta: 2,576,912 bytes (+105 KB).
+
+**Fix 1: `MnemoStore` closes after calls made in the background (Swift).**
+- `LifecycleObserver` keeps an "active" flag:
+  - set synchronously in the `didEnterBackground` and `willTerminate`
+    handlers (which still close inside an expiring activity), and in
+    `willEnterForeground` and `didBecomeActive`;
+  - **plus the starting state:** `UIApplication`'s `applicationState`,
+    read once on the main thread through KVC (so the package still links
+    into extensions, and only when `Bundle.main` is a `.app`). An app
+    launched straight into the background gets no `didEnterBackground`;
+    this closes that hole too.
+- While the app isn't active, `withDatabase` (and `compact`) takes an
+  expiring activity (`performExpiringActivity`, held open by a waiting
+  block), runs the call, flushes and closes, then ends the activity.
+- Calls while the app is active are unchanged. Store methods that touch
+  the file are now `async`; callers already `await` the actor.
+- **Tests:**
+  - a background call reopens, completes, leaves the file closed and the
+    lock free (a second writer opens it), and reads close too;
+  - a burst of 40 background writes ends closed, with all 41 durable;
+  - after `willEnterForeground`, the handle stays open between calls, and
+    `didBecomeActive` alone does the same.
+  - The race test now expects "closed at the end" rather than a
+    notification close, because background calls usually close first.
+- **The README** replaces the wrong lines ("a racing call … reopens
+  after it"; "the next transition closes it again") with the
+  close-after-background-call rule, the background-launch case, and the
+  extension caveat.
+- **The sample's Background tab** has a "Keep writing in the background"
+  switch; the run sheet runs the test in both modes.
+
+**Fix 2: the index.**
+- `build_index` (an `IndexInfo` record) and `has_index` are in the binding;
+  `buildIndex()` and `hasIndex()` are in both stores.
+- On v9 below `V9_ANN_MIN_FACTS` (20,000), the engine builds nothing and
+  reports `partitions: 0`. The tests cover that, and a v8 file building a
+  real index.
+- **The Benchmarks** run `build_index` in the build phase, as
+  `device_budget.rs` does, and record `index_partitions` (0 at 1K and
+  10K). The JSON says recall is an exact scan for that reason.
+  - **No 25K `indexed_recall` cell (my call).** It would roughly double
+    the device run for the path the desktop bench already measures, and
+    10K is the mobile design point. It's listed in the JSON's
+    `not_measured`.
+
+**Fix 3: the essence writes.**
+- `essence_add`, `essence_update`, `essence_resolve`, `essence_remove` and
+  `essence_append_timeline` are in the binding and both stores, with a
+  7-case `EssenceSection` (the timeline has its own call) and string ids.
+- **The lock rule:** the engine's own essence writes embed with its
+  registered embedder, which in the binding is the app's callback, so
+  they would embed under the handle lock. I added
+  `Mnemo::essence_add_with_vector` and
+  `Mnemo::essence_append_timeline_with_vector` (public, with the same
+  validation; the split mirrors `ingest_thread_with_vectors`). The binding
+  embeds first, then locks.
+  - With no embedder set, it uses the plain calls (the engine's sentinel
+    vector).
+  - A re-entrant embedder with a 20 s deadlock timeout proves no lock is
+    held during the embed.
+  - Python doesn't mirror the `_with_vector` methods: they're
+    binding-internal. Say if you want them in Python.
+- **The demo thread screens** (iOS and Android) add a decision and a
+  timeline entry and show the essence.
+
+**Finding, fixed in `894ef01`:** JNA's AAR carries `libjnidispatch.so` for
+7 ABIs, and MNemo ships 2.
+- My 1d DONE listed only the two rows; the APK always had all seven.
+- On an armeabi-v7a or x86 phone, the app would install and fail at its
+  first MNemo call.
+- The sample filters to `arm64-v8a` and `x86_64`, and the Kotlin README
+  tells apps to do the same.
+- An alternative for you: have the library declare it. AARs can't force
+  `abiFilters`, so it would be documentation either way.
+
+**Not done:** the interactive check of the new screens in the simulator
+panel; the user didn't answer its access request. The suites cover the
+logic, and the sample builds with no warnings.
+
+**Memories:** two were saved: the background-call rule, and the ABI
+filter.
+
+**Branch:** `mobile-1d2` is merged into `main`. I left it in place, since
+the user's deletion request covered the three earlier branches; say if it
+should go.
+
+**Next, from the user:** the device run sheet (`examples/mobile/README.md`)
+on this code:
+- the Benchmark JSON from each phone;
+- the background test in both modes, with the protection class and any
+  `MnemoSample` crash entry.
+
+Then I add `device_budget_mobile` and log `WORKER — NOTE — 1d device
+results`.
+
+### 2026-11-09 — PLANNER-A — VERIFIED — MOBILE-1d.2 accepted; the device runs are next (the user)
+**1d.2 accepted** (`6b121a3`, `945fa61`, `e1423ed`, `894ef01`, `752f279`;
+`main` run 42712651838 18/18; emulator run 42709009765 green at 4 KB and
+16 KB).
+- **The background rule is right, including the cold-launch-into-background
+  case.** Reading the starting `applicationState` through KVC, so the
+  package stays extension-safe, is a good touch.
+- **The `_with_vector` essence calls are accepted** as public engine
+  methods (they mirror `ingest_thread_with_vectors`). No Python mirror.
+- **The ABI finding is a good catch:** a v7a or x86 phone would have
+  crashed at the first call. Documenting the `abiFilters` is the only
+  option, since an AAR can't force them. 1e's release notes for Android
+  must say it too.
+- No 25K `indexed_recall` cell: accepted.
+- The sizes stay well under the gates (+41/46 KB per ABI, +105 KB on iOS).
+- **Delete `mobile-1d2`, local and remote.** It's merged. From now on,
+  delete merged PR branches as part of each DONE.
+
+**Next:** the user runs `examples/mobile/README.md` on their phones:
+- the iPhone Benchmark JSON, and the background test in both modes (the
+  protection class, App Group used, any `MnemoSample` crash entry);
+- Android if they have a phone.
+
+The worker then records `device_budget_mobile` and logs
+`WORKER — NOTE — 1d device results`. **Then 1e.**
+
+### 2026-11-09 — PLANNER-A — NOTE — iPhone device checks: both v0.12 release gates pass (the user's run, 2026-11-09)
+The user ran the iOS sample (a Release build, launched from the Home
+Screen, not attached to Xcode) on their iPhone ("a", iOS 27.0.1), signed
+with a free Personal Team.
+- **Background test, in the App Group container
+  `group.com.archkumar.mnemo-sample`:**
+  - run 1 (keep writing off) and run 2 (keep writing on), with the phone
+    locked for 1–2 min each;
+  - both resumed without a relaunch;
+  - after the loop stopped, **Writes = Stored = 288**.
+- **Protection class:** `NSFileProtectionCompleteUntilFirstUserAuthentication`
+  on both the file and the directory.
+- **Crash check:** Analytics Data, searched for "Mnemo", **no entries**. So
+  no `0xdead10cc`.
+- **Benchmark:** the JSON is in `test/scripts/device_runs/`. The worker
+  records `device_budget_mobile`.
+- **Found on the device:** the Notes tab says `NLEmbedding isn't available
+  here` (the sentence asset isn't on the phone), so it falls back to the
+  demo embedder. A small follow-up, not a blocker.
+- **Setup friction worth a line in the run sheet:**
+  - Developer Mode was off;
+  - "Verify App" failed with "An Internet connection is required" on
+    Wi-Fi and on 5G until the user retried.
+- No Android device run this time.
+
+**Both release gates (Q1 `0xdead10cc`, protection class on hardware)
+pass.** 1e starts once the worker's device-results NOTE is in.
+
+### 2026-11-09 — PLANNER-A — DECISION — UI direction (user): MNemo stays an engine; the inspector moves up to v0.13 (INSP-1); mobile memory screens become Phase 15, last
+- **The question (user):** does the engine need a UI? **The answer:** no
+  consumer app (it would compete with the developers who use MNemo).
+  Two UI pieces, both for developers:
+  1. **INSP-1 → v0.13.0, right after MOBILE-1:** the read-only memory
+     inspector (14.2) plus the readable export (12.5) it builds on. PERF-2
+     follows it. Spec to come at the v0.12 VERIFIED.
+  2. **Phase 15, last on the roadmap:** drop-in SwiftUI and Compose
+     "what this app remembers" screens for apps' own users.
+- **Edits above the WORKLOG:**
+  - the execution order (4a INSP-1; the note that PERF-2 now follows it;
+    12.5 moved out of item 5, Phase 15 added at the end);
+  - the 14.2 header;
+  - a new Phase 15 section.
+- **Docs:** the v0.12.0 README and `index.html` roadmap update (my
+  HANDOFF before the tag) lists the inspector under Next, and the mobile
+  screens under Later.
+- **The worker's current queue is unchanged:** the 1d device-results
+  NOTE, then 1e (v0.12.0).
+
+### 2026-11-09 — PLANNER-A — NOTE — Correction to the UI-direction DECISION: "engine only" is for now, not permanent
+The user softened it: **MNemo is an engine for now.**
+- **A platform on top stays possible,** to match what Supabase offers for
+  management: for example, a hosted console to manage files, devices and
+  agent key grants (13.2), the sync relay (14.1), backups (14.3), and the
+  inspector across machines.
+- **It fits the Phase 14 positioning.** That says not to build a
+  *general* agent backend (SQL, app auth, storage, functions). It doesn't
+  rule out a management layer for MNemo's own pieces.
+- **The keys stay client-held either way.** A hosted console could never
+  read memories without a key the user grants it.
+- **Open question (NEEDS-USER when Phase 14 is near):** whether to build
+  that platform, and in what form. It's not scheduled.
+- **Above the WORKLOG,** the Phase 15 wording now says "for now" too.
+
+### 2026-11-09 — WORKER — NOTE — 1d device results
+**Recorded on `main` in `8ea37d9`** (draft PR 6, fast-forwarded). Branch
+run 42727976964 and `main` run 42729498764: 18/18.
+
+**The device:** iPhone18,3, iOS 27.0.1 (24A446), 8 GB RAM, 16 KB pages.
+- The Benchmark ran on a Release build of `752f279`: battery 95%,
+  unplugged, thermal nominal, Low Power Mode off.
+- The raw JSON is now `test/scripts/device_runs/iphone18_3.json` (renamed
+  to the model identifier).
+- It's added to `perf_v0.5.0.json` as **`device_budget_mobile`**:
+  - the targets and the 10K summary;
+  - a comparison with `device_budget_v0_11_0` (M1 Pro);
+  - the 1K summary;
+  - the iOS release gates;
+  - the full results.
+
+  The block is appended as text, so no other line in the file changed.
+
+**10K against the phone targets: 4 of 5 pass.**
+
+| cell | iPhone | target | M1 Pro (v0.11.0) |
+|---|---|---|---|
+| disk per memory | 1,329.6 B | ≤ 2 KB, pass | 1,329.6 B (the same corpus, byte for byte) |
+| handle memory | 7.33 MB `phys_footprint` | ≤ 20 MB, pass | 17.2 MB RSS (a different metric) |
+| raw-key open, median | 2.11 ms | ≤ 10 ms, pass | 2.90 ms |
+| first recall, fresh handle, median | **7.08 ms** | ≤ 5 ms, **miss** | 8.77 ms |
+| warm recall, median (p95) | 1.72 ms (1.84) | ≤ 2 ms, pass | 2.20 ms |
+
+- **The first-recall miss** isn't phone-specific. The M1 Pro misses by
+  more, and `first_recall_10k_profile` puts 66% of it in the
+  vector-column fill (AES-GCM decrypt 48%). That's PERF-2's starting
+  point. For the Planner: does v0.12 ship with this cell over target, or
+  wait for PERF-2?
+- **Also measured at 10K:**
+  - single durable write: 12.0 ms (M1 Pro 14.8 ms);
+  - a batch of 100: 17.4 ms;
+  - background close: 12.8 ms; the reopen after it: 10.2 ms.
+- **1K:** open 0.28 ms, first recall 0.71 ms, warm recall 0.17 ms.
+- **The sample's SoC table** didn't know iPhone18,3, so `soc` is null.
+
+**A sample bug, found in this run and fixed in `8ea37d9`:**
+- Both Benchmarks wrote `CompactReport.after` as `compacted_file_bytes`.
+  That field is a count of live memories, so the JSON shows 1000 and
+  10000.
+- They now measure the compacted copy itself, and report
+  `compacted_memories` separately.
+- `device_budget_mobile` marks the two fields invalid for this run.
+- The binding's `CompactReport` fields now have doc comments saying
+  they're counts.
+
+**The iOS release gates: both pass.** This was the user's run, a Release
+build launched from the Home Screen, with a free Personal Team.
+- **Background test** in the App Group container
+  `group.com.archkumar.mnemo-sample`:
+  - run 1 (keep writing off) and run 2 (keep writing on), with the phone
+    locked for 1–2 min each, both resumed without a relaunch;
+  - after the loop stopped, Writes = Stored = 288;
+  - crash check: Analytics Data, searched for "Mnemo", found no entries,
+    so no `0xdead10cc`.
+- **Protection class:** `NSFileProtectionCompleteUntilFirstUserAuthentication`
+  on both the file and the directory.
+
+**No Android device run this time.** Android is covered by the emulator
+only (the `android-emulator` workflow, 4 KB and 16 KB images).
+
+**Run sheet** (`examples/mobile/README.md`), two lines added:
+- turn on Developer Mode first;
+- "Verify App" may need a few retries when it says "An Internet
+  connection is required", even online.
+
+**Follow-up, not a blocker: `NLEmbedding` on the iPhone.** The Notes tab
+said `NLEmbedding isn't available here`, so the demo embedder was used.
+- **Why:** `NLEmbedding.sentenceEmbedding(for: .english)` returns nil
+  when its LinguisticData asset isn't on the device. The phone had no
+  asset, nor does the simulator; macOS does. **The API has no way to
+  request the asset.**
+- **What can be detected:** `NLEmbedding.supportedSentenceEmbeddingRevisions(for:)`
+  and `currentSentenceEmbeddingRevision(for:)` report revision 1. So the
+  sample can say "Apple's sentence model exists but isn't downloaded on
+  this device", rather than "isn't available".
+- **What can be requested:** `NLContextualEmbedding` (iOS 17+) has
+  `hasAvailableAssets` and `requestAssets()` (async), which download on
+  demand.
+  - English: 512 dims, at most 256 tokens; on macOS, revision 1 with
+    `hasAvailableAssets` true.
+  - It produces token vectors, so the sample would mean-pool them into a
+    sentence vector.
+- **A suggested change** (small, sample-only, not done in this note):
+  1. Try `NLEmbedding` first.
+  2. Otherwise use `NLContextualEmbedding`, showing a "Download Apple's
+     model" button while `hasAvailableAssets` is false.
+  3. Give it a distinct embedder identity
+     (`apple-nl-contextual-en-r1`), so files from either model don't mix.
+  4. Keep the labelled demo embedder as the last fallback.
+
+  For you to schedule.
+
+**Memories:** two were saved: the device results, and the `NLEmbedding`
+and `NLContextualEmbedding` asset facts.
+
+**Branch:** `mobile-1d-device-results` is merged and still in place.
+
+### 2026-11-09 — PLANNER-A — VERIFIED + DECISION + DISPATCH — the 1d device results accepted; v0.12 ships with the 10K first-recall cell over target; MOBILE-1e (the v0.12.0 release) dispatched
+**Device results accepted** (`8ea37d9`; `main` run 42729498764 18/18;
+`test/scripts/device_runs/iphone18_3.json`; `device_budget_mobile` in
+`perf_v0.5.0.json`).
+- **iPhone18,3 at 10K:**
+  - disk 1.33 KB;
+  - 7.3 MB footprint;
+  - open 2.1 ms;
+  - warm recall 1.72 ms;
+  - durable write 12 ms.
+
+  That beats the M1 Pro on every speed cell.
+- **Both iOS release gates pass.**
+- Fixing the `compacted_file_bytes` bug, and marking those two fields
+  invalid for this run, was the right call.
+
+**Decision: v0.12 ships with the 10K first-recall cell at 7.1 ms**
+(target ≤ 5).
+- It isn't phone-specific: the M1 Pro is 8.8. PERF-2 owns it, with the
+  profile already in hand (the vector-column fill, decrypt 48%).
+- The README and CHANGELOG say it honestly: first recall on a fresh 10K
+  handle is about 7 ms on an iPhone, then 1.7 ms warm.
+
+**Follow-ups, not in 1e:**
+- **SAMPLE-1** (small, after the tag, before INSP-1): the `NLEmbedding`,
+  then `NLContextualEmbedding` (with a "Download Apple's model" button,
+  identity `apple-nl-contextual-en-r1`), then the demo-embedder chain, as
+  you suggested. Also add iPhone18,x to the sample's SoC table.
+- **Delete `mobile-1d-device-results`,** local and remote.
+
+**DISPATCH: MOBILE-1e, the v0.12.0 release.** One release covers the
+engine (crates.io, PyPI) and the first mobile packages.
+1. **Versions:** 0.12.0 everywhere:
+   - the engine, Python and Node manifests and lockfiles;
+   - `mnemo-uniffi` (still `publish = false`);
+   - the Kotlin `VERSION_NAME`;
+   - the samples' `MARKETING_VERSION`.
+2. **CHANGELOG `[0.12.0]`:**
+   - **Changed (breaking):** Rust `close(self)`;
+   - **Added:**
+     - the Swift package (iOS 15+, an XCFramework);
+     - the Android library `io.github.toarchkumar:mnemo-android`
+       (minSdk 24, arm64-v8a and x86_64, 16 KB-aligned);
+     - the binding's index and essence calls;
+     - the new engine methods (`ingest_thread_texts`,
+       `ingest_thread_with_vectors`, and the essence `_with_vector`
+       pair);
+   - **the Android notes:** apps must set `abiFilters` to `arm64-v8a`
+     and `x86_64`, JNA is a dependency, and its licence is in the
+     NOTICE;
+   - **the iOS notes:**
+     - the background-close rule;
+     - App Groups work with `MnemoStore`'s handling;
+     - device-only keys by default, with an iCloud opt-in;
+   - **the device numbers** (from `device_budget_mobile`), first recall
+     included.
+3. **The release workflow** (extend `release.yml`; same tag `v0.12.0`):
+   - **iOS:**
+     - build the XCFramework on a macOS runner, zip it, and compute its
+       checksum (`swift package compute-checksum`);
+     - attach the zip to the GitHub Release;
+     - then update `toarchkumar/mnemo-swift` with `MNEMO_SWIFT_TOKEN`:
+       `Package.swift` pointing at the release zip with that checksum,
+       the generated Swift, and the Swift layer's sources, copied from
+       `mnemo/bindings/swift/`;
+     - commit, tag `0.12.0` there (SPM wants a bare semver tag), and push.
+   - **Android:**
+     - build the AAR (both ABIs);
+     - run `publishAndReleaseToMavenCentral` with the four Maven secrets;
+     - attach the AAR to the GitHub Release too.
+   - **Order:** the mobile jobs run after the existing engine jobs
+     succeed. A mobile failure doesn't undo crates.io or PyPI; it's logged
+     and re-run.
+4. **A dry run first (`workflow_dispatch` with a `dry_run` input),
+   before any tag:**
+   - **the iOS part:** the XCFramework zip and checksum, then a throwaway
+     SPM consumer package that resolves a `binaryTarget` from the local
+     zip and that checksum, builds, and runs one store round trip on the
+     iOS simulator;
+   - **the `mnemo-swift` part:** push the generated tree to a
+     `dry-run-0.12.0` branch (no tag) with the token, then delete the
+     branch;
+   - **the Android part:**
+     - run `publishToMavenCentral` *without* releasing (the deployment is
+       validated in the Portal), then drop it through the Portal API;
+     - **if the Portal can't drop a validated deployment, or the plugin
+       can't upload without releasing, stop and log READY with what you
+       found. Don't publish 0.12.0 by accident;**
+   - plus a throwaway Gradle consumer that resolves the signed AAR from
+     `mavenLocal()`, builds, and runs the JVM smoke test.
+5. **Docs that are yours:**
+   - the Swift and Kotlin READMEs: the install lines (SPM URL
+     `https://github.com/toarchkumar/mnemo-swift`, from 0.12.0; Gradle
+     `implementation("io.github.toarchkumar:mnemo-android:0.12.0")`);
+   - a `RELEASING.md` checklist (or a section in AGENTS.md), with the
+     credential renewals:
+     - `MAVEN_CENTRAL_*` and `MNEMO_SWIFT_TOKEN` by 2027-11;
+     - the GPG key, which expires 2028-11-08 (extend it and re-send it to
+       `keyserver.ubuntu.com`).
+6. **Log READY** with:
+   - the release commit staged;
+   - the dry-run results;
+   - the sizes;
+   - the exact install lines.
+
+   **Then stop.** My root README and `index.html` HANDOFF comes before
+   the tag (v0.12 What's new; mobile install; the roadmap: Shipped to
+   v0.12, Next the inspector and PERF-2, Later the mobile memory
+   screens). Then you tag, publish, and log DONE, and I verify all four
+   registries (crates.io, PyPI, Maven Central, SPM).
+
+### 2026-11-09 — WORKER — READY — MOBILE-1e: v0.12.0 is staged, and the release dry run passed
+**Nothing is published or tagged.**
+
+**First, a decision for you before the tag: the v8 sunset.**
+- The `[0.11.0]` CHANGELOG says `mnemo compact --format v8` stays "for one
+  more release. v0.12 makes v8 read-only", and so does your FMT-9 planning
+  note ("v8 write-path sunset": v0.12 makes v8 read-only, compact to
+  upgrade).
+- It isn't built, and the 1e dispatch doesn't include it.
+- I didn't improvise an on-disk behaviour change inside a release.
+  `[0.12.0]` doesn't claim it; it says v8 files still open and write.
+- **Choose one:**
+  - (a) ship 0.12.0 as staged, and add a line to `[0.12.0]` moving the v8
+    sunset to v0.13;
+  - (b) dispatch the sunset as a small PR before the tag (v8 opens
+    read-only, writes return an error pointing at `mnemo compact`, and
+    `compact --format v8` goes).
+
+**What's staged:**
+- **`main` = `8a9af2e`:** the release workflow (PR 7, fast-forwarded; CI
+  run 42742425638 18/18). It has to be on the default branch for a manual
+  run.
+  - `release.yml`: the mobile jobs and the dry run;
+  - `swift/scripts/make-release-package.sh` and
+    `check-release-package.sh`;
+  - `kotlin/scripts/central-dry-run.sh`, and the `release-check/` Gradle
+    consumer;
+  - `RELEASING.md`, and a "Cut a release" row in AGENTS.md.
+- **The release commit, `46e9da7 release: v0.12.0`,** is on branch
+  `release-0.12.0`, in draft PR 8. It isn't merged; CI run 42743601392 is
+  18/18.
+  - **Versions at 0.12.0:**
+    - the engine, Python (`Cargo.toml`, `pyproject.toml`) and Node
+      manifests;
+    - both lockfiles (the version lines only);
+    - `mnemo-uniffi`;
+    - the Kotlin `VERSION_NAME`;
+    - the iOS sample's `MARKETING_VERSION`;
+    - the Android sample's `mnemo-android` dependency.
+  - **CHANGELOG `[0.12.0] — 2026-11-09`**, cut from `[Unreleased]`:
+    - Changed: the breaking `close(self)`, and Node's `close()`;
+    - the Swift package: install, the background rules, App Groups (they
+      work with a free Personal Team), files, `deviceOnly` keys by default
+      with an iCloud opt-in;
+    - the Android library: install, the `.so` sizes and 16 KB, the
+      `abiFilters` snippet with the reason, JNA 5.19.1 with its NOTICE and
+      R8 rules, the stores and keys, the Kotlin renames;
+    - the binding and the engine: `build_index` and `has_index`, the
+      essence writes, and the four engine methods;
+    - a **Measured on devices** table, iPhone against the M1 Pro, with
+      the first-recall line, in your wording ("about 7 ms … then 1.7 ms
+      warm"), and Android as emulator only;
+    - samples, CI and releasing.
+    - The link references are fixed: `[Unreleased]` had pointed at
+      v0.10.0, and `[0.11.0]` had none.
+    - **Move the date if the tag lands later.**
+  - **The install lines** in the Swift and Kotlin READMEs (below), and
+    the `abiFilters` snippet.
+
+**The release workflow** (`release.yml`, the same `v*` tag):
+- **The engine jobs are unchanged,** except that `create-release` now runs
+  on tags only. Everything else in the engine part needs it, so a manual
+  run skips the whole engine part.
+- **`mobile-prepare`** waits for `publish-crates` and `publish-pypi` to
+  succeed or be skipped, never after a failure. It checks that the tag,
+  the engine, `mnemo-uniffi` and `VERSION_NAME` agree, and it sets the
+  mode. A manual run is always a dry run: `dry_run=false` there fails.
+- **`release-swift`** (macOS):
+  1. builds the XCFramework and `MnemoFFI-<v>.xcframework.zip`, and
+     computes its checksum with `swift package compute-checksum`;
+  2. writes the `mnemo-swift` tree: `Package.swift` with the release URL
+     and checksum, the generated Swift, the Swift layer, a README and the
+     LICENSE;
+  3. runs the SPM consumer check;
+  4. on a tag: attaches the zip, pushes `main` and the tag `<v>` (it
+     refuses a tag that already exists), then resolves the published
+     package from GitHub with `exact: <v>` and builds it for the
+     simulator.
+- **`release-android`** (Linux):
+  1. the `.so` files, with the 16 KB and 5 MB gates;
+  2. the JVM tests, the AAR, a signed `publishToMavenLocal` (every
+     `.aar`, `.pom`, `.module` and `.jar` must have its `.asc`), and
+     `check-package.py`;
+  3. the Gradle consumer from `mavenLocal()`;
+  4. on a tag: `publishAndReleaseToMavenCentral`, then the AAR attached to
+     the Release.
+
+**The dry run: release run 42743609144** (`workflow_dispatch`, on
+`release-0.12.0` at `46e9da7`): all green.
+- **The engine jobs and the Release** were all skipped. No GitHub Release
+  was created.
+- **iOS:**
+  - **The zip:** `MnemoFFI-0.12.0.xcframework.zip`, 10,557,958 bytes,
+    checksum
+    `c3e82f3c0257e5d2f7594fa3f200cfc0d7da51bbac4ea7656b5d3fc065501e22`.
+    The runner's Xcode was 26.6.
+  - **The SPM consumer:**
+    - the checksum in the generated `Package.swift` matched the zip;
+    - the release tree, with its binary target pointed at the local zip
+      (SwiftPM only checks a checksum on a URL target), resolved and built
+      on an iOS simulator;
+    - `ConsumerTests.testRoundTrip` passed: write, recall, an essence
+      item, reopen.
+    - The same check passed locally on iOS 27.2.
+  - **`mnemo-swift` is empty, so there was no branch cycle (a
+    deviation).** The first branch pushed to an empty repository becomes
+    its default branch, which GitHub won't delete, so `dry-run-0.12.0`
+    couldn't be pushed and then deleted.
+    - The job ran `git push --dry-run` with the token instead. It was
+      accepted (`* [new branch] HEAD -> dry-run-0.12.0`, nothing
+      created). That authenticates against GitHub's push endpoint.
+    - Afterwards `mnemo-swift` is still empty, with 0 branches.
+    - The real release creates `main`, which becomes the default branch,
+      and the tag `0.12.0`.
+    - Once the repository has `main`, later dry runs do the full branch
+      push and delete.
+- **Android:**
+  - The `.so` files: arm64 2,564,456 bytes and x86_64 2,994,856 bytes,
+    every LOAD at 0x4000.
+  - The AAR: 2,692,667 bytes. With JNA, the native code per ABI is
+    2,740,976 bytes (arm64) and 3,121,768 bytes (x86_64), and JNA's
+    `libjnidispatch` passes the 16 KB check.
+  - The POM, the JNA aar dependency (exact), and the sources and javadoc
+    jars are fine. Every artifact has an `.asc`.
+  - **The Gradle consumer:** it resolved
+    `io.github.toarchkumar:mnemo-android:0.12.0` from `mavenLocal()`, and
+    `ConsumerTest > roundTripThroughThePublishedArtifact PASSED`.
+  - **Maven Central:**
+    - the plugin's `publishToMavenCentral`, with
+      `mavenCentralAutomaticPublishing=false`, logged "Uploaded bundle to
+      Central Portal as USER_MANAGED, deployment id:
+      115b3c5e-5b6c-4b43-8e06-d6379af5e3fd";
+    - the Portal status reached **VALIDATED**;
+    - `DELETE /api/v1/publisher/deployment/<id>` returned **204**, and the
+      status call then returned 404;
+    - so the Portal can drop a validated deployment, and the plugin
+      uploads without releasing. Nothing was published.
+
+**Sizes, all from the dry run:**
+- the XCFramework zip: 10,557,958 bytes. The slices: ios-arm64
+  9,281,624 bytes, the simulator 18,657,312 bytes, macos-arm64 9,250,888
+  bytes (static libraries; apps strip them);
+- the iOS stripped-binary delta in an app: 2,576,912 bytes (1d.2 CI, the
+  same code);
+- the AAR: 2,692,667 bytes;
+- the `.so` files: 2,564,456 and 2,994,856 bytes;
+- the sample APK: 7,267,900 bytes.
+
+**The install lines:**
+- **Swift** (Xcode: File > Add Package Dependencies,
+  `https://github.com/toarchkumar/mnemo-swift`):
+  ```swift
+  .package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.0"),
+  // target dependency:
+  .product(name: "Mnemo", package: "mnemo-swift")
+  ```
+- **Android** (`mavenCentral()`):
+  ```kotlin
+  implementation("io.github.toarchkumar:mnemo-android:0.12.0")
+  // and: android { defaultConfig { ndk { abiFilters += listOf("arm64-v8a", "x86_64") } } }
+  ```
+
+**`RELEASING.md`:** the checklist (versions, the changelog, install lines,
+CI, the dry-run command, the coordination backup, the tag), the checks on
+all four registries, recovery for a mobile failure after the engine
+published, and the credentials:
+- `MAVEN_CENTRAL_*`: the Portal token `mnemo-github-actions`, by
+  **2027-11-09**;
+- `MNEMO_SWIFT_TOKEN`: by **2027-11**;
+- the GPG key `CFAFF7A1…9A04`: before **2028-11-08**. The extend and
+  re-send commands are in the file;
+- `CRATES_IO_TOKEN`;
+- PyPI uses Trusted Publishing, with no secret.
+
+**Also:** 1c's manual `android-publish.yml` (a signed `publishToMavenLocal`)
+is now covered by the release dry run. I can remove it after the tag if
+you agree.
+
+**Tagging, once you've decided on the v8 sunset and logged your README and
+`index.html` HANDOFF:**
+1. Commit the handed-off files on `release-0.12.0`.
+2. Commit the `chore(plan): sync coordination files` backup.
+3. Fast-forward `main`.
+4. Tag `v0.12.0` and push it.
+5. Watch the release, then log DONE with the four registries.
+
+**Memories:** one was saved (the release flow).
+
+### 2026-11-09 — PLANNER-A — NOTE — a second Reviewer (REVIEWER-B) joins; ID scheme and first scope
+**The user is onboarding a REVIEWER-B** (a new model, on trial). It has the
+same role and boundaries as the Reviewer in AGENTS.md: read-only, and it
+writes only `reviewer_notes.md`.
+- **To avoid ID clashes with the existing Reviewer** (who stays
+  REVIEWER-A, batches `REV-001` …), REVIEWER-B uses batches `RB-001`,
+  `RB-002` …, items `RB-001.1` …, and adds its rows at the bottom of the
+  shared Decision Ledger. Each Reviewer edits only its own items.
+- **The first scope for REVIEWER-B:** everything since REV-005, which no
+  Reviewer has audited:
+  - FMT-9 (format v9);
+  - REFAC-1;
+  - MOBILE-1a–1d.2: the binding, the Swift and Kotlin layers, the key
+    storage, the background-close logic, the passphrase helpers, and the
+    sample apps;
+  - the 1e release workflow once it lands, focusing on secrets handling.
+- **Triage is unchanged:** PLANNER-A triages both Reviewers' items when
+  the user asks.
+- **To do:** fold the two-Reviewer rule into AGENTS.md's protocol text
+  after 1e, once AGENTS.md has no uncommitted Worker changes.
+
+### 2026-11-09 — PLANNER-A — NOTE — REVIEWER-B's first pass is widened (user request)
+The first pass, `RB-001`, opens with a **whole-project assessment**:
+- architecture and code health;
+- fit with the on-device direction;
+- **optimization areas:** size, speed, memory, battery and DX;
+- **product ideas** that fit the current direction (on-device first,
+  engine for now, INSP-1 next, then Phase 12–15).
+
+Ideas already in `PLAN.md` are cited, not re-proposed. The deep-dive
+scope in my previous NOTE follows the assessment.
+
+### 2026-11-09 — PLANNER-A — REVIEW + DECISION + HANDOFF — v0.12.0 READY accepted; the v8 sunset moves to v0.13 (option a); README and index.html ready; tag it
+**READY accepted.**
+- `main` = `8a9af2e` (CI 18/18); the release commit `46e9da7` on
+  `release-0.12.0` (CI 18/18); release dry run 42743609144, all green.
+- **The Central result is exactly what I wanted to see:** it uploaded as
+  USER_MANAGED, reached VALIDATED, and `DELETE` gave 204, so nothing was
+  published.
+- **The `mnemo-swift` deviation is accepted:** the repo is empty, so a
+  throwaway branch would become its permanent default. The
+  `git push --dry-run` proves the token. The real release creates `main`
+  and the tag `0.12.0`, and the job then resolves the published package
+  from GitHub with `exact:`, which is the end-to-end check.
+
+**Decision: (a), the v8 sunset moves to v0.13.** Good catch.
+- An on-disk behaviour change doesn't belong inside a release PR, and
+  v0.12 is already breaking (`close(self)`).
+- Mobile users are unaffected (new mobile files are v9). The ones who'd be
+  hit are desktop users with v0.10 files, and v0.11 only shipped
+  yesterday, so one more release of notice is fair.
+- **Add a line to `[0.12.0]`:** "v8 files still open and write in v0.12;
+  v0.13 makes them read-only, so run `mnemo compact` to upgrade." It goes
+  with the INSP-1 release. The execution order (4a) now says so.
+
+**Also agreed:** remove the manual `android-publish.yml` after the tag,
+since the release dry run covers it, as its own small commit.
+
+**HANDOFF: commit on `release-0.12.0`, as their own commit:**
+- **`README.md`:**
+  - the Install section gains the Swift (SPM) and Android (Gradle) lines;
+  - a new "What's new in v0.12.0: iOS and Android" section (background
+    close, keys, embedder, sizes, a Swift snippet, links to both guides,
+    `abiFilters`, the iPhone numbers);
+  - a new "Upgrading to v0.12.0" (`close(self)`, and v0.13 makes v8
+    read-only);
+  - an iPhone table under Performance;
+  - known limitations: the first search wording now includes the iPhone,
+    the v8 line mentions v0.13, and there's a new "mobile packages are
+    new" line.
+- **`index.html`:**
+  - the version pill v0.12.0, and an iOS · Android pill;
+  - the Quick Start line links the Swift and Android guides;
+  - an iPhone numbers line under the performance cards;
+  - the roadmap: Shipped is "v0.4 – v0.12", with the mobile packages.
+    Next is the inspector and the faster first search. Later adds the
+    mobile memory screens, and the sync line now reads "correcting
+    memories from the inspector";
+  - the closing line mentions iOS and Android.
+- **Commit message:** `docs: v0.12.0 README and site (iOS and Android packages, iPhone numbers, upgrade notes, roadmap)`.
+
+**Then tag, in your order:**
+1. this HANDOFF commit and the CHANGELOG line above on `release-0.12.0`
+   (the CHANGELOG line can be amended into the release commit, since it's
+   unpublished and yours; or make it a separate commit, your call);
+2. the `chore(plan)` backup;
+3. fast-forward `main`;
+4. tag `v0.12.0` and push.
+
+Watch all the jobs. Log DONE with the four registries (crates.io, PyPI,
+Maven Central, the `mnemo-swift` tag) and the run id. Then delete the
+merged branches. I verify on the published artifacts.

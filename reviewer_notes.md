@@ -80,8 +80,8 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `R-004.3` | 2026-11-07 | `PLAN-REFINEMENT` | `HIGH` | `FMT-9` (`v0.11.0`) design hazards: free-list CoW/snapshot-overwrite crash window & Page-0 single-sector atomicity broken by `13.2` key slots | `VERIFIED` | Shipped in `FMT-9a` (`8066f50`: quarantined `freelist.rs`, ≤512 B Page 0 in `format.rs:127`, CoW AEAD `keyslot.rs`) |
 | `R-004.4` | 2026-11-07 | `CORRECTNESS` | `LOW` | CLI `mnemo recall` lock fallback (`mnemo.rs:1787-1793`) prints misleading `"running recall read-only"` before failing when an exclusive writer holds the lock | `VERIFIED` | Shipped in `PERF-1` (`f8ecfe0`, `v0.10.0`, `mnemo.rs:1787-1798`) |
 | `R-004.5` | 2026-11-07 | `PRODUCT` | `MEDIUM` | Roadmap vs Repo alignment: `README.md` `v0.10.0` drift, pulling `12.3` raw machine-key open forward before `MOBILE-1` (Argon2id 19 MiB / latency), `12.4` iOS constraint, and `14.1` compression padding | `ACCEPTED` | Parts (1)–(2) `VERIFIED` in `v0.10.0` (`01db7e7`, `a44ee64` `open_with_key`); Parts (3)–(4) folded into `12.4`, `FMT-9e`, `14.1` specs |
-| `R-005.1` | 2026-11-08 | `CORRECTNESS` | `MEDIUM` | CLI `mnemo demo` fails at runtime with `MnemoError::Locked` (`mnemo.rs:2617-2618`) due to shadowed handle drop order after `db.close()` | `ACCEPTED` | Fix as a standalone commit at the next FMT-9 sub-PR boundary (ships in v0.11.0): `drop(db)` before reopen, `close()` rustdoc caution, cli_smoke `demo` test; post-FMT-9 cleanup evaluates `close()` releasing the lock |
-| `R-005.2` | 2026-11-08 | `DX/DOCS` | `LOW` | Stale `mnemo/bindings/node` v0.4 skeleton (`Cargo.toml` pre-`NAME-1` dep) & post-`FMT-9` modularization of `mnemo/src/store.rs` (`8,104` lines) | `ACCEPTED` (modified) | (1) The dependency was already fixed in NAME-1 (`package = "mnemo-engine"`); add an "experimental, Phase 5" status note only. (2) `store.rs` split → REFAC-1 after FMT-9f, before MOBILE-1 |
+| `R-005.1` | 2026-11-08 | `CORRECTNESS` | `MEDIUM` | CLI `mnemo demo` fails at runtime with `MnemoError::Locked` (`mnemo.rs:2617-2618`) due to shadowed handle drop order after `db.close()` | `VERIFIED` | Shipped in `b08469b` (`v0.11.0`, `cli_smoke.rs:2161`) and consuming `Mnemo::close(self)` in `REFAC-1` (`5254395`, `v0.12.0`, `store/flush.rs:852`) |
+| `R-005.2` | 2026-11-08 | `DX/DOCS` | `LOW` | Stale `mnemo/bindings/node` v0.4 skeleton (`Cargo.toml` pre-`NAME-1` dep) & post-`FMT-9` modularization of `mnemo/src/store.rs` (`8,104` lines) | `VERIFIED` | Shipped in `b08469b` (`mnemo/bindings/node/README.md` status note) and `REFAC-1` (`b0a0018`..`49feaea`, `v0.12.0`, 16 `mnemo/src/store/` submodules) |
 
 ---
 
@@ -489,7 +489,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 ---
 
 #### R-005.1 — [CORRECTNESS] [MEDIUM] CLI `mnemo demo` fails at runtime with `MnemoError::Locked` (`mnemo.rs:2617-2618`) due to shadowed handle drop order after `db.close()`
-- **Status:** `OPEN`
+- **Status:** `VERIFIED` (`b08469b` / `v0.11.0`, plus consuming `Mnemo::close(self)` in `REFAC-1` `5254395` / `v0.12.0`)
 - **Context / Evidence:** `mnemo/src/bin/mnemo.rs:2617-2618`, `mnemo/src/store.rs:6806-6817`, `AGENTS.md:55` (`cargo run --bin mnemo -- demo`), `mnemo/tests/cli_smoke.rs` (38 tests, none invoking `demo`). Reproduced live with `./mnemo/target/release/mnemo demo --path /tmp/mnemo-demo-audit.mnemo` at `HEAD` `7103b96` (`exit 1`: `error: file already locked by another handle`).
 - **Finding:** `demo()` (`mnemo/src/bin/mnemo.rs:2617-2618`) executes:
   ```rust
@@ -503,7 +503,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-08). Verified at bin/mnemo.rs ~L2617: `db.close()?; let db = Mnemo::open(path, pp)?;`, and `close(&mut self)` only flushes; the doc says the file is released on drop. Not a new regression: `git log -S` shows the code is from the initial commit, so it has been broken since file locking arrived (v0.4.0). **Fix:** `drop(db)` before reopening, a `close()` rustdoc caution, and a cli_smoke `demo` test. It lands as **its own small commit at the next FMT-9 sub-PR boundary** (it doesn't touch `store.rs` logic, so no conflict with FMT-9) and ships in v0.11.0. A v0.10.1 hotfix is only worth it if the user asks: `demo` isn't in the README quick start. **Follow-up (REFAC-1, after FMT-9):** evaluate whether `close()` should release the file and lock itself (a closed-state handle where later calls return a clear error). A method named `close` that keeps the lock is a footgun for every Rust caller, not just `demo`.
 
 #### R-005.2 — [DX/DOCS] [LOW] Stale `mnemo/bindings/node` v0.4 skeleton (`Cargo.toml` pre-`NAME-1` dep) & post-`FMT-9` modularization of `mnemo/src/store.rs` (`8,104` lines)
-- **Status:** `OPEN`
+- **Status:** `VERIFIED` (`b08469b` / `v0.11.0` + `REFAC-1` `b0a0018`..`49feaea` / `v0.12.0`)
 - **Context / Evidence:** `mnemo/bindings/node/Cargo.toml:14` (`mnemo = { path = "../.." }`), `mnemo/bindings/node/src/lib.rs:1-245`, `mnemo/src/store.rs` (`8,104` total lines / `5,632` SLOC).
 - **Finding:** Two repository-hygiene observations surfaced during the full Rust audit:
   1. `mnemo/bindings/node/` (`excluded` from the workspace in `mnemo/Cargo.toml:8`) is an unmaintained early `napi-rs` skeleton (~v0.4 vector-only API) whose `Cargo.toml` still declares `mnemo = { path = "../.." }` without `package = "mnemo-engine"` — after `PR NAME-1` (`v0.7.0`), `cargo check` inside `mnemo/bindings/node` will fail Cargo dependency resolution, and anyone inspecting the repository tree may mistake the 245-line file for current Node.js parity.
