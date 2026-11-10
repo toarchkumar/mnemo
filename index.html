@@ -386,9 +386,9 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.11.0</span>
+        <span class="pill"><span class="dot"></span>v0.12.0</span>
         <span class="pill">Apache-2.0</span>
-        <span class="pill">Rust · Python · CLI · MCP</span>
+        <span class="pill">Rust · Python · iOS · Android · CLI · MCP</span>
       </div>
       <h1>Encrypted memory for on-device AI agents, <span>in one file</span>.</h1>
       <p class="sub">MNemo gives an agent durable memory and a cache for expensive calls, inside a single encrypted <code>.mnemo</code> file. There's no server or vector database to run. Copy the file and the memory comes with it.</p>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.11.0.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.12.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -714,6 +714,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card stat"><div class="v">~17<span> MB</span></div><div class="l">Memory for an open 10K-memory file</div><div class="d">About 3 MB at 1K memories: small enough for phones and tablets. At 100K it's about 112 MB, because vectors stay in memory for fast search. The library itself is about 2.6 MB.</div></div>
       <div class="card stat"><div class="v">~2.5<span> ms</span></div><div class="l">Search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings. 2.2 ms at 10K and 0.2 ms at 1K, where every search is exact.</div></div>
     </div>
+    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">On an iPhone (v0.12.0, 10K memories): 2.1 ms to open a file, 1.7 ms per search, 12 ms to store a memory durably, and 7.3 MB of memory for an open file. The first search after opening takes about 7 ms while the vectors load.</p>
     <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
   </div>
 </section>
@@ -728,8 +729,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.11</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.12</span></h3>
         <ul>
+          <li>iOS and Android packages: a Swift package and an Android library, keys in the Keychain or Keystore, and files that close safely when an app goes to the background</li>
           <li>A compact file format: files about 6× smaller, saves that write only what changed, and old conversation turns compressed</li>
           <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
           <li>Smaller and faster (v0.10): at 100K memories, opening went from 384 ms to 9 ms, saving from 449 ms to 28 ms, and memory use dropped about 3×; plus keychain-friendly random keys</li>
@@ -753,8 +755,8 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>iOS and Android packages</li>
-          <li>A faster first search on large files, by loading only what a search needs</li>
+          <li>A memory inspector: open a file and see what your agents remember, with search and the history of each fact</li>
+          <li>A faster first search after opening, by loading only what a search needs</li>
         </ul>
       </div>
       <div class="card">
@@ -765,7 +767,8 @@ AI sessions stay aligned without relying on chat history.
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
           <li>Shared access for several agents and tools at once, and a Claude Code plugin that loads and saves memory automatically</li>
           <li>Agent teams: messages and tasks between agents, per-agent keys, signed authorship, and merging copies of a file</li>
-          <li>Encrypted sync across machines through a relay that can't read your data, and a memory inspector to see and correct what your agents remember</li>
+          <li>Encrypted sync across machines through a relay that can't read your data, and correcting memories from the inspector</li>
+          <li>Ready-made iOS and Android screens that let an app's users see and delete what it remembers about them</li>
           <li>A Node.js package and framework integrations</li>
         </ul>
       </div>
@@ -777,7 +780,7 @@ AI sessions stay aligned without relying on chat history.
 <section class="cta">
   <div class="wrap">
     <h2>Give your agent a memory it can carry</h2>
-    <p>Open source under Apache-2.0. Written in Rust, with Python, CLI and MCP on top.</p>
+    <p>Open source under Apache-2.0. Written in Rust, with Python, iOS, Android, CLI and MCP on top.</p>
     <div class="hero-actions">
       <a class="btn btn-primary" href="#quickstart">Get started</a>
       <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>Star on GitHub</a>

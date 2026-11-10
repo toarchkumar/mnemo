@@ -34,6 +34,18 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
+iOS and Android (from v0.12.0):
+
+```swift
+// Swift Package Manager (Xcode: File > Add Package Dependencies)
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.0")
+```
+
+```kotlin
+// Android, from Maven Central (arm64-v8a and x86_64)
+implementation("io.github.toarchkumar:mnemo-android:0.12.0")
+```
+
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
 Rust library are `mnemo_engine` too. `mnemo-db` on PyPI and `mnemo` on
 crates.io are unrelated projects.
@@ -99,6 +111,60 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.12.0: iOS and Android
+
+The same engine, now as native packages for phones and tablets: a Swift
+package for iOS 15 and later, and an Android library for API 24 and later.
+
+- **Built for how phones behave.** When an iOS app goes to the background,
+  the store saves and closes its file, and reopens it on the next call. So
+  iOS never kills the app for holding a file lock, even with the file in a
+  shared App Group. On Android the store saves when the app is stopped.
+- **Keys in the platform's safe.** A random key in the iOS Keychain or the
+  Android Keystore, kept on that device by default, with an opt-in for
+  iCloud Keychain sync on iOS. Files are excluded from backups unless their
+  key can follow them, and `exportWithPassphrase` moves a memory to a new
+  device.
+- **Your own embedding model.** Pass the phone's embedding API or a
+  bundled model to the store; it's called without holding the file lock.
+- **Small.** About 2.6 MB added to an iOS app, and 2.7 MB of native code
+  on 64-bit Arm Android (3.1 MB on x86_64), aligned for Android's 16 KB
+  pages.
+
+```swift
+import Mnemo
+
+let store = try MnemoStore(
+    configuration: MnemoStoreConfiguration(name: "assistant", dimensions: 384),
+    embedder: MyEmbedder())
+try await store.rememberText("The user prefers dark roast coffee",
+                             options: RememberOptions(memoryType: .semantic, key: "coffee"))
+let page = try await store.recallText("what coffee does the user like?",
+                                      options: RecallOptions(topK: 5))
+```
+
+The Kotlin store is the same shape. Full guides:
+[Swift](mnemo/bindings/swift/README.md) and
+[Android](mnemo/bindings/kotlin/README.md). On Android, set
+`abiFilters` to `arm64-v8a` and `x86_64` (the Android guide shows how),
+because MNemo ships only those two.
+
+**Measured on an iPhone** (iPhone18,3, iOS 27, 10K memories): 1.3 KB per
+memory on disk, 7.3 MB of memory for an open file, 2.1 ms to open, 1.7 ms
+per search, 12 ms to store a memory durably. The first search after
+opening takes about 7 ms while the vectors load.
+
+## Upgrading to v0.12.0
+
+- **Rust: `close()` now takes the handle** (`close(self)`), and the file
+  and its lock are released before it returns. Code that used the handle
+  after `close()` no longer compiles. If you keep a `Mnemo` in a struct,
+  hold an `Option<Mnemo>` and call `.take()`. Python already worked this
+  way.
+- **No file format change.** v8 files still open and write in v0.12.
+  **v0.13 makes v8 files read-only,** so run `mnemo compact` to upgrade
+  them to v9 (see "Upgrading to v0.11.0").
 
 ## What's new in v0.11.0: files about 6× smaller
 
@@ -259,6 +325,20 @@ memories or more are indexed):
 
 The library adds about 2.6 MB (Python package) or 3.6 MB (CLI), stripped,
 on ARM Linux.
+
+**On an iPhone** (v0.12.0, iPhone18,3, iOS 27, the same corpus, raw-key
+files):
+
+| | 1K memories | 10K |
+|---|---|---|
+| Open | 0.3 ms | 2.1 ms |
+| First search after opening | 0.7 ms | 7.1 ms |
+| Search, warm | 0.2 ms | 1.7 ms |
+| Store one memory durably | | 12 ms |
+| Memory used by an open file | | 7.3 MB |
+| Disk per memory | | 1.3 KB |
+
+Android has only been measured on the emulator so far.
 An exact-key cache hit takes ~1 µs, and a similar-prompt hit over 500
 entries ~0.4 ms. Full results:
 [`test/scripts/perf_v0.5.0.json`](test/scripts/perf_v0.5.0.json).
@@ -291,10 +371,10 @@ in Rust. Each re-clusters the index with the new defaults.
 
 ## Known limitations (being fixed)
 
-- **The first search on a large file is slow.** It loads the vectors
-  and the index: about 112 ms at 100K memories, and about 9 ms at 10K.
-  Searches after that take 2–3 ms. Loading only what a search needs is
-  planned.
+- **The first search after opening is slower.** It loads the vectors,
+  and the index on large files: about 112 ms at 100K memories, about 9 ms
+  at 10K on a Mac, and about 7 ms at 10K on an iPhone. Searches after that
+  take 2–3 ms. Loading only what a search needs is planned.
 - **Saving threads isn't automatic yet.** You (or your agent) call
   `thread ingest` and the essence tools. A Claude Code plugin with hooks
   that save before compaction and load at session start is on the roadmap,
@@ -305,8 +385,12 @@ in Rust. Each re-clusters the index with the new defaults.
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
 - **v8 files don't get the v0.11 improvements** (smaller files,
-  keyword search, compression) until you run `mnemo compact`. See
-  "Upgrading to v0.11.0".
+  keyword search, compression) until you run `mnemo compact`, and v0.13
+  makes them read-only. See "Upgrading to v0.11.0".
+- **The mobile packages are new.** The Swift and Android APIs cover the
+  common calls (memories, recall, threads, essence, the exact-key cache),
+  not the semantic cache, snapshots or rekey yet. Android has been tested
+  on emulators, not yet measured on a phone.
 
 See the [changelog](CHANGELOG.md) for release history.
 
