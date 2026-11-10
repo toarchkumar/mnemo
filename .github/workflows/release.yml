@@ -34,10 +34,17 @@ env:
   # unknown-cfg warnings don't trip `-D warnings` anywhere.
   RUSTFLAGS: --cfg aes_armv8 --cfg polyval_armv8
 
+# Least privilege (SEC-2): every job reads; the jobs that create the
+# release or attach assets ask for write themselves. No checkout keeps the
+# token in .git/config (`persist-credentials: false`), so build scripts of
+# dependencies never see it, and secrets are scoped to the steps that use
+# them, in jobs that build nothing from source. The three publish jobs run in
+# environments (`crates-io`, `maven-central`, `mnemo-swift`, like `pypi`),
+# so a required reviewer and branch rules apply once the repository sets
+# them up. Before that the environments exist without rules, and every
+# secret can still be a repository secret: the workflow works either way.
 permissions:
-  # softprops/action-gh-release needs write access to create the release
-  # and upload assets.
-  contents: write
+  contents: read
 
 jobs:
   # --- Create the GitHub Release once (idempotent on re-runs). Subsequent
@@ -49,13 +56,12 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-        timeout-minutes: 10
-
       - name: Create release (or no-op if it already exists)
         timeout-minutes: 10
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # Body left empty so GitHub's "Generate release notes" picks up
           # commit history since the previous tag. The CHANGELOG section
@@ -65,10 +71,10 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
 
-  # --- Build the `mnemo` CLI binary for each release platform and attach
-  #     to the GitHub Release. Linux aarch64 cross-compiles via zigbuild
-  #     from an ubuntu-latest runner so we don't pay for a separate
-  #     arm runner.
+  # --- Build the `mnemo` CLI binary for each release platform; the
+  #     `attach` job puts it on the GitHub Release. Linux aarch64
+  #     cross-compiles via zigbuild from an ubuntu-latest runner so we don't
+  #     pay for a separate arm runner.
   build-cli:
     name: cli (${{ matrix.target }})
     needs: create-release
@@ -99,21 +105,24 @@ jobs:
             ext: .exe
             use_zig: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable + target
         timeout-minutes: 10
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.target }}
 
+      # Pinned: the versions v0.12.0 built with.
       - name: Install zigbuild (Linux aarch64 cross only)
         timeout-minutes: 10
         if: matrix.use_zig
         run: |
-          pip install ziglang
-          cargo install --locked cargo-zigbuild
+          pip install ziglang==0.17.1
+          cargo install --locked cargo-zigbuild --version 0.24.1
 
       - name: Build release binary
         timeout-minutes: 20
@@ -138,14 +147,15 @@ jobs:
           echo "asset=$out" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Attach to release
+      - name: Upload the binary for the attach job
         timeout-minutes: 10
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          files: mnemo/${{ steps.stage.outputs.asset }}
+          name: cli-${{ matrix.target }}
+          path: mnemo/${{ steps.stage.outputs.asset }}
 
-  # --- Build Python wheels for each platform via maturin-action and attach
-  #     to the release. The `publish-pypi` job below optionally uploads
+  # --- Build Python wheels for each platform via maturin-action (the
+  #     `attach` job puts them on the release). The `publish-pypi` job below optionally uploads
   #     these wheels + the sdist to PyPI when the `ENABLE_PYPI_PUBLISH`
   #     repo variable is set to `true`; it uses PyPI Trusted Publishing
   #     (OIDC), so no `PYPI_API_TOKEN` secret is needed anywhere.
@@ -174,18 +184,20 @@ jobs:
             os: windows-latest
             manylinux: "off"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         timeout-minutes: 10
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.10"
 
       - name: Build wheel via maturin
         timeout-minutes: 20
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           target: ${{ matrix.target }}
           # `auto` lets maturin pick the right manylinux baseline. On
@@ -200,15 +212,9 @@ jobs:
           # Must match the `env.RUSTFLAGS` at the top of this file.
           rustflags: --cfg aes_armv8 --cfg polyval_armv8
 
-      - name: Attach wheels to release
+      - name: Upload wheel artifact for the attach and PyPI publish jobs
         timeout-minutes: 10
-        uses: softprops/action-gh-release@v2
-        with:
-          files: mnemo-python/dist/*
-
-      - name: Upload wheel artifact for PyPI publish job
-        timeout-minutes: 10
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wheel-${{ matrix.target }}
           path: mnemo-python/dist/*
@@ -225,35 +231,55 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         timeout-minutes: 10
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.10"
 
       - name: Build sdist via maturin
         timeout-minutes: 10
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: sdist
           args: --out dist
           working-directory: mnemo-python
 
-      - name: Attach sdist to release
+      - name: Upload sdist artifact for the attach and PyPI publish jobs
         timeout-minutes: 10
-        uses: softprops/action-gh-release@v2
-        with:
-          files: mnemo-python/dist/*.tar.gz
-
-      - name: Upload sdist artifact for PyPI publish job
-        timeout-minutes: 10
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sdist
           path: mnemo-python/dist/*.tar.gz
+
+  # --- Attach the CLI binaries, the wheels and the sdist to the GitHub
+  #     Release: the only engine job with write access, and it builds
+  #     nothing.
+  attach:
+    name: attach engine assets
+    needs: [create-release, build-cli, build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        timeout-minutes: 10
+        with:
+          pattern: "{cli-*,wheel-*,sdist}"
+          path: dist
+          merge-multiple: true
+
+      - name: Attach to the release
+        timeout-minutes: 10
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: dist/*
 
   # --- Publish all wheels + sdist to PyPI via Trusted Publishing (OIDC).
   #
@@ -289,7 +315,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         timeout-minutes: 10
         with:
           # Pull every wheel-* artifact this run uploaded plus the
@@ -301,16 +327,21 @@ jobs:
 
       - name: Publish to PyPI (Trusted Publishing, no token)
         timeout-minutes: 10
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           # Idempotent on re-runs: skip files PyPI already has.
           skip-existing: true
           packages-dir: dist
 
   # --- Optional: publish the core Rust crate to crates.io. Gated on the
-  #     `ENABLE_CRATES_PUBLISH` repo variable so first-time setup is opt-in
-  #     and the workflow stays no-op until the maintainer wires up
-  #     CRATES_IO_TOKEN. Depends on `build-cli`: if the CLI binary
+  #     `ENABLE_CRATES_PUBLISH` repo variable so first-time setup is opt-in.
+  #     The credential is crates.io Trusted Publishing (OIDC, nothing to
+  #     store) once the repository variable `CRATES_TRUSTED_PUBLISHING` is
+  #     `true` (set it after adding the trusted publisher on crates.io:
+  #     repository toarchkumar/mnemo, workflow release.yml, environment
+  #     crates-io), and the `CRATES_IO_TOKEN` secret until then. Cargo reads
+  #     the token from the environment, never from the command line.
+  #     Depends on `build-cli`: if the CLI binary
   #     compiles on every release target, the library source we're about
   #     to publish also compiles — that's the strongest sanity check we
   #     can do before pushing to a registry that doesn't allow takebacks.
@@ -325,20 +356,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     if: ${{ vars.ENABLE_CRATES_PUBLISH == 'true' }}
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/mnemo-engine
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         timeout-minutes: 10
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      # The build that verifies the package runs here, with no credential
+      # in the environment; the publish step below uploads only.
+      - name: Package and verify the crate (no credential)
+        timeout-minutes: 15
+        working-directory: mnemo
+        run: cargo package
+
+      - name: crates.io Trusted Publishing (OIDC)
+        id: auth
+        timeout-minutes: 10
+        if: ${{ vars.CRATES_TRUSTED_PUBLISHING == 'true' }}
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1
 
       - name: Publish core crate
         timeout-minutes: 10
         working-directory: mnemo
-        run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
+        run: cargo publish --no-verify
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CRATES_IO_TOKEN }}
 
   # === The mobile packages (MOBILE-1e) ===================================
   #
@@ -354,7 +406,7 @@ jobs:
     # publish job that fails makes its dependents skip, and a skipped job
     # isn't a failure, so the gate checks each result itself instead of
     # looking for 'failure' (RB-001.17).
-    needs: [create-release, build-cli, build-wheels, build-sdist, publish-crates, publish-pypi]
+    needs: [create-release, build-cli, build-wheels, build-sdist, attach, publish-crates, publish-pypi]
     # Runs whenever the run wasn't cancelled; the gate step below decides,
     # and fails loudly, so mobile never starts after a broken engine run.
     if: ${{ !cancelled() }}
@@ -376,6 +428,7 @@ jobs:
           BUILD_CLI: ${{ needs.build-cli.result }}
           BUILD_WHEELS: ${{ needs.build-wheels.result }}
           BUILD_SDIST: ${{ needs.build-sdist.result }}
+          ATTACH: ${{ needs.attach.result }}
           PUBLISH_CRATES: ${{ needs.publish-crates.result }}
           PUBLISH_PYPI: ${{ needs.publish-pypi.result }}
           ENABLE_CRATES: ${{ vars.ENABLE_CRATES_PUBLISH }}
@@ -391,21 +444,24 @@ jobs:
             check build-cli "$BUILD_CLI" success
             check build-wheels "$BUILD_WHEELS" success
             check build-sdist "$BUILD_SDIST" success
+            check attach "$ATTACH" success
             if [ "$ENABLE_CRATES" = true ]; then ok=success; else ok="success skipped"; fi
             check publish-crates "$PUBLISH_CRATES" "$ok"
             if [ "$ENABLE_PYPI" = true ]; then ok=success; else ok="success skipped"; fi
             check publish-pypi "$PUBLISH_PYPI" "$ok"
           else
             for pair in "create-release:$CREATE_RELEASE" "build-cli:$BUILD_CLI" \
-                "build-wheels:$BUILD_WHEELS" "build-sdist:$BUILD_SDIST" \
+                "build-wheels:$BUILD_WHEELS" "build-sdist:$BUILD_SDIST" "attach:$ATTACH" \
                 "publish-crates:$PUBLISH_CRATES" "publish-pypi:$PUBLISH_PYPI"; do
               check "${pair%%:*}" "${pair#*:}" "skipped success"
             done
           fi
           [ "$bad" = 0 ] || { echo "::error::an engine job didn't succeed: no mobile release"; exit 1; }
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Version and mode
         timeout-minutes: 10
@@ -432,30 +488,36 @@ jobs:
           fi
           echo "version=$engine" >> "$GITHUB_OUTPUT"
 
-  # --- iOS: the XCFramework zip on the GitHub Release, then the
-  #     toarchkumar/mnemo-swift mirror (Package.swift pointing at that zip
-  #     with its checksum, the generated Swift and the Swift layer's
-  #     sources), committed and tagged with the bare version for SwiftPM.
-  release-swift:
-    name: mobile (Swift package)
+  # --- iOS, build: the XCFramework zip and its checksum, the mnemo-swift
+  #     release tree (Package.swift pointing at the zip on the GitHub
+  #     Release, the generated Swift and the Swift layer's sources), and an
+  #     SPM consumer on the simulator against that tree with the local zip.
+  #     No secrets, read-only token.
+  build-swift:
+    name: mobile (Swift build)
     needs: mobile-prepare
     if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
     runs-on: macos-latest
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.mobile-prepare.outputs.version }}
-      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+    outputs:
+      zip: ${{ steps.zip.outputs.zip }}
+      checksum: ${{ steps.zip.outputs.checksum }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable (Apple targets)
         timeout-minutes: 10
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-darwin
 
       - name: Build the XCFramework and the Swift bindings
+        id: zip
         timeout-minutes: 20
         working-directory: mnemo/bindings/swift
         run: |
@@ -467,6 +529,8 @@ jobs:
           CHECKSUM=$(swift package compute-checksum "build/$ZIP")
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           echo "CHECKSUM=$CHECKSUM" >> "$GITHUB_ENV"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
           {
             echo "### Swift package $VERSION"
             echo "- \`$ZIP\`: $(stat -f %z "build/$ZIP") bytes, checksum \`$CHECKSUM\`"
@@ -481,8 +545,9 @@ jobs:
         run: |
           scripts/make-release-package.sh "$VERSION" \
             "https://github.com/${{ github.repository }}/releases/download/v$VERSION/$ZIP" \
-            "$CHECKSUM" "$RUNNER_TEMP/mnemo-swift"
-          cat "$RUNNER_TEMP/mnemo-swift/Package.swift"
+            "$CHECKSUM" "$RUNNER_TEMP/swift-package/mnemo-swift"
+          cp "build/$ZIP" "$RUNNER_TEMP/swift-package/"
+          cat "$RUNNER_TEMP/swift-package/mnemo-swift/Package.swift"
 
       # The consumer resolves the release tree with the binary target
       # pointed at the local zip (after checking its checksum against the
@@ -490,37 +555,84 @@ jobs:
       - name: SPM consumer on the iOS simulator
         timeout-minutes: 15
         working-directory: mnemo/bindings/swift
-        run: scripts/check-release-package.sh "$RUNNER_TEMP/mnemo-swift" "build/$ZIP"
+        run: scripts/check-release-package.sh "$RUNNER_TEMP/swift-package/mnemo-swift" "build/$ZIP"
+
+      - name: Upload the zip and the release tree for the publish job
+        timeout-minutes: 10
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: swift-package
+          path: ${{ runner.temp }}/swift-package/
+
+  # --- iOS, publish: attach the zip to the GitHub Release, push and tag the
+  #     toarchkumar/mnemo-swift mirror, then resolve the published package
+  #     from GitHub and build it. Builds nothing from this repository's
+  #     sources. The mirror credential is `MNEMO_SWIFT_DEPLOY_KEY` (an SSH
+  #     deploy key with write access) when it's set, and the
+  #     `MNEMO_SWIFT_TOKEN` personal token until then; only the push step
+  #     sees it.
+  publish-swift:
+    name: mobile (Swift publish)
+    needs: [mobile-prepare, build-swift]
+    if: ${{ !cancelled() && needs.build-swift.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    environment:
+      name: mnemo-swift
+      url: https://github.com/toarchkumar/mnemo-swift
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.mobile-prepare.outputs.version }}
+      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+      ZIP: ${{ needs.build-swift.outputs.zip }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        timeout-minutes: 10
+        with:
+          name: swift-package
+          path: ${{ runner.temp }}/swift-package
 
       - name: Attach the zip to the GitHub Release
         timeout-minutes: 10
         if: env.DRY_RUN == 'false'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          files: mnemo/bindings/swift/build/${{ env.ZIP }}
+          files: ${{ runner.temp }}/swift-package/${{ env.ZIP }}
 
-      - name: Upload the zip (dry run)
-        timeout-minutes: 10
-        if: env.DRY_RUN == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: swift-package-dry-run
-          path: |
-            mnemo/bindings/swift/build/${{ env.ZIP }}
-            ${{ runner.temp }}/mnemo-swift/
-
-      # A dry run proves the token can push: a dry-run-<version> branch,
-      # pushed and deleted. On an empty repository the first branch pushed
-      # becomes the default branch, which GitHub won't delete, so there it
-      # runs `git push --dry-run` instead: that authenticates against the
-      # push endpoint and changes nothing. A tag pushes main and tags it.
+      # A dry run proves the credential can push: a dry-run-<version>
+      # branch, pushed and deleted. On an empty repository the first branch
+      # pushed becomes the default branch, which GitHub won't delete, so
+      # there it runs `git push --dry-run` instead: that authenticates
+      # against the push endpoint and changes nothing. A tag pushes main and
+      # tags it.
       - name: Push to mnemo-swift
         timeout-minutes: 10
         env:
           TOKEN: ${{ secrets.MNEMO_SWIFT_TOKEN }}
+          DEPLOY_KEY: ${{ secrets.MNEMO_SWIFT_DEPLOY_KEY }}
         run: |
           set -euo pipefail
-          REMOTE="https://x-access-token:${TOKEN}@github.com/toarchkumar/mnemo-swift.git"
+          trap 'rm -rf "$RUNNER_TEMP/ssh"' EXIT
+          if [ -n "$DEPLOY_KEY" ]; then
+            # GitHub's published ed25519 host key, so nothing is trusted on
+            # first use.
+            KEYDIR="$RUNNER_TEMP/ssh"
+            mkdir -p "$KEYDIR" && chmod 700 "$KEYDIR"
+            printf '%s\n' "$DEPLOY_KEY" > "$KEYDIR/key" && chmod 600 "$KEYDIR/key"
+            echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$KEYDIR/known_hosts"
+            export GIT_SSH_COMMAND="ssh -i $KEYDIR/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$KEYDIR/known_hosts -o StrictHostKeyChecking=yes"
+            REMOTE="git@github.com:toarchkumar/mnemo-swift.git"
+            echo "pushing with the deploy key"
+          else
+            REMOTE="https://x-access-token:${TOKEN}@github.com/toarchkumar/mnemo-swift.git"
+            echo "pushing with MNEMO_SWIFT_TOKEN (no deploy key set)"
+          fi
           WORK="$RUNNER_TEMP/mirror"
           git init -q "$WORK"
           cd "$WORK"
@@ -535,7 +647,7 @@ jobs:
             EMPTY=true
           fi
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -R "$RUNNER_TEMP/mnemo-swift/." .
+          cp -R "$RUNNER_TEMP/swift-package/mnemo-swift/." .
           git add -A
           git commit -q -m "MNemo $VERSION (from ${{ github.repository }}@${GITHUB_SHA::12})"
           git log --stat -1 | head -20
@@ -592,49 +704,46 @@ jobs:
         working-directory: mnemo/bindings/swift
         run: scripts/check-published-package.sh build "$RUNNER_TEMP/published-consumer"
 
-  # --- Android: the AAR on Maven Central (published and released), and
-  #     on the GitHub Release. The dry run uploads a USER_MANAGED
-  #     deployment, waits for validation and drops it, then checks a
-  #     Gradle consumer against the signed artifact in mavenLocal().
-  release-android:
-    name: mobile (Android library)
+  # --- Android, build: the native libraries (cargo-ndk), the 16 KB and size
+  #     gates, the JVM tests, the AAR, an unsigned publishToMavenLocal with
+  #     the package check, and a Gradle consumer from mavenLocal(). No
+  #     secrets, read-only token. It hands the generated directory (the
+  #     .so files, the Kotlin bindings, the host library) to the publish job.
+  build-android:
+    name: mobile (Android build)
     needs: mobile-prepare
     if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.mobile-prepare.outputs.version }}
-      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
       CARGO_NDK_VERSION: 4.1.2
-      # The Maven secrets, mapped to the plugin's properties.
-      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
-      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         timeout-minutes: 10
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable (Android targets)
         timeout-minutes: 10
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: aarch64-linux-android, x86_64-linux-android
 
       - name: Install JDK 17
         timeout-minutes: 10
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Validate the Gradle wrappers
         timeout-minutes: 10
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Set up Gradle (caching; the committed wrapper runs Gradle 9.6.1)
         timeout-minutes: 10
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Install cargo-ndk
         timeout-minutes: 10
@@ -655,19 +764,14 @@ jobs:
         working-directory: mnemo/bindings/kotlin
         run: python3 scripts/check-elf.py "$READELF" --max-bytes 5242880 generated/jniLibs/*/libmnemo_uniffi.so
 
-      - name: The AAR, and a signed publishToMavenLocal
+      - name: The AAR, and an unsigned publishToMavenLocal
         timeout-minutes: 20
         working-directory: mnemo/bindings/kotlin
         run: |
           set -euo pipefail
           ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleRelease publishToMavenLocal
-          M2="$HOME/.m2/repository/io/github/toarchkumar/mnemo-android/$VERSION"
-          ls -l "$M2"
-          for f in "$M2"/*.{aar,pom,module,jar}; do
-            [ -f "$f.asc" ] || { echo "::error::no signature for $f"; exit 1; }
-          done
+          ls -l "$HOME/.m2/repository/io/github/toarchkumar/mnemo-android/$VERSION"
           python3 scripts/check-package.py "$READELF"
-          cp build/outputs/aar/mnemo-android-release.aar "build/mnemo-android-$VERSION.aar"
 
       - name: Gradle consumer from mavenLocal()
         timeout-minutes: 15
@@ -676,6 +780,79 @@ jobs:
           ./gradlew --no-daemon -p release-check test printMnemoArtifact \
             -PmnemoVersion="$VERSION" -Pjna.library.path="$PWD/generated/host"
 
+      - name: Upload the generated directory for the publish job
+        timeout-minutes: 10
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-generated
+          path: mnemo/bindings/kotlin/generated/
+
+  # --- Android, publish: sign the AAR built from the build job's native
+  #     libraries and bindings (Gradle only: no cargo, no NDK build), then
+  #     Maven Central (a tag publishes and releases; the dry run uploads a
+  #     USER_MANAGED deployment, waits for validation and drops it) and the
+  #     AAR on the GitHub Release. The signing key and the Central token
+  #     are passed only to the steps that sign or upload.
+  publish-android:
+    name: mobile (Android publish)
+    needs: [mobile-prepare, build-android]
+    if: ${{ !cancelled() && needs.build-android.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: maven-central
+      url: https://central.sonatype.com/artifact/io.github.toarchkumar/mnemo-android
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.mobile-prepare.outputs.version }}
+      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - name: Install JDK 17
+        timeout-minutes: 10
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Validate the Gradle wrappers
+        timeout-minutes: 10
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        timeout-minutes: 10
+        with:
+          name: android-generated
+          path: mnemo/bindings/kotlin/generated
+
+      - name: The NDK tools the build job used
+        timeout-minutes: 10
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "READELF=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" >> "$GITHUB_ENV"
+
+      - name: A signed publishToMavenLocal
+        timeout-minutes: 20
+        working-directory: mnemo/bindings/kotlin
+        env:
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --stacktrace assembleRelease publishToMavenLocal
+          M2="$HOME/.m2/repository/io/github/toarchkumar/mnemo-android/$VERSION"
+          ls -l "$M2"
+          for f in "$M2"/*.{aar,pom,module,jar}; do
+            [ -f "$f.asc" ] || { echo "::error::no signature for $f"; exit 1; }
+          done
+          python3 scripts/check-package.py "$READELF"
+          cp build/outputs/aar/mnemo-android-release.aar "build/mnemo-android-$VERSION.aar"
+
       - name: Maven Central (dry run, validated then dropped)
         timeout-minutes: 15
         if: env.DRY_RUN == 'true'
@@ -683,25 +860,34 @@ jobs:
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
         run: scripts/central-dry-run.sh
 
       - name: Maven Central (publish and release)
         timeout-minutes: 15
         if: env.DRY_RUN == 'false'
         working-directory: mnemo/bindings/kotlin
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}
         run: ./gradlew --no-daemon --stacktrace publishAndReleaseToMavenCentral
 
       - name: Attach the AAR to the GitHub Release
         timeout-minutes: 10
         if: env.DRY_RUN == 'false'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: mnemo/bindings/kotlin/build/mnemo-android-${{ env.VERSION }}.aar
 
       - name: Upload the AAR (dry run)
         timeout-minutes: 10
         if: env.DRY_RUN == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-library-dry-run
           path: mnemo/bindings/kotlin/build/mnemo-android-${{ env.VERSION }}.aar

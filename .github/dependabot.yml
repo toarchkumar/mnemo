@@ -1,0 +1,12 @@
+# Keeps the commit-pinned GitHub Actions current (SEC-2): Dependabot opens
+# a PR that moves each `uses: owner/repo@<sha> # <ref>` to the newest
+# commit of its ref, weekly.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

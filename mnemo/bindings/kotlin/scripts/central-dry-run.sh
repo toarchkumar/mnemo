@@ -14,7 +14,10 @@ set -euo pipefail
 
 : "${MAVEN_CENTRAL_USERNAME:?}" "${MAVEN_CENTRAL_PASSWORD:?}"
 API=https://central.sonatype.com/api/v1/publisher
-AUTH="Authorization: Bearer $(printf '%s:%s' "$MAVEN_CENTRAL_USERNAME" "$MAVEN_CENTRAL_PASSWORD" | base64 | tr -d '\n')"
+B64=$(printf '%s:%s' "$MAVEN_CENTRAL_USERNAME" "$MAVEN_CENTRAL_PASSWORD" | base64 | tr -d '\n')
+# A derived credential GitHub's log masking doesn't know: mask it too.
+if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::add-mask::$B64"; fi
+AUTH="Authorization: Bearer $B64"
 LOG="$(mktemp)"
 trap 'rm -f "$LOG" "$LOG.body"' EXIT
 
