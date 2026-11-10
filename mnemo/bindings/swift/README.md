@@ -1,13 +1,31 @@
 # MNemo for Swift
 
 An encrypted, single-file agent memory for iOS and macOS apps, built on the
-`mnemo-uniffi` binding (MOBILE-1). This is the development package. Releases
-are published to `toarchkumar/mnemo-swift` by CI (MOBILE-1e), and nobody
+`mnemo-uniffi` binding (MOBILE-1). This directory is the development
+package. Releases go to
+[`toarchkumar/mnemo-swift`](https://github.com/toarchkumar/mnemo-swift):
+on each tag, CI publishes there a `Package.swift` that points at the
+XCFramework zip on this repo's GitHub Release, plus these sources. Nobody
 edits that repo by hand.
 
 - **iOS 15 / macOS 12 or later**, Swift tools 6.0 (Xcode 16 or later).
 - One product, `Mnemo`. It holds `MnemoStore`, `MnemoKeychain`, and the
   generated types (`MemoryRecord`, `RecallOptions`, `MnemoError`, ...).
+
+## Install
+
+In Xcode, choose **File > Add Package Dependencies...**, enter
+`https://github.com/toarchkumar/mnemo-swift`, and add the `Mnemo`
+product. Or, in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.0"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: [.product(name: "Mnemo", package: "mnemo-swift")]),
+]
+```
 
 ## Building
 

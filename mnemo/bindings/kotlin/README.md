@@ -1,9 +1,9 @@
 # MNemo for Android
 
 An encrypted, single-file agent memory for Android apps, built on the
-`mnemo-uniffi` binding (MOBILE-1). This is the development package. It will
-be published to Maven Central as **`io.github.toarchkumar:mnemo-android`**
-(MOBILE-1e).
+`mnemo-uniffi` binding (MOBILE-1). This directory is the development
+package. Releases are on Maven Central as
+**`io.github.toarchkumar:mnemo-android`**.
 
 - **Android API 24 (7.0) or later**, on `arm64-v8a` and `x86_64` (the
   emulator). The native library is linked for 16 KB pages.
@@ -13,9 +13,23 @@ be published to Maven Central as **`io.github.toarchkumar:mnemo-android`**
 - **One native dependency:** JNA 5.19.1 (`net.java.dev.jna:jna:5.19.1@aar`),
   pinned exactly. See [NOTICE](NOTICE).
 
+## Install
+
+From Maven Central (`mavenCentral()` in your repositories):
+
 ```kotlin
 dependencies {
-    implementation("io.github.toarchkumar:mnemo-android:0.11.0")
+    implementation("io.github.toarchkumar:mnemo-android:0.12.0")
+}
+```
+
+Then keep the app to the ABIs MNemo ships (see [ABIs](#abis)):
+
+```kotlin
+android {
+    defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
 }
 ```
 

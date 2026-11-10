@@ -8,136 +8,209 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-09
+
+The first mobile release, with one breaking change in Rust.
+- **The Swift package** (iOS 15 and later), from
+  [`toarchkumar/mnemo-swift`](https://github.com/toarchkumar/mnemo-swift).
+- **The Android library** `io.github.toarchkumar:mnemo-android` (API 24
+  and later), on Maven Central.
+- Both are built on a new UniFFI binding, `mnemo-uniffi`. The engine (the
+  crate and the Python package) ships at the same version.
+- **Upgrading from Rust:** `Mnemo::close` now takes `self`; see Changed.
+  The on-disk format is unchanged (v9; v8 files still open and write).
+
 ### Changed
 
-- **`Mnemo::close` takes `self`** (it took `&mut self`). It flushes as
-  before (nothing on a read-only handle), then drops the handle, so the
-  file and its OS lock are released when it returns and the same file can
-  be reopened at once. Using a handle after `close` is now a compile error
-  rather than a runtime `Locked` on the next open. Code that keeps a
-  handle in a struct and closes it from `&mut self` stores an
-  `Option<Mnemo>` and calls `self.db.take()` (see the `close` docs). If
-  the flush fails, the handle is still dropped. `Drop` alone still
-  doesn't flush. Python's `close()` already released the lock and is
-  unchanged. Node's `close()` now releases it too, and the Node methods
-  throw "database is closed" afterwards (`len()` and `snapshots()` now
-  return errors instead of values).
+- **`Mnemo::close` takes `self` (breaking).** It took `&mut self`.
+  - It flushes as before (nothing on a read-only handle), then drops the
+    handle. The file and its OS lock are released when it returns, so the
+    same file can be reopened at once.
+  - Using a handle after `close` is now a compile error, rather than a
+    runtime `Locked` on the next open.
+  - Code that keeps a handle in a struct and closes it from `&mut self`
+    stores an `Option<Mnemo>` and calls `self.db.take()` (see the `close`
+    docs).
+  - If the flush fails, the handle is still dropped. `Drop` alone still
+    doesn't flush.
+  - **Python:** `close()` already released the lock, and is unchanged.
+  - **Node:** `close()` now releases the lock too, and the Node methods
+    throw "database is closed" afterwards (`len()` and `snapshots()` now
+    return errors instead of values).
 - Internal: `store.rs` is split into private submodules under
   `mnemo/src/store/` (REFAC-1). No public API change.
 
-### Added
+### Added: the Swift package (iOS 15 / macOS 12 or later)
 
-- **The mobile API (MOBILE-1d.2):**
-  - **Essence writes** in `mnemo-uniffi` and both store layers:
-    `essence_add`, `essence_update`, `essence_resolve`, `essence_remove`
-    and `essence_append_timeline`. That's `essenceAdd(section, text,
-    scope:)` and so on in Swift and Kotlin, with a new `EssenceSection`
-    enum for the seven editable sections; ids are strings. With an
-    embedder set, the text is embedded before the handle is locked.
-  - **The index:** `build_index` (`buildIndex()`, returning an
-    `IndexInfo`) and `has_index` (`hasIndex()`). On a v9 file below
-    20,000 facts, `build_index` builds nothing and reports
-    `partitions: 0`, as the engine does.
-  - **The engine** gains `Mnemo::essence_add_with_vector` and
-    `Mnemo::essence_append_timeline_with_vector`, which take the item's
-    vector from the caller (the binding's embed-then-lock split, like
-    `ingest_thread_with_vectors`).
-- **Swift `MnemoStore` closes after calls made in the background.**
-  - It now tracks whether the app is active (`didEnterBackground`,
-    `willEnterForeground`, `didBecomeActive`, plus `UIApplication`'s state
-    at start).
-  - While the app isn't active, each call runs inside an expiring
-    activity and flushes and closes the file before the activity ends. So
-    work the app does in the background (or an app launched into the
-    background) can't leave the lock held into suspension (`0xdead10cc`).
-  - Calls made while the app is active keep the file open, as before.
-  - The store's methods that touch the file are now `async`; callers
-    already `await` the actor.
-
-- **`Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors`**
-  split `ingest_thread` in two, so a caller can embed between the calls
-  without holding the handle (the UniFFI binding does). The first returns
-  the texts to embed; the second applies the caller's vectors, planning
-  again and refusing a count that no longer matches.
-- **`mnemo-uniffi`** (MOBILE-1a, `mnemo/bindings/uniffi/`, not published
-  yet): the UniFFI binding that the Swift and Kotlin packages are built
-  from. It has a curated API, a foreign-callback embedder that's never
-  called with the handle locked, mobile defaults (a 16 MiB vector budget
-  and a 2 MiB page cache), and passphrase export and import for moving a
-  key-bound file between devices. It needs Rust 1.82 or later; the engine
-  stays at 1.75.
-- **The Swift package** (MOBILE-1b, `mnemo/bindings/swift/`, not
-  published yet; iOS 15 and macOS 12 or later):
-  - `scripts/build-xcframework.sh` builds `MnemoFFI.xcframework` (iOS
-    device, iOS simulator, macOS arm64) and generates the Swift bindings.
-  - `actor MnemoStore` opens lazily. It flushes and closes the file when
-    the app enters the background or terminates, and reopens on the next
-    call; a call that races the close never sees `Closed`. Files live in
-    `Application Support/mnemo/`, protected until first unlock, and are
-    excluded from backup under the default key policy.
-  - `MnemoKeychain` stores keys with `KeyPolicy.deviceOnly` (the default)
-    or `.iCloudSynced`, with an optional access group. Each key's id is
-    stamped on its file as an extended attribute. A missing key gives
+- **Install:** `.package(url: "https://github.com/toarchkumar/mnemo-swift",
+  from: "0.12.0")`, product `Mnemo`.
+  - The binary is `MnemoFFI.xcframework` (iOS device, iOS simulator,
+    macOS arm64), attached to this release as
+    `MnemoFFI-0.12.0.xcframework.zip`, with its checksum in the mirror's
+    `Package.swift`.
+  - MNemo adds about 2.6 MB to a stripped arm64 app binary.
+- **`actor MnemoStore`**: async calls, serialized, never on the main
+  thread. It opens lazily.
+- **Background rules.** iOS kills an app suspended while holding a file
+  lock in a shared container (`0xdead10cc`), so `MnemoStore` never lets
+  that happen:
+  - on `didEnterBackground` and `willTerminate`, it flushes and closes
+    the file inside an expiring activity;
+  - while the app isn't active (it also reads `UIApplication`'s state at
+    start, for apps launched into the background), every call runs inside
+    its own expiring activity and closes the file again before it ends;
+  - once the app is active again, the file stays open between calls;
+  - no call fails with `Closed` because of a transition;
+  - **App extensions** get no `UIApplication` notifications, so they're
+    treated as active: close the store when an extension's work ends.
+- **App Groups:** `MnemoStoreConfiguration.appGroupDirectory(_:)` puts the
+  file in a shared container.
+  - The background rules above are what make that safe, for one process
+    at a time.
+  - App Groups work with a free Apple ID (a Personal Team); the group id
+    must be unique to the team.
+- **Files** live in `Application Support/mnemo/`, protected
+  `completeUntilFirstUserAuthentication` (the directory and the file).
+- **Keys:** `MnemoKeychain` stores one random 32-byte key per file.
+  - **`KeyPolicy.deviceOnly` is the default:** the key never leaves the
+    device, and the file is excluded from backups.
+  - **`.iCloudSynced` is opt-in:** the key syncs through iCloud Keychain,
+    and the file stays in backups.
+  - Each key's id is stamped on its file as an extended attribute, with a
+    try-each-key fallback. A missing key gives
     `MnemoStoreError.keyMissing`.
-  - `exportWithPassphrase` and `importWithPassphrase` move a store
-    between devices.
-- CI: a `swift` job runs `swift test` on macOS and `xcodebuild test` on an
-  iOS simulator.
-- **The Kotlin package** (MOBILE-1c, `mnemo/bindings/kotlin/`, to be
-  published as `io.github.toarchkumar:mnemo-android`, not published yet;
-  Android API 24 or later):
-  - `scripts/build-native.sh` builds `libmnemo_uniffi.so` for `arm64-v8a`
-    and `x86_64` with cargo-ndk, linked for 16 KB pages, and generates the
-    Kotlin bindings. The Gradle library packs them into an AAR with JNA
-    5.19.1 (pinned exactly) as its one native dependency.
-  - `MnemoStore` has suspend functions on `Dispatchers.IO` and opens
-    lazily. It flushes on `ProcessLifecycleOwner` `ON_STOP` and keeps the
-    file open, and it reopens transparently after `close()`. Files live in
-    `noBackupFilesDir/mnemo/`.
-  - `MnemoKeystore` wraps each file's 32-byte key with a non-exportable
-    AES-256-GCM key in the Android Keystore. Each key's id is stamped on
-    its file as an extended attribute (API 26 and later), with a
-    try-each-key fallback, and a missing key gives
-    `MnemoStoreException.KeyMissing`. It doesn't use
-    `androidx.security:security-crypto`.
-  - `exportWithPassphrase` and `importWithPassphrase` move a store
-    between devices.
-  - In Kotlin, the engine's `close` is `MnemoDb.closeFile()`, because
-    `close()` is `AutoCloseable`'s. Error fields named `message` are
-    `reason`, because Kotlin's `Throwable.message` already uses the name.
-- CI: a `kotlin` job builds the `.so` files and runs the JVM host tests on
-  every PR. It also builds the AAR and checks 16 KB alignment (every
-  `LOAD` and the RELRO rule), gates each `.so` at 5 MB, and runs a
-  `publishToMavenLocal` dry run with a POM check. A new
-  `android-emulator` workflow runs the instrumented tests nightly and on
-  tags, on API 35 `x86_64` images with 4 KB and 16 KB pages. A manual
-  `android-publish` workflow runs a signed dry run with the Maven Central
-  secrets.
-- CI: `cargo deny --workspace` now checks every workspace member, which
-  adds per-crate license exceptions (MPL-2.0 for UniFFI; ISC for
-  `libloading`, via the experimental Node binding). New jobs: an Android
-  `x86_64` build, a release build of the binding on each mobile target
-  with a 5 MB stripped-size gate, and `msrv-uniffi`.
-- **The sample apps** (MOBILE-1d, `examples/mobile/`), built against the
-  local packages:
-  - **iOS (SwiftUI, XcodeGen):** a notes demo using Apple's built-in
-    `NLEmbedding` sentence embedding; a Benchmark screen with the
-    `device_budget` cells at 1K and 10K and JSON export; and a background
-    test that writes to a store in an App Group container, so a device run
-    can check for `0xdead10cc`. It also shows the file's protection class.
-  - **Android (Compose):** the same demo with a labelled demo embedder, the
-    Benchmark screen, and a self-test for the R8-minified release build.
-  - `examples/mobile/README.md` is the run sheet for the on-device checks.
-- CI: the `swift` job builds the iOS sample for the simulator and reports
-  MNemo's stripped binary-size delta. The `kotlin` job builds the Android
-  sample's release APK with R8, runs `zipalign -c -P 16`, and reports the
-  APK's size. The `android-emulator` workflow installs that APK and runs
-  its self-test.
-- **Gradle wrappers** in `mnemo/bindings/kotlin/` and
-  `examples/mobile/android/`. They were generated by Gradle 9.6.1 in CI;
-  the jar matches Gradle's published SHA-256, and `distributionSha256Sum`
-  pins the distribution. CI validates them (`wrapper-validation`) and builds
-  with `./gradlew`.
+- **Moving a store between devices:** `exportWithPassphrase` and
+  `importWithPassphrase`.
+
+### Added: the Android library (`io.github.toarchkumar:mnemo-android`, API 24 or later)
+
+- **Install:**
+  `implementation("io.github.toarchkumar:mnemo-android:0.12.0")`, from
+  Maven Central.
+- **Native libraries:** `libmnemo_uniffi.so` for `arm64-v8a` (2.56 MB)
+  and `x86_64` (2.99 MB), stripped, and linked for 16 KB pages (every
+  `LOAD` 16 KB-aligned).
+- **Set `abiFilters` to `arm64-v8a` and `x86_64`:**
+
+  ```kotlin
+  android { defaultConfig { ndk { abiFilters += listOf("arm64-v8a", "x86_64") } } }
+  ```
+
+  JNA's AAR brings its dispatch library for five more ABIs, where an app
+  would install and then fail to load MNemo.
+- **JNA 5.19.1** (`net.java.dev.jna:jna:5.19.1@aar`) is the library's one
+  native dependency, pinned exactly.
+  - Its licence (Apache-2.0 or LGPL-2.1) is in the package's NOTICE.
+  - Its R8 rules ship in the AAR's `consumer-rules.pro`, so a minified
+    app needs none of its own.
+- **`MnemoStore`:**
+  - suspend functions on `Dispatchers.IO`; it opens lazily;
+  - a flush on `ProcessLifecycleOwner` `ON_STOP`, keeping the file open;
+    it reopens transparently after `close()`;
+  - files in `noBackupFilesDir/mnemo/`.
+- **`MnemoKeystore`:**
+  - wraps each file's 32-byte key with a non-exportable AES-256-GCM key
+    in the Android Keystore;
+  - keys are device-only;
+  - each key's id is stamped on its file as an extended attribute (API 26
+    and later), with a try-each-key fallback;
+  - a missing key gives `MnemoStoreException.KeyMissing`;
+  - it doesn't use `androidx.security:security-crypto`.
+- **Moving a store between devices:** `exportWithPassphrase` and
+  `importWithPassphrase`.
+- **Names in Kotlin:** the engine's `close` is `MnemoDb.closeFile()`,
+  because `close()` is `AutoCloseable`'s. Error fields named `message` are
+  `reason`, because Kotlin's `Throwable.message` already uses the name.
+
+### Added: the binding and the engine
+
+- **`mnemo-uniffi`** (`mnemo/bindings/uniffi/`, not published on its own):
+  the UniFFI binding both packages are built from.
+  - A curated API.
+  - A foreign-callback embedder that's never called with the handle
+    locked.
+  - Mobile defaults: a 16 MiB vector budget and a 2 MiB page cache.
+  - Passphrase export and import.
+  - It needs Rust 1.82 or later; the engine stays at 1.75.
+- **The index:** `build_index` (`buildIndex()`, returning an `IndexInfo`)
+  and `has_index` (`hasIndex()`). On a v9 file below 20,000 facts,
+  `build_index` builds nothing and reports `partitions: 0`, because an
+  exact scan is faster there.
+- **The essence writes:** `essence_add`, `essence_update`,
+  `essence_resolve`, `essence_remove` and `essence_append_timeline`.
+  - That's `essenceAdd(section, text, scope:)` and so on in Swift and
+    Kotlin, with an `EssenceSection` enum for the seven editable sections.
+  - Ids are strings.
+  - With an embedder set, the text is embedded before the handle is
+    locked.
+- **New engine methods** for that embed-then-lock split:
+  - `Mnemo::ingest_thread_texts` and `Mnemo::ingest_thread_with_vectors`
+    split `ingest_thread` in two. The first returns the texts to embed;
+    the second applies the caller's vectors, planning again and refusing
+    a count that no longer matches.
+  - `Mnemo::essence_add_with_vector` and
+    `Mnemo::essence_append_timeline_with_vector` take an item's vector
+    from the caller.
+
+### Measured on devices
+
+An iPhone (iPhone18,3, iOS 27.0.1), running the sample app's Benchmark on
+a Release build. These are the `device_budget` cells at 10K memories, with
+384-dim vectors and raw-key v9 files. The full numbers are in
+`test/scripts/perf_v0.5.0.json` (`device_budget_mobile`).
+
+| at 10K | iPhone | M1 Pro (v0.11.0) |
+|---|---|---|
+| disk per memory | 1.33 KB | 1.33 KB |
+| memory for one open handle | 7.3 MB (footprint) | 17.2 MB (RSS) |
+| open (raw key) | 2.1 ms | 2.9 ms |
+| **first recall on a fresh handle** | **7.1 ms** | 8.8 ms |
+| warm recall, median / p95 | 1.72 / 1.84 ms | 2.20 / 2.38 ms |
+| durable single write | 12.0 ms | 14.8 ms |
+| batch of 100 writes | 17.4 ms | 20.0 ms |
+
+- **First recall on a fresh 10K handle is about 7 ms on the iPhone**, over
+  the 5 ms target; recall is then 1.7 ms warm. Most of the first recall is
+  decrypting the vector column, and PERF-2 works on it.
+- On iOS, closing a store for the background takes 12.8 ms, and the next
+  call's reopen 10.2 ms.
+- **The iOS release checks passed on the device:**
+  - no `0xdead10cc` with the store in an App Group container, both when
+    the app's work stops in the background and when it keeps writing;
+  - the protection class is `completeUntilFirstUserAuthentication` on
+    the file and its directory.
+- **Android:** the emulator only (4 KB and 16 KB page images); no device
+  run yet.
+
+### Added: samples, CI and releasing
+
+- **The sample apps** (`examples/mobile/`), built against the local
+  packages:
+  - **iOS (SwiftUI, XcodeGen):** a notes demo on Apple's `NLEmbedding`
+    (with a labelled fallback where its model isn't on the device); the
+    Benchmark screen; and the background test, in two modes, with the
+    protection class shown.
+  - **Android (Compose):** the same demo with a labelled demo embedder,
+    the Benchmark, and a self-test for the R8-minified release build.
+  - `examples/mobile/README.md` is the run sheet for the device checks.
+- **CI:**
+  - a `swift` job: `swift test` on macOS, the TestHost suite on an iOS
+    simulator, the iOS sample, and the size report;
+  - a `kotlin` job: the `.so` files with 16 KB and 5 MB gates, the JVM
+    tests, the AAR, `publishToMavenLocal` with a POM check, and the
+    Android sample's R8 release APK with `zipalign -c -P 16`;
+  - an `android-emulator` workflow, nightly and on tags: the instrumented
+    tests and the sample's self-test, on API 35 `x86_64` at 4 KB and 16 KB
+    pages, failing if no tests ran;
+  - `msrv-uniffi`, mobile target builds, and `cargo deny --workspace`
+    (MPL-2.0 for UniFFI, ISC for `libloading`).
+  - **Gradle wrappers** (Gradle 9.6.1, checksums pinned) are validated in
+    CI.
+- **Releasing:**
+  - `release.yml` now publishes the Swift package and the Android library
+    after the engine;
+  - a manual run is a dry run that publishes nothing;
+  - `RELEASING.md` is the checklist, with the credential renewal dates.
 
 ## [0.11.0] — 2026-11-08
 
@@ -2801,7 +2874,9 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/toarchkumar/mnemo/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/toarchkumar/mnemo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/toarchkumar/mnemo/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/toarchkumar/mnemo/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/toarchkumar/mnemo/compare/v0.8.1...v0.9.0
