@@ -67,6 +67,33 @@ import UIKit
         try await store.close()
     }
 
+    @Test func aBackgroundCloseIsNotDelayedByAnEmbedInFlight() async throws {
+        let keys = MemoryKeyStore()
+        let slow = SlowEmbedder(seconds: 2)
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "bgembed", dimensions: 32, directory: try scratchDirectory()),
+            keyStore: keys, embedder: slow)
+        await post(UIApplication.didBecomeActiveNotification)
+        try await store.remember("open the file", vector: WordEmbedder().vector(for: "open the file"))
+        let closesBefore = await store.backgroundCloses
+        let writer = Task { try await store.rememberText("embedding while the app leaves") }
+        #expect(try await eventually(5) { slow.started })
+
+        let start = Date()
+        await post(UIApplication.didEnterBackgroundNotification)
+        #expect(try await eventually(5) { await store.backgroundCloses == closesBefore + 1 })
+        let waited = Date().timeIntervalSince(start)
+        #expect(waited < 1, "the background close waited \(waited) s for the embedder")
+        #expect(await store.isOpen == false)
+
+        // The write lands afterwards, as a call made in the background.
+        _ = try await writer.value
+        #expect(await store.isOpen == false)
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 2)
+        await post(UIApplication.willEnterForegroundNotification)
+        try await store.close()
+    }
+
     @Test func aCallInTheBackgroundReopensCompletesAndLeavesTheFileClosed() async throws {
         let keys = MemoryKeyStore()
         let store = try MnemoStore(

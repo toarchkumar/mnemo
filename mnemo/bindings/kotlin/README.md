@@ -160,8 +160,11 @@ class MyEmbedder : MnemoEmbedder {
 }
 ```
 
-- `embed` is called synchronously on the store's dispatcher thread, never
-  on the main thread, and never with the database locked.
+- `embed` runs on the store's dispatcher before the call takes the store's
+  lock, never on the main thread. The store isn't held while it runs, so
+  other calls go ahead, and `embed` may call back into the same store.
+  (Before v0.12.1 it ran under the store's lock, so a slow model held every
+  other call.)
 - If it throws anything, the call fails with `MnemoException.Embedder`,
   and nothing is written. Throw `EmbedderException.Failed(reason)` to
   choose the message.

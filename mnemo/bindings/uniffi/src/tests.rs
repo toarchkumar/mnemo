@@ -666,3 +666,150 @@ fn build_index_and_has_index() {
     assert_eq!(hits.len(), 10);
     db.close().unwrap();
 }
+
+fn turn(id: &str, content: &str) -> ThreadTurn {
+    ThreadTurn {
+        turn_id: id.into(),
+        role: "user".into(),
+        content: content.into(),
+        timestamp: None,
+    }
+}
+
+#[test]
+fn ingest_in_two_halves_plans_applies_and_refuses_a_stale_plan() {
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    let turns = vec![turn("t1", "alpha one"), turn("t2", "beta two")];
+    let texts = db.ingest_thread_plan("chat".into(), turns.clone()).unwrap();
+    assert_eq!(texts.len(), 2);
+    let vectors: Vec<Vec<f32>> = texts.iter().map(|t| mock_vector(t)).collect();
+
+    // Wrong shapes are refused before anything is written.
+    assert!(matches!(
+        db.ingest_thread_with_vectors(
+            "chat".into(),
+            turns.clone(),
+            texts.clone(),
+            vectors[..1].to_vec()
+        ),
+        Err(MnemoError::Invalid { .. })
+    ));
+    assert!(matches!(
+        db.ingest_thread_with_vectors(
+            "chat".into(),
+            turns.clone(),
+            texts.clone(),
+            vec![vec![1.0; 3]; 2]
+        ),
+        Err(MnemoError::DimensionMismatch {
+            expected: 4,
+            got: 3
+        })
+    ));
+
+    // The thread changed since the plan: None, nothing written.
+    db.ingest_thread_with_vectors(
+        "chat".into(),
+        vec![turns[0].clone()],
+        vec![texts[0].clone()],
+        vec![vectors[0].clone()],
+    )
+    .unwrap()
+    .expect("a fresh plan applies");
+    assert!(db
+        .ingest_thread_with_vectors("chat".into(), turns.clone(), texts.clone(), vectors.clone())
+        .unwrap()
+        .is_none());
+    assert_eq!(db.thread_export("chat".into()).unwrap().len(), 1);
+
+    // Plan again: only t2 is new.
+    let texts = db.ingest_thread_plan("chat".into(), turns.clone()).unwrap();
+    assert_eq!(texts.len(), 1);
+    let vectors = texts.iter().map(|t| mock_vector(t)).collect();
+    let report = db
+        .ingest_thread_with_vectors("chat".into(), turns.clone(), texts, vectors)
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.skipped_existing_turns, 1);
+    assert_eq!(db.thread_export("chat".into()).unwrap().len(), 2);
+    assert!(db
+        .ingest_thread_plan("chat".into(), turns)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn embed_texts_checks_like_the_text_calls() {
+    let m = mock();
+    let v = embed_texts(m.clone(), vec!["alpha".into(), "beta".into()], DIMS).unwrap();
+    assert_eq!(v, vec![mock_vector("alpha"), mock_vector("beta")]);
+    assert!(matches!(
+        embed_texts(m.clone(), vec!["alpha".into()], 8),
+        Err(MnemoError::DimensionMismatch {
+            expected: 8,
+            got: 4
+        })
+    ));
+    struct Short;
+    impl MnemoEmbedder for Short {
+        fn identity(&self) -> EmbedderIdentity {
+            EmbedderIdentity {
+                name: "short".into(),
+                dimensions: DIMS,
+                normalize: false,
+            }
+        }
+        fn embed(&self, _: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedderError> {
+            Err(EmbedderError::Failed {
+                message: "model not loaded".into(),
+            })
+        }
+    }
+    match embed_texts(Arc::new(Short), vec!["x".into()], DIMS) {
+        Err(MnemoError::Embedder { message }) => assert!(message.contains("model not loaded")),
+        other => panic!("expected Embedder, got {other:?}"),
+    }
+}
+
+#[test]
+fn essence_writes_with_the_callers_vector_never_call_the_embedder() {
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    let m = mock();
+    db.set_embedder(m.clone()).unwrap();
+    let before = m.calls.load(Ordering::SeqCst);
+    let id = db
+        .essence_add_with_vector(
+            EssenceScope::Project,
+            EssenceSection::Decisions,
+            "keep it small".into(),
+            None,
+            Some(mock_vector("keep")),
+        )
+        .unwrap();
+    db.essence_append_timeline_with_vector(
+        EssenceScope::Project,
+        "shipped".into(),
+        None,
+        Some(mock_vector("s")),
+    )
+    .unwrap();
+    assert_eq!(m.calls.load(Ordering::SeqCst), before, "no embed call");
+    let text = db.essence(EssenceScope::Project, 4096).unwrap();
+    assert!(
+        text.contains("keep it small") && text.contains("shipped"),
+        "{text}"
+    );
+    assert!(db.get(id).is_ok());
+    assert!(matches!(
+        db.essence_add_with_vector(
+            EssenceScope::Project,
+            EssenceSection::Decisions,
+            "x".into(),
+            None,
+            Some(vec![1.0; 3])
+        ),
+        Err(MnemoError::DimensionMismatch { .. })
+    ));
+}

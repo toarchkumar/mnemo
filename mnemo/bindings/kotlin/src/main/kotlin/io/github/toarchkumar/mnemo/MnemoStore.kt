@@ -24,6 +24,9 @@ import kotlinx.coroutines.withContext
  * - **Calls run on the dispatcher**, never on the caller's thread, one at a
  *   time. Each is a blocking call into the engine, so keep batches
  *   reasonable.
+ * - **The embedder runs before a call takes the store's lock**, on the
+ *   dispatcher: other calls go ahead while it runs, and it may call back
+ *   into the same store.
  * - **Durability.** A write is in memory until the store commits it. Under
  *   the default [FlushPolicy.Coalesced] that's within about a second (or
  *   after 64 writes) while the app is in the foreground, and before the
@@ -129,16 +132,25 @@ class MnemoStore private constructor(
     suspend fun remember(content: String, vector: List<Float>, options: RememberOptions = RememberOptions()): WriteResult =
         withDatabase(write = true) { it.remember(content, vector, options) }
 
-    /** Stores a memory, embedding [content] with the store's embedder. */
-    suspend fun rememberText(content: String, options: RememberOptions = RememberOptions()): WriteResult =
-        withDatabase(write = true) { it.rememberText(content, options) }
+    /** Stores a memory, embedding [content] with the store's embedder first. */
+    suspend fun rememberText(content: String, options: RememberOptions = RememberOptions()): WriteResult {
+        val vector = embed(content)
+        return withDatabase(write = true) { it.remember(content, vector, options) }
+    }
 
     /**
-     * Changes fields of a memory. A content change is re-embedded when the
-     * patch has no vector and an embedder is set.
+     * Changes fields of a memory. A content change is re-embedded first when
+     * the patch has no vector and an embedder is set.
      */
-    suspend fun update(id: String, patch: MemoryPatch): WriteOutcome =
-        withDatabase(write = true) { it.update(id, patch) }
+    suspend fun update(id: String, patch: MemoryPatch): WriteOutcome {
+        val content = patch.content
+        val withVector = if (content != null && patch.vector == null && embedder != null) {
+            patch.copy(vector = embed(content))
+        } else {
+            patch
+        }
+        return withDatabase(write = true) { it.update(id, withVector) }
+    }
 
     /** Deletes a memory. */
     suspend fun delete(id: String) = withDatabase(write = true) { it.delete(id) }
@@ -158,9 +170,11 @@ class MnemoStore private constructor(
     suspend fun recall(vector: List<Float>, options: RecallOptions = RecallOptions()): RecallPage =
         withDatabase { it.recall(vector, options) }
 
-    /** Recall by text, embedded with the store's embedder. */
-    suspend fun recallText(query: String, options: RecallOptions = RecallOptions()): RecallPage =
-        withDatabase { it.recallText(query, options) }
+    /** Recall by text, embedded with the store's embedder first. */
+    suspend fun recallText(query: String, options: RecallOptions = RecallOptions()): RecallPage {
+        val vector = embed(query)
+        return withDatabase { it.recall(vector, options) }
+    }
 
     /** The file's self-description (manifest and orientation memories). */
     suspend fun about(): List<MemoryRecord> = withDatabase { it.about() }
@@ -186,14 +200,23 @@ class MnemoStore private constructor(
         text: String,
         scope: EssenceScope = EssenceScope.Project,
         refs: List<String>? = null,
-    ): String = withDatabase(write = true) { it.essenceAdd(scope, section, text, refs) }
+    ): String {
+        val vector = embedIfSet(text)
+        return withDatabase(write = true) { it.essenceAddWithVector(scope, section, text, refs, vector) }
+    }
 
-    /** Appends a timeline entry (at most 600 bytes; append-only) and returns its id. */
+    /**
+     * Appends a timeline entry (at most 600 bytes; append-only) and returns
+     * its id. Embeds like [essenceAdd].
+     */
     suspend fun essenceAppendTimeline(
         text: String,
         scope: EssenceScope = EssenceScope.Project,
         refs: List<String>? = null,
-    ): String = withDatabase(write = true) { it.essenceAppendTimeline(scope, text, refs) }
+    ): String {
+        val vector = embedIfSet(text)
+        return withDatabase(write = true) { it.essenceAppendTimelineWithVector(scope, text, refs, vector) }
+    }
 
     /** Replaces an item's text and refs. Timeline entries can't be edited. */
     suspend fun essenceUpdate(id: String, text: String, refs: List<String>? = null): WriteOutcome =
@@ -218,9 +241,20 @@ class MnemoStore private constructor(
 
     // --- threads --------------------------------------------------------
 
-    /** Appends a thread's turns; turns already stored are skipped. Needs an embedder. */
-    suspend fun ingestThread(threadId: String, turns: List<ThreadTurn>): IngestReport =
-        withDatabase(write = true) { it.ingestThread(threadId, turns) }
+    /**
+     * Appends a thread's turns; turns already stored are skipped. Needs an
+     * embedder. The store asks the file which texts are new, embeds them,
+     * then applies them, and plans again if the thread changed meanwhile.
+     */
+    suspend fun ingestThread(threadId: String, turns: List<ThreadTurn>): IngestReport {
+        repeat(3) {
+            val texts = withDatabase { it.ingestThreadPlan(threadId, turns) }
+            val vectors = if (texts.isEmpty()) emptyList() else embed(texts)
+            withDatabase(write = true) { it.ingestThreadWithVectors(threadId, turns, texts, vectors) }
+                ?.let { return it }
+        }
+        throw MnemoException.Invalid("the thread kept changing during ingest; try again")
+    }
 
     /** A thread's turns, oldest first. */
     suspend fun threadExport(threadId: String): List<ExportedTurn> =
@@ -325,6 +359,18 @@ class MnemoStore private constructor(
         ): MnemoStore = MnemoStore(configuration, keys, embedder, dispatcher)
             .also { it.importFrom(source, passphrase) }
     }
+
+    // --- embedding ------------------------------------------------------
+
+    /** [texts]' vectors, embedded on the dispatcher with no lock held. */
+    private suspend fun embed(texts: List<String>): List<List<Float>> {
+        val e = embedder ?: throw MnemoException.Invalid("no embedder set; call set_embedder first")
+        return withContext(dispatcher) { embedTexts(e, texts, configuration.dimensions) }
+    }
+
+    private suspend fun embed(text: String): List<Float> = embed(listOf(text))[0]
+
+    private suspend fun embedIfSet(text: String): List<Float>? = if (embedder == null) null else embed(text)
 
     // --- internals ------------------------------------------------------
 

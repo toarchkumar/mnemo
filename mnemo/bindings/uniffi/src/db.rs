@@ -242,6 +242,27 @@ impl MnemoDb {
         })
     }
 
+    fn engine_turns(turns: Vec<ThreadTurn>) -> Vec<mnemo_engine::ThreadTurn> {
+        turns
+            .into_iter()
+            .map(|t| mnemo_engine::ThreadTurn {
+                turn_id: t.turn_id,
+                role: t.role,
+                content: t.content,
+                timestamp: t.timestamp,
+            })
+            .collect()
+    }
+
+    fn report(r: mnemo_engine::IngestReport) -> IngestReport {
+        IngestReport {
+            added_records: r.added_records as u64,
+            skipped_existing_turns: r.skipped_existing_turns as u64,
+            truncated_turns: r.truncated_turns as u64,
+            chunked_turns: r.chunked_turns as u64,
+        }
+    }
+
     /// Reopen `copy` with this handle's own secret (the copy is a byte copy
     /// under the same key).
     fn open_copy(&self, copy: &Path) -> Result<Mnemo, MnemoError> {
@@ -534,6 +555,42 @@ impl MnemoDb {
         .map(|id| id.to_string())
     }
 
+    /// `essence_add` with the caller's vector, embedded before the call so
+    /// no embedder runs under the lock. With `None` it's `essence_add`: the
+    /// registered embedder, if any, or else a neutral vector (essence is
+    /// read by section, not similarity). The Swift and Kotlin stores pass a
+    /// vector whenever they have an embedder.
+    pub fn essence_add_with_vector(
+        &self,
+        scope: EssenceScope,
+        section: EssenceSection,
+        text: String,
+        refs: Option<Vec<String>>,
+        vector: Option<Vec<f32>>,
+    ) -> Result<String, MnemoError> {
+        self.with(|db| match vector {
+            Some(v) => db.essence_add_with_vector(scope.into(), section.into(), &text, refs, v),
+            None => db.essence_add(scope.into(), section.into(), &text, refs),
+        })
+        .map(|id| id.to_string())
+    }
+
+    /// `essence_append_timeline` with the caller's vector, like
+    /// [`MnemoDb::essence_add_with_vector`].
+    pub fn essence_append_timeline_with_vector(
+        &self,
+        scope: EssenceScope,
+        text: String,
+        refs: Option<Vec<String>>,
+        vector: Option<Vec<f32>>,
+    ) -> Result<String, MnemoError> {
+        self.with(|db| match vector {
+            Some(v) => db.essence_append_timeline_with_vector(scope.into(), &text, refs, v),
+            None => db.essence_append_timeline(scope.into(), &text, refs),
+        })
+        .map(|id| id.to_string())
+    }
+
     /// Replace an item's text (and refs). Timeline entries can't be edited.
     /// `Unchanged` when nothing differs.
     pub fn essence_update(
@@ -600,15 +657,7 @@ impl MnemoDb {
         thread_id: String,
         turns: Vec<ThreadTurn>,
     ) -> Result<IngestReport, MnemoError> {
-        let turns: Vec<mnemo_engine::ThreadTurn> = turns
-            .into_iter()
-            .map(|t| mnemo_engine::ThreadTurn {
-                turn_id: t.turn_id,
-                role: t.role,
-                content: t.content,
-                timestamp: t.timestamp,
-            })
-            .collect();
+        let turns = Self::engine_turns(turns);
         for _ in 0..3 {
             let texts = self.with(|db| db.ingest_thread_texts(&thread_id, &turns))?;
             let vectors = if texts.is_empty() {
@@ -626,17 +675,58 @@ impl MnemoDb {
                     .map(Some)
             })?;
             if let Some(r) = applied {
-                return Ok(IngestReport {
-                    added_records: r.added_records as u64,
-                    skipped_existing_turns: r.skipped_existing_turns as u64,
-                    truncated_turns: r.truncated_turns as u64,
-                    chunked_turns: r.chunked_turns as u64,
-                });
+                return Ok(Self::report(r));
             }
         }
         Err(MnemoError::Invalid {
             message: "the thread kept changing during ingest; try again".into(),
         })
+    }
+
+    /// The first half of an ingest that the caller embeds itself (the
+    /// Swift and Kotlin stores, which embed before taking their own lock):
+    /// the texts to embed for these turns, in order. Empty when every turn
+    /// is already stored.
+    pub fn ingest_thread_plan(
+        &self,
+        thread_id: String,
+        turns: Vec<ThreadTurn>,
+    ) -> Result<Vec<String>, MnemoError> {
+        let turns = Self::engine_turns(turns);
+        self.with(|db| db.ingest_thread_texts(&thread_id, &turns))
+    }
+
+    /// The second half: `texts` is what [`MnemoDb::ingest_thread_plan`]
+    /// returned and `vectors` one vector per text. Under one lock, the plan
+    /// is checked and applied. `None` when the thread changed since the
+    /// plan (plan and embed again); nothing is written then.
+    pub fn ingest_thread_with_vectors(
+        &self,
+        thread_id: String,
+        turns: Vec<ThreadTurn>,
+        texts: Vec<String>,
+        vectors: Vec<Vec<f32>>,
+    ) -> Result<Option<IngestReport>, MnemoError> {
+        if vectors.len() != texts.len() {
+            return Err(MnemoError::Invalid {
+                message: format!("{} vectors for {} texts", vectors.len(), texts.len()),
+            });
+        }
+        if let Some(v) = vectors.iter().find(|v| v.len() != self.dimensions) {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions as u64,
+                got: v.len() as u64,
+            });
+        }
+        let turns = Self::engine_turns(turns);
+        self.with(|db| {
+            if db.ingest_thread_texts(&thread_id, &turns)? != texts {
+                return Ok(None);
+            }
+            db.ingest_thread_with_vectors(&thread_id, &turns, &vectors)
+                .map(Some)
+        })
+        .map(|r| r.map(Self::report))
     }
 
     /// The archived turns of a thread, in order (chunks joined).
@@ -743,6 +833,20 @@ fn sibling(dest: &Path, suffix: &str) -> PathBuf {
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".{suffix}"));
     dest.with_file_name(name)
+}
+
+/// Run the app's embedder on `texts`, checking the shape like the binding's
+/// own text calls: a throw is [`MnemoError::Embedder`], a wrong count is
+/// `Embedder`, and a wrong width is `DimensionMismatch`. The Swift and
+/// Kotlin stores call it before taking their lock, then pass the vectors
+/// to the vector APIs, so the embedder may call back into the same store.
+#[uniffi::export]
+pub fn embed_texts(
+    embedder: Arc<dyn MnemoEmbedder>,
+    texts: Vec<String>,
+    dimensions: u32,
+) -> Result<Vec<Vec<f32>>, MnemoError> {
+    embed_checked(&embedder, texts, dimensions as usize)
 }
 
 /// A fresh random 32-byte key for `create_with_key`. Store it in the

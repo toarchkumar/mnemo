@@ -148,8 +148,11 @@ final class MyEmbedder: MnemoEmbedder, @unchecked Sendable {
 }
 ```
 
-- `embed` is called synchronously on the store's thread, never on the main
-  thread, and never with the database locked.
+- `embed` runs before a call reaches the store's actor, synchronously and
+  off the main thread. The store isn't held while it runs, so other calls
+  go ahead, a background close isn't held up, and `embed` may call back
+  into the same store. (Before v0.12.1 it ran on the actor, so a slow
+  model held every other call.)
 - If it throws (any error), the call fails with `MnemoError.Embedder`, and
   nothing is written.
 - The identity is recorded in the file. Opening the file with a different

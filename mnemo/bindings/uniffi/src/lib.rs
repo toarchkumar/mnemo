@@ -22,7 +22,9 @@ mod embedder;
 mod error;
 mod types;
 
-pub use db::{compact_file, compact_file_with_key, generate_key, import_with_passphrase, MnemoDb};
+pub use db::{
+    compact_file, compact_file_with_key, embed_texts, generate_key, import_with_passphrase, MnemoDb,
+};
 pub use embedder::MnemoEmbedder;
 pub use error::{EmbedderError, MnemoError};
 pub use types::*;

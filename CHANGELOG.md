@@ -30,6 +30,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `try await store.withSession { session in ... }`; Kotlin:
   `store.withSession { session -> ... }`). A session takes vectors; it
   doesn't embed.
+- **The embedder runs outside the store's lock (MOBILE-2c).** Both
+  stores call the app's embedder before taking their own lock (the Swift
+  actor, the Kotlin mutex), then write with the vector. Before, a slow
+  model held every other call to the store, held up the iOS background
+  close, and an embedder that called back into the same store
+  deadlocked. This covers `rememberText`, `recallText`, a content-changing
+  `update`, `ingestThread` and the essence writes. Errors are unchanged.
+- **New binding entry points** (`mnemo-uniffi`) that the stores use:
+  `embedTexts` (runs an embedder with the binding's checks),
+  `ingestThreadPlan` and `ingestThreadWithVectors` (an ingest the caller
+  embeds), and `essenceAddWithVector` and
+  `essenceAppendTimelineWithVector`.
 - The samples' Benchmarks use the manual policy, so their numbers stay
   comparable with earlier runs. The Notes screens use the default.
 - **Kill tests:** `scripts/kill-test.sh` (iOS simulator, `simctl

@@ -102,6 +102,9 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
 ///   calls into one commit.
 /// - Calls run on the actor, never on the main thread, and are serialized.
 ///   Each is a blocking call into the engine, so keep batches reasonable.
+/// - The embedder runs before a call reaches the actor, off the main thread:
+///   other calls to the store go ahead while it runs, a background close
+///   isn't held up by it, and it may call back into the same store.
 /// - The file lives in `Application Support/mnemo/` by default, with the
 ///   protection class `completeUntilFirstUserAuthentication`, and under
 ///   ``KeyPolicy/deviceOnly`` it's excluded from backups.
@@ -112,7 +115,8 @@ public actor MnemoStore {
     public nonisolated let fileURL: URL
 
     private let keyStore: any MnemoKeyStore
-    private var embedder: (any MnemoEmbedder)?
+    /// Read outside the actor: the text calls embed before they reach it.
+    private nonisolated let embedderBox: EmbedderBox
     private var db: MnemoDb?
     private var keyID: String?
     private nonisolated let lifecycle = LifecycleObserver()
@@ -149,7 +153,7 @@ public actor MnemoStore {
         self.configuration = configuration
         self.fileURL = try configuration.fileURL()
         self.keyStore = keyStore
-        self.embedder = embedder
+        self.embedderBox = EmbedderBox(embedder)
         activityReason = "MNemo: \(configuration.name) in the background"
         lifecycle.start(reason: "MNemo: flush and close \(configuration.name)") { [weak self] in
             await self?.closeForBackground()
@@ -165,17 +169,26 @@ public actor MnemoStore {
         try await withDatabase(write: true) { try $0.remember(content: content, vector: vector, options: options) }
     }
 
-    /// Stores a memory, embedding `content` with the store's embedder.
+    /// Stores a memory, embedding `content` with the store's embedder first.
     @discardableResult
-    public func rememberText(_ content: String,
-                             options: RememberOptions = RememberOptions()) async throws -> WriteResult {
-        try await withDatabase(write: true) { try $0.rememberText(content: content, options: options) }
+    public nonisolated func rememberText(_ content: String,
+                                         options: RememberOptions = RememberOptions()) async throws -> WriteResult {
+        let vector = try embed(content)
+        return try await remember(content, vector: vector, options: options)
     }
 
-    /// Changes fields of a memory. A content change is re-embedded when the
-    /// patch has no vector and an embedder is set.
+    /// Changes fields of a memory. A content change is re-embedded first
+    /// when the patch has no vector and an embedder is set.
     @discardableResult
-    public func update(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
+    public nonisolated func update(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
+        var patch = patch
+        if let content = patch.content, patch.vector == nil, embedderBox.value != nil {
+            patch.vector = try embed(content)
+        }
+        return try await updateOnHandle(id: id, patch: patch)
+    }
+
+    private func updateOnHandle(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
         try await withDatabase(write: true) { try $0.update(id: id, patch: patch) }
     }
 
@@ -202,9 +215,10 @@ public actor MnemoStore {
         try await withDatabase { try $0.recall(vector: vector, options: options) }
     }
 
-    /// Recall by text, embedded with the store's embedder.
-    public func recallText(_ query: String, options: RecallOptions = RecallOptions()) async throws -> RecallPage {
-        try await withDatabase { try $0.recallText(query: query, options: options) }
+    /// Recall by text, embedded with the store's embedder first.
+    public nonisolated func recallText(_ query: String, options: RecallOptions = RecallOptions()) async throws -> RecallPage {
+        let vector = try embed(query)
+        return try await recall(vector: vector, options: options)
     }
 
     /// The file's self-description (manifest and orientation memories).
@@ -223,17 +237,33 @@ public actor MnemoStore {
     /// `open`) and returns its id. With an embedder set, the text is
     /// embedded first.
     @discardableResult
-    public func essenceAdd(_ section: EssenceSection, _ text: String, scope: EssenceScope = .project,
-                           refs: [String]? = nil) async throws -> String {
-        try await withDatabase(write: true) { try $0.essenceAdd(scope: scope, section: section, text: text, refs: refs) }
+    public nonisolated func essenceAdd(_ section: EssenceSection, _ text: String, scope: EssenceScope = .project,
+                                       refs: [String]? = nil) async throws -> String {
+        let vector = try embedIfSet(text)
+        return try await essenceAddOnHandle(section, text, scope: scope, refs: refs, vector: vector)
+    }
+
+    private func essenceAddOnHandle(_ section: EssenceSection, _ text: String, scope: EssenceScope,
+                                    refs: [String]?, vector: [Float]?) async throws -> String {
+        try await withDatabase(write: true) {
+            try $0.essenceAddWithVector(scope: scope, section: section, text: text, refs: refs, vector: vector)
+        }
     }
 
     /// Appends a timeline entry (at most 600 bytes; append-only) and returns
-    /// its id.
+    /// its id. Embeds like ``essenceAdd(_:_:scope:refs:)``.
     @discardableResult
-    public func essenceAppendTimeline(_ text: String, scope: EssenceScope = .project,
-                                      refs: [String]? = nil) async throws -> String {
-        try await withDatabase(write: true) { try $0.essenceAppendTimeline(scope: scope, text: text, refs: refs) }
+    public nonisolated func essenceAppendTimeline(_ text: String, scope: EssenceScope = .project,
+                                                  refs: [String]? = nil) async throws -> String {
+        let vector = try embedIfSet(text)
+        return try await essenceAppendOnHandle(text, scope: scope, refs: refs, vector: vector)
+    }
+
+    private func essenceAppendOnHandle(_ text: String, scope: EssenceScope, refs: [String]?,
+                                       vector: [Float]?) async throws -> String {
+        try await withDatabase(write: true) {
+            try $0.essenceAppendTimelineWithVector(scope: scope, text: text, refs: refs, vector: vector)
+        }
     }
 
     /// Replaces an item's text and refs. Timeline entries can't be edited.
@@ -280,10 +310,29 @@ public actor MnemoStore {
     // MARK: Threads
 
     /// Appends a thread's turns; turns already stored are skipped. Needs an
-    /// embedder.
+    /// embedder. The store asks the file which texts are new, embeds them,
+    /// then applies them, and plans again if the thread changed meanwhile.
     @discardableResult
-    public func ingestThread(_ threadID: String, turns: [ThreadTurn]) async throws -> IngestReport {
-        try await withDatabase(write: true) { try $0.ingestThread(threadId: threadID, turns: turns) }
+    public nonisolated func ingestThread(_ threadID: String, turns: [ThreadTurn]) async throws -> IngestReport {
+        for _ in 0..<3 {
+            let texts = try await ingestPlan(threadID, turns: turns)
+            let vectors = texts.isEmpty ? [] : try embed(texts)
+            if let report = try await ingestApply(threadID, turns: turns, texts: texts, vectors: vectors) {
+                return report
+            }
+        }
+        throw MnemoError.Invalid(message: "the thread kept changing during ingest; try again")
+    }
+
+    private func ingestPlan(_ threadID: String, turns: [ThreadTurn]) async throws -> [String] {
+        try await withDatabase { try $0.ingestThreadPlan(threadId: threadID, turns: turns) }
+    }
+
+    private func ingestApply(_ threadID: String, turns: [ThreadTurn], texts: [String],
+                             vectors: [[Float]]) async throws -> IngestReport? {
+        try await withDatabase(write: true) {
+            try $0.ingestThreadWithVectors(threadId: threadID, turns: turns, texts: texts, vectors: vectors)
+        }
     }
 
     /// A thread's turns, oldest first.
@@ -315,7 +364,7 @@ public actor MnemoStore {
     /// the one the file was written with, if any.
     public func setEmbedder(_ embedder: any MnemoEmbedder) throws {
         try db?.setEmbedder(embedder: embedder)
-        self.embedder = embedder
+        embedderBox.value = embedder
     }
 
     /// Makes every write so far durable. A no-op while the file is closed.
@@ -407,6 +456,24 @@ public actor MnemoStore {
             throw error
         }
         return store
+    }
+
+    // MARK: Embedding
+
+    /// One text's vector, embedded here, outside the actor.
+    private nonisolated func embed(_ text: String) throws -> [Float] {
+        try embed([text])[0]
+    }
+
+    private nonisolated func embed(_ texts: [String]) throws -> [[Float]] {
+        guard let embedder = embedderBox.value else {
+            throw MnemoError.Invalid(message: "no embedder set; call set_embedder first")
+        }
+        return try embedTexts(embedder: embedder, texts: texts, dimensions: configuration.dimensions)
+    }
+
+    private nonisolated func embedIfSet(_ text: String) throws -> [Float]? {
+        embedderBox.value == nil ? nil : try embed(text)
     }
 
     // MARK: Internals
@@ -565,7 +632,7 @@ public actor MnemoStore {
         if let db { return db }
         let opened = try open()
         do {
-            if let embedder { try opened.setEmbedder(embedder: embedder) }
+            if let embedder = embedderBox.value { try opened.setEmbedder(embedder: embedder) }
         } catch {
             try? opened.close()
             throw error
@@ -650,5 +717,18 @@ public actor MnemoStore {
             return (id, key)
         }
         throw MnemoStoreError.keyMissing(keyID: nil, path: fileURL.path)
+    }
+}
+
+/// The store's embedder, readable from outside the actor.
+final class EmbedderBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var embedder: (any MnemoEmbedder)?
+
+    init(_ embedder: (any MnemoEmbedder)?) { self.embedder = embedder }
+
+    var value: (any MnemoEmbedder)? {
+        get { lock.lock(); defer { lock.unlock() }; return embedder }
+        set { lock.lock(); embedder = newValue; lock.unlock() }
     }
 }
