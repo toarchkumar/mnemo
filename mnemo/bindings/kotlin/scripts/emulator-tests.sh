@@ -94,8 +94,11 @@ wait_for_line() {   # tag, pattern, seconds
   done
   return 1
 }
+# A fresh process: the self-test's activity is still on top, and an intent
+# to it would only reach onNewIntent.
+adb shell am force-stop io.github.toarchkumar.mnemo.sample
 adb logcat -c
-adb shell am start -n io.github.toarchkumar.mnemo.sample/.MainActivity --es durability write
+adb shell am start -W -n io.github.toarchkumar.mnemo.sample/.MainActivity --es durability write
 wait_for_line MnemoDurability "MNEMO_DURABILITY \(late\|failed\)" 60 || { echo "the durability writer never finished" >&2; exit 1; }
 adb shell am force-stop io.github.toarchkumar.mnemo.sample
 adb logcat -d -s MnemoDurability:I | tee durability.log
