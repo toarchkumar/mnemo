@@ -113,9 +113,11 @@ it.
 
 ### Install on the iPhone
 
-1. **Developer Mode:** connect the iPhone by USB and pick it as the run
-   destination in Xcode. On the iPhone, go to **Settings > Privacy &
-   Security > Developer Mode**, turn it on, and let it restart.
+1. **Turn on Developer Mode first,** before anything else in Xcode: it's
+   off by default, and Xcode can't install until it's on. Connect the
+   iPhone by USB and pick it as the run destination in Xcode. On the
+   iPhone, go to **Settings > Privacy & Security > Developer Mode**, turn
+   it on, and let it restart.
 2. **A Release build** (the Benchmark needs it):
    1. Open **Product > Scheme > Edit Scheme... > Run**.
    2. Set **Build Configuration** to **Release**.
@@ -123,6 +125,9 @@ it.
 3. **The first time with a free account,** iOS refuses to open the app.
    Trust your certificate under **Settings > General > VPN & Device
    Management**, then run it again.
+   **"Verify App" may need a few retries.** It can fail with "An Internet
+   connection is required" even when the phone is online, on Wi-Fi or
+   cellular. Tap it again until it verifies.
 
 ### Benchmark
 

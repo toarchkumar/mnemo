@@ -119,15 +119,19 @@ final class DeviceBudget: @unchecked Sendable {
         try db.close()
         let copy = try scratchCopy(n, "compact")
         defer { try? FileManager.default.removeItem(at: copy) }
+        // CompactReport counts memories (before/after), not bytes: measure
+        // the compacted copy itself.
         let compacted = try compactFileWithKey(path: copy.path, key: key)
+        let compactedBytes = fileSize(copy)
         return [
             "memories": stats.memories,
             "format_version": stats.formatVersion,
             "has_index": stats.hasIndex,
             "file_bytes": stats.fileBytes,
             "bytes_per_memory": Double(stats.fileBytes) / Double(n),
-            "compacted_file_bytes": compacted.after,
-            "compacted_bytes_per_memory": Double(compacted.after) / Double(n),
+            "compacted_file_bytes": compactedBytes,
+            "compacted_bytes_per_memory": Double(compactedBytes) / Double(n),
+            "compacted_memories": compacted.after,
         ]
     }
 

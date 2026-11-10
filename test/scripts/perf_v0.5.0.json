@@ -5556,5 +5556,253 @@
       "first_recall_10k_profile"
     ],
     "remeasured_note": "All measured fresh for v0.11.0 on 2026-11-08 (single runs except where noted). At 100K the single-write p95, the batch median and RSS vary between runs on this laptop."
+  },
+  "device_budget_mobile": {
+    "note": "MOBILE-1d device runs. The sample apps' Benchmark (examples/mobile/): the device_budget cells at 1K and 10K, same corpus generator as device_budget.rs, raw-key v9 files, exact scan (below V9_ANN_MIN_FACTS), through the Swift/Kotlin APIs. Raw files in test/scripts/device_runs/.",
+    "targets_10k": {
+      "disk_bytes_per_memory_max": 2048,
+      "handle_rss_mb_max": 20,
+      "open_ms_max": 10,
+      "first_recall_ms_max": 5,
+      "warm_recall_ms_max": 2
+    },
+    "runs": [
+      {
+        "source": "test/scripts/device_runs/iphone18_3.json",
+        "date": "2026-11-09",
+        "device": {
+          "model_identifier": "iPhone18,3",
+          "os": "iOS 27.0.1 (24A446)",
+          "ram_bytes": 8045641728,
+          "cpu_count": 6,
+          "page_size": 16384,
+          "battery": "95%, unplugged",
+          "thermal_state": "nominal",
+          "low_power_mode": false,
+          "soc": "not in the sample's table (iPhone18,3); look up by model identifier"
+        },
+        "build": {
+          "commit": "752f2791d962",
+          "configuration": "Release",
+          "dirty": false,
+          "mnemo_version": "0.11.0",
+          "release_build": true,
+          "xcode": "27B52"
+        },
+        "summary_10k": {
+          "disk_bytes_per_memory": {
+            "value": 1329.5616,
+            "target": 2048,
+            "pass": true
+          },
+          "handle_rss_mb": {
+            "value": 7.33,
+            "target": 20,
+            "pass": true
+          },
+          "raw_key_open_median_ms": {
+            "value": 2.113334,
+            "target": 10,
+            "pass": true
+          },
+          "first_recall_fresh_handle_median_ms": {
+            "value": 7.075333,
+            "target": 5,
+            "pass": false
+          },
+          "warm_recall_median_ms": {
+            "value": 1.717375,
+            "target": 2,
+            "pass": true
+          }
+        },
+        "summary_10k_verdict": "4 of 5 pass; first recall on a fresh handle misses (7.08 ms vs 5). It misses on the M1 Pro too (8.77 ms, device_budget_v0_11_0), where first_recall_10k_profile puts 66% in the vector-column fill (AES-GCM decrypt 48%); PERF-2 starts from that.",
+        "vs_desktop_m1_pro_10k": {
+          "disk_bytes_per_memory": {
+            "iphone": 1329.5616,
+            "m1_pro": 1329.6,
+            "note": "identical: the same corpus, byte for byte"
+          },
+          "raw_key_open_median_ms": {
+            "iphone": 2.113334,
+            "m1_pro": 2.9
+          },
+          "first_recall_median_ms": {
+            "iphone": 7.075333,
+            "m1_pro": 8.77
+          },
+          "warm_recall_median_ms": {
+            "iphone": 1.717375,
+            "m1_pro": 2.195
+          },
+          "single_durable_write_median_ms": {
+            "iphone": 11.994042,
+            "m1_pro": 14.8
+          },
+          "handle_memory_kb": {
+            "iphone_phys_footprint": 7504,
+            "m1_pro_rss": 17232,
+            "note": "different metrics: phys_footprint leaves out clean file-backed pages, RSS counts them"
+          }
+        },
+        "summary_1k": {
+          "bytes_per_memory": 1417.216,
+          "raw_key_open_median_ms": 0.275917,
+          "first_recall_median_ms": 0.707875,
+          "warm_recall_median_ms": 0.174792,
+          "handle_rss_kb": 432
+        },
+        "background_close_reopen_10k_ms": {
+          "close_median": 12.797875,
+          "reopen_median": 10.178334
+        },
+        "invalid_fields": {
+          "file.compacted_file_bytes, file.compacted_bytes_per_memory": "a sample bug: they hold CompactReport.after, which counts live memories (1000, 10000), not bytes. Fixed in the samples after this run; ignore these two fields here."
+        },
+        "results": {
+          "1000": {
+            "background": {
+              "close_median_ms": 11.993,
+              "close_p95_ms": 13.282917,
+              "cycles": 20,
+              "note": "close = flush one pending write + close; reopen = the next call (raw-key open)",
+              "reopen_median_ms": 4.756959,
+              "reopen_p95_ms": 5.009417
+            },
+            "build": {
+              "build_secs": 0.082462292,
+              "built": true,
+              "index_partitions": 0
+            },
+            "cycles": {
+              "cycles": 20,
+              "first_recall_median_ms": 0.707875,
+              "first_recall_p95_ms": 0.74525,
+              "open_median_ms": 0.275541,
+              "open_p95_ms": 0.3155
+            },
+            "file": {
+              "bytes_per_memory": 1417.216,
+              "compacted_bytes_per_memory": 1,
+              "compacted_file_bytes": 1000,
+              "file_bytes": 1417216,
+              "format_version": 9,
+              "has_index": false,
+              "memories": 1000
+            },
+            "handle": {
+              "first_recall_ms": 1.146917,
+              "handle_rss_kb": 432,
+              "open_ms": 0.420459,
+              "rss_kb_after_drop": 37505,
+              "rss_kb_after_first_recall": 37425,
+              "rss_kb_after_warm": 37505,
+              "rss_kb_before_open": 37073,
+              "rss_kb_open": 37073,
+              "rss_metric": "task_vm_info.phys_footprint",
+              "warm_recall_median_ms": 0.174792,
+              "warm_recall_p95_ms": 0.211959
+            },
+            "keyopen": {
+              "open_with_key_median_ms": 0.275917,
+              "open_with_key_p95_ms": 0.305042,
+              "rss_kb_after_key_open": 37617,
+              "rss_kb_before_open": 37617
+            },
+            "layers": {},
+            "writes": {
+              "batch_size": 100,
+              "batch_write_median_ms": 20.154917,
+              "batch_write_p95_ms": 30.89325,
+              "batch_write_per_memory_ms": 0.20154917,
+              "file_growth_per_batch_bytes": 145817,
+              "file_growth_per_single_write_bytes": 57344,
+              "single_write_median_ms": 11.997792,
+              "single_write_p95_ms": 13.107875
+            }
+          },
+          "10000": {
+            "background": {
+              "close_median_ms": 12.797875,
+              "close_p95_ms": 13.828042,
+              "cycles": 20,
+              "note": "close = flush one pending write + close; reopen = the next call (raw-key open)",
+              "reopen_median_ms": 10.178334,
+              "reopen_p95_ms": 10.960792
+            },
+            "build": {
+              "build_secs": 0.277262,
+              "built": true,
+              "index_partitions": 0
+            },
+            "cycles": {
+              "cycles": 20,
+              "first_recall_median_ms": 7.075333,
+              "first_recall_p95_ms": 7.493458,
+              "open_median_ms": 2.155,
+              "open_p95_ms": 2.257625
+            },
+            "file": {
+              "bytes_per_memory": 1329.5616,
+              "compacted_bytes_per_memory": 1,
+              "compacted_file_bytes": 10000,
+              "file_bytes": 13295616,
+              "format_version": 9,
+              "has_index": false,
+              "memories": 10000
+            },
+            "handle": {
+              "first_recall_ms": 7.806625,
+              "handle_rss_kb": 7504,
+              "open_ms": 2.431167,
+              "rss_kb_after_drop": 51057,
+              "rss_kb_after_first_recall": 51057,
+              "rss_kb_after_warm": 51057,
+              "rss_kb_before_open": 43553,
+              "rss_kb_open": 43553,
+              "rss_metric": "task_vm_info.phys_footprint",
+              "warm_recall_median_ms": 1.717375,
+              "warm_recall_p95_ms": 1.841709
+            },
+            "keyopen": {
+              "open_with_key_median_ms": 2.113334,
+              "open_with_key_p95_ms": 2.256542,
+              "rss_kb_after_key_open": 49009,
+              "rss_kb_before_open": 49009
+            },
+            "layers": {},
+            "writes": {
+              "batch_size": 100,
+              "batch_write_median_ms": 17.358125,
+              "batch_write_p95_ms": 20.103958,
+              "batch_write_per_memory_ms": 0.17358125000000002,
+              "file_growth_per_batch_bytes": 178585,
+              "file_growth_per_single_write_bytes": 57344,
+              "single_write_median_ms": 11.994042,
+              "single_write_p95_ms": 13.00325
+            }
+          }
+        }
+      }
+    ],
+    "ios_release_gates": {
+      "date": "2026-11-09",
+      "device": "iPhone18,3, iOS 27.0.1, Release build launched from the Home Screen (not attached to Xcode), free Personal Team",
+      "background_test": {
+        "container": "group.com.archkumar.mnemo-sample",
+        "run_1_keep_writing_off": "resumed without relaunch",
+        "run_2_keep_writing_on": "resumed without relaunch",
+        "phone_locked": "1-2 min each",
+        "writes_equal_stored": 288,
+        "crash_check": "Analytics Data searched for 'Mnemo': no entries, so no 0xdead10cc",
+        "result": "pass"
+      },
+      "file_protection": {
+        "file": "NSFileProtectionCompleteUntilFirstUserAuthentication",
+        "directory": "NSFileProtectionCompleteUntilFirstUserAuthentication",
+        "result": "pass"
+      }
+    },
+    "android": "not run on a device this time (emulator only: android-emulator workflow, 4 KB and 16 KB images)"
   }
 }

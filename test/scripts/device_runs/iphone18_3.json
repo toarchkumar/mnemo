@@ -1,0 +1,167 @@
+{
+  "build" : {
+    "commit" : "752f2791d962",
+    "configuration" : "Release",
+    "dirty" : false,
+    "mnemo_version" : "0.11.0",
+    "release_build" : true,
+    "xcode" : "27B52"
+  },
+  "corpus" : {
+    "dimensions" : 384,
+    "generator" : "device_budget.rs text_for + corpus.rs gen_clustered_vectors (seeds 0xBEEFC0DE, 0xDE71CE00, 0x57170001)",
+    "index" : "exact scan: build_index runs, but 1K and 10K are below V9_ANN_MIN_FACTS (20,000), where a v9 file builds no IVF+PQ index (as on desktop)",
+    "key" : "raw 32-byte key (createWithKey \/ openWithKey): no KDF on open",
+    "not_measured" : "layers, open_secure_kdf_*, *_fsyncs (not in the mobile API), indexed recall (25K+)",
+    "text_bytes" : 300
+  },
+  "device" : {
+    "battery_level" : 0.94999998807907104,
+    "battery_state" : "unplugged",
+    "cpu_count" : 6,
+    "free_storage_bytes" : 136551590295,
+    "low_power_mode" : false,
+    "model_identifier" : "iPhone18,3",
+    "model_name" : "iPhone",
+    "os" : "iOS",
+    "os_build" : "24A446",
+    "os_version" : "27.0.1",
+    "page_size" : 16384,
+    "platform" : "ios",
+    "ram_bytes" : 8045641728,
+    "simulator" : false,
+    "soc" : null,
+    "thermal_state" : "nominal"
+  },
+  "elapsed_secs" : 4.7747800829999996,
+  "results" : {
+    "1000" : {
+      "background" : {
+        "close_median_ms" : 11.993,
+        "close_p95_ms" : 13.282916999999999,
+        "cycles" : 20,
+        "note" : "close = flush one pending write + close; reopen = the next call (raw-key open)",
+        "reopen_median_ms" : 4.7569590000000002,
+        "reopen_p95_ms" : 5.009417
+      },
+      "build" : {
+        "build_secs" : 0.082462292000000006,
+        "built" : true,
+        "index_partitions" : 0
+      },
+      "cycles" : {
+        "cycles" : 20,
+        "first_recall_median_ms" : 0.70787500000000003,
+        "first_recall_p95_ms" : 0.74524999999999997,
+        "open_median_ms" : 0.27554099999999998,
+        "open_p95_ms" : 0.3155
+      },
+      "file" : {
+        "bytes_per_memory" : 1417.2159999999999,
+        "compacted_bytes_per_memory" : 1,
+        "compacted_file_bytes" : 1000,
+        "file_bytes" : 1417216,
+        "format_version" : 9,
+        "has_index" : false,
+        "memories" : 1000
+      },
+      "handle" : {
+        "first_recall_ms" : 1.146917,
+        "handle_rss_kb" : 432,
+        "open_ms" : 0.42045900000000003,
+        "rss_kb_after_drop" : 37505,
+        "rss_kb_after_first_recall" : 37425,
+        "rss_kb_after_warm" : 37505,
+        "rss_kb_before_open" : 37073,
+        "rss_kb_open" : 37073,
+        "rss_metric" : "task_vm_info.phys_footprint",
+        "warm_recall_median_ms" : 0.174792,
+        "warm_recall_p95_ms" : 0.21195900000000001
+      },
+      "keyopen" : {
+        "open_with_key_median_ms" : 0.27591700000000002,
+        "open_with_key_p95_ms" : 0.30504199999999998,
+        "rss_kb_after_key_open" : 37617,
+        "rss_kb_before_open" : 37617
+      },
+      "layers" : {
+
+      },
+      "writes" : {
+        "batch_size" : 100,
+        "batch_write_median_ms" : 20.154917000000001,
+        "batch_write_p95_ms" : 30.893249999999998,
+        "batch_write_per_memory_ms" : 0.20154917,
+        "file_growth_per_batch_bytes" : 145817,
+        "file_growth_per_single_write_bytes" : 57344,
+        "single_write_median_ms" : 11.997792,
+        "single_write_p95_ms" : 13.107875
+      }
+    },
+    "10000" : {
+      "background" : {
+        "close_median_ms" : 12.797874999999999,
+        "close_p95_ms" : 13.828042,
+        "cycles" : 20,
+        "note" : "close = flush one pending write + close; reopen = the next call (raw-key open)",
+        "reopen_median_ms" : 10.178334,
+        "reopen_p95_ms" : 10.960792
+      },
+      "build" : {
+        "build_secs" : 0.27726200000000001,
+        "built" : true,
+        "index_partitions" : 0
+      },
+      "cycles" : {
+        "cycles" : 20,
+        "first_recall_median_ms" : 7.0753329999999997,
+        "first_recall_p95_ms" : 7.4934580000000004,
+        "open_median_ms" : 2.1549999999999998,
+        "open_p95_ms" : 2.257625
+      },
+      "file" : {
+        "bytes_per_memory" : 1329.5616,
+        "compacted_bytes_per_memory" : 1,
+        "compacted_file_bytes" : 10000,
+        "file_bytes" : 13295616,
+        "format_version" : 9,
+        "has_index" : false,
+        "memories" : 10000
+      },
+      "handle" : {
+        "first_recall_ms" : 7.8066250000000004,
+        "handle_rss_kb" : 7504,
+        "open_ms" : 2.4311669999999999,
+        "rss_kb_after_drop" : 51057,
+        "rss_kb_after_first_recall" : 51057,
+        "rss_kb_after_warm" : 51057,
+        "rss_kb_before_open" : 43553,
+        "rss_kb_open" : 43553,
+        "rss_metric" : "task_vm_info.phys_footprint",
+        "warm_recall_median_ms" : 1.7173750000000001,
+        "warm_recall_p95_ms" : 1.841709
+      },
+      "keyopen" : {
+        "open_with_key_median_ms" : 2.113334,
+        "open_with_key_p95_ms" : 2.256542,
+        "rss_kb_after_key_open" : 49009,
+        "rss_kb_before_open" : 49009
+      },
+      "layers" : {
+
+      },
+      "writes" : {
+        "batch_size" : 100,
+        "batch_write_median_ms" : 17.358125000000001,
+        "batch_write_p95_ms" : 20.103957999999999,
+        "batch_write_per_memory_ms" : 0.17358125000000002,
+        "file_growth_per_batch_bytes" : 178585,
+        "file_growth_per_single_write_bytes" : 57344,
+        "single_write_median_ms" : 11.994042,
+        "single_write_p95_ms" : 13.00325
+      }
+    }
+  },
+  "schema" : "device_budget_mobile\/1",
+  "timestamp" : "2026-11-10T00:09:46Z"
+}

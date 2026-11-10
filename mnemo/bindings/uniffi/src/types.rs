@@ -322,12 +322,17 @@ pub struct DbStats {
     pub wal_pages: u64,
 }
 
-/// What `compact_file` did.
+/// What `compact_file` did. Every field is a count, not a size: read the
+/// file's length for bytes.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CompactReport {
+    /// Live memories before compaction.
     pub before: u64,
+    /// Live memories after it (expired ones dropped).
     pub after: u64,
+    /// Live result-cache entries before compaction.
     pub cache_before: u64,
+    /// Live result-cache entries after it.
     pub cache_after: u64,
 }
 

@@ -115,15 +115,19 @@ class DeviceBudget(private val context: Context, private val report: (String) ->
         val stats = withDb(MnemoDb.openReadOnlyWithKey(corpus(n).path, key)) { it.stats() }
         val copy = scratchCopy(n, "compact")
         try {
+            // CompactReport counts memories (before/after), not bytes:
+            // measure the compacted copy itself.
             val compacted = compactFileWithKey(copy.path, key)
+            val compactedBytes = copy.length()
             return JSONObject()
                 .put("memories", stats.memories.toLong())
                 .put("format_version", stats.formatVersion.toInt())
                 .put("has_index", stats.hasIndex)
                 .put("file_bytes", stats.fileBytes.toLong())
                 .put("bytes_per_memory", stats.fileBytes.toDouble() / n)
-                .put("compacted_file_bytes", compacted.after.toLong())
-                .put("compacted_bytes_per_memory", compacted.after.toDouble() / n)
+                .put("compacted_file_bytes", compactedBytes)
+                .put("compacted_bytes_per_memory", compactedBytes.toDouble() / n)
+                .put("compacted_memories", compacted.after.toLong())
         } finally {
             copy.delete()
         }
