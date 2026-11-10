@@ -21,8 +21,8 @@ copy the file and the memory comes with it.
 - **An MCP server built in**, so Claude Desktop, Cursor or any MCP client can
   use the file as tools.
 - **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM; commits
-  go through a write-ahead log; every commit is a restorable snapshot; OS file
-  locks allow one writer and many readers.
+  go through a write-ahead log; recent commits are kept as restorable
+  snapshots; OS file locks allow one writer and many readers.
 
 Site: **https://toarchkumar.github.io/mnemo/**
 
@@ -34,16 +34,16 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0):
+iOS and Android (from v0.12.0; current 0.12.1):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.1")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.12.0")
+implementation("io.github.toarchkumar:mnemo-android:0.12.1")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -112,6 +112,28 @@ The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 
+## What's new in v0.12.1: safer phone stores
+
+A hardening release for the iOS and Android packages, from an independent
+review.
+
+- **Writes are saved on their own.** The phone stores now commit within
+  about a second (or every 64 writes) by default, so a crash or a killed
+  app no longer loses everything since the app last went to the
+  background. `withSession { }` batches a burst into one commit. To keep
+  the old behaviour, choose the `.manual` flush policy.
+- **Your embedding model runs outside the store's lock,** so a slow model
+  no longer stalls other calls or the iOS background close.
+- **Search stays fast as threads grow.** The vector memory budget now
+  counts only the memories that search scans, not archived conversation
+  turns, and `stats()` reports which search mode is in use.
+- **Passphrase changes, exports and imports are hardened.** Exports and
+  imports now get their own fresh data key. A plain `rekey` changes the
+  secret that opens the file from now on, but someone who had a copy and
+  the old secret could still read it. To revoke the old secret, use
+  `mnemo rekey --rotate`, which also re-encrypts the file under a new key.
+  If you think a passphrase leaked, rotate.
+
 ## What's new in v0.12.0: iOS and Android
 
 The same engine, now as native packages for phones and tablets: a Swift
@@ -172,8 +194,12 @@ A new file format, v9. At 100K memories, compared with v0.10.0:
 
 - **1.5 KB per memory on disk instead of 8.7 KB.** Memories share pages,
   vectors are stored at half precision, and a save writes only what
-  changed. Old snapshots are kept for a window (the newest 16, plus any
-  from the last 24 hours), and their space is then reused.
+  changed. Old snapshots are kept for a window, and their space is then
+  reused. Point-in-time restore reaches back only to the retained
+  snapshots: on v9, the newest 16 plus any from the last 24 hours, never
+  pinning more than a quarter of the file (so under heavy churn, fewer);
+  on v8, the newest 256. Call `set_max_snapshots` to keep a fixed number
+  instead; `compact` drops the history.
 - **Faster saves and searches.** Storing one memory durably takes 16 ms
   instead of 28 ms, and a warm search takes 2.5 ms instead of 8.8 ms.
 - **Keyword search for exact names.** Pass versions, PR numbers or
