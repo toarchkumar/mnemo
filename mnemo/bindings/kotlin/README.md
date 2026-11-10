@@ -280,7 +280,7 @@ export (below), or delete the file and start over.
 // On the old device: a copy that opens with the passphrase alone.
 store.exportWithPassphrase(exportFile, passphrase)
 
-// On the new device: re-protected by a fresh key in this device's Keystore.
+// On the new device: a fresh copy under a new key in this device's Keystore.
 val store = MnemoStore.importWithPassphrase(
     context, exportFile, passphrase,
     MnemoStoreConfiguration(name = "assistant", dimensions = 384u),
@@ -290,7 +290,12 @@ val store = MnemoStore.importWithPassphrase(
 - Both calls take a few seconds, because the passphrase goes through the
   KDF.
 - The destination must not exist yet, and the source is never modified.
-- Have the user choose the passphrase. Never store it next to the export.
+- Both write a compacted copy (live data, no history) under a **fresh data
+  key**. The export shares no key material with the device's file, and the
+  imported file shares none with the export: the transfer passphrase never
+  opens the imported file, even with a leftover copy of the export.
+- Have the user choose the passphrase. Never store it next to the export,
+  and delete the export once it's imported.
 
 ## ABIs
 

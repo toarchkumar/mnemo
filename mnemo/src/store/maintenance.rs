@@ -112,13 +112,24 @@ impl Mnemo {
 
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps the DEK;
     /// the encrypted pages are never rewritten.
+    ///
+    /// **This changes who can open the file from now on, as long as nobody
+    /// kept the old secret.** The data key stays the same, so anyone who had
+    /// the file (or any copy or backup of it) and the old passphrase can
+    /// still read it, and everything written to it later. The old wrap is
+    /// scrubbed from this file (the previous WAL region is zeroed, and any
+    /// stale copy of the old header's key wrap is overwritten), but an
+    /// earlier copy keeps it. To revoke an old secret, rotate: rekey, then
+    /// [`Mnemo::compact_file`] (`mnemo rekey --rotate`), which rewrites the
+    /// file under a fresh data key.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
         self.rekey_secret(new_passphrase.as_bytes(), kdf)
     }
 
     /// PERF-1 step 7: switch to (or rotate) a raw 256-bit key, recording
     /// [`KdfParams::raw_key`] in the header. Like [`Mnemo::rekey`], only the
-    /// wrapped DEK changes; pages aren't rewritten.
+    /// wrapped DEK changes; pages aren't rewritten, and it doesn't revoke
+    /// the old key (see [`Mnemo::rekey`]).
     pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
         self.rekey_secret(new_key, KdfParams::raw_key())
     }
@@ -137,6 +148,15 @@ impl Mnemo {
         }
         let mut wrapped_dek = [0u8; WRAPPED_DEK_LEN];
         wrapped_dek.copy_from_slice(&wrapped);
+
+        // SEC-2: the old header's key wrap (salt, DEK nonce, wrapped DEK, as
+        // laid out at header bytes 86..162), to scrub once the new header
+        // is committed.
+        let mut old_wrap =
+            Vec::with_capacity(crypto::SALT_LEN + crypto::NONCE_LEN + WRAPPED_DEK_LEN);
+        old_wrap.extend_from_slice(&self.header.salt);
+        old_wrap.extend_from_slice(&self.header.dek_nonce);
+        old_wrap.extend_from_slice(&self.header.wrapped_dek);
 
         self.header.salt = new_salt;
         self.header.dek_nonce = new_nonce;
@@ -159,10 +179,148 @@ impl Mnemo {
         self.header.wal_pages = new_pages;
         self.header.wal_seq += 1;
         self.relocate_header_through_wal(old_wal_start)?;
+        // SEC-2 (RB-001.30): the old region holds page-0 images with the old
+        // wrap; `relocate_header_through_wal` only zeroed its first frame
+        // header. Zero all of it, then overwrite any other stale copy of
+        // the old wrap in the file (an earlier, grown or relocated region).
+        // Hygiene only: a copy of the file taken before the rekey still
+        // opens with the old secret (see `rekey`).
+        wal::scrub_region(self.pager.file_mut(), old_wal_start, new_pages)?;
+        scrub_bytes(self.pager.file_mut(), &old_wrap)?;
         // FMT-9 (a): the old region is freed by the next commit (see
         // `ensure_wal_capacity`).
         self.release_pages(old_wal_start, new_pages);
         Ok(())
+    }
+
+    /// SEC-2 (RB-001.30): write a copy of this database at `dest` under a
+    /// **fresh data key**, protected by `passphrase` through `kdf`. It goes
+    /// through the compaction path (live memories, the result cache and
+    /// the index, no history), so the copy shares no key material with
+    /// this file: neither this file's passphrase nor its data key opens
+    /// it, and its passphrase opens nothing here. This file is flushed
+    /// first (unless read-only) and is otherwise unchanged; `dest` must not
+    /// exist. The copy is v9.
+    pub fn export_rekeyed(
+        &mut self,
+        dest: impl AsRef<Path>,
+        passphrase: &str,
+        kdf: KdfParams,
+    ) -> Result<CompactReport> {
+        self.export_rekeyed_secret(dest.as_ref(), passphrase.as_bytes(), kdf)
+    }
+
+    /// [`Mnemo::export_rekeyed`] protected by a raw 256-bit key (no KDF).
+    pub fn export_rekeyed_with_key(
+        &mut self,
+        dest: impl AsRef<Path>,
+        key: &[u8; crypto::KEY_LEN],
+    ) -> Result<CompactReport> {
+        self.export_rekeyed_secret(dest.as_ref(), key, KdfParams::raw_key())
+    }
+
+    pub(super) fn export_rekeyed_secret(
+        &mut self,
+        dest: &Path,
+        secret: &[u8],
+        kdf: KdfParams,
+    ) -> Result<CompactReport> {
+        if paths_refer_to_same_file(&self.path, dest).unwrap_or(false) {
+            return Err(MnemoError::Invalid(format!(
+                "export_rekeyed refuses to overwrite the open database at {}",
+                dest.display()
+            )));
+        }
+        if dest.exists() {
+            return Err(MnemoError::Invalid(format!(
+                "{} already exists",
+                dest.display()
+            )));
+        }
+        if !self.read_only {
+            self.flush()?;
+        }
+        let mut name = dest.file_name().unwrap_or_default().to_os_string();
+        name.push(".export-tmp");
+        let tmp = dest.with_file_name(name);
+        let _ = std::fs::remove_file(&tmp);
+        let result = (|| {
+            let mut new = Mnemo::create_secret(
+                &tmp,
+                secret,
+                MnemoConfig {
+                    dimensions: self.dimensions,
+                    kdf,
+                    store_float_vectors: self.float_vectors(),
+                    ..Default::default()
+                },
+            )?;
+            let report = self.copy_live_into(&mut new)?;
+            new.flush()?;
+            drop(new);
+            std::fs::rename(&tmp, dest)?;
+            Ok(report)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
+    }
+
+    /// The compaction copy: every live, unexpired memory and cache entry of
+    /// `self` into `new` (a freshly created file), and the index if `self`
+    /// has one. Counts as [`CompactReport`].
+    pub(super) fn copy_live_into(&mut self, new: &mut Mnemo) -> Result<CompactReport> {
+        // FMT-9e: compaction rewrites everything, so it compresses every
+        // thread turn, recent or not.
+        new.turn_compress_after = 0;
+        // ANN-1.1: compaction is "re-tune for the current size" by
+        // default. Pass IndexConfig::default() so partitions,
+        // subspaces, n_probe and n_rerank are all re-derived from the
+        // compacted vector count. Previously we froze the pre-compact
+        // (n_probe, n_rerank), which left the new index on stale
+        // numbers for the smaller post-compact corpus.
+        let want_index = self.has_index();
+        let now = memory::now_secs();
+        let all = self.memories()?;
+        let before = all.len();
+        let mut after = 0;
+        for m in all {
+            if m.is_expired(now) {
+                continue;
+            }
+            new.remember(m)?;
+            after += 1;
+        }
+        if want_index && after > 0 {
+            new.build_index_with(IndexConfig::default())?;
+        }
+
+        // Count + copy cache entries. We walk `self.cache_dir` by index
+        // so each hop reads the directory's live `accessed_at` /
+        // `access_count` directly rather than going through
+        // `cache_get` (which would also treat read-only semantics,
+        // tombstones, etc. — we want the raw, authoritative values).
+        let mut cache_before = 0usize;
+        let mut cache_after = 0usize;
+        let positions: Vec<usize> = (0..self.cache_dir.len()).collect();
+        for pos in positions {
+            let keep = {
+                let e = &self.cache_dir[pos];
+                !e.deleted && !e.is_expired(now)
+            };
+            if keep {
+                cache_before += 1;
+                new.copy_cache_entry_from(self, pos)?;
+                cache_after += 1;
+            }
+        }
+        Ok(CompactReport {
+            before,
+            after,
+            cache_before,
+            cache_after,
+        })
     }
 
     /// Decrypt and validate every live record. Returns the count verified
@@ -393,62 +551,14 @@ impl Mnemo {
                 ..Default::default()
             },
         )?;
-        // FMT-9e: compaction rewrites everything, so it compresses every
-        // thread turn, recent or not.
-        new.turn_compress_after = 0;
-        // ANN-1.1: compaction is "re-tune for the current size" by
-        // default. Pass IndexConfig::default() so partitions,
-        // subspaces, n_probe and n_rerank are all re-derived from the
-        // compacted vector count. Previously we froze the pre-compact
-        // (n_probe, n_rerank), which left the new index on stale
-        // numbers for the smaller post-compact corpus.
-        let want_index = old.has_index();
-        let now = memory::now_secs();
-        let all = old.memories()?;
-        let before = all.len();
-        let mut after = 0;
-        for m in all {
-            if m.is_expired(now) {
-                continue;
-            }
-            new.remember(m)?;
-            after += 1;
-        }
-        if want_index && after > 0 {
-            new.build_index_with(IndexConfig::default())?;
-        }
-
-        // Count + copy cache entries. We walk `old.cache_dir` by index
-        // so each hop reads the directory's live `accessed_at` /
-        // `access_count` directly rather than going through
-        // `cache_get` (which would also treat read-only semantics,
-        // tombstones, etc. — we want the raw, authoritative values).
-        let mut cache_before = 0usize;
-        let mut cache_after = 0usize;
-        let positions: Vec<usize> = (0..old.cache_dir.len()).collect();
-        for pos in positions {
-            let keep = {
-                let e = &old.cache_dir[pos];
-                !e.deleted && !e.is_expired(now)
-            };
-            if keep {
-                cache_before += 1;
-                new.copy_cache_entry_from(&mut old, pos)?;
-                cache_after += 1;
-            }
-        }
+        let report = old.copy_live_into(&mut new)?;
 
         new.flush()?;
         drop(new);
         drop(old);
 
         std::fs::rename(&tmp, path)?;
-        Ok(CompactReport {
-            before,
-            after,
-            cache_before,
-            cache_after,
-        })
+        Ok(report)
     }
 
     /// Copy one live cache entry from `old` at directory position
@@ -518,4 +628,48 @@ impl Mnemo {
         self.dirty_cache = true;
         Ok(())
     }
+}
+
+/// SEC-2 (RB-001.30): overwrite every occurrence of `needle` in the file
+/// with zeros, then sync. Rekey uses it for stale copies of the old header's
+/// key wrap: they're plaintext (page 0 is sealed, not encrypted) and can sit
+/// in WAL regions that were grown, relocated or freed. Every other page is
+/// AES-GCM ciphertext, where a 76-byte random match doesn't happen.
+pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usize> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    if needle.is_empty() {
+        return Ok(0);
+    }
+    let len = file.seek(SeekFrom::End(0))?;
+    let chunk = 1 << 20;
+    let overlap = needle.len() - 1;
+    let mut hits: Vec<u64> = Vec::new();
+    let mut buf = vec![0u8; chunk + overlap];
+    let mut pos: u64 = 0;
+    while pos < len {
+        let want = (chunk as u64 + overlap as u64).min(len - pos) as usize;
+        file.seek(SeekFrom::Start(pos))?;
+        file.read_exact(&mut buf[..want])?;
+        let mut i = 0;
+        while i + needle.len() <= want {
+            if buf[i..i + needle.len()] == *needle {
+                hits.push(pos + i as u64);
+                i += needle.len();
+            } else {
+                i += 1;
+            }
+        }
+        pos += chunk as u64;
+    }
+    hits.dedup();
+    let zeros = vec![0u8; needle.len()];
+    for off in &hits {
+        file.seek(SeekFrom::Start(*off))?;
+        file.write_all(&zeros)?;
+    }
+    if !hits.is_empty() {
+        file.sync_all()?;
+        crate::bump_fsync();
+    }
+    Ok(hits.len())
 }

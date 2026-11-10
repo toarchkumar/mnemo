@@ -227,6 +227,22 @@ pub fn invalidate_region(file: &mut File, region_start: u64) -> Result<()> {
     Ok(())
 }
 
+/// SEC-2 (RB-001.30): zero all `pages` pages of a stale WAL region at
+/// `region_start` and fsync. A rekey runs it on the region it moved away
+/// from, whose frames hold page-0 images with the old key wrap
+/// ([`invalidate_region`] zeroes only the first frame header).
+pub fn scrub_region(file: &mut File, region_start: u64, pages: u64) -> Result<()> {
+    crate::pager::__failpoint_check()?;
+    let zeros = vec![0u8; PAGE_SIZE];
+    file.seek(SeekFrom::Start(region_start * PAGE_SIZE as u64))?;
+    for _ in 0..pages {
+        file.write_all(&zeros)?;
+    }
+    file.sync_all()?;
+    crate::bump_fsync();
+    Ok(())
+}
+
 /// Magic prefix of a frame on disk. Four ASCII bytes `MWAL`. Exposed
 /// so the torn-header scan in `Mnemo::open` can test for `MWAL` at
 /// every 8 KiB-aligned page start without reaching into this module.

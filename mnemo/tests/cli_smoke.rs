@@ -2177,3 +2177,46 @@ fn demo_runs_to_a_clean_exit() {
     );
     assert!(stdout.contains("demo complete."), "{stdout}");
 }
+
+#[test]
+fn rekey_notes_the_data_key_and_rotate_rewrites_it() {
+    let (_dir, path, pp, _) = seed_db();
+    let p = path.to_str().unwrap();
+    let rekey = |args: &[&str], old: &str, new: &str| {
+        let out = Command::new(bin())
+            .args(args)
+            .env("MNEMO_PASSPHRASE", old)
+            .env("MNEMO_NEW_PASSPHRASE", new)
+            .output()
+            .expect("failed to invoke mnemo binary");
+        (
+            out.status,
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let (status, stdout, stderr) = rekey(&["rekey", p], pp, "second-passphrase");
+    assert!(status.success(), "rekey failed: {stderr}");
+    assert!(stdout.contains("rekeyed"), "{stdout}");
+    assert!(
+        stdout.contains("--rotate"),
+        "the note about rotating: {stdout}"
+    );
+
+    let (status, stdout, stderr) = rekey(
+        &["rekey", p, "--rotate"],
+        "second-passphrase",
+        "third-passphrase",
+    );
+    assert!(status.success(), "rekey --rotate failed: {stderr}");
+    assert!(
+        stdout.contains("rotated") && stdout.contains("3 memories"),
+        "{stdout}"
+    );
+
+    let (status, stdout, stderr) = run_cli(&["info", p], "third-passphrase");
+    assert!(status.success(), "stats failed: {stderr}");
+    assert!(stdout.contains("memories:    3"), "{stdout}");
+    let (status, _, _) = run_cli(&["info", p], "second-passphrase");
+    assert!(!status.success(), "the old passphrase must not open it");
+}

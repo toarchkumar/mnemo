@@ -39,8 +39,11 @@ extension MnemoStoreError: LocalizedError {
 }
 
 extension Data {
-    /// Overwrites the bytes with zeros (best effort: copies Swift already
-    /// made aren't reachable).
+    /// Overwrites the bytes with zeros. It wipes the storage this value
+    /// owns: when the storage is shared with another `Data` (or bridged from
+    /// an immutable `CFData`), the first mutation copies it and the wipe
+    /// lands on the copy, so call it only on a value nothing else holds (see
+    /// `KeyBytes`). Best effort: copies Swift already made aren't reachable.
     mutating func zeroize() {
         resetBytes(in: startIndex..<endIndex)
     }

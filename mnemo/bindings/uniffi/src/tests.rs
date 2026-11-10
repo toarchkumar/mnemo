@@ -257,9 +257,14 @@ fn export_with_passphrase_opens_with_the_passphrase_not_the_key() {
     assert_eq!(exported.get(w.id.clone()).unwrap().content, "kept");
     exported.close().unwrap();
     assert!(matches!(
-        MnemoDb::open_with_key(dest.clone(), key),
+        MnemoDb::open_with_key(dest.clone(), key.clone()),
         Err(MnemoError::WrongPassphrase)
     ));
+    // A fresh data key: the live file's header over the export doesn't
+    // open it with the device key either.
+    let live_path = dir.path().join("t.mnemo");
+    let spliced = splice(&dest, &live_path, &dir, "export-with-live-header");
+    assert!(MnemoDb::open_read_only_with_key(spliced, key).is_err());
     // A second export to the same path is refused.
     let again = MnemoDb::open(dest.clone(), "move-pw".into()).unwrap();
     assert!(matches!(
@@ -292,6 +297,15 @@ fn import_with_passphrase_opens_with_the_new_key_not_the_passphrase() {
         MnemoDb::open(dest.clone(), "move-pw".into()),
         Err(MnemoError::WrongPassphrase)
     ));
+    // A fresh data key: the transfer file's header over the import doesn't
+    // open it with the transfer passphrase.
+    let spliced = splice(
+        &dest,
+        std::path::Path::new(&src),
+        &dir,
+        "import-with-source-header",
+    );
+    assert!(MnemoDb::open_read_only(spliced, "move-pw".into()).is_err());
     // The source is untouched and still opens with the passphrase.
     MnemoDb::open(src.clone(), "move-pw".into())
         .unwrap()
@@ -812,4 +826,20 @@ fn essence_writes_with_the_callers_vector_never_call_the_embedder() {
         ),
         Err(MnemoError::DimensionMismatch { .. })
     ));
+}
+
+/// A copy of `file` with `header_from`'s page 0 (the header: salt, KDF costs,
+/// wrapped data key) written over its own.
+fn splice(
+    file: &str,
+    header_from: &std::path::Path,
+    dir: &tempfile::TempDir,
+    name: &str,
+) -> String {
+    let mut bytes = std::fs::read(file).unwrap();
+    let other = std::fs::read(header_from).unwrap();
+    bytes[..8192].copy_from_slice(&other[..8192]);
+    let out = dir.path().join(format!("{name}.mnemo"));
+    std::fs::write(&out, bytes).unwrap();
+    out.display().to_string()
 }

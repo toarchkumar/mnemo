@@ -309,6 +309,16 @@ Argon2id; the KEK wraps a random data-encryption key (DEK); the DEK encrypts
 every data page with AES-256-GCM. Changing the passphrase (`rekey`) only
 re-wraps the DEK — the bulk pages are never rewritten.
 
+That makes `rekey` cheap, and it also means a rekey changes who can open
+the file *from now on, provided nobody kept the old secret*: the DEK is the
+same, so a copy of the file taken earlier still opens with the old
+passphrase, and so does the live file's data for anyone holding that copy's
+header. To revoke an old passphrase (after a suspected leak, say), rotate
+the DEK too: `mnemo rekey --rotate`, or `rekey` followed by
+`Mnemo::compact_file`, which rewrites the file under a fresh DEK.
+`Mnemo::export_rekeyed` writes a copy under a fresh DEK and a new secret,
+sharing no key material with the source.
+
 The file is a sequence of fixed **8 KiB pages**:
 
 - **Page 0** — the header (plaintext): magic, version, KDF parameters, salt,
@@ -704,7 +714,7 @@ cargo run --bin mnemo -- <command>
 | `search`  | Exact nearest-neighbour search (similarity only)     |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
-| `rekey`   | Re-encrypt the data key under a new passphrase       |
+| `rekey`   | Re-encrypt the data key under a new passphrase; `--rotate` also rewrites the file under a fresh data key (revokes the old passphrase) |
 | `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which upgrades a v8 file (`--format v8` keeps v8 for one release) |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |

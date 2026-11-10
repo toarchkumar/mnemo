@@ -1,6 +1,6 @@
 //! `MnemoDb`, the one object the Swift and Kotlin packages wrap.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use mnemo_engine::{KdfParams, Mnemo, RecallRequest, Ulid};
@@ -10,13 +10,6 @@ use crate::embedder::{embed_checked, EngineEmbedder, MnemoEmbedder};
 use crate::error::{MnemoError, POISONED};
 use crate::types::*;
 
-/// How the handle was opened, kept (zeroized on drop) so
-/// [`MnemoDb::export_with_passphrase`] can reopen its copy.
-pub(crate) enum Secret {
-    Passphrase(Zeroizing<String>),
-    Key(Zeroizing<[u8; 32]>),
-}
-
 /// An open `.mnemo` file. Safe to share across threads: calls are
 /// serialized on the handle's lock and block until done, so call them off
 /// the main thread (the Swift and Kotlin layers add async wrappers).
@@ -24,7 +17,6 @@ pub(crate) enum Secret {
 pub struct MnemoDb {
     pub(crate) inner: Mutex<Option<Mnemo>>,
     embedder: RwLock<Option<Arc<dyn MnemoEmbedder>>>,
-    secret: Secret,
     path: PathBuf,
     dimensions: usize,
 }
@@ -82,7 +74,7 @@ fn engine_filter(terms: &[FilterTerm]) -> Result<mnemo_engine::Filter, MnemoErro
 }
 
 impl MnemoDb {
-    fn wrap(db: Mnemo, secret: Secret, path: PathBuf, tuning: Option<&MnemoConfig>) -> Arc<Self> {
+    fn wrap(db: Mnemo, path: PathBuf, tuning: Option<&MnemoConfig>) -> Arc<Self> {
         let mut db = db;
         let (budget, pages) = tuning
             .map_or((MOBILE_VECTOR_CACHE_BUDGET, MOBILE_CACHE_PAGES), |c| {
@@ -94,7 +86,6 @@ impl MnemoDb {
         Arc::new(MnemoDb {
             inner: Mutex::new(Some(db)),
             embedder: RwLock::new(None),
-            secret,
             path,
             dimensions,
         })
@@ -262,16 +253,6 @@ impl MnemoDb {
             chunked_turns: r.chunked_turns as u64,
         }
     }
-
-    /// Reopen `copy` with this handle's own secret (the copy is a byte copy
-    /// under the same key).
-    fn open_copy(&self, copy: &Path) -> Result<Mnemo, MnemoError> {
-        match &self.secret {
-            Secret::Passphrase(p) => Mnemo::open(copy, p),
-            Secret::Key(k) => Mnemo::open_with_key(copy, k),
-        }
-        .map_err(MnemoError::from)
-    }
 }
 
 #[uniffi::export]
@@ -285,17 +266,14 @@ impl MnemoDb {
         passphrase: String,
         config: MnemoConfig,
     ) -> Result<Arc<Self>, MnemoError> {
+        // Wrapped first, so it's zeroized on every path, failures included.
+        let passphrase = Zeroizing::new(passphrase);
         let db = Mnemo::create(
             &path,
             &passphrase,
             engine_config(&config, KdfParams::secure()),
         )?;
-        Ok(Self::wrap(
-            db,
-            Secret::Passphrase(Zeroizing::new(passphrase)),
-            path.into(),
-            Some(&config),
-        ))
+        Ok(Self::wrap(db, path.into(), Some(&config)))
     }
 
     /// Create a new file protected by a raw 32-byte key (from
@@ -309,19 +287,15 @@ impl MnemoDb {
     ) -> Result<Arc<Self>, MnemoError> {
         let key = key_from(key)?;
         let db = Mnemo::create_with_key(&path, &key, engine_config(&config, KdfParams::raw_key()))?;
-        Ok(Self::wrap(db, Secret::Key(key), path.into(), Some(&config)))
+        Ok(Self::wrap(db, path.into(), Some(&config)))
     }
 
     /// Open a passphrase file, read-write (takes the file's exclusive lock).
     #[uniffi::constructor]
     pub fn open(path: String, passphrase: String) -> Result<Arc<Self>, MnemoError> {
+        let passphrase = Zeroizing::new(passphrase);
         let db = Mnemo::open(&path, &passphrase)?;
-        Ok(Self::wrap(
-            db,
-            Secret::Passphrase(Zeroizing::new(passphrase)),
-            path.into(),
-            None,
-        ))
+        Ok(Self::wrap(db, path.into(), None))
     }
 
     /// Open a raw-key file, read-write.
@@ -329,20 +303,16 @@ impl MnemoDb {
     pub fn open_with_key(path: String, key: Vec<u8>) -> Result<Arc<Self>, MnemoError> {
         let key = key_from(key)?;
         let db = Mnemo::open_with_key(&path, &key)?;
-        Ok(Self::wrap(db, Secret::Key(key), path.into(), None))
+        Ok(Self::wrap(db, path.into(), None))
     }
 
     /// Open a passphrase file read-only (a shared lock; writes return
     /// `ReadOnly`).
     #[uniffi::constructor]
     pub fn open_read_only(path: String, passphrase: String) -> Result<Arc<Self>, MnemoError> {
+        let passphrase = Zeroizing::new(passphrase);
         let db = Mnemo::open_read_only(&path, &passphrase)?;
-        Ok(Self::wrap(
-            db,
-            Secret::Passphrase(Zeroizing::new(passphrase)),
-            path.into(),
-            None,
-        ))
+        Ok(Self::wrap(db, path.into(), None))
     }
 
     /// Open a raw-key file read-only.
@@ -350,7 +320,7 @@ impl MnemoDb {
     pub fn open_read_only_with_key(path: String, key: Vec<u8>) -> Result<Arc<Self>, MnemoError> {
         let key = key_from(key)?;
         let db = Mnemo::open_read_only_with_key(&path, &key)?;
-        Ok(Self::wrap(db, Secret::Key(key), path.into(), None))
+        Ok(Self::wrap(db, path.into(), None))
     }
 
     /// Flush, then release the file and its lock. Later calls return
@@ -797,8 +767,11 @@ impl MnemoDb {
 
     /// Write a copy of this file at `dest` that opens with `passphrase`
     /// alone (the secure KDF), on any device: for moving a key-bound file
-    /// to a new phone. The live file is flushed first and keeps its own
-    /// key; `dest` must not exist.
+    /// to a new phone. The copy is written under a fresh data key (through
+    /// the compaction path: live memories, the result cache and the index,
+    /// no history), so it shares no key material with this file. The live
+    /// file is flushed first and keeps its own key; `dest` must not exist.
+    /// The handle is locked for the copy and the KDF.
     pub fn export_with_passphrase(
         &self,
         dest: String,
@@ -806,34 +779,9 @@ impl MnemoDb {
     ) -> Result<(), MnemoError> {
         let passphrase = Zeroizing::new(passphrase);
         let dest = PathBuf::from(dest);
-        if dest.exists() {
-            return Err(MnemoError::Invalid {
-                message: format!("{} already exists", dest.display()),
-            });
-        }
-        let tmp = sibling(&dest, "export-tmp");
-        let _ = std::fs::remove_file(&tmp);
-        self.with(|db| db.export_encrypted(&tmp))?;
-        let result = (|| {
-            let mut copy = self.open_copy(&tmp)?;
-            copy.rekey(&passphrase, KdfParams::secure())?;
-            copy.close()?;
-            std::fs::rename(&tmp, &dest).map_err(|e| MnemoError::Io {
-                message: e.to_string(),
-            })
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        result
+        self.with(|db| db.export_rekeyed(&dest, &passphrase, KdfParams::secure()))
+            .map(|_| ())
     }
-}
-
-/// `dest` with `.<suffix>` appended to its file name.
-fn sibling(dest: &Path, suffix: &str) -> PathBuf {
-    let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{suffix}"));
-    dest.with_file_name(name)
 }
 
 /// Run the app's embedder on `texts`, checking the shape like the binding's
@@ -852,6 +800,11 @@ pub fn embed_texts(
 
 /// A fresh random 32-byte key for `create_with_key`. Store it in the
 /// Keychain or Keystore: it can't be recovered from the file.
+///
+/// Zeroizing here is best effort: the key is made in a zeroized array and
+/// copied once into the returned `Vec`, which UniFFI copies into the
+/// foreign buffer and frees without zeroing (a lowering that wiped it would
+/// need unsafe code). The app's copy is the one to look after.
 #[uniffi::export]
 pub fn generate_key() -> Vec<u8> {
     let key = Zeroizing::new(Mnemo::generate_key());
@@ -859,9 +812,11 @@ pub fn generate_key() -> Vec<u8> {
 }
 
 /// Copy a passphrase file (from `export_with_passphrase`, on another
-/// device) to `dest`, re-protected by a new device key, and return that
-/// key for the app to store in the Keychain or Keystore. `src` is left as
-/// it is; `dest` must not exist.
+/// device) to `dest` under a fresh data key, protected by a new device key,
+/// and return that key for the app to store in the Keychain or Keystore.
+/// The copy shares no key material with `src`: the transfer passphrase
+/// doesn't open it, even with `src`'s header. `src` is opened read-only and
+/// left as it is; `dest` must not exist.
 #[uniffi::export]
 pub fn import_with_passphrase(
     src: String,
@@ -870,30 +825,14 @@ pub fn import_with_passphrase(
 ) -> Result<Vec<u8>, MnemoError> {
     let passphrase = Zeroizing::new(passphrase);
     let dest = PathBuf::from(dest);
-    if dest.exists() {
-        return Err(MnemoError::Invalid {
-            message: format!("{} already exists", dest.display()),
-        });
-    }
-    let tmp = sibling(&dest, "import-tmp");
-    let _ = std::fs::remove_file(&tmp);
-    let result = (|| {
-        std::fs::copy(&src, &tmp).map_err(|e| MnemoError::Io {
-            message: e.to_string(),
-        })?;
-        let mut db = Mnemo::open(&tmp, &passphrase)?;
-        let key = Zeroizing::new(Mnemo::generate_key());
-        db.rekey_with_key(&key)?;
-        db.close()?;
-        std::fs::rename(&tmp, &dest).map_err(|e| MnemoError::Io {
-            message: e.to_string(),
-        })?;
-        Ok(key.to_vec())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    // Read-only: the source is left exactly as it is. The copy is written
+    // under a fresh data key and the new device key, so neither the
+    // transfer passphrase nor the source's data key opens it.
+    let mut source = Mnemo::open_read_only(&src, &passphrase)?;
+    let key = Zeroizing::new(Mnemo::generate_key());
+    source.export_rekeyed_with_key(&dest, &key)?;
+    drop(source);
+    Ok(key.to_vec())
 }
 
 /// Compact a passphrase file in place (also upgrades a v8 file to v9). The

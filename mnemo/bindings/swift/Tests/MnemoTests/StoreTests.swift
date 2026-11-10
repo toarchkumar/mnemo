@@ -302,6 +302,18 @@ import Testing
         try await v8.close()
     }
 
+    @Test func keyBytesOwnsItsCopyAndZeroesItInPlace() {
+        let original = Data((0..<32).map { UInt8($0 + 1) })
+        let key = KeyBytes(copying: original)
+        #expect(key.data == original)
+        let before = key.data.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
+        key.wipe()
+        let after = key.data.withUnsafeBytes { UInt(bitPattern: $0.baseAddress) }
+        #expect(before == after, "zeroed in place, not in a copy")
+        #expect(key.data.allSatisfy { $0 == 0 })
+        #expect(original.allSatisfy { $0 != 0 }, "the source is a separate buffer")
+    }
+
     @Test func invalidNamesAreRefused() throws {
         for name in ["", "../escape", ".hidden", "a/b"] {
             #expect(throws: MnemoStoreError.self) {

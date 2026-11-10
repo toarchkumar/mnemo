@@ -53,6 +53,11 @@ enum Command {
     /// the `MNEMO_NEW_PASSPHRASE` env var, or an interactive double-prompt
     /// without echo. The old passphrase follows the same priority chain as
     /// every other command.
+    ///
+    /// A plain rekey changes the secret that opens this file from now on,
+    /// but the data key stays: anyone who kept a copy of the file and the
+    /// old passphrase can still read it, and everything written later.
+    /// After a suspected passphrase leak, use `--rotate`.
     Rekey {
         /// Path to the `.mnemo` file.
         path: String,
@@ -61,6 +66,12 @@ enum Command {
         /// The new passphrase. Omit to be prompted twice without echo.
         #[arg(long)]
         new_passphrase: Option<String>,
+        /// Also rotate the data key: rekey, then compact, which rewrites the
+        /// file under a fresh data key. The old passphrase then opens no
+        /// copy of the file made from now on, and no earlier copy opens with
+        /// the new one. Takes as long as `compact` (history is dropped).
+        #[arg(long)]
+        rotate: bool,
     },
     /// Rebuild the file, dropping tombstoned and expired memories. Writes
     /// the current format, v9, so this is also how a v8 file is upgraded.
@@ -1317,6 +1328,7 @@ fn run() -> std::result::Result<(), String> {
             path,
             passphrase: pp,
             new_passphrase: new,
+            rotate,
         } => {
             let pp = passphrase(&pp)?;
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
@@ -1324,7 +1336,19 @@ fn run() -> std::result::Result<(), String> {
             db.rekey(&new, mnemo_engine::KdfParams::secure())
                 .map_err(fmt)?;
             db.close().map_err(fmt)?;
-            println!("rekeyed {path}");
+            if rotate {
+                let r = Mnemo::compact_file(&path, &new).map_err(fmt)?;
+                println!(
+                    "rekeyed and rotated {path}: a fresh data key, {} memories kept",
+                    r.after
+                );
+            } else {
+                println!("rekeyed {path}");
+                println!(
+                    "note: the data key is unchanged; after a passphrase leak, run \
+                     `mnemo rekey --rotate` to revoke the old one"
+                );
+            }
         }
         Command::Compact {
             path,

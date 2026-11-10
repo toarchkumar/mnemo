@@ -413,9 +413,7 @@ public actor MnemoStore {
             throw MnemoError.NotFound(message: fileURL.path)
         }
         let (id, key) = try resolveKey()
-        var bytes = key
-        defer { bytes.zeroize() }
-        let report = try compactFileWithKey(path: fileURL.path, key: bytes)
+        let report = try compactFileWithKey(path: fileURL.path, key: key.data)
         try KeyID.write(id, to: fileURL)
         try FilePolicy.apply(to: fileURL, policy: configuration.keyPolicy)
         return report
@@ -424,15 +422,17 @@ public actor MnemoStore {
     // MARK: Moving devices
 
     /// Writes a copy that opens with `passphrase` alone, for moving the
-    /// database to another device or app. `destination` must not exist.
-    /// Takes a few seconds: the passphrase goes through the KDF.
+    /// database to another device or app: a compacted copy under a fresh
+    /// data key, sharing no key material with this file. `destination` must
+    /// not exist. Takes a few seconds: the passphrase goes through the KDF.
     public func exportWithPassphrase(to destination: URL, passphrase: String) async throws {
         try await withDatabase { try $0.exportWithPassphrase(dest: destination.path, passphrase: passphrase) }
     }
 
-    /// Imports a passphrase export as a new store: the copy is re-protected
-    /// by a fresh key, stored in `keyStore` under the configuration's
-    /// policy. The store's file must not exist yet; the source is unchanged.
+    /// Imports a passphrase export as a new store: a compacted copy under a
+    /// fresh data key, protected by a new key stored in `keyStore` under the
+    /// configuration's policy. The transfer passphrase doesn't open it. The
+    /// store's file must not exist yet; the source is unchanged.
     public static func importWithPassphrase(
         from source: URL,
         passphrase: String,
@@ -683,40 +683,66 @@ public actor MnemoStore {
 
     private func openExisting() throws -> (String, MnemoDb) {
         let (id, key) = try resolveKey()
-        var bytes = key
-        defer { bytes.zeroize() }
-        return (id, try MnemoDb.openWithKey(path: fileURL.path, key: bytes))
+        return (id, try MnemoDb.openWithKey(path: fileURL.path, key: key.data))
     }
 
     /// The key id and key for the existing file: the stamped id, or else the
-    /// first stored key that opens the file (which is then stamped).
-    private func resolveKey() throws -> (String, Data) {
+    /// first stored key that opens the file (which is then stamped). The key
+    /// is copied out of whatever the key store returned into bytes the store
+    /// owns, which are zeroed when the caller lets go of them.
+    private func resolveKey() throws -> (String, KeyBytes) {
         if let id = KeyID.read(fileURL) ?? keyID {
             do {
-                return (id, try keyStore.key(id: id))
+                return (id, KeyBytes(copying: try keyStore.key(id: id)))
             } catch MnemoStoreError.keyMissing {
                 throw MnemoStoreError.keyMissing(keyID: id, path: fileURL.path)
             }
         }
         for id in try keyStore.keyIDs() {
-            var key: Data
+            let key: KeyBytes
             do {
-                key = try keyStore.key(id: id)
+                key = KeyBytes(copying: try keyStore.key(id: id))
             } catch MnemoStoreError.keyMissing {
                 continue
             }
             do {
                 // Opening with a raw key costs no KDF, so a wrong key is cheap.
-                let probe = try MnemoDb.openReadOnlyWithKey(path: fileURL.path, key: key)
+                let probe = try MnemoDb.openReadOnlyWithKey(path: fileURL.path, key: key.data)
                 try probe.close()
             } catch MnemoError.WrongPassphrase {
-                key.zeroize()
                 continue
             }
             try? KeyID.write(id, to: fileURL)
             return (id, key)
         }
         throw MnemoStoreError.keyMissing(keyID: nil, path: fileURL.path)
+    }
+}
+
+/// Key bytes the store owns: a private copy (never shared with the key
+/// store's own `Data`, which may be an immutable Keychain buffer), zeroed in
+/// place when the last reference goes. Zeroing `Data` you don't own uniquely
+/// wipes a copy instead (`Data` copies on its first mutation), which is why
+/// the store copies first. Best effort: the key store's buffer and the
+/// binding's FFI copy aren't reachable from here.
+final class KeyBytes {
+    private(set) var data: Data
+
+    init(copying source: Data) {
+        var owned = Data(count: source.count)
+        owned.withUnsafeMutableBytes { dst in
+            _ = source.copyBytes(to: dst)
+        }
+        data = owned
+    }
+
+    /// Zeroes the bytes in place (the store's copy is the only reference).
+    func wipe() {
+        data.zeroize()
+    }
+
+    deinit {
+        wipe()
     }
 }
 

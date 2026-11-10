@@ -270,6 +270,11 @@ open costs a file open and a key lookup (no KDF: device keys are raw keys).
 - **Sharing keys.** `MnemoKeychain(accessGroup:)` shares keys with app
   extensions or other apps from the same team. Give every process the same
   group and service.
+- **Keys in memory.** The store copies each key it reads into bytes it
+  owns and zeroes them as soon as the file is open. That's best effort:
+  the Keychain's own buffer, and the copies the binding hands to the
+  engine, aren't reachable from Swift, and the engine holds the file's
+  data key for as long as the file is open.
 
 ### Moving to another device: passphrase export and import
 
@@ -277,7 +282,7 @@ open costs a file open and a key lookup (no KDF: device keys are raw keys).
 // On the old device: a copy that opens with the passphrase alone.
 try await store.exportWithPassphrase(to: exportURL, passphrase: passphrase)
 
-// On the new device: re-protected by a fresh key in this device's Keychain.
+// On the new device: a fresh copy under a new key in this device's Keychain.
 let store = try await MnemoStore.importWithPassphrase(
     from: exportURL, passphrase: passphrase,
     configuration: MnemoStoreConfiguration(name: "assistant", dimensions: 384))
@@ -286,7 +291,12 @@ let store = try await MnemoStore.importWithPassphrase(
 - Both calls take a few seconds, because the passphrase goes through the
   KDF.
 - The destination must not exist yet, and the source is never modified.
-- Have the user choose the passphrase. Never store it next to the export.
+- Both write a compacted copy (live data, no history) under a **fresh data
+  key**. The export shares no key material with the device's file, and the
+  imported file shares none with the export: the transfer passphrase never
+  opens the imported file, even with a leftover copy of the export.
+- Have the user choose the passphrase. Never store it next to the export,
+  and delete the export once it's imported.
 
 ## App Groups and extensions
 

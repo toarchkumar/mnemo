@@ -325,16 +325,18 @@ class MnemoStore private constructor(
 
     /**
      * Writes a copy that opens with [passphrase] alone, for moving the
-     * database to another device or app. [destination] must not exist.
-     * Takes a few seconds: the passphrase goes through the KDF.
+     * database to another device or app: a compacted copy under a fresh
+     * data key, sharing no key material with this file. [destination] must
+     * not exist. Takes a few seconds: the passphrase goes through the KDF.
      */
     suspend fun exportWithPassphrase(destination: File, passphrase: String) =
         withDatabase { it.exportWithPassphrase(destination.path, passphrase) }
 
     companion object {
         /**
-         * Imports a passphrase export as a new Android store: the copy is
-         * re-protected by a fresh key in [keys]. The store's file must not
+         * Imports a passphrase export as a new Android store: a compacted
+         * copy under a fresh data key, protected by a new key in [keys]. The
+         * transfer passphrase doesn't open it. The store's file must not
          * exist yet; [source] is unchanged.
          */
         suspend fun importWithPassphrase(
