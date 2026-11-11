@@ -674,13 +674,13 @@ impl Mnemo {
     /// `fn_` is any Python callable with the shape
     /// `embed(texts: list[str]) -> list[list[float]]`. `name`,
     /// `dimensions`, and `normalize` describe the embedder's identity;
-    /// they're validated against the scaffold manifest on registration
-    /// and persisted there on first registration so a subsequent open
-    /// catches an embedder swap.
+    /// the file records them on the first registration (every file, and
+    /// the scaffold manifest too when there is one) and checks them on
+    /// every later one, so a subsequent open catches an embedder swap.
     ///
     /// Raises `RuntimeError` on dimension mismatch
     /// (`dimensions != db.dimensions()`) or on an identity mismatch
-    /// with the manifest.
+    /// with the identity the file records.
     #[pyo3(signature = (fn_, *, name, dimensions, normalize=true))]
     fn set_embedder(
         &mut self,
