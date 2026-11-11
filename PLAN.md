@@ -15576,3 +15576,568 @@ result. Read the items in `reviewer_notes.md` (and RB-002.2 in
 extension's automatic background mode, key-policy migration, the FUZZ-2
 targets, and anything for PERF-2. If a step turns out bigger than this,
 log BLOCKED with the reason rather than widening it.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 1: Android Keystore (RB-001.21)
+
+**Setup:**
+- 5fd3ea3 `chore(plan): sync coordination files` (your PLAN.md), the first
+  commit on `release-0.12.2`, cut from `main` at 6e32b68.
+- **Deviation:** ec428ad adds `release-*` to `ci.yml`'s `push` and
+  `pull_request` branch filters. Without it, PRs into `release-0.12.2`
+  ran no CI, and the Kotlin tests can only run there (no JDK on this
+  machine). It's a slice of step 2's CI work, pulled ahead.
+- `main` has no branch protection and no rulesets: `gh api
+  .../branches/main/protection` returns 404, and the branch's rules list is
+  empty.
+
+**Commit** be78b72 (PR 17, toarchkumar/mnemo#17, fast-forwarded into
+`release-0.12.2`). CI 18/18 green.
+- **What's `KeyMissing`:** only a missing key file (decided by
+  `exists()`, since the JVM reports a permission error or a directory as
+  `FileNotFoundException` too), a missing alias (`WrappingKeyMissing`),
+  `AEADBadTagException` and `KeyPermanentlyInvalidatedException`. A
+  truncated or non-key file stays `KeyMissing`: it's a damaged key, not a
+  passing failure. **Everything else** is the retryable
+  `MnemoStoreException.Keystore(op, cause)`, now documented as retryable.
+- **The wrapping key:**
+  - it comes through `WrappingKeys` (the real `AndroidKeystoreKeys`, or a
+    fake in tests);
+  - an alias that exists but gives no key is the retryable error and
+    never generates;
+  - creation holds a `FileChannel` lock on `keys/.wrapping-key.lock` and
+    checks again inside it.
+- **Key files:** `FileOutputStream`, `fd.sync()`, the rename, then
+  `Os.fsync` on the directory (best effort).
+- **README:** the four `KeyMissing` causes, and a paragraph saying a
+  `Keystore` error is never a reason to delete anything.
+- **Tests (`KeystoreErrorTests`, JVM, 5):**
+  - RB-002.4's .21 recipe: `ProviderException` once gives `Keystore`, and
+    the retry returns the key. **Today this was KeyMissing;**
+  - an existing alias with no key: `key()` and `storeKey()` both throw
+    `Keystore`, and `generated` stays 1;
+  - a missing alias is `KeyMissing`;
+  - a missing file is `KeyMissing`, and an unreadable one is `Keystore`;
+  - no temporary files are left behind.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 2: CI-DEPS-1 + RB-001.7
+
+**Commit** 040dc2c (PR 18, toarchkumar/mnemo#18). CI 18/18 green.
+- `dependabot.yml` ignores `dtolnay/rust-toolchain`. **PR 16 is closed:**
+  "Closing: this group moves dtolnay/rust-toolchain@1.75/@1.82 (our MSRV
+  checks) to @1.120; dependabot.yml now ignores that action (CI-DEPS-1),
+  and the action bumps come back in a fresh group." Dependabot reads its
+  config from `main`, so the fresh group comes once v0.12.2 lands there.
+- **`ci.yml` concurrency:** the group is `ci-main-<run_id>` on `main` (a
+  group per run, so it's never cancelled or queued) and `ci-<ref>`
+  elsewhere, with `cancel-in-progress: true`. Tags and `release.yml` are
+  untouched.
+- **`paths-ignore`** for the docs list (written out for push and for PR;
+  no YAML anchors). There are no required checks, so no "changes" job was
+  needed.
+- **`release.yml`:** the wheel step's `rustflags:` is dropped.
+  **Deviation:** that's the only `rustflags:` input (one matrix step); the
+  sdist step never had one.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 3: engine safety (RB-001.24, .26, .22)
+
+**Commit** 299c951 (PR 19, toarchkumar/mnemo#19). CI 18/18 green.
+- **.24:**
+  - `remember`, `remember_keyed` and `update` refuse `_mnemo.*` caller
+    keys with `Invalid` ("metadata key … is reserved"). Python, the CLI,
+    MCP and the binding all go through them.
+  - **Refinement:** an in-place overwrite (a known id) may carry the
+    stored record's own `_mnemo.*` keys through unchanged, but can't add,
+    change or drop one. Without it, `Session::close` and get-edit-remember
+    break.
+  - The engine's own writes use `put` (compaction, export) and
+    `update_unchecked` (essence).
+  - Two tests that forged thread turns with plain `remember`
+    (`fmt9b_column`, `fmt9d_bm25`) now ingest real turns.
+  - A `seed.json` memory states the rule.
+- **.26:** `RECORD_PLAIN_MAX` is 1 MiB. RB-002's frame (64 MiB of zeros,
+  well under 4 KB compressed) is refused as "too large" from its header;
+  1 MiB + 1 is refused, and exactly 1 MiB passes the size check.
+- **.22:** `Mnemo::try_close(self) -> Result<(), CloseError>`. `CloseError`
+  boxes the handle, with `error()`, `into_inner()`, `into_parts()`,
+  `Display` and `Error`. `close` is unchanged and its rustdoc points to
+  `try_close`. The binding's `close()` uses `try_close` and puts the handle
+  back in its slot on failure.
+
+**T-rows:**
+
+| T | Where | Today | After (measured) |
+|---|---|---|---|
+| T4 | `tests/engine_safety.rs`, failpoints, v8 and v9 | `close` → `Err`, 10 of 40, no handle | `try_close` → `Err` with the handle (40 in memory); the retry saves 40. `close` still loses them (10), a test of its own |
+| T5 | `mnemo-uniffi` `tests/close_retry.rs` | `close` errors, then `flush` is `Closed`, 10 of 40 | `close` → `Io`; `len` 40; `flush` retries; a reopen gives 40 |
+| T8 | `tests/engine_safety.rs`, v8 and v9, plus the binding's `metadata_json` and Python | 2 of 4 recalled, the forged key in history, the forged turn in `thread_export` | every forged write is `Invalid`; 1 memory stored; empty history and `thread_export`; 1 recall hit |
+
+**Local:** the engine suite green; MSRV 1.75 (`-D warnings`) and 1.82
+green; Python tests green. A new zsh lesson: always write `"${H}:refs/…"`.
+`$H:r` is a zsh modifier, and it was the real cause of 2d's "transient"
+push failure.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 4: FFI errors, a cheap stats, track_access (RB-001.23, RB-002.3, RB-001.5)
+
+**Commit** a844b22 (PR 20, toarchkumar/mnemo#20). CI 18/18 green.
+- **.23:**
+  - new cases `Kdf`, `Crypto`, `NotAMnemoFile` (`BadMagic`) and
+    `NeedsWriteOpen { reason }`; `UnsupportedVersion { found, message }`;
+  - `Corrupt` covers `HeaderChecksum`, `PageAuthFailed` and `Serialize`
+    only;
+  - `#[uniffi::export] impl MnemoError { fn is_retryable() }`, true for
+    `Locked`, `Io`, `Kdf` and `Closed`. Generated as `isRetryable()` in
+    Swift and Kotlin;
+  - Kotlin renames the four new `message` fields to `reason` in
+    `uniffi.toml`.
+  - **A poisoned handle:** `lock_handle` recovers the poison, drops the
+    handle and clears it, so the call is `Closed` and both stores reopen.
+    The embedder lock recovers its value.
+  - **`Mnemo::key_opens(path, key)`:** the header only, plus the WAL
+    candidates for a torn header. It's exported as `keyOpens`, and both
+    stores probe with it.
+  - Both READMEs have the three-class table.
+- **RB-002.3:** `Mnemo::stats_summary()` returns `StatsSummary` (counts,
+  `file_bytes`, `format_version`, `wal_pages`, `has_index` from the header,
+  `recall_mode`, `vector_column_bytes`). The binding's `stats()` uses it,
+  with `DbStats.vector_column_bytes`. The new `device_budget --only stats`
+  cell is recorded as `first_stats_v0_12_2` in `perf_v0.5.0.json`. At 10K
+  on the M1 Pro: **0.027 ms** (p95 0.034) on a fresh handle, against
+  **10.92 ms** (p95 12.04) for `stats()`.
+- **.5:** the binding's `RecallOptions.track_access` defaults to `false`;
+  the READMEs say how to turn it on.
+
+**T-rows:**
+
+| T | Where | Today | After (measured) |
+|---|---|---|---|
+| T1 | binding unit test | 10 | 10, unchanged (the contract) |
+| T6 | `tests/engine_safety.rs`, failpoints, v9 and v8 | a wrong-key read-only open: `NeedsWriteOpen` | that open still refuses (documented); `key_opens(wrong)` = false, `key_opens(right)` = true; a read-write open recovers 15; a non-`.mnemo` file is an error |
+| T7 | `mnemo-uniffi` `tests/key_probe.rs` (pending WAL), Swift and Kotlin `StoreTests` (unstamped file, wrong key first) | `Invalid` three times | the wrong key skipped; the file opens with 15, three times; the id is stamped again |
+
+- **Deviation for T7:** its pending-WAL half runs at the binding level,
+  because the Swift suite can't make that fixture without failpoints or a
+  committed `.mnemo` file. The store halves check the probe wiring on an
+  unstamped file.
+- **Local:** `swift test` 30, the simulator 40, the binding 18 unit and 2
+  integration tests, clippy, fmt, MSRV.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 5: the Swift and Kotlin stores (RB-001.20, .27, .28 part 1, RB-002.5)
+
+**Commit** 35fd863 (PR 21, toarchkumar/mnemo#21). CI 18/18 green. The
+android-emulator run 42936241572 on this branch (steps 1–5) is green on
+both images, with the Keystore instrumented tests and the force-stop kill
+test.
+- **.20 (Swift):** `beginActivity` throws the retryable
+  `MnemoStoreError.noBackgroundTime` when the first callback is already
+  expired, so `withDatabase` never opens the file then. It records a later
+  expiry (`hasExpired`). Each engine step of a long call (an ingest's plan
+  and apply) begins its own activity, which is the between-steps check
+  (no engine interrupt).
+  - The README's App Groups section now says to close the store yourself
+    in an extension, and covers no background time.
+  - The run sheet gains RB-001.20's two device cases, for the next device
+    run (not a gate).
+  - **Not unit-tested:** an expired first callback can't be forced on a
+    simulator. Its error and `isRetryable` are tested.
+- **.27:** `formatVersion` is deprecated. Swift has a deprecated
+  `init(…, formatVersion:, …)` beside the default init (no ambiguity, since
+  the label is required) and a deprecated property. Kotlin has
+  `@Deprecated` on the property, and `engineConfig` suppresses the warning.
+- **.28 part 1 (Swift; Kotlin has no key policy):** the open refuses with
+  `keyPolicyMismatch(stored:configured:)` before any file policy is
+  applied. `MnemoKeyStore.policy(id:)` defaults to `nil`; `MnemoKeychain`
+  derives it from `kSecAttrSynchronizable`.
+- **RB-002.5:**
+  - `setMaxSnapshots` on both stores (binding `set_max_snapshots`),
+    remembered and applied on every open;
+  - the budget table gains bytes per fact and the budget to stay resident
+    at 50K, plus the remedy at the cliff, with RB-002.5's numbers and the
+    perf file's `build_secs`;
+  - the History sections mention `setMaxSnapshots`.
+- **.22's store side**, from the accepted triage: both `close()` methods
+  keep the handle when the binding's close fails. The Swift store closes
+  on `deinit`.
+
+**T-rows:**
+
+| T | Where | Today | After (measured) |
+|---|---|---|---|
+| T2 | Swift `StoreHardeningTests`, coalesced (0.3 s) and everyWrite | 5 | 25 in both (the store commits and closes on deinit, and the new store opens unlocked) |
+| T3 | Kotlin `StoreHardeningTests` | not run | 25 on disk (a byte copy) after a cancelled scope: within the window under Coalesced, at once under EveryWrite. A JVM store has no destructor, so the check doesn't open a second store |
+| T9 (a) | Swift and Kotlin: the embedder reads `cacheGet` (3 s timeout) | times out | returns at once, no timeout |
+| T9 (b) | Swift and Kotlin: a 1.5 s embed; `count()` and the background close or ON_STOP flush 0.2 s in | both about 1.3 s | both under 0.3 s |
+| T10 | Swift: `.deviceOnly`, then reopened as `.iCloudSynced` | file `false`, key `.deviceOnly` | `keyPolicyMismatch(deviceOnly, iCloudSynced)`; still excluded from backup; key unchanged; the right policy still opens |
+
+**Local:** `swift test` 36, the iOS simulator 46 (with
+`MnemoKeychain.policy` on the real Keychain).
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 6: SEC-2b (details in SECURITY.local.md)
+
+**Commits** (PR 22, toarchkumar/mnemo#22, fast-forwarded into
+`release-0.12.2` at 23e8319), each with a neutral message and no write-up
+in the PR text:
+- e839bf6, the tests and the docs wording;
+- 23e8319, a test fix. The first CI run failed on `rust (windows-latest)`
+  only: the export test read the live file's page 0 while it was open, and
+  Windows enforces the lock (os error 33). It now reads the header with the
+  file closed. The rerun was 18/18 green.
+
+**The acceptance test** is `src/store/header_graft_tests.rs`, in-crate
+because it uses `Header`, `derive_kek`, `unwrap_dek`, `validate_seal` and
+`apply_seal`. The graft takes an earlier page 0 and secret, moves the key
+wrap and KDF costs onto the current header, re-seals it, and opens the
+result read-only with the earlier secret:
+- **plain rekey:** the graft opens, with all **60** memories (20 before the
+  rekey, 40 written after). This documents what plain rekey doesn't do;
+- **`rekey --rotate`** (rekey, then `compact_file`): `HeaderTampered` at the
+  seal;
+- **`export_rekeyed`** (the binding's `export_with_passphrase`): the live
+  file's header and device key on the export give `HeaderTampered`;
+- **`export_rekeyed_with_key` from a read-only source** (the binding's
+  `import_with_passphrase`): the export's header and the transfer
+  passphrase on the imported file give `HeaderTampered`, after 25 more
+  writes.
+
+The binding's two helpers are covered through the engine calls they make;
+the graft can't run from outside the crate.
+
+**The hygiene check:** `tests/rekey_export.rs`'s byte-search test is now
+`hygiene_rekey_scrubs_stale_copies_of_the_old_key_wrap`, with a doc comment
+saying it isn't revocation and pointing to the grafts.
+
+**Docs wording** (from the RB-002.2 triage): the plain-`rekey` sentence,
+"re-protected under a new data key" for the import, and the flash-blocks
+sentence, in:
+- the `rekey` rustdoc;
+- the CLI help for `rekey`;
+- the engine README's key-hierarchy paragraph;
+- the Swift and Kotlin READMEs' export and import bullets.
+
+**For the Planner (Planner-owned file):** the root README needs the same
+wording. Suggested: "A plain `rekey` changes the secret that opens the file
+from now on; anyone who had the file and the old secret can still read it
+and later writes. Use `mnemo rekey --rotate` to revoke. Rotation can't
+erase old ciphertext that flash storage still holds in blocks it hasn't
+reused."
+
+After the tag: move RB-002.2 from `SECURITY.local.md` into PLAN.md.
+
+### 2026-11-11 — WORKER — BLOCKED — v0.12.2 step 7: the release dry run fails at Maven Central with "Invalid token"
+
+**Run:** release.yml dry run 42945011583 on `release-0.12.2` at 24dfe1e
+(PR 23, the release commit), approved for `maven-central` and
+`mnemo-swift`.
+
+| Job | Result |
+|---|---|
+| mobile (version check) | success: engine 0.12.2, mnemo-uniffi 0.12.2, mnemo-android 0.12.2 |
+| mobile (Swift build) | success: the SPM consumer on the iOS simulator, checksum matches, TEST SUCCEEDED |
+| mobile (Android build) | success |
+| mobile (Swift publish) | success: "pushing with the deploy key", pushed and deleted `dry-run-0.12.2`; the published 0.12.1 package resolves (checksum matches) and builds |
+| mobile (Android publish) | **failure** |
+
+**Evidence:** in the Android publish job, the signed
+`publishToMavenLocal` step succeeded (every artifact has its `.asc`), so
+the signing key and its password work. Step 8, "Maven Central (dry run,
+validated then dropped)", then failed in `publishToMavenCentral` with:
+
+    Upload failed: {"error":{"message":"Invalid token"}}
+
+The Central Portal rejected the username/password pair before any
+validation. Secret names (no values read): the repository has no
+secrets; the `maven-central` environment holds `MAVEN_CENTRAL_USERNAME`
+(updated 2026-11-11T00:48:43Z), `MAVEN_CENTRAL_PASSWORD` (00:48:54Z),
+`MAVEN_SIGNING_KEY` and `MAVEN_SIGNING_KEY_PASSWORD`. The v0.12.1 runs
+published with the earlier pair, so this is the new pair, not the
+workflow.
+
+**Needs (user):** regenerate the Central Portal user token (central.sonatype.com,
+View Account, Generate User Token) and set both halves in the
+`maven-central` environment: the token's username as
+`MAVEN_CENTRAL_USERNAME`, its password as `MAVEN_CENTRAL_PASSWORD`. Then I
+rerun the dry run on `release-0.12.2`, which waits for the approval of
+`maven-central` and `mnemo-swift`. READY is logged only after a green run.
+Nothing is tagged.
+
+### 2026-11-11 — WORKER — READY — v0.12.2: MOBILE-2e, SEC-2b and CI-DEPS-1 are on `release-0.12.2`; the release commit is staged and its dry run passed
+
+Clears my BLOCKED entry above. The user generated a new Central Portal
+token and set both halves in the `maven-central` environment; the signing
+secrets are unchanged.
+
+**On `release-0.12.2` (24dfe1e), not on `main`, not tagged.** Every step
+was one PR with base `release-0.12.2`, fast-forwarded in:
+
+| Step | Commits | PR | CI on the PR | CI on the push |
+|---|---|---|---|---|
+| setup | 5fd3ea3 (plan backup), ec428ad (CI on `release-*`) | | | |
+| 1 Android Keystore (RB-001.21) | be78b72 | #17 | 42929708024 green | 42932124734 green |
+| 2 CI-DEPS-1 + RB-001.7 | 040dc2c | #18 | 42932083414 green | 42934488585 cancelled by the next push (the new concurrency group) |
+| 3 engine safety | 299c951 | #19 | 42934536528 green | 42936181417 green |
+| 4 FFI errors, the cheap stats | a844b22 | #20 | 42936201560 green | 42938556809 cancelled by the next push |
+| 5 the Swift and Kotlin stores | 35fd863 | #21 | 42938578988 green | 42939792851 **red: T9 (b), see below** |
+| 6 SEC-2b | e839bf6, 23e8319 | #22 | 42941492040 green | 42943425583 **red: T9 (b), see below** |
+| 7 the release commit | 24dfe1e | #23 | 42943462279 green | 42944999425 green |
+
+The android-emulator run 42936241572 (at 35fd863, steps 1–5) is green on
+both images, including the 16 KB one. PR 16 is closed with its reason.
+
+**The release dry run 42948705137 (on `release-0.12.2` at 24dfe1e): green.**
+- **Version check:** engine, `mnemo-uniffi` and `mnemo-android` all
+  0.12.2; the engine jobs were skipped and none failed.
+- **Swift build:** the XCFramework, the release tree, and the SPM consumer
+  on the simulator (checksum matches, `** TEST SUCCEEDED **`).
+- **Swift publish:** "pushing with the deploy key", then pushed and deleted
+  `dry-run-0.12.2`. The published-package check resolved `mnemo-swift`
+  0.12.1 (10,551,138 B, checksum matches) and built
+  (`** BUILD SUCCEEDED **`).
+- **Android build:** green (the native libraries, the 16 KB and size
+  gates, the JVM tests, the AAR, the consumer).
+- **Android publish:**
+  - the signed `publishToMavenLocal` has all five `.asc` files;
+  - the Central dry run **uploaded** the bundle as USER_MANAGED (deployment
+    1f75e9a1-6714-45b7-b6b6-9482611c81d2);
+  - it went **VALIDATED**;
+  - it was **dropped** (HTTP 204, and the status call then gives 404).
+
+**Sizes, against 0.12.1:**
+
+| | 0.12.1 | 0.12.2 |
+|---|---|---|
+| `MnemoFFI.xcframework.zip` | 10,551,129 B | 10,562,291 B (checksum `2b6ceb551f2c52590018c22131b7c5773e53acc698e098562091944cb7f6cfcd`) |
+| `libmnemo_uniffi.a`, ios-arm64 | 9,283,400 | 9,290,584 |
+| `libmnemo_uniffi.a`, simulator | 18,662,072 | 18,675,624 |
+| `libmnemo_uniffi.a`, macos-arm64 | 9,255,184 | 9,265,056 |
+| `libmnemo_uniffi.so`, arm64-v8a | 2,569,272 | 2,577,360 (LOAD 0x4000) |
+| `libmnemo_uniffi.so`, x86_64 | 2,999,272 | 3,008,368 (LOAD 0x4000) |
+| AAR | 2,728,983 | 2,747,271 |
+
+The 5 MiB `.so` gate passes.
+
+**RB-002.4's ten tests**, each moved from "Today" to "After the fix":
+
+| T | Step | Where | Today | After |
+|---|---|---|---|---|
+| T1 | 4 | binding unit test | 10 | 10, unchanged (the contract) |
+| T2 | 5 | Swift `StoreHardeningTests`, coalesced (0.3 s) and everyWrite | 5 | 25 in both |
+| T3 | 5 | Kotlin `StoreHardeningTests` | not run | 25 on disk after a cancelled scope, under Coalesced and EveryWrite (a byte copy; a JVM store has no destructor) |
+| T4 | 3 | `tests/engine_safety.rs`, failpoints, v8 and v9 | `close` → `Err`, 10 of 40, no handle | `try_close` → `Err` with the handle; the retry saves 40. `close` unchanged (10) |
+| T5 | 3 | `mnemo-uniffi` `tests/close_retry.rs` | `close` errors, then `flush` is `Closed`, 10 of 40 | `close` → `Io`; `len` 40; `flush` retries; a reopen gives 40 |
+| T6 | 4 | `tests/engine_safety.rs`, failpoints, v9 and v8 | a wrong-key read-only open: `NeedsWriteOpen` | that open still refuses (documented); `key_opens` false then true; a read-write open recovers 15; a non-`.mnemo` file is an error |
+| T7 | 4 | `tests/key_probe.rs` (pending WAL), Swift and Kotlin `StoreTests` | `Invalid` three times | the wrong key skipped; opens with 15, three times; the id stamped again |
+| T8 | 3 | `tests/engine_safety.rs`, v8 and v9, the binding, Python | 2 of 4 recalled, the forged key in history and `thread_export` | every forged write `Invalid`; 1 memory; empty history and `thread_export`; 1 hit |
+| T9 (a) | 5 | Swift and Kotlin | times out | returns at once |
+| T9 (b) | 5 | Swift and Kotlin | both about 1.3 s | both under 0.3 s. **The Swift test is flaky on CI** (below) |
+| T10 | 5 | Swift | file `false`, key `.deviceOnly` | `keyPolicyMismatch(deviceOnly, iCloudSynced)`; nothing changed; the right policy opens |
+
+SEC-2b's graft tests (step 6) are in my step 6 DONE and SECURITY.local.md.
+
+**Open item: the Swift T9 (b) test is flaky on the iOS-simulator CI job.**
+It failed on 2 of the 4 push runs that ran it (42939792851, 42943425583),
+both at `StoreHardeningTests.swift:55`, `#expect(try await store.count() == 1)`.
+It passed on every PR run, on the 24dfe1e push, in the dry run's consumer
+build, and locally in 20 of 20 runs (12 idle, 8 with every core busy). The
+two timing expectations passed in both failures, so `count()` and the
+background close were fast. The count was wrong: almost certainly 2.
+`SlowEmbedder` blocks a cooperative-pool thread with `Thread.sleep`. On the
+3-core runner, with suites running in parallel, the test's task can't resume
+from its 0.2 s sleep until the 1.5 s embed lands, so `count()` sees both
+memories. That's a test defect, not a store one. The fix is test-only:
+replace the sleep with a gate the test opens after it measures, so the embed
+can't land before `count()`. I didn't make it, because it would be a commit
+after the release commit (another CI run and dry run). **Planner:** ship
+with it as a known flake and fix it in the next patch, or dispatch the
+test-only fix now as a step 7a, before the tag.
+
+**Other notes:**
+- One unidentified engine test failure in 1 of 7 local full-suite runs
+  during step 3; six reruns, and every CI run, were clean.
+- **For the Planner (Planner-owned file):** the root README's rekey wording,
+  as suggested in my step 6 DONE.
+
+**Before the tag (not done, per the dispatch):**
+1. A decision on the T9 (b) flake (above).
+2. Merge `release-0.12.2` into `main`: a fast-forward from 6e32b68 (10
+   commits, ending with the release commit 24dfe1e).
+3. The `chore(plan): sync coordination files` backup of `PLAN.md` and
+   `reviewer_notes.md`.
+4. Tag `v0.12.2` on `main`; the tag run waits for the user's approval of
+   all four environments.
+5. After the tag: move RB-002.2 from SECURITY.local.md into PLAN.md.
+
+### 2026-11-11 — PLANNER-A — REVIEW + DECISION + HANDOFF — v0.12.2 READY accepted; the T9 (b) flake gets a test-only step 7a before the tag; README and site handoff
+
+**READY accepted** (the WORKER READY above; `release-0.12.2` at
+`24dfe1e`, release dry run 42948705137 green). Every dispatched step is
+done, T1–T10 moved from "Today" to "After the fix", and the Android
+publish validated with the user's new Central Portal token, so the
+`maven-central` environment secrets are confirmed working. I spot-checked
+the step DONE entries behind the README wording below.
+
+**DECISION: fix the T9 (b) flake now, as step 7a, before the tag.**
+- A test that fails on half the pushes would leave `main` red and teach
+  everyone to ignore the Swift job. The Worker's diagnosis (`Thread.sleep`
+  in `SlowEmbedder` starves the cooperative pool on the 3-core runner, so
+  the embed lands before `count()`) fits the evidence: both timing
+  expectations passed in the failures.
+- **The fix is test-only:** replace the sleep with a gate the test opens
+  after it has measured `count()` and the background close. No store
+  change.
+- **No new release dry run.** `release.yml` doesn't run the Swift test
+  suites, and step 7a and the handoff below change no packaging. CI green
+  on the PR and on the push is the bar. If the flake shows up again after
+  the fix, log it and go ahead; it doesn't block the tag.
+- **The one unexplained engine-test failure** (1 of 7 local runs during
+  step 3, never on CI): no action now. If it recurs, record the test name
+  and seed. I'm asking REVIEWER-B to look out for it.
+
+**HANDOFF: commit on `release-0.12.2`, on its own:**
+- **`README.md`:**
+  - the install lines at 0.12.2;
+  - a new "What's new in v0.12.2: clearer errors, safer keys" section,
+    above v0.12.1's, covering the Keystore fix, the error classes, the
+    retained handle on a failed close (`try_close`), `trackAccess` off on
+    phones and the cheap `stats()`, the `_mnemo.` refusal, and your
+    suggested rekey wording (plain `rekey`, `--rotate` to revoke, flash
+    blocks), plus a short upgrade note;
+- **`index.html`:** the pill and the "current release" line at v0.12.2.
+- **Commit message:** `docs: v0.12.2 README and site (error classes, safer Android keys, rekey wording)`.
+
+**The tag, in this order:**
+1. step 7a (its own PR into `release-0.12.2`, CI green on the PR and the
+   push);
+2. this HANDOFF commit;
+3. the `chore(plan)` backup;
+4. fast-forward `main` to `release-0.12.2`;
+5. tag `v0.12.2` and push. Each publish job waits for the user's approval.
+
+Then log DONE with the four registries, the run id and the credential each
+publish used. After the tag, move RB-002.2 from `SECURITY.local.md` into
+PLAN.md, and delete the merged branch.
+
+**Queued (after v0.12.2, before SAMPLE-1 only if small):**
+- **REL-1:** move the published-package check out of `publish-swift` into
+  its own `verify-published` job, so a slow runner after the push can be
+  re-run (RB-002.1's recommendation 3, the part not adopted; REVIEWER-B's
+  2026-11-11 verification explains why it matters). CI-only, with a dry
+  run.
+- **Credential reminder:** the Central Portal user token behind
+  `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD` was generated
+  2026-11-11 and expires after a year (the user checks the exact date on
+  the Tokens page). Renew it before then, or the Android publish fails with
+  "Invalid token". Every other publish credential is short-lived (Trusted
+  Publishing) or a deploy key; the repository now holds no long-lived
+  publishing tokens.
+
+### 2026-11-11 — WORKER — BLOCKED — v0.12.2 step 7a: the gated `SlowEmbedder` makes the iOS-simulator job worse; the gate itself starves the pool
+
+**What I did** (PR 24, toarchkumar/mnemo#24, branch `v0122-7a-t9b-gate`,
+f86cce2, not merged): per the decision, `SlowEmbedder` now waits on a
+`DispatchSemaphore` (its `seconds` as the timeout) instead of
+`Thread.sleep`, and T9 (b) holds its embed (at most 10 s), measures
+`count()` and `closeForBackground()`, then calls `open()`. Test-only.
+Locally `swift test` passed 6 of 6, T9 (b) in 0.29 s.
+
+**CI 42954324057 on the PR: red**, `swift (macos-latest, iOS simulator)`
+only. T9 (b) itself **passed, but took 5.434 s**. Five other issues:
+- `t9aAnEmbedderThatCallsCacheGetReturnsAtOnce`, StoreHardeningTests.swift:38
+  and :39: `(Date().timeIntervalSince(start) → 3.027168035507202) < 2` and
+  `(embedder.timedOut → true) == false`;
+- `coalescedCommitsOnceWithinTheWindow`, FlushPolicyTests.swift:27 and :28:
+  `eventually(5) { await s.commits == 1 }` and `committedCount(...) == 3`;
+- `aBurstOf100WritesIsOneCommit`, FlushPolicyTests.swift:50:
+  `eventually(5) { await s.commits == 1 }`.
+
+Tests that do almost nothing took 3.5–5.2 s in the same window
+(`noBackgroundTime...` aside, `swiftEmbedderAndItsErrors` 3.562 s,
+`keywordOnlyRecallNeedsNoEmbedder` 3.563 s).
+
+**Why the spec doesn't work:** the embedder protocol is synchronous, so
+any embed blocks a cooperative-pool thread, whether it sleeps or waits on
+a gate. The gate is worse: the embed holds its thread until the test opens
+it, and the test can only resume and open it on a free pool thread. On the
+3-core runner, with `CacheReadingEmbedder` (T9 a) and the iOS
+`SlowEmbedder(seconds: 2)` test also blocking threads, the pool stops until
+timeouts free it. That's what the 5.4 s T9 (b), T9 (a)'s 3 s timeout, and
+the flush timers that never fired show. The original flake was the same
+starvation, triggered less often.
+
+**Options for the Planner** (I've taken none of them):
+- **A, test-only, adds no blocking:** put `Thread.sleep(1.5)` back, and
+  have `SlowEmbedder` record `finished` before it returns. T9 (b) expects
+  `count() == 1` when the embed hadn't finished before the call, and 1 or 2
+  when it had. The timing checks stay. Under starvation the test proves
+  less (the embed is already over), but it can't fail falsely, and the
+  other tests are as they were on 24dfe1e.
+- **B, CI only:** run the iOS-simulator Swift tests without parallel
+  execution (`-parallel-testing-enabled NO` on the `xcodebuild test`
+  line), which removes the starvation from every test on that job. Not
+  test-only.
+- **C, a store change (not for this patch):** the store calls a synchronous
+  embedder on the cooperative pool, so an app's slow embedder (Core ML,
+  say) can starve the app's own Swift concurrency in the same way. Running
+  `embed` on a dedicated queue and awaiting it would fix this for apps and
+  tests. A candidate for v0.12.3 or v0.13, with its own review.
+
+My recommendation: A now, in place of f86cce2 on PR 24 (a second commit,
+no force-push), then the tag as planned. C goes on the queue.
+
+**Not done, waiting on this:** the README/site HANDOFF commit, the
+`chore(plan)` backup, the fast-forward of `main`, and the tag.
+`release-0.12.2` is still at 24dfe1e.
+
+### 2026-11-11 — PLANNER-A — DECISION — v0.12.2 step 7a: option A (test-only, no new blocking); option C queued as MOBILE-2f
+
+**Option A, as you recommend.** On PR 24, a second commit (no
+force-push) that undoes the gate:
+- `SlowEmbedder` goes back to `Thread.sleep`, and records `finished`
+  before it returns;
+- T9 (b) expects `count() == 1` if the embed hadn't finished when
+  `count()` was called, and 1 or 2 if it had. The two timing checks stay;
+- every other test is as it was at `24dfe1e`.
+
+CI green on the PR and the push, then the HANDOFF, the backup, the
+fast-forward and the tag, as in my previous entry. **Not B:** serial
+tests would slow a 730 s job to hide one test's flaw, and they'd also
+hide the real problem below.
+
+**Option C becomes MOBILE-2f (v0.12.3), and it's a real store bug, not
+just a test one.** The Swift store calls the app's synchronous `embed` on
+Swift's cooperative thread pool, which Apple says must never block. A slow
+Core ML embedder in an app can starve the app's own concurrency, the same
+way the gate starved the test runner. 2c moved the embed outside the
+store's lock, but not off the pool. **Scope, to spec at the v0.12.2 DONE:**
+- Swift runs `embed` on a dedicated serial `DispatchQueue` and awaits it
+  through a continuation;
+- check the Kotlin store for the same pattern (an embed on a limited
+  dispatcher);
+- the tests prove that other tasks keep running during a slow embed;
+- after it lands, T9 (b) can go back to a strict `count() == 1`.
+
+Planned order after v0.12.2: MOBILE-2f (v0.12.3), then REL-1, then
+SAMPLE-1.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 step 7a: T9 (b), option A
+
+**Commits** on PR 24 (toarchkumar/mnemo#24), fast-forwarded into
+`release-0.12.2` at 2b5ea2a:
+- f86cce2, the gate (CI 42954324057 red, see my BLOCKED above);
+- 2b5ea2a, option A: the gate is undone, `SlowEmbedder` sleeps again and
+  records `finished` before it returns. T9 (b) reads `finished` *after*
+  `count()` returns (stricter than before the call: if the embed still
+  hadn't finished, its write can't have landed), and then expects 1, or
+  1 or 2 if it had. Both timing checks stay. Against 24dfe1e only those two
+  test files differ.
+
+**CI:** PR run 42956844046 18/18. Push run 42958511538: the first attempt
+failed in `rust (ubuntu-latest)` only, on
+`cli_smoke::recall_text_falls_back_to_read_only_when_write_lock_held`
+(tests/cli_smoke.rs:1722, `open read-only reader: Locked { path:
+"/tmp/.tmpQms7Uq/em-rot.mnemo" }`), right after the seeding handle was
+dropped. The commit touches only Swift tests. A rerun of the failed job
+passed 18/18. This may be the unexplained engine-test failure from step 3,
+now with a name. My unconfirmed guess: a parallel test's CLI child forks
+while the seeding handle is open, inherits the lock's file description, and
+holds the flock until it execs. For REVIEWER-B.
+
+**Local:** `swift test` 36/36 in 4 runs.
