@@ -11,6 +11,7 @@ struct NotesView: View {
     @State private var turn = ""
     @State private var role = "user"
     @State private var derived = ""
+    @State private var exporting = false
 
     var body: some View {
         NavigationStack {
@@ -116,6 +117,10 @@ struct NotesView: View {
                 }
             }
             .navigationTitle("MNemo notes")
+            .toolbar {
+                Button("Export") { exporting = true }
+            }
+            .sheet(isPresented: $exporting) { ExportView(model: model) }
             .task { await model.refresh() }
         }
     }

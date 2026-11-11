@@ -162,6 +162,26 @@ final class NotesModel: ObservableObject {
         }
     }
 
+    /// Writes a copy of the notes that opens with `passphrase` alone (a
+    /// fresh data key, no Keychain key), for the share sheet. It opens with
+    /// the `mnemo` CLI on a Mac: `MNEMO_PASSPHRASE=... mnemo info <file>`.
+    /// Takes a few seconds: the passphrase goes through the KDF.
+    func export(passphrase: String) async -> URL? {
+        guard let store else { return nil }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mnemo-notes-export.mnemo")
+        // The export refuses to overwrite: drop the last one first.
+        try? FileManager.default.removeItem(at: url)
+        do {
+            try await store.exportWithPassphrase(to: url, passphrase: passphrase)
+            error = nil
+            return url
+        } catch {
+            self.error = "\(error)"
+            return nil
+        }
+    }
+
     private func run(_ body: (MnemoStore) async throws -> Void) async {
         guard let store else { return }
         do {
