@@ -306,14 +306,21 @@ impl Mnemo {
         let mut cache_after = 0usize;
         let positions: Vec<usize> = (0..self.cache_dir.len()).collect();
         for pos in positions {
-            let keep = {
+            let (keep, reserved) = {
                 let e = &self.cache_dir[pos];
-                !e.deleted && !e.is_expired(now)
+                (
+                    !e.deleted && !e.is_expired(now),
+                    embed::is_reserved_namespace(&e.namespace),
+                )
             };
             if keep {
-                cache_before += 1;
+                // EMBED-ID-1: the engine's own entries (the embedder
+                // identity) are copied but not counted.
                 new.copy_cache_entry_from(self, pos)?;
-                cache_after += 1;
+                if !reserved {
+                    cache_before += 1;
+                    cache_after += 1;
+                }
             }
         }
         Ok(CompactReport {
@@ -355,17 +362,23 @@ impl Mnemo {
         // skipped — their pages are orphan ciphertext awaiting
         // `compact_file`, same as deleted memories. Expired entries
         // are *still* on disk until compaction, so we verify them too.
-        let cache_positions: Vec<(u64, u32, u32, u64)> = self
+        let cache_positions: Vec<(u64, u32, u32, u64, bool)> = self
             .cache_dir
             .iter()
             .filter(|e| !e.deleted)
-            .map(|e| (e.start_page, e.page_count, e.len, e.gen))
+            .map(|e| {
+                let reserved = embed::is_reserved_namespace(&e.namespace);
+                (e.start_page, e.page_count, e.len, e.gen, reserved)
+            })
             .collect();
-        for (start_page, page_count, len, gen) in cache_positions {
+        for (start_page, page_count, len, gen, reserved) in cache_positions {
             let buf = self.read_record_run(start_page, page_count, len, gen)?;
             let _c: CacheEntry = rmp_serde::from_slice(&buf)
                 .map_err(|err| MnemoError::Serialize(err.to_string()))?;
-            n += 1;
+            // EMBED-ID-1: the engine's own entries are checked, not counted.
+            if !reserved {
+                n += 1;
+            }
         }
         // FMT-9 (a): no free run may overlap a page the committed state
         // references (records, cache entries, control runs, the WAL).

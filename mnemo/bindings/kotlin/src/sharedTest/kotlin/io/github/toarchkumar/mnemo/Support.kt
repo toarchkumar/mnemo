@@ -51,11 +51,11 @@ internal class SoftwareKeyWrapper : KeyWrapper {
 }
 
 /** A deterministic bag-of-words embedder: texts that share words get similar vectors. */
-class WordEmbedder(private val dimensions: UInt = 32u) : MnemoEmbedder {
+class WordEmbedder(private val dimensions: UInt = 32u, private val name: String = "test-words") : MnemoEmbedder {
     private val calls = AtomicInteger()
     val callCount: Int get() = calls.get()
 
-    override fun identity() = EmbedderIdentity(name = "test-words", dimensions = dimensions, normalize = true)
+    override fun identity() = EmbedderIdentity(name = name, dimensions = dimensions, normalize = true)
 
     override fun embed(texts: List<String>): List<List<Float>> {
         calls.incrementAndGet()

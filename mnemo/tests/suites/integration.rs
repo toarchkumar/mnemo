@@ -2482,12 +2482,14 @@ fn set_embedder_identity_mismatch_rejected_after_persist() {
     // Second handle: reopen and try to register a different name.
     let mut db = Mnemo::open(&path, "pw").unwrap();
     match db.set_embedder(FakeEmbedder::new("bge", 4, true)) {
-        Err(MnemoError::Invalid(msg)) => {
-            assert!(msg.contains(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
+        Err(e @ MnemoError::EmbedderMismatch { .. }) => {
+            let msg = e.to_string();
+            assert!(msg.starts_with(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
             assert!(msg.contains("MiniLM"));
             assert!(msg.contains("bge"));
+            assert!(msg.contains("create a new store"), "msg = {msg}");
         }
-        other => panic!("expected Invalid identity mismatch, got {other:?}"),
+        other => panic!("expected EmbedderMismatch, got {other:?}"),
     }
     // Re-registering the SAME identity round-trips cleanly.
     db.set_embedder(FakeEmbedder::new("MiniLM", 4, true))
@@ -2633,12 +2635,14 @@ fn set_embedder_nested_manifest_mismatch_rejected() {
     remember_nested_manifest(&mut db, 4, "sentence-transformers/all-MiniLM-L6-v2", true);
     // Register a different name at the same dimensions.
     match db.set_embedder(FakeEmbedder::new("bge-large-en-v1.5", 4, true)) {
-        Err(MnemoError::Invalid(msg)) => {
-            assert!(msg.contains(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
+        Err(e @ MnemoError::EmbedderMismatch { .. }) => {
+            let msg = e.to_string();
+            assert!(msg.starts_with(EmbedderIdentity::MISMATCH_MSG), "msg = {msg}");
             assert!(msg.contains("sentence-transformers/all-MiniLM-L6-v2"));
             assert!(msg.contains("bge-large-en-v1.5"));
+            assert!(msg.contains("create a new store"), "msg = {msg}");
         }
-        other => panic!("expected Invalid identity mismatch, got {other:?}"),
+        other => panic!("expected EmbedderMismatch, got {other:?}"),
     }
 }
 

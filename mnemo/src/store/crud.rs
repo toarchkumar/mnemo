@@ -120,18 +120,29 @@ impl Mnemo {
     ///    must equal [`Mnemo::dimensions`] (the width this database
     ///    was created with). Mismatch returns
     ///    [`MnemoError::DimensionMismatch`].
-    /// 2. **Manifest identity check.** If the scaffold / onboarding
-    ///    manifest already records an embedder — the canonical shape
-    ///    is `metadata.embedder = { name, dimensions, normalize }`,
-    ///    with the legacy flat `embedder_name` / `embedder_dimensions`
-    ///    / `embedder_normalize` keys accepted as an alias — the new
-    ///    embedder's identity must match exactly. A different name —
-    ///    even at the same dimensions — returns
-    ///    [`MnemoError::Invalid`] with
-    ///    [`EmbedderIdentity::MISMATCH_MSG`] in the message. If the
-    ///    manifest has no embedder metadata yet, this call upserts
-    ///    the nested object into the first onboarding/manifest memory
-    ///    (write + flush so a subsequent reopen sees the identity).
+    /// 2. **Identity check (EMBED-ID-1).** Every file records the
+    ///    identity (name, dimensions, normalize) of the first embedder
+    ///    attached to it, in a reserved, encrypted record that isn't a
+    ///    memory: `len`, `count`, `stats`, recall, `about` and `get`
+    ///    never see it, and compaction, the rekeyed exports and the
+    ///    passphrase import carry it. After that, any other identity,
+    ///    even at the same width (another model, or another revision of
+    ///    the same one), returns [`MnemoError::EmbedderMismatch`]: a
+    ///    store is bound to the model that first wrote to it, so a new
+    ///    model needs a new store.
+    ///
+    /// **Files with a manifest** (`mnemo init`, `seed.json`) also carry
+    /// the identity on the manifest at `metadata.embedder = { name,
+    /// dimensions, normalize }` (the legacy flat `embedder_name` /
+    /// `embedder_dimensions` / `embedder_normalize` keys are read as an
+    /// alias). The first registration upserts it there too, as before.
+    /// If the manifest and the record disagree, this returns
+    /// [`MnemoError::Invalid`] naming both.
+    ///
+    /// **Files from before EMBED-ID-1** have no record: the first
+    /// embedder attached after the upgrade is recorded. The check
+    /// protects from then on; it can't tell which model made the older
+    /// vectors.
     ///
     /// **Read-only handles.** `set_embedder` on an `open_read_only`
     /// handle performs both checks and adopts the embedder in memory;
@@ -139,12 +150,12 @@ impl Mnemo {
     /// can therefore use the text path next to a writer that holds
     /// the exclusive lock.
     ///
-    /// On both failure paths the handle's embedder slot is left
+    /// On every failure path the handle's embedder slot is left
     /// unchanged. On success the embedder is wrapped in an `Arc<dyn
     /// Embedder>` and consulted by every text-side call made through
     /// this handle. The slot is per-handle and not persisted — a
-    /// fresh open must re-register (same identity, so the manifest
-    /// check round-trips cleanly).
+    /// fresh open must re-register (same identity, so the check
+    /// round-trips cleanly).
     pub fn set_embedder<E: Embedder + 'static>(&mut self, embedder: E) -> Result<()> {
         let identity = embedder.identity();
         if identity.dimensions != self.dimensions {
@@ -154,42 +165,65 @@ impl Mnemo {
             });
         }
 
-        // Find a scaffold/onboarding manifest to inspect (or upsert
-        // into). `about()` already filters + sorts the onboarding set.
+        // The manifest's identity, if the file has one, and the first
+        // onboarding memory without one (the upsert target).
         let onboarding = self.about()?;
+        let mut on_manifest: Option<embed::EmbedderIdentity> = None;
         let mut upsert_target: Option<usize> = None;
         for (i, m) in onboarding.iter().enumerate() {
             if let Some(saw) = embed::read_identity_from_metadata(&m.metadata) {
-                if saw != identity {
-                    return Err(embed::identity_mismatch_err(&saw, &identity));
-                }
-                // Match — nothing to persist; adopt + done. Works the
-                // same on read-only and read-write handles.
-                self.embedder = Some(std::sync::Arc::new(embedder));
-                return Ok(());
+                on_manifest = Some(saw);
+                break;
             }
             if upsert_target.is_none() {
                 upsert_target = Some(i);
             }
         }
+        let on_record = self.recorded_identity()?;
 
-        // No existing identity on the manifest. On a read-write handle
-        // upsert into the first onboarding memory so later opens see
-        // it; on a read-only handle skip the write (readers must not
-        // mutate the file), but still adopt the embedder in memory.
+        if let (Some(manifest), Some(record)) = (&on_manifest, &on_record) {
+            if manifest != record {
+                return Err(embed::identity_conflict_err(manifest, record));
+            }
+        }
+        if let Some(stored) = on_record.as_ref().or(on_manifest.as_ref()) {
+            if *stored != identity {
+                return Err(embed::identity_mismatch_err(stored, &identity));
+            }
+        }
+
+        // Record what's missing. A read-only handle writes nothing, but
+        // still adopts the embedder in memory.
         if !self.read_only {
-            if let Some(idx) = upsert_target {
-                let mut m = onboarding[idx].clone();
-                embed::write_identity_into_metadata(&mut m.metadata, &identity);
-                // Reuse the memory's existing id so this is an in-place
-                // update of the scaffold manifest, not a new entry.
-                self.put(m)?;
+            let mut wrote = false;
+            if on_manifest.is_none() {
+                if let Some(idx) = upsert_target {
+                    let mut m = onboarding[idx].clone();
+                    embed::write_identity_into_metadata(&mut m.metadata, &identity);
+                    // Reuse the memory's existing id so this is an in-place
+                    // update of the scaffold manifest, not a new entry.
+                    self.put(m)?;
+                    wrote = true;
+                }
+            }
+            if on_record.is_none() {
+                self.record_identity(&identity)?;
+                wrote = true;
+            }
+            if wrote {
                 self.flush()?;
             }
         }
 
         self.embedder = Some(std::sync::Arc::new(embedder));
         Ok(())
+    }
+
+    /// The embedder identity this file records (EMBED-ID-1), or `None`
+    /// before the first `set_embedder` on a read-write handle. Reads the
+    /// reserved record without touching any counter.
+    pub fn embedder_identity(&mut self) -> Result<Option<embed::EmbedderIdentity>> {
+        self.recorded_identity()
     }
 
     /// Borrow the currently-registered embedder, if any. Returns
