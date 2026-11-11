@@ -7,14 +7,17 @@ on:
     # Added for PR SEC-1 → v0.5.2, which couldn't be cut from main
     # because main held unreleased ANN-1 changes. Keep for future
     # patch releases that follow the same pattern.
-    branches: [main, "release/**"]
+    # `release-*` is the integration branch of a release being prepared
+    # (v0.12.2 on: one PR per step into `release-0.12.2`, then `main` is
+    # fast-forwarded at the tag).
+    branches: [main, "release/**", "release-*"]
     # Coordination-file-only pushes don't change code and shouldn't
     # burn a CI run (lane A v0.8.1 DISPATCH: coordination files sync
     # only before a release tag or on user request, but a one-off
     # commit still lands between tags). Everything else keeps running.
     paths-ignore: [PLAN.md, reviewer_notes.md]
   pull_request:
-    branches: [main, "release/**"]
+    branches: [main, "release/**", "release-*"]
     paths-ignore: [PLAN.md, reviewer_notes.md]
 
 env:
