@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.12.3] — 2026-11-11
+
+Two fixes: the Swift store's embeds no longer block Swift's cooperative
+thread pool, and a dropped handle's file lock is released at once.
+
+- **Upgrading from 0.12.2:**
+  - Swift: a cancelled text call now throws `CancellationError` and writes
+    nothing (before, it ran to the end); and an embedder must not wait on
+    a text call of its own store, since embeds now run one at a time per
+    store.
+  - No API, binding or file-format change. The `MnemoEmbedder` protocols
+    are unchanged.
+
 ### Fixed
 
 - **Swift: a slow embedder no longer starves the app's Swift concurrency.**
@@ -3226,7 +3239,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/toarchkumar/mnemo/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/toarchkumar/mnemo/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/toarchkumar/mnemo/compare/v0.11.0...v0.12.0
