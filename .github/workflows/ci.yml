@@ -240,9 +240,12 @@ jobs:
       # system Python on PATH without a venv. Build the abi3 wheel and
       # `pip install` it instead — this matches the recipe maturin's own
       # error message recommends for CI environments.
+      # HOOKS-1: the test wheel has `dev-hooks`, because test_mnemo.py sets
+      # `MNEMO_DEV_ANN_MIN_FACTS=0` to build an index on small files. The
+      # released wheels (release.yml) are built without it.
       - name: Build wheel
         working-directory: mnemo-python
-        run: maturin build --release --out target/wheels
+        run: maturin build --release --features dev-hooks --out target/wheels
 
       - name: Install wheel
         working-directory: mnemo-python

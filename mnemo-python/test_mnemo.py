@@ -13,6 +13,8 @@ import mnemo_engine as mnemo
 # FMT-9f: new files are v9, which only builds an ANN index at 20K facts
 # (`V9_ANN_MIN_FACTS`). The index tests below use small files, so drop the
 # threshold with the engine's hidden test override (read at build time).
+# Needs a wheel built with `--features dev-hooks` (HOOKS-1): a released
+# wheel ignores this switch.
 os.environ["MNEMO_DEV_ANN_MIN_FACTS"] = "0"
 
 
