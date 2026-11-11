@@ -30,8 +30,11 @@ attach or publish it:
 - `attach engine assets` puts the CLI binaries, wheels and sdist on the
   Release;
 - `publish to crates.io` and `publish to PyPI` upload;
-- `mobile (Swift publish)` attaches the zip, pushes the mirror and checks
-  the published package;
+- `mobile (Swift publish)` attaches the zip and pushes the mirror;
+- `mobile (Swift verify published)` resolves the published `mnemo-swift`
+  version from GitHub and builds against it. It's a job of its own, with no
+  secrets, so after a slow runner it can be re-run alone without pushing
+  again;
 - `mobile (Android publish)` signs, uploads to Maven Central and attaches
   the AAR.
 
