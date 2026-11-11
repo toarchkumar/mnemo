@@ -29,7 +29,7 @@ settings:
     TARGETED_DEVICE_FAMILY: "1"
     # iPhone only, full screen: no multitasking-orientation warning.
     INFOPLIST_KEY_UIRequiresFullScreen: YES
-    MARKETING_VERSION: "0.12.1"
+    MARKETING_VERSION: "0.12.2"
     CURRENT_PROJECT_VERSION: "1"
     # Simulator builds are signed ad hoc, as TestHost's are: an app with no
     # signature has no entitlements, so the Keychain refuses it

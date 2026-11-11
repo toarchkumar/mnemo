@@ -1,6 +1,6 @@
 [package]
 name = "mnemo-node"
-version = "0.12.1"
+version = "0.12.2"
 edition = "2021"
 # napi's build script emits `cargo::` lines, which need Rust 1.77. The
 # engine's MSRV stays 1.75; this experimental binding isn't published.

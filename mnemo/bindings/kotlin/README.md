@@ -19,7 +19,7 @@ From Maven Central (`mavenCentral()` in your repositories):
 
 ```kotlin
 dependencies {
-    implementation("io.github.toarchkumar:mnemo-android:0.12.1")
+    implementation("io.github.toarchkumar:mnemo-android:0.12.2")
 }
 ```
 

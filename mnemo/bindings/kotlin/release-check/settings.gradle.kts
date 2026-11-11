@@ -2,7 +2,7 @@
 // mnemo-android artifact from mavenLocal() (run the library's signed
 // publishToMavenLocal first) and runs a JVM smoke test against it.
 //
-//   ../gradlew -p release-check test -PmnemoVersion=0.12.1 \
+//   ../gradlew -p release-check test -PmnemoVersion=0.12.2 \
 //     -Pjna.library.path=$PWD/generated/host
 pluginManagement {
     repositories {

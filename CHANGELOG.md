@@ -8,13 +8,44 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-### Deprecated
+## [0.12.2] — 2026-11-11
 
-- **`formatVersion` in the Swift and Kotlin store configurations
-  (RB-001.27).** No mobile reader needs a v8 file, and a v8 file misses every
-  v9 gain the mobile numbers rest on. v0.13 makes v8 files read-only and
-  removes the setting. Swift keeps an initializer with `formatVersion:`,
-  marked deprecated; the one without it is the default.
+Mobile hardening: safer errors and keys on Android and iOS, durable closes,
+a cheap `stats()`, and engine safety checks.
+
+- **Upgrading from 0.12.1:**
+  - **caller metadata keys starting with `_mnemo.` are now refused** on
+    every write (they set engine state; see Changed);
+  - the mobile `RecallOptions.trackAccess` defaults to `false`;
+  - the mobile error enum gains cases (`Kdf`, `Crypto`, `NotAMnemoFile`,
+    `NeedsWriteOpen`), and `UnsupportedVersion` gains a message, so an
+    exhaustive `switch` on `MnemoError` needs the new cases;
+  - `formatVersion` in the store configurations is deprecated.
+- The Rust API is additive: `try_close`, `stats_summary` and `key_opens`
+  sit beside `close` and `stats`, which keep their 0.12 behaviour.
+- The on-disk format is unchanged (v9). v8 files still open and write;
+  v0.13 makes them read-only.
+
+### Security
+
+- **Revocation is tested the way an attacker would try it.**
+  - Every path that claims to revoke an earlier secret (`mnemo rekey
+    --rotate`, and the mobile passphrase export and import) now has an
+    acceptance test that grafts an earlier header, with its secret, onto
+    the current file. Each one fails at the header's seal, because each
+    path writes a fresh data key.
+  - A plain `rekey`'s graft opens, by design, and its test says so.
+- **The docs say exactly what each path gives you:**
+  - a plain `rekey` changes the secret that opens the file from now on,
+    but anyone who had the file and the old secret can still read it and
+    later writes;
+  - `--rotate` revokes, and an imported file is re-protected under a new
+    data key;
+  - rotation can't erase old ciphertext that flash storage still holds.
+- **Android: a passing Keystore failure is never reported as a lost key**,
+  and the wrapping key is never regenerated over a live alias (see Fixed).
+  Before, an app that followed the `KeyMissing` recovery advice could
+  delete a readable database.
 
 ### Changed
 
@@ -42,6 +73,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
     carry the record's own `_mnemo.*` keys through unchanged.
   - `get` and the exports still return them, and existing files are
     unaffected.
+
+### Deprecated
+
+- **`formatVersion` in the Swift and Kotlin store configurations
+  (RB-001.27).** No mobile reader needs a v8 file, and a v8 file misses every
+  v9 gain the mobile numbers rest on. v0.13 makes v8 files read-only and
+  removes the setting. Swift keeps an initializer with `formatVersion:`,
+  marked deprecated; the one without it is the default.
 
 ### Added
 
@@ -76,21 +115,6 @@ Pre-1.0, the minor component carries the breaking-change signal.
   the handle back, still open and holding every unflushed write, so the
   caller can fix the cause and retry, as with `BufWriter::into_inner`.
   `close` is unchanged in 0.12; its docs point to `try_close`.
-
-
-### CI
-
-- **Dependabot no longer moves the MSRV toolchains** (CI-DEPS-1).
-  `dtolnay/rust-toolchain`'s ref is the Rust version it installs, so
-  `@1.75` and `@1.82` are the MSRV checks; `dependabot.yml` now ignores
-  that action. The rest of the grouped action bumps arrive in their own PR.
-- **A newer push cancels its branch's or PR's older CI run**, never on
-  `main` (RB-001.7).
-- **Docs-only pushes and PRs run no CI:** `README.md`, any `README.md`,
-  `index.html`, `CHANGELOG.md` and `RELEASING.md`.
-- The release workflow's wheel step drops a `rustflags:` input that
-  `maturin-action` doesn't take (the job's `RUSTFLAGS` already reaches the
-  build container).
 
 ### Fixed
 
@@ -146,6 +170,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
   into place, and the directory is synced after, so a power loss right
   after creating or importing a store can't leave the database without its
   key.
+
+### CI
+
+- **Dependabot no longer moves the MSRV toolchains** (CI-DEPS-1).
+  `dtolnay/rust-toolchain`'s ref is the Rust version it installs, so
+  `@1.75` and `@1.82` are the MSRV checks; `dependabot.yml` now ignores
+  that action. The rest of the grouped action bumps arrive in their own PR.
+- **A newer push cancels its branch's or PR's older CI run**, never on
+  `main` (RB-001.7).
+- **Docs-only pushes and PRs run no CI:** `README.md`, any `README.md`,
+  `index.html`, `CHANGELOG.md` and `RELEASING.md`.
+- The release workflow's wheel step drops a `rustflags:` input that
+  `maturin-action` doesn't take (the job's `RUSTFLAGS` already reaches the
+  build container).
 
 ## [0.12.1] — 2026-11-09
 
@@ -3161,7 +3199,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/toarchkumar/mnemo/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/toarchkumar/mnemo/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/toarchkumar/mnemo/compare/v0.10.0...v0.11.0
