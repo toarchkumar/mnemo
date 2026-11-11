@@ -11,6 +11,9 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "Mnemo", targets: ["Mnemo"]),
+        // Optional (SAMPLE-1): Apple's on-device embedders. An app that
+        // doesn't add this product doesn't link NaturalLanguage.
+        .library(name: "MnemoAppleEmbedder", targets: ["MnemoAppleEmbedder"]),
     ],
     targets: [
         .binaryTarget(name: "MnemoFFI", path: "build/MnemoFFI.xcframework"),
@@ -20,10 +23,21 @@ let package = Package(
             path: "Sources/Mnemo",
             linkerSettings: [.linkedFramework("Security")]
         ),
+        .target(
+            name: "MnemoAppleEmbedder",
+            dependencies: ["Mnemo"],
+            path: "Sources/MnemoAppleEmbedder",
+            linkerSettings: [.linkedFramework("NaturalLanguage")]
+        ),
         .testTarget(
             name: "MnemoTests",
             dependencies: ["Mnemo"],
             path: "Tests/MnemoTests"
+        ),
+        .testTarget(
+            name: "MnemoAppleEmbedderTests",
+            dependencies: ["MnemoAppleEmbedder", "Mnemo"],
+            path: "Tests/MnemoAppleEmbedderTests"
         ),
     ],
     // The UniFFI-generated Swift predates Swift 6's strict concurrency checks.
