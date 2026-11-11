@@ -85,11 +85,24 @@ fresh child with the same argv/env/timeout. The guarantee is
 asymmetric and deliberate: **an error is allowed; a mismatched
 vector never is.**
 
-The `--embed-name` string is matched against (and persisted on) the
-scaffold manifest's `metadata.embedder = { name, dimensions, normalize }`
-object. Starting a server with a different `--embed-name` on an existing
-file fails loudly — mixing embedders in one file silently corrupts
-recall quality.
+The `--embed-name` string is the embedder's identity, with the width and
+the `normalize` flag. Every file records the identity of the first embedder
+attached to it, with or without a manifest (EMBED-ID-1). Starting a server
+with a different `--embed-name` on an existing file fails loudly with
+`MnemoError::EmbedderMismatch`, because mixing embedders in one file
+silently corrupts recall quality. A new model needs a new file.
+
+- The record is a reserved, encrypted entry, not a memory: `len()`,
+  `stats()`, recall, `about()` and `get()` never see it, and the cache API
+  refuses its `_mnemo.*` namespace. Compaction, `export_rekeyed` and the
+  mobile passphrase import carry it.
+- A read-only handle checks the identity and never writes one.
+- A file with a manifest also keeps it at the manifest's `metadata.embedder
+  = { name, dimensions, normalize }`, as before. If the manifest and the
+  record disagree, `set_embedder` says so and names both.
+- A file from before v0.13 records the first embedder attached after the
+  upgrade. The check protects from then on; it can't tell which model made
+  the older vectors.
 
 Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 

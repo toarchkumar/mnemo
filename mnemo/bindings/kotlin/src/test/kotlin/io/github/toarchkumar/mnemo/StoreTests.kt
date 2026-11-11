@@ -79,6 +79,30 @@ class StoreTests {
         store.close()
     }
 
+    /**
+     * EMBED-ID-1: a store records its first embedder's identity, and an
+     * embedder with another identity of the same width (another model, or
+     * another revision) is refused when the store next opens the file.
+     */
+    @Test fun aStoreRefusesAnotherEmbedderIdentity(): Unit = runBlocking {
+        val keys = InMemoryKeyStorage()
+        val dir = scratchDirectory()
+        val first = store("identity", dir, keys, dimensions = 32u, embedder = WordEmbedder())
+        first.rememberText("written with the first model")
+        first.close()
+
+        val other = store("identity", dir, keys, dimensions = 32u, embedder = WordEmbedder(name = "test-words-r2"))
+        val e = expectThrows<MnemoException.EmbedderMismatch> { other.count() }
+        assertEquals("test-words", e.stored.name)
+        assertEquals("test-words-r2", e.given.name)
+        assertFalse(e.isRetryable())
+        runCatching { other.close() }
+
+        val same = store("identity", dir, keys, dimensions = 32u, embedder = WordEmbedder())
+        assertEquals("the identity record isn't a memory", 1uL, same.count())
+        same.close()
+    }
+
     @Test fun keyedWritesKeepHistory(): Unit = runBlocking {
         val store = store("keyed")
         val first = store.remember("tea", vec(0), RememberOptions(key = "drink"))

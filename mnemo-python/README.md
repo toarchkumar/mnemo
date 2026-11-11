@@ -431,14 +431,15 @@ db.set_embedder(embed, name="text-embedding-3-small",
                 dimensions=1536, normalize=False)
 ```
 
-The identity (`name`, `dimensions`, `normalize`) is persisted on the
-scaffold manifest the first time you `set_embedder`. Reopening with a
-*different* embedder — say you swap MiniLM for BGE on the same file —
-raises `RuntimeError: embedder identity mismatch: database manifest
-records embedder (name="all-MiniLM-L6-v2", …), but this handle was
-passed embedder (name="bge-large-en-v1.5", …). Mixing embedders
-silently corrupts recall quality — open the file with the original
-embedder, or create a fresh database for the new one.`
+The identity (`name`, `dimensions`, `normalize`) is recorded in the file
+the first time you `set_embedder` (since v0.13 on every file, with or
+without a manifest; a file with a manifest also keeps it there).
+Reopening with a *different* embedder — say you swap MiniLM for BGE on
+the same file — raises `RuntimeError: embedder identity mismatch: this
+file's vectors come from embedder (name="all-MiniLM-L6-v2", …), but the
+embedder given is (name="bge-large-en-v1.5", …). Open the file with its
+original embedder, or create a new store for the new model.` A file from
+before v0.13 records the first embedder attached after the upgrade.
 
 Mnemo also now refuses any `remember` call with an all-zero vector,
 so a mis-wired embedder (returning `[0.0] * dims`) fails loudly on

@@ -489,6 +489,32 @@ def test_set_embedder_identity_mismatch_rejected_after_reopen():
     print("ok  set_embedder identity-mismatch rejected across reopen")
 
 
+
+def test_set_embedder_identity_checked_without_a_manifest():
+    """EMBED-ID-1: a file with no manifest records the first embedder too,
+    and refuses another identity of the same width after a reopen. The
+    record isn't a memory."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "plain.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.set_embedder(_fake_embedder(4), name="model-r1", dimensions=4, normalize=True)
+        db.remember("one memory", "semantic", [1.0, 0.0, 0.0, 0.0])
+        db.close()
+        del db
+
+        db2 = mnemo.open(path, "pw")
+        try:
+            db2.set_embedder(_fake_embedder(4), name="model-r2", dimensions=4, normalize=True)
+            raise AssertionError("expected identity mismatch")
+        except RuntimeError as e:
+            assert "embedder identity mismatch" in str(e), f"got {e}"
+            assert "model-r1" in str(e) and "model-r2" in str(e), f"got {e}"
+        db2.set_embedder(_fake_embedder(4), name="model-r1", dimensions=4, normalize=True)
+        assert len(db2) == 1, len(db2)
+        db2.close()
+        del db2
+    print("ok  set_embedder identity checked without a manifest")
+
 def test_set_embedder_on_read_only_handle_adopts_without_write():
     """Reader opened via `read_only=True` can still register an
     embedder and drive `recall_text` (PR 10a.1 Bug 2 fix: `set_embedder`
@@ -1228,6 +1254,7 @@ if __name__ == "__main__":
     test_set_embedder_and_text_round_trip()
     test_set_embedder_dim_mismatch_rejected()
     test_set_embedder_identity_mismatch_rejected_after_reopen()
+    test_set_embedder_identity_checked_without_a_manifest()
     test_set_embedder_on_read_only_handle_adopts_without_write()
     test_read_only_with_block_and_close_are_noops()
     test_remember_rejects_zero_vector()

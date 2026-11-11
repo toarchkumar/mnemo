@@ -95,6 +95,27 @@ pub enum MnemoError {
         /// Human-readable reason (e.g. `"pending WAL recovery"`).
         reason: &'static str,
     },
+
+    /// EMBED-ID-1: the embedder passed to [`crate::Mnemo::set_embedder`]
+    /// isn't the one this file's vectors came from. The file records the
+    /// identity of the first embedder attached to it; a different name,
+    /// width or `normalize` flag is refused, because mixing two models'
+    /// vectors in one file silently breaks recall. Use the original
+    /// embedder, or create a new store for the new model.
+    #[error(
+        "embedder identity mismatch: this file's vectors come from embedder \
+         (name={:?}, dimensions={}, normalize={}), but the embedder given is \
+         (name={:?}, dimensions={}, normalize={}). Open the file with its \
+         original embedder, or create a new store for the new model.",
+        stored.name, stored.dimensions, stored.normalize,
+        given.name, given.dimensions, given.normalize
+    )]
+    EmbedderMismatch {
+        /// The identity the file records.
+        stored: crate::embed::EmbedderIdentity,
+        /// The identity of the embedder that was passed.
+        given: crate::embed::EmbedderIdentity,
+    },
 }
 
 /// Convenience result alias used throughout the crate.

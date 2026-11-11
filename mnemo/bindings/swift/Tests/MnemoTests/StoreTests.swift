@@ -74,6 +74,33 @@ import Testing
         try await store.close()
     }
 
+    /// EMBED-ID-1: a store records its first embedder's identity, and an
+    /// embedder with another identity of the same width (another model, or
+    /// another revision) is refused when the store next opens the file.
+    @Test func aStoreRefusesAnotherEmbedderIdentity() async throws {
+        let keys = MemoryKeyStore()
+        let config = MnemoStoreConfiguration(name: "identity", dimensions: 32, directory: try scratchDirectory())
+        let first = try MnemoStore(configuration: config, keyStore: keys, embedder: WordEmbedder())
+        try await first.rememberText("written with the first model")
+        try await first.close()
+
+        let other = try MnemoStore(configuration: config, keyStore: keys,
+                                   embedder: WordEmbedder(name: "test-words-r2"))
+        do {
+            _ = try await other.count()
+            Issue.record("expected EmbedderMismatch")
+        } catch let MnemoError.EmbedderMismatch(stored, given) {
+            #expect(stored.name == "test-words")
+            #expect(given.name == "test-words-r2")
+            #expect(!MnemoError.EmbedderMismatch(stored: stored, given: given).isRetryable())
+        }
+        try? await other.close()
+
+        let same = try MnemoStore(configuration: config, keyStore: keys, embedder: WordEmbedder())
+        #expect(try await same.count() == 1, "the identity record isn't a memory")
+        try await same.close()
+    }
+
     @Test func keyedWritesKeepHistory() async throws {
         let store = try MnemoStore(
             configuration: MnemoStoreConfiguration(name: "keyed", dimensions: 4, directory: try scratchDirectory()),

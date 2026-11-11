@@ -211,8 +211,14 @@ final class MyEmbedder: MnemoEmbedder, @unchecked Sendable {
   result is dropped.
 - If it throws (any error), the call fails with `MnemoError.Embedder`, and
   nothing is written.
-- The identity is recorded in the file. Opening the file with a different
-  model name or width is refused, so vectors from two models never mix.
+- The identity is recorded in the file, the first time an embedder is
+  attached, and checked every time after that (v0.13, EMBED-ID-1). An
+  embedder with another name, width or `normalize` flag is refused with
+  `MnemoError.EmbedderMismatch(stored, given)`, so vectors from two models never
+  mix. A different model, or a new revision of the same one, therefore
+  needs a new store: give it its own `name`, and add the memories again
+  from your app's own data. The store opens its file lazily, so the error
+  comes from the first call after the open, not from the initializer.
 
 ## Threads: keep the blocking API off the main thread
 
@@ -365,8 +371,9 @@ let store = try MnemoStore(
 
 - `MnemoError` comes from the engine: `Locked`, `WrongPassphrase`,
   `HeaderTampered`, `UnsupportedVersion`, `NotAMnemoFile`, `NotFound`,
-  `ReadOnly`, `NeedsWriteOpen`, `DimensionMismatch`, `Invalid`, `Io`, `Kdf`,
-  `Crypto`, `Corrupt`, `Closed`, `Embedder`. `MnemoStore` never surfaces
+  `ReadOnly`, `NeedsWriteOpen`, `DimensionMismatch`, `EmbedderMismatch`
+  (v0.13), `Invalid`, `Io`, `Kdf`, `Crypto`, `Corrupt`, `Closed`,
+  `Embedder`. `MnemoStore` never surfaces
   `Closed`: it reopens the file and retries once, and a handle a panic
   poisoned is treated the same way.
 - `MnemoStoreError` comes from this layer: `keyMissing(keyID:path:)`,
@@ -380,5 +387,5 @@ apart for `MnemoError`):
 | Class | Errors | What to do |
 |---|---|---|
 | Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)`, `noBackgroundTime` | Try again later, on the next launch, say. The data is fine. |
-| Fix the call | `Invalid`, `DimensionMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
+| Fix the call | `Invalid`, `DimensionMismatch`, `EmbedderMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
 | The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `keyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |
