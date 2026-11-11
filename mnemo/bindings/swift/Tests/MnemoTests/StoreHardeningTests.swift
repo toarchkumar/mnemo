@@ -40,10 +40,12 @@ import Testing
         try await store.close()
     }
 
-    /// T9 (b): a 1.5 s embed in flight; `count()` and `closeForBackground()`
-    /// 0.2 s in. Before 2c both waited about 1.3 s. After: milliseconds.
+    /// T9 (b): an embed in flight; `count()` and `closeForBackground()`
+    /// 0.2 s in. Before 2c both waited for the embed. After: milliseconds.
+    /// The embed is held until both are measured (at most 10 s), so it can't
+    /// land before `count()` on a slow runner.
     @Test func t9bCountAndTheBackgroundCloseDontWaitForAnEmbed() async throws {
-        let slow = SlowEmbedder(seconds: 1.5)
+        let slow = SlowEmbedder(seconds: 10)
         let store = try MnemoStore(
             configuration: MnemoStoreConfiguration(name: "t9b", dimensions: 32, directory: try scratchDirectory()),
             keyStore: MemoryKeyStore(), embedder: slow)
@@ -57,9 +59,11 @@ import Testing
         t = Date()
         await store.closeForBackground()
         let closeSecs = Date().timeIntervalSince(t)
+        slow.open()
         #expect(countSecs < 0.3, "count took \(countSecs) s")
         #expect(closeSecs < 0.3, "the background close took \(closeSecs) s")
         _ = try await writer.value
+        #expect(try await store.count() == 2)
         try await store.close()
     }
 
