@@ -2538,6 +2538,8 @@ fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObje
     // PY-1 + FIX-1 R-001.1: report cache counts too.
     d.set_item("cache_before", report.cache_before)?;
     d.set_item("cache_after", report.cache_after)?;
+    d.set_item("zero_vector_manifests", report.zero_vector_manifests)?;
+    d.set_item("zero_vector_memories", report.zero_vector_memories)?;
     Ok(d.into_any().unbind())
 }
 

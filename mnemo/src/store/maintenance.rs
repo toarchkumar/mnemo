@@ -285,12 +285,27 @@ impl Mnemo {
         let all = self.memories()?;
         let before = all.len();
         let mut after = 0;
-        for m in all {
+        let mut zero_vector_manifests = 0;
+        let mut zero_vector_memories = 0;
+        for mut m in all {
             if m.is_expired(now) {
                 continue;
             }
-            // The engine's own copy: `_mnemo.*` keys come through as they are.
-            new.put(m)?;
+            // A file from before the zero-vector rule (Phase 3 PR 10a) can
+            // hold all-zero vectors. A legacy onboarding or manifest memory
+            // gets the sentinel unit vector a current manifest has, so it
+            // behaves like a new one; any other is carried unchanged.
+            if embed::is_zero_vector(&m.vector) {
+                if crud::is_onboarding(&m) || is_manifest(&m) {
+                    m.vector = Memory::scaffold_manifest(self.dimensions).vector;
+                    zero_vector_manifests += 1;
+                } else {
+                    zero_vector_memories += 1;
+                }
+            }
+            // The engine's own copy: `_mnemo.*` keys come through as they
+            // are, and the write-time zero-vector check doesn't apply.
+            new.put_existing(m)?;
             after += 1;
         }
         if want_index && after > 0 {
@@ -328,6 +343,8 @@ impl Mnemo {
             after,
             cache_before,
             cache_after,
+            zero_vector_manifests,
+            zero_vector_memories,
         })
     }
 
@@ -337,6 +354,15 @@ impl Mnemo {
     /// pre-FIX-1 implementation only checked `self.catalog`, so a
     /// corrupted cache record went unnoticed).
     pub fn verify(&mut self) -> Result<usize> {
+        Ok(self.verify_report()?.records)
+    }
+
+    /// [`Mnemo::verify`], also counting the memories whose vector is all
+    /// zeros. A file written before the zero-vector rule (Phase 3 PR 10a)
+    /// can hold them; they decode fine but score 0.0 on every vector query.
+    /// `mnemo verify` warns about them, and compaction carries them
+    /// (giving a legacy manifest the sentinel vector).
+    pub fn verify_report(&mut self) -> Result<VerifyReport> {
         let entries: Vec<CatalogEntry> = self
             .catalog
             .iter()
@@ -344,17 +370,25 @@ impl Mnemo {
             .cloned()
             .collect();
         let mut n = entries.len();
+        let mut zero_vector_memories = 0;
         for e in &entries {
             let bytes = self.read_record(e)?;
-            let _m: Memory = self.decode_memory(&bytes)?;
+            let m: Memory = self.decode_memory(&bytes)?;
             // FMT-9b: and the row's vector column entry.
-            if e.v9.is_some() {
+            let zero = if e.v9.is_some() {
                 let (h, _) = self.column_entry(e)?;
                 if h.len() != self.dimensions {
                     return Err(MnemoError::Invalid(
                         "vector entry has the wrong width".into(),
                     ));
                 }
+                // fp16 +0.0 and -0.0.
+                !h.is_empty() && h.iter().all(|b| b & 0x7fff == 0)
+            } else {
+                embed::is_zero_vector(&m.vector)
+            };
+            if zero {
+                zero_vector_memories += 1;
             }
         }
 
@@ -385,7 +419,10 @@ impl Mnemo {
         if self.is_v9() {
             self.check_free_list_disjoint()?;
         }
-        Ok(n)
+        Ok(VerifyReport {
+            records: n,
+            zero_vector_memories,
+        })
     }
 
     /// FMT-9 (a): fail if the free list (or a pending free) overlaps any

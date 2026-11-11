@@ -32,6 +32,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - No file-format change: the identity lives in a reserved result-cache
     entry, which v8 and v9 files both have.
 
+### Fixed
+
+- **Compaction no longer refuses a file that holds an all-zero vector.**
+  - `compact_file`, `export_rekeyed` / `export_rekeyed_with_key` and the
+    mobile passphrase import copied each record through the write path,
+    which refuses all-zero vectors (a rule since v0.5). A file written
+    before that rule could hold one, typically its scaffold manifest, so it
+    couldn't be compacted, exported or upgraded at all.
+  - The copy now skips that write-time check (the dimension check stays).
+    A legacy onboarding or manifest memory gets the sentinel unit vector
+    a current manifest has; any other zero-vector memory is carried as it
+    is, with the same content and recall behaviour.
+  - `CompactReport` (and the `mnemo compact` line, the Python dict and the
+    FFI record) gains `zero_vector_manifests` and `zero_vector_memories`.
+  - New `Mnemo::verify_report()` counts zero-vector memories, and
+    `mnemo verify` warns when there are any.
+  - A new zero vector is still refused.
+
 ### Changed
 
 - **HOOKS-1: release builds carry no test hooks** (RB-001.29). The hidden

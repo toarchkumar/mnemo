@@ -906,5 +906,7 @@ fn report(r: mnemo_engine::CompactReport) -> CompactReport {
         after: r.after as u64,
         cache_before: r.cache_before as u64,
         cache_after: r.cache_after as u64,
+        zero_vector_manifests: r.zero_vector_manifests as u64,
+        zero_vector_memories: r.zero_vector_memories as u64,
     }
 }

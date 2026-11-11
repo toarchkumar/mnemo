@@ -1404,7 +1404,20 @@ impl Mnemo {
     }
 
     /// Serialize and store a memory (insert or overwrite by ID).
-    pub(super) fn put(&mut self, mut m: Memory) -> Result<Ulid> {
+    pub(super) fn put(&mut self, m: Memory) -> Result<Ulid> {
+        self.put_checked(m, true)
+    }
+
+    /// [`Mnemo::put`] for a record already in a file: the compaction copy
+    /// (and so the rekeyed exports and the import). It keeps the dimension
+    /// check but skips the zero-vector check, which is a write-time rule:
+    /// a file written before that rule can hold an all-zero vector, and
+    /// compaction must still carry it.
+    pub(super) fn put_existing(&mut self, m: Memory) -> Result<Ulid> {
+        self.put_checked(m, false)
+    }
+
+    fn put_checked(&mut self, mut m: Memory, refuse_zero: bool) -> Result<Ulid> {
         if m.vector.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -1418,7 +1431,7 @@ impl Mnemo {
         // `remember` than let a mis-embedded entry pollute recall
         // quality for the life of the database. Scaffold manifests now
         // use a sentinel unit vector so this check doesn't trip them.
-        if embed::is_zero_vector(&m.vector) {
+        if refuse_zero && embed::is_zero_vector(&m.vector) {
             return Err(MnemoError::Invalid(
                 "all-zero vector refused: it scores 0.0 on every cosine query and \
                  pollutes recall; check your embedder returned a real embedding"
