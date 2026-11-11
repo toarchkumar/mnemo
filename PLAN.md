@@ -66,17 +66,19 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-09)
+## Status (2026-11-11)
 
-**Published:** v0.12.0 (the iOS and Android packages; Rust `close(self)`)
-on crates.io, PyPI, Maven Central (`io.github.toarchkumar:mnemo-android`)
-and SPM (`toarchkumar/mnemo-swift`); PLANNER-A VERIFIED. **In progress:**
-v0.12.1, mobile hardening (MOBILE-2a–d, then SEC-2; triaged from
-REVIEWER-B's RB-001). **Target market (user decision 2026-11-07):**
-on-device agents and apps, from desktop to tablets, phones and other
-small devices. **Next:** SAMPLE-1 → INSP-1 (v0.13, with the v8 sunset)
-→ PERF-2 → Phases 12–15 (see "Authoritative execution order"). Read the
-WORKLOG from the 2026-11-09 entries on for the live thread.
+**Published:** v0.12.1, mobile hardening (MOBILE-2a–d and SEC-2), on
+crates.io, PyPI, Maven Central (`io.github.toarchkumar:mnemo-android`)
+and SPM (`toarchkumar/mnemo-swift`); PLANNER-A VERIFIED. Releases now
+publish through approval-gated environments, crates.io Trusted Publishing
+and a mnemo-swift deploy key. **In progress:** v0.12.2 (MOBILE-2e and
+SEC-2b, from RB-001 and RB-002, plus CI-DEPS-1). **Target market (user
+decision 2026-11-07):** on-device agents and apps, from desktop to
+tablets, phones and other small devices. **Next:** SAMPLE-1 → INSP-1
+(v0.13, with the v8 sunset) → PERF-2 → Phases 12–15 (see "Authoritative
+execution order"). Read the WORKLOG from the 2026-11-10 entries on for
+the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1566,6 +1568,8 @@ of this file applies to every one.
 >    (2026-11-10, from RB-002):** MOBILE-2e (the RB-002-confirmed mobile
 >    fixes) plus SEC-2b (security test and docs; details in
 >    `SECURITY.local.md`).
+>    **(Reordered 2026-11-11, PLANNER-A:** v0.12.2 goes before SAMPLE-1,
+>    and CI-DEPS-1 rides with it.)
 >    **Also queued from RB-001/RB-002:** HOOKS-1 (with v0.13), DOCS-1
 >    (after INSP-1), FUZZ-2 (required before 14.1), and MOBILE-3 (a
 >    candidate after INSP-1; the user picks its priority).
@@ -15151,3 +15155,424 @@ only):
 
 **MOBILE-2e and SEC-2b start after the v0.12.1 DONE.** I'll write their
 dispatch then, with the step order, so this release isn't held up.
+
+
+### 2026-11-10 — WORKER — NOTE — SEC-2's findings moved here from SECURITY.local.md (the fix shipped in v0.12.1)
+
+Per AGENTS.md: the fixes for RB-001.30, .31 and .32 shipped in v0.12.1
+(tag at 6e32b68; SEC-2 commits 280a54b, 95a5dde and 9c0e261), so their
+write-ups move from the gitignored `SECURITY.local.md` into this log,
+verbatim below. **RB-002.2 stays in `SECURITY.local.md`**, along with the
+RB-002 verification sections and the reproduction it relies on: it's still
+open (SEC-2b, v0.12.2).
+
+#### RB-001.30 — [SECURITY] [MEDIUM] `rekey` leaves the old wrapped data key in the file, and never rotates the data key; the passphrase import and export inherit both
+
+- **Status:** `ACCEPTED`
+- **Evidence (code):**
+  - `mnemo/src/store/maintenance.rs:113-166` (`rekey`, `rekey_with_key`, `rekey_secret`): only the wrapped DEK changes. The new page 0 is logged to a *new* WAL region, then the old region is invalidated and freed.
+  - `mnemo/src/wal.rs:220-228` (`invalidate_region`): zeroes only the first 29-byte frame header of the old region. The frame payloads stay, and one of them is the previous page-0 image (salt, DEK nonce, wrapped DEK, KDF costs).
+  - `mnemo/src/store/flush.rs:101-120` (`relocate_header_through_wal`), `maintenance.rs:164` (`release_pages`): on v9 the old region goes on the free list and is overwritten only when a later commit happens to reuse those pages. On v8 nothing reuses pages, so it stays until `compact`.
+  - `mnemo/bindings/uniffi/src/db.rs:711-738` (`export_with_passphrase`: byte copy, then `rekey` on the copy) and `db.rs:761-792` (`import_with_passphrase`: copy, then `rekey_with_key`).
+- **Evidence (measured, published `mnemo-engine==0.11.0` aarch64 wheel, v9 file; the rekey path is the same code at `46e9da7`, moved by REFAC-1):**
+  1. Create a file with passphrase A, write 20 memories, flush, close. Save page 0.
+  2. Reopen, `rekey("B")`, write 5 more memories, flush, close.
+  3. The 76 bytes at header offsets 86..161 of the *old* page 0 (salt + DEK nonce + wrapped DEK) are still in the file, at byte offset 41191 (page 5, the old WAL region).
+  4. Copy the file, overwrite its first 8,192 bytes with the old page-0 image found at offset 41105. `open(copy, "A", read_only=True)` **succeeds** and shows the 20 pre-rekey memories. The untouched file still rejects A.
+  - So after a rekey, the old secret plus any later copy of the file gives the DEK. The DEK is the same before and after, so it also decrypts every page written after the rekey.
+- **Finding:**
+  1. **Core `rekey` is not a revocation, and the file keeps the evidence.** The rustdoc ("Change the passphrase. Cheap: ... the encrypted pages are never rewritten") is accurate but doesn't say that someone who knew the old passphrase can still read the file, including later writes, with no old copy needed. Users rekey after a suspected passphrase leak. PLAN.md 13.2 already says revoking a slot means rotating the data key; the same holds for today's single-secret `rekey`.
+  2. **`import_with_passphrase`:** the imported file is advertised as "re-protected by a fresh key in this device's Keychain", and the binding test asserts that it "fails with the passphrase". It fails through the API only. The transfer passphrase (human-chosen, typed on a phone, possibly weak) remains a permanent offline handle on the device file: a later leak of the file (an unencrypted local backup under `.iCloudSynced`, a rooted Android device) plus the old passphrase recovers everything. The export file itself, which usually lingers in Files, AirDrop or a cloud drive, also shares the DEK.
+  3. **`export_with_passphrase`:** the export shares the live file's DEK, so whoever gets the export and the passphrase can read every *future* state of the live file if they ever obtain its bytes. The export also carries a stale header image wrapped under the device key (harmless without that key).
+- **Recommendation:**
+  1. In `rekey_secret`, overwrite every page of the old WAL region (not only its first frame header) and fsync before returning, on v8 and v9. Cost: `wal_pages` (8 by default) page writes. Check the torn-header scan for any other place an old page-0 image can sit (a relocated region that was grown).
+  2. Give the import and the export a fresh DEK. Cheapest: an engine `export_rekeyed(dest, secret, kdf)` that writes the copy through the compaction path under a new DEK (the README already documents that compaction rewrites the file under a fresh data key), and have `import_with_passphrase` finish with `compact_file_with_key`. That also lets `MnemoDb` stop keeping the open secret for the handle's lifetime (see RB-001.32).
+  3. Add `mnemo rekey --rotate` (rekey + compact) and say plainly in the `rekey` docs and the mobile READMEs: "rekey changes who can open the file from now on only if nobody kept the old secret; rotate to revoke".
+  4. Tests: after rekey, the old salt and wrapped-DEK bytes appear nowhere in the file; after import, a header splice with the passphrase fails.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-09) → **SEC-2, v0.12.1**. Verified: `wal::invalidate_region` zeroes only the 29-byte frame header and fsyncs (`wal.rs:220-228`), and `rekey_secret` then frees the old region (`maintenance.rs`, `release_pages`). So the old page-0 image survives until the pages are reused, and on v8, until `compact`. Your splice reproduction is convincing. SEC-2 takes all four recommendations:
+  1. overwrite every page of the old WAL region and fsync on rekey (v8 and v9), and audit other places a page-0 image can sit (grown or relocated regions);
+  2. an engine-level rekeyed export through the compaction path under a **fresh DEK**, used by `export_with_passphrase`; `import_with_passphrase` ends with a fresh-DEK compaction too, and `MnemoDb` stops keeping the secret (closes RB-001.32 item 2);
+  3. `mnemo rekey --rotate`, with honest `rekey` docs in the rustdoc, the CLI and the mobile READMEs ("rotate to revoke");
+  4. your two tests.
+
+  The README and site don't promote passphrase export (RB-001.14, the demo) until SEC-2 ships. **The CHANGELOG entry when it ships** describes it as a hardening of rekey and export, with the advice to rotate after a suspected passphrase leak.
+
+---
+
+#### RB-001.31 — [SECURITY] [MEDIUM] `release.yml`: publish credentials are exposed far beyond the steps that use them
+
+- **Status:** `ACCEPTED`
+- **Evidence:** `.github/workflows/release.yml` at `8a9af2e`.
+  - `release.yml:512-520`: the four Maven secrets (Central token pair, the GPG private key and its password) are **job-level `env`** of `release-android`. Every step of that job sees them: third-party actions referenced by mutable tags (`dtolnay/rust-toolchain@stable`, `actions/setup-java@v4`, `gradle/actions/*@v4`, `softprops/action-gh-release@v2`), `cargo install cargo-ndk`, and `scripts/build-native.sh`, which runs the build scripts of the whole dependency tree (`zstd-sys`/`cc` included), plus the JVM tests and the consumer build.
+  - `release.yml:37-40`: workflow-level `permissions: contents: write` for **all** jobs, and every `actions/checkout@v4` keeps its default `persist-credentials: true`, so a write-scoped `GITHUB_TOKEN` sits in `.git/config` while dependency build scripts run (wheels, CLI, mobile).
+  - Only PyPI uses an environment (`release.yml:262`). `CRATES_IO_TOKEN`, `MAVEN_*` and `MNEMO_SWIFT_TOKEN` are plain repository secrets, and the workflow has `workflow_dispatch` (`release.yml:16`), which RELEASING.md runs on a release branch. Any branch's copy of the workflow can read them.
+  - Actions are pinned by tag, not commit (`@v4`, `@v2`, `@v1`, `@stable`, `@release/v1`). `pip install ziglang` and `cargo install --locked cargo-zigbuild` (`release.yml:106-109`) have no version.
+  - `mnemo/bindings/kotlin/scripts/central-dry-run.sh:17`: the base64 of `user:password` is a new string that GitHub's log masking doesn't know.
+  - `release.yml:309-312`: `cargo publish --token "$CARGO_REGISTRY_TOKEN"` puts the token in the process arguments (cargo reads the env var by itself).
+  - `release.yml:434-438`: the fine-grained PAT is embedded in the remote URL on the command line. It isn't written to `.git/config` and the script doesn't use `set -x`, which is good. It's still a personal token that expires (2027-11).
+- **Finding:** A compromised action tag or a malicious build script in any transitive crate, on a tag *or* on a manual dry run, can take the Maven Central token and the GPG signing key (publish as `io.github.toarchkumar` forever), the crates.io token, or a repo-write token. For an encryption product on four registries, that's the highest-value target in the project. Nothing here is known to be exploited; this is exposure, not an incident.
+- **Recommendation (in order of value):**
+  1. **Split build from publish.** Build and test jobs get no secrets and `contents: read`; they upload artifacts. Small publish jobs download the artifacts and do only the signing and upload. Until then, at least move the four `ORG_GRADLE_PROJECT_*` values from job `env` to the three steps that sign or upload.
+  2. **Environments with a required reviewer** (`crates-io`, `maven-central`, `mnemo-swift`, like `pypi`), restricted to `v*` tags and, for the dry run, to the release branch. That gives the maintainer one click per irreversible publish and stops branch workflows from reading the secrets.
+  3. Top-level `permissions: contents: read`, `persist-credentials: false` on every checkout, `contents: write` only on the jobs that attach assets.
+  4. Pin every action to a commit SHA (Dependabot keeps them current) and pin `ziglang` and `cargo-zigbuild` versions.
+  5. crates.io Trusted Publishing (OIDC), as PyPI already does here, removes `CRATES_IO_TOKEN`. For `mnemo-swift`, a deploy key or a GitHub App token removes the expiring personal token. Add a tag ruleset on `mnemo-swift` so a published version tag can't be moved.
+  6. `echo "::add-mask::$b64"` for the derived credential in `central-dry-run.sh`; drop `--token` from `cargo publish`.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-09) → **SEC-2, v0.12.1**, before the next tag. Verified: the four `ORG_GRADLE_PROJECT_*` values are job-level `env` of `release-android` (`release.yml:517-520`), and the workflow has a top-level `permissions:` block (`:37`). **In SEC-2:**
+  1. split build from publish: build and test jobs get no secrets and `contents: read`, and small publish jobs download the artifacts, then sign and upload. As an interim, step-scoped env;
+  2. top-level `contents: read`, `persist-credentials: false` everywhere, and write only on the asset-attaching jobs;
+  3. pin actions to commit SHAs (with Dependabot), and pin `ziglang` and `cargo-zigbuild`;
+  4. `::add-mask::` for the derived base64, and drop `--token` from `cargo publish`.
+
+  **These need the user (NEEDS-USER, listed for them in the SEC-2 dispatch):**
+  - GitHub environments with a required reviewer (`crates-io`, `maven-central`, `mnemo-swift`), restricted to `v*` tags and the release branch;
+  - crates.io Trusted Publishing;
+  - a deploy key or GitHub App instead of the `mnemo-swift` personal token;
+  - a tag ruleset on `mnemo-swift`.
+
+---
+
+#### RB-001.32 — [SECURITY] [LOW] Secret hygiene in memory across the three layers (hardening)
+
+- **Status:** `ACCEPTED`
+- **Evidence and finding:**
+  1. `mnemo/bindings/uniffi/src/db.rs:262-333`: on a failed open or create, the `passphrase: String` is dropped without zeroizing (it's wrapped in `Zeroizing` only on success). `compact_file`, `import_with_passphrase` and `export_with_passphrase` wrap first, which is the right pattern.
+  2. `db.rs:15-18, 24-30`: `MnemoDb` keeps the open secret (the passphrase or the raw key) for the object's whole life, only so `export_with_passphrase` can reopen its copy (`db.rs:247-253`). It stays after `close()` until the foreign object is freed. With an engine-level rekeyed export (RB-001.30, recommendation 2) the binding needs to keep nothing.
+  3. `db.rs:751-754`: `generate_key` returns `key.to_vec()`; that `Vec` is handed to the FFI buffer and never zeroized on the Rust side.
+  4. `mnemo/bindings/swift/Sources/Mnemo/MnemoStore.swift:494-498, 323-325`: `var bytes = key; defer { bytes.zeroize() }`. A `Data` bridged from the Keychain's immutable `CFData` copies on first mutation, so `resetBytes` zeroes a private copy and the original bytes stay until freed. `MnemoStoreError.swift:42-47` says "best effort", which is honest, but the call sites read as if the key were wiped.
+  5. Kotlin zeroizes its `ByteArray`s in `finally` blocks (`MnemoStore.kt:236, 316, 403, 412`), which works. The JNA marshalling copy isn't reachable.
+- **Risk:** low. Process memory on iOS and Android is sandboxed and not swapped to disk, and the DEK is in memory for as long as the file is open anyway. Worth fixing for consistency and because the READMEs make zeroization claims.
+- **Recommendation:** wrap passphrases in `Zeroizing` before the first fallible call; stop retaining the secret in `MnemoDb`; in Swift read the key into a `[UInt8]` or `UnsafeMutableRawBufferPointer` you own, pass it down, and zero that; say "best effort" in the Swift README's key section.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-09) → **SEC-2, v0.12.1**, all five points:
+  1. wrap the passphrase in `Zeroizing` before the first fallible call;
+  2. `MnemoDb` stops retaining the secret (via RB-001.30's rekeyed export);
+  3. zeroize `generate_key`'s Rust-side `Vec`;
+  4. Swift reads the key into a buffer it owns and zeroes that, and the README says "best effort";
+  5. Kotlin as is.
+
+
+#### RB-001.31 — verification: NOT TESTABLE HERE (nothing to run); the reading still holds
+
+- `.github/workflows/release.yml` is unchanged since `8a9af2e` (`git diff 8a9af2e HEAD -- .github` is empty), so every line reference in RB-001.31 stands.
+- The v0.12.0 run (42748000883) used all four credentials. Nothing suggests misuse. One observation from that run, tracked as `RB-002.1` in `reviewer_notes.md` (no security content): its last Swift step was still running 45 minutes after everything had published, on a macOS runner whose job-level environment no longer needs any secret; `MNEMO_SWIFT_TOKEN` is step-scoped to "Push to mnemo-swift" (`release.yml:433-435`), which is the right shape and the model for the Maven secrets.
+
+#### RB-001.32 — verification
+
+- **Item 4 (Swift `var bytes = key; defer { bytes.zeroize() }`): CONFIRMED** with a Swift test against the package built from `f79715e`: after `var bytes = key; bytes.zeroize()`, `bytes` is all zero and `key` still holds all 32 key bytes. `Data` copies on the first mutation, so the wipe lands on the copy.
+- **Items 1–3 and 5:** confirmed by reading at `f79715e` (`mnemo/bindings/uniffi/src/db.rs:262-333, 15-30, 751-754`; `MnemoStore.kt` `finally` blocks). Not testable from outside the process.
+
+
+### 2026-11-10 — WORKER — DONE — v0.12.1 shipped (per the PLANNER-A HANDOFF "The tag, after the user's settings A–D")
+
+**Commits on `release-0.12.1`, then `main`:**
+- d6df75b `docs: v0.12.1 README and site (durability default, rekey vs
+  rotate, retention cap)`: your README.md and index.html, on their own;
+- 6e32b68 `chore(plan): sync coordination files` (PLAN.md and
+  reviewer_notes.md).
+
+The branch switch from `main` was clean, and nothing was reset or
+stashed. `main` was fast-forwarded to 6e32b68 (9c0e261..6e32b68). Tag
+`v0.12.1` (annotated) is at 6e32b68.
+
+**Dry run 42901448023, on `release-0.12.1` at 6e32b68: green.**
+- The version check and both builds passed.
+- `maven-central` and `mnemo-swift` paused for the user's approval, the
+  first run with the new environment rules.
+  - **They waited about an hour:** the user hadn't realized they were the
+    reviewer. Nothing failed; I'll remind them at each gate from now on.
+- **Swift publish:** "pushing with the deploy key", pushed and deleted
+  `dry-run-0.12.1`, and the published-package check built.
+- **Android publish:** the signed bundle uploaded as USER_MANAGED,
+  deployment 1fcc5f13-aaa2-408b-9192-ba7e04f63847 went **VALIDATED**, and
+  it was dropped (HTTP 204).
+
+**Tag run 42919069975: every job succeeded.**
+- Create GitHub Release, the 5 `cli` jobs, the 5 `wheels` jobs, `sdist`,
+  `attach engine assets`, `publish to crates.io`, `publish to PyPI`, the
+  version check, both mobile builds, and both mobile publishes.
+- The user approved `crates-io` and `pypi` together, then `mnemo-swift`
+  and `maven-central`. No step was retried or re-run.
+
+**Which credential each publish used, from the logs:**
+- **crates.io: Trusted Publishing (OIDC), not the token.** "Retrieved JWT
+  token successfully", then "Retrieved token successfully" from
+  `crates.io/api/v1/trusted_publishing/tokens`, then
+  `cargo publish --no-verify`: "Published mnemo-engine v0.12.1". The post
+  step: "Token revoked successfully". `CRATES_IO_TOKEN` was unused.
+- **PyPI:** Trusted Publishing, as before.
+- **`mnemo-swift`: the deploy key.** "pushing with the deploy key", then
+  "pushed main and tag 0.12.1". `MNEMO_SWIFT_TOKEN` was unused.
+- **Maven Central:** the repository secrets (the token pair and the
+  signing key), step-scoped in the `maven-central` job. "Uploaded bundle to
+  Central Portal as AUTOMATIC, deployment id:
+  cad48814-311d-446a-bd83-aa7966230bd9".
+
+**The four registries:**
+- **crates.io:** `mnemo-engine` max_version **0.12.1**.
+- **PyPI:** `mnemo-engine` **0.12.1**, with 6 files (5 wheels and the sdist).
+- **`mnemo-swift`:** tag **`0.12.1`** (89254f958e3a). The Swift publish
+  job resolved `exact: "0.12.1"` from GitHub and built it; SwiftPM checks
+  the zip checksum as it resolves.
+- **Maven Central: `io.github.toarchkumar:mnemo-android:0.12.1` is
+  visible.**
+  - It reached repo1.maven.org at about 23:58 UTC, roughly 15 minutes
+    after the upload.
+  - The pom, aar, module, sources and javadoc jars, and the pom, aar and
+    module `.asc` files all return 200.
+  - `maven-metadata.xml` has latest and release **0.12.1**.
+  - The AAR (2,728,983 B) matches its `.sha1`, and gpg reports "Good
+    signature" from RSA key `…19104D9B3DA89A04` (the release key
+    CFAFF7A174EBC15ED5475C4619104D9B3DA89A04).
+
+**The GitHub Release v0.12.1** has 13 assets: the XCFramework zip
+(10,551,138 B), the AAR, the 5 CLI binaries, the 5 wheels and the sdist.
+
+**After the tag:**
+- **SEC-2's findings moved into PLAN.md:** the NOTE above has RB-001.30,
+  .31 and .32, with their triage and the .31/.32 verification notes,
+  verbatim. In `SECURITY.local.md` they're replaced by pointers.
+  - RB-002.2, the RB-002 verification sections and the reproduction stay
+    there: RB-002.2 is open, for SEC-2b in v0.12.2.
+  - I kept a copy of the file as it was before the move in my scratchpad.
+- **`release-0.12.1` is deleted, local and remote**, after checking it was
+  contained in `origin/main`. PR 15 shows merged.
+  - Local `main` had to be moved to `origin/main` first, without a
+    checkout: switching from the release branch was refused while local
+    `main` lagged at 9c0e261.
+
+**Found along the way, not acted on:**
+1. **PR 16** (toarchkumar/mnemo#16), Dependabot's first grouped update
+   from SEC-2's `dependabot.yml`:
+   - mostly major-version bumps (`checkout` 7, `upload-artifact` 7,
+     `download-artifact` 8, `action-gh-release` 3, `gradle/actions` 6,
+     `setup-java` 6, `setup-python` 7);
+   - it also moves `dtolnay/rust-toolchain@1.75` and `@1.82` to `@1.120`,
+     which would quietly end the MSRV checks. Its two MSRV jobs are red.
+   - **Don't merge it as is.** The fix is an `ignore` for
+     `dtolnay/rust-toolchain` in `dependabot.yml`, then the action bumps
+     in their own PR with a release dry run.
+2. The pinned `PyO3/maturin-action` warns "Unexpected input(s)
+   'rustflags'" on every wheel job. That's harmless: the container gets
+   `-e RUSTFLAGS` from the job environment, which has the ARM AES flags,
+   and the same warning was in v0.12.0. The unused input could go in the
+   same cleanup.
+
+**Left on purpose, per the user:** the Maven secrets are still repository
+secrets, and `CRATES_IO_TOKEN` and `MNEMO_SWIFT_TOKEN` stay as fallbacks.
+Neither fallback was used in this release, so both can be deleted, and
+the tokens revoked, whenever the user likes.
+
+### 2026-11-10 — WORKER — NOTE — to PLANNER-A: Dependabot PR 16 needs a config fix before any action bumps merge (proposed CI-DEPS-1)
+
+**What it is.** PR 16 (toarchkumar/mnemo#16, branch
+`dependabot/github_actions/actions-c1e54af735`) is Dependabot's first
+grouped update, from the `dependabot.yml` that SEC-2 added. It bumps 10
+GitHub Actions across `ci.yml`, `release.yml`, `android-emulator.yml`,
+`fuzz-weekly.yml` and `size.yml`, keeping the commit pinning:
+- `actions/checkout` 4→7, `actions/upload-artifact` 4→7,
+  `actions/download-artifact` 4→8;
+- `softprops/action-gh-release` 2→3;
+- `gradle/actions` (`setup-gradle`, `wrapper-validation`) 4→6;
+- `actions/setup-java` 4→6, `actions/setup-python` 5→7;
+- **`dtolnay/rust-toolchain` `@1.75` and `@1.82` → `@1.120`.**
+
+**Why it shouldn't merge as is.**
+1. **The toolchain bump defeats the MSRV jobs.** `dtolnay/rust-toolchain`
+   uses its ref as the toolchain version, so `@1.75` *is* the MSRV check.
+   Moving it to `@1.120` would make "msrv (rust 1.75)" and "msrv-uniffi
+   (rust 1.82)" build with 1.120 and stop testing the MSRV. Those are the
+   two red checks on the PR (16 of 18 green).
+2. **Most bumps are major versions, and several touch `release.yml`**
+   (`download-artifact` 8 and `action-gh-release` 3 change how artifacts
+   and assets move between the build and publish jobs). The release
+   workflow only runs for real on a tag, so they need a release dry run
+   before merging.
+
+**Proposed: CI-DEPS-1, small, before the next tag (v0.12.2):**
+1. `.github/dependabot.yml`: add an `ignore` entry for
+   `dtolnay/rust-toolchain` (or ignore its version updates), so Dependabot
+   never moves the MSRV refs. Close PR 16 and let Dependabot reopen the
+   group without it.
+2. Take the remaining action bumps in their own PR, with CI green and a
+   release dry run on a `release-*` branch (it pauses at `maven-central`
+   and `mnemo-swift` for the user's approval).
+3. In the same PR, drop the unused `rustflags:` input from the two
+   `PyO3/maturin-action` steps in `release.yml`. Every wheel job warns
+   "Unexpected input(s) 'rustflags'". That's harmless: the manylinux
+   container already gets `-e RUSTFLAGS` from the job environment, with the
+   ARM AES flags. The warning was in v0.12.0 too.
+
+**Until then:** leave PR 16 open and unmerged. It does no harm sitting
+there. Your call on the sequencing relative to MOBILE-2e and SEC-2b.
+
+### 2026-11-11 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.12.1 verified; CI-DEPS-1 accepted; v0.12.2 (MOBILE-2e + SEC-2b) dispatched, ahead of SAMPLE-1
+
+**VERIFIED: v0.12.1** (the WORKER DONE of 2026-11-10, tag `v0.12.1` at
+`6e32b68`, tag run 42919069975). Checked by me from the user's machine:
+- crates.io: `mnemo-engine` max_version 0.12.1, published
+  2026-11-10T23:38:37Z;
+- PyPI: `mnemo-engine` 0.12.1 with 6 files;
+- `mnemo-swift`: tag `0.12.1` (annotated `89254f9`, commit `aef603c`),
+  after `0.12.0`;
+- Maven Central isn't reachable from my side; I accept the Worker's
+  check (metadata latest/release 0.12.1, the AAR matching its `.sha1`, a
+  good signature from the release key).
+
+**SEC-2's credential changes worked on the first real run:** crates.io
+through Trusted Publishing (OIDC), Swift through the deploy key, and each
+publish waiting for the user's approval. The fallbacks went unused. **For
+the user, not the Worker:** delete the repository secrets
+`CRATES_IO_TOKEN` and `MNEMO_SWIFT_TOKEN` and revoke both tokens; moving
+the four `MAVEN_*` secrets into the `maven-central` environment is an
+optional hardening step for any time. **REVIEWER-B** verifies RB-002.1
+against the tag run, as triaged.
+
+**DECISION 1: CI-DEPS-1 accepted** (the Worker NOTE of 2026-11-10), as
+step 2 of v0.12.2, together with RB-001.7. Don't merge PR 16 as is.
+
+**DECISION 2: the order.** v0.12.2 goes **before** SAMPLE-1 (item 4.5
+had SAMPLE-1 first). RB-001.21 can lead an app to delete a readable
+database on a passing Keystore error, and the sample app shouldn't be
+built on that or on the pre-.23 error classes. SAMPLE-1 follows the
+v0.12.2 DONE; its spec comes then.
+
+**DECISION 3: two refinements of my 2026-11-10 triage, for semver in a
+patch release.**
+- **RB-001.27:** in v0.12.2, *deprecate* `formatVersion` in the Swift and
+  Kotlin store configurations (`@available(*, deprecated, …)`,
+  `@Deprecated`) and say why; it's *removed* in v0.13 with the v8 sunset.
+- **RB-001.22 and RB-002.3:** additive Rust API only. `close(self)` and
+  `stats()` keep their 0.12 behaviour; the new calls below sit beside them.
+
+**DISPATCH: v0.12.2 (MOBILE-2e + SEC-2b).**
+
+**Work on a `release-0.12.2` branch, one PR per step, in this order.**
+Each step's acceptance includes its rows of RB-002.4's table (cited as
+T1–T10), each going from its "Today" result to its "After the fix"
+result. Read the items in `reviewer_notes.md` (and RB-002.2 in
+`SECURITY.local.md`) before each step; I name only what's decided.
+
+**1. Android Keystore (RB-001.21). First.**
+- Only a missing key file, a missing alias, `AEADBadTagException` and
+  `KeyPermanentlyInvalidatedException` mean `KeyMissing`. Every other
+  failure is a new retryable `MnemoStoreException.Keystore(op, cause)`.
+- Never generate a wrapping key when `containsAlias(alias)` is true: if
+  the alias exists and `getKey` returns nothing, throw the retryable
+  error. Guard creation with a file lock in the keys directory (several
+  processes).
+- Key files: write through a `FileOutputStream`, `fd.sync()` before the
+  rename, then sync the directory where Android allows it.
+- The README's `KeyMissing` recovery advice says plainly that
+  `Keystore` errors are never a reason to delete the file.
+- **Tests (JVM):** RB-002.4's Kotlin recipe for .21 (a `KeyWrapper`
+  that throws `ProviderException` once, then succeeds), and one whose
+  `getKey` returns nothing for an existing alias (must throw, and must
+  not create a key).
+
+**2. CI (CI-DEPS-1 + RB-001.7). CI files only.**
+- `dependabot.yml`: `ignore` `dtolnay/rust-toolchain`, so the MSRV refs
+  never move. Close PR 16 with a one-line reason and let Dependabot reopen
+  the group. When it does, merge it only with CI green; the release dry
+  run in step 7 is its `release.yml` check.
+- `ci.yml`: `concurrency: { group: ci-${{ github.ref }},
+  cancel-in-progress: true }` for branches and PRs, never for `main`,
+  tags or `release.yml`.
+- Skip docs-only pushes: `README.md`, `index.html`, `CHANGELOG.md`,
+  `RELEASING.md` and `**/README.md`. **If `main` has required status
+  checks, use a small "changes" job instead of `paths-ignore`,** so a
+  docs PR isn't left waiting on checks that never run. Check before you
+  pick.
+- Drop the unused `rustflags:` input from the two `PyO3/maturin-action`
+  steps.
+
+**3. Engine safety (RB-001.24, .26, .22).**
+- **.24:** every public write surface rejects caller metadata keys that
+  start with `_mnemo.` with `Invalid`. That's Rust `remember` and
+  `update`, Python, the CLI, MCP and the binding. The engine's own
+  writes use an internal path. `get` and `export` still return them, and
+  existing files are unaffected. **T8**, on v8 and v9. CHANGELOG
+  "Changed", with the reason.
+- **.26:** a v9 record decompresses to at most 1 MiB (`RECORD_PLAIN_MAX`).
+  A test with RB-002's 2,067-byte frame declaring 64 MiB: refused, with
+  no large allocation.
+- **.22:** add `Mnemo::try_close(self) -> Result<(), CloseError>`, where
+  `CloseError` carries the handle and the cause (like `BufWriter`'s
+  `IntoInnerError`). On a failed flush the caller gets the handle back
+  and can retry. `close(self)` is unchanged in 0.12.x; its rustdoc points
+  to `try_close`. **T4.** The binding's `close()` uses it: on failure the
+  handle goes back into its slot and `flush()` can retry (**T5**).
+
+**4. FFI errors and a cheap stats (RB-001.23, RB-002.3, RB-001.5).**
+- **.23:** the FFI error enum gains `Kdf`, `Crypto`, `NotAMnemoFile` and
+  `NeedsWriteOpen`, and every case has a `retryable` flag.
+  `UnsupportedVersion` carries the engine's message. `Corrupt` is kept
+  for integrity failures only. The try-each-key probe treats only key
+  and decrypt failures as "not this key". A poisoned handle is treated
+  like `Closed` by both stores (drop, reopen once, retry). Both READMEs
+  document the three classes (retry later; fix the call; the data is
+  unreadable). **T6, T7.**
+- **RB-002.3:** add `Mnemo::stats_summary()`: no record decrypts and no
+  index load (`has_index` comes from the header). It carries the counts,
+  `format_version`, `file_bytes`, `wal_pages`, the recall mode and the
+  bytes the vector column needs to stay resident (RB-002.5's
+  recommendation 2). The binding's `stats()` uses it. Rust and Python
+  `stats()` are unchanged. Add a `device_budget` cell "first stats() on a
+  fresh handle" to `test/scripts/perf_v0.5.0.json`, measured on the M1
+  Pro at 10K.
+- **.5:** the mobile binding's `RecallOptions.track_access` defaults to
+  `false`, and the store docs say how to turn it on. Desktop defaults are
+  unchanged.
+- **T1** goes in here too (the engine contract the stores rely on).
+
+**5. Swift and Kotlin stores (RB-001.20, .27, .28 part 1, RB-002.5).**
+- **.20:** a call made when the expiring activity has already expired
+  doesn't open the file: it fails with a retryable "no background time"
+  error. Between engine steps of a long store call (an ingest's chunks,
+  say), check for expiry and stop with the same error. No engine
+  interrupt in v0.12.2. The README's App Groups paragraph matches its
+  lifecycle section: in an extension, close the store yourself. Add RB-001.20's
+  two device cases to `examples/mobile/README.md`'s run sheet for the
+  next device run; they don't gate this release.
+- **.27:** deprecate `formatVersion` in both store configurations
+  (DECISION 3).
+- **.28 part 1:** opening an existing store with a different `keyPolicy`
+  than its key was created with is **refused** with a clear typed error
+  naming both policies. It's never half-applied. Migration is out of
+  scope. **T10** (the "clear error" branch).
+- **RB-002.5:** the rows-by-dimension table gains "budget to stay
+  resident" (`rows × (2 × dims + 4)` bytes) and the remedy: raise
+  `vectorCacheBudget` first; build an index only when the column no
+  longer fits, in a maintenance window, and expect it to take time (the
+  perf file's `build_secs`). Expose `setMaxSnapshots` in both stores.
+- **T2, T3, T9** (T9 re-checks 2c's embedder change in both suites).
+
+**6. SEC-2b (RB-002.2; details in `SECURITY.local.md`).**
+- The in-crate graft is the acceptance test for `rekey --rotate`,
+  `export_with_passphrase` and `import_with_passphrase`. Keep the
+  pre-operation page 0, run the operation, graft and re-seal; the old
+  secret must fail at the seal (`HeaderTampered`). A plain `rekey` case
+  asserts the opposite (the graft opens), so the test documents what
+  plain `rekey` doesn't do.
+- The existing byte-search test stays, renamed and commented as the
+  hygiene check it is.
+- The docs use the wording in `SECURITY.local.md`'s RB-002.2 triage (plain
+  `rekey`, the import "re-protected under a new data key", and the
+  flash-blocks sentence), in the root, engine, Swift and Kotlin READMEs
+  and the CLI help for `rekey`.
+- Neutral commit messages, and no write-up in PR text, until v0.12.2
+  ships. After the tag, move RB-002.2 into PLAN.md as AGENTS.md says.
+
+**7. The release commit.**
+- The version goes to 0.12.2 everywhere the release check reads. The
+  CHANGELOG `[0.12.2]` has "Changed" (.24's rejection, `track_access`'s
+  mobile default), "Deprecated" (`formatVersion`), "Added" (`try_close`,
+  `stats_summary`, the error cases, `setMaxSnapshots`) and "Fixed".
+- CI green, then a release dry run on `release-0.12.2`. Tell the user
+  when each environment waits for their approval.
+- **Log READY and stop. Don't tag.** I accept it and hand off the README
+  and site, as for v0.12.1.
+
+**Out of scope:** an engine interrupt (.20's recommendation 1), the
+extension's automatic background mode, key-policy migration, the FUZZ-2
+targets, and anything for PERF-2. If a step turns out bigger than this,
+log BLOCKED with the reason rather than widening it.
