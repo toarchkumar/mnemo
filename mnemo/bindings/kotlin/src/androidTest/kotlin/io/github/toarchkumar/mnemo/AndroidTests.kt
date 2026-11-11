@@ -49,7 +49,7 @@ class AndroidTests {
         val alias = "mnemo-test-${UUID.randomUUID()}"
         aliases += alias
         val dir = File(context.cacheDir, "keys-${UUID.randomUUID()}").also { cleanup += it }
-        return MnemoKeystore(dir, AndroidKeystoreWrapper(alias)) to alias
+        return MnemoKeystore(dir, AndroidKeystoreWrapper(alias, AndroidKeystoreKeys, File(dir, MnemoKeystore.LOCK_FILE))) to alias
     }
 
     @Test fun theKeystoreWrapsKeysWithANonExportableKey() {

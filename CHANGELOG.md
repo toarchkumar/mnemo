@@ -8,6 +8,29 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Android: a passing Keystore failure is no longer reported as a lost
+  key (RB-001.21).**
+  - `MnemoKeystore` used to turn every unwrap failure, and every error
+    reading a key file, into `MnemoStoreException.KeyMissing`. The README's
+    recovery advice for `KeyMissing` includes deleting the database.
+  - Now only a missing key file, a missing wrapping-key alias, a key file
+    that doesn't authenticate (`AEADBadTagException`) and a permanently
+    invalidated wrapping key are `KeyMissing`. Anything else (the Keystore
+    busy or restarting, a binder or I/O error) is the retryable
+    `MnemoStoreException.Keystore`. The README says plainly that
+    `Keystore` is never a reason to delete anything.
+- **Android: the wrapping key is never generated over an alias that
+  exists.** If the alias is there but its key can't be read, that's the
+  retryable `Keystore` error, not a new key that would orphan every key it
+  wrapped. Creation also holds a file lock in the keys directory, for apps
+  with several processes.
+- **Android: key files are durable.** Each is synced before it's renamed
+  into place, and the directory is synced after, so a power loss right
+  after creating or importing a store can't leave the database without its
+  key.
+
 ## [0.12.1] — 2026-11-09
 
 Mobile hardening, and a hardening of rekey and export.

@@ -265,14 +265,24 @@ transfer. So neither the file nor its key reaches a new phone, and the app
 starts empty there unless it imports an export.
 
 **Recovering from `MnemoStoreException.KeyMissing`.** The file exists, but
-its key isn't available. This happens in three ways:
+its key is gone. This happens in four ways:
 
 - the key file was deleted;
 - the file was copied from another device;
-- the Keystore key that wraps it is gone or invalidated, which is rare.
+- the key file is damaged, or doesn't authenticate;
+- the Keystore key that wraps it is missing or permanently invalidated,
+  which is rare.
 
 The data can't be read without the key. The app can import a passphrase
 export (below), or delete the file and start over.
+
+**`MnemoStoreException.Keystore` is different: never delete anything for
+it.** It means the Keystore, or the key file behind it, failed for a reason
+that can pass: the Keystore service busy or restarting, a binder error, an
+I/O error, or a wrapping-key entry that exists but couldn't be read. The key
+is probably still there. Retry later (on the next launch, say), and treat
+only `KeyMissing` as a lost key. The store never replaces a wrapping key
+whose alias exists, since that would orphan every key it wraps.
 
 ### Moving to another device: passphrase export and import
 
@@ -326,7 +336,8 @@ name. Nothing else is needed.
   `DimensionMismatch`, `Invalid`, `Io`, `Corrupt`, `Closed` and `Embedder`.
   `MnemoStore` never surfaces `Closed`.
 - **`MnemoStoreException`** comes from this layer: `KeyMissing(keyId,
-  path)`, `Keystore(operation)` and `File`.
+  path)` (the key is gone), `Keystore(operation)` (retryable; see above)
+  and `File`.
 
 ## Tests
 
