@@ -166,6 +166,20 @@ class FlushPolicyTests {
     }
 }
 
+/**
+ * [committedCount] for polling inside `eventually` while a commit may be
+ * running (FLAKE-2): a copy taken mid-commit has a pending WAL, so its
+ * read-only open is refused with [MnemoException.NeedsWriteOpen]. That
+ * means "not committed yet", so it's null here, never an error. The store
+ * is fine: a read-write open of that copy would recover it, as after a kill.
+ */
+fun committedCountOrNull(file: File, keys: MnemoKeyStorage): ULong? =
+    try {
+        committedCount(file, keys)
+    } catch (e: MnemoException.NeedsWriteOpen) {
+        null
+    }
+
 /** The memories a byte copy of [file] holds right now: what a kill would leave. */
 fun committedCount(file: File, keys: MnemoKeyStorage): ULong {
     val copy = File(file.parentFile, "copy-${System.nanoTime()}.mnemo")

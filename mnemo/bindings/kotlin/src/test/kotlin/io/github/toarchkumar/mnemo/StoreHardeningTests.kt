@@ -39,7 +39,7 @@ class StoreHardeningTests {
             if (policy == FlushPolicy.EveryWrite) {
                 assertEquals(25uL, committedCount(s.file, keys))
             } else {
-                assertTrue("$policy: committed within the window", eventually(5_000) { committedCount(s.file, keys) == 25uL })
+                assertTrue("$policy: committed within the window", eventually(5_000) { committedCountOrNull(s.file, keys) == 25uL })
             }
             s.close()
         }
