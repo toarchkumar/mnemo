@@ -7,7 +7,7 @@ use mnemo_engine::{KdfParams, Mnemo, RecallRequest, Ulid};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::embedder::{embed_checked, EngineEmbedder, MnemoEmbedder};
-use crate::error::{MnemoError, POISONED};
+use crate::error::MnemoError;
 use crate::types::*;
 
 /// An open `.mnemo` file. Safe to share across threads: calls are
@@ -92,43 +92,55 @@ impl MnemoDb {
     }
 
     /// Run `f` on the open handle, under its lock. A poisoned lock (a panic
-    /// while the handle was in use) is `Corrupt`, never a panic.
+    /// while the handle was in use) drops the handle, so this and every
+    /// later call is `Closed`: the stores reopen the file (v0.12.2; it was
+    /// `Corrupt`, which reads as a damaged file).
     fn with<T>(
         &self,
         f: impl FnOnce(&mut Mnemo) -> Result<T, mnemo_engine::MnemoError>,
     ) -> Result<T, MnemoError> {
-        let mut guard = self.inner.lock().map_err(|_| MnemoError::Corrupt {
-            message: POISONED.into(),
-        })?;
+        let mut guard = self.lock_handle();
         let db = guard.as_mut().ok_or(MnemoError::Closed)?;
         f(db).map_err(MnemoError::from)
+    }
+
+    /// The handle's slot. After a panic poisoned it, the handle is dropped
+    /// (its in-memory state can't be trusted; what was flushed is safe on
+    /// disk) and the poison cleared, so the slot reads as closed.
+    fn lock_handle(&self) -> std::sync::MutexGuard<'_, Option<Mnemo>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                *guard = None;
+                self.inner.clear_poison();
+                guard
+            }
+        }
+    }
+
+    /// The registered embedder, read whatever a panic elsewhere did to its
+    /// lock (the slot only ever holds a whole `Arc`).
+    fn current_embedder(&self) -> Option<Arc<dyn MnemoEmbedder>> {
+        self.embedder
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     /// The registered embedder, cloned out so the caller holds no lock
     /// while it runs.
     fn embedder(&self) -> Result<Arc<dyn MnemoEmbedder>, MnemoError> {
-        self.embedder
-            .read()
-            .map_err(|_| MnemoError::Corrupt {
-                message: POISONED.into(),
-            })?
-            .clone()
-            .ok_or_else(|| MnemoError::Invalid {
-                message: "no embedder set; call set_embedder first".into(),
-            })
+        self.current_embedder().ok_or_else(|| MnemoError::Invalid {
+            message: "no embedder set; call set_embedder first".into(),
+        })
     }
 
     /// Embed one text with no lock held.
     /// `text`'s vector when an embedder is set (embedded with no lock
     /// held), `None` otherwise.
     fn embed_if_set(&self, text: &str) -> Result<Option<Vec<f32>>, MnemoError> {
-        let set = self
-            .embedder
-            .read()
-            .map_err(|_| MnemoError::Corrupt {
-                message: POISONED.into(),
-            })?
-            .is_some();
+        let set = self.current_embedder().is_some();
         if set {
             self.embed_one(text).map(Some)
         } else {
@@ -331,9 +343,7 @@ impl MnemoDb {
     /// returned, and `flush()` or `close()` can be retried once the cause is
     /// fixed (v0.12.2; before, the writes were lost).
     pub fn close(&self) -> Result<(), MnemoError> {
-        let mut guard = self.inner.lock().map_err(|_| MnemoError::Corrupt {
-            message: POISONED.into(),
-        })?;
+        let mut guard = self.lock_handle();
         match guard.take() {
             Some(db) => match db.try_close() {
                 Ok(()) => Ok(()),
@@ -389,9 +399,7 @@ impl MnemoDb {
             identity,
         };
         self.with(|db| db.set_embedder(adapter))?;
-        *self.embedder.write().map_err(|_| MnemoError::Corrupt {
-            message: POISONED.into(),
-        })? = Some(embedder);
+        *self.embedder.write().unwrap_or_else(|p| p.into_inner()) = Some(embedder);
         Ok(())
     }
 
@@ -615,16 +623,21 @@ impl MnemoDb {
     }
 
     /// File statistics.
+    ///
+    /// The cheap path (`Mnemo::stats_summary`, v0.12.2): no record decrypts
+    /// and no index load, so it costs about the same on a fresh handle as on
+    /// a warm one. Before, the first call decrypted every record.
     pub fn stats(&self) -> Result<DbStats, MnemoError> {
-        self.with(|db| db.stats()).map(|s| DbStats {
+        self.with(|db| Ok(db.stats_summary())).map(|s| DbStats {
             memories: s.memories as u64,
             deleted: s.deleted as u64,
             dimensions: s.dimensions as u32,
             file_bytes: s.file_bytes,
             format_version: s.format_version,
-            has_index: s.index.is_some(),
+            has_index: s.has_index,
             wal_pages: s.wal_pages,
             recall_mode: s.recall_mode.into(),
+            vector_column_bytes: s.vector_column_bytes,
         })
     }
 
@@ -794,6 +807,17 @@ impl MnemoDb {
         self.with(|db| db.export_rekeyed(&dest, &passphrase, KdfParams::secure()))
             .map(|_| ())
     }
+}
+
+/// Whether `key` opens the raw-key file at `path`, from its header alone
+/// (no lock, no catalog load). `false` is "not this key". It answers even
+/// when the file has a WAL transaction to recover, where a read-only open
+/// would refuse with `NeedsWriteOpen`. The stores use it to find a file's key
+/// when the key-id stamp is lost (v0.12.2).
+#[uniffi::export]
+pub fn key_opens(path: String, key: Vec<u8>) -> Result<bool, MnemoError> {
+    let key = key_from(key)?;
+    Mnemo::key_opens(&path, &key).map_err(MnemoError::from)
 }
 
 /// Run the app's embedder on `texts`, checking the shape like the binding's

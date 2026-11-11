@@ -723,6 +723,32 @@ pub struct Stats {
     pub recall_mode: RecallMode,
 }
 
+/// [`Mnemo::stats_summary`]: the cheap statistics, read from the catalog and
+/// the header (v0.12.2, RB-002.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatsSummary {
+    /// Live (non-deleted) memory count.
+    pub memories: usize,
+    /// Tombstoned entries awaiting compaction.
+    pub deleted: usize,
+    /// Embedding dimensionality.
+    pub dimensions: usize,
+    /// File size in bytes.
+    pub file_bytes: u64,
+    /// The on-disk format, `8` or `9`.
+    pub format_version: u16,
+    /// Current size of the write-ahead log region, in 8 KiB pages.
+    pub wal_pages: u64,
+    /// Whether an IVF+PQ index exists (loaded, or persisted in the file).
+    pub has_index: bool,
+    /// How recall scores vectors right now.
+    pub recall_mode: RecallMode,
+    /// The bytes the v9 vector column needs to stay in memory: the live
+    /// facts × (`2 × dimensions + 4`). Recall is `ExactResident` while the
+    /// vector cache budget is at least this; `0` on v8, which has no column.
+    pub vector_column_bytes: u64,
+}
+
 /// MOBILE-2d: how recall scores vectors, from [`Mnemo::stats`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecallMode {

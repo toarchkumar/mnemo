@@ -5821,5 +5821,17 @@
       }
     },
     "reading": "past the budget, warm recall at 10K goes from 2.17 ms to 10.89 ms (5.0x): every recall reads the vectors back through the page cache. The cheap paged path is PERF-2."
+  },
+  "first_stats_v0_12_2": {
+    "date": "2026-11-11",
+    "what": "RB-002.3: the first stats on a fresh handle (after one recall), median and p95 of 20 fresh handles. device_budget --sizes 10000 --only stats, cached v9 corpus (384 dims, 300-byte texts, fast KDF). stats_summary is what the mobile binding's stats() calls since v0.12.2; stats decrypts every record for its agent list.",
+    "machine": "Apple M1 Pro, macOS 26.7.1, release build",
+    "10000": {
+      "stats_summary_first_median_ms": 0.027,
+      "stats_summary_first_p95_ms": 0.034,
+      "stats_first_median_ms": 10.92,
+      "stats_first_p95_ms": 12.04
+    },
+    "reading": "the mobile stats() no longer pays a pass of record decrypts on each fresh handle (RB-002.3 measured 12.32 ms at 10K for the old path)"
   }
 }

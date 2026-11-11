@@ -209,8 +209,12 @@ pub struct RecallOptions {
     /// Stop adding hits once their content would pass this many bytes.
     #[uniffi(default = None)]
     pub max_bytes: Option<u64>,
-    /// Record the hits as accessed (persisted on the next flush).
-    #[uniffi(default = true)]
+    /// Record the hits as accessed (persisted on the next commit). Off by
+    /// default on phones since v0.12.2 (RB-001.5): with it on, every recall
+    /// dirties the file, so a recall made in the iOS background ends in a
+    /// full commit. Ranking doesn't need it. Turn it on per call when the
+    /// access counts matter to the app.
+    #[uniffi(default = false)]
     pub track_access: bool,
 }
 
@@ -322,6 +326,10 @@ pub struct DbStats {
     pub wal_pages: u64,
     /// How recall scores vectors right now (see [`RecallMode`]).
     pub recall_mode: RecallMode,
+    /// The bytes the vector column needs to stay in memory (live facts ×
+    /// `2 × dimensions + 4`). Recall is `ExactResident` while the store's
+    /// `vectorCacheBudgetBytes` is at least this. `0` on a v8 file.
+    pub vector_column_bytes: u64,
 }
 
 /// How recall scores vectors, from `stats()`.

@@ -302,6 +302,30 @@ import Testing
         try await v8.close()
     }
 
+    /// RB-002.4 T7, the store's half (v0.12.2): a file whose key-id stamp is
+    /// gone, a key store holding a wrong key first. The probe skips the
+    /// wrong key, opens the file, and stamps the id again. (The half with a
+    /// WAL to recover runs in mnemo-uniffi's tests/key_probe.rs.)
+    @Test func t7TheKeyProbeSkipsAWrongKeyAndRestampsTheFile() async throws {
+        let dir = try scratchDirectory()
+        let config = MnemoStoreConfiguration(name: "probe", dimensions: 4, directory: dir)
+        let first = MemoryKeyStore()
+        let store = try MnemoStore(configuration: config, keyStore: first)
+        for i in 0..<15 { try await store.remember("note \(i)", vector: vec(i)) }
+        try await store.close()
+        let id = try #require(KeyID.read(store.fileURL))
+        KeyID.remove(from: store.fileURL)
+
+        // "0-wrong" sorts before the real id, so it's tried first.
+        let keys = MemoryKeyStore()
+        try keys.storeKey(generateKey(), id: "0-wrong", policy: .deviceOnly)
+        try keys.storeKey(try first.key(id: id), id: id, policy: .deviceOnly)
+        let again = try MnemoStore(configuration: config, keyStore: keys)
+        for _ in 0..<3 { #expect(try await again.count() == 15) }
+        #expect(KeyID.read(store.fileURL) == id)
+        try await again.close()
+    }
+
     @Test func keyBytesOwnsItsCopyAndZeroesItInPlace() {
         let original = Data((0..<32).map { UInt8($0 + 1) })
         let key = KeyBytes(copying: original)

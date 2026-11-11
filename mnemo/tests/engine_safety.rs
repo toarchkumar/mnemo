@@ -205,3 +205,73 @@ fn a_record_frame_over_one_mib_is_refused() {
         "1 MiB decompresses (then isn't a memory): {e}"
     );
 }
+
+/// Builds RB-002.4's fixture 6: a raw-key file killed between a WAL commit
+/// and its checkpoint, so a read-only open needs a write open first.
+/// Returns the path, the key and the `n` that produced it.
+#[cfg(feature = "failpoints")]
+fn pending_wal_fixture(dir: &std::path::Path, version: u16) -> (std::path::PathBuf, [u8; 32], i64) {
+    let key = Mnemo::generate_key();
+    for n in 0..40 {
+        let path = dir.join(format!("fx-{version}-{n}.mnemo"));
+        let mut db = Mnemo::create_with_key(&path, &key, cfg(version)).unwrap();
+        for i in 0..10 {
+            db.remember(mem(&format!("flushed {i}"), i)).unwrap();
+        }
+        db.flush().unwrap();
+        for i in 10..15 {
+            db.remember(mem(&format!("pending {i}"), i)).unwrap();
+        }
+        mnemo_engine::__failpoints::set_writes_until_fail(n);
+        let _ = db.flush();
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
+        drop(db);
+        if matches!(
+            Mnemo::open_read_only_with_key(&path, &key),
+            Err(MnemoError::NeedsWriteOpen { .. })
+        ) {
+            return (path, key, n);
+        }
+    }
+    panic!("no n gave a pending WAL on v{version}");
+}
+
+/// T6: a key probe on a file with a WAL to recover. Today a read-only open
+/// with a **wrong** key reports `NeedsWriteOpen` before checking the key, so
+/// a store trying each key in turn stopped at the first one. After:
+/// `key_opens` answers from the header: `false` for the wrong key, `true`
+/// for the right one, and a read-write open then recovers all 15.
+#[cfg(feature = "failpoints")]
+#[test]
+fn t6_key_opens_answers_on_a_file_with_a_wal_to_recover() {
+    let _g = lock();
+    for version in [9u16, 8] {
+        let dir = tempdir().unwrap();
+        let (path, key, n) = pending_wal_fixture(dir.path(), version);
+        let wrong = Mnemo::generate_key();
+        // The read-only open still refuses (documented), whatever the key.
+        assert!(matches!(
+            Mnemo::open_read_only_with_key(&path, &wrong),
+            Err(MnemoError::NeedsWriteOpen { .. })
+        ));
+        assert!(
+            !Mnemo::key_opens(&path, &wrong).unwrap(),
+            "v{version} n={n}: the wrong key"
+        );
+        assert!(
+            Mnemo::key_opens(&path, &key).unwrap(),
+            "v{version} n={n}: the right key"
+        );
+        let db = Mnemo::open_with_key(&path, &key).unwrap();
+        assert_eq!(
+            db.len(),
+            15,
+            "v{version}: the read-write open recovers the WAL"
+        );
+        db.close().unwrap();
+        // A file that isn't a .mnemo is an error, not "not this key".
+        let junk = dir.path().join("junk.mnemo");
+        std::fs::write(&junk, vec![7u8; 16384]).unwrap();
+        assert!(Mnemo::key_opens(&junk, &key).is_err());
+    }
+}

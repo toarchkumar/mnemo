@@ -603,20 +603,19 @@ class MnemoStore private constructor(
             } catch (e: MnemoStoreException.KeyMissing) {
                 continue
             }
-            try {
-                // Opening with a raw key costs no KDF, so a wrong key is cheap.
-                val probe = MnemoDb.openReadOnlyWithKey(file.path, key)
-                try {
-                    probe.closeFile()
-                } finally {
-                    probe.close()
-                }
-            } catch (e: MnemoException.WrongPassphrase) {
-                key.zeroize()
-                continue
+            // From the header alone (no KDF for a raw key, no catalog load),
+            // and it answers even when the file has a WAL to recover, where a
+            // read-only open refuses (v0.12.2, RB-001.23). Only `false` means
+            // "not this key"; any error is the file's, not the key's.
+            val opens = try {
+                keyOpens(file.path, key)
             } catch (e: Exception) {
                 key.zeroize()
                 throw e
+            }
+            if (!opens) {
+                key.zeroize()
+                continue
             }
             KeyId.write(id, file)
             return id to key

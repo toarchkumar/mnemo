@@ -10,6 +10,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **Mobile: `RecallOptions.trackAccess` defaults to `false` (RB-001.5).**
+  With it on, every recall dirties the file, so a recall made in the iOS
+  background ended in a full commit (4 fsyncs and +24 KB a cycle,
+  measured). Ranking doesn't need it. Pass `trackAccess: true` where the
+  app reads access counts. Desktop defaults are unchanged.
+- **Mobile: `Corrupt` now means an integrity failure only.**
+  - Before, a KDF memory failure, a crypto error, a file that isn't a
+    `.mnemo` and a needed write open all arrived as `Corrupt` (or
+    `Invalid`), which reads as "the file is damaged". They have their own
+    cases now (see Added).
+  - A handle that a panic poisoned is dropped and reads as `Closed`, so
+    the stores reopen it.
 - **Caller metadata can no longer set engine state (RB-001.24).**
   - Every public write (Rust `remember`, `remember_keyed` and `update`, and
     through them Python, the CLI, MCP and the mobile binding) now refuses
@@ -25,6 +37,23 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Added
 
+- **`Mnemo::stats_summary()` (RB-002.3):** counts, the file size, the
+  format, the WAL size, whether an index exists, the recall mode and
+  `vector_column_bytes` (what the vector column needs to stay in memory).
+  It does no record decrypts and no index load: 0.027 ms on a fresh 10K
+  handle, where the first `stats()` takes 10.9 ms (M1 Pro). The mobile
+  binding's `stats()` uses it, and `DbStats` gains `vectorColumnBytes`.
+  Rust and Python `stats()` are unchanged.
+- **`Mnemo::key_opens(path, key)`:** whether a raw key opens a file, from
+  its header alone, even when the file has a WAL to recover, where a
+  read-only open refuses. The binding exports it as `keyOpens`, and both
+  stores use it to find a file's key when the key-id stamp is lost
+  (RB-001.23).
+- **Mobile error cases (RB-001.23):** `Kdf`, `Crypto`, `NotAMnemoFile`
+  and `NeedsWriteOpen`, plus `isRetryable()` on every case.
+  `UnsupportedVersion` gains `message` (`reason` in Kotlin), with the
+  versions this build opens. Both READMEs sort the errors into three
+  classes: retry later, fix the call, or the data is unreadable.
 - **`Mnemo::try_close(self) -> Result<(), CloseError>` (RB-001.22).** If
   the final flush fails (a full disk on a phone, say), the error carries
   the handle back, still open and holding every unflushed write, so the
@@ -48,6 +77,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **The stores no longer give up on a file whose key-id stamp is lost
+  while it has a WAL to recover** (RB-001.23). They used to probe each key
+  with a read-only open, which refused with `NeedsWriteOpen` before
+  checking the key, and the store failed on this launch and every later
+  one. They probe with `keyOpens` now.
 - **The mobile binding's `close()` keeps the file when its final flush
   fails.** The handle goes back in its slot, so `flush()` or `close()` can
   be retried and nothing is lost (RB-001.22). Before, the unflushed writes

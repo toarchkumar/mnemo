@@ -20,3 +20,8 @@ cdylib_name = "mnemo_uniffi"
 "MnemoError.Corrupt.message" = "reason"
 "MnemoError.Embedder.message" = "reason"
 "EmbedderError.Failed.message" = "reason"
+# v0.12.2's cases.
+"MnemoError.UnsupportedVersion.message" = "reason"
+"MnemoError.NotAMnemoFile.message" = "reason"
+"MnemoError.Kdf.message" = "reason"
+"MnemoError.Crypto.message" = "reason"

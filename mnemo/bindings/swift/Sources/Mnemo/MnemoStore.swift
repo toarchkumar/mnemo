@@ -705,11 +705,11 @@ public actor MnemoStore {
             } catch MnemoStoreError.keyMissing {
                 continue
             }
-            do {
-                // Opening with a raw key costs no KDF, so a wrong key is cheap.
-                let probe = try MnemoDb.openReadOnlyWithKey(path: fileURL.path, key: key.data)
-                try probe.close()
-            } catch MnemoError.WrongPassphrase {
+            // From the header alone (no KDF for a raw key, no catalog load),
+            // and it answers even when the file has a WAL to recover, where a
+            // read-only open refuses (v0.12.2, RB-001.23). Only `false` means
+            // "not this key"; any error is the file's, not the key's.
+            guard try keyOpens(path: fileURL.path, key: key.data) else {
                 continue
             }
             try? KeyID.write(id, to: fileURL)

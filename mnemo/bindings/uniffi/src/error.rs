@@ -3,6 +3,14 @@
 
 /// Every error a binding call can return. Engine errors map onto these;
 /// `Closed` and `Embedder` are the binding's own.
+///
+/// Three classes (`is_retryable` tells the first apart):
+/// - **retry later:** `Locked`, `Io`, `Kdf` (the KDF couldn't get its
+///   memory), `Closed` (reopen);
+/// - **fix the call:** `Invalid`, `DimensionMismatch`, `ReadOnly`,
+///   `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`;
+/// - **the data is unreadable:** `Corrupt`, `HeaderTampered`, `Crypto`,
+///   `NotAMnemoFile`, `UnsupportedVersion`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum MnemoError {
     /// Another handle (in this process or another) holds the file's lock.
@@ -14,9 +22,26 @@ pub enum MnemoError {
     /// The header's keyed seal failed: the file was modified outside MNemo.
     #[error("header tampered: the file was modified outside MNemo")]
     HeaderTampered,
-    /// The file's format is newer than this build reads.
-    #[error("unsupported .mnemo format version {found}")]
-    UnsupportedVersion { found: u16 },
+    /// The file's format is one this build doesn't open. `message` says which
+    /// versions it does (v0.12.2).
+    #[error("{message}")]
+    UnsupportedVersion { found: u16, message: String },
+    /// The file isn't a `.mnemo` database (its magic bytes are wrong).
+    #[error("not a .mnemo file: {message}")]
+    NotAMnemoFile { message: String },
+    /// Deriving the key from the passphrase failed, most often because
+    /// Argon2 couldn't allocate its memory on a phone short of RAM.
+    /// Retryable.
+    #[error("key derivation failed: {message}")]
+    Kdf { message: String },
+    /// A cryptographic operation failed.
+    #[error("cryptographic operation failed: {message}")]
+    Crypto { message: String },
+    /// A read-only open needs a read-write open first: the file has a WAL
+    /// transaction to recover, or a format migration to apply. Open it
+    /// read-write once, then read-only again.
+    #[error("read-only open blocked: {reason}; open read-write once to fix")]
+    NeedsWriteOpen { reason: String },
     /// No such memory, key, thread or snapshot.
     #[error("not found: {message}")]
     NotFound { message: String },
@@ -32,12 +57,12 @@ pub enum MnemoError {
     /// An I/O error from the file system.
     #[error("i/o error: {message}")]
     Io { message: String },
-    /// The file failed an integrity check (magic, CRC, page
-    /// authentication, decoding), or this handle can no longer be used
-    /// (a poisoned lock after a panic: reopen the file).
+    /// The file failed an integrity check (a CRC, page authentication,
+    /// decoding). Integrity failures only (v0.12.2).
     #[error("corrupt: {message}")]
     Corrupt { message: String },
-    /// The handle was closed; open the file again.
+    /// The handle was closed, or dropped after a panic poisoned it; open the
+    /// file again (the Swift and Kotlin stores do that themselves).
     #[error("database is closed")]
     Closed,
     /// The app's embedder callback threw or returned the wrong shape.
@@ -58,7 +83,18 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             },
             E::WrongPassphrase => MnemoError::WrongPassphrase,
             E::HeaderTampered => MnemoError::HeaderTampered,
-            E::UnsupportedVersion(found) => MnemoError::UnsupportedVersion { found },
+            other @ E::UnsupportedVersion(_) => {
+                let message = other.to_string();
+                let E::UnsupportedVersion(found) = other else {
+                    unreachable!()
+                };
+                MnemoError::UnsupportedVersion { found, message }
+            }
+            other @ E::BadMagic => MnemoError::NotAMnemoFile {
+                message: other.to_string(),
+            },
+            E::Kdf(message) => MnemoError::Kdf { message },
+            E::Crypto(message) => MnemoError::Crypto { message },
             E::NotFound(message) => MnemoError::NotFound { message },
             E::ReadOnly => MnemoError::ReadOnly,
             E::DimensionMismatch { expected, got } => MnemoError::DimensionMismatch {
@@ -66,9 +102,11 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
                 got: got as u64,
             },
             E::Invalid(message) => MnemoError::Invalid { message },
-            other @ E::NeedsWriteOpen { .. } => MnemoError::Invalid {
-                message: other.to_string(),
+            E::NeedsWriteOpen { reason } => MnemoError::NeedsWriteOpen {
+                reason: reason.to_string(),
             },
+            // What's left is integrity: a header CRC, page authentication,
+            // decoding.
             other => MnemoError::Corrupt {
                 message: other.to_string(),
             },
@@ -76,9 +114,21 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
     }
 }
 
-/// The message a poisoned handle lock reports: a panic happened while the
-/// handle was in use, so its state can't be trusted any more.
-pub(crate) const POISONED: &str = "handle poisoned by an earlier panic; reopen the file";
+#[uniffi::export]
+impl MnemoError {
+    /// Whether the same call may succeed later with nothing changed: `Locked`,
+    /// `Io`, `Kdf` and `Closed` (reopen first). Everything else needs a
+    /// different call, or means the data can't be read (v0.12.2).
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            MnemoError::Locked { .. }
+                | MnemoError::Io { .. }
+                | MnemoError::Kdf { .. }
+                | MnemoError::Closed
+        )
+    }
+}
 
 /// What the app's embedder callback throws (`EmbedderError` in Swift and
 /// Kotlin).

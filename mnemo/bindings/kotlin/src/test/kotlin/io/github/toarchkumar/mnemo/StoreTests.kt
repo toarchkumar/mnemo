@@ -306,6 +306,29 @@ class StoreTests {
         v8.close()
     }
 
+    /**
+     * RB-002.4 T7, the store's half (v0.12.2): an unstamped file and a wrong
+     * key tried first. The probe skips it, opens the file and stamps the id.
+     */
+    @Test fun t7TheKeyProbeSkipsAWrongKeyAndRestampsTheFile(): Unit = runBlocking {
+        val dir = scratchDirectory()
+        val config = MnemoStoreConfiguration("probe", 4u, dir)
+        val first = InMemoryKeyStorage()
+        val store = MnemoStore(config, first)
+        repeat(15) { store.remember("note $it", vec(it)) }
+        store.close()
+        val id = checkNotNull(KeyId.read(store.file))
+        KeyId.remove(store.file)
+
+        val keys = InMemoryKeyStorage()
+        keys.storeKey("0-wrong", generateKey())
+        keys.storeKey(id, first.key(id))
+        val again = MnemoStore(config, keys)
+        repeat(3) { assertEquals(15uL, again.count()) }
+        assertEquals(id, KeyId.read(store.file))
+        again.close()
+    }
+
     @Test fun invalidNamesAreRefused() {
         for (name in listOf("", "../escape", ".hidden", "a/b")) {
             assertThrowsStoreFile { MnemoStore(MnemoStoreConfiguration(name, 4u, scratchDirectory()), InMemoryKeyStorage()) }

@@ -98,6 +98,11 @@ let byWord = try await store.recall(vector: [], options: RecallOptions(keywords:
 - **Keyed facts:** `RememberOptions(key:)` writes a new version and
   supersedes the old one. `history(key:)` lists the versions, newest first.
 - **The result cache:** `cachePut` and `cacheGet`, by exact key.
+- **Access counts:** `RecallOptions.trackAccess` is off by default here
+  (v0.12.2). With it on, every recall marks its hits as read, which dirties
+  the file, so a recall made in the background ends in a full commit, and
+  ranking doesn't need it. Pass `RecallOptions(topK: 5, trackAccess: true)` on the calls whose
+  access counts the app reads.
 - **Batches:** `withSession { session in ... }` runs many calls on one
   open handle and commits once at the end (see Durability).
 - **Also:** `get`, `update`, `delete`, `about`, `stats`, `count`, `flush`,
@@ -318,8 +323,19 @@ let store = try MnemoStore(
 ## Errors
 
 - `MnemoError` comes from the engine: `Locked`, `WrongPassphrase`,
-  `HeaderTampered`, `UnsupportedVersion`, `NotFound`, `ReadOnly`,
-  `DimensionMismatch`, `Invalid`, `Io`, `Corrupt`, `Closed`, `Embedder`.
-  `MnemoStore` never surfaces `Closed`.
+  `HeaderTampered`, `UnsupportedVersion`, `NotAMnemoFile`, `NotFound`,
+  `ReadOnly`, `NeedsWriteOpen`, `DimensionMismatch`, `Invalid`, `Io`, `Kdf`,
+  `Crypto`, `Corrupt`, `Closed`, `Embedder`. `MnemoStore` never surfaces
+  `Closed`: it reopens the file and retries once, and a handle a panic
+  poisoned is treated the same way.
 - `MnemoStoreError` comes from this layer: `keyMissing(keyID:path:)`,
   `keychain(status:operation:)` and `file(message:)`.
+
+**What to do about an error, in three classes** (`error.isRetryable()` tells the first
+apart for `MnemoError`):
+
+| Class | Errors | What to do |
+|---|---|---|
+| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)` | Try again later, on the next launch, say. The data is fine. |
+| Fix the call | `Invalid`, `DimensionMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
+| The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `keyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |

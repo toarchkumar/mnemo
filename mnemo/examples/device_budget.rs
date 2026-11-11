@@ -247,6 +247,37 @@ fn phase_over_budget(n: usize) -> Value {
     Value::Object(cells)
 }
 
+/// v0.12.2 (RB-002.3): the first `stats()` on a fresh handle, which the
+/// phone lifecycle makes frequent. `stats_summary` (what the mobile binding
+/// calls) against `stats` (which decrypts every record for its agent list),
+/// each on its own fresh handle after one recall, median of 20.
+fn phase_first_stats(n: usize) -> Value {
+    let qs = queries();
+    let (mut summary, mut full) = (Vec::new(), Vec::new());
+    for i in 0..OPEN_CYCLES {
+        let mut db = Mnemo::open(corpus_path(n), PASSPHRASE).expect("open");
+        std::hint::black_box(db.recall(&recall_req(&qs[i % qs.len()])).expect("recall"));
+        let t = Instant::now();
+        std::hint::black_box(db.stats_summary());
+        summary.push(ms(t));
+        drop(db);
+        let mut db = Mnemo::open(corpus_path(n), PASSPHRASE).expect("open");
+        std::hint::black_box(db.recall(&recall_req(&qs[i % qs.len()])).expect("recall"));
+        let t = Instant::now();
+        std::hint::black_box(db.stats().expect("stats"));
+        full.push(ms(t));
+    }
+    let (s_med, s_p95) = median_p95(summary);
+    let (f_med, f_p95) = median_p95(full);
+    json!({
+        "cycles": OPEN_CYCLES,
+        "stats_summary_first_median_ms": s_med,
+        "stats_summary_first_p95_ms": s_p95,
+        "stats_first_median_ms": f_med,
+        "stats_first_p95_ms": f_p95,
+    })
+}
+
 fn phase_cycles(n: usize) -> Value {
     let qs = queries();
     let (mut opens, mut firsts) = (Vec::new(), Vec::new());
@@ -558,6 +589,7 @@ fn main() {
             "layers" => phase_layers(n),
             "keyopen" => phase_keyopen(n),
             "overbudget" => phase_over_budget(n),
+            "stats" => phase_first_stats(n),
             other => panic!("unknown phase {other}"),
         };
         println!("RESULT {v}");
@@ -593,9 +625,10 @@ fn main() {
         let layers = run("layers");
         let keyopen = run("keyopen");
         let overbudget = run("overbudget");
+        let first_stats = run("stats");
         results.insert(
             n.to_string(),
-            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers, "keyopen": keyopen, "overbudget": overbudget }),
+            json!({ "build": build, "file": file, "handle": handle, "cycles": cycles, "writes": writes, "layers": layers, "keyopen": keyopen, "overbudget": overbudget, "first_stats": first_stats }),
         );
     }
 
@@ -712,6 +745,24 @@ fn main() {
         "(the budget cliff: the vector column budget at the mobile default and below the live \
          facts; {BUDGET_QUERIES} warm recalls; ms)"
     );
+
+    println!(
+        "\n{:>7} | {:>16} {:>10} | {:>14} {:>10}",
+        "n", "summary 1st med", "p95", "stats 1st med", "p95"
+    );
+    for &n in &sizes {
+        let f = &results[&n.to_string()]["first_stats"];
+        let g = |k: &str| f[k].as_f64().unwrap_or(0.0);
+        println!(
+            "{:>7} | {:>16.3} {:>10.3} | {:>14.2} {:>10.2}",
+            n,
+            g("stats_summary_first_median_ms"),
+            g("stats_summary_first_p95_ms"),
+            g("stats_first_median_ms"),
+            g("stats_first_p95_ms"),
+        );
+    }
+    println!("(the first stats on a fresh handle, after one recall; ms; stats_summary is the mobile binding's stats())");
 
     let doc = Value::Object(results);
     let path = out_dir().join(format!("device_budget{}.json", format_suffix()));

@@ -445,7 +445,43 @@ impl Mnemo {
         Ok(())
     }
 
-    /// Summary statistics for the open database.
+    /// The statistics that need no record decrypts and no index load
+    /// (v0.12.2, RB-002.3): counts, sizes, the format, whether an index
+    /// exists, the recall mode and the bytes the vector column needs. The
+    /// first [`Mnemo::stats`] on a handle decrypts every record (for its
+    /// agent list) and loads a persisted index; this is what a phone app
+    /// polling the recall mode should call.
+    pub fn stats_summary(&self) -> StatsSummary {
+        let deleted = self.catalog.iter().filter(|e| e.deleted).count();
+        let v9 = self.is_v9();
+        let column = if v9 {
+            (self.scored_rows() * crate::veccol::entry_len(self.dimensions)) as u64
+        } else {
+            0
+        };
+        let recall_mode = if self.has_index() {
+            RecallMode::Indexed
+        } else if v9 && column <= self.vector_cache_budget as u64 {
+            RecallMode::ExactResident
+        } else {
+            RecallMode::ExactPaged
+        };
+        StatsSummary {
+            memories: self.len(),
+            deleted,
+            dimensions: self.dimensions,
+            file_bytes: self.header.next_page * PAGE_SIZE as u64,
+            format_version: self.header.version,
+            wal_pages: self.header.wal_pages,
+            has_index: self.has_index(),
+            recall_mode,
+            vector_column_bytes: column,
+        }
+    }
+
+    /// Summary statistics for the open database. The first call on a
+    /// handle decrypts every record (to list the agents) and loads a
+    /// persisted index; [`Mnemo::stats_summary`] does neither.
     pub fn stats(&mut self) -> Result<Stats> {
         let deleted = self.catalog.iter().filter(|e| e.deleted).count();
         // FIX-1 R-001.8 part 2: build the agent set lazily on first

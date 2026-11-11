@@ -321,23 +321,29 @@ fn import_with_passphrase_opens_with_the_new_key_not_the_passphrase() {
 }
 
 #[test]
-fn a_poisoned_handle_reports_corrupt_instead_of_panicking() {
+fn a_poisoned_handle_reads_as_closed_and_the_file_reopens() {
+    // v0.12.2 (RB-001.23): a panic while the handle was locked drops it, so
+    // every call is `Closed` (the stores reopen on `Closed`), not `Corrupt`,
+    // which reads as a damaged file.
     let dir = tempdir().unwrap();
-    let (db, _) = new_db(&dir);
+    let (db, key) = new_db(&dir);
     db.remember("x".into(), vec![1.0, 0.0, 0.0, 0.0], remember_opts())
         .unwrap();
+    db.flush().unwrap();
     let inner = db.clone();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let _guard = inner.inner.lock().unwrap();
         panic!("a panic while the handle is in use");
     }));
     assert!(r.is_err());
-    for res in [db.len().map(|_| ()), db.flush(), db.close()] {
-        match res {
-            Err(MnemoError::Corrupt { message }) => assert!(message.contains("poisoned")),
-            other => panic!("expected Corrupt, got {other:?}"),
-        }
-    }
+    assert!(matches!(db.len(), Err(MnemoError::Closed)));
+    assert!(matches!(db.flush(), Err(MnemoError::Closed)));
+    assert!(db.close().is_ok(), "closing a dropped handle is fine");
+    assert!(MnemoError::Closed.is_retryable());
+    // The handle's lock was released, and what was flushed is there.
+    let path = dir.path().join("t.mnemo").display().to_string();
+    let again = MnemoDb::open_with_key(path, key).unwrap();
+    assert_eq!(again.len().unwrap(), 1);
 }
 
 #[test]
@@ -874,4 +880,118 @@ fn t8_reserved_metadata_through_metadata_json_is_invalid() {
     ));
     assert_eq!(db.len().unwrap(), 1);
     assert!(db.thread_export("t1".into()).unwrap().is_empty());
+}
+
+/// RB-001.23 (v0.12.2): engine errors keep their meaning across the FFI,
+/// and each case says whether a retry can help.
+#[test]
+fn errors_map_to_distinct_cases_with_a_retryable_flag() {
+    use mnemo_engine::MnemoError as E;
+    let map = |e: E| MnemoError::from(e);
+    assert!(matches!(
+        map(E::Kdf("out of memory".into())),
+        MnemoError::Kdf { .. }
+    ));
+    assert!(matches!(
+        map(E::Crypto("aead".into())),
+        MnemoError::Crypto { .. }
+    ));
+    assert!(matches!(map(E::BadMagic), MnemoError::NotAMnemoFile { .. }));
+    assert!(matches!(
+        map(E::NeedsWriteOpen { reason: "pending WAL recovery" }),
+        MnemoError::NeedsWriteOpen { reason } if reason == "pending WAL recovery"
+    ));
+    match map(E::UnsupportedVersion(42)) {
+        MnemoError::UnsupportedVersion { found: 42, message } => {
+            assert!(message.contains("42"), "{message}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        map(E::PageAuthFailed(3)),
+        MnemoError::Corrupt { .. }
+    ));
+    assert!(matches!(map(E::HeaderChecksum), MnemoError::Corrupt { .. }));
+
+    let retry = [
+        MnemoError::Locked { path: "p".into() },
+        MnemoError::Io {
+            message: "disk".into(),
+        },
+        MnemoError::Kdf {
+            message: "oom".into(),
+        },
+        MnemoError::Closed,
+    ];
+    assert!(retry.iter().all(MnemoError::is_retryable));
+    let no_retry = [
+        MnemoError::WrongPassphrase,
+        MnemoError::Invalid {
+            message: "x".into(),
+        },
+        MnemoError::Corrupt {
+            message: "x".into(),
+        },
+        MnemoError::NeedsWriteOpen { reason: "x".into() },
+        MnemoError::NotAMnemoFile {
+            message: "x".into(),
+        },
+    ];
+    assert!(no_retry.iter().all(|e| !e.is_retryable()));
+}
+
+/// RB-002.4 T1: an `Arc<MnemoDb>` dropped without `close` keeps what was
+/// flushed and only that. Unchanged by v0.12.2: this is the engine contract
+/// the stores' flush policy covers.
+#[test]
+fn t1_dropping_the_handle_without_close_keeps_only_what_was_flushed() {
+    let dir = tempdir().unwrap();
+    let (db, key) = new_db(&dir);
+    for i in 0..10 {
+        db.remember(
+            format!("flushed {i}"),
+            vec![i as f32 + 1.0, 0.0, 0.0, 1.0],
+            remember_opts(),
+        )
+        .unwrap();
+    }
+    db.flush().unwrap();
+    for i in 10..60 {
+        db.remember(
+            format!("pending {i}"),
+            vec![i as f32 + 1.0, 0.0, 0.0, 1.0],
+            remember_opts(),
+        )
+        .unwrap();
+    }
+    drop(db);
+    let path = dir.path().join("t.mnemo").display().to_string();
+    let again = MnemoDb::open_with_key(path, key).unwrap();
+    assert_eq!(again.len().unwrap(), 10);
+}
+
+/// RB-002.3 (v0.12.2): the binding's stats() is the cheap path and reports
+/// the bytes the vector column needs; track_access is off by default here.
+#[test]
+fn stats_is_the_cheap_path_and_track_access_defaults_off() {
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    for i in 0..20 {
+        db.remember(
+            format!("n {i}"),
+            vec![i as f32 + 1.0, 0.5, 0.0, 1.0],
+            remember_opts(),
+        )
+        .unwrap();
+    }
+    db.flush().unwrap();
+    let s = db.stats().unwrap();
+    assert_eq!(s.memories, 20);
+    assert_eq!(s.vector_column_bytes, 20 * (2 * DIMS as u64 + 4));
+    assert_eq!(s.recall_mode, RecallMode::ExactResident);
+    assert!(!s.has_index);
+    // `RecallOptions` built in Rust spell every field; the default is the
+    // generated one, checked in the Swift and Kotlin suites.
+    let page = db.recall(vec![1.0, 0.5, 0.0, 1.0], recall_opts()).unwrap();
+    assert!(!page.hits.is_empty());
 }

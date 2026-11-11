@@ -708,6 +708,48 @@ impl Mnemo {
         Self::open_read_only_secret(path, key)
     }
 
+    /// Whether `key` opens the raw-key file at `path`, decided from its
+    /// header alone: no catalog load, no lock, microseconds. `Ok(false)` is
+    /// "not this key". Unlike a read-only open, it answers for a file that
+    /// has a WAL transaction to recover (the state a kill between a commit
+    /// and its checkpoint leaves), so a caller trying each of its keys in
+    /// turn isn't stopped by [`MnemoError::NeedsWriteOpen`]. A torn header is
+    /// judged from the WAL frame that would heal it. Other failures (not a
+    /// `.mnemo` file, a tampered header, an I/O error) are errors. Added in
+    /// v0.12.2 (RB-001.23).
+    pub fn key_opens(
+        path: impl AsRef<std::path::Path>,
+        key: &[u8; crypto::KEY_LEN],
+    ) -> Result<bool> {
+        let mut file = File::open(path.as_ref())?;
+        let mut hbuf = [0u8; PAGE_SIZE];
+        file.seek(SeekFrom::Start(0))?;
+        file.read_exact(&mut hbuf)?;
+        let header = match Header::from_page(&hbuf) {
+            Ok(h) => h,
+            // A candidate frame only counts when it validates with `key`.
+            Err(parse_err) => {
+                return match scan_header_recovery_candidates(&mut file, key)? {
+                    Some(_) => Ok(true),
+                    None => Err(parse_err),
+                }
+            }
+        };
+        let kdf = KdfParams {
+            m_cost: header.m_cost,
+            t_cost: header.t_cost,
+            p_cost: header.p_cost,
+        };
+        let kek = crypto::derive_kek(key, &header.salt, kdf)?;
+        let dek = match crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek) {
+            Ok(dek) => dek,
+            Err(MnemoError::WrongPassphrase) => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        header.validate_seal(&dek)?;
+        Ok(true)
+    }
+
     pub(super) fn open_read_only_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         let mut file = open_with_lock(&path, /*write=*/ false, /*create=*/ false)?;
