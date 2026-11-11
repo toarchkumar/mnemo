@@ -744,6 +744,7 @@ cargo run --bin mnemo -- <command>
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters) |
+| `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output |
 | `get`     | Fetch one memory by its ULID                         |
 | `search`  | Exact nearest-neighbour search (similarity only)     |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
@@ -863,6 +864,29 @@ export MNEMO_PASSPHRASE=hunter2
 cargo run --bin mnemo -- init agent.mnemo --dimensions 768
 cargo run --bin mnemo -- demo            # try it without any setup
 ```
+
+### Readable export
+
+`mnemo export` writes a file's live memories as plaintext: Markdown (a
+section per memory, content in a fenced block) or JSON Lines (one object
+per memory). It opens the file read-only, so the file never changes.
+
+```sh
+# to stdout; a warning on stderr says the output isn't encrypted
+cargo run --bin mnemo -- export agent.mnemo --type semantic,procedural --agent ops
+
+# diff-clean, for committing beside the project
+cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
+```
+
+- Vectors are always left out; superseded keyed versions are included.
+- It writes a file only with `-o` (owner-only on Unix), and never over the
+  `.mnemo` file itself.
+- **`--git`** orders records by key, then id (keyed memories first), and
+  leaves out thread turns, access stats and counts. The same unchanged file
+  exports to the same bytes, a recall doesn't change the output, and one new
+  memory adds only its own lines.
+- The result cache (and so the embedder-identity record) is never exported.
 
 ## Build and test
 

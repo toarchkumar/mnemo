@@ -7,6 +7,9 @@
 
 use std::process::ExitCode;
 
+#[path = "mnemo/export.rs"]
+mod export;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
     Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest, RecallResult, Result, Ulid,
@@ -288,6 +291,34 @@ enum Command {
         /// Include the embedding vector (json/jsonl only).
         #[arg(long)]
         vector: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Export the live memories as readable plaintext (Markdown or JSON
+    /// Lines). Opens the file read-only. Writes to stdout unless `-o` is
+    /// given, and warns on stderr that the output isn't encrypted. Vectors
+    /// are left out; `--git` makes the output diff-clean (ordered by key,
+    /// then id; no thread turns and no access stats).
+    Export {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = export::ExportFormat::Markdown)]
+        format: export::ExportFormat,
+        /// Restrict to these memory types (comma-separated:
+        /// `episodic,semantic,procedural,working`).
+        #[arg(long, value_name = "T[,T...]")]
+        r#type: Option<String>,
+        /// Restrict to a single agent ID.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Deterministic, diff-clean output for version control: the same
+        /// unchanged file always exports to the same bytes.
+        #[arg(long)]
+        git: bool,
+        /// Write to this file (owner-only on Unix) instead of stdout.
+        #[arg(long, short = 'o')]
+        output: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -1803,6 +1834,59 @@ fn run() -> std::result::Result<(), String> {
             };
             let page: Vec<Memory> = all[start..end].to_vec();
             print_memories(&page, total_after_filter, format, vector);
+        }
+        Command::Export {
+            path,
+            format,
+            r#type,
+            agent,
+            git,
+            output,
+            passphrase: pp,
+        } => {
+            let pp = passphrase(&pp)?;
+            let types = match r#type {
+                Some(s) => Some(parse_memory_types(&s)?),
+                None => None,
+            };
+            if let Some(o) = &output {
+                if let (Ok(a), Ok(b)) = (std::fs::canonicalize(o), std::fs::canonicalize(&path)) {
+                    if a == b {
+                        return Err(format!("refusing to write the export over {path} itself"));
+                    }
+                }
+            }
+            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let summary = db.stats_summary();
+            let facts = export::FileFacts {
+                format_version: summary.format_version,
+                dimensions: summary.dimensions,
+            };
+            let all = db.memories().map_err(fmt)?;
+            drop(db);
+            let opts = export::ExportOptions {
+                format,
+                git,
+                types,
+                agent,
+            };
+            let selected = export::select(all, &opts);
+            let body = export::render(&selected, &opts, &facts);
+            eprintln!(
+                "warning: the export is plaintext, not encrypted; keep it as safe as \
+                 the file's passphrase"
+            );
+            match output {
+                Some(p) => {
+                    export::write_private(&p, &body)?;
+                    eprintln!("exported {} memories to {p}", selected.len());
+                }
+                None => {
+                    use std::io::Write;
+                    // A closed pipe (`| head`) isn't an error worth a panic.
+                    let _ = std::io::stdout().lock().write_all(body.as_bytes());
+                }
+            }
         }
         Command::Recall {
             path,

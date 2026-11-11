@@ -53,6 +53,25 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - No file-format change: the identity lives in a reserved result-cache
     entry, which v8 and v9 files both have.
 
+### Added
+
+- **`mnemo export`: a readable plaintext export** (PLAN.md 12.5).
+  `mnemo export <file> [--format markdown|jsonl] [--type T] [--agent A]
+  [--git] [-o path]` writes the live memories as Markdown (a section per
+  memory) or JSON Lines (an object per memory).
+  - It opens the file read-only, so it also reads a v8 file. It writes to
+    stdout unless `-o` is given (that file is owner-only on Unix), refuses
+    to write over the `.mnemo` file itself, and always warns on stderr that
+    the output isn't encrypted.
+  - Vectors are always left out. Superseded keyed versions are included,
+    with their `_mnemo.*` metadata.
+  - **`--git`** makes it diff-clean for keeping under version control:
+    ordered by key, then id (keyed memories first), never by access time;
+    no thread turns, no access stats and no counts. Exporting the same
+    unchanged file twice gives the same bytes, a recall doesn't change it,
+    and one new memory adds only its own lines. The result cache (and so
+    the embedder-identity record) is never exported.
+
 ### Fixed
 
 - **Compaction no longer refuses a file that holds an all-zero vector.**
