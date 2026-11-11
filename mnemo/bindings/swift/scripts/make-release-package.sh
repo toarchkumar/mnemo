@@ -39,6 +39,7 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT/Sources"
 cp -R "$HERE/Sources/Mnemo" "$OUT/Sources/Mnemo"
+cp -R "$HERE/Sources/MnemoAppleEmbedder" "$OUT/Sources/MnemoAppleEmbedder"
 cp "$ROOT/LICENSE" "$OUT/LICENSE"
 
 cat > "$OUT/Package.swift" <<SWIFT
@@ -54,6 +55,9 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     products: [
         .library(name: "Mnemo", targets: ["Mnemo"]),
+        // Optional: Apple's on-device embedders. An app that doesn't add
+        // this product doesn't link NaturalLanguage.
+        .library(name: "MnemoAppleEmbedder", targets: ["MnemoAppleEmbedder"]),
     ],
     targets: [
         .binaryTarget(
@@ -66,6 +70,12 @@ let package = Package(
             dependencies: ["MnemoFFI"],
             path: "Sources/Mnemo",
             linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
+            name: "MnemoAppleEmbedder",
+            dependencies: ["Mnemo"],
+            path: "Sources/MnemoAppleEmbedder",
+            linkerSettings: [.linkedFramework("NaturalLanguage")]
         ),
     ],
     // The UniFFI-generated Swift predates Swift 6's strict concurrency checks.
@@ -93,6 +103,9 @@ In Xcode, **File > Add Package Dependencies...**, then enter
 \`\`\`
 
 and add the \`Mnemo\` product to your target. It needs iOS 15 or macOS 12.
+Add the optional \`MnemoAppleEmbedder\` product too for Apple's on-device
+embedders (the sentence model, and on iOS 17 or macOS 14 the contextual
+model).
 
 ## Documentation
 

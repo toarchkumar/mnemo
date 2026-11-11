@@ -49,7 +49,10 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v12)],
     dependencies: [.package(path: "../MnemoSwift")],
     targets: [
-        .target(name: "Consumer", dependencies: [.product(name: "Mnemo", package: "MnemoSwift")]),
+        .target(name: "Consumer", dependencies: [
+            .product(name: "Mnemo", package: "MnemoSwift"),
+            .product(name: "MnemoAppleEmbedder", package: "MnemoSwift"),
+        ]),
         .testTarget(name: "ConsumerTests", dependencies: ["Consumer"]),
     ],
     swiftLanguageModes: [.v5]
@@ -58,6 +61,15 @@ SWIFT
 cat > "$WORK/Consumer/Sources/Consumer/Consumer.swift" <<'SWIFT'
 import Foundation
 import Mnemo
+import MnemoAppleEmbedder
+import NaturalLanguage
+
+/// The optional Apple embedder product resolves and links: the identity of
+/// whichever Apple model this system has (the sentence model ships with
+/// iOS), or nil.
+public func appleEmbedderIdentity() -> String? {
+    AppleEmbedders.bestAvailable(language: .english)?.identity().name
+}
 
 /// Keys in memory: the bare test runner has no Keychain entitlement.
 public final class MemoryKeys: MnemoKeyStore, @unchecked Sendable {
@@ -105,6 +117,12 @@ final class ConsumerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(result.count, 2)
         XCTAssertEqual(result.top, "the user prefers green tea")
         XCTAssertTrue(result.essence.contains("keep the sample small"), result.essence)
+    }
+
+    func testTheAppleEmbedderProductLinks() {
+        if let name = appleEmbedderIdentity() {
+            XCTAssertTrue(name.hasPrefix("apple-nl-"), name)
+        }
     }
 }
 SWIFT

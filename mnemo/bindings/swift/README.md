@@ -214,6 +214,47 @@ final class MyEmbedder: MnemoEmbedder, @unchecked Sendable {
 - The identity is recorded in the file. Opening the file with a different
   model name or width is refused, so vectors from two models never mix.
 
+### Apple's on-device embedders (`MnemoAppleEmbedder`)
+
+The optional `MnemoAppleEmbedder` product wraps Apple's NaturalLanguage
+models, so an app needs no model of its own. Add the product to your target
+only if you use it: an app without it doesn't link NaturalLanguage.
+
+```swift
+import Mnemo
+import MnemoAppleEmbedder
+
+// Pick the model when the store is created, and keep it.
+guard let embedder = AppleEmbedders.bestAvailable() else { return }   // nil: no Apple model here
+let store = try MnemoStore(
+    configuration: MnemoStoreConfiguration(name: "notes-\(embedder.identity().name)",
+                                           dimensions: embedder.identity().dimensions),
+    keyStore: MnemoKeychain(), embedder: embedder)
+```
+
+- **`AppleSentenceEmbedder`** (`NLEmbedding.sentenceEmbedding`): every
+  supported system (iOS 15, macOS 12). English is 512 dimensions. Its
+  identity is `apple-nl-sentence-<language>-r<revision>`.
+- **`AppleContextualEmbedder`** (`NLContextualEmbedding`, iOS 17 and macOS
+  14): a transformer model, mean-pooled over its token vectors into one unit
+  vector per text. Its identity is `apple-nl-contextual-<language>-r<revision>`,
+  and only the first `maximumSequenceLength` tokens of a text count.
+  - The system downloads its assets on demand. Check `hasAvailableAssets`,
+    and call `requestAssets()` (behind a "Download Apple's model" button,
+    say) before the first embed, which otherwise throws.
+- **`AppleEmbedders.bestAvailable()`** picks the contextual model when its
+  assets are on the device, else the sentence model. It never downloads.
+
+**A store is bound to the model that first wrote to it.** The revision is
+in the identity, and the file records the first identity (v0.13,
+EMBED-ID-1). So when the contextual model arrives, or the system ships a
+new revision, opening the old store with it fails with
+`MnemoError.EmbedderMismatch`. To move to the new model, create a new store
+(name it after the embedder's identity, as above) and add the memories
+again from your app's own data. Keep `AppleSentenceEmbedder(language:revision:)`
+for opening a store written with an older revision. An engine-side re-embed
+of an existing store is planned, not shipped.
+
 ## Threads: keep the blocking API off the main thread
 
 - **`MnemoStore` is an actor.** Every call is `async`, runs off the main
