@@ -34,16 +34,16 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0; current 0.12.2):
+iOS and Android (from v0.12.0; current 0.12.3):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.2")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.3")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.12.2")
+implementation("io.github.toarchkumar:mnemo-android:0.12.3")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -111,6 +111,17 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.12.3: two fixes
+
+- **Swift: a slow embedding model no longer holds up your app.** The store
+  runs embeds one at a time on its own queue instead of on Swift's shared
+  task threads, so a slow on-device model can't stall the app's other
+  tasks. A cancelled text call now stops at once and writes nothing.
+- **A closed file is unlocked at once.** On Linux and macOS, an app that
+  started another program (an agent running a tool, say) at the moment it
+  closed a store could find the file still locked when it reopened it.
+  The engine now releases the lock itself.
 
 ## What's new in v0.12.2: clearer errors, safer keys
 
