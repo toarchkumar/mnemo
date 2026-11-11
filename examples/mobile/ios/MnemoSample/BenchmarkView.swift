@@ -15,12 +15,12 @@ struct BenchmarkView: View {
                     Button(running ? "Running..." : "Run the benchmark") { start() }
                         .disabled(running)
                     if let resultURL {
-                        ShareLink(item: resultURL) { Label("Share the JSON", systemImage: "square.and.arrow.up") }
+                        ShareLink(item: resultURL) { Label("Share results", systemImage: "square.and.arrow.up") }
                         Text(resultURL.lastPathComponent).font(.caption).foregroundStyle(.secondary)
                     }
                     if let error { Text(error).foregroundStyle(.red).font(.footnote) }
                 } footer: {
-                    Text("The device_budget cells at 1K and 10K memories (384-dim synthetic vectors, raw-key files). Use a Release build, keep the app in the foreground and the phone unplugged; it takes a few minutes the first time, while it builds the corpus.")
+                    Text("The device_budget cells at 1K and 10K memories (384-dim synthetic vectors, raw-key files). Use a Release build, keep the app in the foreground and the phone unplugged; it takes a few minutes the first time, while it builds the corpus. Share results sends the JSON, for test/scripts/device_runs/ in the MNemo repository.")
                 }
                 if !summary.isEmpty {
                     Section("Results") {

@@ -144,12 +144,13 @@ it.
    - The first run builds the two corpora (a minute or two). Later runs
      reuse them.
 3. **Send the JSON:**
-   - when it finishes, tap **Share the JSON** (AirDrop it to the Mac, or
+   - when it finishes, tap **Share results** (AirDrop it to the Mac, or
      save it to Files);
    - or find it in the **Files** app under **On My iPhone > MNemo**;
    - name it after the device, for example `iphone16_1.json`, and put it
      in `test/scripts/device_runs/` (or just send it, and the Worker files
-     it);
+     it). [`test/scripts/device_runs/README.md`](../../test/scripts/device_runs/README.md)
+     has the schema and how to submit a run;
    - the results go into `perf_v0.5.0.json` as `device_budget_mobile`.
 
 ### Background test (`0xdead10cc`)
@@ -273,7 +274,7 @@ Either take it from CI, or build it on the Mac.
    off, cool.
 2. **Run it:** open the **Benchmark** tab and tap **Run the benchmark**.
 3. **Send the JSON:**
-   - tap **Share the JSON**, or pull it over USB:
+   - tap **Share results**, or pull it over USB:
 
      ```bash
      adb pull /sdcard/Android/data/io.github.toarchkumar.mnemo.sample/files/device_budget/ .

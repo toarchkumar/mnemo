@@ -79,7 +79,7 @@ fun BenchmarkScreen() {
                 },
             ) { Text(if (running) "Running..." else "Run the benchmark") }
             result?.let { file ->
-                OutlinedButton({ share(context, file) }) { Text("Share the JSON") }
+                OutlinedButton({ share(context, file) }) { Text("Share results") }
                 Text(file.path, style = small)
             }
             error?.let { Text(it, color = Color.Red, style = small) }

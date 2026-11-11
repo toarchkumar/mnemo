@@ -1,0 +1,28 @@
+# SAMPLE-1 (RB-001.15): checks contributed device runs against the
+# device_budget_mobile/1 schema, whenever test/scripts/device_runs/ changes.
+name: Device runs
+
+on:
+  push:
+    branches: [main, "release/**", "release-*"]
+    paths:
+      - "test/scripts/device_runs/**"
+      - ".github/workflows/device-runs.yml"
+  pull_request:
+    branches: [main, "release/**", "release-*"]
+    paths:
+      - "test/scripts/device_runs/**"
+      - ".github/workflows/device-runs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: device runs (schema check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate every device run
+        run: python3 test/scripts/device_runs/validate.py

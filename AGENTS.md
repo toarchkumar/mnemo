@@ -151,6 +151,11 @@ PR they run only when it touches `mnemo/bindings/**`, `examples/mobile/**`,
 `main` or a release branch they always run, so an engine-only PR that breaks
 a mobile build shows up on its merge.
 
+`.github/workflows/device-runs.yml` (SAMPLE-1) runs
+`test/scripts/device_runs/validate.py` when `test/scripts/device_runs/**`
+changes: every contributed device run must match the
+`device_budget_mobile/1` schema in that folder's README.
+
 ## Format-version policy
 
 The format constants live in `mnemo/src/format.rs`:
