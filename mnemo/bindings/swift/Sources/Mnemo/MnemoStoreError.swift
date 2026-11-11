@@ -21,6 +21,25 @@ public enum MnemoStoreError: Error, Equatable, Sendable {
     /// A file or directory couldn't be prepared, or the configuration names
     /// an invalid file.
     case file(message: String)
+    /// The app is in the background and the system gave no more background
+    /// time, so the call didn't open the file (an app suspended holding it
+    /// would be killed). Retryable: call again when the app is active, or
+    /// in the next background task (v0.12.2).
+    case noBackgroundTime
+    /// The store's file was created with a key under `stored`, and the
+    /// configuration asks for `configured`. The policy is fixed when the
+    /// store is created; changing it would put the file in backups without
+    /// a synced key, or the reverse. Nothing was changed (v0.12.2).
+    case keyPolicyMismatch(stored: KeyPolicy, configured: KeyPolicy)
+
+    /// Whether the same call may succeed later with nothing changed: the
+    /// Keychain and background-time errors.
+    public var isRetryable: Bool {
+        switch self {
+        case .keychain, .noBackgroundTime: return true
+        case .keyMissing, .file, .keyPolicyMismatch: return false
+        }
+    }
 }
 
 extension MnemoStoreError: LocalizedError {
@@ -34,6 +53,10 @@ extension MnemoStoreError: LocalizedError {
             return "MNemo: Keychain \(operation) failed: \(text)"
         case let .file(message):
             return "MNemo: \(message)"
+        case .noBackgroundTime:
+            return "MNemo: no background time left; the file wasn't opened (retry when the app is active)"
+        case let .keyPolicyMismatch(stored, configured):
+            return "MNemo: the store's key was created with \(stored), but the configuration asks for \(configured); the policy is fixed when a store is created"
         }
     }
 }

@@ -780,6 +780,16 @@ impl MnemoDb {
         })
     }
 
+    /// How many past snapshots (point-in-time restore points) to keep; on a
+    /// v9 file this is a hard cap, replacing the default of the newest 16 plus
+    /// the last 24 hours. Applies to this handle (v0.12.2, RB-002.5).
+    pub fn set_max_snapshots(&self, count: u32) -> Result<(), MnemoError> {
+        self.with(|db| {
+            db.set_max_snapshots(count as usize);
+            Ok(())
+        })
+    }
+
     /// The page cache, in 8 KB pages.
     pub fn set_cache_capacity(&self, pages: u32) -> Result<(), MnemoError> {
         self.with(|db| {

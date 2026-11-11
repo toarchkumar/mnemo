@@ -148,21 +148,27 @@ final class LifecycleObserver: @unchecked Sendable {
     /// process isn't suspended while a call made in the background runs and
     /// closes the file. Where there are no expiring activities (macOS), it
     /// holds nothing.
-    static func beginActivity(reason: String) async -> ExpiringActivity {
+    ///
+    /// Throws ``MnemoStoreError/noBackgroundTime`` when the system has no
+    /// time left (its first callback says `expired`): the caller must not
+    /// open the file then (v0.12.2, RB-001.20).
+    static func beginActivity(reason: String) async throws -> ExpiringActivity {
         let activity = ExpiringActivity()
         #if canImport(UIKit) && !os(watchOS)
-        await withCheckedContinuation { (started: CheckedContinuation<Void, Never>) in
+        let granted = await withCheckedContinuation { (started: CheckedContinuation<Bool, Never>) in
             let first = Once()
             ProcessInfo.processInfo.performExpiringActivity(withReason: reason) { expired in
-                // The first call starts the work, expired or not (a close is
-                // short). Only an unexpired call holds the activity open; the
-                // second, expired call just returns.
                 if first.claim() {
-                    started.resume()
+                    started.resume(returning: !expired)
                     if !expired { activity.wait() }
+                } else if expired {
+                    // Time ran out while the call held the activity: later
+                    // steps of a long call check this.
+                    activity.markExpired()
                 }
             }
         }
+        if !granted { throw MnemoStoreError.noBackgroundTime }
         #endif
         return activity
     }
@@ -173,9 +179,18 @@ final class ExpiringActivity: @unchecked Sendable {
     private let done = DispatchSemaphore(value: 0)
     private let ended = Once()
 
+    private let expiredFlag = Once()
+
     fileprivate func wait() {
         done.wait()
     }
+
+    fileprivate func markExpired() {
+        _ = expiredFlag.claim()
+    }
+
+    /// Whether the system said the time ran out while the activity was held.
+    var hasExpired: Bool { !expiredFlag.claimable }
 
     /// Releases the activity. Safe to call more than once.
     func end() {
@@ -187,6 +202,13 @@ final class ExpiringActivity: @unchecked Sendable {
 final class Once: @unchecked Sendable {
     private let lock = NSLock()
     private var claimed = false
+
+    /// Whether ``claim()`` would still succeed.
+    var claimable: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !claimed
+    }
 
     func claim() -> Bool {
         lock.lock()

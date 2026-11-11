@@ -208,6 +208,27 @@ real hardware.
    - whether the App Group was used;
    - any `MnemoSample` crash entry, as a file or a screenshot.
 
+### Long calls in the background (RB-001.20, for the next device run)
+
+These two cases don't gate v0.12.2; they check what the store can't
+promise yet. A single engine step can't be interrupted, so a long one can
+outlast the background time the system gives.
+
+1. **Background during `buildIndex` on a large file.** Build a 100K file
+   in the Benchmark, start `buildIndex()`, and send the app to the Home
+   Screen at once. Wait two minutes, then reopen it.
+   - **Record:** whether the app was killed (and the crash entry's code,
+     `0xdead10cc` or a watchdog `0x8badf00d`), how long the build ran, and
+     whether the next open recovered the file with every memory (it
+     should: the build is a crash to the WAL).
+2. **A share extension writing while the app is suspended.** With the
+   sample's App Group store open in the app, send the app to the
+   background, then write a note from a share extension using the same
+   store, and have it call `close()` when it's done.
+   - **Record:** whether the extension's write succeeded or reported
+     `MnemoError.Locked`, whether either process was killed, and whether
+     the app saw the note after returning to the foreground.
+
 ## Android phone
 
 ### Build the APK

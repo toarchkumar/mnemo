@@ -10,11 +10,18 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
     /// The directory, or `nil` for `Application Support/mnemo/` (see
     /// ``defaultDirectory()`` and ``appGroupDirectory(_:)``).
     public var directory: URL?
-    /// Where the key lives, and whether the file goes into backups.
+    /// Where the key lives, and whether the file goes into backups. Fixed
+    /// when the store is created: opening an existing store with another
+    /// policy is refused (``MnemoStoreError/keyPolicyMismatch(stored:configured:)``).
     public var keyPolicy: KeyPolicy
     /// `0` creates the current format (v9); `8` creates a v8 file for readers
     /// on v0.10 or earlier. Used only when the file is created.
-    public var formatVersion: UInt16
+    @available(*, deprecated, message: "No mobile reader needs a v8 file. v0.13 makes v8 files read-only and removes this setting; leave it at 0 (v9).")
+    public var formatVersion: UInt16 {
+        get { formatVersionValue }
+        set { formatVersionValue = newValue }
+    }
+    var formatVersionValue: UInt16
     /// The in-memory vector column budget (default 16 MiB).
     public var vectorCacheBudgetBytes: UInt64
     /// The page cache, in 8 KB pages (default 256 = 2 MiB).
@@ -28,7 +35,6 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
         dimensions: UInt32,
         directory: URL? = nil,
         keyPolicy: KeyPolicy = .deviceOnly,
-        formatVersion: UInt16 = 0,
         vectorCacheBudgetBytes: UInt64 = 16 << 20,
         cachePages: UInt32 = 256,
         flushPolicy: FlushPolicy = .default
@@ -37,10 +43,27 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
         self.dimensions = dimensions
         self.directory = directory
         self.keyPolicy = keyPolicy
-        self.formatVersion = formatVersion
+        self.formatVersionValue = 0
         self.vectorCacheBudgetBytes = vectorCacheBudgetBytes
         self.cachePages = cachePages
         self.flushPolicy = flushPolicy
+    }
+
+    /// The same, choosing the format of a new file.
+    @available(*, deprecated, message: "No mobile reader needs a v8 file. v0.13 makes v8 files read-only and removes formatVersion; use the initializer without it.")
+    public init(
+        name: String,
+        dimensions: UInt32,
+        directory: URL? = nil,
+        keyPolicy: KeyPolicy = .deviceOnly,
+        formatVersion: UInt16,
+        vectorCacheBudgetBytes: UInt64 = 16 << 20,
+        cachePages: UInt32 = 256,
+        flushPolicy: FlushPolicy = .default
+    ) {
+        self.init(name: name, dimensions: dimensions, directory: directory, keyPolicy: keyPolicy,
+                  vectorCacheBudgetBytes: vectorCacheBudgetBytes, cachePages: cachePages, flushPolicy: flushPolicy)
+        self.formatVersionValue = formatVersion
     }
 
     /// `Application Support/mnemo/` in the app's container.
@@ -71,7 +94,7 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
     }
 
     var engineConfig: MnemoConfig {
-        MnemoConfig(dimensions: dimensions, formatVersion: formatVersion,
+        MnemoConfig(dimensions: dimensions, formatVersion: formatVersionValue,
                     vectorCacheBudgetBytes: vectorCacheBudgetBytes, cachePages: cachePages)
     }
 }
@@ -135,6 +158,8 @@ public actor MnemoStore {
     /// The coalesced policy's timer, armed by the first write after a commit.
     private var commitTimer: Task<Void, Never>?
     private var timerGeneration = 0
+    /// Set by ``setMaxSnapshots(_:)``; applied on every open.
+    private var maxSnapshots: UInt32?
     /// The last error a flush or close the store ran on its own hit (a
     /// background close, or a coalesced commit), if any.
     public private(set) var lastBackgroundError: (any Error)?
@@ -374,13 +399,32 @@ public actor MnemoStore {
 
     /// Flushes and closes the file, releasing its lock. The next call reopens
     /// it.
+    ///
+    /// If the final flush fails (a full disk, say), the file stays open with
+    /// every unflushed write and the error is thrown: free space and call
+    /// ``flush()`` or `close()` again (v0.12.2).
     public func close() throws {
         guard let db else { return }
-        self.db = nil
         cancelPendingCommit()
-        try db.flush()
-        commits += 1
+        // The binding's close flushes first and keeps its handle on failure.
         try db.close()
+        self.db = nil
+        commits += 1
+    }
+
+    /// How many past snapshots (restore points) the file keeps, replacing the
+    /// default (the newest 16 plus any from the last 24 hours). Applies now
+    /// and every time the store reopens the file (v0.12.2).
+    public func setMaxSnapshots(_ count: UInt32) async throws {
+        maxSnapshots = count
+        if let db { try db.setMaxSnapshots(count: count) }
+    }
+
+    /// Commits and closes the file when the store goes away, so a new store
+    /// on the same file sees every write and finds it unlocked (RB-002.4 T2).
+    deinit {
+        commitTimer?.cancel()
+        if let db { try? db.close() }
     }
 
     /// Runs `body` on one open handle with no other call in between, then
@@ -406,7 +450,7 @@ public actor MnemoStore {
     /// Rewrites the file compactly, closing it first. The next call reopens it.
     @discardableResult
     public func compact() async throws -> CompactReport {
-        let activity = lifecycle.isForeground ? nil : await LifecycleObserver.beginActivity(reason: activityReason)
+        let activity = lifecycle.isForeground ? nil : try await LifecycleObserver.beginActivity(reason: activityReason)
         defer { activity?.end() }
         try close()
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -519,7 +563,11 @@ public actor MnemoStore {
             if write { try noteWrite() }
             return value
         }
-        let activity = await LifecycleObserver.beginActivity(reason: activityReason)
+        // No background time left: fail before the file is opened, so the
+        // app is never suspended holding its lock (RB-001.20). A long call
+        // made of several engine steps (an ingest's plan and apply) begins an
+        // activity per step, so it stops at the first step with no time.
+        let activity = try await LifecycleObserver.beginActivity(reason: activityReason)
         // Deferred blocks run last-first: close, then end the activity.
         defer { activity.end() }
         defer { closeAfterBackgroundCall() }
@@ -660,6 +708,9 @@ public actor MnemoStore {
             if configuration.cachePages != 256 {
                 try opened.setCacheCapacity(pages: configuration.cachePages)
             }
+            if let maxSnapshots {
+                try opened.setMaxSnapshots(count: maxSnapshots)
+            }
         } catch {
             try? opened.close()
             throw error
@@ -683,6 +734,13 @@ public actor MnemoStore {
 
     private func openExisting() throws -> (String, MnemoDb) {
         let (id, key) = try resolveKey()
+        // RB-001.28 part 1: the policy is the key's, fixed at creation. A
+        // different configured policy would flip the backup flag but not the
+        // Keychain item, so a restore brings the file without its key; refuse
+        // it, before anything is changed (v0.12.2).
+        if let stored = try keyStore.policy(id: id), stored != configuration.keyPolicy {
+            throw MnemoStoreError.keyPolicyMismatch(stored: stored, configured: configuration.keyPolicy)
+        }
         return (id, try MnemoDb.openWithKey(path: fileURL.path, key: key.data))
     }
 

@@ -8,6 +8,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Deprecated
+
+- **`formatVersion` in the Swift and Kotlin store configurations
+  (RB-001.27).** No mobile reader needs a v8 file, and a v8 file misses every
+  v9 gain the mobile numbers rest on. v0.13 makes v8 files read-only and
+  removes the setting. Swift keeps an initializer with `formatVersion:`,
+  marked deprecated; the one without it is the default.
+
 ### Changed
 
 - **Mobile: `RecallOptions.trackAccess` defaults to `false` (RB-001.5).**
@@ -37,6 +45,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Added
 
+- **`setMaxSnapshots` on both stores (RB-002.5):** how many restore points
+  the file keeps, applied now and on every reopen. The READMEs' budget
+  table gains "bytes per fact" and "budget to stay resident", and says what
+  to do at the recall cliff: raise the budget first, and build an index only
+  past 20,000 facts, in a maintenance window.
+- **Swift: `MnemoStoreError.noBackgroundTime`,
+  `.keyPolicyMismatch(stored:configured:)` and `isRetryable`**, and an
+  optional `MnemoKeyStore.policy(id:)` (`MnemoKeychain` reads it from the
+  item).
 - **`Mnemo::stats_summary()` (RB-002.3):** counts, the file size, the
   format, the WAL size, whether an index exists, the recall mode and
   `vector_column_bytes` (what the vector column needs to stay in memory).
@@ -77,6 +94,26 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **iOS: a call made with no background time left no longer opens the
+  file (RB-001.20).** When the system's expiring activity is already over
+  on its first callback, the call fails with the retryable
+  `MnemoStoreError.noBackgroundTime` instead of opening the file and taking
+  its lock with nothing held. A long call made of several engine steps
+  stops at the first step with no time. A single step still can't be
+  interrupted; the README says to keep `buildIndex`, `compact` and the
+  passphrase export for the foreground. The App Groups section now says
+  what the lifecycle section did: in an extension, close the store
+  yourself.
+- **Swift: a changed `keyPolicy` is refused, never half-applied
+  (RB-001.28).** Opening an existing store with another policy used to
+  flip the file's backup flag but not the Keychain item, so a restore
+  brought the file without its key. It now fails with
+  `keyPolicyMismatch`, before anything is changed.
+- **Both stores keep the file when `close()`'s flush fails** (RB-001.22),
+  so `flush()` or `close()` can be retried.
+- **Swift: a store that's released without `close()` commits and closes
+  its file** (RB-002.4 T2), so a new store on the file sees every write
+  and finds it unlocked.
 - **The stores no longer give up on a file whose key-id stamp is lost
   while it has a WAL to recover** (RB-001.23). They used to probe each key
   with a read-only open, which refused with `NeedsWriteOpen` before

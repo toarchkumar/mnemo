@@ -210,6 +210,8 @@ import UIKit
             ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
             : kSecAttrAccessibleAfterFirstUnlock as String
         #expect(accessible == expected)
+        // v0.12.2: the store reads the policy back to refuse a changed one.
+        #expect(try keychain.policy(id: id) == policy)
 
         // Storing again replaces; deleting leaves a clear KeyMissing.
         try keychain.storeKey(key, id: id, policy: policy)

@@ -119,17 +119,26 @@ It stays in memory while the file's **live facts** fit the configuration's
 superseded versions don't count. Past the budget, recall reads the vectors
 from the file instead, which is slower, and slower still as the file grows.
 
-| Dimensions | Facts that fit 16 MiB |
-|---|---|
-| 384 | 21,732 |
-| 512 | 16,320 |
-| 768 | 10,894 |
+| Dimensions | Bytes per fact | Facts that fit 16 MiB | Budget to stay resident at 50,000 facts |
+|---|---|---|---|
+| 384 | 772 | 21,732 | 38.6 MB |
+| 512 | 1,028 | 16,320 | 51.4 MB |
+| 768 | 1,540 | 10,894 | 77.0 MB |
 
-``store.stats()`` says which path recall takes now, in `recallMode`:
+`store.stats()` says which path recall takes now, in `recallMode`:
 `RecallMode.EXACT_RESIDENT` (in memory, the fast path),
-`RecallMode.EXACT_PAGED` (from the file) or `RecallMode.INDEXED`. Past the budget, raise `vectorCacheBudgetBytes` if the app can
-spend the memory. Past 20,000 facts, `buildIndex()` builds the IVF+PQ
-index instead.
+`RecallMode.EXACT_PAGED` (from the file) or `RecallMode.INDEXED`, and how many bytes the column needs to stay in memory, in
+`vectorColumnBytes` (`facts × (2 × dimensions + 4)`).
+
+**At the cliff, raise the budget first.** Setting `vectorCacheBudgetBytes` to at least
+`vectorColumnBytes` costs that much memory and gives the fast path back at
+once (at 22,000 facts × 384, warm recall went from 23.6 ms paged to 4.9 ms
+with the budget raised). Build an index (`buildIndex()`) only when the
+column no longer fits the memory the app can spare, past 20,000 facts, and
+only in a maintenance window: the build holds the store and takes long (49.8
+s at 22,000 facts on an M1 Pro; 19 s at 10,000 and 179 s at 100,000 in the
+perf file's `build_secs`), and a raised `cachePages` doesn't help a large
+file.
 
 ### History
 
@@ -139,6 +148,9 @@ never lets them pin more than a quarter of the file. Under the default
 flush policy a busy app commits about once a second, so the history
 reaches back about a day, not further. A v8 file keeps the newest 256.
 `compact()` drops all of them.
+`setMaxSnapshots(_:)` (Kotlin: `setMaxSnapshots(count)`) keeps a different
+number instead, as a hard cap; the store applies it every time it opens the
+file.
 
 ### Durability
 

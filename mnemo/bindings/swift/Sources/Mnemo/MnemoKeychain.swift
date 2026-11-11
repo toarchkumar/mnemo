@@ -40,6 +40,14 @@ public protocol MnemoKeyStore: Sendable {
     func keyIDs() throws -> [String]
     /// Deletes the key under `id`. Deleting a missing key isn't an error.
     func deleteKey(id: String) throws
+    /// The policy the key under `id` was stored with, or `nil` when the key
+    /// store can't tell (v0.12.2). A store whose key has a different policy
+    /// than its configuration refuses to open. The default returns `nil`.
+    func policy(id: String) throws -> KeyPolicy?
+}
+
+extension MnemoKeyStore {
+    public func policy(id: String) throws -> KeyPolicy? { nil }
 }
 
 /// Database keys as Keychain generic-password items.
@@ -103,6 +111,14 @@ public struct MnemoKeychain: MnemoKeyStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw MnemoStoreError.keychain(status: status, operation: "delete")
         }
+    }
+
+    /// The policy the item was stored with: synced means ``KeyPolicy/iCloudSynced``.
+    public func policy(id: String) throws -> KeyPolicy? {
+        guard let item = try attributes(id: id) else { return nil }
+        let synced = (item[kSecAttrSynchronizable as String] as? Bool)
+            ?? ((item[kSecAttrSynchronizable as String] as? NSNumber)?.boolValue ?? false)
+        return synced ? .iCloudSynced : .deviceOnly
     }
 
     /// The stored item's attributes (no key bytes), for tests and diagnostics.

@@ -113,6 +113,9 @@ class MnemoStore private constructor(
     private var commitTimer: Job? = null
     private var timerGeneration = 0
 
+    /** Set by [setMaxSnapshots]; applied on every open. Guarded by [mutex]. */
+    private var maxSnapshots: UInt? = null
+
     /** The last error a flush the store ran on its own hit (`ON_STOP`, a coalesced commit), if any. */
     @Volatile var lastBackgroundError: Throwable? = null
         private set
@@ -287,8 +290,24 @@ class MnemoStore private constructor(
     /** Makes every write so far durable. A no-op while the file is closed. */
     suspend fun flush() = locked { commitLocked() }
 
-    /** Flushes and closes the file, releasing its lock. The next call reopens it. */
+    /**
+     * Flushes and closes the file, releasing its lock. The next call reopens
+     * it. If the final flush fails (a full disk, say), the file stays open
+     * with every unflushed write and the error is thrown: free space and
+     * call [flush] or `close()` again (v0.12.2).
+     */
     suspend fun close() = locked { closeLocked() }
+
+    /**
+     * How many past snapshots (restore points) the file keeps, replacing the
+     * default (the newest 16 plus any from the last 24 hours). Applies now
+     * and every time the store reopens the file (v0.12.2).
+     */
+    suspend fun setMaxSnapshots(count: UInt) = locked {
+        maxSnapshots = count
+        db?.setMaxSnapshots(count)
+        Unit
+    }
 
     /**
      * Runs [body] on one open handle with no other call in between, then
@@ -508,14 +527,13 @@ class MnemoStore private constructor(
     private fun closeLocked() {
         val open = db ?: return
         cancelPendingCommitLocked()
+        // The binding's close flushes first; if that fails it keeps its
+        // handle (and the writes) and throws, and so does this, with the
+        // store still holding the open handle for a retry.
+        open.closeFile()
         db = null
-        try {
-            open.flush()
-            commits += 1
-            open.closeFile()
-        } finally {
-            open.close() // frees the Kotlin handle
-        }
+        commits += 1
+        open.close() // frees the Kotlin handle
     }
 
     private fun dropHandle() {
@@ -550,6 +568,7 @@ class MnemoStore private constructor(
             if (configuration.cachePages != MnemoStoreConfiguration.DEFAULT_CACHE_PAGES) {
                 opened.setCacheCapacity(configuration.cachePages)
             }
+            maxSnapshots?.let { opened.setMaxSnapshots(it) }
         } catch (e: Exception) {
             runCatching { opened.closeFile() }
             opened.close()

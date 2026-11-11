@@ -116,17 +116,26 @@ It stays in memory while the file's **live facts** fit the configuration's
 superseded versions don't count. Past the budget, recall reads the vectors
 from the file instead, which is slower, and slower still as the file grows.
 
-| Dimensions | Facts that fit 16 MiB |
-|---|---|
-| 384 | 21,732 |
-| 512 | 16,320 |
-| 768 | 10,894 |
+| Dimensions | Bytes per fact | Facts that fit 16 MiB | Budget to stay resident at 50,000 facts |
+|---|---|---|---|
+| 384 | 772 | 21,732 | 38.6 MB |
+| 512 | 1,028 | 16,320 | 51.4 MB |
+| 768 | 1,540 | 10,894 | 77.0 MB |
 
-``try await store.stats()`` says which path recall takes now, in `recallMode`:
+`try await store.stats()` says which path recall takes now, in `recallMode`:
 `.exactResident` (in memory, the fast path), `.exactPaged` (from the
-file) or `.indexed`. Past the budget, raise `vectorCacheBudgetBytes` if the app can
-spend the memory. Past 20,000 facts, `buildIndex()` builds the IVF+PQ
-index instead.
+file) or `.indexed`, and how many bytes the column needs to stay in memory, in
+`vectorColumnBytes` (`facts × (2 × dimensions + 4)`).
+
+**At the cliff, raise the budget first.** Setting `vectorCacheBudgetBytes` to at least
+`vectorColumnBytes` costs that much memory and gives the fast path back at
+once (at 22,000 facts × 384, warm recall went from 23.6 ms paged to 4.9 ms
+with the budget raised). Build an index (`buildIndex()`) only when the
+column no longer fits the memory the app can spare, past 20,000 facts, and
+only in a maintenance window: the build holds the store and takes long (49.8
+s at 22,000 facts on an M1 Pro; 19 s at 10,000 and 179 s at 100,000 in the
+perf file's `build_secs`), and a raised `cachePages` doesn't help a large
+file.
 
 ### History
 
@@ -136,6 +145,9 @@ never lets them pin more than a quarter of the file. Under the default
 flush policy a busy app commits about once a second, so the history
 reaches back about a day, not further. A v8 file keeps the newest 256.
 `compact()` drops all of them.
+`setMaxSnapshots(_:)` (Kotlin: `setMaxSnapshots(count)`) keeps a different
+number instead, as a hard cap; the store applies it every time it opens the
+file.
 
 ### Durability
 
@@ -265,6 +277,12 @@ open costs a file open and a key lookup (no KDF: device keys are raw keys).
 | `.deviceOnly` (default) | `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, not synced | excluded | nothing to restore; the app starts empty, or imports an export |
 | `.iCloudSynced` | `kSecAttrAccessibleAfterFirstUnlock`, synced through iCloud Keychain | included | opens, once iCloud Keychain has synced the key |
 
+- **The policy is fixed when the store is created.** Opening an existing
+  store with a different `keyPolicy` is refused with
+  `MnemoStoreError.keyPolicyMismatch(stored:configured:)`, and nothing is
+  changed. Moving the key and flipping the backup flag together isn't
+  supported yet; to switch, export with a passphrase and import under the
+  new policy.
 - **Recovering from `MnemoStoreError.keyMissing`.** The file exists, but
   its key isn't in the Keychain. That happens with a `.deviceOnly` file
   copied to another device, an `.iCloudSynced` file restored before the
@@ -312,10 +330,22 @@ let store = try MnemoStore(
     keyStore: MnemoKeychain(accessGroup: "TEAMID.com.example.shared"))
 ```
 
-- **Use App Group containers only through `MnemoStore`.** Its background
-  close is what keeps a suspended app or extension from holding the lock.
-  The close relies on `ProcessInfo.performExpiringActivity`, which works
-  in extensions as well, where `UIApplication.shared` isn't available.
+- **Use App Group containers only through `MnemoStore`.** In the app, its
+  background close is what keeps a suspended app from holding the lock. It
+  relies on `ProcessInfo.performExpiringActivity`, which works in
+  extensions as well, where `UIApplication.shared` isn't available.
+- **In an extension, close the store yourself.** An extension gets no
+  `UIApplication` lifecycle notifications, so the store treats it as
+  always active and keeps the file open between calls (see "Background,
+  termination and the file lock"). Call `close()` when the extension's work
+  ends, or before it can be suspended, or the main app gets
+  `MnemoError.Locked` until the extension exits.
+- **No background time, no open.** A call made in the background when the
+  system has no background time left fails with the retryable
+  `MnemoStoreError.noBackgroundTime` and doesn't open the file. A long call
+  made of several steps (an ingest's plan and apply) stops at the first
+  step with no time. A single engine step can't be interrupted, so keep
+  `buildIndex`, `compact` and the passphrase export for the foreground.
 - **One process at a time.** A store already open in another process fails
   with `MnemoError.Locked`. Concurrent access from an app and its
   extensions waits for engine phase 12.4.
@@ -329,13 +359,15 @@ let store = try MnemoStore(
   `Closed`: it reopens the file and retries once, and a handle a panic
   poisoned is treated the same way.
 - `MnemoStoreError` comes from this layer: `keyMissing(keyID:path:)`,
-  `keychain(status:operation:)` and `file(message:)`.
+  `keychain(status:operation:)`, `file(message:)`, `noBackgroundTime` and
+  `keyPolicyMismatch(stored:configured:)`, with `isRetryable` (the first two
+  of those, `keychain` and `noBackgroundTime`, are retryable).
 
 **What to do about an error, in three classes** (`error.isRetryable()` tells the first
 apart for `MnemoError`):
 
 | Class | Errors | What to do |
 |---|---|---|
-| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)` | Try again later, on the next launch, say. The data is fine. |
-| Fix the call | `Invalid`, `DimensionMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
+| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)`, `noBackgroundTime` | Try again later, on the next launch, say. The data is fine. |
+| Fix the call | `Invalid`, `DimensionMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
 | The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `keyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |
