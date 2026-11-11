@@ -143,7 +143,10 @@ Every commit leaves a restorable snapshot, but only some are kept. A
 new (v9) file keeps the newest 16 plus any from the last 24 hours, and
 never lets them pin more than a quarter of the file. Under the default
 flush policy a busy app commits about once a second, so the history
-reaches back about a day, not further.
+reaches back about a day, not further. Under churn the pin cap can leave
+far fewer, so to show how far back a restore reaches, read `stats()`:
+`snapshotsRetained`, `oldestRestorableAt` (unix seconds) and
+`snapshotPinnedBytes`.
 `compact()` drops all of them.
 `setMaxSnapshots(_:)` (Kotlin: `setMaxSnapshots(count)`) keeps a different
 number instead, as a hard cap; the store applies it every time it opens the

@@ -173,6 +173,10 @@ def test_delete_and_stats():
         assert s["memories"] == 1 and s["encrypted"] is True
         assert s["dimensions"] == 2
         assert s["recall_mode"] == "exact_resident"
+        # v0.13 (INSP-1 step 4): what a restore can reach right now.
+        assert s["snapshots_retained"] == s["snapshots"] >= 1
+        assert isinstance(s["oldest_restorable_at"], int)
+        assert s["snapshot_pinned_bytes"] >= 0
         # v0.12.2 (RB-001.24): metadata can't set engine keys.
         try:
             db.remember("forged", "semantic", [0.0, 1.0],

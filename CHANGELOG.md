@@ -72,6 +72,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
     and one new memory adds only its own lines. The result cache (and so
     the embedder-identity record) is never exported.
 
+- **Restore points in `stats`** (RB-001.25). `Stats` and `StatsSummary`
+  gain `snapshots_retained`, `oldest_restorable_at` (`Option<i64>`, unix
+  seconds) and `snapshot_pinned_bytes`, taken from the snapshots retained
+  now, not from the retention policy, which under churn can keep far fewer
+  than 16 because of the pin cap. Still cheap: they read the snapshot
+  manifest and the free list, with no record decrypts. The binding's
+  `DbStats` (Swift and Kotlin), Python's `stats()` dict and the MCP `stats`
+  tool carry them, and `mnemo info` prints them. `Stats` and
+  `StatsSummary` aren't `#[non_exhaustive]`, so code that builds them with
+  a struct literal needs the new fields.
+
 ### Fixed
 
 - **Compaction no longer refuses a file that holds an all-zero vector.**

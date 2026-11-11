@@ -35,6 +35,23 @@ impl Mnemo {
         v
     }
 
+    /// INSP-1 step 4 (RB-001.25): what is restorable right now, from the
+    /// retained snapshots rather than the retention policy: how many there
+    /// are, when the oldest was committed, and the bytes they keep from
+    /// reuse (free pages freed after the oldest one; v9's pin). Reads only
+    /// the manifest and the free list, so it's as cheap as `snapshots()`.
+    pub(super) fn restore_points(&self) -> RestorePoints {
+        let oldest = self.manifest.iter().min_by_key(|s| s.txn_id);
+        RestorePoints {
+            retained: self.manifest.len(),
+            oldest_at: oldest.map(|s| s.created_at),
+            pinned_bytes: match oldest {
+                Some(o) if self.is_v9() => self.free.pinned_pages(o.txn_id) * PAGE_SIZE as u64,
+                _ => 0,
+            },
+        }
+    }
+
     /// Load a past snapshot's state and commit it as a new transaction.
     pub(super) fn apply_snapshot(&mut self, snap: &Snapshot) -> Result<()> {
         let catalog = load_catalog(

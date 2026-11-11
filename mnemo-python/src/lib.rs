@@ -1736,6 +1736,10 @@ impl Mnemo {
         d.set_item("format_version", s.format_version)?;
         d.set_item("recall_mode", s.recall_mode.as_str())?;
         d.set_item("snapshots", self.core_mut()?.snapshots().len())?;
+        // INSP-1 (RB-001.25): what's restorable now, not the policy.
+        d.set_item("snapshots_retained", s.snapshots_retained)?;
+        d.set_item("oldest_restorable_at", s.oldest_restorable_at)?;
+        d.set_item("snapshot_pinned_bytes", s.snapshot_pinned_bytes)?;
         match s.index {
             Some(ix) => {
                 let i = PyDict::new_bound(py);

@@ -638,6 +638,9 @@ impl MnemoDb {
             wal_pages: s.wal_pages,
             recall_mode: s.recall_mode.into(),
             vector_column_bytes: s.vector_column_bytes,
+            snapshots_retained: s.snapshots_retained as u64,
+            oldest_restorable_at: s.oldest_restorable_at,
+            snapshot_pinned_bytes: s.snapshot_pinned_bytes,
         })
     }
 

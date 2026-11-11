@@ -431,6 +431,14 @@ pub struct SnapshotInfo {
     pub memory_count: u64,
 }
 
+/// What [`Mnemo::stats`] and [`Mnemo::stats_summary`] report about restore
+/// points (INSP-1, RB-001.25).
+pub(super) struct RestorePoints {
+    pub(super) retained: usize,
+    pub(super) oldest_at: Option<i64>,
+    pub(super) pinned_bytes: u64,
+}
+
 /// A retrieval request for [`Mnemo::recall`].
 #[derive(Clone, Debug)]
 pub struct RecallRequest {
@@ -726,11 +734,22 @@ pub struct Stats {
     /// before deciding whether cutting fsync count is a viable
     /// durability-preserving fix.
     pub fsyncs_last_flush: u32,
-    /// FMT-9f: the file's on-disk format (`8` or `9`). A v8 file still
-    /// opens and writes as v8; `mnemo compact` upgrades it to v9.
+    /// FMT-9f: the file's on-disk format (`8` or `9`). Since v0.13 a v8 file
+    /// opens read-only; `mnemo compact` converts it to v9.
     pub format_version: u16,
     /// MOBILE-2d: how recall scores vectors on this handle right now.
     pub recall_mode: RecallMode,
+    /// INSP-1 (RB-001.25): the snapshots retained right now, each a
+    /// restore point for [`Mnemo::restore_to`]. Under churn the pin cap can
+    /// keep fewer than the policy's 16-and-24-hours, so this, not the
+    /// policy, is what can be restored.
+    pub snapshots_retained: usize,
+    /// When the oldest retained snapshot was committed (unix seconds):
+    /// the furthest back a restore reaches. `None` with no snapshot.
+    pub oldest_restorable_at: Option<i64>,
+    /// The bytes the retained snapshots keep from reuse (pages freed after
+    /// the oldest one). `0` on v8, which never reuses pages.
+    pub snapshot_pinned_bytes: u64,
 }
 
 /// [`Mnemo::stats_summary`]: the cheap statistics, read from the catalog and
@@ -757,6 +776,17 @@ pub struct StatsSummary {
     /// facts × (`2 × dimensions + 4`). Recall is `ExactResident` while the
     /// vector cache budget is at least this; `0` on v8, which has no column.
     pub vector_column_bytes: u64,
+    /// INSP-1 (RB-001.25): the snapshots retained right now, each a
+    /// restore point for [`Mnemo::restore_to`]. Under churn the pin cap can
+    /// keep fewer than the policy's 16-and-24-hours, so this, not the
+    /// policy, is what can be restored.
+    pub snapshots_retained: usize,
+    /// When the oldest retained snapshot was committed (unix seconds):
+    /// the furthest back a restore reaches. `None` with no snapshot.
+    pub oldest_restorable_at: Option<i64>,
+    /// The bytes the retained snapshots keep from reuse (pages freed after
+    /// the oldest one). `0` on v8, which never reuses pages.
+    pub snapshot_pinned_bytes: u64,
 }
 
 /// MOBILE-2d: how recall scores vectors, from [`Mnemo::stats`].

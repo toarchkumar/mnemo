@@ -1074,6 +1074,9 @@ fn stats_is_the_cheap_path_and_track_access_defaults_off() {
     assert_eq!(s.vector_column_bytes, 20 * (2 * DIMS as u64 + 4));
     assert_eq!(s.recall_mode, RecallMode::ExactResident);
     assert!(!s.has_index);
+    // INSP-1 step 4: the restore points, as the engine reports them.
+    assert!(s.snapshots_retained >= 1);
+    assert!(s.oldest_restorable_at.is_some());
     // `RecallOptions` built in Rust spell every field; the default is the
     // generated one, checked in the Swift and Kotlin suites.
     let page = db.recall(vec![1.0, 0.5, 0.0, 1.0], recall_opts()).unwrap();

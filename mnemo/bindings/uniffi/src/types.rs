@@ -330,6 +330,14 @@ pub struct DbStats {
     /// `2 × dimensions + 4`). Recall is `ExactResident` while the store's
     /// `vectorCacheBudgetBytes` is at least this. `0` on a v8 file.
     pub vector_column_bytes: u64,
+    /// The snapshots retained right now: the restore points. Under churn
+    /// the pin cap can keep fewer than the 16-and-24-hours policy.
+    pub snapshots_retained: u64,
+    /// When the oldest retained snapshot was committed (unix seconds), the
+    /// furthest back a restore reaches; `None` with no snapshot.
+    pub oldest_restorable_at: Option<i64>,
+    /// The bytes the retained snapshots keep from reuse. `0` on a v8 file.
+    pub snapshot_pinned_bytes: u64,
 }
 
 /// How recall scores vectors, from `stats()`.

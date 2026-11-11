@@ -27,6 +27,10 @@ import Testing
         #expect(try await again.count() == 2)
         #expect(try await again.stats().dimensions == 4)
         #expect(try await again.stats().recallMode == .exactResident)
+        // v0.13: the restore points (the store committed at least once).
+        let restore = try await again.stats()
+        #expect(restore.snapshotsRetained >= 1)
+        #expect(restore.oldestRestorableAt != nil)
         try await again.close()
     }
 

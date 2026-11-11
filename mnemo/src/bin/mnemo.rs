@@ -1321,7 +1321,16 @@ fn run() -> std::result::Result<(), String> {
             println!("recall:      {}", s.recall_mode.as_str());
             println!("created at:  {}", s.created_at);
             println!("agents:      {}", s.agents.join(", "));
-            println!("snapshots:   {}", db.snapshots().len());
+            // INSP-1 (RB-001.25): what a restore can reach right now.
+            match s.oldest_restorable_at {
+                Some(t) => println!(
+                    "snapshots:   {} retained, oldest {} ({} bytes pinned)",
+                    s.snapshots_retained,
+                    export::rfc3339(t),
+                    s.snapshot_pinned_bytes
+                ),
+                None => println!("snapshots:   none"),
+            }
             // Phase 6 instrumentation: how many fsyncs the most recent
             // flush issued. `0` on a read-only open since open() never
             // flushes; shown as a dash in that case for clarity.

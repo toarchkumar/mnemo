@@ -516,6 +516,7 @@ impl Mnemo {
         } else {
             RecallMode::ExactPaged
         };
+        let rp = self.restore_points();
         StatsSummary {
             memories: self.len(),
             deleted,
@@ -526,6 +527,9 @@ impl Mnemo {
             has_index: self.has_index(),
             recall_mode,
             vector_column_bytes: column,
+            snapshots_retained: rp.retained,
+            oldest_restorable_at: rp.oldest_at,
+            snapshot_pinned_bytes: rp.pinned_bytes,
         }
     }
 
@@ -554,6 +558,7 @@ impl Mnemo {
             .collect();
         let file_bytes = self.header.next_page * PAGE_SIZE as u64;
         let recall_mode = self.recall_mode()?;
+        let rp = self.restore_points();
         Ok(Stats {
             memories: self.len(),
             deleted,
@@ -570,6 +575,9 @@ impl Mnemo {
             fsyncs_last_flush: self.fsyncs_last_flush,
             format_version: self.header.version,
             recall_mode,
+            snapshots_retained: rp.retained,
+            oldest_restorable_at: rp.oldest_at,
+            snapshot_pinned_bytes: rp.pinned_bytes,
         })
     }
 

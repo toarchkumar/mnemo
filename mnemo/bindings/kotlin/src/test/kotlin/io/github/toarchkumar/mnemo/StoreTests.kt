@@ -43,6 +43,10 @@ class StoreTests {
         assertEquals(2uL, again.count())
         assertEquals(4u, again.stats().dimensions)
         assertEquals(RecallMode.EXACT_RESIDENT, again.stats().recallMode)
+        // v0.13: the restore points (the store committed at least once).
+        val restore = again.stats()
+        assertTrue(restore.snapshotsRetained >= 1uL)
+        assertNotNull(restore.oldestRestorableAt)
         again.close()
     }
 

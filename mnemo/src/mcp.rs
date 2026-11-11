@@ -1709,6 +1709,9 @@ fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
         "recall_mode": s.recall_mode.as_str(),
         "index": s.index,
         "snapshot_count": snapshot_count,
+        "snapshots_retained": s.snapshots_retained,
+        "oldest_restorable_at": s.oldest_restorable_at,
+        "snapshot_pinned_bytes": s.snapshot_pinned_bytes,
         "cache_pages": cache_pages,
         "cache_capacity": cache_capacity,
     })

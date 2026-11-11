@@ -467,7 +467,12 @@ to last week" doesn't work unless you raise the count. `restore_to` a
 snapshot that's gone returns `MnemoError::NotFound`. `compact_file`
 collapses the manifest to a single snapshot, and there's no external log
 archiving, so nothing older than the last compaction is ever restorable.
-`snapshots()` lists exactly what's restorable now.
+`snapshots()` lists exactly what's restorable now, and since v0.13
+`stats()` and `stats_summary()` sum it up: `snapshots_retained`,
+`oldest_restorable_at` (the furthest back a restore reaches) and
+`snapshot_pinned_bytes` (what the retained snapshots keep from reuse; `0`
+on v8). Under churn the pin cap can leave only a few snapshots, seconds
+apart, so show these rather than the policy. `mnemo info` prints them.
 
 ### Format versions: v9, and v8 read-only
 
