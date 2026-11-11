@@ -849,6 +849,11 @@ impl Mnemo {
     ///
     /// Changed in v0.12.0: `close` took `&mut self` and left the file and
     /// lock held until the handle was dropped.
+    ///
+    /// **If the final flush fails, the handle is dropped with it**, and the
+    /// writes that weren't flushed are lost (a full disk on a phone, say).
+    /// [`Mnemo::try_close`] gives the handle back on that path, so the caller
+    /// can free space and retry.
     pub fn close(mut self) -> Result<()> {
         if !self.read_only {
             // PERF-1: closing persists a dirty ANN index too, so the next
@@ -857,6 +862,41 @@ impl Mnemo {
             self.flush()?;
         }
         // Dropping the handle closes the file, which releases the lock.
+        drop(self);
+        Ok(())
+    }
+
+    /// [`Mnemo::close`] that keeps the data when the final flush fails: the
+    /// error carries the handle back, with every unflushed write still in
+    /// it, as [`std::io::BufWriter::into_inner`] does. Retry with
+    /// [`Mnemo::flush`] or another `try_close` once the cause is fixed.
+    /// A read-only handle never flushes, so it always closes. Added in
+    /// v0.12.2 (RB-001.22).
+    ///
+    /// ```no_run
+    /// # use mnemo_engine::Mnemo;
+    /// # fn run(db: Mnemo) -> mnemo_engine::Result<()> {
+    /// match db.try_close() {
+    ///     Ok(()) => {}
+    ///     Err(e) => {
+    ///         eprintln!("close failed: {}", e.error());
+    ///         let mut db = e.into_inner(); // still open, still holding the writes
+    ///         db.flush()?;                  // e.g. after freeing space
+    ///         db.close()?;
+    ///     }
+    /// }
+    /// # Ok(()) }
+    /// ```
+    pub fn try_close(mut self) -> std::result::Result<(), CloseError> {
+        if !self.read_only {
+            self.index_persist.forced = true;
+            if let Err(error) = self.flush() {
+                return Err(CloseError {
+                    handle: Box::new(self),
+                    error,
+                });
+            }
+        }
         drop(self);
         Ok(())
     }

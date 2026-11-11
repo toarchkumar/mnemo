@@ -31,8 +31,11 @@ pub(super) const TURN_ZSTD_MIN_BYTES: usize = 256;
 /// FMT-9e: the largest decompressed record accepted. A turn record is a
 /// chunk of at most [`V9_TURN_CHUNK_BYTES`] plus its metadata, so this is
 /// a generous bound, not a size limit anyone meets; it stops a damaged
-/// (but authenticated) frame from asking for an unbounded allocation.
-pub(super) const RECORD_PLAIN_MAX: u64 = 64 << 20;
+/// (but authenticated) frame from asking for a large allocation. The frame's
+/// declared size is checked before anything is allocated. 1 MiB since
+/// v0.12.2 (RB-001.26); it was 64 MiB, four times the whole mobile vector
+/// budget, for records of under 8 KB.
+pub(super) const RECORD_PLAIN_MAX: u64 = 1 << 20;
 
 /// FMT-9e: at most this many aged turns are compressed per commit, so a
 /// commit's extra work stays bounded (like the vacuum).

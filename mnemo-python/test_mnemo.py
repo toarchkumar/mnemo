@@ -171,6 +171,14 @@ def test_delete_and_stats():
         assert s["memories"] == 1 and s["encrypted"] is True
         assert s["dimensions"] == 2
         assert s["recall_mode"] == "exact_resident"
+        # v0.12.2 (RB-001.24): metadata can't set engine keys.
+        try:
+            db.remember("forged", "semantic", [0.0, 1.0],
+                        metadata={"_mnemo.kind": "turn", "_mnemo.thread": "t1"})
+            raise AssertionError("a _mnemo.* metadata key should be refused")
+        except (RuntimeError, ValueError) as e:
+            assert "reserved" in str(e), e
+        assert len(db) == 1
         db.close()
     print("ok  delete / stats")
 

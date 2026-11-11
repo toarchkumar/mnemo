@@ -247,7 +247,7 @@ impl Mnemo {
             );
             patch.metadata = Some(meta);
         }
-        self.update(id, patch)
+        self.update_unchecked(id, patch)
     }
 
     /// Phase 12.7b: mark a section item as resolved (open → resolved

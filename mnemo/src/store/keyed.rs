@@ -62,13 +62,20 @@ impl Mnemo {
                 "remember_keyed: 'key' must not be empty".into(),
             ));
         }
+        // RB-001.24: a keyed write is always a new record, so no caller
+        // `_mnemo.*` key is accepted (the engine sets `_mnemo.key` below).
+        if let Some(k) = memory
+            .metadata
+            .keys()
+            .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
+        {
+            return Err(super::crud::reserved_key_error(k));
+        }
         self.ensure_key_caches()?;
         let slot = Self::key_slot_for(&memory, key);
         let existing = self.key_index.as_ref().and_then(|k| k.get(&slot).copied());
 
-        // Caller may already have set `_mnemo.key` on the memory; rewrite
-        // it to our canonical value regardless so the record is
-        // self-identifying.
+        // The canonical `_mnemo.key`, so the record is self-identifying.
         memory
             .metadata
             .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
@@ -167,7 +174,27 @@ impl Mnemo {
     /// entries. A `content` change requires a matching `vector`
     /// (use [`Mnemo::update_text`] to re-embed) — a bare `content` patch
     /// is rejected to stop text and embedding drifting apart silently.
+    ///
+    /// A `metadata` map with a key starting with `_mnemo.` is refused with
+    /// [`MnemoError::Invalid`]: those keys are the engine's, and the
+    /// record's own are kept as described above.
     pub fn update(&mut self, id: &Ulid, patch: MemoryPatch) -> Result<WriteOutcome> {
+        if let Some(k) = patch.metadata.as_ref().and_then(|m| {
+            m.keys()
+                .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
+        }) {
+            return Err(super::crud::reserved_key_error(k));
+        }
+        self.update_unchecked(id, patch)
+    }
+
+    /// [`Mnemo::update`] without the reserved-key check, for the engine's own
+    /// updates (essence items carry `_mnemo.refs`).
+    pub(super) fn update_unchecked(
+        &mut self,
+        id: &Ulid,
+        patch: MemoryPatch,
+    ) -> Result<WriteOutcome> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }

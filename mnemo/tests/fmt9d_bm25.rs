@@ -2,9 +2,8 @@
 //! explicitly.
 
 use mnemo_engine::{
-    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, RecallRequest, Ulid,
+    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, RecallRequest, ThreadTurn, Ulid,
 };
-use serde_json::json;
 use tempfile::tempdir;
 
 fn cfg(version: u16) -> MnemoConfig {
@@ -143,10 +142,18 @@ fn restore_brings_back_the_keyword_index_of_its_snapshot() {
 fn thread_turns_are_not_keyword_indexed_and_v8_has_no_index() {
     let dir = tempdir().unwrap();
     let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(9)).unwrap();
-    let mut turn = mem("gamma said in a thread", 0);
-    turn.metadata.insert("_mnemo.kind".into(), json!("turn"));
-    turn.metadata.insert("_mnemo.thread".into(), json!("t1"));
-    db.remember(turn).unwrap();
+    // A real thread turn (since v0.12.2 a plain `remember` can't forge one).
+    db.ingest_thread_with_vectors(
+        "t1",
+        &[ThreadTurn {
+            turn_id: "1".into(),
+            role: "user".into(),
+            content: "gamma said in a thread".into(),
+            timestamp: None,
+        }],
+        &[vec![1.0, 0.5, 0.25, 0.125]],
+    )
+    .unwrap();
     let fact = db.remember(mem("gamma is a fact", 1)).unwrap();
     assert_eq!(top(&mut db, "gamma"), vec![fact]);
 

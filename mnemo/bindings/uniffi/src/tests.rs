@@ -843,3 +843,35 @@ fn splice(
     std::fs::write(&out, bytes).unwrap();
     out.display().to_string()
 }
+
+/// RB-002.4 T8 through the binding (v0.12.2): `metadata_json` can't set
+/// engine keys, on `remember` or on `update`.
+#[test]
+fn t8_reserved_metadata_through_metadata_json_is_invalid() {
+    let dir = tempdir().unwrap();
+    let (db, _) = new_db(&dir);
+    let mut opts = remember_opts();
+    opts.metadata_json = Some(r#"{"_mnemo.kind": "turn", "_mnemo.thread": "t1"}"#.into());
+    assert!(matches!(
+        db.remember("forged".into(), vec![1.0, 0.0, 0.0, 0.0], opts),
+        Err(MnemoError::Invalid { .. })
+    ));
+    let w = db
+        .remember("normal".into(), vec![1.0, 0.0, 0.0, 0.0], remember_opts())
+        .unwrap();
+    let patch = MemoryPatch {
+        content: None,
+        vector: None,
+        importance: None,
+        memory_type: None,
+        metadata_json: Some(r#"{"_mnemo.invalid_at": 1}"#.into()),
+        ttl_secs: None,
+        clear_ttl: false,
+    };
+    assert!(matches!(
+        db.update(w.id, patch),
+        Err(MnemoError::Invalid { .. })
+    ));
+    assert_eq!(db.len().unwrap(), 1);
+    assert!(db.thread_export("t1".into()).unwrap().is_empty());
+}

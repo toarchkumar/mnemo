@@ -750,6 +750,51 @@ impl RecallMode {
     }
 }
 
+/// The error from [`Mnemo::try_close`]: the final flush failed, and the
+/// handle comes back with it, still open and still holding every write that
+/// wasn't flushed.
+pub struct CloseError {
+    pub(super) handle: Box<Mnemo>,
+    pub(super) error: MnemoError,
+}
+
+impl CloseError {
+    /// Why the flush failed.
+    pub fn error(&self) -> &MnemoError {
+        &self.error
+    }
+
+    /// The handle, to retry [`Mnemo::flush`] or [`Mnemo::try_close`].
+    pub fn into_inner(self) -> Mnemo {
+        *self.handle
+    }
+
+    /// The handle and the error.
+    pub fn into_parts(self) -> (Mnemo, MnemoError) {
+        (*self.handle, self.error)
+    }
+}
+
+impl std::fmt::Debug for CloseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloseError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Display for CloseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "close failed (the handle is kept): {}", self.error)
+    }
+}
+
+impl std::error::Error for CloseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
 /// Result of a [`Mnemo::compact_file`] run.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompactReport {

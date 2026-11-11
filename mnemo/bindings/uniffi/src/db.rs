@@ -325,12 +325,24 @@ impl MnemoDb {
 
     /// Flush, then release the file and its lock. Later calls return
     /// `Closed`; closing twice is fine.
+    ///
+    /// If the final flush fails (a full disk, say), the handle is put back:
+    /// the file stays open with every unflushed write, the error is
+    /// returned, and `flush()` or `close()` can be retried once the cause is
+    /// fixed (v0.12.2; before, the writes were lost).
     pub fn close(&self) -> Result<(), MnemoError> {
         let mut guard = self.inner.lock().map_err(|_| MnemoError::Corrupt {
             message: POISONED.into(),
         })?;
         match guard.take() {
-            Some(db) => db.close().map_err(MnemoError::from),
+            Some(db) => match db.try_close() {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    let (db, error) = e.into_parts();
+                    *guard = Some(db);
+                    Err(error.into())
+                }
+            },
             None => Ok(()),
         }
     }

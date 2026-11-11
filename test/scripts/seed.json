@@ -357,5 +357,14 @@
       "area": "architecture",
       "topic": "sizing-mrl-and-future"
     }
+  },
+  {
+    "content": "RESERVED METADATA (v0.12.2): metadata keys starting with `_mnemo.` belong to the engine (supersession, keys, threads, kinds). Every public write (remember, remember_keyed, update, the CLI, MCP, Python, the mobile binding) refuses a caller key with that prefix, with Invalid. Don't pass model-written metadata through unfiltered; use your own namespace. To key a fact use remember_keyed or the key option, not `_mnemo.key`. An in-place overwrite (get, edit, remember) may carry the record's own `_mnemo.*` keys through unchanged.",
+    "memory_type": "procedural",
+    "importance": 0.8,
+    "metadata": {
+      "area": "conventions",
+      "topic": "reserved-metadata-namespace"
+    }
   }
 ]

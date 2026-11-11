@@ -249,11 +249,55 @@ impl Mnemo {
 
     /// Store a memory. Returns its ULID. If the memory's ID is nil a fresh
     /// one is assigned; an existing ID overwrites in place.
+    ///
+    /// Metadata keys starting with `_mnemo.` are the engine's (supersession,
+    /// keys, threads, kinds): a new memory carrying one is refused with
+    /// [`MnemoError::Invalid`]. An in-place overwrite may carry the stored
+    /// record's own `_mnemo.*` keys through unchanged (the usual `get`,
+    /// change a field, `remember`), but can't add, change or drop one.
     pub fn remember(&mut self, memory: Memory) -> Result<Ulid> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        self.check_caller_metadata(&memory)?;
         self.put(memory)
+    }
+
+    /// RB-001.24: the caller's metadata may not set engine state. For a
+    /// memory with a nil or unknown id, any `_mnemo.*` key is refused; for
+    /// an overwrite in place, the `_mnemo.*` keys must equal the stored
+    /// record's.
+    pub(super) fn check_caller_metadata(&mut self, memory: &Memory) -> Result<()> {
+        let reserved: Vec<(&String, &Value)> = memory
+            .metadata
+            .iter()
+            .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS))
+            .collect();
+        if reserved.is_empty() {
+            return Ok(());
+        }
+        let stored = if memory.id.is_nil() {
+            None
+        } else {
+            match self.index.get(memory.id.0, &self.catalog) {
+                Some(idx) if !self.catalog[idx].deleted => {
+                    let entry = self.catalog[idx].clone();
+                    Some(self.read_memory(&entry)?)
+                }
+                _ => None,
+            }
+        };
+        if let Some(old) = stored {
+            let old_reserved: Vec<(&String, &Value)> = old
+                .metadata
+                .iter()
+                .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS))
+                .collect();
+            if old_reserved == reserved {
+                return Ok(());
+            }
+        }
+        Err(reserved_key_error(reserved[0].0))
     }
 
     /// Fetch a memory by ID.
@@ -550,4 +594,12 @@ impl Mnemo {
         }
         Ok(())
     }
+}
+
+/// RB-001.24: the error for caller metadata that sets an engine key.
+pub(super) fn reserved_key_error(key: &str) -> MnemoError {
+    MnemoError::Invalid(format!(
+        "metadata key \"{key}\" is reserved: keys starting with \"{}\" are set by the engine",
+        crate::memory::MNEMO_META_NS
+    ))
 }

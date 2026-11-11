@@ -40,3 +40,6 @@ zeroize = "=1.8.1"
 
 [dev-dependencies]
 tempfile = "=3.10.1"
+# The engine's failpoints, for tests/close_retry.rs only (resolver 2 keeps
+# dev-dependency features out of normal builds).
+mnemo_engine = { package = "mnemo-engine", path = "../..", features = ["failpoints"] }

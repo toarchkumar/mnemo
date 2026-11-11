@@ -96,8 +96,8 @@ pub use session::{Role, Session, Turn};
 #[doc(hidden)]
 pub use store::BudgetReport;
 pub use store::{
-    CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse, RecallResult,
-    SnapshotInfo, Stats, DEFAULT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS,
+    CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
+    RecallResult, SnapshotInfo, Stats, DEFAULT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS,
     DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
     V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };

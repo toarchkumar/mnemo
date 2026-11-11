@@ -8,6 +8,30 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **Caller metadata can no longer set engine state (RB-001.24).**
+  - Every public write (Rust `remember`, `remember_keyed` and `update`, and
+    through them Python, the CLI, MCP and the mobile binding) now refuses
+    metadata keys that start with `_mnemo.`, with `Invalid`.
+  - Those keys are how the engine records supersession, keys, threads and
+    kinds. Set from outside, they could store a memory already hidden from
+    recall, file it into a thread it isn't part of, or slip it into another
+    key's history.
+  - An in-place overwrite (`get`, change a field, `remember`) may still
+    carry the record's own `_mnemo.*` keys through unchanged.
+  - `get` and the exports still return them, and existing files are
+    unaffected.
+
+### Added
+
+- **`Mnemo::try_close(self) -> Result<(), CloseError>` (RB-001.22).** If
+  the final flush fails (a full disk on a phone, say), the error carries
+  the handle back, still open and holding every unflushed write, so the
+  caller can fix the cause and retry, as with `BufWriter::into_inner`.
+  `close` is unchanged in 0.12; its docs point to `try_close`.
+
+
 ### CI
 
 - **Dependabot no longer moves the MSRV toolchains** (CI-DEPS-1).
@@ -24,6 +48,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **The mobile binding's `close()` keeps the file when its final flush
+  fails.** The handle goes back in its slot, so `flush()` or `close()` can
+  be retried and nothing is lost (RB-001.22). Before, the unflushed writes
+  were dropped.
+- **A v9 record decompresses to at most 1 MiB** (was 64 MiB, for records
+  of under 8 KB; RB-001.26). The bound is checked from the frame's header,
+  before any allocation.
 - **Android: a passing Keystore failure is no longer reported as a lost
   key (RB-001.21).**
   - `MnemoKeystore` used to turn every unwrap failure, and every error

@@ -143,10 +143,19 @@ fn rows_skip_superseded_expired_and_thread_layers_without_decrypting() {
     let mut ttl = mem(2);
     ttl.ttl_secs = Some(0);
     let ttl_id = db.remember(ttl).unwrap();
-    let mut turn = mem(3);
-    turn.metadata.insert("_mnemo.kind".into(), json!("turn"));
-    turn.metadata.insert("_mnemo.thread".into(), json!("t1"));
-    let turn_id = db.remember(turn).unwrap();
+    // A real thread turn (since v0.12.2 a plain `remember` can't forge one).
+    db.ingest_thread_with_vectors(
+        "t1",
+        &[ThreadTurn {
+            turn_id: "1".into(),
+            role: "user".into(),
+            content: "memory 3".into(),
+            timestamp: None,
+        }],
+        &[vector(3)],
+    )
+    .unwrap();
+    let turn_id = db.thread_export("t1").unwrap()[0].id;
     db.flush().unwrap();
 
     let hits = db

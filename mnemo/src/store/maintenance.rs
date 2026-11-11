@@ -289,7 +289,8 @@ impl Mnemo {
             if m.is_expired(now) {
                 continue;
             }
-            new.remember(m)?;
+            // The engine's own copy: `_mnemo.*` keys come through as they are.
+            new.put(m)?;
             after += 1;
         }
         if want_index && after > 0 {
