@@ -194,11 +194,21 @@ final class MyEmbedder: MnemoEmbedder, @unchecked Sendable {
 }
 ```
 
-- `embed` runs before a call reaches the store's actor, synchronously and
-  off the main thread. The store isn't held while it runs, so other calls
-  go ahead, a background close isn't held up, and `embed` may call back
-  into the same store. (Before v0.12.1 it ran on the actor, so a slow
-  model held every other call.)
+- `embed` runs before a call reaches the store's actor, on the store's own
+  serial queue, off the main thread and off Swift's cooperative thread
+  pool. A slow model doesn't block the app's Swift concurrency, the store
+  isn't held while it runs (other calls go ahead, and a background close
+  isn't held up), and `embed` may call back into the same store. (Before
+  v0.12.1 it ran on the actor, so a slow model held every other call;
+  before v0.12.3 it ran on the cooperative pool, so slow embeds could
+  starve the app's other tasks.)
+- Embeds run one at a time per store, because Core ML models often aren't
+  safe to call concurrently. So `embed` must not wait on a text call
+  (`rememberText`, `recallText`, ...) of the same store: that call queues
+  behind it.
+- A cancelled text call stops waiting at once and writes nothing. An embed
+  already running can't be interrupted: it finishes on the queue and its
+  result is dropped.
 - If it throws (any error), the call fails with `MnemoError.Embedder`, and
   nothing is written.
 - The identity is recorded in the file. Opening the file with a different

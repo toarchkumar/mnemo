@@ -8,6 +8,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Swift: a slow embedder no longer starves the app's Swift concurrency.**
+  `MnemoStore` ran the app's synchronous `embed` on Swift's cooperative
+  thread pool, which must never block, so slow embeds (a Core ML model, say)
+  could hold up the app's other tasks. Each store now runs its embeds one
+  at a time on its own serial queue (QoS `.userInitiated`), and the text
+  calls wait for it without holding a pool thread. The `MnemoEmbedder`
+  protocol is unchanged.
+  - A cancelled text call (`rememberText`, `recallText`, `update`, the
+    essence calls, `ingestThread`) now stops waiting at once with
+    `CancellationError` and writes nothing. An embed already running
+    finishes and its result is dropped.
+  - An embedder must not wait on a text call of its own store, which would
+    queue behind it.
+  - Kotlin needed no change: its embed already runs on `Dispatchers.IO`,
+    which grows for blocking work. A test now confirms it.
+
 ## [0.12.2] — 2026-11-11
 
 Mobile hardening: safer errors and keys on Android and iOS, durable closes,

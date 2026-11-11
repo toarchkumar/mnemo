@@ -125,9 +125,15 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
 ///   calls into one commit.
 /// - Calls run on the actor, never on the main thread, and are serialized.
 ///   Each is a blocking call into the engine, so keep batches reasonable.
-/// - The embedder runs before a call reaches the actor, off the main thread:
-///   other calls to the store go ahead while it runs, a background close
-///   isn't held up by it, and it may call back into the same store.
+/// - The embedder runs before a call reaches the actor, on the store's own
+///   serial embed queue, never on Swift's cooperative thread pool: other
+///   calls to the store and the app's other tasks go ahead while it runs, a
+///   background close isn't held up by it, and it may call back into the
+///   same store (but must not wait on that store's text calls, which queue
+///   behind it). Embeds run one at a time, because Core ML models often
+///   aren't safe to call concurrently. A cancelled text call stops waiting
+///   at once and writes nothing; an embed already running can't be
+///   interrupted, so it finishes on the queue and its result is dropped.
 /// - The file lives in `Application Support/mnemo/` by default, with the
 ///   protection class `completeUntilFirstUserAuthentication`, and under
 ///   ``KeyPolicy/deviceOnly`` it's excluded from backups.
@@ -140,6 +146,9 @@ public actor MnemoStore {
     private let keyStore: any MnemoKeyStore
     /// Read outside the actor: the text calls embed before they reach it.
     private nonisolated let embedderBox: EmbedderBox
+    /// Runs the embedder, one call at a time, off the cooperative pool. QoS
+    /// `.userInitiated`: a text call is something the app is waiting on.
+    private nonisolated let embedQueue: DispatchQueue
     private var db: MnemoDb?
     private var keyID: String?
     private nonisolated let lifecycle = LifecycleObserver()
@@ -179,6 +188,7 @@ public actor MnemoStore {
         self.fileURL = try configuration.fileURL()
         self.keyStore = keyStore
         self.embedderBox = EmbedderBox(embedder)
+        self.embedQueue = DispatchQueue(label: "mnemo.embed.\(configuration.name)", qos: .userInitiated)
         activityReason = "MNemo: \(configuration.name) in the background"
         lifecycle.start(reason: "MNemo: flush and close \(configuration.name)") { [weak self] in
             await self?.closeForBackground()
@@ -198,7 +208,7 @@ public actor MnemoStore {
     @discardableResult
     public nonisolated func rememberText(_ content: String,
                                          options: RememberOptions = RememberOptions()) async throws -> WriteResult {
-        let vector = try embed(content)
+        let vector = try await embed(content)
         return try await remember(content, vector: vector, options: options)
     }
 
@@ -208,7 +218,7 @@ public actor MnemoStore {
     public nonisolated func update(id: String, patch: MemoryPatch) async throws -> WriteOutcome {
         var patch = patch
         if let content = patch.content, patch.vector == nil, embedderBox.value != nil {
-            patch.vector = try embed(content)
+            patch.vector = try await embed(content)
         }
         return try await updateOnHandle(id: id, patch: patch)
     }
@@ -242,7 +252,7 @@ public actor MnemoStore {
 
     /// Recall by text, embedded with the store's embedder first.
     public nonisolated func recallText(_ query: String, options: RecallOptions = RecallOptions()) async throws -> RecallPage {
-        let vector = try embed(query)
+        let vector = try await embed(query)
         return try await recall(vector: vector, options: options)
     }
 
@@ -264,7 +274,7 @@ public actor MnemoStore {
     @discardableResult
     public nonisolated func essenceAdd(_ section: EssenceSection, _ text: String, scope: EssenceScope = .project,
                                        refs: [String]? = nil) async throws -> String {
-        let vector = try embedIfSet(text)
+        let vector = try await embedIfSet(text)
         return try await essenceAddOnHandle(section, text, scope: scope, refs: refs, vector: vector)
     }
 
@@ -280,7 +290,7 @@ public actor MnemoStore {
     @discardableResult
     public nonisolated func essenceAppendTimeline(_ text: String, scope: EssenceScope = .project,
                                                   refs: [String]? = nil) async throws -> String {
-        let vector = try embedIfSet(text)
+        let vector = try await embedIfSet(text)
         return try await essenceAppendOnHandle(text, scope: scope, refs: refs, vector: vector)
     }
 
@@ -341,7 +351,7 @@ public actor MnemoStore {
     public nonisolated func ingestThread(_ threadID: String, turns: [ThreadTurn]) async throws -> IngestReport {
         for _ in 0..<3 {
             let texts = try await ingestPlan(threadID, turns: turns)
-            let vectors = texts.isEmpty ? [] : try embed(texts)
+            let vectors = texts.isEmpty ? [] : try await embed(texts)
             if let report = try await ingestApply(threadID, turns: turns, texts: texts, vectors: vectors) {
                 return report
             }
@@ -504,20 +514,36 @@ public actor MnemoStore {
 
     // MARK: Embedding
 
-    /// One text's vector, embedded here, outside the actor.
-    private nonisolated func embed(_ text: String) throws -> [Float] {
-        try embed([text])[0]
+    /// One text's vector, embedded outside the actor, on the embed queue.
+    private nonisolated func embed(_ text: String) async throws -> [Float] {
+        try await embed([text])[0]
     }
 
-    private nonisolated func embed(_ texts: [String]) throws -> [[Float]] {
+    /// Runs the embedder on the store's serial embed queue and waits for it
+    /// without holding a cooperative-pool thread. A cancelled caller stops
+    /// waiting with `CancellationError`; an embed not yet started is skipped,
+    /// and one already running finishes and its result is dropped.
+    private nonisolated func embed(_ texts: [String]) async throws -> [[Float]] {
         guard let embedder = embedderBox.value else {
             throw MnemoError.Invalid(message: "no embedder set; call set_embedder first")
         }
-        return try embedTexts(embedder: embedder, texts: texts, dimensions: configuration.dimensions)
+        let dimensions = configuration.dimensions
+        let call = EmbedCall()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard call.wait(continuation) else { return }
+                embedQueue.async {
+                    guard !call.isCancelled else { return }
+                    call.finish(Result { try embedTexts(embedder: embedder, texts: texts, dimensions: dimensions) })
+                }
+            }
+        } onCancel: {
+            call.cancel()
+        }
     }
 
-    private nonisolated func embedIfSet(_ text: String) throws -> [Float]? {
-        embedderBox.value == nil ? nil : try embed(text)
+    private nonisolated func embedIfSet(_ text: String) async throws -> [Float]? {
+        embedderBox.value == nil ? nil : try await embed(text)
     }
 
     // MARK: Internals
@@ -801,6 +827,40 @@ final class KeyBytes {
 
     deinit {
         wipe()
+    }
+}
+
+/// One embed's hand-off between the caller and the embed queue: whichever of
+/// the result and a cancellation comes first resumes the caller, once.
+final class EmbedCall: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<[[Float]], any Error>?
+    private var cancelled = false
+
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+
+    /// Parks the caller. False (and the caller resumed with
+    /// `CancellationError`) when the task was cancelled first.
+    func wait(_ c: CheckedContinuation<[[Float]], any Error>) -> Bool {
+        lock.lock()
+        if cancelled {
+            lock.unlock()
+            c.resume(throwing: CancellationError())
+            return false
+        }
+        continuation = c
+        lock.unlock()
+        return true
+    }
+
+    func finish(_ result: Result<[[Float]], any Error>) {
+        lock.lock(); let c = continuation; continuation = nil; lock.unlock()
+        c?.resume(with: result)
+    }
+
+    func cancel() {
+        lock.lock(); cancelled = true; let c = continuation; continuation = nil; lock.unlock()
+        c?.resume(throwing: CancellationError())
     }
 }
 

@@ -42,9 +42,8 @@ import Testing
 
     /// T9 (b): a 1.5 s embed in flight; `count()` and `closeForBackground()`
     /// 0.2 s in. Before 2c both waited about 1.3 s. After: milliseconds.
-    /// On a busy runner the test can resume only after the embed is over
-    /// (the embed blocks a cooperative-pool thread, MOBILE-2f), so the count
-    /// is 1 only when the embed hadn't finished when `count()` was called.
+    /// Strict since MOBILE-2f: the embed no longer holds a cooperative-pool
+    /// thread, so the test resumes while it's still in flight.
     @Test func t9bCountAndTheBackgroundCloseDontWaitForAnEmbed() async throws {
         let slow = SlowEmbedder(seconds: 1.5)
         let store = try MnemoStore(
@@ -55,19 +54,11 @@ import Testing
         #expect(try await eventually(5) { slow.started })
         try await Task.sleep(nanoseconds: 200_000_000)
         var t = Date()
-        let count = try await store.count()
+        #expect(try await store.count() == 1)
         let countSecs = Date().timeIntervalSince(t)
-        // Read after count() returns: if the embed still hadn't finished, its
-        // write can't have landed before count() read the file.
-        let embedDone = slow.finished
         t = Date()
         await store.closeForBackground()
         let closeSecs = Date().timeIntervalSince(t)
-        if embedDone {
-            #expect(count == 1 || count == 2, "count \(count) after the embed finished")
-        } else {
-            #expect(count == 1, "count \(count) with the embed in flight")
-        }
         #expect(countSecs < 0.3, "count took \(countSecs) s")
         #expect(closeSecs < 0.3, "the background close took \(closeSecs) s")
         _ = try await writer.value

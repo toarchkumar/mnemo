@@ -3,7 +3,8 @@ import Testing
 @testable import Mnemo
 
 /// The embedder runs outside the store (MOBILE-2c): before a call reaches
-/// the actor, so the store keeps serving other calls while it runs.
+/// the actor, on the store's embed queue (MOBILE-2f), so the store keeps
+/// serving other calls while it runs.
 @Suite struct EmbedderLockTests {
     @Test func anEmbedderThatCallsBackIntoTheStoreCompletes() async throws {
         let embedder = CallbackEmbedder()
@@ -99,7 +100,6 @@ final class SlowEmbedder: MnemoEmbedder, @unchecked Sendable {
     init(seconds: Double) { self.seconds = seconds }
 
     var started: Bool { lock.lock(); defer { lock.unlock() }; return _started }
-    /// True once the embed is about to return; its write can land only after.
     var finished: Bool { lock.lock(); defer { lock.unlock() }; return _finished }
 
     func identity() -> EmbedderIdentity { words.identity() }

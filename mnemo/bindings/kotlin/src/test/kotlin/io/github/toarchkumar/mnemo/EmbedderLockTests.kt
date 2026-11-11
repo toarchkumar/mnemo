@@ -5,6 +5,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -46,6 +48,45 @@ class EmbedderLockTests {
         writer.await()
         assertEquals(2uL, store.count())
         store.close()
+    }
+
+    /**
+     * MOBILE-2f's confirming test (v0.12.3): no Kotlin change. The embed runs
+     * in `withContext(dispatcher)`, `Dispatchers.IO` by default, which grows
+     * for blocking work. Twice as many stores as cores each have a slow embed
+     * in flight, and more short coroutines than cores (one of them a store
+     * call) on the same dispatcher all finish within 0.5 s.
+     */
+    @Test fun slowEmbedsDontStallOtherCoroutinesOnTheStoresDispatcher(): Unit = runBlocking {
+        val cores = Runtime.getRuntime().availableProcessors()
+        val embedders = List(2 * cores) { SlowEmbedder(1_500) }
+        val stores = embedders.mapIndexed { i, e ->
+            MnemoStore(MnemoStoreConfiguration("starve$i", 32u, scratchDirectory()), InMemoryKeyStorage(), e)
+        }
+        val launched = System.nanoTime()
+        val writers = stores.map { s -> async(Dispatchers.IO) { s.rememberText("slow to embed") } }
+        assertTrue(eventually(5_000) { embedders.any { it.started.get() } })
+
+        val start = System.nanoTime()
+        val waits = List(cores + 2) {
+            async(Dispatchers.IO) {
+                delay(50)
+                (System.nanoTime() - start) / 1_000_000
+            }
+        } + async(Dispatchers.IO) {
+            assertEquals(0uL, stores[0].count())
+            (System.nanoTime() - start) / 1_000_000
+        }
+        val done = waits.awaitAll()
+        val sinceLaunchMs = (System.nanoTime() - launched) / 1_000_000
+        assertTrue("slowest coroutine: ${done.max()} ms", done.all { it < 500 })
+        assertTrue("the coroutines ended $sinceLaunchMs ms after the embeds began", sinceLaunchMs < 1_200)
+
+        writers.awaitAll()
+        for (s in stores) {
+            assertEquals(1uL, s.count())
+            s.close()
+        }
     }
 
     @Test fun embedderErrorsAreUnchangedAndWriteNothing(): Unit = runBlocking {
