@@ -66,19 +66,23 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-11)
+## Status (2026-11-11, after v0.12.2)
 
-**Published:** v0.12.1, mobile hardening (MOBILE-2a–d and SEC-2), on
-crates.io, PyPI, Maven Central (`io.github.toarchkumar:mnemo-android`)
-and SPM (`toarchkumar/mnemo-swift`); PLANNER-A VERIFIED. Releases now
-publish through approval-gated environments, crates.io Trusted Publishing
-and a mnemo-swift deploy key. **In progress:** v0.12.2 (MOBILE-2e and
-SEC-2b, from RB-001 and RB-002, plus CI-DEPS-1). **Target market (user
-decision 2026-11-07):** on-device agents and apps, from desktop to
-tablets, phones and other small devices. **Next:** SAMPLE-1 → INSP-1
-(v0.13, with the v8 sunset) → PERF-2 → Phases 12–15 (see "Authoritative
-execution order"). Read the WORKLOG from the 2026-11-10 entries on for
-the live thread.
+**Published:** v0.12.2, the second round of mobile hardening (MOBILE-2e
+and SEC-2b, plus CI-DEPS-1), on crates.io, PyPI, Maven Central
+(`io.github.toarchkumar:mnemo-android`) and SPM (`toarchkumar/mnemo-swift`);
+PLANNER-A VERIFIED. Releases publish through approval-gated environments
+with no long-lived tokens except the Maven Central user token (expires
+about 2027-11-11). **In progress:** v0.12.3 (MOBILE-2f: the Swift store
+stops blocking the cooperative pool; FLAKE-1). **Then:** REL-1 → SAMPLE-1
+→ INSP-1 (v0.13, with the v8 sunset) → the local harness stack (12.4,
+12.3, 12.2, Phase 13a) → HARNESS-DOGFOOD-1 (the first-success milestone:
+this project's git Markdown workflow runs entirely in MNemo) → PERF-2 →
+Phase 13b → 14 → 15 (see "Authoritative execution order"). **Reviewers** come in at milestones
+(AGENTS.md `Reviewer` rule 4). **Target market (user decision
+2026-11-07):** on-device agents and apps, from desktop to tablets, phones
+and other small devices. Read the WORKLOG from the 2026-11-11 entries on
+for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1570,6 +1574,12 @@ of this file applies to every one.
 >    `SECURITY.local.md`).
 >    **(Reordered 2026-11-11, PLANNER-A:** v0.12.2 goes before SAMPLE-1,
 >    and CI-DEPS-1 rides with it.)
+>    **(Reordered again 2026-11-11, REV-006 triage):** after v0.12.3 come
+>    REL-1 → SAMPLE-1 → INSP-1 (v0.13) → the 12.4 design note → 12.4 →
+>    12.3 → 12.2 → Phase 13a (13.1, 13.3, 13.5, 13.6) → HARNESS-DOGFOOD-1
+>    → PERF-2 → Phase 13b (13.2, 13.4, 13.7) → Phase 14 → Phase 15. This
+>    replaces item 3a's and item 5's placement of PERF-2 and Phase 13. See
+>    the WORKLOG entry of that date.
 >    **Also queued from RB-001/RB-002:** HOOKS-1 (with v0.13), DOCS-1
 >    (after INSP-1), FUZZ-2 (required before 14.1), and MOBILE-3 (a
 >    candidate after INSP-1; the user picks its priority).
@@ -16141,3 +16151,644 @@ while the seeding handle is open, inherits the lock's file description, and
 holds the flock until it execs. For REVIEWER-B.
 
 **Local:** `swift test` 36/36 in 4 runs.
+
+### 2026-11-11 — WORKER — NOTE — RB-002.2 moved here from SECURITY.local.md (SEC-2b shipped in v0.12.2)
+
+Per AGENTS.md: SEC-2b, the fix for RB-002.2, shipped in v0.12.2 (tag
+`v0.12.2` at fc7c9b1; SEC-2b commits e839bf6 and 23e8319, PR 22), so the
+RB-002 additions to the gitignored `SECURITY.local.md` move into this log,
+verbatim below (headings demoted to fit this entry). With them go the
+RB-001.30 verification that is RB-002.2's evidence, the reproduction, and
+REVIEWER-B's tested-at addendum. `SECURITY.local.md` now holds no open
+finding, only pointers here.
+
+**How it shipped** (my step 6 DONE above has the detail):
+- the graft is the acceptance test for every path that claims revocation:
+  `src/store/header_graft_tests.rs`. Plain `rekey`: the graft opens (60
+  of 60, documented as not a revocation). `rekey --rotate`,
+  `export_rekeyed` (the binding's `export_with_passphrase`) and
+  `export_rekeyed_with_key` from a read-only source (the binding's
+  `import_with_passphrase`): `HeaderTampered` at the seal;
+- the byte-search test is the hygiene check it is,
+  `hygiene_rekey_scrubs_stale_copies_of_the_old_key_wrap`;
+- the docs wording from recommendations 2 and 4 is in the `rekey` rustdoc,
+  the CLI help, the engine, Swift and Kotlin READMEs, and the root README
+  (Planner handoff, 828ccf0).
+
+**Ledger:** RB-002.2 can go to `VERIFIED (v0.12.2)` (REVIEWER-B's call).
+
+#### RB-002 additions (REVIEWER-B, 2026-11-09, on the Mac)
+
+Appended by batch `RB-002`. Nothing above this line was changed. Working tree `f79715e` (= tag `v0.12.0`; `git log f79715e..HEAD` is empty).
+All tests ran outside the repo: a scratch crate depending on the engine and `mnemo-uniffi` by path, and a scratch copy of the repo (`git archive HEAD`) for the tests that need crate internals. Machine: Apple M1 Pro, macOS 26.7.1, Rust 1.95.0, debug profile for these tests.
+
+#### RB-001.30 — verification: CONFIRMED on the working tree, as Rust tests
+
+**1. The reproduction (scratch crate, public API only; v8 and v9).** Create with passphrase A, 20 memories, flush, close; reopen, `rekey("B")`, 5 more memories, flush, close.
+
+| | v9 | v8 |
+|---|---|---|
+| Old salt + DEK nonce + wrapped DEK (76 bytes, header offset 86) still in the file | yes, at byte 41191 (page 5, in-page 231), the same offset RB-001 saw | yes, at byte 24749 (page 3) |
+| Untouched file with passphrase A | `WrongPassphrase` | `WrongPassphrase` |
+| Copy with the in-file old page-0 image written over page 0, `open_read_only(A)` | **opens, 20 memories** | **opens, 20 memories** |
+| The same copy, read-write `open(A)`, then `verify()` | opens, `Ok(20)` | opens, `Ok(20)` |
+| Stale image gone after N more single-write commits | 18 (when the freed pages happened to be reused) | still there after 300; gone after `compact_file` |
+
+**2. The binding (`export_with_passphrase`, `import_with_passphrase`), same crate.**
+- The export file carries the live file's device-key-wrapped header image, at byte 41191. Harmless without the device key, as RB-001 said.
+- The imported file still carries the transfer-passphrase wrap (byte 131216 in this run). The API rejects the passphrase (`WrongPassphrase`), but a copy with that in-file image over page 0 **opens with the transfer passphrase** (20 memories). So does a copy with the *export's* page 0 over page 0.
+
+**3. New: the stale image is not the real problem (scratch copy of the repo, in-crate test `rb_sec30`).** An attacker's tool needs only the old secret and the old 512-byte header (from any earlier copy of the file, or from the export). It unwraps the DEK from the old header, checks that the DEK validates the *current* header's seal (it does), grafts the old salt, DEK nonce, wrapped DEK and KDF costs onto the current header, and re-seals it with the DEK.
+
+| File state | Stale wrap in the file | Grafted header + old secret |
+|---|---|---|
+| v9, rekey, then 40 single-write commits | **no** (pages reused) | **opens: 60 of 60 memories, `verify` Ok(60)**, including the 40 written after the rekey |
+| v8, the same | yes | opens: 60 of 60 |
+| Import path: passphrase file, `rekey_with_key`, 40 commits "on the new phone" | no | **opens with the transfer passphrase: 60 of 60** (20 at import, 40 written afterwards) |
+| Either format after `compact_file` | no | **fails**: the old DEK doesn't validate the header seal (`HeaderTampered`). Compaction really does write a fresh DEK |
+
+**What that means for SEC-2 (raised as `RB-002.2`, below).**
+
+#### RB-002.2 — [SECURITY] [MEDIUM] SEC-2: scrubbing the old WAL region doesn't revoke anything, and its acceptance test would pass on a file the old secret still opens
+
+- **Status:** `OPEN`
+- **Relation:** refines `RB-001.30` (ACCEPTED → SEC-2). It doesn't contradict the triage; it changes what two of the four accepted parts are worth and how part 4 must be tested.
+- **Evidence:** section 3 above. On v9 the stale image disappeared by itself after 18 commits, and the file was still fully readable with the old passphrase and an old header.
+- **Finding:**
+  1. Recommendation 1 of RB-001.30 (overwrite every page of the old WAL region) is hygiene. It only removes the case where the attacker has *no* earlier copy. Anyone who ever held the file with the old secret (a backup, a synced copy, the export itself) keeps a working header, and 512 bytes are enough. Only a new DEK revokes.
+  2. Accepted test 4a ("after rekey, the old salt and wrapped-DEK bytes appear nowhere in the file") passes on exactly the file in row 1 of the table. A green test would then stand for a revocation that hasn't happened.
+  3. `compact_file` is a correct rotation today (row 4), so `rekey --rotate` as "rekey, then compact" works without new crypto. What's missing is only that plain `rekey` and both passphrase helpers stop short of it.
+- **Recommendation:**
+  1. Make the graft the acceptance test for every path that claims revocation (`rekey --rotate`, `import_with_passphrase`, `export_with_passphrase`): keep the pre-operation page 0, run the operation, then graft and re-seal as above; the old secret must fail on the seal. An in-crate test can do it in about 30 lines (`Header::from_page`, `crypto::derive_kek`, `crypto::unwrap_dek`, `validate_seal`, `apply_seal`). Keep the byte-search test too, but only as the hygiene check it is.
+  2. Word the docs by what the user can rely on: plain `rekey` = "changes the secret that opens this file from now on; anyone who had the file and the old secret can still read it and everything written to it later; use `--rotate` to revoke". The Swift and Kotlin import docs currently say the imported file is "re-protected by a fresh key"; until the import compacts, that's true of the wrap only.
+  3. In `import_with_passphrase`, do the fresh-DEK compaction **before** the app writes anything (it's the cheapest moment: the file is closed and small), and in `export_with_passphrase` write the export through the compaction path so the live file's DEK never leaves the device.
+  4. Rotation leaves the old ciphertext in unlinked blocks until the flash reuses them. Say so in one sentence; it's out of the engine's hands.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10) → **SEC-2b, v0.12.2**. **Where SEC-2 already stands** (`280a54b`, in v0.12.1): it implemented the fresh-DEK paths that the finding says are the only real revocation.
+  - `rekey --rotate` is rekey then `compact_file`;
+  - `export_with_passphrase` goes through `export_rekeyed`, under a fresh DEK;
+  - `import_with_passphrase` opens the source read-only and exports it rekeyed under a new device key, before the app writes anything (recommendation 3, done);
+  - the docs say plain `rekey` doesn't revoke.
+
+  So the v0.12.1 behaviour is right. **What SEC-2b adds:**
+  1. **the graft as the acceptance test** for every path that claims revocation (`rekey --rotate`, both passphrase helpers): keep the pre-operation page 0, run the operation, then graft and re-seal; the old secret must fail at the seal. It's in-crate, about 30 lines. The existing byte-search test is relabelled as the hygiene check it is;
+  2. a docs pass on the exact wording of recommendations 2 and 4: plain `rekey` "changes the secret that opens this file from now on; anyone who had the file and the old secret can still read it and later writes; use `--rotate` to revoke", the import "re-protected under a new data key" (now true), and one sentence that rotation can't erase old ciphertext from flash blocks.
+
+  **No v0.12.1 hold:** SEC-2's fresh-DEK paths are what revoke, and the graft tightens the test, not the behaviour.
+
+#### RB-001.31 and RB-001.32 — verification: moved to PLAN.md with their items (2026-11-10, Worker)
+#### The RB-001.30 reproduction, kept here so it isn't lost again
+
+Scratch crate `Cargo.toml` dependencies: `mnemo_engine = { package = "mnemo-engine", path = "<repo>/mnemo" }`, `mnemo_uniffi = { package = "mnemo-uniffi", path = "<repo>/mnemo/bindings/uniffi" }`, `tempfile = "=3.10.1"`; copy `mnemo/Cargo.lock` next to it and the repo's `.cargo/config.toml` into `.cargo/`.
+
+```rust
+// Public API only. cfg(v): dimensions 8, KdfParams::fast(), format_version v.
+let mut db = Mnemo::create(&path, "passphrase-A", cfg(v))?;
+for i in 0..20 { db.remember(mem(i))?; }
+db.flush()?; db.close()?;
+let before = std::fs::read(&path)?;
+let old_wrap = before[86..162].to_vec();              // salt(16) + nonce(12) + wrapped DEK(48)
+let mut db = Mnemo::open(&path, "passphrase-A")?;
+db.rekey("passphrase-B", KdfParams::fast())?;
+for i in 20..25 { db.remember(mem(i))?; }
+db.flush()?; db.close()?;
+let after = std::fs::read(&path)?;
+let hit = after.windows(76).position(|w| w == &old_wrap[..]).expect("old wrap still in the file");
+let mut spliced = after.clone();
+let image = after[hit - 86..hit - 86 + 8192].to_vec();  // the old page-0 image inside the file
+spliced[..8192].copy_from_slice(&image);
+std::fs::write(&copy, &spliced)?;
+assert_eq!(Mnemo::open_read_only(&copy, "passphrase-A")?.len(), 20);   // passes today
+```
+
+```rust
+// In-crate (uses format::Header and crypto): the graft. `cur` = current file bytes,
+// `old_p0` = any earlier page 0, `old_secret` = the earlier passphrase or key.
+let old = Header::from_page(&old_p0[..PAGE_SIZE])?;
+let kdf = KdfParams { m_cost: old.m_cost, t_cost: old.t_cost, p_cost: old.p_cost };
+let dek = crypto::unwrap_dek(&crypto::derive_kek(old_secret, &old.salt, kdf)?, &old.dek_nonce, &old.wrapped_dek)?;
+let mut h = Header::from_page(&cur[..PAGE_SIZE])?;
+h.validate_seal(&dek)?;                               // Ok today: the DEK never changed
+h.salt = old.salt; h.dek_nonce = old.dek_nonce; h.wrapped_dek = old.wrapped_dek;
+h.m_cost = old.m_cost; h.t_cost = old.t_cost; h.p_cost = old.p_cost;
+let mut page = h.to_page();
+h.apply_seal(&mut page, &dek)?;
+let mut out = cur.to_vec(); out[..PAGE_SIZE].copy_from_slice(&page);
+// write `out`, then Mnemo::open_read_only(out, old_secret): opens with every current memory.
+// After SEC-2's rotation, `h.validate_seal(&dek)` must be Err(HeaderTampered).
+```
+
+#### Addendum, 2026-11-10 05:15 UTC — tested-at labels (REVIEWER-B)
+
+- **RB-001.30 and RB-002.2:** the public-API reproduction (engine v8 and v9, and the binding's export and import) was run at `f79715e` and **re-run at `6bc592c`** with `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`: the same results. The in-crate graft runs in a scratch copy of `f79715e` (it needs crate internals) and was re-run the same way: the same results. `6bc592c` and `ce88b06` change no engine or binding source, so nothing here has met a fix yet.
+- **RB-001.32 item 4:** Swift package built from a scratch copy of `f79715e`; not re-run (the Swift sources are identical at `6bc592c`).
+- **RB-001.31:** read at `f79715e`. `6bc592c` (MOBILE-2a) changed `release.yml`, but only the mobile gate, the published-package check and the time limits. The exposure described in RB-001.31 is unchanged there, at shifted lines: the four `ORG_GRADLE_PROJECT_*` values are still job-level `env` of the Android job, `cargo publish --token` is still on the command line, the top-level `permissions:` block is as it was, and no checkout sets `persist-credentials: false`. SEC-2 hasn't started.
+
+### 2026-11-11 — WORKER — DONE — v0.12.2 shipped: all four registries at 0.12.2
+
+**On `main` (fc7c9b1), tagged `v0.12.2`** (annotated, "MNemo 0.12.2"), in
+the Planner's order:
+1. step 7a, PR 24 (f86cce2, then 2b5ea2a; my 7a DONE above);
+2. the HANDOFF commit **828ccf0** `docs: v0.12.2 README and site (error
+   classes, safer Android keys, rekey wording)`, `README.md` and
+   `index.html` only;
+3. the backup **fc7c9b1** `chore(plan): sync coordination files`,
+   `PLAN.md` and `reviewer_notes.md` only;
+4. `main` fast-forwarded 6e32b68..fc7c9b1 (14 commits), then the tag.
+
+**The tag run 42960354844: green, 20/20 jobs, no job retried.** The user
+approved `crates-io` and `pypi`, then `maven-central` and `mnemo-swift`.
+
+| Registry | Result | Credential |
+|---|---|---|
+| crates.io | `mnemo-engine` 0.12.2 (the API's `max_version`, 04:46Z) | **Trusted Publishing (OIDC).** The step's `CARGO_REGISTRY_TOKEN` is the short-lived token from the "crates.io Trusted Publishing (OIDC)" step, revoked after the job ("Token revoked successfully") |
+| PyPI | `mnemo-engine` 0.12.2: 5 abi3 wheels (macOS x86_64 and arm64, manylinux x86_64 and aarch64, Windows) and the sdist | **Trusted Publishing**, the step "Publish to PyPI (Trusted Publishing, no token)" |
+| Swift (`toarchkumar/mnemo-swift`) | tag `0.12.2` (commit 8d23b4e, "MNemo 0.12.2 (from toarchkumar/mnemo@fc7c9b19a287)"); the published-package check resolved the zip (10,562,287 B, checksum matches) and built | **the deploy key**: "pushing with the deploy key", `TOKEN` empty |
+| Maven Central | `io.github.toarchkumar:mnemo-android` 0.12.2: `maven-metadata.xml` `<latest>` and `<release>` 0.12.2; `.aar`, `.aar.asc`, `.pom` and `.module` all 200 on repo1 at 05:07Z (the job ended 04:58Z) | **the Central Portal user token** in the `maven-central` environment (`MAVEN_CENTRAL_USERNAME`/`PASSWORD`, generated 2026-11-11), signed with `MAVEN_SIGNING_KEY`; uploaded as AUTOMATIC, deployment b3df20cc-7846-4a0d-94c7-2073194c78ba, validated and published |
+
+**GitHub Release `v0.12.2`:** not a draft, 13 assets (the five CLI
+binaries, the five wheels, the sdist, the AAR, and
+`MnemoFFI-0.12.2.xcframework.zip`, checksum
+`eadebf5d7b40c144738c6995d41ea2a9952af122cd8dd24d47751c9ea363d634`).
+
+**What failed or was retried:**
+- the dry run 42945011583: "Invalid token" at Central (my first step 7
+  BLOCKED). The user generated a new token and the rerun 42948705137
+  passed;
+- step 7a's gate, CI 42954324057 red (my 7a BLOCKED). Option A replaced it;
+- push CI 42958511538 on 2b5ea2a: `rust (ubuntu-latest)` failed on
+  `cli_smoke::recall_text_falls_back_to_read_only_when_write_lock_held`
+  (`Locked`); the failed job was rerun and passed (my 7a DONE);
+- **CI 42960333281 on `main` at fc7c9b1:** `swift (macos-latest, iOS
+  simulator)` failed on **T9 (a)**, `t9aAnEmbedderThatCallsCacheGetReturnsAtOnce`
+  (StoreHardeningTests.swift:38 and :39: 3.115 s against `< 2`, and
+  `timedOut` true). It's the same cooperative-pool starvation:
+  `CacheReadingEmbedder` blocks a pool thread while its detached task waits
+  for one. T9 (b) passed. I logged it and carried on, per the decision. I
+  rewrote no test, because that's MOBILE-2f's to fix. A rerun of the failed
+  job passed 18/18, so `main` is green. **For MOBILE-2f:** T9 (a) belongs in
+  its "other tasks keep running during a slow embed" tests, alongside
+  T9 (b)'s return to a strict `count() == 1`.
+
+**After the tag:**
+- RB-002.2 moved from `SECURITY.local.md` into this log (the NOTE above).
+  `SECURITY.local.md` keeps pointers only, with no open finding;
+- `release-0.12.2` deleted on GitHub and locally (it was fc7c9b1, merged).
+  The step branches for PRs 17–23 were deleted when they merged.
+  `v0122-7a-t9b-gate` (PR 24, merged) is still on GitHub; I left it,
+  because only `release-0.12.2` was asked for;
+- `PLAN.md` has uncommitted log entries after fc7c9b1 (this one, the
+  RB-002.2 NOTE). They wait for the next backup.
+
+**Next, per the plan:** MOBILE-2f (v0.12.3), not started.
+
+### 2026-11-11 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.12.2 verified; the Reviewers move to milestones; v0.12.3 (MOBILE-2f + FLAKE-1) dispatched
+
+**VERIFIED: v0.12.2** (the WORKER DONE above; tag `v0.12.2` at `fc7c9b1`,
+tag run 42960354844, 20/20 green). Checked by me from the user's machine:
+- crates.io: `mnemo-engine` max_version 0.12.2, published
+  2026-11-11T04:46:22Z;
+- PyPI: 0.12.2 with 6 files;
+- `mnemo-swift`: tag `0.12.2` (annotated `1ad29c8`, commit `8d23b4e`);
+- Maven Central isn't reachable from my side; I accept the Worker's
+  check.
+
+Every publish used a short-lived or scoped credential: Trusted
+Publishing for crates.io and PyPI, the deploy key for Swift, and the
+`maven-central` environment's token, now the only long-lived credential
+(it expires about 2027-11-11; see my reminder above). The last two CI
+reds (T9 (a) on `main`, and the `cli_smoke` lock test) both passed on a
+rerun and are covered below. You can delete the remote branch
+`v0122-7a-t9b-gate` (PR 24 is merged).
+
+**DECISION 1 (user, 2026-11-11): the Reviewers come in at milestones.**
+Written into AGENTS.md as `Reviewer` rule 4. That's one of the two
+AGENTS.md changes I'd held back, and it covers the two-Reviewer rule as
+well.
+- **REVIEWER-A** does market research and product direction, once before
+  each phase starts.
+- **REVIEWER-B** does code health and blind spots, once at each minor
+  release's READY.
+- **The user may call either one at any other time.** I don't send them
+  routine verification work, and neither does the Worker. My earlier
+  "for REVIEWER-B" asks (the step 3 engine-test failure, and the
+  `cli_smoke` guess) go to FLAKE-1 below instead.
+- **Next scheduled reviews:** REVIEWER-B at v0.13's READY, and REVIEWER-A
+  before Phase 12 resumes.
+
+**DECISION 2: the order** is v0.12.3 (MOBILE-2f + FLAKE-1), then REL-1,
+then SAMPLE-1, then INSP-1 (v0.13).
+
+**DISPATCH: v0.12.3.** Work on a `release-0.12.3` branch, one PR per step.
+
+**1. MOBILE-2f: the Swift store stops blocking the cooperative pool.**
+- **The bug:** `MnemoStore` calls the app's synchronous `embed`
+  (`MnemoStore.swift:508-520`, from `rememberText`, the update path,
+  `recallText` and the thread ingest) directly on Swift's cooperative
+  pool, so a slow embedder starves the app's other tasks. That's what
+  T9 (a) and T9 (b) kept hitting on CI.
+- **The fix:** each store gets its own serial `DispatchQueue` for embeds.
+  The async methods hop there with `withCheckedThrowingContinuation` and
+  resume with the vectors or the error. The queue is serial because
+  Core ML models often aren't safe to call concurrently; say so in the
+  doc comment. Pick a QoS of `.userInitiated` unless you find a reason
+  otherwise, and note it.
+- **Cancellation:** a cancelled caller stops waiting. The embed in flight
+  finishes on the queue and its result is dropped, because a synchronous
+  embed can't be interrupted. Document that.
+- **Unchanged:** the `MnemoEmbedder` protocol (no async variant in this
+  patch), the lock rules from 2c, and the background close, which must not
+  wait for a queued embed.
+- **Kotlin needs no change:** its embed already runs in
+  `withContext(dispatcher)` on `Dispatchers.IO`, which grows its pool for
+  blocking work. State that in one line in your DONE, and add a Kotlin
+  test that a slow embed doesn't stall another coroutine on the store's
+  scope.
+- **Tests:**
+  - **T9 (a) and T9 (b) go back to strict.** T9 (b) expects
+    `count() == 1`, with no 1-or-2 branch, and T9 (a) expects under 2 s.
+  - **A new starvation test:** while a 1.5 s embed is in flight, more
+    concurrent tasks than the runner has cores each finish a short
+    `Task.sleep` within about 0.5 s.
+  - All three must pass 20 of 20 locally with every core busy, and on
+    the iOS-simulator CI job on the PR and the push.
+- **The Swift README's embedder section:** embeds run one at a time on
+  the store's own queue, so a slow model doesn't block the app's Swift
+  concurrency, and a cancelled call doesn't stop an embed already running.
+
+**2. FLAKE-1: `cli_smoke::recall_text_falls_back_to_read_only_when_write_lock_held`.**
+- **What's seen:** it failed once on CI (42958511538) with `Locked` on
+  the test's own `open_read_only`, right after the seeding handle was
+  dropped. That's probably also the one-in-seven local failure from step 3.
+- **Investigate first:** reproduce it (loop the `cli_smoke` and
+  `integration` suites in parallel), and test your theory that another
+  test's child process inherits the lock across `fork` before `exec`.
+  Check how the engine takes its lock (`flock`, the fd flags, and whether
+  `O_CLOEXEC` is set at open) on Linux, macOS and Windows.
+- **Then fix where the fault is:**
+  - **if it's the test's race:** fix the test, with no engine change;
+  - **if a closed handle can leave the lock briefly held in real use**
+    (an agent app that spawns tools, say): fix it in the engine, add a
+    test, and add a CHANGELOG line.
+  - Either way, log what you found, including the evidence.
+- **If you can't reproduce it in an hour of looping,** log what you tried,
+  add the test name and the lock-holder's details to the `Locked` error's
+  message if it's cheap, and move on.
+
+**3. The release commit** (as for v0.12.2): the version goes to 0.12.3,
+plus a CHANGELOG `[0.12.3]` entry, CI green, and a release dry run on
+`release-0.12.3`. Tell the user when each environment waits for approval.
+**Log READY and stop. Don't tag.**
+
+**Out of scope:** an async `MnemoEmbedder` protocol, the engine
+interrupt, REL-1, and anything for PERF-2.
+
+**HANDOFF:** commit `AGENTS.md` on its own, before step 1, with the
+message `docs(agents): two Reviewers, at milestones (Reviewer rule 4)`. The
+change is `Reviewer` rule 4 and a pointer to it in the roles paragraph.
+
+### 2026-11-11 — WORKER — DONE — HANDOFF: AGENTS.md (Reviewer rule 4); `v0122-7a-t9b-gate` deleted
+
+- **cd5cfd2** `docs(agents): two Reviewers, at milestones (Reviewer rule 4)`,
+  `AGENTS.md` only, pushed to `main` (fc7c9b1..cd5cfd2). `release-0.12.3`
+  starts there.
+- The remote branch `v0122-7a-t9b-gate` (PR 24, merged) is deleted, here
+  and on GitHub.
+
+### 2026-11-11 — WORKER — DONE — v0.12.3 step 1: MOBILE-2f (the Swift store's embeds on a per-store serial queue)
+
+**Commit** b36bf6c (PR 26, toarchkumar/mnemo#26), fast-forwarded into
+`release-0.12.3`. CI: PR 42966475435 18/18, push 42967687107 18/18.
+
+**The fix** (`MnemoStore.swift`):
+- each store has a serial `DispatchQueue` (`mnemo.embed.<name>`, QoS
+  `.userInitiated`: a text call is something the app is waiting on, and I
+  found no reason to differ). It's serial because Core ML models often
+  aren't safe to call concurrently, as the doc comment says;
+- `embed` is now `async`, and the five text paths await it (`rememberText`,
+  `update`'s re-embed, `recallText`, `essenceAdd`/`essenceAppendTimeline`,
+  `ingestThread`). It hops through `withCheckedThrowingContinuation`, with an
+  `EmbedCall` box so the result and a cancellation resume the caller once;
+- **cancellation:** inside `withTaskCancellationHandler`, a cancelled caller
+  resumes at once with `CancellationError` and nothing is written. An embed
+  that hasn't started is skipped, and one already running finishes on the
+  queue and its result is dropped. Documented in the type doc and the
+  README;
+- **unchanged:** the `MnemoEmbedder` protocol, the 2c lock rules (the embed
+  still runs before the actor), and the background close, which doesn't
+  touch the queue.
+- **A consequence, documented:** an embedder must not wait on a text call of
+  its own store, because that call queues behind it. Embedders that call
+  non-text methods (`count`, `cacheGet`) are fine:
+  `anEmbedderThatCallsBackIntoTheStoreCompletes` and T9 (a) cover them.
+
+**Kotlin needs no change:** its embed runs in `withContext(dispatcher)`,
+`Dispatchers.IO` by default, which grows its pool for blocking work. The
+confirming test, `EmbedderLockTests.slowEmbedsDontStallOtherCoroutinesOnTheStoresDispatcher`:
+twice as many stores as cores each have a 1.5 s embed in flight, and
+cores+2 coroutines on `Dispatchers.IO`, one of them a `count()`, all finish
+in under 500 ms. It passed on CI (`kotlin (linux, Android AAR)`); there's
+no JDK locally.
+
+**Tests:**
+
+| Test | Before (the old store) | After |
+|---|---|---|
+| T9 (a), strict (< 2 s) | flaked on CI (3.03 s, 3.12 s) | 0.39 s on the iOS-simulator job; slowest locally under load 1.13 s |
+| T9 (b), strict (`count() == 1`) | flaked on CI; with the new suite alongside it fails locally too | passes; 1.84 s on CI; slowest locally under load 2.58 s |
+| new `slowEmbedsDontStarveTheAppsOtherTasks`: 2 x cores stores with a 1.5 s embed in flight; cores+2 tasks, timed from before scheduling, each end in < 0.5 s, all within 1.2 s of the launch | **fails** (`sinceLaunch < 1.2`) | passes; 1.6–1.9 s on CI |
+| new `aCancelledTextCallStopsWaitingAndWritesNothing` | **fails** (no error; the write lands) | passes |
+| new `embedsOnOneStoreRunOneAtATime` | **fails** (`maxConcurrent == 1`) | passes |
+
+The full Swift suite (39 tests) passed **20 of 20 runs locally with every
+core busy** (`yes` on all 10 cores). A note on the first draft of the
+starvation test: it passed on the old store, because each task started its
+clock only once it ran. It's timed from before the tasks are scheduled now,
+and it fails on the old store as it should.
+
+**Docs:** the Swift README's embedder section, and the CHANGELOG.
+
+### 2026-11-11 — WORKER — DONE — v0.12.3 step 2: FLAKE-1 (an engine fix: the lock outlived a dropped handle while the process spawned children)
+
+**Commit** 3f9ac4d (PR 27, toarchkumar/mnemo#27), fast-forwarded into
+`release-0.12.3`. CI: PR 42969081798 18/18, push 42970933480 18/18.
+
+**How the engine locks:** `open_with_lock` (`store/load.rs`) opens through
+std's `OpenOptions`, which sets `O_CLOEXEC` on Unix, then takes
+`fs4::FileExt::try_lock_exclusive` / `try_lock_shared`: `flock` on Linux
+and macOS, `LockFileEx` on Windows. Nothing calls `try_clone`. The pager
+owned the `File` and had no `Drop`, so the lock was released only when the
+last reference to the open file description closed.
+
+**The cause** (my fork theory, confirmed): an `flock` lock belongs to the
+open file description. While any thread spawns a child, the child holds a
+copy of the parent's file table until it `exec`s. Close-on-exec only acts
+at the exec. A handle dropped inside that window leaves the lock held by
+the child's copy, and the next open gets `Locked`. In `cli_smoke`, other
+tests spawn the CLI in parallel, which is how
+`recall_text_falls_back_to_read_only_when_write_lock_held` hit it right
+after its seeding handle was dropped. **It's an engine bug, not only a test
+race.** Any app that spawns processes (an agent running tools) while it
+closes and reopens the file can hit it. Windows is unaffected, because
+Rust's handles aren't inheritable.
+
+**Reproduction** (`tests/lock_release.rs`, Unix only; about 30 minutes in
+all): four threads spawn `true` in a loop while the main thread opens the
+file read-write, drops or closes it, opens it read-only, and drops that,
+400 times, with a wrong-key open every tenth time.
+- **Without the fix, on macOS:** 333 of 400 read-write opens and 274 of 400
+  read-only opens hit `Locked` (2,677 children spawned meanwhile), and 32
+  of the 40 wrong-key opens hit `Locked` instead of `WrongPassphrase`.
+- **Control** (the same loop, no spawning threads): passes.
+- **Looping the `cli_smoke` and `integration` suites in parallel** for about
+  10 minutes reproduced nothing; the window in those suites is narrow. I
+  stopped the loop once my edits had started rebuilding into it.
+- I didn't need Linux to reproduce it (it reproduces on macOS too), and
+  there's no Docker here. On CI the test passes on ubuntu and macOS, and is
+  skipped on Windows.
+
+**The fix:** `open_with_lock` returns a crate-private `LockedFile`
+(`pager.rs`). It derefs to `File` and calls `FileExt::unlock` on drop, which
+releases the lock however many copies of the description exist. The pager
+owns it, and a failed open (a wrong key) drops it the same way. No API
+change.
+
+**After:** the new test passed 5 of 5 locally. The engine suite with
+`--features failpoints` passed 473 tests with no failure; `mnemo-uniffi`
+passed 20. Clippy (`failpoints,benches`) and `cargo fmt --check` are clean,
+and MSRV 1.75 builds. A CHANGELOG Fixed line. The cli_smoke test needs no
+change. It may also explain the one-in-seven local failure in v0.12.2 step 3.
+I never had its name, so I can't confirm that.
+
+### 2026-11-11 — WORKER — READY — v0.12.3: MOBILE-2f and FLAKE-1 are on `release-0.12.3`; the release commit is staged and its dry run passed
+
+**On `release-0.12.3` (e61f774), not on `main`, not tagged.** One PR per
+step, base `release-0.12.3`, fast-forwarded in:
+
+| Step | Commit | PR | CI on the PR | CI on the push |
+|---|---|---|---|---|
+| HANDOFF (AGENTS.md, Reviewer rule 4) | cd5cfd2 | on `main` | | |
+| 1 MOBILE-2f | b36bf6c | #26 | 42966475435 18/18 | 42967687107 18/18 |
+| 2 FLAKE-1 | 3f9ac4d | #27 | 42969081798 18/18 | 42970933480 18/18 |
+| 3 the release commit | e61f774 | #28 | 42972229673 18/18 | 42973460557: **red on the first attempt** (`kotlin (linux, Android AAR)`, see below); the rerun of the failed job passed 18/18 |
+
+The details of steps 1 and 2, with the before and after evidence, are in
+their DONE entries above.
+
+**The release commit** (as for v0.12.2):
+- **versions** to 0.12.3 in `mnemo/Cargo.toml`, `mnemo-uniffi`, the Node
+  binding, `mnemo-python/Cargo.toml` and `pyproject.toml`, both `Cargo.lock`
+  files (5 version lines in all), the Kotlin `VERSION_NAME`, the iOS
+  sample's `MARKETING_VERSION`, the Android sample's dependency, the
+  `release-check` comment, and the Swift and Kotlin README install lines;
+- **CHANGELOG** `[0.12.3] — 2026-11-11`, with upgrade notes: a cancelled
+  Swift text call now throws `CancellationError` and writes nothing, and an
+  embedder must not wait on a text call of its own store. No API, binding
+  or file-format change. Two Fixed entries, and the link references.
+
+**The release dry run 42974767268 (on `release-0.12.3` at e61f774): green.**
+The user approved `maven-central`, then `mnemo-swift`.
+- **Version check:** engine, `mnemo-uniffi` and `mnemo-android` all 0.12.3.
+- **Swift build:** the XCFramework, the tree, and the SPM consumer on the
+  simulator (checksum `2f5c9b1a8faae088f07ab5457526921bd15724eb73e03492e9c9d2015af1ecb7`
+  matches, `** TEST SUCCEEDED **`).
+- **Swift publish:** "pushing with the deploy key", then pushed and deleted
+  `dry-run-0.12.3`. The published-package check resolved `mnemo-swift`
+  0.12.2 (10,562,287 B, checksum matches) and built (`** BUILD SUCCEEDED **`).
+- **Android build:** green (the 16 KB and size gates, the JVM tests, the
+  AAR, the consumer).
+- **Android publish:** the signed `publishToMavenLocal` has all five `.asc`
+  files. The Central dry run uploaded the bundle as USER_MANAGED
+  (deployment 71a7194d-9afe-4f52-8081-5e8a332d593d), which went
+  **VALIDATED** and was **dropped** (HTTP 204, then 404).
+
+**Sizes, against 0.12.2:**
+
+| | 0.12.2 | 0.12.3 |
+|---|---|---|
+| `MnemoFFI.xcframework.zip` | 10,562,291 B | 10,563,011 B |
+| `libmnemo_uniffi.a`, ios-arm64 | 9,290,584 | 9,293,864 |
+| `libmnemo_uniffi.a`, simulator | 18,675,624 | 18,678,104 |
+| `libmnemo_uniffi.a`, macos-arm64 | 9,265,056 | 9,262,768 |
+| `libmnemo_uniffi.so`, arm64-v8a | 2,577,360 | 2,578,912 (LOAD 0x4000) |
+| `libmnemo_uniffi.so`, x86_64 | 3,008,368 | 3,010,912 (LOAD 0x4000) |
+| AAR | 2,747,271 | 2,748,990 |
+
+**What failed or was retried:** the release commit's push CI 42973460557
+failed, first attempt, in `kotlin (linux, Android AAR)`:
+`StoreHardeningTests.t3AStoreLeftBehindByACancelledScopeStillCommits`,
+`MnemoException$NeedsWriteOpen: reason=pending WAL recovery`, from
+`committedCount` (FlushPolicyTests.kt:175) inside `eventually`
+(StoreHardeningTests.kt:42, the Coalesced branch).
+- **A test race from v0.12.2 step 5**, unrelated to this release (the
+  release commit changes versions and the CHANGELOG only). The Coalesced
+  branch polls a byte copy of the live file while the store's timed commit
+  is running. A copy taken mid-commit has a pending WAL, so the read-only
+  open in `committedCount` refuses it with `NeedsWriteOpen`. The exception
+  escapes `eventually` instead of counting as "not yet". The store behaved
+  correctly: a read-write open of that copy would recover it, as a kill
+  mid-commit would.
+- I reran the failed job, which passed 18/18. I didn't fix the test, to keep
+  this release's scope. **For the Planner:** a test-only fix (a candidate
+  FLAKE-2) is for `committedCount` to treat `NeedsWriteOpen` as not yet
+  committed inside `eventually`, or to open the copy read-write. The Swift
+  counterpart (`committedCount` in the Swift tests) should be checked for
+  the same pattern.
+
+**Before the tag (not done, per the dispatch):**
+1. the root README and site at 0.12.3 (the Planner's, by handoff), if
+   wanted;
+2. the `chore(plan)` backup of `PLAN.md` and `reviewer_notes.md`;
+3. fast-forward `main` to `release-0.12.3`;
+4. tag `v0.12.3`; the tag run waits for the user's approval of all four
+   environments.
+
+### 2026-11-11 — PLANNER-A — REVIEW + DECISION + HANDOFF + DISPATCH — v0.12.3 READY accepted; REL-1 dispatched (with the mobile publish rule and FLAKE-2); REV-006 triaged (the harness stack moves ahead of PERF-2; HARNESS-DOGFOOD-1 gets a parity checklist)
+
+**READY accepted** (`release-0.12.3` at `e61f774`, dry run 42974767268
+green, with VALIDATED and then dropped at Central).
+- **FLAKE-1 found a real engine bug, which is a good result.** A handle
+  dropped while another thread was spawning a child left its `flock` held
+  by the child's copy of the file table. The explicit unlock in `LockedFile`
+  is the right fix, and the reproduction (333 of 400 opens `Locked` before
+  the fix) is convincing. **It bears on 12.4,** whose design note must
+  assume agent apps that spawn tools constantly.
+- **MOBILE-2f:** accepted as built. The documented rule, that an embedder
+  must not wait on a text call of its own store, belongs in the Swift
+  README's embedder section; the Worker says it's there.
+- **The Kotlin T3 race** becomes **FLAKE-2**, test-only, as REL-1's step 4
+  below.
+
+**HANDOFF: commit on `release-0.12.3`, on its own:**
+- `README.md`: the install lines at 0.12.3, and a short "What's new in
+  v0.12.3: two fixes" (the Swift embed queue, the lock release);
+- `index.html`: the pill and the "current release" line at v0.12.3;
+- **Commit message:** `docs: v0.12.3 README and site (Swift embed queue, lock release)`.
+
+**The tag:** this HANDOFF commit, the `chore(plan)` backup, fast-forward
+`main`, tag `v0.12.3`, then DONE with the registries and credentials.
+Delete the merged branch. Then REL-1.
+
+**DECISION 1 (user, 2026-11-11): mobile publishes on a rule, not on every
+release.** The Swift and Android packages publish only when:
+1. the mobile code changed (bindings, stores, Keystore or Keychain);
+2. an engine fix matters on phones (security, data loss, corruption);
+3. a minor version is released, at least once each, so mobile is never more
+   than one minor version behind.
+
+Otherwise a release publishes only crates.io, PyPI and the CLI binaries.
+The repo keeps every manifest on one version number, so mobile version
+numbers skip; each package carries the engine version it was built from.
+v0.12.3 and v0.13 both publish mobile.
+
+**DISPATCH: REL-1 (CI and release workflow only; no release of its own,
+the next release carries it).** Work on a `rel-1` branch, one PR per step.
+
+1. **The published-package check gets its own job** (RB-002.1's
+   recommendation 3). `verify-published` needs `publish-swift`, runs the
+   resolve and build steps that are now inside it, and can be re-run on its
+   own after a slow runner. `publish-swift` ends at "pushed main and tag".
+   The Android equivalent (the Central metadata check) moves the same way
+   if it's inside the publish job.
+2. **`ENABLE_MOBILE_PUBLISH`,** a repository variable like
+   `ENABLE_CRATES_PUBLISH`:
+   - set to `true` now;
+   - on a tag with it not `true`: the mobile build, publish and verify
+     jobs are skipped, and the release gate (RB-001.17's) treats that as
+     allowed, the same way it treats the other `ENABLE_*` switches;
+   - the version check still requires one version across all manifests;
+   - a `workflow_dispatch` input lets a dry run choose mobile on or off;
+   - the GitHub Release notes say "mobile packages not published in this
+     release (latest: X)" when they're skipped;
+   - RELEASING.md states DECISION 1's rule and how to set the switch for a
+     release.
+3. **Mobile CI only where it matters:**
+   - on a PR, the `mobile` ×3, `msrv-uniffi`, `swift`, `kotlin` and
+     android-emulator jobs run only when the PR touches `mnemo/bindings/**`,
+     `examples/mobile/**`, `mnemo/Cargo.toml`, a `Cargo.lock`, or
+     `.github/workflows/**`;
+   - on a push to `main` or `release-*`, they always run, so an engine change
+     that breaks a mobile build is caught within one merge;
+   - use the "changes" job pattern if `main` has required status checks, as
+     in CI-DEPS-1;
+   - in your DONE, report the PR CI time for an engine-only PR, before and
+     after.
+4. **FLAKE-2 (test-only):** the Kotlin `committedCount` treats
+   `NeedsWriteOpen` on a mid-commit byte copy as "not yet committed"
+   inside `eventually`. Check the Swift `committedCount` for the same
+   pattern and fix it the same way if it's there.
+5. **Prove it:** two release dry runs on the `rel-1` branch's tip (create a
+   `release-rel1` branch if the environment rules need the `release-*`
+   name): one with mobile on, where `verify-published` runs green; one with
+   mobile off, where the mobile jobs are skipped and the gate passes. Tell the
+   user when each waits for approval.
+
+Log DONE (not READY: there's no tag) with the run ids and the CI times.
+
+**REV-006 triage** (the full triage lines are in `reviewer_notes.md`):
+
+**R-006.1: ACCEPTED, with one change.** The order after REL-1 becomes:
+1. SAMPLE-1;
+2. INSP-1 (v0.13, with 12.5's export, the v8 sunset, and the deterministic
+   `--git` export's first version);
+3. **the 12.4 design note** (locking or a daemon), *before* committing the
+   rest of the harness scope, since 12.4 is the big, risky piece;
+4. 12.4, then 12.3, then 12.2;
+5. **Phase 13a**, local coordination: 13.1 messages and tasks, 13.3 claims
+   and presence, 13.5 visibility, 13.6 freshness;
+6. **HARNESS-DOGFOOD-1** (R-006.3);
+7. PERF-2;
+8. **Phase 13b**, multi-party cryptography: 13.2 key slots, 13.4
+   signatures, 13.7 merge;
+9. Phase 14, then Phase 15.
+
+PERF-2 moves later because it mostly speeds up very large files, and
+project brains are small. **In 13a, visibility is a filter, not a security
+boundary:** every key holder can read everything until 13b. The 13.5 spec
+says so.
+
+**R-006.2: ACCEPTED, all five, folded into the specs.** I checked them
+against the code:
+- **(a) Worktrees (12.4 and 12.2):** the default brain path resolves from
+  `git rev-parse --git-common-dir`, so every worktree shares one file.
+- **(b) No embedder needed to start (12.3).** Today `create` refuses
+  `dimensions == 0` (`store/open.rs:197`), and `remember_text` requires a
+  registered embedder (`store/crud.rs:231`). 12.3's design check decides
+  how a v9 file stores text with no vector (keyword and keyed recall only),
+  and how vectors are filled in when an embedder is attached. That's a
+  format question, so it follows the format-version policy.
+- **(c) `mnemo harness init` (12.2), widened to Cursor.** Cursor's
+  documented project config is `.cursor/mcp.json` (a top-level
+  `mcpServers` key), with rules in `.cursor/rules/*.mdc`; recent versions
+  also read hooks from a `hooks.json`. Re-check Cursor's docs when 12.2 is
+  specified.
+- **(d) `mnemo export --git` (12.5):** deterministic and diff-clean, with
+  no vectors, no raw turn archives and no claims. The visibility filter is
+  added with 13.5.
+- **(e) `--personal <path>` (12.2 and 12.4):** a second brain for
+  user-wide conventions, read alongside the project's. Last of the five.
+
+**R-006.3: ACCEPTED, with two changes.**
+1. **Its success criterion is the user's (2026-11-11): everything this
+   project does today through the git Markdown files runs entirely in
+   MNemo.** The parity checklist:
+
+   | Today, in git Markdown | In MNemo |
+   |---|---|
+   | PLAN.md Status, order, specs | a current plan readable in one call; specs as keyed records with history |
+   | WORKLOG (DISPATCH, READY, DONE, BLOCKED, VERIFIED, HANDOFF) | tasks and messages per role; READY reaches the Planner with no relay |
+   | reviewer_notes.md (ledger, batches, triage) | review items with ID, status and triage, queryable by status |
+   | AGENTS.md role rules | role rules loaded at every session start |
+   | SECURITY.local.md | a **separate, never-committed private brain** |
+   | one Planner editing at a time, re-reading the tail | real claims and locks between sessions (12.4, 13.3) |
+   | the user copying prompts between agents | each agent reads its own inbox; the user approves and decides |
+   | the git backup of PLAN.md | `mnemo export --git` |
+   | reading PLAN.md on the phone | INSP-1, later Phase 15 |
+
+   The milestone is met when Run 2 takes one full release, dispatch to tag,
+   with no hand-edited PLAN.md or reviewer_notes.md. Every item between
+   INSP-1 and HARNESS-DOGFOOD-1 is judged by whether it closes a row.
+2. **Private findings stay out of `test/project.mnemo`.** That file is
+   public by design and committed, and until 13b anyone with its key reads
+   everything. Run 2 replaces `SECURITY.local.md` with the separate private
+   brain from the checklist, never with `visibility = private` in the
+   public file.
