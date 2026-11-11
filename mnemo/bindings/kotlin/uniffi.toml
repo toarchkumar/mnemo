@@ -25,3 +25,5 @@ cdylib_name = "mnemo_uniffi"
 "MnemoError.NotAMnemoFile.message" = "reason"
 "MnemoError.Kdf.message" = "reason"
 "MnemoError.Crypto.message" = "reason"
+# v0.13's case (the v8 sunset).
+"MnemoError.FormatTooOld.message" = "reason"
