@@ -1,4 +1,5 @@
-//! The pager: encrypted, page-granular I/O over the database file.
+//! The pager: encrypted, page-granular I/O over the database file (one
+//! file, one lock).
 //!
 //! The pager owns the file handle and the data-encryption-key (DEK). Callers
 //! deal in *plaintext payloads*; the pager transparently encrypts on write and
