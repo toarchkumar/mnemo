@@ -256,8 +256,8 @@ jobs:
         run: python test_mnemo.py
 
   # --- Format compatibility (FMT-9f): a v8 file built by the published
-  #     v0.10.0 CLI opens and writes under this build, compacts to v9 and
-  #     recalls the same; v0.10.0 refuses the v9 copy. See
+  #     v0.10.0 CLI opens read-only under this build (the v8 sunset),
+  #     compacts to v9 and recalls the same; v0.10.0 refuses the v9 copy. See
   #     `mnemo/tests/v0_10_fixture.rs`.
   compat:
     name: compat (v0.10.0 fixture, linux)

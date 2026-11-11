@@ -458,7 +458,7 @@ restored, and the cap differs by format:
 | Format | Retained by default | Override |
 |---|---|---|
 | v9 (new files) | the newest **16** snapshots, plus any from the **last 24 hours**; retained snapshots never pin more than a quarter of the file (past that, the oldest go first, whatever their age) | `max_snapshots` / `set_max_snapshots` changes the count |
-| v8 | the newest **256** snapshots | `max_snapshots` (`0`: no cap) |
+| v8 (read-only since v0.13) | the newest **256** snapshots | — |
 
 So on a v9 file that flushes often (a phone app under the default
 coalesced flush policy commits about once a second while it's writing),
@@ -468,6 +468,27 @@ snapshot that's gone returns `MnemoError::NotFound`. `compact_file`
 collapses the manifest to a single snapshot, and there's no external log
 archiving, so nothing older than the last compaction is ever restorable.
 `snapshots()` lists exactly what's restorable now.
+
+### Format versions: v9, and v8 read-only
+
+New files are **v9**, the only format this build writes. Since v0.13 (the v8
+sunset):
+
+- **A v8 file opens read-only.** `open_read_only` (and every read command:
+  `info`, `about`, `get`, `list`, `search`, `recall`, `verify`, `history`,
+  `thread export`, `essence`) works as before.
+- **A read-write open of it fails** with `MnemoError::FormatTooOld { version:
+  8 }`, whose message says to run `mnemo compact`.
+- **`mnemo compact` (`Mnemo::compact_file`) converts it to v9** and keeps
+  every live memory, the result cache, the threads and the essence. It
+  collapses the snapshot history to one snapshot, as any compaction does.
+- **A v4–v7 file** (from v0.6 and earlier) no longer opens at all, read-only
+  included: `compact` converts it the same way.
+- **No new v8 file can be made.** `format_version: 8` is refused, and
+  `compact --format v8` is gone.
+
+The mobile packages never open a v8 file read-write either. Convert an old
+file on a Mac with `mnemo compact` before copying it to a phone.
 
 ### The vector column (v9)
 
@@ -728,7 +749,7 @@ cargo run --bin mnemo -- <command>
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase; `--rotate` also rewrites the file under a fresh data key (revokes the old passphrase) |
-| `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which upgrades a v8 file (`--format v8` keeps v8 for one release) |
+| `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |

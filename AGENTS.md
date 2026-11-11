@@ -162,16 +162,21 @@ The format constants live in `mnemo/src/format.rs`:
 
 - `DEFAULT_NEW_VERSION` (currently 9) is the format new files are created
   in, and the one `Mnemo::compact_file` writes.
-- `VERSION` (8) is the in-place migration target: files in
-  `[MIGRATABLE_FROM, VERSION)` (v4–v7) are migrated in place on first open
-  and rewritten as v8 on the next flush. `MIGRATABLE_FROM` (4) is the
-  lowest version this build can auto-upgrade; older files are rejected
-  with `MnemoError::UnsupportedVersion`.
-- `MAX_VERSION` (9) is the newest version this build opens. v8 and v9 files
-  both open and write in their own format.
-- **v8 → v9 happens only through compaction** (`mnemo compact`,
-  `Mnemo::compact_file`). v9's layout differs throughout, so there's no
-  in-place upgrade.
+- `VERSION` (8) is the last pre-v9 format. **Since the v8 sunset (v0.13)
+  a read-write handle is always v9:** `Mnemo::open` on a v4–v8 file
+  fails with `MnemoError::FormatTooOld`, `open_read_only` still reads a v8
+  file (not v4–v7), and no new file can be v8. `MIGRATABLE_FROM` (4) is the
+  lowest version `compact_file` can convert; older files are rejected with
+  `MnemoError::UnsupportedVersion`.
+- `MAX_VERSION` (9) is the newest version this build opens.
+- **v4–v8 → v9 happens only through compaction** (`mnemo compact`,
+  `Mnemo::compact_file`), the one read-write open that accepts an older
+  file (`open_secret_with(.., allow_old: true)`). It migrates v4–v7 in
+  memory to v8 on the way, then writes the v9 copy.
+- **v8 test coverage is reads of committed fixtures**
+  (`mnemo/tests/fixtures/v8/`, written by the published v0.12.3 engine
+  through `tests/fixtures/v8/generator`; `tests/v8_fixture.rs`). Nothing in
+  the tree writes v8 any more.
 
 **Standing MessagePack rule:** `rmp_serde::to_vec` encodes Rust structs as
 positional MessagePack arrays (not named maps), and `rmp-serde` (1.3) rejects

@@ -23,6 +23,16 @@ fn mem(text: &str, i: usize) -> Memory {
     )
 }
 
+/// The committed v8 fixture, read-only (the published v0.12.3 engine wrote
+/// it; since the v8 sunset no v8 file is written).
+fn v8_fixture() -> Mnemo {
+    Mnemo::open_read_only(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        "v8-fixture-passphrase",
+    )
+    .unwrap()
+}
+
 fn top(db: &mut Mnemo, q: &str) -> Vec<Ulid> {
     db.__bm25(q)
         .unwrap()
@@ -157,9 +167,9 @@ fn thread_turns_are_not_keyword_indexed_and_v8_has_no_index() {
     let fact = db.remember(mem("gamma is a fact", 1)).unwrap();
     assert_eq!(top(&mut db, "gamma"), vec![fact]);
 
-    let mut v8 = Mnemo::create(dir.path().join("v8.mnemo"), "pw", cfg(8)).unwrap();
-    v8.remember(mem("gamma on v8", 0)).unwrap();
-    assert!(top(&mut v8, "gamma").is_empty());
+    // v8 has no keyword index.
+    let mut v8 = v8_fixture();
+    assert!(top(&mut v8, "Lisbon").is_empty());
 }
 
 // --- FMT-9d.2: keywords and hybrid recall --------------------------------
@@ -226,10 +236,8 @@ fn hybrid_recall_lifts_an_exact_keyword_match() {
 
 #[test]
 fn keyword_recall_on_v8_is_a_clear_error() {
-    let dir = tempdir().unwrap();
-    let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(8)).unwrap();
-    db.remember(mem("gamma", 0)).unwrap();
-    match db.recall(&RecallRequest::keywords_only("gamma")) {
+    let mut db = v8_fixture();
+    match db.recall(&RecallRequest::keywords_only("Lisbon").track_access(false)) {
         Err(MnemoError::Invalid(msg)) => assert!(msg.contains("v9"), "{msg}"),
         other => panic!("expected Invalid, got {:?}", other.map(|h| h.len())),
     }

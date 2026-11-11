@@ -106,26 +106,6 @@ fn v9_round_trips_through_close_and_reopen() {
 }
 
 #[test]
-fn v8_is_untouched_no_reuse_no_free_list() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("t.mnemo");
-    let mut db = Mnemo::create(&path, "pw", cfg(8)).unwrap();
-    db.set_max_snapshots(1);
-    let ids: Vec<Ulid> = (0..10).map(|i| db.remember(mem(i)).unwrap()).collect();
-    db.flush().unwrap();
-    for id in &ids[..5] {
-        db.delete(id).unwrap();
-    }
-    db.flush().unwrap();
-    let tail = db.__next_page();
-    let fresh: Vec<Ulid> = (10..15).map(|i| db.remember(mem(i)).unwrap()).collect();
-    db.flush().unwrap();
-    assert_eq!(db.__format_version(), 8);
-    assert!(db.__free_list().0.is_empty());
-    assert!(record_pages(&db, &fresh).iter().all(|&p| p >= tail));
-}
-
-#[test]
 fn freed_pages_are_reused_once_unpinned() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
@@ -347,10 +327,15 @@ fn key_slot_run_is_persisted_copy_on_write_and_authenticated() {
     );
     drop(db);
 
-    // A v8 file has no key-slot run.
-    let path8 = dir.path().join("v8.mnemo");
-    let mut db8 = Mnemo::create(&path8, "pw", cfg(8)).unwrap();
-    assert!(db8.__add_key_slot_for_testing("x").is_err());
+    // A v8 file has no key-slot run (the committed v8 fixture, read-only:
+    // since the v8 sunset no v8 file is created).
+    let db8 = Mnemo::open_read_only(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        "v8-fixture-passphrase",
+    )
+    .unwrap();
+    assert!(db8.__key_slot_labels().is_empty());
+    drop(db8);
 
     // Tampering with the run's page fails the open.
     let mut page = read_page(&path, p2);

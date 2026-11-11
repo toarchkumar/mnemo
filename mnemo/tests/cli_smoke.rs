@@ -19,6 +19,16 @@ fn bin() -> &'static str {
 }
 
 /// Cheap KDF so the tests are fast.
+/// The v8 sunset (v0.13): a copy of the committed v8 fixture (written by the
+/// published v0.12.3 engine; see `tests/fixtures/v8/generator`). 17 live
+/// memories, 8 dimensions.
+fn v8_fixture(dir: &std::path::Path) -> (std::path::PathBuf, &'static str) {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo");
+    let dst = dir.join("v8.mnemo");
+    std::fs::copy(src, &dst).unwrap();
+    (dst, "v8-fixture-passphrase")
+}
+
 fn fast_cfg(dimensions: usize) -> MnemoConfig {
     MnemoConfig {
         dimensions,
@@ -791,16 +801,9 @@ fn cli_recall_text_without_embed_cmd_errors_cleanly() {
     // FMT-9f: on a v8 file `--text` needs an embedder. On v9 (the default)
     // it's keyword recall without one: see
     // `cli_recall_text_without_embed_cmd_is_keyword_recall_on_v9`.
+    // A v8 file recalls read-only since v0.13 (the fixture).
     let dir = tempdir().unwrap();
-    let path = dir.path().join("em-noec.mnemo");
-    let pp = "em-pw";
-    {
-        let cfg = MnemoConfig {
-            format_version: 8,
-            ..fast_cfg(4)
-        };
-        let _ = Mnemo::create(&path, pp, cfg).unwrap();
-    }
+    let (path, pp) = v8_fixture(dir.path());
     let out = Command::new(bin())
         .args([
             "recall",
@@ -855,30 +858,14 @@ fn cli_recall_text_without_embed_cmd_is_keyword_recall_on_v9() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("alpha shipped"));
 }
 
-/// FMT-9f: `info` and `about` hint at the upgrade on a v8 file; `compact`
-/// writes v9; `compact --format v8` keeps v8.
+/// The v8 sunset (v0.13): on a v8 file `info` and `about` hint at the
+/// upgrade, reads work, a write is refused with the `mnemo compact` hint,
+/// and `compact` writes v9 with every memory.
 #[test]
 fn cli_compact_upgrades_a_v8_file_and_info_hints_until_then() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("up.mnemo");
+    let (path, pp) = v8_fixture(dir.path());
     let p = path.to_str().unwrap();
-    let pp = "up-pw";
-    {
-        let cfg = MnemoConfig {
-            format_version: 8,
-            ..fast_cfg(4)
-        };
-        let mut db = Mnemo::create(&path, pp, cfg).unwrap();
-        for i in 0..3 {
-            db.remember(Memory::new(
-                format!("m{i}"),
-                MemoryType::Semantic,
-                vec![1.0 + i as f32, 0.0, 0.0, 0.0],
-            ))
-            .unwrap();
-        }
-        db.close().unwrap();
-    }
     let run = |args: &[&str]| {
         let out = Command::new(bin())
             .args(args)
@@ -896,17 +883,33 @@ fn cli_compact_upgrades_a_v8_file_and_info_hints_until_then() {
     assert!(info.contains("format:      v8"), "{info}");
     assert!(info.contains("mnemo compact"), "{info}");
     assert!(run(&["about", p]).contains("mnemo compact"));
+    assert!(run(&["list", p]).contains("Flight UA 931"));
+    assert!(run(&["verify", p]).contains("verified"));
 
-    let out = run(&["compact", p, "--format", "v8"]);
-    assert!(out.contains("(v8)"), "{out}");
-    assert!(run(&["info", p]).contains("format:      v8"));
+    // A write is refused, and says what to do.
+    let out = Command::new(bin())
+        .args(["essence", "append", p, "--thread", "offsite", "--text", "a milestone"])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo");
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("format v8") && err.contains("mnemo compact"), "{err}");
+
+    // `--format` is gone.
+    let out = Command::new(bin())
+        .args(["compact", p, "--format", "v8"])
+        .env("MNEMO_PASSPHRASE", pp)
+        .output()
+        .expect("spawn mnemo");
+    assert!(!out.status.success(), "compact --format v8 must be refused");
 
     let out = run(&["compact", p]);
-    assert!(out.contains("(v9)"), "{out}");
+    assert!(out.contains("(v9)") && out.contains("17 -> 17"), "{out}");
     let info = run(&["info", p]);
     assert!(info.contains("format:      v9"), "{info}");
     assert!(!info.contains("mnemo compact"), "{info}");
-    assert!(info.contains("memories:    3"), "{info}");
+    assert!(info.contains("memories:    17"), "{info}");
 }
 
 #[test]
@@ -1523,14 +1526,12 @@ fn cli_index_rebuild_runs_rebuild_index() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rb.mnemo");
     let pp = "bp1-pw";
+    // A 40-memory v9 file builds no ANN index (below `V9_ANN_MIN_FACTS`),
+    // and this test is about the CLI flag, so drop the threshold: the test
+    // process and the CLI the tests build both have `dev-hooks`.
+    std::env::set_var("MNEMO_DEV_ANN_MIN_FACTS", "0");
     {
-        // A v8 file: a 40-memory v9 file has no ANN index (below
-        // `V9_ANN_MIN_FACTS`), and this test is about the CLI flag.
-        let cfg = MnemoConfig {
-            format_version: 8,
-            ..fast_cfg(4)
-        };
-        let mut db = Mnemo::create(&path, pp, cfg).unwrap();
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
         for i in 0..40 {
             let v = vec![((i % 4) + 1) as f32, 1.0, 2.0, 3.0];
             db.remember(Memory::new(format!("m{i}"), MemoryType::Semantic, v))

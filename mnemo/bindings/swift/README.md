@@ -143,7 +143,7 @@ Every commit leaves a restorable snapshot, but only some are kept. A
 new (v9) file keeps the newest 16 plus any from the last 24 hours, and
 never lets them pin more than a quarter of the file. Under the default
 flush policy a busy app commits about once a second, so the history
-reaches back about a day, not further. A v8 file keeps the newest 256.
+reaches back about a day, not further.
 `compact()` drops all of them.
 `setMaxSnapshots(_:)` (Kotlin: `setMaxSnapshots(count)`) keeps a different
 number instead, as a hard cap; the store applies it every time it opens the
@@ -413,7 +413,7 @@ let store = try MnemoStore(
 - `MnemoError` comes from the engine: `Locked`, `WrongPassphrase`,
   `HeaderTampered`, `UnsupportedVersion`, `NotAMnemoFile`, `NotFound`,
   `ReadOnly`, `NeedsWriteOpen`, `DimensionMismatch`, `EmbedderMismatch`
-  (v0.13), `Invalid`, `Io`, `Kdf`, `Crypto`, `Corrupt`, `Closed`,
+  and `FormatTooOld` (v0.13), `Invalid`, `Io`, `Kdf`, `Crypto`, `Corrupt`, `Closed`,
   `Embedder`. `MnemoStore` never surfaces
   `Closed`: it reopens the file and retries once, and a handle a panic
   poisoned is treated the same way.
@@ -428,5 +428,5 @@ apart for `MnemoError`):
 | Class | Errors | What to do |
 |---|---|---|
 | Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)`, `noBackgroundTime` | Try again later, on the next launch, say. The data is fine. |
-| Fix the call | `Invalid`, `DimensionMismatch`, `EmbedderMismatch`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
+| Fix the call | `Invalid`, `DimensionMismatch`, `EmbedderMismatch`, `FormatTooOld` (a v8 file: convert it with `mnemo compact` on a Mac), `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
 | The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `keyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |

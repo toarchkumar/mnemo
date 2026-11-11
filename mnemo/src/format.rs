@@ -40,21 +40,27 @@ pub const VERSION: u16 = 8;
 /// free list, a generation in every page's AAD, a sealed 512-byte header,
 /// a key-slot run, the fp16 vector column, packed records, catalog and
 /// index deltas, BM25, compressed turns). **New files are v9 from
-/// v0.11.0** ([`DEFAULT_NEW_VERSION`]). v8 files still open and write as
-/// v8 ([`VERSION`] stays the in-place migration target for v4–v7 files);
-/// `Mnemo::compact_file` rewrites a file as v9. v9 isn't an in-place
+/// v0.11.0** ([`DEFAULT_NEW_VERSION`]), and **since v0.13 (the v8 sunset)
+/// every read-write handle is v9:** a v8 file opens read-only, a v4–v8 file
+/// refuses a read-write open with `MnemoError::FormatTooOld`, and no new
+/// file can be v8. `Mnemo::compact_file` converts any v4–v8 file to v9
+/// (migrating v4–v7 to v8 in memory on the way). v9 isn't an in-place
 /// upgrade: its layout differs throughout.
 pub const VERSION_V9: u16 = 9;
 /// FMT-9f: the format a new file is created in (and `compact_file` writes).
 pub const DEFAULT_NEW_VERSION: u16 = VERSION_V9;
 /// Highest version this build can open.
 pub const MAX_VERSION: u16 = VERSION_V9;
-/// Lowest version this build can auto-migrate on open. Files older than
-/// this are rejected with [`MnemoError::UnsupportedVersion`]; files in
-/// `[MIGRATABLE_FROM, VERSION)` are upgraded in place by [`crate::Mnemo::open`]
-/// and rewritten under the current `VERSION` on the next flush.
+/// Lowest version `Mnemo::compact_file` can convert. Files older than
+/// this are rejected with [`MnemoError::UnsupportedVersion`]. Since v0.13
+/// (the v8 sunset) files in `[MIGRATABLE_FROM, VERSION)` are migrated only
+/// in memory, by compaction on its way to v9; [`crate::Mnemo::open`] refuses
+/// them with `MnemoError::FormatTooOld`.
 ///
 /// History:
+/// - **v0.13, the v8 sunset (no version bump):** read-write handles are v9
+///   only. v8 opens read-only; v4–v8 convert through `compact_file`; no new
+///   v8 file is created.
 /// - **v7** adds a small AES-GCM seal at the tail of the header page that
 ///   authenticates every mutable header field (write_counter, next_page,
 ///   catalog/index/manifest pointers, etc.) under the DEK. An attacker

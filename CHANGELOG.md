@@ -8,7 +8,28 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-- **Upgrading:**
+- **Upgrading: the v8 sunset.** v9 (the default since v0.11) is now the
+  only format this build writes.
+  - **A v8 file opens read-only.** `Mnemo::open` / `open_with_key` (and so
+    the CLI's write commands, `mnemo serve`, Python's `mnemo.open` and the
+    mobile stores) fail on it with the new `MnemoError::FormatTooOld {
+    version }`, whose message says to run `mnemo compact`.
+    `open_read_only` and the CLI's read commands work as before (`recall`
+    and `cache get` fall back to read-only on a v8 file).
+  - **Run `mnemo compact <file>` once** to convert it to v9. It keeps every
+    live memory, the result cache, threads and essence, and collapses the
+    snapshot history (as every compaction does). It also converts v4–v7
+    files, which no longer open in any mode.
+  - **No new v8 file:** `MnemoConfig { format_version: 8, .. }` is refused,
+    `Mnemo::compact_file_to` and `mnemo compact --format v8` are removed,
+    and the Swift `MnemoStoreConfiguration.formatVersion` and Kotlin
+    `formatVersion` (deprecated in 0.12.2) are gone. A Kotlin call that
+    passed `vectorCacheBudgetBytes` positionally after `directory` needs a
+    named argument.
+  - The FFI gets `FormatTooOld { version, message }`, which isn't
+    retryable ("fix the call").
+  - The engine's own v8 coverage is now read tests on committed v8
+    fixtures that the published v0.12.3 engine wrote.
   - A file is now bound to the first embedder attached to it, with or
     without a manifest. Attaching another identity (another name, width or
     `normalize` flag) fails with the new `MnemoError::EmbedderMismatch {
@@ -34,6 +55,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **The v8 sunset** (see the upgrade notes above): read-write handles are
+  v9 only, a v8 file opens read-only, `compact_file` is the one path from
+  v4–v8 to v9, and no new v8 file is created.
 - **HOOKS-1: release builds carry no test hooks** (RB-001.29). The hidden
   `__*` methods on `Mnemo`, `BudgetReport`, and the
   `MNEMO_DEV_ANN_MIN_FACTS` and `MNEMO_DEV_TURN_ZSTD` environment switches

@@ -44,7 +44,8 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 #[test]
 fn t8_reserved_metadata_is_refused_on_every_write_path() {
     let _g = lock();
-    for version in [8u16, 9] {
+    // v9 only since the v8 sunset (v0.13): v8 files can't be written.
+    for version in [9u16] {
         let dir = tempdir().unwrap();
         let mut db = Mnemo::create(dir.path().join("t.mnemo"), "pw", cfg(version)).unwrap();
         let normal = db.remember(mem("a normal memory", 0)).unwrap();
@@ -124,7 +125,8 @@ fn t8_reserved_metadata_is_refused_on_every_write_path() {
 #[test]
 fn t4_try_close_keeps_the_handle_when_the_flush_fails() {
     let _g = lock();
-    for version in [8u16, 9] {
+    // v9 only since the v8 sunset (v0.13): v8 files can't be written.
+    for version in [9u16] {
         let dir = tempdir().unwrap();
         let path = dir.path().join("c.mnemo");
         let mut db = Mnemo::create(&path, "pw", cfg(version)).unwrap();
@@ -245,7 +247,8 @@ fn pending_wal_fixture(dir: &std::path::Path, version: u16) -> (std::path::PathB
 #[test]
 fn t6_key_opens_answers_on_a_file_with_a_wal_to_recover() {
     let _g = lock();
-    for version in [9u16, 8] {
+    // v9 only since the v8 sunset (v0.13): v8 files can't be written.
+    for version in [9u16] {
         let dir = tempdir().unwrap();
         let (path, key, n) = pending_wal_fixture(dir.path(), version);
         let wrong = Mnemo::generate_key();

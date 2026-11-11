@@ -59,7 +59,8 @@ fn splice(current: &Path, page0: &[u8], out: &Path) {
 /// tests are the header grafts in `src/store/header_graft_tests.rs`.
 #[test]
 fn hygiene_rekey_scrubs_stale_copies_of_the_old_key_wrap() {
-    for version in [8u16, 9] {
+    // v9 only since the v8 sunset (v0.13): v8 files can't be written.
+    for version in [9u16] {
         let dir = tempdir().unwrap();
         let path = dir.path().join("r.mnemo");
         make(&path, version, "passphrase-A", 20);
@@ -110,7 +111,8 @@ fn a_plain_rekey_does_not_revoke_an_earlier_copy_of_the_header() {
 
 #[test]
 fn rotating_revokes_the_old_passphrase() {
-    for version in [8u16, 9] {
+    // v9 only since the v8 sunset (v0.13): v8 files can't be written.
+    for version in [9u16] {
         let dir = tempdir().unwrap();
         let path = dir.path().join("rot.mnemo");
         make(&path, version, "passphrase-A", 20);
@@ -181,14 +183,20 @@ fn a_rekeyed_export_shares_no_key_material_with_its_source() {
 #[test]
 fn a_rekeyed_export_with_a_key_and_from_a_read_only_handle() {
     let dir = tempdir().unwrap();
+    // A v8 source, read-only (the committed fixture: since the v8 sunset
+    // nothing writes v8, and a v8 file opens read-only).
     let live = dir.path().join("src.mnemo");
-    make(&live, 8, "pw", 12);
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        &live,
+    )
+    .unwrap();
     let key = Mnemo::generate_key();
-    let mut ro = Mnemo::open_read_only(&live, "pw").unwrap();
+    let mut ro = Mnemo::open_read_only(&live, "v8-fixture-passphrase").unwrap();
     let copy = dir.path().join("keyed.mnemo");
     ro.export_rekeyed_with_key(&copy, &key).unwrap();
     let c = Mnemo::open_read_only_with_key(&copy, &key).unwrap();
-    assert_eq!(c.len(), 12);
+    assert_eq!(c.len(), 17);
     assert_eq!(c.stats_format_version(), 9, "the copy is v9");
     // It refuses an existing destination and the open file itself.
     assert!(ro.export_rekeyed_with_key(&copy, &key).is_err());

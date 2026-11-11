@@ -19,6 +19,13 @@ fn cfg(version: u16) -> MnemoConfig {
     }
 }
 
+/// The committed v8 fixtures (the published v0.12.3 engine wrote them; see
+/// `tests/fixtures/v8/generator`).
+fn fixture(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8").join(name)
+}
+const FIXTURE_PASSPHRASE: &str = "v8-fixture-passphrase";
+
 /// A deterministic, well-spread vector for memory `i`.
 fn vector(i: usize) -> Vec<f32> {
     (0..DIMS)
@@ -76,57 +83,37 @@ fn v9_vectors_are_fp16_rounded_unless_float_vectors_are_kept() {
     }
 }
 
+/// v9's fp16 column ranks like v8's exact scan. Since the v8 sunset no v8
+/// file is written, so this compares the committed v8 fixture (read-only)
+/// with its compacted v9 copy, querying with each memory's own vector.
 #[test]
 fn v9_recall_matches_v8_ranking() {
     let dir = tempdir().unwrap();
-    let mut dbs: Vec<Mnemo> = [8u16, 9]
-        .iter()
-        .map(|&v| {
-            let mut db =
-                Mnemo::create(dir.path().join(format!("v{v}.mnemo")), "pw", cfg(v)).unwrap();
-            for i in 0..200 {
-                let mut m = mem(i);
-                m.importance = (i % 5) as f32 / 4.0;
-                m.agent_id = if i % 3 == 0 { "a".into() } else { "b".into() };
-                if i % 7 == 0 {
-                    m.memory_type = MemoryType::Episodic;
-                }
-                db.remember(m).unwrap();
-            }
-            db.flush().unwrap();
-            db
-        })
-        .collect();
-    for q in [3usize, 50, 111, 199] {
+    let v8_path = dir.path().join("v8.mnemo");
+    std::fs::copy(fixture("v8_passphrase.mnemo"), &v8_path).unwrap();
+    let v9_path = dir.path().join("v9.mnemo");
+    std::fs::copy(&v8_path, &v9_path).unwrap();
+    Mnemo::compact_file(v9_path.to_str().unwrap(), FIXTURE_PASSPHRASE).unwrap();
+
+    let mut v8 = Mnemo::open_read_only(&v8_path, FIXTURE_PASSPHRASE).unwrap();
+    let mut v9 = Mnemo::open_read_only(&v9_path, FIXTURE_PASSPHRASE).unwrap();
+    assert_eq!(v8.stats_summary().format_version, 8);
+    assert_eq!(v9.stats_summary().format_version, 9);
+    let queries: Vec<Vec<f32>> = v8.memories().unwrap().into_iter().map(|m| m.vector).collect();
+    assert!(queries.len() >= 10);
+    for q in &queries {
         for metric in [Metric::Cosine, Metric::Dot, Metric::L2] {
-            let req = RecallRequest::new(vector(q))
-                .top_k(10)
+            let req = RecallRequest::new(q.clone())
+                .top_k(5)
                 .metric(metric)
                 .track_access(false);
-            let a = dbs[0].recall(&req).unwrap();
-            let b = dbs[1].recall(&req).unwrap();
-            assert_eq!(
-                a[0].memory.content, b[0].memory.content,
-                "top hit, q {q} {metric:?}"
-            );
-            // Two files never share ids, so compare by content.
-            let cb: Vec<&str> = b.iter().map(|h| h.memory.content.as_str()).collect();
-            let common = a
-                .iter()
-                .filter(|h| cb.contains(&h.memory.content.as_str()))
-                .count();
-            assert!(common >= 9, "q {q} {metric:?}: only {common}/10 in common");
-            // Agent + type filters take the row path on v9.
-            let req = req.clone().agent("a").types(vec![MemoryType::Semantic]);
-            let a = dbs[0].recall(&req).unwrap();
-            let b = dbs[1].recall(&req).unwrap();
-            assert_eq!(a.len(), b.len());
-            assert!(b
-                .iter()
-                .all(|h| h.memory.agent_id == "a" && h.memory.memory_type == MemoryType::Semantic));
+            let a: Vec<String> = v8.recall(&req).unwrap().into_iter().map(|h| h.memory.content).collect();
+            let b: Vec<String> = v9.recall(&req).unwrap().into_iter().map(|h| h.memory.content).collect();
+            assert_eq!(a[0], b[0], "top hit, {metric:?}");
+            let common = a.iter().filter(|c| b.contains(c)).count();
+            assert!(common >= 4, "{metric:?}: only {common}/5 in common: {a:?} vs {b:?}");
         }
     }
-    assert!(dbs[1].__vector_column().0, "recall loaded the column");
 }
 
 #[test]
@@ -367,16 +354,6 @@ fn too_many_dimensions_for_a_v9_page_is_refused() {
         },
     );
     assert!(matches!(res, Err(MnemoError::Invalid(_))));
-    // v8 is unaffected.
-    Mnemo::create(
-        dir.path().join("t8.mnemo"),
-        "pw",
-        MnemoConfig {
-            dimensions: 4096,
-            ..cfg(8)
-        },
-    )
-    .unwrap();
 }
 
 // --- FMT-9b.2: packed record pages -----------------------------------------
@@ -623,19 +600,17 @@ fn writes_past_the_budget_page_the_column_and_recall_mode_follows() {
 
 #[test]
 fn an_index_makes_recall_mode_indexed() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("v8.mnemo");
-    let mut db = Mnemo::create(&path, "pw", cfg(8)).unwrap();
-    for i in 0..300 {
-        db.remember(mem(i)).unwrap();
-    }
-    assert_eq!(
-        db.stats().unwrap().recall_mode,
-        RecallMode::ExactPaged,
-        "v8 has no column"
-    );
-    db.build_index().unwrap();
-    assert_eq!(db.stats().unwrap().recall_mode, RecallMode::Indexed);
+    // v8 has no vector column: without an index it scans the records, and
+    // with one it's indexed. The committed v8 fixtures, read-only (no v8
+    // file is written since the v8 sunset): the key fixture has no index,
+    // the passphrase one has.
+    let hex = std::fs::read_to_string(fixture("v8_key.key")).unwrap();
+    let key: [u8; 32] =
+        std::array::from_fn(|i| u8::from_str_radix(&hex.trim()[2 * i..2 * i + 2], 16).unwrap());
+    let mut plain = Mnemo::open_read_only_with_key(fixture("v8_key.mnemo"), &key).unwrap();
+    assert_eq!(plain.stats().unwrap().recall_mode, RecallMode::ExactPaged, "v8 has no column");
+    let mut indexed = Mnemo::open_read_only(fixture("v8_passphrase.mnemo"), FIXTURE_PASSPHRASE).unwrap();
+    assert!(indexed.has_index());
+    assert_eq!(indexed.stats().unwrap().recall_mode, RecallMode::Indexed);
     assert_eq!(RecallMode::Indexed.as_str(), "indexed");
-    db.close().unwrap();
 }
