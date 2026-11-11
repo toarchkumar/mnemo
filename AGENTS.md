@@ -144,6 +144,13 @@ push to `main` and every PR. Two jobs:
 The `rust` jobs also gate on `cargo fmt --check` (since PR 9), so run
 `cargo fmt` (from `mnemo/`) before pushing.
 
+The mobile jobs (the phone cross-builds, `msrv-uniffi`, `swift` on the iOS
+simulator, `kotlin`) are in `.github/workflows/mobile-ci.yml` (REL-1). On a
+PR they run only when it touches `mnemo/bindings/**`, `examples/mobile/**`,
+`mnemo/Cargo.toml`, a `Cargo.lock` or `.github/workflows/**`. On a push to
+`main` or a release branch they always run, so an engine-only PR that breaks
+a mobile build shows up on its merge.
+
 ## Format-version policy
 
 The format constants live in `mnemo/src/format.rs`:

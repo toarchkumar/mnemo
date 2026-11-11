@@ -1,0 +1,346 @@
+name: Mobile CI
+
+# The mobile jobs (REL-1): the phone cross-builds, the uniffi MSRV, the
+# Swift package on the iOS simulator and the Kotlin package. They were in
+# ci.yml; they're a workflow of their own so a PR runs them only when it
+# touches the mobile code or what the mobile builds depend on. A push to
+# `main` or a release branch always runs them, so an engine change that
+# breaks a mobile build is caught within one merge. `main` has no required
+# status checks, so nothing waits on a run that doesn't start. The
+# android-emulator workflow is nightly, on tags and by hand, unchanged.
+on:
+  push:
+    branches: [main, "release/**", "release-*"]
+    # The same docs-only list as ci.yml.
+    paths-ignore:
+      - PLAN.md
+      - reviewer_notes.md
+      - README.md
+      - "**/README.md"
+      - index.html
+      - CHANGELOG.md
+      - RELEASING.md
+  pull_request:
+    branches: [main, "release/**", "release-*"]
+    paths:
+      - "mnemo/bindings/**"
+      - "examples/mobile/**"
+      - "mnemo/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/**"
+
+# As in ci.yml: a newer push cancels an older run, except on `main`.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && format('mobile-ci-main-{0}', github.run_id) || format('mobile-ci-{0}', github.ref) }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Treat new clippy lints in future toolchain releases as warnings, not
+  # build-breaking errors, so a CI run going red is always something we
+  # actually changed. The job below still uses `-D warnings` to enforce
+  # the existing lint surface; `RUSTFLAGS` only governs the build itself.
+  #
+  # `--cfg aes_armv8 --cfg polyval_armv8` enables ARMv8 hardware AES +
+  # PMULL in the `aes` and `polyval` crates. No-op on x86_64 (both
+  # crates auto-detect AES-NI / CLMUL at runtime), active on aarch64
+  # runners (macos-latest, and any linux aarch64 we add later). An env
+  # `RUSTFLAGS` fully overrides `rustflags` from `.cargo/config.toml`,
+  # so the flags must appear here as well. The cfg names are declared
+  # under `[lints.rust] unexpected_cfgs` in every crate's Cargo.toml
+  # so `-D warnings` doesn't trip when they aren't recognised by rustc.
+  RUSTFLAGS: -D warnings --cfg aes_armv8 --cfg polyval_armv8
+
+jobs:
+  # --- Mobile cross-builds (FMT-9e, PLANNER-A condition (ii)). zstd is
+  #     the engine's first C dependency (`zstd-sys`, built by `cc`), so
+  #     every change must still compile the library for the phone
+  #     targets MOBILE-1 ships. Library only (no CLI binary), debug: this
+  #     is a compile gate, not a size or speed check (size.yml covers
+  #     size). Android points `cc` at the runner's NDK clang (API 24);
+  #     iOS uses the runner's Xcode SDK, which `cc` finds via xcrun.
+  mobile:
+    name: mobile (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-ios
+            os: macos-latest
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+          # MOBILE-1a: the emulator ABI (x86_64) is shipped in the AAR too.
+          - target: x86_64-linux-android
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: ${{ matrix.target }}
+
+      - name: Point cc at the NDK (Android)
+        if: endsWith(matrix.target, '-linux-android')
+        run: |
+          TC="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          T="${{ matrix.target }}"
+          U=$(echo "$T" | tr 'a-z-' 'A-Z_')
+          echo "CC_${T//-/_}=$TC/${T}24-clang" >> "$GITHUB_ENV"
+          echo "AR_${T//-/_}=$TC/llvm-ar" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_${U}_LINKER=$TC/${T}24-clang" >> "$GITHUB_ENV"
+          echo "NDK_BIN=$TC" >> "$GITHUB_ENV"
+
+      - name: cargo build --lib
+        working-directory: mnemo
+        run: cargo build --lib --target ${{ matrix.target }}
+
+      # MOBILE-1a: the UniFFI binding, release (LTO), for the same target.
+      - name: cargo build -p mnemo-uniffi (release)
+        working-directory: mnemo
+        run: cargo build -p mnemo-uniffi --lib --release --target ${{ matrix.target }}
+
+      # Gate (MOBILE-1a §Q9): the stripped .so is at most 5 MB per ABI.
+      # The ELF alignment is printed for 1c, which gates on it.
+      - name: stripped size and ELF alignment (Android)
+        if: endsWith(matrix.target, '-linux-android')
+        working-directory: mnemo
+        run: |
+          SO="target/${{ matrix.target }}/release/libmnemo_uniffi.so"
+          "$NDK_BIN/llvm-strip" -o stripped.so "$SO"
+          BYTES=$(stat -c %s stripped.so)
+          echo "libmnemo_uniffi.so (${{ matrix.target }}): $BYTES bytes stripped"
+          echo "### libmnemo_uniffi.so (${{ matrix.target }}): $BYTES bytes stripped" >> "$GITHUB_STEP_SUMMARY"
+          "$NDK_BIN/llvm-readelf" -Wl stripped.so | grep -E 'LOAD|RELRO|Type'
+          test "$BYTES" -le 5242880
+
+      - name: static library size (iOS, informational)
+        if: matrix.target == 'aarch64-apple-ios'
+        working-directory: mnemo
+        run: |
+          A="target/${{ matrix.target }}/release/libmnemo_uniffi.a"
+          ls -l "$A"
+          echo "### libmnemo_uniffi.a (${{ matrix.target }}): $(stat -f %z "$A") bytes (before app linking; 1d reports the App Thinning delta)" >> "$GITHUB_STEP_SUMMARY"
+
+  # --- MOBILE-1a: the UniFFI binding crate on its own declared minimum Rust
+  #     (`rust-version` in mnemo/bindings/uniffi/Cargo.toml). The engine's
+  #     MSRV job (1.75) never builds it: it's a non-default workspace member.
+  msrv-uniffi:
+    name: msrv-uniffi (rust 1.82, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.82
+        uses: dtolnay/rust-toolchain@1.82
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: msrv-uniffi-1.82
+
+      - name: cargo test -p mnemo-uniffi
+        working-directory: mnemo
+        run: cargo test -p mnemo-uniffi
+
+  # --- The Swift package (MOBILE-1b): builds the XCFramework, runs
+  #     `swift test` on macOS and `xcodebuild test` on an iOS simulator
+  #     (the background-transition, race and Keychain tests run only there).
+  swift:
+    name: swift (macos-latest, iOS simulator)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Apple targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: swift
+
+      - name: Build the XCFramework and the Swift bindings
+        working-directory: mnemo/bindings/swift
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          scripts/build-xcframework.sh 2>&1 | tee build.log
+          {
+            echo "### MnemoFFI.xcframework (bytes)"
+            echo '```'
+            sed -n '/==> sizes/,$p' build.log | tail -n +2
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: swift test (macOS)
+        working-directory: mnemo/bindings/swift
+        run: swift test
+
+      - name: xcodebuild test (iOS simulator, hosted by TestHost for the Keychain)
+        working-directory: mnemo/bindings/swift/TestHost
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          UDID=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime in sorted(devices, reverse=True):
+              if "iOS" in runtime:
+                  for d in devices[runtime]:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit()
+          ')
+          echo "simulator $UDID"
+          xcodebuild test -project MnemoTestHost.xcodeproj -scheme MnemoHostTests -destination "id=$UDID" 2>&1 \
+            | tee xcodebuild.log | grep -E "^(✔|✘|◇ Test run)|Test run with|error:" || true
+          tail -5 xcodebuild.log
+          grep -q "TEST SUCCEEDED" xcodebuild.log
+
+      # The iOS sample app (MOBILE-1d), on the XCFramework built above: a
+      # simulator build, signed ad hoc (project.yml), so it has its
+      # entitlements (the Keychain, the App Group) as it would on a device.
+      - name: Build the iOS sample (simulator)
+        working-directory: examples/mobile/ios
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild build -project MnemoSample.xcodeproj -scheme MnemoSample -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/sim 2>&1 \
+            | tee sample.log | grep -E "error:|warning: .*MnemoSample|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" sample.log
+
+      # App Thinning needs a signed export, so this is the stripped binary
+      # delta of SizeProbe (with MNemo) against SizeBaseline (without).
+      - name: iOS size report
+        working-directory: examples/mobile/ios
+        run: scripts/size-report.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # --- The Kotlin package (MOBILE-1c): the Android .so files (cargo-ndk,
+  #     16 KB pages), the generated bindings, the JVM host tests, the AAR,
+  #     the 16 KB and size gates, and a publishToMavenLocal dry run with a
+  #     POM check. The instrumented emulator tests are android-emulator.yml.
+  kotlin:
+    name: kotlin (linux, Android AAR)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_NDK_VERSION: 4.1.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: kotlin
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The committed wrappers: their jars must match Gradle's published
+      # checksums, and they fetch Gradle 9.6.1 (distributionSha256Sum set).
+      - name: Validate the Gradle wrappers
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up Gradle (caching)
+        uses: gradle/actions/setup-gradle@v4
+
+      # Its own RUSTFLAGS: the workspace's `--cfg` flags and `-D warnings`
+      # aren't meant for a tool's build.
+      - name: Install cargo-ndk
+        env:
+          RUSTFLAGS: ""
+        run: cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+
+      - name: Build the native libraries and the Kotlin bindings
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "READELF=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" >> "$GITHUB_ENV"
+          echo "NDK: $ANDROID_NDK_LATEST_HOME"
+          ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/build-native.sh
+
+      # Gates: every LOAD aligned to 16 KB, the RELRO rule, and each .so at
+      # most 5 MB stripped (MOBILE-1 §Q3 and §Q9).
+      - name: 16 KB pages and the size gate
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          set -o pipefail
+          python3 scripts/check-elf.py "$READELF" --max-bytes 5242880 generated/jniLibs/*/libmnemo_uniffi.so | tee elf.log
+          {
+            echo "### libmnemo_uniffi.so: 16 KB pages and size (gate: 5242880 bytes)"
+            echo '```'
+            cat elf.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: JVM tests, the AAR, publishToMavenLocal
+        working-directory: mnemo/bindings/kotlin
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleRelease publishToMavenLocal
+
+      - name: Test counts
+        if: always()
+        working-directory: mnemo/bindings/kotlin
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          print("### JVM host tests")
+          for path in sorted(glob.glob("build/test-results/testDebugUnitTest/TEST-*.xml")):
+              s = ET.parse(path).getroot()
+              print(f"- {s.get('name').split('.')[-1]}: {s.get('tests')} tests, "
+                    f"{s.get('failures')} failures, {s.get('errors')} errors, {s.get('skipped')} skipped")
+          PY
+
+      - name: POM, jars and the AAR size report
+        working-directory: mnemo/bindings/kotlin
+        run: python3 scripts/check-package.py "$READELF"
+
+      # The Android sample app (MOBILE-1d), with the library as an included
+      # build: its JVM tests, and a release APK minified by R8 with only the
+      # library's consumer rules (the emulator workflow runs its self-test).
+      - name: Build the Android sample (release, R8)
+        working-directory: examples/mobile/android
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleRelease
+
+      - name: zipalign 16 KB and the APK size report
+        working-directory: examples/mobile/android
+        run: |
+          set -o pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          ZIPALIGN=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)zipalign
+          "$ZIPALIGN" -c -P 16 -v 4 "$APK" | tee zipalign.log | grep -E "\.so|Verification" || true
+          grep -q "Verification successful" zipalign.log
+          python3 scripts/apk-report.py "$APK"
+
+      - name: Upload the AAR, the APK and the test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnemo-android
+          path: |
+            mnemo/bindings/kotlin/build/outputs/aar/
+            mnemo/bindings/kotlin/build/reports/tests/
+            examples/mobile/android/app/build/outputs/apk/release/
+            examples/mobile/android/app/build/outputs/mapping/release/mapping.txt
+            examples/mobile/android/app/build/reports/tests/
+          if-no-files-found: ignore
