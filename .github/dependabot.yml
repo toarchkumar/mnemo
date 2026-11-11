@@ -7,6 +7,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The ref of dtolnay/rust-toolchain *is* the toolchain it installs, so
+    # `@1.75` and `@1.82` are the MSRV checks. Dependabot would move them
+    # to the newest Rust (PR 16 tried `@1.120`) and quietly end those
+    # checks. CI-DEPS-1.
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
     groups:
       actions:
         patterns: ["*"]

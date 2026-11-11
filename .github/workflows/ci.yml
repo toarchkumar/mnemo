@@ -15,10 +15,36 @@ on:
     # burn a CI run (lane A v0.8.1 DISPATCH: coordination files sync
     # only before a release tag or on user request, but a one-off
     # commit still lands between tags). Everything else keeps running.
-    paths-ignore: [PLAN.md, reviewer_notes.md]
+    paths-ignore:
+      - PLAN.md
+      - reviewer_notes.md
+      # Docs-only changes (RB-001.7). A push or PR that touches only these
+      # runs no CI; one that touches anything else runs all of it. `main`
+      # has no required status checks, so nothing waits on a skipped run.
+      - README.md
+      - "**/README.md"
+      - index.html
+      - CHANGELOG.md
+      - RELEASING.md
   pull_request:
     branches: [main, "release/**", "release-*"]
-    paths-ignore: [PLAN.md, reviewer_notes.md]
+    paths-ignore:
+      - PLAN.md
+      - reviewer_notes.md
+      # (the same list as for pushes)
+      - README.md
+      - "**/README.md"
+      - index.html
+      - CHANGELOG.md
+      - RELEASING.md
+
+# A newer push to a branch or PR cancels its older run (RB-001.7). Every run
+# on `main` gets a group of its own, so `main` is never cancelled or queued
+# behind another run. Tags don't run this workflow, and release.yml has no
+# concurrency group.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && format('ci-main-{0}', github.run_id) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

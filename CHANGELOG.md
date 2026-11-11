@@ -8,6 +8,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### CI
+
+- **Dependabot no longer moves the MSRV toolchains** (CI-DEPS-1).
+  `dtolnay/rust-toolchain`'s ref is the Rust version it installs, so
+  `@1.75` and `@1.82` are the MSRV checks; `dependabot.yml` now ignores
+  that action. The rest of the grouped action bumps arrive in their own PR.
+- **A newer push cancels its branch's or PR's older CI run**, never on
+  `main` (RB-001.7).
+- **Docs-only pushes and PRs run no CI:** `README.md`, any `README.md`,
+  `index.html`, `CHANGELOG.md` and `RELEASING.md`.
+- The release workflow's wheel step drops a `rustflags:` input that
+  `maturin-action` doesn't take (the job's `RUSTFLAGS` already reaches the
+  build container).
+
 ### Fixed
 
 - **Android: a passing Keystore failure is no longer reported as a lost
