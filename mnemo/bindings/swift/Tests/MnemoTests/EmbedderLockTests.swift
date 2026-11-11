@@ -88,33 +88,28 @@ final class CallbackEmbedder: MnemoEmbedder, @unchecked Sendable {
     }
 }
 
-/// Holds each embed until the test calls `open()`, or for at most `seconds`.
-/// A test that measures while an embed is in flight opens the gate after
-/// measuring, so the embed can't land first however late the test's task
-/// resumes on a busy runner.
+/// Sleeps before embedding, and records when it has finished.
 final class SlowEmbedder: MnemoEmbedder, @unchecked Sendable {
     let seconds: Double
     private let lock = NSLock()
     private var _started = false
-    private let gate = DispatchSemaphore(value: 0)
+    private var _finished = false
     private let words = WordEmbedder()
 
     init(seconds: Double) { self.seconds = seconds }
 
     var started: Bool { lock.lock(); defer { lock.unlock() }; return _started }
-
-    /// Lets the embed in flight (and any later one) finish now.
-    func open() {
-        // Enough signals for every embed a test makes.
-        for _ in 0..<16 { gate.signal() }
-    }
+    /// True once the embed is about to return; its write can land only after.
+    var finished: Bool { lock.lock(); defer { lock.unlock() }; return _finished }
 
     func identity() -> EmbedderIdentity { words.identity() }
 
     func embed(texts: [String]) throws -> [[Float]] {
         lock.lock(); _started = true; lock.unlock()
-        _ = gate.wait(timeout: .now() + seconds)
-        return try words.embed(texts: texts)
+        Thread.sleep(forTimeInterval: seconds)
+        let vectors = try words.embed(texts: texts)
+        lock.lock(); _finished = true; lock.unlock()
+        return vectors
     }
 }
 

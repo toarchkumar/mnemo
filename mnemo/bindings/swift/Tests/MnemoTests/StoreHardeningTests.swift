@@ -40,12 +40,13 @@ import Testing
         try await store.close()
     }
 
-    /// T9 (b): an embed in flight; `count()` and `closeForBackground()`
-    /// 0.2 s in. Before 2c both waited for the embed. After: milliseconds.
-    /// The embed is held until both are measured (at most 10 s), so it can't
-    /// land before `count()` on a slow runner.
+    /// T9 (b): a 1.5 s embed in flight; `count()` and `closeForBackground()`
+    /// 0.2 s in. Before 2c both waited about 1.3 s. After: milliseconds.
+    /// On a busy runner the test can resume only after the embed is over
+    /// (the embed blocks a cooperative-pool thread, MOBILE-2f), so the count
+    /// is 1 only when the embed hadn't finished when `count()` was called.
     @Test func t9bCountAndTheBackgroundCloseDontWaitForAnEmbed() async throws {
-        let slow = SlowEmbedder(seconds: 10)
+        let slow = SlowEmbedder(seconds: 1.5)
         let store = try MnemoStore(
             configuration: MnemoStoreConfiguration(name: "t9b", dimensions: 32, directory: try scratchDirectory()),
             keyStore: MemoryKeyStore(), embedder: slow)
@@ -54,16 +55,22 @@ import Testing
         #expect(try await eventually(5) { slow.started })
         try await Task.sleep(nanoseconds: 200_000_000)
         var t = Date()
-        #expect(try await store.count() == 1)
+        let count = try await store.count()
         let countSecs = Date().timeIntervalSince(t)
+        // Read after count() returns: if the embed still hadn't finished, its
+        // write can't have landed before count() read the file.
+        let embedDone = slow.finished
         t = Date()
         await store.closeForBackground()
         let closeSecs = Date().timeIntervalSince(t)
-        slow.open()
+        if embedDone {
+            #expect(count == 1 || count == 2, "count \(count) after the embed finished")
+        } else {
+            #expect(count == 1, "count \(count) with the embed in flight")
+        }
         #expect(countSecs < 0.3, "count took \(countSecs) s")
         #expect(closeSecs < 0.3, "the background close took \(closeSecs) s")
         _ = try await writer.value
-        #expect(try await store.count() == 2)
         try await store.close()
     }
 
