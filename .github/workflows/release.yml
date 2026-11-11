@@ -672,6 +672,26 @@ jobs:
             echo "pushed main and tag $VERSION"
           fi
 
+  # --- iOS, verify (REL-1, RB-002.1's recommendation 3): the published-
+  #     package check, in a job of its own so a slow runner after the push
+  #     can be re-run alone ("Re-run failed jobs") without pushing again.
+  #     It reads the public mnemo-swift repository: no environment, no
+  #     secrets, read-only token.
+  verify-published:
+    name: mobile (Swift verify published)
+    needs: [mobile-prepare, publish-swift]
+    if: ${{ !cancelled() && needs.publish-swift.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.mobile-prepare.outputs.version }}
+      DRY_RUN: ${{ needs.mobile-prepare.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
       # A consumer resolves a published mnemo-swift version from GitHub
       # (the real tag, zip url and checksum) and builds it for the
       # simulator, in two steps so a hang shows which phase it's in. A tag
