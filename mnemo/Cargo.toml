@@ -137,6 +137,12 @@ tempfile = "=3.10.1"
 # is Rust 1.65, well under our 1.75 floor. Kept as a dev-dep only —
 # it does not appear in the shipped library dependency set.
 proptest = "=1.5.0"
+# HOOKS-1: the crate's own tests, benches and examples get the hidden test
+# hooks and the `MNEMO_DEV_*` switches (`dev-hooks`). A dev-dependency's
+# features apply only to those targets, so the library and the CLI that
+# `cargo build` / `cargo install` and the release workflow make stay without
+# them.
+mnemo-engine = { path = ".", features = ["dev-hooks"] }
 
 [[bench]]
 name = "write"
@@ -176,6 +182,13 @@ required-features = ["benches"]
 # crate) can opt into the same hooks without touching this crate's
 # tests. Not for production use — never enable in a release build.
 failpoints = []
+# HOOKS-1 (RB-001.29): the `#[doc(hidden)]` `__*` test hooks on `Mnemo`
+# (three of which change the file) and the `MNEMO_DEV_ANN_MIN_FACTS` /
+# `MNEMO_DEV_TURN_ZSTD` switches. Off by default, so release builds (the
+# CLI, the wheels, the mobile libraries) carry neither; the crate's own
+# tests, benches and examples turn it on through the dev-dependency below.
+# Never enable it in a release build.
+dev-hooks = []
 # Phase 6 speed benchmarks. Pulls criterion (and its rayon/half/
 # ciborium subtree, which raised MSRV to 1.80+). Opt-in only — the
 # maintainer runs `cargo bench --no-run --features benches` on the

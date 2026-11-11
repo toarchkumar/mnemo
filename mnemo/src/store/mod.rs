@@ -38,7 +38,9 @@ use crate::format::{
 };
 use crate::freelist::FreeList;
 use crate::index::{IndexConfig, IndexInfo, IndexOp, IvfPqIndex};
-use crate::keyslot::{KeySlot as KeySlotEntry, KeySlotRun};
+#[cfg(feature = "dev-hooks")]
+use crate::keyslot::KeySlot as KeySlotEntry;
+use crate::keyslot::KeySlotRun;
 use crate::memory::{
     self, status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind,
     EssenceScope, EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, Memory,
@@ -68,6 +70,9 @@ mod essence;
 mod flush;
 #[cfg(test)]
 mod header_graft_tests;
+// HOOKS-1: the hidden test hooks exist only in test, bench and example
+// builds (the `dev-hooks` feature), never in a release build.
+#[cfg(feature = "dev-hooks")]
 mod hooks;
 mod keyed;
 mod load;
@@ -649,6 +654,7 @@ pub struct RecallResponse {
 /// every allocation, and not allocator overhead.
 #[doc(hidden)]
 #[derive(Clone, Debug, Default, serde::Serialize)]
+#[cfg(feature = "dev-hooks")]
 pub struct BudgetReport {
     pub file_bytes: u64,
     pub page_size: u64,
@@ -1104,6 +1110,7 @@ impl IdIndex {
         }
     }
 
+    #[cfg(feature = "dev-hooks")]
     fn heap_bytes(&self) -> usize {
         self.slots.capacity() * std::mem::size_of::<u32>()
     }

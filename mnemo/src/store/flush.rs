@@ -925,6 +925,7 @@ impl Mnemo {
     /// not enable AES-GCM nonce reuse. Calling this in production code
     /// strands data pages; never expose it from a binding.
     #[doc(hidden)]
+    #[cfg(feature = "dev-hooks")]
     pub fn __crash_partial_flush_for_testing(&mut self) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);

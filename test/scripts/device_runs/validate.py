@@ -127,6 +127,11 @@ def validate(path):
         warnings.append(f"the thermal state was {device['thermal_state']}")
     if build.get("dirty") is True:
         warnings.append("built from a tree with uncommitted changes")
+    for size, cell in results.items():
+        per = ((cell or {}).get("file") or {}).get("compacted_bytes_per_memory") if isinstance(cell, dict) else None
+        if is_number(per) and per < 100:
+            warnings.append(f"results[{size}].file.compacted_bytes_per_memory is {per}: a count, not a size "
+                            "(an older Benchmark recorded the memory count); a new run records the compacted file's size")
     return errors, warnings
 
 

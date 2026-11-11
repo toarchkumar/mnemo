@@ -1879,7 +1879,7 @@ fn run() -> std::result::Result<(), String> {
                     // No embedder: keyword-only recall, which needs v9.
                     let (db, effective_no_track) =
                         open_recall(&path, &pp, no_track).map_err(fmt)?;
-                    if db.__format_version() < 9 {
+                    if db.stats_summary().format_version < 9 {
                         return Err("--text requires --embed-cmd and --embed-name \
                                     (or a v9 file, which can recall by keyword)"
                             .to_string());

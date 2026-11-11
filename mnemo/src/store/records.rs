@@ -43,10 +43,18 @@ pub(super) const COLD_TURNS_PER_COMMIT: usize = 256;
 
 /// FMT-9e: is turn-record compression on? Always, unless the dev switch
 /// `MNEMO_DEV_TURN_ZSTD=0` turns it off for an A/B measurement (read once
-/// per process). Reading never depends on it.
+/// per process). Reading never depends on it. The switch is compiled only
+/// with `dev-hooks` (HOOKS-1): a release build always compresses.
+#[cfg(feature = "dev-hooks")]
 pub(super) fn turn_zstd_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("MNEMO_DEV_TURN_ZSTD").as_deref() != Ok("0"))
+}
+
+/// FMT-9e: turn-record compression is always on in a release build.
+#[cfg(not(feature = "dev-hooks"))]
+pub(super) fn turn_zstd_enabled() -> bool {
+    true
 }
 
 /// FMT-9e: compress a v9 thread-turn record body, before the page

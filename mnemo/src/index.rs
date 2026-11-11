@@ -177,6 +177,7 @@ impl U128Map {
     }
 
     /// Heap bytes held by the two slot arrays.
+    #[cfg(feature = "dev-hooks")]
     pub(crate) fn heap_bytes(&self) -> usize {
         self.keys.capacity() * std::mem::size_of::<u128>()
             + self.vals.capacity() * std::mem::size_of::<u32>()
@@ -187,6 +188,7 @@ impl U128Map {
 /// one `(K, V)` slot plus one control byte per bucket, with buckets
 /// rounded up from capacity at the 7/8 load factor. An estimate for the
 /// P-0 device budget, not an exact allocator figure.
+#[cfg(feature = "dev-hooks")]
 pub(crate) fn hash_map_bytes<K, V>(capacity: usize) -> usize {
     if capacity == 0 {
         return 0;
@@ -724,6 +726,7 @@ impl IvfPqIndex {
     /// buffer capacities; the hash map is estimated from its capacity.
     /// Returns `(coarse_centroids, pq_codebook, posting_ids, posting_codes,
     /// assignment_map)`.
+    #[cfg(feature = "dev-hooks")]
     pub(crate) fn heap_bytes(&self) -> (usize, usize, usize, usize, usize) {
         let f32s = std::mem::size_of::<f32>();
         let centroids = self.centroids.capacity() * f32s;

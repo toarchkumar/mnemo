@@ -34,6 +34,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **HOOKS-1: release builds carry no test hooks** (RB-001.29). The hidden
+  `__*` methods on `Mnemo`, `BudgetReport`, and the
+  `MNEMO_DEV_ANN_MIN_FACTS` and `MNEMO_DEV_TURN_ZSTD` environment switches
+  now compile only with the new, non-default `dev-hooks` feature. That
+  covers 17 in `store/hooks.rs` and `__crash_partial_flush_for_testing`;
+  three of them change the file.
+  - The crate's own tests, benches and examples turn it on through a
+    dev-dependency on itself. The CLI, the wheels, `mnemo-uniffi` and
+    `mnemo-node` are built without it, and CI checks that
+    (`cargo tree --edges normal`).
+  - A release build ignores the two variables: it uses the 20,000-fact
+    ANN threshold and always compresses aged turns.
+  - These were never a stable API (`#[doc(hidden)]`). A Rust dependent
+    that called one would now need `features = ["dev-hooks"]`, and
+    shouldn't.
 - **EMBED-ID-1: every file checks its embedder's identity.** The first
   `set_embedder` on a read-write handle records the identity in a reserved,
   encrypted entry (namespace `_mnemo.embedder`); every later `set_embedder`

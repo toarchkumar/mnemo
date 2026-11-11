@@ -153,6 +153,26 @@ jobs:
         # not only the root package.
         run: cargo deny --workspace check
 
+      # HOOKS-1: the release builds (the CLI, mnemo-uniffi for the phones,
+      # the Python wheel, mnemo-node) must resolve the engine without
+      # `dev-hooks`. Only the crate's own tests, benches and examples turn
+      # it on (a dev-dependency), so a normal-edge feature tree with it in
+      # means a release build would carry the test hooks.
+      - name: Release builds carry no test hooks (dev-hooks)
+        working-directory: mnemo
+        run: |
+          set -euo pipefail
+          check() {
+            if cargo tree "$@" -e features --edges normal,build -i mnemo-engine | grep -q 'feature "dev-hooks"'; then
+              echo "::error::dev-hooks is enabled in a release build ($*)"; exit 1
+            fi
+            echo "ok: $* builds mnemo-engine without dev-hooks"
+          }
+          check --package mnemo-engine
+          check --package mnemo-uniffi
+          check --package mnemo-node
+          (cd ../mnemo-python && check)
+
   # --- MSRV check: ensure the codebase still builds against the floor
   #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
   #     keep job count down; toolchain drift across platforms is rare and

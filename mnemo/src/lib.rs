@@ -94,6 +94,7 @@ pub use result_cache::{
 };
 pub use session::{Role, Session, Turn};
 #[doc(hidden)]
+#[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,

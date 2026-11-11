@@ -29,11 +29,16 @@ impl Mnemo {
         // Report it as an index with no partitions, and drop a stale one.
         // `MNEMO_DEV_ANN_MIN_FACTS` overrides the threshold. Unsupported,
         // for tests (and the recall-grid bench) only: it lets the index
-        // suites exercise a v9 ANN on small files. Not documented.
+        // suites exercise a v9 ANN on small files. Not documented, and
+        // compiled only with `dev-hooks` (HOOKS-1), so a release build
+        // ignores the variable.
+        #[cfg(feature = "dev-hooks")]
         let min_facts = std::env::var("MNEMO_DEV_ANN_MIN_FACTS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(V9_ANN_MIN_FACTS);
+        #[cfg(not(feature = "dev-hooks"))]
+        let min_facts = V9_ANN_MIN_FACTS;
         if self.is_v9() && mems.len() < min_facts {
             if self.ann.is_some() || self.ann_unloaded {
                 self.ann = None;
