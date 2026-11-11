@@ -34,16 +34,16 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0; current 0.12.1):
+iOS and Android (from v0.12.0; current 0.12.2):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.1")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.2")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.12.1")
+implementation("io.github.toarchkumar:mnemo-android:0.12.2")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -111,6 +111,41 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.12.2: clearer errors, safer keys
+
+A second hardening release for the phone packages, with a few engine
+safety checks. The file format is unchanged.
+
+- **Android never mistakes a passing Keystore error for a lost key.** A
+  busy or restarting Keystore now gives a retryable error instead of
+  "key missing", and the wrapping key is never regenerated over one that
+  exists. Never delete a store because of a Keystore error.
+- **Errors say what to do.** The phone packages report distinct errors for
+  a memory or crypto failure, a file that isn't a MNemo file, and a file
+  that needs a write open, each marked retryable or not. "Corrupt" now
+  means only that the file failed its integrity checks.
+- **A failed close keeps your writes.** If the last save fails, for
+  example because the disk is full, the store keeps its handle so you can
+  free space and save again. In Rust, `try_close` returns the handle with
+  the error.
+- **Reading no longer writes on phones.** Recall doesn't record access
+  counts there unless you turn `trackAccess` on, so a search in the iOS
+  background no longer ends in a save. `stats()` is cheap on a fresh
+  store, and it says how much memory search needs to stay fast.
+- **Engine bookkeeping can't be forged.** Metadata keys starting with
+  `_mnemo.` are refused on every write, because the engine uses them to
+  record versions, threads and keys.
+- **What a passphrase change gives you.** A plain `rekey` changes the
+  secret that opens the file from now on; anyone who had the file and the
+  old secret can still read it and later writes. Use
+  `mnemo rekey --rotate` to revoke. Rotation can't erase old ciphertext
+  that flash storage still holds in blocks it hasn't reused.
+
+Upgrading from 0.12.1: an exhaustive `switch` on the mobile error type
+needs the new cases, and the store configurations' `formatVersion` is
+deprecated (v8 files become read-only in v0.13). See the
+[changelog](CHANGELOG.md).
 
 ## What's new in v0.12.1: safer phone stores
 
