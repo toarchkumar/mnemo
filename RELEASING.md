@@ -98,9 +98,8 @@ Check all four registries:
 
 - **crates.io:** `cargo search mnemo-engine` shows `X.Y.Z`.
 - **PyPI:** `pip index versions mnemo-engine` lists `X.Y.Z`.
-- **SPM:** `mnemo-swift` has the tag `X.Y.Z`, and the workflow's "Resolve
-  the published package" and "Build against the published package" steps
-  succeeded for it.
+- **SPM:** `mnemo-swift` has the tag `X.Y.Z`, and the workflow's
+  `mobile (Swift verify published)` job succeeded for it.
 - **Maven Central:** the version is on
   `https://central.sonatype.com/artifact/io.github.toarchkumar/mnemo-android`.
   The search index can lag the repository by up to an hour;
@@ -111,9 +110,10 @@ Check all four registries:
 failed jobs:
 
 - **Swift:** the push step (in `mobile (Swift publish)`) refuses a tag
-  that `mnemo-swift` already has. If the mirror was tagged but something
-  later failed, the release is out: fix the cause forward, in the next
-  version.
+  that `mnemo-swift` already has. If the mirror was tagged but
+  `mobile (Swift verify published)` failed (a slow runner, say), re-run
+  that job alone: it pushes nothing. If the published package itself is
+  broken, the release is out: fix the cause forward, in the next version.
 - **Maven Central** rejects a version it already has. If the deployment
   reached `PUBLISHED`, the release is out; if it failed validation, drop
   it in the Portal (Deployments) and re-run.
