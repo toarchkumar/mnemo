@@ -8,6 +8,50 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+- **Upgrading:**
+  - A file is now bound to the first embedder attached to it, with or
+    without a manifest. Attaching another identity (another name, width or
+    `normalize` flag) fails with the new `MnemoError::EmbedderMismatch {
+    stored, given }`. Before, only files with a manifest (`mnemo init`)
+    checked this; a file from `Mnemo::create`, Python or the mobile
+    bindings accepted any embedder of the right width.
+  - **Existing files** record whatever embedder is attached first after the
+    upgrade. The check protects from then on; it can't tell which model
+    made the vectors already in the file.
+  - `MnemoError` isn't `#[non_exhaustive]`, so a Rust `match` over it
+    without a catch-all arm needs a new `EmbedderMismatch` arm. A manifest
+    mismatch used to be `MnemoError::Invalid`; it's `EmbedderMismatch` now,
+    and its message still starts with "embedder identity mismatch" (the
+    string Python's `RuntimeError` carries).
+  - Swift and Kotlin: a new `MnemoError.EmbedderMismatch(stored:given:)` /
+    `MnemoException.EmbedderMismatch` case, not retryable ("fix the call").
+    A Swift `switch` over `MnemoError` without a `default` needs the new
+    case.
+  - Cache namespaces starting with `_mnemo.` are now reserved: the cache API
+    refuses them (`Invalid`).
+  - No file-format change: the identity lives in a reserved result-cache
+    entry, which v8 and v9 files both have.
+
+### Changed
+
+- **EMBED-ID-1: every file checks its embedder's identity.** The first
+  `set_embedder` on a read-write handle records the identity in a reserved,
+  encrypted entry (namespace `_mnemo.embedder`); every later `set_embedder`
+  checks it, and a read-only handle checks without writing.
+  - The entry isn't a memory: `len()`, `stats()`, `stats_summary()`,
+    recall, `about()`, `memories()` and `get()` never see it, and neither
+    do `cache_stats()`, `cache_purge()`, `verify()`'s count or
+    `CompactReport`'s cache counts.
+  - Compaction, `export_rekeyed` / `export_rekeyed_with_key` and the
+    mobile passphrase import carry it.
+  - A file with a manifest also keeps the identity on the manifest, as
+    before; if the two disagree, `set_embedder` returns `Invalid` naming
+    both.
+  - New `Mnemo::embedder_identity()` reads the recorded identity.
+  - An older build opening a newer file sees one extra cache entry in
+    `cache_stats`, and its `cache_purge(None)` removes it (the next
+    `set_embedder` on a new build records it again).
+
 ## [0.12.3] — 2026-11-11
 
 Two fixes: the Swift store's embeds no longer block Swift's cooperative

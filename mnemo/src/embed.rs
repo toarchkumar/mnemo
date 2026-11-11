@@ -158,21 +158,77 @@ pub(crate) fn write_identity_into_metadata(
     meta.remove(LEGACY_FLAT_NORMALIZE);
 }
 
-/// Build a clear `MnemoError::Invalid` describing an identity mismatch,
-/// shaped so a Python caller catching `RuntimeError` can grep the string.
-pub(crate) fn identity_mismatch_err(want: &EmbedderIdentity, saw: &EmbedderIdentity) -> MnemoError {
+/// The error for an embedder that isn't the one the file records
+/// ([`MnemoError::EmbedderMismatch`]). Its message starts with
+/// [`EmbedderIdentity::MISMATCH_MSG`], so callers that grep the string
+/// (Python's `RuntimeError`) keep working.
+pub(crate) fn identity_mismatch_err(
+    stored: &EmbedderIdentity,
+    given: &EmbedderIdentity,
+) -> MnemoError {
+    MnemoError::EmbedderMismatch {
+        stored: stored.clone(),
+        given: given.clone(),
+    }
+}
+
+/// EMBED-ID-1: the reserved result-cache namespace that holds a file's
+/// embedder identity. Every file (manifest or not) records the first
+/// embedder attached to it here. The public cache API refuses
+/// [`RESERVED_CACHE_PREFIX`] namespaces and leaves them out of its stats
+/// and purges; compaction, the rekeyed exports and the import copy the
+/// entry like any other cache entry, so the identity follows the file.
+pub(crate) const IDENTITY_NAMESPACE: &str = "_mnemo.embedder";
+/// The key of the identity entry in [`IDENTITY_NAMESPACE`].
+pub(crate) const IDENTITY_KEY: &str = "identity";
+/// Cache namespaces with this prefix belong to the engine.
+pub(crate) const RESERVED_CACHE_PREFIX: &str = "_mnemo.";
+
+/// Whether `namespace` is one of the engine's own cache namespaces.
+pub(crate) fn is_reserved_namespace(namespace: &str) -> bool {
+    namespace.starts_with(RESERVED_CACHE_PREFIX)
+}
+
+/// The identity as the JSON the identity entry stores.
+pub(crate) fn identity_to_json(identity: &EmbedderIdentity) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "name": identity.name,
+        "dimensions": identity.dimensions as u64,
+        "normalize": identity.normalize,
+    }))
+    .expect("a JSON object of a string, a number and a bool serializes")
+}
+
+/// The identity from the identity entry's JSON, or `None` if it's
+/// malformed.
+pub(crate) fn identity_from_json(bytes: &[u8]) -> Option<EmbedderIdentity> {
+    let v: Value = serde_json::from_slice(bytes).ok()?;
+    let obj = v.as_object()?;
+    Some(EmbedderIdentity {
+        name: obj.get("name")?.as_str()?.to_string(),
+        dimensions: obj.get("dimensions")?.as_u64()? as usize,
+        normalize: obj.get("normalize")?.as_bool()?,
+    })
+}
+
+/// The error for a file whose manifest and identity entry disagree (a
+/// file changed by hand, or by two builds that saw different embedders).
+/// It names both; neither embedder is attached.
+pub(crate) fn identity_conflict_err(
+    manifest: &EmbedderIdentity,
+    record: &EmbedderIdentity,
+) -> MnemoError {
     MnemoError::Invalid(format!(
-        "{}: database manifest records embedder (name={:?}, dimensions={}, normalize={}), \
-         but this handle was passed embedder (name={:?}, dimensions={}, normalize={}). \
-         Mixing embedders silently corrupts recall quality — open the file with the \
-         original embedder, or create a fresh database for the new one.",
+        "{}: this file's manifest records embedder (name={:?}, dimensions={}, normalize={}), \
+         but its identity record holds (name={:?}, dimensions={}, normalize={}); \
+         fix the manifest (`mnemo update`) to match the embedder its vectors came from",
         EmbedderIdentity::MISMATCH_MSG,
-        want.name,
-        want.dimensions,
-        want.normalize,
-        saw.name,
-        saw.dimensions,
-        saw.normalize,
+        manifest.name,
+        manifest.dimensions,
+        manifest.normalize,
+        record.name,
+        record.dimensions,
+        record.normalize,
     ))
 }
 

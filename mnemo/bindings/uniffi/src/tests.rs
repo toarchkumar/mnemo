@@ -71,6 +71,16 @@ impl MnemoEmbedder for Mock {
     }
 }
 
+impl Mock {
+    fn identity_named(name: &str) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: name.into(),
+            dimensions: DIMS,
+            normalize: false,
+        }
+    }
+}
+
 fn mock() -> Arc<Mock> {
     Arc::new(Mock {
         calls: AtomicUsize::new(0),
@@ -936,8 +946,54 @@ fn errors_map_to_distinct_cases_with_a_retryable_flag() {
         MnemoError::NotAMnemoFile {
             message: "x".into(),
         },
+        MnemoError::EmbedderMismatch {
+            stored: Mock::identity_named("a"),
+            given: Mock::identity_named("b"),
+        },
     ];
     assert!(no_retry.iter().all(|e| !e.is_retryable()));
+}
+
+/// EMBED-ID-1: a store made through the binding (no manifest) records its
+/// first embedder, and refuses another identity of the same width on the
+/// next open, with `EmbedderMismatch` naming both.
+#[test]
+fn a_binding_store_refuses_another_embedder_identity() {
+    struct Named(&'static str);
+    impl MnemoEmbedder for Named {
+        fn identity(&self) -> EmbedderIdentity {
+            Mock::identity_named(self.0)
+        }
+        fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedderError> {
+            Ok(texts.iter().map(|t| mock_vector(t)).collect())
+        }
+    }
+    let dir = tempdir().unwrap();
+    let (db, key) = new_db(&dir);
+    db.set_embedder(Arc::new(Named("model-r1"))).unwrap();
+    db.remember_text("written with r1".into(), remember_opts())
+        .unwrap();
+    db.close().unwrap();
+
+    let again = MnemoDb::open_with_key(db.path(), key).unwrap();
+    match again.set_embedder(Arc::new(Named("model-r2"))) {
+        Err(e @ MnemoError::EmbedderMismatch { .. }) => {
+            assert!(!e.is_retryable());
+            let MnemoError::EmbedderMismatch { stored, given } = &e else {
+                unreachable!()
+            };
+            assert_eq!(stored.name, "model-r1");
+            assert_eq!(given.name, "model-r2");
+            assert!(e.to_string().contains("create a new store"), "{e}");
+        }
+        other => panic!("expected EmbedderMismatch, got {other:?}"),
+    }
+    again.set_embedder(Arc::new(Named("model-r1"))).unwrap();
+    assert_eq!(
+        again.len().unwrap(),
+        1,
+        "the identity record isn't a memory"
+    );
 }
 
 /// RB-002.4 T1: an `Arc<MnemoDb>` dropped without `close` keeps what was
