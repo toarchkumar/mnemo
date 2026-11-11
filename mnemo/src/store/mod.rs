@@ -51,7 +51,7 @@ use crate::memory::{
     MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
     THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
-use crate::pager::Pager;
+use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
     CacheStats, CachedValue, CounterState, DirectoryIndex, SemanticCachePutOpts,

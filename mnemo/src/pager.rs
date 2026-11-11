@@ -86,6 +86,47 @@ use crate::crypto::{self, KEY_LEN, NONCE_LEN};
 use crate::error::{MnemoError, Result};
 use crate::format::{PAGE_SIZE, PAYLOAD};
 
+/// The database file with the advisory lock its opener took, released
+/// explicitly when this is dropped.
+///
+/// `flock` locks belong to the open file description, not to one file
+/// descriptor. While another thread of the process spawns a child, the
+/// child holds a copy of the parent's file table until it `exec`s (the
+/// descriptor is close-on-exec, but that only takes effect at the exec).
+/// Without the explicit unlock, a handle dropped inside that window left
+/// the lock held by the child's copy, and the next open of the file failed
+/// with `Locked` (FLAKE-1). Unlocking releases it whatever copies exist.
+/// On Windows the unlock is equally harmless: handles aren't inherited.
+pub(crate) struct LockedFile(File);
+
+impl LockedFile {
+    /// Wraps a file whose lock the caller has just taken.
+    pub(crate) fn new(file: File) -> Self {
+        Self(file)
+    }
+}
+
+impl std::ops::Deref for LockedFile {
+    type Target = File;
+    fn deref(&self) -> &File {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for LockedFile {
+    fn deref_mut(&mut self) -> &mut File {
+        &mut self.0
+    }
+}
+
+impl Drop for LockedFile {
+    fn drop(&mut self) {
+        // Nothing to do on failure: closing the file releases the lock once
+        // the last copy of the description goes.
+        let _ = fs4::fs_std::FileExt::unlock(&self.0);
+    }
+}
+
 /// Default page-cache capacity, in pages (~8 MiB of decrypted payloads).
 /// PERF-1 step 4 lowered it from 8192 (~64 MiB): at 10K and 100K memories
 /// that cache was most of an open handle's RSS, for little hit rate on
@@ -100,7 +141,7 @@ pub const V9_DEFAULT_CACHE_PAGES: usize = 256;
 
 /// Encrypted page reader/writer with a bounded write-back cache.
 pub struct Pager {
-    file: File,
+    file: LockedFile,
     dek: Zeroizing<[u8; KEY_LEN]>,
     /// Monotonic write counter persisted in the header (lease / replay
     /// machinery; see `Mnemo::prepare_for_flush`). **No longer used in
@@ -139,8 +180,8 @@ pub struct Pager {
 
 impl Pager {
     /// Wrap an open file with a pager. `write_counter` comes from the header.
-    pub fn new(
-        file: File,
+    pub(crate) fn new(
+        file: LockedFile,
         dek: Zeroizing<[u8; KEY_LEN]>,
         write_counter: u64,
         version: u16,

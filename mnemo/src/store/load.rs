@@ -9,7 +9,11 @@ use super::*;
 /// the lock is scoped to this handle: cloning the file (or the returned
 /// `File`) shares the lock, but a fresh `open()` from any process gets a
 /// distinct handle and will collide.
-pub(super) fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<File> {
+///
+/// The file comes back as a [`LockedFile`], which unlocks explicitly on
+/// drop, so a failed open (a wrong key, say) releases the lock as promptly
+/// as a closed handle does.
+pub(super) fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<LockedFile> {
     let mut opts = OpenOptions::new();
     opts.read(true);
     if write {
@@ -33,7 +37,7 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<F
         FileExt::try_lock_shared(&file)
     };
     match result {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(LockedFile::new(file)),
         Err(e) if is_lock_conflict(&e) => Err(MnemoError::Locked {
             path: path.to_path_buf(),
         }),

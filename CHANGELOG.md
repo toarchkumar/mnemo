@@ -25,6 +25,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
     queue behind it.
   - Kotlin needed no change: its embed already runs on `Dispatchers.IO`,
     which grows for blocking work. A test now confirms it.
+- **A closed or dropped handle releases its file lock at once, even while
+  the process spawns children.** The lock is an `flock`, which belongs to
+  the open file description. A child being spawned by another thread holds
+  a copy of the parent's file table until it `exec`s, so a handle dropped
+  in that window kept the lock held by the child's copy, and an immediate
+  reopen failed with `Locked`. The engine now unlocks explicitly when a
+  handle (or a failed open, such as a wrong key) lets the file go. It
+  mattered most to agent apps that spawn tools while opening and closing
+  the file. Linux and macOS; Windows handles aren't inherited.
 
 ## [0.12.2] — 2026-11-11
 
