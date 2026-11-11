@@ -313,20 +313,7 @@ import Testing
         #expect(info.vectors == 50 && info.partitions == 0)
         #expect(try await store.hasIndex() == false)
 
-        // A v8 file builds one at any size.
-        let v8 = try MnemoStore(
-            configuration: MnemoStoreConfiguration(name: "index8", dimensions: 4, directory: try scratchDirectory(),
-                                                   formatVersion: 8),
-            keyStore: MemoryKeyStore())
-        for i in 0..<300 {
-            let x = Float(i) + 1
-            try await v8.remember("memory \(i)", vector: [sin(x) + 1.5, cos(x), sin(x * 0.37), 1])
-        }
-        let built = try await v8.buildIndex()
-        #expect(built.vectors == 300 && built.partitions > 0)
-        #expect(try await v8.hasIndex())
         try await store.close()
-        try await v8.close()
     }
 
     /// RB-002.4 T7, the store's half (v0.12.2): a file whose key-id stamp is

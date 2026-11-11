@@ -11,10 +11,6 @@ import java.io.File
  * @property dimensions the embedding width. Every stored vector must match it.
  * @property directory the directory, or `null` for
  *   `noBackupFilesDir/mnemo/` (see [defaultDirectory]).
- * @property formatVersion `0` creates the current format (v9); `8` creates a
- *   v8 file for readers on v0.10 or earlier. Used only when the file is
- *   created. **Deprecated in v0.12.2:** no mobile reader needs a v8 file,
- *   and v0.13 makes v8 files read-only and removes this setting.
  * @property vectorCacheBudgetBytes the in-memory vector column budget
  *   (default 16 MiB).
  * @property cachePages the page cache, in 8 KB pages (default 256 = 2 MiB).
@@ -25,8 +21,6 @@ data class MnemoStoreConfiguration(
     val name: String,
     val dimensions: UInt,
     val directory: File? = null,
-    @Deprecated("No mobile reader needs a v8 file. v0.13 makes v8 files read-only and removes formatVersion; leave it at 0 (v9).")
-    val formatVersion: UShort = 0u,
     val vectorCacheBudgetBytes: ULong = DEFAULT_VECTOR_CACHE_BUDGET,
     val cachePages: UInt = DEFAULT_CACHE_PAGES,
     val flushPolicy: FlushPolicy = FlushPolicy.DEFAULT,
@@ -45,10 +39,9 @@ data class MnemoStoreConfiguration(
     }
 
     internal val engineConfig: MnemoConfig
-        @Suppress("DEPRECATION")
         get() = MnemoConfig(
             dimensions = dimensions,
-            formatVersion = formatVersion,
+            formatVersion = 0u,
             vectorCacheBudgetBytes = vectorCacheBudgetBytes,
             cachePages = cachePages,
         )

@@ -75,16 +75,13 @@ enum Command {
         rotate: bool,
     },
     /// Rebuild the file, dropping tombstoned and expired memories. Writes
-    /// the current format, v9, so this is also how a v8 file is upgraded.
+    /// v9, so this is also how a v8 (or older) file is converted: since
+    /// v0.13 a v8 file opens read-only until it's compacted.
     Compact {
         /// Path to the `.mnemo` file.
         path: String,
         #[arg(long)]
         passphrase: Option<String>,
-        /// Target format: `v9` (the default) or `v8`, to keep the file
-        /// readable by v0.10 and earlier. `v8` is kept for one release.
-        #[arg(long, default_value = "v9")]
-        format: String,
     },
     /// Decrypt and re-verify every live record.
     Verify {
@@ -1354,17 +1351,11 @@ fn run() -> std::result::Result<(), String> {
         Command::Compact {
             path,
             passphrase: pp,
-            format,
         } => {
-            let target = match format.trim_start_matches('v') {
-                "9" => 9,
-                "8" => 8,
-                other => return Err(format!("--format must be v8 or v9, not {other}")),
-            };
             let pp = passphrase(&pp)?;
-            let report = Mnemo::compact_file_to(&path, &pp, target).map_err(fmt)?;
+            let report = Mnemo::compact_file(&path, &pp).map_err(fmt)?;
             println!(
-                "compacted {path} (v{target}): {} -> {} live memories",
+                "compacted {path} (v9): {} -> {} live memories",
                 report.before, report.after
             );
         }
@@ -1862,6 +1853,15 @@ fn run() -> std::result::Result<(), String> {
                             );
                             Ok((db, true))
                         }
+                        // The v8 sunset: a v8 file recalls read-only.
+                        Err(mnemo_engine::MnemoError::FormatTooOld { version: 8 }) => {
+                            let db = Mnemo::open_read_only(path, pp)?;
+                            eprintln!(
+                                "mnemo: {path} is a v8 file, which opens read-only; running \
+                                 recall with --no-track (`mnemo compact` converts it to v9)"
+                            );
+                            Ok((db, true))
+                        }
                         Err(e) => Err(e),
                     }
                 };
@@ -2223,8 +2223,14 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             let pp = passphrase(&pp)?;
             // Get on a cache is a mutation (bumps access stats) unless
             // the handle is read-only. Use read-write here so the stats
-            // update lands durably on the next user-driven flush.
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            // update lands durably on the next user-driven flush. A v8
+            // file opens read-only (the v8 sunset), so its stats stay.
+            let mut db = match Mnemo::open(&path, &pp) {
+                Err(mnemo_engine::MnemoError::FormatTooOld { version: 8 }) => {
+                    Mnemo::open_read_only(&path, &pp).map_err(fmt)?
+                }
+                other => other.map_err(fmt)?,
+            };
             match db.cache_get(&ns, &key).map_err(fmt)? {
                 Some(v) => {
                     // Print value to stdout verbatim. If the caller

@@ -20,11 +20,9 @@
 //! FMT-9f: every test runs on both on-disk formats, as `v8::<name>` and
 //! `v9::<name>`; the body lives in `tests/suites/fix1_correctness_sweep.rs`.
 
-mod v8 {
-    const FORMAT: u16 = 8;
-    include!("suites/fix1_correctness_sweep.rs");
-}
-
+// The v8 sunset (v0.13): a v8 file can't be created or opened read-write,
+// so the suite runs on v9 only. The v8 coverage is the read tests on the
+// committed fixtures, in `tests/v8_fixture.rs`.
 mod v9 {
     const FORMAT: u16 = 9;
     include!("suites/fix1_correctness_sweep.rs");

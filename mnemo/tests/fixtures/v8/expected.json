@@ -1,0 +1,52 @@
+{
+  "generator": "mnemo/tests/fixtures/v8/generator (mnemo-engine =0.12.3 from crates.io)",
+  "key_file": {
+    "key_hex_file": "v8_key.key",
+    "memories": 3,
+    "path": "v8_key.mnemo"
+  },
+  "passphrase_file": {
+    "cache": {
+      "key": "weather:lisbon",
+      "namespace": "app",
+      "value": "sunny, 21C"
+    },
+    "dimensions": 8,
+    "format_version": 8,
+    "has_index": true,
+    "keyed_history_newest_first": [
+      "drink: water",
+      "drink: coffee",
+      "drink: tea"
+    ],
+    "manifest_embedder": "fixture-embedder-r1",
+    "memories": 17,
+    "passphrase": "v8-fixture-passphrase",
+    "path": "v8_passphrase.mnemo",
+    "plain_contents": [
+      "The user prefers green tea in the morning",
+      "Flight UA 931 leaves on 12 March",
+      "Run cargo fmt before pushing",
+      "The draft is on the second monitor",
+      "Invoice 4471 was paid on 3 November",
+      "The office wifi is called Meridian"
+    ],
+    "plain_ids": [
+      "01M760VPAK84MMP72XHTZH31HG",
+      "01M760VPAKEWN5YBMTHXFJBP76",
+      "01M760VPAK3A6QM36WXME6FQF6",
+      "01M760VPAK7VJA3E22T97QV4V1",
+      "01M760VPAK7P7JZMVFRTG7YG7H",
+      "01M760VPAKDGM82NNFEZ7HM0EV"
+    ],
+    "project_essence": "# essence — project\n\n## conventions\n- [open] Dates are day month\n\n> full history: `mnemo thread export <file> --thread <id>` or `recall --thread <id>`\n",
+    "snapshots": 7,
+    "thread_essence": "# essence — thread `offsite`\n\n## conventions\n- [open] Dates are day month\n\n## decisions\n- [open] Lisbon, three days\n\n## timeline\n- [2026-11-11] Hotel booked: Riverside\n\n> full history: `mnemo thread export <file> --thread offsite` or `recall --thread offsite`\n",
+    "thread_turns": [
+      "Can you plan the offsite for March?",
+      "Yes: three days in Lisbon, flights on the 12th.",
+      "Book the hotel near the river.",
+      "Booked the Riverside, 3 nights."
+    ]
+  }
+}

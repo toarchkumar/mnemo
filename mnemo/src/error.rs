@@ -96,6 +96,21 @@ pub enum MnemoError {
         reason: &'static str,
     },
 
+    /// The v8 sunset (v0.13): the file's format is older than v9, so it
+    /// can't be opened read-write. A v8 file still opens read-only
+    /// ([`crate::Mnemo::open_read_only`]); `mnemo compact` (or
+    /// [`crate::Mnemo::compact_file`]) converts any v4–v8 file to v9 and
+    /// keeps every live memory.
+    #[error(
+        "this file is format v{version}, which this build {}; run `mnemo compact <file>` \
+         to convert it to v9 (every live memory is kept)",
+        if *version == 8 { "opens read-only" } else { "no longer opens" }
+    )]
+    FormatTooOld {
+        /// The file's on-disk format version.
+        version: u16,
+    },
+
     /// EMBED-ID-1: the embedder passed to [`crate::Mnemo::set_embedder`]
     /// isn't the one this file's vectors came from. The file records the
     /// identity of the first embedder attached to it; a different name,

@@ -552,6 +552,10 @@ impl Mnemo {
     /// compaction kept only the memory catalog and silently emptied
     /// the cache; the Planner's interim README caveat (c417d2e) called
     /// that out — this PR removes the surprise.
+    ///
+    /// The output is always v9, so this is also how a v4–v8 file is
+    /// converted: the only read-write open that accepts one (the v8
+    /// sunset, v0.13). It keeps every live memory.
     pub fn compact_file(path: &str, passphrase: &str) -> Result<CompactReport> {
         Self::compact_file_secret(path, passphrase.as_bytes(), 0)
     }
@@ -561,28 +565,13 @@ impl Mnemo {
         Self::compact_file_secret(path, key, 0)
     }
 
-    /// FMT-9f: [`Mnemo::compact_file`] into an explicit format: `9` (what
-    /// `compact_file` does) or `8`, which keeps a v8 file readable by
-    /// v0.10 and earlier. The v8 target is kept for one release.
-    pub fn compact_file_to(
-        path: &str,
-        passphrase: &str,
-        format_version: u16,
-    ) -> Result<CompactReport> {
-        if format_version != VERSION && format_version != VERSION_V9 {
-            return Err(MnemoError::Invalid(format!(
-                "compact target format {format_version} isn't supported (use 8 or 9)"
-            )));
-        }
-        Self::compact_file_secret(path, passphrase.as_bytes(), format_version)
-    }
-
     pub(super) fn compact_file_secret(
         path: &str,
         secret: &[u8],
         format_version: u16,
     ) -> Result<CompactReport> {
-        let mut old = Mnemo::open_secret(path, secret)?;
+        // The one read-write open that takes a v4–v8 file (the v8 sunset).
+        let mut old = Mnemo::open_secret_with(path, secret, true)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
         let tmp = format!("{path}.compact-tmp");

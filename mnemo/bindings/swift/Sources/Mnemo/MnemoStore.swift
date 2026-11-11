@@ -14,14 +14,6 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
     /// when the store is created: opening an existing store with another
     /// policy is refused (``MnemoStoreError/keyPolicyMismatch(stored:configured:)``).
     public var keyPolicy: KeyPolicy
-    /// `0` creates the current format (v9); `8` creates a v8 file for readers
-    /// on v0.10 or earlier. Used only when the file is created.
-    @available(*, deprecated, message: "No mobile reader needs a v8 file. v0.13 makes v8 files read-only and removes this setting; leave it at 0 (v9).")
-    public var formatVersion: UInt16 {
-        get { formatVersionValue }
-        set { formatVersionValue = newValue }
-    }
-    var formatVersionValue: UInt16
     /// The in-memory vector column budget (default 16 MiB).
     public var vectorCacheBudgetBytes: UInt64
     /// The page cache, in 8 KB pages (default 256 = 2 MiB).
@@ -43,27 +35,9 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
         self.dimensions = dimensions
         self.directory = directory
         self.keyPolicy = keyPolicy
-        self.formatVersionValue = 0
         self.vectorCacheBudgetBytes = vectorCacheBudgetBytes
         self.cachePages = cachePages
         self.flushPolicy = flushPolicy
-    }
-
-    /// The same, choosing the format of a new file.
-    @available(*, deprecated, message: "No mobile reader needs a v8 file. v0.13 makes v8 files read-only and removes formatVersion; use the initializer without it.")
-    public init(
-        name: String,
-        dimensions: UInt32,
-        directory: URL? = nil,
-        keyPolicy: KeyPolicy = .deviceOnly,
-        formatVersion: UInt16,
-        vectorCacheBudgetBytes: UInt64 = 16 << 20,
-        cachePages: UInt32 = 256,
-        flushPolicy: FlushPolicy = .default
-    ) {
-        self.init(name: name, dimensions: dimensions, directory: directory, keyPolicy: keyPolicy,
-                  vectorCacheBudgetBytes: vectorCacheBudgetBytes, cachePages: cachePages, flushPolicy: flushPolicy)
-        self.formatVersionValue = formatVersion
     }
 
     /// `Application Support/mnemo/` in the app's container.
@@ -94,7 +68,7 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
     }
 
     var engineConfig: MnemoConfig {
-        MnemoConfig(dimensions: dimensions, formatVersion: formatVersionValue,
+        MnemoConfig(dimensions: dimensions, formatVersion: 0,
                     vectorCacheBudgetBytes: vectorCacheBudgetBytes, cachePages: cachePages)
     }
 }

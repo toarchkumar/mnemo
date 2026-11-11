@@ -364,6 +364,18 @@ impl Mnemo {
     }
 
     pub(super) fn open_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
+        Self::open_secret_with(path, secret, false)
+    }
+
+    /// The read-write open. `allow_old` lets a file older than v9 open (and
+    /// migrate in memory to v8): only compaction uses it, to read a v4–v8
+    /// file and write the v9 copy. Every public read-write open refuses
+    /// those with [`MnemoError::FormatTooOld`] (the v8 sunset, v0.13).
+    pub(super) fn open_secret_with(
+        path: impl Into<PathBuf>,
+        secret: &[u8],
+        allow_old: bool,
+    ) -> Result<Mnemo> {
         let path: PathBuf = path.into();
         let mut file = open_with_lock(&path, /*write=*/ true, /*create=*/ false)?;
 
@@ -453,6 +465,13 @@ impl Mnemo {
         // use the matching AAD scheme — `Pager::page_aad` returns empty AAD
         // for v4/v5 (no page binding) and `page_no.to_le_bytes()` for v6+.
         let on_disk_version = header.version;
+        // The v8 sunset (v0.13): a read-write handle is v9. Older files open
+        // read-only (v8) or through `compact_file`, which converts them.
+        if !allow_old && on_disk_version < VERSION_V9 {
+            return Err(MnemoError::FormatTooOld {
+                version: on_disk_version,
+            });
+        }
         let mut pager = Pager::new(file, dek, header.write_counter, on_disk_version);
         let dimensions = header.dimensions as usize;
 
@@ -783,9 +802,12 @@ impl Mnemo {
         // (no page writes required), but even that bumps `version` on
         // disk and re-seals the header — which needs write access. Keep
         // the policy uniform across all sub-version bumps.
+        // A v4–v7 file needs migrating, which a read-only handle can't do,
+        // and since v0.13 no read-write handle opens it either: compaction
+        // converts it to v9.
         if header.version < VERSION {
-            return Err(MnemoError::NeedsWriteOpen {
-                reason: "pending format-version migration",
+            return Err(MnemoError::FormatTooOld {
+                version: header.version,
             });
         }
 

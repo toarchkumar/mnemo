@@ -313,21 +313,7 @@ class StoreTests {
         assertEquals(0u, info.partitions)
         assertFalse(store.hasIndex())
 
-        // A v8 file builds one at any size.
-        val v8 = MnemoStore(
-            MnemoStoreConfiguration("index8", 4u, scratchDirectory(), formatVersion = 8u),
-            InMemoryKeyStorage(),
-        )
-        repeat(300) {
-            val x = it + 1f
-            v8.remember("memory $it", listOf(kotlin.math.sin(x) + 1.5f, kotlin.math.cos(x), kotlin.math.sin(x * 0.37f), 1f))
-        }
-        val built = v8.buildIndex()
-        assertEquals(300uL, built.vectors)
-        assertTrue(built.partitions > 0u)
-        assertTrue(v8.hasIndex())
         store.close()
-        v8.close()
     }
 
     /**

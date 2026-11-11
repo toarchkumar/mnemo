@@ -185,7 +185,7 @@ fn the_record_is_invisible_to_counts_reads_and_the_cache_api() {
     assert_mismatch(db.set_embedder(fake("other")), "model", "other");
 }
 
-/// Compaction (in this file's format) carries the identity, and doesn't
+/// Compaction carries the identity, and doesn't
 /// count it as a cache entry.
 #[test]
 fn the_identity_survives_compaction() {
@@ -199,7 +199,7 @@ fn the_identity_survives_compaction() {
         }
         db.flush().unwrap();
     }
-    let report = Mnemo::compact_file_to(path.to_str().unwrap(), "pw", FORMAT).unwrap();
+    let report = Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
     assert_eq!(report.after, 5);
     assert_eq!((report.cache_before, report.cache_after), (0, 0));
     let mut db = Mnemo::open(&path, "pw").unwrap();

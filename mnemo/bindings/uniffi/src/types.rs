@@ -52,8 +52,8 @@ pub const MOBILE_CACHE_PAGES: u32 = 256;
 pub struct MnemoConfig {
     /// Embedding width. Every stored vector must match it.
     pub dimensions: u32,
-    /// `0` (the default) creates the current format, v9; `8` creates a v8
-    /// file for readers on v0.10 or earlier.
+    /// `0` (the default) or `9`: new files are v9. Since v0.13 a v8 file
+    /// can't be created (the v8 sunset); `8` is refused with `Invalid`.
     #[uniffi(default = 0)]
     pub format_version: u16,
     /// The in-memory vector column budget (default 16 MiB).
@@ -320,7 +320,7 @@ pub struct DbStats {
     pub deleted: u64,
     pub dimensions: u32,
     pub file_bytes: u64,
-    /// `8` or `9`.
+    /// `9`, or `8` for a v8 file opened read-only.
     pub format_version: u16,
     pub has_index: bool,
     pub wal_pages: u64,

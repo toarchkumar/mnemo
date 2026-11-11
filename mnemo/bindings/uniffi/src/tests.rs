@@ -671,30 +671,58 @@ fn build_index_and_has_index() {
     assert!(!db.has_index().unwrap());
     db.close().unwrap();
 
-    // v8 builds an IVF+PQ index at any size, and recall uses it.
+    // The v8 sunset (v0.13): a new v8 file is refused.
     let dir = tempdir().unwrap();
     let path = dir.path().join("v8.mnemo").display().to_string();
-    let db = MnemoDb::create_with_key(
-        path,
-        generate_key(),
-        MnemoConfig {
-            format_version: 8,
-            ..config()
-        },
-    )
-    .unwrap();
-    fill(&db, 600);
-    let info = db.build_index().unwrap();
-    assert_eq!(info.vectors, 600);
-    assert!(info.partitions > 0 && info.subspaces > 0, "{info:?}");
-    assert!(db.has_index().unwrap());
-    assert!(db.stats().unwrap().has_index);
-    let hits = db
-        .recall(vec![2.0, 0.5, 0.1, 1.0], recall_opts())
-        .unwrap()
-        .hits;
-    assert_eq!(hits.len(), 10);
-    db.close().unwrap();
+    assert!(matches!(
+        MnemoDb::create_with_key(
+            path,
+            generate_key(),
+            MnemoConfig {
+                format_version: 8,
+                ..config()
+            },
+        ),
+        Err(MnemoError::Invalid { .. })
+    ));
+}
+
+/// The v8 sunset (v0.13), through the binding: the committed v8 fixture
+/// (written by the published v0.12.3 engine) refuses a read-write open with
+/// `FormatTooOld`, which isn't retryable; a read-only open reads it, and
+/// `compact_file_with_key` converts it to v9, after which it opens
+/// read-write.
+#[test]
+fn a_v8_file_opens_read_only_and_compacts_to_v9() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/v8");
+    let hex = std::fs::read_to_string(fixtures.join("v8_key.key")).unwrap();
+    let key: Vec<u8> = (0..32)
+        .map(|i| u8::from_str_radix(&hex.trim()[2 * i..2 * i + 2], 16).unwrap())
+        .collect();
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v8.mnemo");
+    std::fs::copy(fixtures.join("v8_key.mnemo"), &path).unwrap();
+    let path = path.display().to_string();
+
+    match MnemoDb::open_with_key(path.clone(), key.clone()) {
+        Err(e @ MnemoError::FormatTooOld { version: 8, .. }) => {
+            assert!(!e.is_retryable());
+            assert!(e.to_string().contains("mnemo compact"), "{e}");
+        }
+        Err(other) => panic!("expected FormatTooOld, got {other:?}"),
+        Ok(_) => panic!("expected FormatTooOld, got an open handle"),
+    }
+    let ro = MnemoDb::open_read_only_with_key(path.clone(), key.clone()).unwrap();
+    assert_eq!(ro.len().unwrap(), 3);
+    assert_eq!(ro.stats().unwrap().format_version, 8);
+    ro.close().unwrap();
+
+    let report = compact_file_with_key(path.clone(), key.clone()).unwrap();
+    assert_eq!(report.after, 3);
+    let rw = MnemoDb::open_with_key(path, key).unwrap();
+    assert_eq!(rw.stats().unwrap().format_version, 9);
+    assert_eq!(rw.len().unwrap(), 3);
+    rw.close().unwrap();
 }
 
 fn turn(id: &str, content: &str) -> ThreadTurn {

@@ -254,9 +254,11 @@ fn resolve_format_version(requested: u16) -> Result<u16> {
     match requested {
         // FMT-9f: new files are v9; the `MNEMO_DEV_FORMAT` switch is gone.
         0 => Ok(crate::format::DEFAULT_NEW_VERSION),
-        VERSION | VERSION_V9 => Ok(requested),
+        VERSION_V9 => Ok(requested),
+        // The v8 sunset (v0.13): v8 files open read-only and compact to v9;
+        // no new one is created.
         v => Err(MnemoError::Invalid(format!(
-            "format_version {v} is not supported for new files (use 8 or 9)"
+            "format_version {v} is not supported for new files: new files are v9 (pass 0 or 9)"
         ))),
     }
 }

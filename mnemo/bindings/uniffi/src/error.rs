@@ -8,7 +8,8 @@
 /// - **retry later:** `Locked`, `Io`, `Kdf` (the KDF couldn't get its
 ///   memory), `Closed` (reopen);
 /// - **fix the call:** `Invalid`, `DimensionMismatch`, `EmbedderMismatch`,
-///   `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`;
+///   `FormatTooOld`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`,
+///   `WrongPassphrase`, `Embedder`;
 /// - **the data is unreadable:** `Corrupt`, `HeaderTampered`, `Crypto`,
 ///   `NotAMnemoFile`, `UnsupportedVersion`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -42,6 +43,12 @@ pub enum MnemoError {
     /// read-write once, then read-only again.
     #[error("read-only open blocked: {reason}; open read-write once to fix")]
     NeedsWriteOpen { reason: String },
+    /// The file's format is older than v9, so it can't be opened read-write
+    /// (the v8 sunset, v0.13). A v8 file still opens read-only; `compact_file`
+    /// (or `mnemo compact` on a Mac) converts it to v9 and keeps every live
+    /// memory. `message` says which.
+    #[error("{message}")]
+    FormatTooOld { version: u16, message: String },
     /// No such memory, key, thread or snapshot.
     #[error("not found: {message}")]
     NotFound { message: String },
@@ -119,6 +126,13 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
                 stored: identity(stored),
                 given: identity(given),
             },
+            other @ E::FormatTooOld { .. } => {
+                let message = other.to_string();
+                let E::FormatTooOld { version } = other else {
+                    unreachable!()
+                };
+                MnemoError::FormatTooOld { version, message }
+            }
             E::NeedsWriteOpen { reason } => MnemoError::NeedsWriteOpen {
                 reason: reason.to_string(),
             },
