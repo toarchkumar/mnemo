@@ -23,7 +23,8 @@ fn bin() -> &'static str {
 /// published v0.12.3 engine; see `tests/fixtures/v8/generator`). 17 live
 /// memories, 8 dimensions.
 fn v8_fixture(dir: &std::path::Path) -> (std::path::PathBuf, &'static str) {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo");
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/v8/v8_passphrase.mnemo");
     let dst = dir.join("v8.mnemo");
     std::fs::copy(src, &dst).unwrap();
     (dst, "v8-fixture-passphrase")
@@ -888,13 +889,24 @@ fn cli_compact_upgrades_a_v8_file_and_info_hints_until_then() {
 
     // A write is refused, and says what to do.
     let out = Command::new(bin())
-        .args(["essence", "append", p, "--thread", "offsite", "--text", "a milestone"])
+        .args([
+            "essence",
+            "append",
+            p,
+            "--thread",
+            "offsite",
+            "--text",
+            "a milestone",
+        ])
         .env("MNEMO_PASSPHRASE", pp)
         .output()
         .expect("spawn mnemo");
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("format v8") && err.contains("mnemo compact"), "{err}");
+    assert!(
+        err.contains("format v8") && err.contains("mnemo compact"),
+        "{err}"
+    );
 
     // `--format` is gone.
     let out = Command::new(bin())

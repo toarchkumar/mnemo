@@ -9,7 +9,9 @@
 //! goes through the check), so this uses the `__put_unvalidated_for_testing`
 //! hook (`dev-hooks`, which examples get). It ran at the commit that added
 //! it (v0.13 step 2a), the last state of the engine that still creates v8
-//! files; the v8 writer is unchanged since v0.12.3.
+//! files; the v8 writer is unchanged since v0.12.3. Since the v8 sunset
+//! (later in v0.13) no build creates v8 files, so this now fails at
+//! `create`; it stays as the record of how the committed fixture was made.
 //!
 //!   cargo run --example gen_v8_zero_vector_fixture
 

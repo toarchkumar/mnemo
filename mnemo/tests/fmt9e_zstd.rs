@@ -145,14 +145,18 @@ fn short_turns_facts_and_v8_files_stay_plain() {
 
     // v8 never compressed a turn: the committed v8 fixture's, read-only.
     let mut v8 = Mnemo::open_read_only(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/v8/v8_passphrase.mnemo"),
         "v8-fixture-passphrase",
     )
     .unwrap();
     let turns = v8.thread_export("offsite").unwrap();
     assert_eq!(turns.len(), 4);
     for t in &turns {
-        assert!(!v8.__record_storage(&t.id).unwrap().1, "v8 never compresses");
+        assert!(
+            !v8.__record_storage(&t.id).unwrap().1,
+            "v8 never compresses"
+        );
     }
     // The memories and the fixture's one result-cache entry.
     assert_eq!(v8.verify().unwrap(), v8.len() + 1);

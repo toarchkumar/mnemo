@@ -248,33 +248,32 @@ fn pending_wal_fixture(dir: &std::path::Path, version: u16) -> (std::path::PathB
 fn t6_key_opens_answers_on_a_file_with_a_wal_to_recover() {
     let _g = lock();
     // v9 only since the v8 sunset (v0.13): v8 files can't be written.
-    for version in [9u16] {
-        let dir = tempdir().unwrap();
-        let (path, key, n) = pending_wal_fixture(dir.path(), version);
-        let wrong = Mnemo::generate_key();
-        // The read-only open still refuses (documented), whatever the key.
-        assert!(matches!(
-            Mnemo::open_read_only_with_key(&path, &wrong),
-            Err(MnemoError::NeedsWriteOpen { .. })
-        ));
-        assert!(
-            !Mnemo::key_opens(&path, &wrong).unwrap(),
-            "v{version} n={n}: the wrong key"
-        );
-        assert!(
-            Mnemo::key_opens(&path, &key).unwrap(),
-            "v{version} n={n}: the right key"
-        );
-        let db = Mnemo::open_with_key(&path, &key).unwrap();
-        assert_eq!(
-            db.len(),
-            15,
-            "v{version}: the read-write open recovers the WAL"
-        );
-        db.close().unwrap();
-        // A file that isn't a .mnemo is an error, not "not this key".
-        let junk = dir.path().join("junk.mnemo");
-        std::fs::write(&junk, vec![7u8; 16384]).unwrap();
-        assert!(Mnemo::key_opens(&junk, &key).is_err());
-    }
+    let version = 9u16;
+    let dir = tempdir().unwrap();
+    let (path, key, n) = pending_wal_fixture(dir.path(), version);
+    let wrong = Mnemo::generate_key();
+    // The read-only open still refuses (documented), whatever the key.
+    assert!(matches!(
+        Mnemo::open_read_only_with_key(&path, &wrong),
+        Err(MnemoError::NeedsWriteOpen { .. })
+    ));
+    assert!(
+        !Mnemo::key_opens(&path, &wrong).unwrap(),
+        "v{version} n={n}: the wrong key"
+    );
+    assert!(
+        Mnemo::key_opens(&path, &key).unwrap(),
+        "v{version} n={n}: the right key"
+    );
+    let db = Mnemo::open_with_key(&path, &key).unwrap();
+    assert_eq!(
+        db.len(),
+        15,
+        "v{version}: the read-write open recovers the WAL"
+    );
+    db.close().unwrap();
+    // A file that isn't a .mnemo is an error, not "not this key".
+    let junk = dir.path().join("junk.mnemo");
+    std::fs::write(&junk, vec![7u8; 16384]).unwrap();
+    assert!(Mnemo::key_opens(&junk, &key).is_err());
 }

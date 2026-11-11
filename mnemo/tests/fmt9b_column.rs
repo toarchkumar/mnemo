@@ -22,7 +22,9 @@ fn cfg(version: u16) -> MnemoConfig {
 /// The committed v8 fixtures (the published v0.12.3 engine wrote them; see
 /// `tests/fixtures/v8/generator`).
 fn fixture(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8").join(name)
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/v8")
+        .join(name)
 }
 const FIXTURE_PASSPHRASE: &str = "v8-fixture-passphrase";
 
@@ -99,7 +101,12 @@ fn v9_recall_matches_v8_ranking() {
     let mut v9 = Mnemo::open_read_only(&v9_path, FIXTURE_PASSPHRASE).unwrap();
     assert_eq!(v8.stats_summary().format_version, 8);
     assert_eq!(v9.stats_summary().format_version, 9);
-    let queries: Vec<Vec<f32>> = v8.memories().unwrap().into_iter().map(|m| m.vector).collect();
+    let queries: Vec<Vec<f32>> = v8
+        .memories()
+        .unwrap()
+        .into_iter()
+        .map(|m| m.vector)
+        .collect();
     assert!(queries.len() >= 10);
     for q in &queries {
         for metric in [Metric::Cosine, Metric::Dot, Metric::L2] {
@@ -107,11 +114,24 @@ fn v9_recall_matches_v8_ranking() {
                 .top_k(5)
                 .metric(metric)
                 .track_access(false);
-            let a: Vec<String> = v8.recall(&req).unwrap().into_iter().map(|h| h.memory.content).collect();
-            let b: Vec<String> = v9.recall(&req).unwrap().into_iter().map(|h| h.memory.content).collect();
+            let a: Vec<String> = v8
+                .recall(&req)
+                .unwrap()
+                .into_iter()
+                .map(|h| h.memory.content)
+                .collect();
+            let b: Vec<String> = v9
+                .recall(&req)
+                .unwrap()
+                .into_iter()
+                .map(|h| h.memory.content)
+                .collect();
             assert_eq!(a[0], b[0], "top hit, {metric:?}");
             let common = a.iter().filter(|c| b.contains(c)).count();
-            assert!(common >= 4, "{metric:?}: only {common}/5 in common: {a:?} vs {b:?}");
+            assert!(
+                common >= 4,
+                "{metric:?}: only {common}/5 in common: {a:?} vs {b:?}"
+            );
         }
     }
 }
@@ -608,8 +628,13 @@ fn an_index_makes_recall_mode_indexed() {
     let key: [u8; 32] =
         std::array::from_fn(|i| u8::from_str_radix(&hex.trim()[2 * i..2 * i + 2], 16).unwrap());
     let mut plain = Mnemo::open_read_only_with_key(fixture("v8_key.mnemo"), &key).unwrap();
-    assert_eq!(plain.stats().unwrap().recall_mode, RecallMode::ExactPaged, "v8 has no column");
-    let mut indexed = Mnemo::open_read_only(fixture("v8_passphrase.mnemo"), FIXTURE_PASSPHRASE).unwrap();
+    assert_eq!(
+        plain.stats().unwrap().recall_mode,
+        RecallMode::ExactPaged,
+        "v8 has no column"
+    );
+    let mut indexed =
+        Mnemo::open_read_only(fixture("v8_passphrase.mnemo"), FIXTURE_PASSPHRASE).unwrap();
     assert!(indexed.has_index());
     assert_eq!(indexed.stats().unwrap().recall_mode, RecallMode::Indexed);
     assert_eq!(RecallMode::Indexed.as_str(), "indexed");

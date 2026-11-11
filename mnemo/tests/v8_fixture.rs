@@ -23,7 +23,8 @@ fn fixtures() -> PathBuf {
 }
 
 fn expected() -> Value {
-    serde_json::from_str(&std::fs::read_to_string(fixtures().join("expected.json")).unwrap()).unwrap()
+    serde_json::from_str(&std::fs::read_to_string(fixtures().join("expected.json")).unwrap())
+        .unwrap()
 }
 
 /// A copy of a fixture in a fresh directory: the tests never touch the
@@ -36,32 +37,58 @@ fn copy(name: &str) -> (TempDir, PathBuf) {
 }
 
 fn strings(v: &Value) -> Vec<String> {
-    v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect()
 }
 
 /// Everything `expected.json` records, read through `db`.
 fn check_contents(db: &mut Mnemo, e: &Value) {
     assert_eq!(db.len() as u64, e["memories"].as_u64().unwrap());
-    let contents: Vec<String> = db.memories().unwrap().into_iter().map(|m| m.content).collect();
+    let contents: Vec<String> = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
     for c in strings(&e["plain_contents"]) {
         assert!(contents.contains(&c), "missing {c:?}");
     }
-    let history: Vec<String> =
-        db.history("fact:drink", None).unwrap().into_iter().map(|m| m.content).collect();
+    let history: Vec<String> = db
+        .history("fact:drink", None)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
     assert_eq!(history, strings(&e["keyed_history_newest_first"]));
-    let turns: Vec<String> =
-        db.thread_export_turns("offsite").unwrap().into_iter().map(|t| t.content).collect();
+    let turns: Vec<String> = db
+        .thread_export_turns("offsite")
+        .unwrap()
+        .into_iter()
+        .map(|t| t.content)
+        .collect();
     assert_eq!(turns, strings(&e["thread_turns"]));
     assert_eq!(
-        db.essence(EssenceScope::Thread("offsite".into()), 4096).unwrap(),
+        db.essence(EssenceScope::Thread("offsite".into()), 4096)
+            .unwrap(),
         e["thread_essence"].as_str().unwrap()
     );
     assert_eq!(
         db.essence(EssenceScope::Project, 4096).unwrap(),
         e["project_essence"].as_str().unwrap()
     );
-    let manifest = db.about().unwrap().into_iter().next().expect("the manifest");
-    assert_eq!(manifest.metadata["embedder"]["name"], e["manifest_embedder"]);
+    let manifest = db
+        .about()
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the manifest");
+    assert_eq!(
+        manifest.metadata["embedder"]["name"],
+        e["manifest_embedder"]
+    );
     let hits = db
         .recall(&RecallRequest::keywords_only("Meridian").track_access(false))
         .ok();
@@ -82,7 +109,10 @@ fn a_v8_file_is_read_only_and_reads_everything() {
     match Mnemo::open(&path, pass) {
         Err(err @ MnemoError::FormatTooOld { version: 8 }) => {
             let msg = err.to_string();
-            assert!(msg.contains("opens read-only") && msg.contains("mnemo compact"), "{msg}");
+            assert!(
+                msg.contains("opens read-only") && msg.contains("mnemo compact"),
+                "{msg}"
+            );
         }
         other => panic!("expected FormatTooOld, got {:?}", other.err()),
     }
@@ -90,18 +120,29 @@ fn a_v8_file_is_read_only_and_reads_everything() {
     let mut db = Mnemo::open_read_only(&path, pass).unwrap();
     assert_eq!(db.stats().unwrap().format_version, 8);
     assert_eq!(db.has_index(), e["has_index"].as_bool().unwrap());
-    assert_eq!(db.snapshots().len() as u64, e["snapshots"].as_u64().unwrap());
+    assert_eq!(
+        db.snapshots().len() as u64,
+        e["snapshots"].as_u64().unwrap()
+    );
     check_contents(&mut db, e);
     assert!(matches!(
         db.recall(&RecallRequest::keywords_only("Meridian").track_access(false)),
         Err(MnemoError::Invalid(_))
     ));
-    let cached = db.cache_get("app", "weather:lisbon").unwrap().expect("the cache entry");
-    assert_eq!(cached.value, e["cache"]["value"].as_str().unwrap().as_bytes());
+    let cached = db
+        .cache_get("app", "weather:lisbon")
+        .unwrap()
+        .expect("the cache entry");
+    assert_eq!(
+        cached.value,
+        e["cache"]["value"].as_str().unwrap().as_bytes()
+    );
     // Vector recall works (through the index).
     let q = db.memories().unwrap()[3].vector.clone();
     assert_eq!(
-        db.recall(&RecallRequest::new(q).top_k(3).track_access(false)).unwrap().len(),
+        db.recall(&RecallRequest::new(q).top_k(3).track_access(false))
+            .unwrap()
+            .len(),
         3
     );
     // Writes on the read-only handle are refused, as on any read-only one.
@@ -109,9 +150,16 @@ fn a_v8_file_is_read_only_and_reads_everything() {
         db.remember(Memory::new("x", MemoryType::Semantic, vec![1.0; 8])),
         Err(MnemoError::ReadOnly)
     ));
-    assert_eq!(db.verify().unwrap() as u64, e["memories"].as_u64().unwrap() + 1);
+    assert_eq!(
+        db.verify().unwrap() as u64,
+        e["memories"].as_u64().unwrap() + 1
+    );
     drop(db);
-    assert_eq!(std::fs::read(&path).unwrap(), before, "reading changed the file");
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "reading changed the file"
+    );
 }
 
 #[test]
@@ -130,24 +178,38 @@ fn compaction_converts_it_to_v9_with_everything() {
     assert_eq!(db.stats().unwrap().format_version, 9);
     check_contents(&mut db, e);
     assert_eq!(
-        db.cache_get("app", "weather:lisbon").unwrap().unwrap().value,
+        db.cache_get("app", "weather:lisbon")
+            .unwrap()
+            .unwrap()
+            .value,
         b"sunny, 21C"
     );
     // The manifest's embedder is enforced, and now recorded (EMBED-ID-1).
     struct Named(&'static str);
     impl Embedder for Named {
         fn identity(&self) -> EmbedderIdentity {
-            EmbedderIdentity { name: self.0.into(), dimensions: 8, normalize: true }
+            EmbedderIdentity {
+                name: self.0.into(),
+                dimensions: 8,
+                normalize: true,
+            }
         }
         fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
             Ok(texts.iter().map(|_| vec![1.0; 8]).collect())
         }
     }
-    assert!(matches!(db.set_embedder(Named("another")), Err(MnemoError::EmbedderMismatch { .. })));
+    assert!(matches!(
+        db.set_embedder(Named("another")),
+        Err(MnemoError::EmbedderMismatch { .. })
+    ));
     db.set_embedder(Named("fixture-embedder-r1")).unwrap();
     // Writable again.
-    db.remember(Memory::new("written on the v9 copy", MemoryType::Semantic, vec![1.0; 8]))
-        .unwrap();
+    db.remember(Memory::new(
+        "written on the v9 copy",
+        MemoryType::Semantic,
+        vec![1.0; 8],
+    ))
+    .unwrap();
     db.flush().unwrap();
     assert_eq!(db.len(), n + 1);
 }

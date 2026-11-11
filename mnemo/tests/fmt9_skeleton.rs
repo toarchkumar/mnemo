@@ -330,7 +330,8 @@ fn key_slot_run_is_persisted_copy_on_write_and_authenticated() {
     // A v8 file has no key-slot run (the committed v8 fixture, read-only:
     // since the v8 sunset no v8 file is created).
     let db8 = Mnemo::open_read_only(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/v8/v8_passphrase.mnemo"),
         "v8-fixture-passphrase",
     )
     .unwrap();

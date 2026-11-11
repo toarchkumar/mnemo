@@ -27,7 +27,8 @@ fn mem(text: &str, i: usize) -> Memory {
 /// it; since the v8 sunset no v8 file is written).
 fn v8_fixture() -> Mnemo {
     Mnemo::open_read_only(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/v8/v8_passphrase.mnemo"),
         "v8-fixture-passphrase",
     )
     .unwrap()

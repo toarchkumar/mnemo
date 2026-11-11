@@ -118,7 +118,10 @@ fn a_v0_10_0_file_opens_read_only_and_compacts_to_v9() {
             v,
         ))
         .unwrap();
-    assert_eq!(db.get(&added).unwrap().content, "release note written by v0.13");
+    assert_eq!(
+        db.get(&added).unwrap().content,
+        "release note written by v0.13"
+    );
     for (q, w) in queries().iter().zip(&want) {
         assert_eq!(&topics(&mut db, q), w, "recall on the v9 copy");
     }
