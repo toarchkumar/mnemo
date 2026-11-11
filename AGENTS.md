@@ -210,7 +210,7 @@ fast with a clear error and document the manual upgrade path (e.g.
 Solo contributors and unassigned agents follow the general codebase rules
 above. When multiple LLMs collaborate in a shared working tree, the user
 assigns each session one of three roles — **`Planner`**, **`Worker`**, or
-**`Reviewer`** — and information flows through two coordination files at the repository root,
+**`Reviewer`** (there are two Reviewers; see `Reviewer` rule 4) — and information flows through two coordination files at the repository root,
 both tracked in git as a backup:
 
 - **`PLAN.md` (`Planner` <-> `Worker`):** Single source of truth for
@@ -343,6 +343,24 @@ it; other roles stop and ask the user first.
    dispositions: never re-raise `REJECTED` items without new code or
    benchmark evidence, and mark shipped `ACCEPTED` items
    `VERIFIED (<commit/tag>)` once confirmed in code.
+4. **Two Reviewers, each with its own focus, at milestones (user decision
+   2026-11-11):**
+   - **`REVIEWER-A`: market research and product direction.** Batches use
+     `REV-` IDs. Scheduled once before each roadmap phase starts (next:
+     before Phase 12 resumes, after PERF-2), and when the user weighs a
+     change of direction.
+   - **`REVIEWER-B`: code health and blind spots.** Batches use `RB-` IDs.
+     It can build and test, with `CARGO_TARGET_DIR=/tmp/rb-target` and
+     `--locked`, and runs no benchmarks while the `Worker` has a PR open.
+     Scheduled once at each minor release's READY, before the tag (next:
+     v0.13), and when a change touches the file format, the encryption or
+     the release workflow. Patch releases get no review unless the
+     `Planner` asks.
+   - **The user may call either Reviewer at any other time.** Only the
+     user starts an off-cycle review. The `Planner` and the `Worker` don't
+     send Reviewers routine verification work: the `Worker`'s tests and CI
+     and the `Planner`'s `VERIFIED` cover each release. A Reviewer may
+     mark an item `VERIFIED` during its next scheduled pass.
 
 ## Where the philosophy lives
 
