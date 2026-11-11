@@ -366,5 +366,14 @@
       "area": "conventions",
       "topic": "reserved-metadata-namespace"
     }
+  },
+  {
+    "content": "EMBEDDER IDENTITY (v0.13, EMBED-ID-1): every .mnemo file is bound to the first embedder attached to it, with or without a manifest. The identity (name, dimensions, normalize) is recorded on the first set_embedder of a read-write handle, in a reserved encrypted cache entry (namespace `_mnemo.embedder`, not a memory: counts, recall, about and get never see it; compaction and the rekeyed exports carry it). Any later set_embedder with another identity, even at the same width (another model or a new revision), fails with MnemoError::EmbedderMismatch {stored, given} (Swift MnemoError.EmbedderMismatch, Kotlin MnemoException.EmbedderMismatch, Python RuntimeError 'embedder identity mismatch'). Read-only handles check and never write. A new model means a new store until a re-embed path exists. Cache namespaces starting with `_mnemo.` are reserved.",
+    "memory_type": "procedural",
+    "importance": 0.8,
+    "metadata": {
+      "area": "conventions",
+      "topic": "embedder-identity"
+    }
   }
 ]

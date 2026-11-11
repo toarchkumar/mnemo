@@ -24,6 +24,19 @@ impl Mnemo {
         value: &[u8],
         opts: CachePutOpts,
     ) -> Result<()> {
+        reject_reserved(namespace)?;
+        self.cache_put_inner(namespace, key, value, opts)
+    }
+
+    /// [`Mnemo::cache_put`] without the reserved-namespace check: the
+    /// engine's own entries (EMBED-ID-1's identity) go through here.
+    pub(super) fn cache_put_inner(
+        &mut self,
+        namespace: &str,
+        key: &str,
+        value: &[u8],
+        opts: CachePutOpts,
+    ) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -103,6 +116,7 @@ impl Mnemo {
     /// the key was TTL-expired — from the caller's perspective the two
     /// are indistinguishable.
     pub fn cache_get(&mut self, namespace: &str, key: &str) -> Result<Option<CachedValue>> {
+        reject_reserved(namespace)?;
         // FIX-1 R-001.8 part 4: under `Batched`, honor `max_age` on
         // reads too. Pre-FIX-1 the age check only fired on `cache_put`,
         // so a workload that wrote a few entries and then switched to
@@ -191,6 +205,7 @@ impl Mnemo {
     /// Tombstone the entry at `(namespace, key)`. Silently succeeds if
     /// no such entry exists. Space is reclaimed by `compact_file`.
     pub fn cache_delete(&mut self, namespace: &str, key: &str) -> Result<()> {
+        reject_reserved(namespace)?;
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -214,6 +229,9 @@ impl Mnemo {
     /// otherwise every live entry in the target scope is tombstoned.
     /// Returns the number of entries newly tombstoned.
     pub fn cache_purge(&mut self, namespace: Option<&str>, expired_only: bool) -> Result<usize> {
+        if let Some(ns) = namespace {
+            reject_reserved(ns)?;
+        }
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -222,7 +240,9 @@ impl Mnemo {
         // Iterate the directory by index; mark matching entries as
         // deleted and pull them out of the in-memory index.
         for pos in 0..self.cache_dir.len() {
-            if self.cache_dir[pos].deleted {
+            if self.cache_dir[pos].deleted
+                || embed::is_reserved_namespace(&self.cache_dir[pos].namespace)
+            {
                 continue;
             }
             if let Some(ns) = namespace {
@@ -258,7 +278,7 @@ impl Mnemo {
         let mut entries = 0usize;
         let mut bytes = 0u64;
         for e in &self.cache_dir {
-            if e.deleted {
+            if e.deleted || embed::is_reserved_namespace(&e.namespace) {
                 continue;
             }
             if let Some(ns) = namespace {
@@ -385,6 +405,7 @@ impl Mnemo {
         value: &[u8],
         opts: SemanticCachePutOpts,
     ) -> Result<()> {
+        reject_reserved(namespace)?;
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -477,6 +498,7 @@ impl Mnemo {
         threshold: f32,
         model: &str,
     ) -> Result<Option<(CachedValue, f32)>> {
+        reject_reserved(namespace)?;
         if query_vector.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -564,4 +586,54 @@ impl Mnemo {
             sim,
         )))
     }
+}
+
+impl Mnemo {
+    /// EMBED-ID-1: the embedder identity in the reserved record, or `None`
+    /// when the file has none yet. Touches no counter and writes nothing,
+    /// so it's safe on a read-only handle.
+    pub(super) fn recorded_identity(&mut self) -> Result<Option<embed::EmbedderIdentity>> {
+        let key_hash = result_cache::hash_key(embed::IDENTITY_KEY);
+        let Some(pos) = self.cache_idx.get(embed::IDENTITY_NAMESPACE, &key_hash) else {
+            return Ok(None);
+        };
+        let (start_page, page_count, len, gen) = {
+            let e = &self.cache_dir[pos];
+            (e.start_page, e.page_count, e.len, e.gen)
+        };
+        let buf = self.read_record_run(start_page, page_count, len, gen)?;
+        let entry: CacheEntry =
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
+        embed::identity_from_json(&entry.value)
+            .map(Some)
+            .ok_or_else(|| {
+                MnemoError::Serialize("the embedder identity record is malformed".into())
+            })
+    }
+
+    /// EMBED-ID-1: write the reserved identity record (read-write handles
+    /// only; the caller flushes).
+    pub(super) fn record_identity(&mut self, identity: &embed::EmbedderIdentity) -> Result<()> {
+        self.cache_put_inner(
+            embed::IDENTITY_NAMESPACE,
+            embed::IDENTITY_KEY,
+            &embed::identity_to_json(identity),
+            CachePutOpts {
+                content_type: "json".into(),
+                ttl_secs: None,
+                cost_hint_ms: None,
+            },
+        )
+    }
+}
+
+/// The public cache API refuses the engine's own namespaces.
+fn reject_reserved(namespace: &str) -> Result<()> {
+    if embed::is_reserved_namespace(namespace) {
+        return Err(MnemoError::Invalid(format!(
+            "cache namespace {namespace:?} is reserved (namespaces starting with {:?} belong to the engine)",
+            embed::RESERVED_CACHE_PREFIX
+        )));
+    }
+    Ok(())
 }

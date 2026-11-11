@@ -7,8 +7,8 @@
 /// Three classes (`is_retryable` tells the first apart):
 /// - **retry later:** `Locked`, `Io`, `Kdf` (the KDF couldn't get its
 ///   memory), `Closed` (reopen);
-/// - **fix the call:** `Invalid`, `DimensionMismatch`, `ReadOnly`,
-///   `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`;
+/// - **fix the call:** `Invalid`, `DimensionMismatch`, `EmbedderMismatch`,
+///   `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`;
 /// - **the data is unreadable:** `Corrupt`, `HeaderTampered`, `Crypto`,
 ///   `NotAMnemoFile`, `UnsupportedVersion`.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -51,6 +51,19 @@ pub enum MnemoError {
     /// A vector's width doesn't match the file's.
     #[error("vector dimension mismatch: expected {expected}, got {got}")]
     DimensionMismatch { expected: u64, got: u64 },
+    /// The embedder isn't the one this file's vectors came from (another
+    /// model, or another revision of the same one, even at the same width).
+    /// A file is bound to the first embedder attached to it: use that one,
+    /// or create a new store for the new model (EMBED-ID-1).
+    #[error(
+        "embedder identity mismatch: this file's vectors come from {} (dimensions {}, normalize {}), \
+         but the embedder given is {} (dimensions {}, normalize {}); create a new store for the new model",
+        stored.name, stored.dimensions, stored.normalize, given.name, given.dimensions, given.normalize
+    )]
+    EmbedderMismatch {
+        stored: crate::types::EmbedderIdentity,
+        given: crate::types::EmbedderIdentity,
+    },
     /// A bad argument (an empty key, malformed metadata JSON, …).
     #[error("invalid argument: {message}")]
     Invalid { message: String },
@@ -102,6 +115,10 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
                 got: got as u64,
             },
             E::Invalid(message) => MnemoError::Invalid { message },
+            E::EmbedderMismatch { stored, given } => MnemoError::EmbedderMismatch {
+                stored: identity(stored),
+                given: identity(given),
+            },
             E::NeedsWriteOpen { reason } => MnemoError::NeedsWriteOpen {
                 reason: reason.to_string(),
             },
@@ -111,6 +128,14 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
                 message: other.to_string(),
             },
         }
+    }
+}
+
+fn identity(i: mnemo_engine::EmbedderIdentity) -> crate::types::EmbedderIdentity {
+    crate::types::EmbedderIdentity {
+        name: i.name,
+        dimensions: i.dimensions as u32,
+        normalize: i.normalize,
     }
 }
 

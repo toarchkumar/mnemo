@@ -40,12 +40,18 @@ final class WordEmbedder: MnemoEmbedder, @unchecked Sendable {
     private let lock = NSLock()
     private var calls = 0
 
-    init(dimensions: UInt32 = 32) { self.dimensions = dimensions }
+    /// The identity's name: another name stands in for another model.
+    let name: String
+
+    init(dimensions: UInt32 = 32, name: String = "test-words") {
+        self.dimensions = dimensions
+        self.name = name
+    }
 
     var callCount: Int { lock.lock(); defer { lock.unlock() }; return calls }
 
     func identity() -> EmbedderIdentity {
-        EmbedderIdentity(name: "test-words", dimensions: dimensions, normalize: true)
+        EmbedderIdentity(name: name, dimensions: dimensions, normalize: true)
     }
 
     func embed(texts: [String]) throws -> [[Float]] {
