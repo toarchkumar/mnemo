@@ -19,6 +19,10 @@ on:
         description: "Dry run (the only mode a manual run has)"
         type: boolean
         default: true
+      mobile:
+        description: "Include the mobile packages (a tag uses the ENABLE_MOBILE_PUBLISH variable)"
+        type: boolean
+        default: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -414,6 +418,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
       dry_run: ${{ steps.v.outputs.dry_run }}
+      mobile: ${{ steps.v.outputs.mobile }}
     steps:
       # On a tag, each engine job must have succeeded. A publish job may
       # be skipped only when its ENABLE_* variable switches that registry
@@ -487,6 +492,66 @@ jobs:
           fi
           echo "version=$engine" >> "$GITHUB_OUTPUT"
 
+          # REL-1: the mobile packages publish on a rule (RELEASING.md), so
+          # a release may leave them out. A tag follows the
+          # ENABLE_MOBILE_PUBLISH variable; a dry run, its `mobile` input.
+          # The version check above runs either way.
+          if [ "${{ github.event_name }}" = push ]; then
+            mobile="${{ vars.ENABLE_MOBILE_PUBLISH == 'true' }}"
+          else
+            mobile="${{ inputs.mobile }}"
+          fi
+          if [ "$mobile" = true ]; then
+            echo "mobile: on"
+          else
+            mobile=false
+            echo "mobile: off: the Swift and Android build, publish and verify jobs are skipped"
+            echo "Mobile packages skipped in this run (ENABLE_MOBILE_PUBLISH or the dry run's \`mobile\` input)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
+
+  # --- REL-1: on a tag that leaves the mobile packages out, say so on the
+  #     GitHub Release, with the newest version each one already has. A dry
+  #     run with mobile off writes the same note to the run summary only.
+  mobile-skipped-note:
+    name: mobile (skipped, release note)
+    needs: mobile-prepare
+    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' && needs.mobile-prepare.outputs.mobile != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - name: The newest published mobile versions
+        timeout-minutes: 10
+        id: latest
+        run: |
+          set -euo pipefail
+          swift=$(mnemo/bindings/swift/scripts/check-published-package.sh latest)
+          android=$(curl -fsS https://repo1.maven.org/maven2/io/github/toarchkumar/mnemo-android/maven-metadata.xml \
+            | sed -n 's|.*<release>\(.*\)</release>.*|\1|p' || true)
+          echo "Swift ${swift:-none}, Android ${android:-none}"
+          {
+            echo "note<<EOF"
+            echo ""
+            echo "**Mobile packages not published in this release** (latest: Swift ${swift:-none}, Android ${android:-none})."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "**Mobile packages not published in this release** (latest: Swift ${swift:-none}, Android ${android:-none})." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add the note to the GitHub Release
+        timeout-minutes: 10
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          body: ${{ steps.latest.outputs.note }}
+          append_body: true
+
   # --- iOS, build: the XCFramework zip and its checksum, the mnemo-swift
   #     release tree (Package.swift pointing at the zip on the GitHub
   #     Release, the generated Swift and the Swift layer's sources), and an
@@ -495,7 +560,7 @@ jobs:
   build-swift:
     name: mobile (Swift build)
     needs: mobile-prepare
-    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
+    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' && needs.mobile-prepare.outputs.mobile == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 45
     env:
@@ -731,7 +796,7 @@ jobs:
   build-android:
     name: mobile (Android build)
     needs: mobile-prepare
-    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' }}
+    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' && needs.mobile-prepare.outputs.mobile == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

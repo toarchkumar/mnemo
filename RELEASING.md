@@ -1,6 +1,7 @@
 # Releasing MNemo
 
-One tag, `vX.Y.Z`, releases everything:
+One tag, `vX.Y.Z`, releases everything (the mobile packages on the rule
+below):
 
 - **the engine:** the CLI binaries and the Python wheels on the GitHub
   Release, the `mnemo-engine` crate on crates.io, and `mnemo-engine` on
@@ -19,6 +20,32 @@ registry switched off with its `ENABLE_CRATES_PUBLISH` or
 still runs. The `mobile (version check)` job checks this and fails with
 each job's result if anything else happened. A mobile failure doesn't
 undo crates.io or PyPI: fix the cause and re-run the failed jobs.
+
+**The mobile packages publish on a rule, not on every release** (user
+decision, 2026-11-11). The Swift and Android packages are released only
+when:
+
+1. the mobile code changed (the bindings, the stores, the Keystore or
+   Keychain code);
+2. an engine fix matters on phones (security, data loss, corruption); or
+3. a minor version is released: every minor version publishes mobile at
+   least once, so mobile is never more than one minor version behind.
+
+Otherwise a release publishes only crates.io, PyPI and the CLI binaries.
+Every manifest stays on one version number, so the mobile version numbers
+skip; each package carries the engine version it was built from.
+
+**The switch is the `ENABLE_MOBILE_PUBLISH` repository variable**
+(Settings > Secrets and variables > Actions > Variables, or
+`gh variable set ENABLE_MOBILE_PUBLISH --body true`). Before tagging, set it
+to `true` if the rule above says this release publishes mobile, and to
+`false` if it doesn't. With it not `true`, a tag skips the Swift and
+Android build, publish and verify jobs, and the GitHub Release says
+"Mobile packages not published in this release", with the newest published
+versions. The version check still runs, and still requires one version in
+every manifest. A dry run picks with its own `mobile` input instead
+(Actions > Release > Run workflow), so you can rehearse either kind of
+release.
 
 Every job has a 45-minute limit, and every step a limit of 10 to 20
 minutes, so a hang fails the step instead of running for hours.
