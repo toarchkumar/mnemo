@@ -54,10 +54,11 @@ enum Command {
     /// without echo. The old passphrase follows the same priority chain as
     /// every other command.
     ///
-    /// A plain rekey changes the secret that opens this file from now on,
-    /// but the data key stays: anyone who kept a copy of the file and the
-    /// old passphrase can still read it, and everything written later.
-    /// After a suspected passphrase leak, use `--rotate`.
+    /// A plain rekey changes the secret that opens this file from now on;
+    /// anyone who had the file and the old secret can still read it and
+    /// later writes. Use `--rotate` to revoke (after a suspected passphrase
+    /// leak, say). Rotation can't erase old ciphertext that flash storage
+    /// still holds in blocks it hasn't reused.
     Rekey {
         /// Path to the `.mnemo` file.
         path: String,

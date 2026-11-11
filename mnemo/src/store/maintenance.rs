@@ -113,15 +113,15 @@ impl Mnemo {
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps the DEK;
     /// the encrypted pages are never rewritten.
     ///
-    /// **This changes who can open the file from now on, as long as nobody
-    /// kept the old secret.** The data key stays the same, so anyone who had
-    /// the file (or any copy or backup of it) and the old passphrase can
-    /// still read it, and everything written to it later. The old wrap is
-    /// scrubbed from this file (the previous WAL region is zeroed, and any
-    /// stale copy of the old header's key wrap is overwritten), but an
-    /// earlier copy keeps it. To revoke an old secret, rotate: rekey, then
+    /// **This changes the secret that opens this file from now on; anyone who
+    /// had the file and the old secret can still read it and later writes.**
+    /// The data key stays the same, so an earlier copy of the file (or of
+    /// just its header) and the old passphrase still unlock it. The old wrap
+    /// is scrubbed from this file (the previous WAL region is zeroed, and any
+    /// stale copy of the old header's key wrap is overwritten); that's
+    /// hygiene, not revocation. **To revoke, rotate:** rekey, then
     /// [`Mnemo::compact_file`] (`mnemo rekey --rotate`), which rewrites the
-    /// file under a fresh data key.
+    /// file under a fresh data key. Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
         self.rekey_secret(new_passphrase.as_bytes(), kdf)
     }

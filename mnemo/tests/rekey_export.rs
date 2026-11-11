@@ -53,8 +53,12 @@ fn splice(current: &Path, page0: &[u8], out: &Path) {
     std::fs::write(out, bytes).unwrap();
 }
 
+/// Hygiene, not revocation: after a rekey, no stale copy of the old key wrap
+/// is left in this file. An earlier copy of the file still has one, and with
+/// the old secret it still unlocks the unchanged data key; the revocation
+/// tests are the header grafts in `src/store/header_graft_tests.rs`.
 #[test]
-fn rekey_leaves_no_copy_of_the_old_key_wrap_in_the_file() {
+fn hygiene_rekey_scrubs_stale_copies_of_the_old_key_wrap() {
     for version in [8u16, 9] {
         let dir = tempdir().unwrap();
         let path = dir.path().join("r.mnemo");

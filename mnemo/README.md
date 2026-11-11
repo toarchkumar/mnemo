@@ -309,15 +309,15 @@ Argon2id; the KEK wraps a random data-encryption key (DEK); the DEK encrypts
 every data page with AES-256-GCM. Changing the passphrase (`rekey`) only
 re-wraps the DEK — the bulk pages are never rewritten.
 
-That makes `rekey` cheap, and it also means a rekey changes who can open
-the file *from now on, provided nobody kept the old secret*: the DEK is the
-same, so a copy of the file taken earlier still opens with the old
-passphrase, and so does the live file's data for anyone holding that copy's
-header. To revoke an old passphrase (after a suspected leak, say), rotate
-the DEK too: `mnemo rekey --rotate`, or `rekey` followed by
-`Mnemo::compact_file`, which rewrites the file under a fresh DEK.
-`Mnemo::export_rekeyed` writes a copy under a fresh DEK and a new secret,
-sharing no key material with the source.
+That makes `rekey` cheap, and it means **a plain `rekey` changes the
+secret that opens this file from now on; anyone who had the file and the
+old secret can still read it and later writes.** The DEK is the same, so an
+earlier copy of the file, or of just its header, still unlocks it with the
+old passphrase. **Use `--rotate` to revoke** (after a suspected leak, say):
+`mnemo rekey --rotate`, or `rekey` followed by `Mnemo::compact_file`,
+rewrites the file under a fresh DEK. `Mnemo::export_rekeyed` writes a copy
+under a fresh DEK and a new secret, sharing no key material with the
+source. Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
 
 The file is a sequence of fixed **8 KiB pages**:
 

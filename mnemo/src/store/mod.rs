@@ -66,6 +66,8 @@ mod continuation;
 mod crud;
 mod essence;
 mod flush;
+#[cfg(test)]
+mod header_graft_tests;
 mod hooks;
 mod keyed;
 mod load;

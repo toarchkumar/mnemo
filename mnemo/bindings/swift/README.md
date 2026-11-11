@@ -316,8 +316,9 @@ let store = try await MnemoStore.importWithPassphrase(
 - The destination must not exist yet, and the source is never modified.
 - Both write a compacted copy (live data, no history) under a **fresh data
   key**. The export shares no key material with the device's file, and the
-  imported file shares none with the export: the transfer passphrase never
+  import is re-protected under a new data key: the transfer passphrase never
   opens the imported file, even with a leftover copy of the export.
+- Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
 - Have the user choose the passphrase. Never store it next to the export,
   and delete the export once it's imported.
 
