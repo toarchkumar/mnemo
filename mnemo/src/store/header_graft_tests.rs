@@ -129,8 +129,10 @@ fn a_rekeyed_export_revokes_the_live_files_secret() {
     for i in 0..15 {
         db.remember(mem(i)).unwrap();
     }
-    db.flush().unwrap();
+    // Read the header with the file closed: Windows locks an open file.
+    db.close().unwrap();
     let live_page0 = page0(&live);
+    let mut db = Mnemo::open_with_key(&live, &key).unwrap();
     let export = dir.path().join("export.mnemo");
     db.export_rekeyed(&export, "transfer", KdfParams::fast())
         .unwrap();
