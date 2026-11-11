@@ -4,6 +4,18 @@ use super::*;
 
 impl Mnemo {
     /// **Not a stable API.** The file's on-disk format version.
+    /// Writes `m` as a record already in a file would be copied: no
+    /// zero-vector check (the dimension check stays). For the zero-vector
+    /// fixture only (`examples/gen_v8_zero_vector_fixture.rs`): it stands in
+    /// for a file written before the zero-vector rule.
+    #[doc(hidden)]
+    pub fn __put_unvalidated_for_testing(&mut self, m: Memory) -> Result<Ulid> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        self.put_existing(m)
+    }
+
     #[doc(hidden)]
     pub fn __format_version(&self) -> u16 {
         self.header.version

@@ -845,6 +845,24 @@ pub struct CompactReport {
     /// Live, non-expired cache entries after compaction (tombstoned
     /// and TTL-expired ones dropped).
     pub cache_after: usize,
+    /// Legacy onboarding or manifest memories that held an all-zero vector
+    /// (from before the zero-vector rule) and were given the sentinel unit
+    /// vector a current manifest has.
+    pub zero_vector_manifests: usize,
+    /// Other memories with an all-zero vector, carried unchanged: their
+    /// content and recall behaviour are the same as before.
+    pub zero_vector_memories: usize,
+}
+
+/// What [`Mnemo::verify_report`] checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifyReport {
+    /// Records decrypted and decoded: live memories and cache entries (the
+    /// engine's own entries aren't counted).
+    pub records: usize,
+    /// Live memories whose vector is all zeros (from before the zero-vector
+    /// rule). They score 0.0 on every vector query.
+    pub zero_vector_memories: usize,
 }
 
 /// An encrypted, single-file agent memory database.

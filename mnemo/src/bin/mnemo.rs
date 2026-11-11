@@ -1358,6 +1358,13 @@ fn run() -> std::result::Result<(), String> {
                 "compacted {path} (v9): {} -> {} live memories",
                 report.before, report.after
             );
+            if report.zero_vector_manifests + report.zero_vector_memories > 0 {
+                println!(
+                    "  all-zero vectors: {} legacy manifest memories given the sentinel \
+                     vector, {} other memories carried unchanged",
+                    report.zero_vector_manifests, report.zero_vector_memories
+                );
+            }
         }
         Command::Verify {
             path,
@@ -1365,8 +1372,19 @@ fn run() -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
-            let n = db.verify().map_err(fmt)?;
-            println!("verified {n} records — all pages decrypt and decode");
+            let report = db.verify_report().map_err(fmt)?;
+            println!(
+                "verified {} records — all pages decrypt and decode",
+                report.records
+            );
+            if report.zero_vector_memories > 0 {
+                eprintln!(
+                    "warning: {} memories have an all-zero vector (written before v0.5's \
+                     zero-vector rule); they score 0.0 on every vector query. `mnemo compact` \
+                     carries them and gives a legacy manifest the sentinel vector.",
+                    report.zero_vector_memories
+                );
+            }
         }
         Command::Import {
             path,

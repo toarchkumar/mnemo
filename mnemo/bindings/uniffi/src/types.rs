@@ -368,6 +368,11 @@ pub struct CompactReport {
     pub cache_before: u64,
     /// Live result-cache entries after it.
     pub cache_after: u64,
+    /// Legacy manifest memories that held an all-zero vector and were given
+    /// the sentinel vector (v0.13).
+    pub zero_vector_manifests: u64,
+    /// Other all-zero-vector memories, carried unchanged (v0.13).
+    pub zero_vector_memories: u64,
 }
 
 /// One turn of a conversation to archive.
