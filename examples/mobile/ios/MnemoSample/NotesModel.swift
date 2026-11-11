@@ -1,13 +1,23 @@
 import Foundation
 import Mnemo
+import MnemoAppleEmbedder
 
 /// The notes demo: notes, a keyed fact with its history, recall with and
 /// without keywords, and a thread.
+///
+/// The embedder is chosen when the store opens: Apple's contextual model if
+/// its assets are on the phone, else Apple's sentence model, else a demo
+/// embedder. A store is bound to the model that first wrote to it, so each
+/// model gets its own store, named after the model's identity.
 @MainActor
 final class NotesModel: ObservableObject {
     static let threadID = "demo-thread"
 
     @Published private(set) var embedderLabel = ""
+    /// The contextual model exists on this phone but its assets aren't
+    /// downloaded yet.
+    @Published private(set) var canDownloadContextualModel = false
+    @Published private(set) var downloading = false
     @Published private(set) var count: UInt64 = 0
     @Published private(set) var recent: [String] = []
     @Published private(set) var hits: [RecallHit] = []
@@ -16,28 +26,63 @@ final class NotesModel: ObservableObject {
     @Published private(set) var essence = ""
     @Published var error: String?
 
-    let store: MnemoStore?
+    private(set) var store: MnemoStore?
 
     init() {
-        let embedder: any MnemoEmbedder
-        let name: String
-        if let sentence = SentenceEmbedder() {
-            embedder = sentence
-            name = "notes"
-            embedderLabel = "Apple NLEmbedding, sentence, \(sentence.dimensions) dims"
+        if let apple = AppleEmbedders.bestAvailable() {
+            open(apple)
         } else {
-            let demo = DemoWordEmbedder()
-            embedder = demo
             // A different file: a file keeps the embedder it was written with.
-            name = "notes-demo-embedder"
-            embedderLabel = "DEMO embedder (hashed words): NLEmbedding isn't available here"
+            open(DemoWordEmbedder(), name: "notes-demo-embedder",
+                 label: "DEMO embedder (hashed words): no Apple model on this system")
         }
+        canDownloadContextualModel = Self.contextualModelNeedsDownload()
+    }
+
+    private func open(_ embedder: any MnemoEmbedder, name: String? = nil, label: String? = nil) {
+        let identity = embedder.identity()
+        embedderLabel = label ?? Self.label(for: identity)
         do {
-            let dims = UInt32(embedder.identity().dimensions)
-            store = try MnemoStore(configuration: MnemoStoreConfiguration(name: name, dimensions: dims),
-                                   embedder: embedder)
+            store = try MnemoStore(
+                configuration: MnemoStoreConfiguration(name: name ?? "notes-\(identity.name)",
+                                                       dimensions: identity.dimensions),
+                embedder: embedder)
         } catch {
             store = nil
+            self.error = "\(error)"
+        }
+    }
+
+    private static func label(for identity: EmbedderIdentity) -> String {
+        let kind = identity.name.hasPrefix("apple-nl-contextual") ? "contextual" : "sentence"
+        return "Apple NaturalLanguage, \(kind), \(identity.dimensions) dims (\(identity.name))"
+    }
+
+    private static func contextualModelNeedsDownload() -> Bool {
+        guard #available(iOS 17.0, *), let contextual = AppleContextualEmbedder() else { return false }
+        return !contextual.hasAvailableAssets
+    }
+
+    /// Downloads Apple's contextual model, then moves the notes to a new
+    /// store for it. The sentence model's store stays on the phone: a store
+    /// keeps the model it was written with.
+    func downloadContextualModel() async {
+        guard #available(iOS 17.0, *), let contextual = AppleContextualEmbedder() else { return }
+        downloading = true
+        defer { downloading = false }
+        do {
+            guard try await contextual.requestAssets() == .available else {
+                error = "Apple's contextual model can't be downloaded now (no network, or no model for English)."
+                return
+            }
+            try? await store?.close()
+            open(contextual)
+            canDownloadContextualModel = false
+            recent = []
+            hits = []
+            history = []
+            await refresh()
+        } catch {
             self.error = "\(error)"
         }
     }

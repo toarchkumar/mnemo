@@ -18,6 +18,14 @@ struct NotesView: View {
                 Section {
                     LabeledContent("Memories", value: "\(model.count)")
                     Text(model.embedderLabel).font(.footnote).foregroundStyle(.secondary)
+                    if model.canDownloadContextualModel {
+                        Button(model.downloading ? "Downloading Apple's model..." : "Download Apple's model") {
+                            Task { await model.downloadContextualModel() }
+                        }
+                        .disabled(model.downloading)
+                        Text("Apple's contextual model understands sentences better. It starts a new, empty store: a store keeps the model it was written with.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                     if let error = model.error {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }

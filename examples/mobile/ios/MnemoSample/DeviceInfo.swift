@@ -34,6 +34,9 @@ enum DeviceInfo {
             ("iPhone16,1", "A17 Pro"), ("iPhone16,2", "A17 Pro"),
             ("iPhone17,1", "A18 Pro"), ("iPhone17,2", "A18 Pro"),
             ("iPhone17,3", "A18"), ("iPhone17,4", "A18"), ("iPhone17,5", "A18"),
+            // iPhone 17 Pro, 17 Pro Max and Air; iPhone 17 (SAMPLE-1).
+            ("iPhone18,1", "A19 Pro"), ("iPhone18,2", "A19 Pro"), ("iPhone18,4", "A19 Pro"),
+            ("iPhone18,3", "A19"),
         ]
         return table.first { identifier == $0.0 || ($0.0.hasSuffix(",") && identifier.hasPrefix($0.0)) }?.1
     }

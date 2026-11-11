@@ -1,44 +1,10 @@
 import Foundation
 import Mnemo
-import NaturalLanguage
 
-/// Apple's built-in sentence embedding (`NLEmbedding`, NaturalLanguage), so
-/// the sample ships no model. 512 dimensions for English.
-final class SentenceEmbedder: MnemoEmbedder, @unchecked Sendable {
-    private let embedding: NLEmbedding
-    private let language: NLLanguage
-    // NLEmbedding isn't documented as thread-safe; the engine may call from
-    // any thread.
-    private let lock = NSLock()
-
-    init?(language: NLLanguage = .english) {
-        guard let embedding = NLEmbedding.sentenceEmbedding(for: language) else { return nil }
-        self.embedding = embedding
-        self.language = language
-    }
-
-    var dimensions: Int { embedding.dimension }
-
-    func identity() -> EmbedderIdentity {
-        EmbedderIdentity(name: "apple-nl-sentence-\(language.rawValue)-r\(embedding.revision)",
-                         dimensions: UInt32(embedding.dimension), normalize: true)
-    }
-
-    func embed(texts: [String]) throws -> [[Float]] {
-        lock.lock()
-        defer { lock.unlock() }
-        return try texts.map { text in
-            guard let v = embedding.vector(for: text) else {
-                throw EmbedderError.Failed(message: "NLEmbedding has no vector for this text")
-            }
-            return normalized(v.map { Float($0) })
-        }
-    }
-}
-
-/// A demo embedder for when `NLEmbedding` isn't available: hashed words, so
-/// texts that share words come out similar. It has no idea what words mean;
-/// it's labelled as a demo in the UI.
+/// Apple's embedders come from the package's `MnemoAppleEmbedder` product
+/// (SAMPLE-1). This is the last resort, for a system with no Apple model:
+/// hashed words, so texts that share words come out similar. It has no
+/// idea what words mean; it's labelled as a demo in the UI.
 final class DemoWordEmbedder: MnemoEmbedder, @unchecked Sendable {
     let dimensions = 64
 
