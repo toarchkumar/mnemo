@@ -934,12 +934,13 @@ to the URL.
   open at that moment, it says so and keeps the last read.
 - **It stays on your machine.** It binds `127.0.0.1` only (a random free
   port unless `--port`), and the printed URL carries a random token. Every
-  request must carry that token and a `Host` of the loopback address and
+  data request must carry that token and a `Host` of the loopback address and
   port, which stops other sites' pages (DNS rebinding included). Only `GET`
   is served, with no CORS, and no endpoint writes the file. Nothing is
   written to disk. Once the page has loaded, it keeps the token for that
-  tab only and takes it out of the address bar, so it isn't in the
-  browser's history.
+  tab only and takes it out of the address bar. The browser's history
+  still records the first visit; the token stops working when the
+  inspector stops.
 - **It stops when it's left alone.** After `--idle-timeout` without a
   request from the page (30 minutes by default; `90s`, `1h`, or `0` for
   never) it wipes the passphrase or key from memory and exits. It holds

@@ -92,7 +92,9 @@
 <script>
 "use strict";
 // The token arrives in the URL once. Keep it for this tab only and take it
-// out of the address bar, so it isn't in the history or on the screen.
+// out of the address bar, so it isn't on the screen or in a copied link. The
+// browser's history still records the first visit; the token stops working
+// when the inspector stops.
 const TOKEN = (() => {
   const fromUrl = new URLSearchParams(location.search).get("t");
   if (fromUrl) {
