@@ -862,6 +862,13 @@ The passphrase is resolved in this priority order:
    passphrase follows the same chain via `--new-passphrase`,
    `MNEMO_NEW_PASSPHRASE`, or a double-prompt.
 
+**Raw-key files** (what `Mnemo::create_with_key` writes, and what the
+phone libraries keep) open with `--key-file <path>` instead, on `info`,
+`about`, `list`, `verify`, `recall`, `export`, `compact` and `inspect`
+(since v0.13.1). The file holds the 32-byte key, raw or as 64 hex digits;
+it can't be combined with `--passphrase`. `mnemo compact --key-file` is
+how a raw-key v8 file becomes v9.
+
 For real applications, prefer the library API and supply the passphrase
 in-process.
 

@@ -2536,6 +2536,12 @@ fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObje
     let report = py
         .allow_threads(move || Core::compact_file(&path, &pp))
         .map_err(to_py)?;
+    compact_report_dict(py, report)
+}
+
+/// A `CompactReport` as the dict `compact_file` and `compact_file_with_key`
+/// return.
+fn compact_report_dict(py: Python<'_>, report: mnemo_core::CompactReport) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("before", report.before)?;
     d.set_item("after", report.after)?;
@@ -2545,6 +2551,18 @@ fn compact_file(py: Python<'_>, path: &str, passphrase: &str) -> PyResult<PyObje
     d.set_item("zero_vector_manifests", report.zero_vector_manifests)?;
     d.set_item("zero_vector_memories", report.zero_vector_memories)?;
     Ok(d.into_any().unbind())
+}
+
+/// RB-003.6 (v0.13.1): `compact_file` for a raw-key file (32 bytes): the
+/// same rewrite, under the same key. Converts a v8 file to v9.
+#[pyfunction]
+fn compact_file_with_key(py: Python<'_>, path: &str, key: &[u8]) -> PyResult<PyObject> {
+    let key = key_from_bytes(key)?;
+    let path = path.to_string();
+    let report = py
+        .allow_threads(move || Core::compact_file_with_key(&path, &key))
+        .map_err(to_py)?;
+    compact_report_dict(py, report)
 }
 
 /// Report this build's cryptographic backend configuration.
@@ -2585,6 +2603,7 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(open_with_key, m)?)?;
     m.add_function(wrap_pyfunction!(generate_key, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
+    m.add_function(wrap_pyfunction!(compact_file_with_key, m)?)?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

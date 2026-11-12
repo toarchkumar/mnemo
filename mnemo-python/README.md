@@ -188,6 +188,7 @@ Plus two module-level functions:
 | Function | Purpose |
 |---|---|
 | `mnemo.compact_file(path, passphrase)` | Rewrite the file out-of-place, dropping tombstoned and expired memories and reclaiming stale pages. Caller's own handle must be closed first. Returns `{"before": int, "after": int}` |
+| `mnemo.compact_file_with_key(path, key)` | The same for a raw-key file (`key`: 32 bytes, as from `generate_key()`), under the same key; converts a v8 file to v9 (since v0.13.1) |
 | `mnemo.build_info()` | Returns `{"version", "target", "aes_backend", "polyval_backend"}` for the installed wheel. Lets you verify an ARM wheel picked up the hardware AES path — `aes_backend` should read `"armv8 hardware"` on Apple Silicon / Graviton (anything else, like `"armv8 software (constant-time fallback)"`, means the compile missed the fix). PR 11.0, v0.5.1+ |
 
 `Session` methods: `add_turn(turn)`, `recall(query, top_k=10, memory_types=None)`,

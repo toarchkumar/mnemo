@@ -633,6 +633,31 @@ def test_compact_file_module_fn():
     print("ok  mnemo.compact_file(path, pp) -> {before, after}")
 
 
+def test_compact_file_with_key():
+    """v0.13.1 (RB-003.6): `mnemo.compact_file_with_key(path, key)` is
+    `compact_file` for a raw-key file, under the same key."""
+    key = mnemo.generate_key()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "k.mnemo")
+        db = mnemo.open_with_key(path, key, dimensions=2)
+        keep = db.remember("keep", "semantic", [1.0, 0.0])
+        drop = db.remember("drop", "semantic", [0.0, 1.0])
+        db.delete(drop)
+        db.close()
+        del db
+        report = mnemo.compact_file_with_key(path, key)
+        assert report["before"] == 1 and report["after"] == 1, report
+        db = mnemo.open_with_key(path, key)
+        assert len(db) == 1 and db.get(keep)["content"] == "keep"
+        db.close()
+        try:
+            mnemo.compact_file_with_key(path, b"short")
+            raise AssertionError("a short key should be refused")
+        except ValueError as e:
+            assert "32 bytes" in str(e), e
+    print("ok  mnemo.compact_file_with_key(path, key)")
+
+
 def test_recall_accepts_n_probe_n_rerank_overrides():
     """PR ANN-1: Python callers can tune the ANN index per query.
 
@@ -1265,6 +1290,7 @@ if __name__ == "__main__":
     test_read_only_with_block_and_close_are_noops()
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
+    test_compact_file_with_key()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()
     test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package()

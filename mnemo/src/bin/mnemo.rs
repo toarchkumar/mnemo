@@ -49,6 +49,10 @@ enum Command {
     Info {
         /// Path to the `.mnemo` file.
         path: String,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -85,6 +89,10 @@ enum Command {
     Compact {
         /// Path to the `.mnemo` file.
         path: String,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -92,6 +100,10 @@ enum Command {
     Verify {
         /// Path to the `.mnemo` file.
         path: String,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -246,6 +258,10 @@ enum Command {
         /// Print only the manifest memory (topic=manifest), no other onboarding entries.
         #[arg(long)]
         manifest_only: bool,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -293,6 +309,10 @@ enum Command {
         /// Include the embedding vector (json/jsonl only).
         #[arg(long)]
         vector: bool,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -323,6 +343,10 @@ enum Command {
         /// with a wider mode.
         #[arg(long, short = 'o')]
         output: Option<String>,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -446,6 +470,10 @@ enum Command {
         /// Per-request timeout for the embedder (seconds; default 60).
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -899,6 +927,35 @@ fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
         .map_err(|e| format!("failed to read passphrase: {e}"))
 }
 
+/// RB-003.6: what unlocks the file: the raw key from `--key-file` when it's
+/// given, else the passphrase (`--passphrase`, `MNEMO_PASSPHRASE` or the
+/// prompt).
+fn unlock(
+    pp: &Option<String>,
+    key_file: &Option<String>,
+) -> std::result::Result<inspect::Secret, String> {
+    match key_file {
+        Some(k) => Ok(inspect::Secret::Key(inspect::read_key_file(k)?)),
+        None => Ok(inspect::Secret::Passphrase(passphrase(pp)?)),
+    }
+}
+
+/// A read-only open with either secret.
+fn open_ro(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
+    match s {
+        inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
+        inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+    }
+}
+
+/// A read-write open with either secret.
+fn open_rw(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
+    match s {
+        inspect::Secret::Passphrase(p) => Mnemo::open(path, p),
+        inspect::Secret::Key(k) => Mnemo::open_with_key(path, k),
+    }
+}
+
 /// Like [`passphrase`] but for *new* passphrases on `init` / `rekey`:
 /// double-prompts and rejects mismatches. Non-interactive paths (`--flag`,
 /// env var) skip the double-prompt and use the value directly.
@@ -1318,6 +1375,7 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Info {
             path,
+            key_file,
             passphrase: pp,
         } => {
             // Build info first — printed before the file open so it's
@@ -1328,8 +1386,8 @@ fn run() -> std::result::Result<(), String> {
             println!("mnemo:       v{} ({})", bi.version, bi.target);
             println!("aes:         {}", bi.aes_backend);
             println!("polyval:     {}", bi.polyval_backend);
-            let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let secret = unlock(&pp, &key_file)?;
+            let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
             println!("path:        {path}");
             println!("format:      v{}", s.format_version);
@@ -1418,10 +1476,15 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Compact {
             path,
+            key_file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
-            let report = Mnemo::compact_file(&path, &pp).map_err(fmt)?;
+            let secret = unlock(&pp, &key_file)?;
+            let report = match &secret {
+                inspect::Secret::Passphrase(p) => Mnemo::compact_file(&path, p),
+                inspect::Secret::Key(k) => Mnemo::compact_file_with_key(&path, k),
+            }
+            .map_err(fmt)?;
             println!(
                 "compacted {path} (v9): {} -> {} live memories",
                 report.before, report.after
@@ -1436,10 +1499,11 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Verify {
             path,
+            key_file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let secret = unlock(&pp, &key_file)?;
+            let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let report = db.verify_report().map_err(fmt)?;
             println!(
                 "verified {} records — all pages decrypt and decode",
@@ -1651,10 +1715,11 @@ fn run() -> std::result::Result<(), String> {
             path,
             format,
             manifest_only,
+            key_file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let secret = unlock(&pp, &key_file)?;
+            let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
             let mut entries = db.about().map_err(fmt)?;
@@ -1819,9 +1884,10 @@ fn run() -> std::result::Result<(), String> {
             offset,
             sort,
             vector,
+            key_file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let secret = unlock(&pp, &key_file)?;
             let types = match r#type {
                 Some(s) => Some(parse_memory_types(&s)?),
                 None => None,
@@ -1833,7 +1899,7 @@ fn run() -> std::result::Result<(), String> {
                 ));
             }
             // `list` is a bulk read of the catalog + record bodies — no writes.
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let mut all = db.memories().map_err(fmt)?;
 
             // Filter.
@@ -1879,9 +1945,10 @@ fn run() -> std::result::Result<(), String> {
             agent,
             git,
             output,
+            key_file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let secret = unlock(&pp, &key_file)?;
             let types = match r#type {
                 Some(s) => Some(parse_memory_types(&s)?),
                 None => None,
@@ -1893,7 +1960,7 @@ fn run() -> std::result::Result<(), String> {
                     }
                 }
             }
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let summary = db.stats_summary();
             let facts = export::FileFacts {
                 format_version: summary.format_version,
@@ -1982,10 +2049,11 @@ fn run() -> std::result::Result<(), String> {
             embed_name,
             embed_normalize,
             embed_timeout,
+            key_file,
             passphrase: pp,
         } => {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity};
-            let pp = passphrase(&pp)?;
+            let secret = unlock(&pp, &key_file)?;
             if query.is_none() && query_file.is_none() && text.is_none() && keywords.is_none() {
                 return Err(
                     "recall requires one of --query / --query-file / --text / --keywords".into(),
@@ -2008,20 +2076,20 @@ fn run() -> std::result::Result<(), String> {
             // decide whether to flush after `recall`.
             let open_recall =
                 |path: &str,
-                 pp: &str,
+                 secret: &inspect::Secret,
                  no_track: bool|
                  -> std::result::Result<(Mnemo, bool), mnemo_engine::MnemoError> {
                     if no_track {
-                        return Mnemo::open_read_only(path, pp).map(|db| (db, true));
+                        return open_ro(path, secret).map(|db| (db, true));
                     }
-                    match Mnemo::open(path, pp) {
+                    match open_rw(path, secret) {
                         Ok(db) => Ok((db, false)),
                         Err(mnemo_engine::MnemoError::Locked { .. }) => {
                             // R-004.4: open read-only first and print the
                             // notice only if that worked. An exclusive
                             // holder blocks the read-only open too, and
                             // then the `Locked` error is the whole story.
-                            let db = Mnemo::open_read_only(path, pp)?;
+                            let db = open_ro(path, secret)?;
                             eprintln!(
                                 "mnemo: another process holds the lock on {path}; \
                                  running recall read-only with --no-track"
@@ -2030,7 +2098,7 @@ fn run() -> std::result::Result<(), String> {
                         }
                         // The v8 sunset: a v8 file recalls read-only.
                         Err(mnemo_engine::MnemoError::FormatTooOld { version: 8 }) => {
-                            let db = Mnemo::open_read_only(path, pp)?;
+                            let db = open_ro(path, secret)?;
                             eprintln!(
                                 "mnemo: {path} is a v8 file, which opens read-only; running \
                                  recall with --no-track (`mnemo compact` converts it to v9)"
@@ -2053,7 +2121,7 @@ fn run() -> std::result::Result<(), String> {
                 Some(text) if embed_cmd.is_none() => {
                     // No embedder: keyword-only recall, which needs v9.
                     let (db, effective_no_track) =
-                        open_recall(&path, &pp, no_track).map_err(fmt)?;
+                        open_recall(&path, &secret, no_track).map_err(fmt)?;
                     if db.stats_summary().format_version < 9 {
                         return Err("--text requires --embed-cmd and --embed-name \
                                     (or a v9 file, which can recall by keyword)"
@@ -2072,7 +2140,7 @@ fn run() -> std::result::Result<(), String> {
                         "--text requires --embed-cmd and --embed-name".to_string()
                     })?;
                     let (mut db, effective_no_track) =
-                        open_recall(&path, &pp, no_track).map_err(fmt)?;
+                        open_recall(&path, &secret, no_track).map_err(fmt)?;
                     let identity = EmbedderIdentity {
                         name: ename,
                         dimensions: db.dimensions(),
@@ -2133,7 +2201,7 @@ fn run() -> std::result::Result<(), String> {
             let mut db = match db_opt.take() {
                 Some(db) => db,
                 None => {
-                    let (db, eff_no_track) = open_recall(&path, &pp, no_track).map_err(fmt)?;
+                    let (db, eff_no_track) = open_recall(&path, &secret, no_track).map_err(fmt)?;
                     effective_no_track = eff_no_track;
                     db
                 }

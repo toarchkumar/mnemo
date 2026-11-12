@@ -862,8 +862,9 @@ impl Mnemo {
             // Compaction recovers the WAL and converts the file.
             return Err(MnemoError::NeedsWriteOpen {
                 reason: if header.version < VERSION_V9 {
-                    "pending WAL recovery in a pre-v9 file; run `mnemo compact <file>`, \
-                     which recovers it and converts the file to v9"
+                    "pending WAL recovery in a pre-v9 file; run `mnemo compact <file>` \
+                     (with `--key-file <key>` for a raw-key file), which recovers it and \
+                     converts the file to v9"
                 } else {
                     "pending WAL recovery"
                 },

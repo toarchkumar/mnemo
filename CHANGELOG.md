@@ -8,6 +8,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **`--key-file` on the CLI's read and convert commands** (RB-003.6):
+  `info`, `about`, `list`, `verify`, `recall`, `export` and `compact`, as
+  on `inspect`. A raw-key file (what `create_with_key` writes, and what
+  the phone libraries keep) can now be read, exported and compacted from
+  the CLI, and `mnemo compact --key-file` converts a raw-key v8 file.
+  `FormatTooOld`'s message, and the pre-v9 pending-WAL message, name it.
+- **Python `mnemo.compact_file_with_key(path, key)`,** `compact_file` for a
+  raw-key file.
+
 ### Fixed
 
 - **A refused or wrong-secret open no longer writes to the file**

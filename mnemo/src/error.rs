@@ -108,7 +108,8 @@ pub enum MnemoError {
     /// keeps every live memory.
     #[error(
         "this file is format v{version}, which this build {}; run `mnemo compact <file>` \
-         to convert it to v9 (every live memory is kept)",
+         (with `--key-file <key>` for a raw-key file) to convert it to v9 (every live \
+         memory is kept)",
         if *version == 8 { "opens read-only" } else { "no longer opens" }
     )]
     FormatTooOld {
