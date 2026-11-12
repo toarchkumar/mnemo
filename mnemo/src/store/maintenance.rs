@@ -122,6 +122,10 @@ impl Mnemo {
     /// hygiene, not revocation. **To revoke, rotate:** rekey, then
     /// [`Mnemo::compact_file`] (`mnemo rekey --rotate`), which rewrites the
     /// file under a fresh data key. Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
+    ///
+    /// **If it returns an error, the file may already be under the new secret,
+    /// or may move to it at the next write** (RB-004.2). Close the handle
+    /// without writing anything more, then try both secrets.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
         self.rekey_secret(new_passphrase.as_bytes(), kdf)
     }
@@ -130,6 +134,10 @@ impl Mnemo {
     /// [`KdfParams::raw_key`] in the header. Like [`Mnemo::rekey`], only the
     /// wrapped DEK changes; pages aren't rewritten, and it doesn't revoke
     /// the old key (see [`Mnemo::rekey`]).
+    ///
+    /// **If it returns an error, the file may already be under the new secret,
+    /// or may move to it at the next write** (RB-004.2). Close the handle
+    /// without writing anything more, then try both secrets.
     pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
         self.rekey_secret(new_key, KdfParams::raw_key())
     }

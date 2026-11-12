@@ -445,9 +445,12 @@ impl Mnemo {
         // so a wrong secret or a refused old format leaves the file
         // byte-identical. Both are checked against the header the file will
         // have once the WAL is replayed (its page-0 frame, else the current
-        // header): after a crash mid-rekey, page 0 still wraps the data key
-        // under the old secret and the WAL under the new one, and only the
-        // new one may open and recover it.
+        // header), since that header is the one the secret must open. No write
+        // the engine makes leaves a pending page-0 frame whose key wrap differs
+        // from page 0's (a rekey logs its new page 0 into a fresh WAL region,
+        // so a cut-off rekey leaves the old secret or the new one, never a
+        // mix), but checking against the replay's header is the right
+        // defence if one ever does.
         let target = match pending.as_deref().and_then(page_zero_header) {
             Some(h) => h,
             None => header.clone(),

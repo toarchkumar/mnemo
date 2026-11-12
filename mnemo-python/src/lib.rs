@@ -1629,6 +1629,10 @@ impl Mnemo {
     /// intended for tests only. Production callers should leave it
     /// `False` so the new KEK inherits the same protection level as
     /// the file's original creation-time parameters.
+    ///
+    /// If it raises, the file may already be under the new secret, or may
+    /// move to it at the next write: close the handle without writing
+    /// anything more, then try both secrets.
     #[pyo3(signature = (new_passphrase, fast=false))]
     fn rekey(&mut self, py: Python<'_>, new_passphrase: &str, fast: bool) -> PyResult<()> {
         // FIX-1 R-001.5: `fast=False` now really does "inherit the
@@ -1655,6 +1659,10 @@ impl Mnemo {
     /// from `mnemo.generate_key()` held in an OS keychain). Records the
     /// minimal Argon2id parameters, so later `open_with_key` calls skip the
     /// KDF cost. Only the wrapped data key changes.
+    ///
+    /// If it raises, the file may already be under the new secret, or may
+    /// move to it at the next write: close the handle without writing
+    /// anything more, then try both secrets.
     fn rekey_with_key(&mut self, py: Python<'_>, key: &[u8]) -> PyResult<()> {
         let key = key_from_bytes(key)?;
         let core = self.core_mut()?;

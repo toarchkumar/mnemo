@@ -448,12 +448,17 @@ pub fn parse_idle(s: &str) -> Result<Option<Duration>, String> {
     let n: u64 = num
         .parse()
         .map_err(|_| format!("--idle-timeout {s:?}: use a number with s, m or h (30m)"))?;
-    let secs = match unit {
-        "s" => n,
-        "m" => n * 60,
-        "h" => n * 3600,
+    let per = match unit {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
         _ => return Err(format!("--idle-timeout {s:?}: use s, m or h (30m)")),
     };
+    // RB-004.5 item 3: an unchecked product wrapped (to 0, "never", in a
+    // release build). Refuse it instead.
+    let secs = n
+        .checked_mul(per)
+        .ok_or_else(|| format!("--idle-timeout {s:?} is too long (use 0 for never)"))?;
     Ok((secs > 0).then(|| Duration::from_secs(secs)))
 }
 
@@ -987,6 +992,11 @@ mod tests {
         assert_eq!(parse_idle("45").unwrap(), Some(Duration::from_secs(2700)));
         assert_eq!(parse_idle("0").unwrap(), None);
         assert!(parse_idle("soon").is_err() && parse_idle("5d").is_err());
+        // RB-004.5 item 3: an overflow is refused, not wrapped to "never".
+        let too_long = parse_idle("1152921504606846976h").unwrap_err();
+        assert!(too_long.contains("too long"), "{too_long}");
+        assert!(parse_idle(&format!("{}m", u64::MAX / 60 + 1)).is_err());
+        assert!(parse_idle(&format!("{}s", u64::MAX)).unwrap().is_some());
     }
 
     #[test]

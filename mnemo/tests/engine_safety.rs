@@ -309,7 +309,8 @@ fn a_wrong_key_leaves_a_pending_wal_untouched() {
 /// old passphrase or the new one. (A rekey logs the new page 0 into a fresh
 /// WAL region, so a cut-off one never leaves the new wrap pending behind
 /// the old page 0; the key check against the replay's header covers that
-/// case anyway.)
+/// case anyway.) This test also passes on the v0.13.0 open order: it guards
+/// a property the old order already had, so a regression in either shows.
 #[cfg(feature = "failpoints")]
 #[test]
 fn a_cut_off_rekey_opens_with_one_passphrase_and_a_wrong_one_writes_nothing() {

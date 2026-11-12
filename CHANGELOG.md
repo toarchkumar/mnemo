@@ -40,15 +40,21 @@ rule); they stay at 0.13.0.
   once every build (engine and mobile) is green, so a failed build
   publishes nothing anywhere. The dry run now builds the CLI binaries, the
   wheels and the sdist too, and rehearses the asset attach and both engine
-  publishes; it never waits for an approval. Maintainers: see RELEASING.md.
+  publishes; it never waits for an approval. The approval's name shows the
+  version and the mobile mode it releases. Maintainers: see RELEASING.md.
+- **`rekey`'s documentation** (Rust and Python) now says what to do after
+  an error: the file may already be under the new secret, or may move to
+  it at the next write, so close the handle without writing and try both
+  secrets. A fix is planned for v0.13.2.
 - **`mnemo inspect`:**
   - `--idle-timeout` (default `30m`; `90s`, `1h`, or `0` for never): the
     server stops after that long without a request from the page, wiping
     the passphrase or key, which it now holds in memory that's zeroed when
     dropped.
   - The page keeps the token for its tab and takes it out of the address
-    bar, so it isn't in the browser's history; the page itself (which
-    holds no data) loads without it, so a refresh still works. Every API
+    bar. The browser's history still records the first visit; the token
+    stops working when the inspector stops. The page itself (which holds
+    no data) loads without the token, so a refresh still works. Every API
     route still needs it.
   - `--open` hands the browser a private local page (owner-only, deleted
     once it has loaded) that forwards to the URL, instead of the URL.
@@ -69,6 +75,8 @@ rule); they stay at 0.13.0.
   and refuses an old format before writing anything, so both leave the
   file byte-identical. The right secret still recovers the WAL, and
   `mnemo compact` still recovers and converts a v8 file.
+- **`mnemo inspect --idle-timeout` refuses a value too long to count**
+  instead of wrapping it, which in a release build meant "never".
 
 ## [0.13.0] — 2026-11-12
 
