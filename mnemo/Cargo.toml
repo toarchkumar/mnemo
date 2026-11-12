@@ -24,6 +24,23 @@ repository = "https://github.com/toarchkumar/mnemo"
 homepage = "https://toarchkumar.github.io/mnemo/"
 documentation = "https://docs.rs/mnemo-engine"
 readme = "README.md"
+# RB-003.4: the published crate carries the library, the CLI and the
+# examples that build from it. The tests, the benches and their fixtures
+# (encrypted .mnemo files that don't compress), the Swift and Kotlin
+# package sources, and the examples that need the `dev-hooks` feature stay
+# in the repository: the self dev-dependency that turns it on is stripped
+# from the published manifest.
+exclude = [
+    "tests/",
+    "benches/*",
+    # The measurement examples share the benches' corpus generator.
+    "!benches/corpus.rs",
+    "fuzz/",
+    "bindings/",
+    "examples/gen_*",
+    "examples/device_budget.rs",
+    "examples/fmt9_proto.rs",
+]
 # crates.io shows 5 keywords; pick the ones most likely to match how
 # people search for this. Each keyword must be ≤20 chars and lowercase.
 keywords = ["database", "encryption", "vector", "ai", "memory"]
