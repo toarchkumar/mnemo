@@ -8,7 +8,7 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-## [0.13.0] — 2026-11-11
+## [0.13.0] — 2026-11-12
 
 A readable export (`mnemo export`) and a read-only inspector (`mnemo
 inspect`), the v8 sunset (v8 files open read-only until `mnemo compact`
