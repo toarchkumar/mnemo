@@ -29,6 +29,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   flatpak can't read the forwarding page under `/tmp` (tested with snap
   Firefox). The help text, the README and a note on Linux say to copy the
   printed link instead.
+- **The engine README says what `mnemo inspect` writes to disk:** nothing
+  without `--open`; with it, one owner-only forwarding page under the
+  temp directory, removed once it has been used or after 60 seconds.
 
 ### Fixed
 

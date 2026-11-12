@@ -954,8 +954,15 @@ page, so copy the printed link instead.
   another tab needs a new link (run `mnemo inspect` again). Every data
   request must carry the token and a `Host` of the loopback address and
   port, which stops other sites' pages (DNS rebinding included). Only `GET`
-  is served, with no CORS, and no endpoint writes the file. Nothing is
-  written to disk. The token stops working when the inspector stops.
+  is served, with no CORS, and no endpoint writes the file. **What it
+  writes to disk:** without `--open`, nothing. With `--open`, one small
+  page that forwards the browser to the link, in a new folder under the
+  system temp directory (on macOS and Linux, a folder only you can open,
+  holding a page only you can read). It's removed (with
+  its folder) as soon as the page has exchanged the link's code, or after
+  60 seconds if it never does. If the inspector is stopped before that, the
+  page can be left behind, holding a code that no longer works. The token
+  stops working when the inspector stops.
 - **It stops when it's left alone.** After `--idle-timeout` without a
   request from the page (30 minutes by default; `90s`, `1h`, or `0` for
   never) it wipes the passphrase or key from memory and exits. It holds
