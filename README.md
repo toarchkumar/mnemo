@@ -34,16 +34,16 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0; current 0.12.3):
+iOS and Android (from v0.12.0; current 0.13.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.3")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.13.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.12.3")
+implementation("io.github.toarchkumar:mnemo-android:0.13.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -111,6 +111,41 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.13.0: see what your agents remember
+
+- **`mnemo inspect`: a read-only view of a memory file in your browser.**
+  Browse and search memories, follow the history of a keyed fact, read a
+  thread's essence and turns, and check restore points and stats. It runs
+  only on your own machine, behind a one-time link, and never changes the
+  file or blocks an agent that's writing to it.
+  ```sh
+  mnemo inspect agent.mnemo                  # prints a link; open it in your browser
+  mnemo inspect app.mnemo --key-file app.key # a raw-key file, e.g. a phone export
+  ```
+  Copy the printed link into your browser. `--open` launches the browser
+  for you; use it only on a machine where you're the only user.
+- **`mnemo export`: a readable copy of a file,** as Markdown or JSON Lines.
+  `--git` writes a stable version for a repository: the same file always
+  gives the same output, and a new memory changes only its own lines (a new
+  version of a keyed fact also changes the line of the version it
+  replaces). The output is plaintext, so treat it like the memories
+  themselves.
+- **Old v8 files are now read-only.** Run `mnemo compact <file>` once to
+  upgrade a file to the current format; that also repairs files from
+  early versions that compaction used to refuse.
+- **Every file records which embedding model made its vectors,** and
+  refuses a different one, so a model change can't quietly mix
+  incompatible vectors.
+- **`stats` shows the restore points that are actually kept,** not just
+  the policy.
+- **iOS:** an optional `MnemoAppleEmbedder` library uses Apple's built-in
+  models, so an app can store and search text without bringing its own.
+
+**Upgrading from 0.12.3:** v8 files open read-only until you compact them;
+`mnemo compact --format v8` and the mobile `formatVersion` setting are
+gone; and the error types gain cases (`FormatTooOld`, `EmbedderMismatch`),
+so an exhaustive match needs them. See the [changelog](CHANGELOG.md).
 
 ## What's new in v0.12.3: two fixes
 
@@ -280,8 +315,8 @@ CLI), about 0.5 MB of it for compression.
 - **Upgrade every tool that reads a file before you compact it.** v0.10
   and earlier can't open v9 files. They report `unsupported .mnemo format
   version 9 (this build supports v1)`, which means you need v0.11 or
-  later. `mnemo compact --format v8` keeps a file readable by older
-  versions for one more release.
+  later. (`mnemo compact --format v8`, which kept a file readable by
+  older versions, was removed in v0.13.)
 - **Vectors come back at half precision** from `get` and `recall` (about
   0.1% error). In Rust, create the file with
   `MnemoConfig::store_float_vectors` to keep full precision.
@@ -456,9 +491,9 @@ in Rust. Each re-clusters the index with the new defaults.
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
-- **v8 files don't get the v0.11 improvements** (smaller files,
-  keyword search, compression) until you run `mnemo compact`, and v0.13
-  makes them read-only. See "Upgrading to v0.11.0".
+- **v8 files are read-only from v0.13** and don't get the v0.11
+  improvements (smaller files, keyword search, compression) until you run
+  `mnemo compact`. See "Upgrading to v0.11.0".
 - **The mobile packages are new.** The Swift and Android APIs cover the
   common calls (memories, recall, threads, essence, the exact-key cache),
   not the semantic cache, snapshots or rekey yet. Android has been tested

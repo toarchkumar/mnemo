@@ -110,6 +110,11 @@ fixtures under `mnemo/tests/fixtures/`, which hold synthetic data under
 throwaway test secrets only, never real memories. `.gitignore` lets those
 through, so nobody needs `git add -f`.
 
+**If cloud sync touches the working tree:** files named like `name 2.ext`
+(a sync conflict copy), "Resource deadlock avoided" (EDEADLK), or files
+that aren't on disk mean a sync service is managing the repo folder again.
+Stop, don't stage or delete anything, and log `BLOCKED` for the user.
+
 ## Common task locations
 
 | Task | Where |
