@@ -923,7 +923,7 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
 `mnemo inspect` serves a read-only web view of a file on your machine:
 
 ```sh
-cargo run --bin mnemo -- inspect agent.mnemo   # prints a URL with a token: open it in your browser
+cargo run --bin mnemo -- inspect agent.mnemo   # prints a link that works once: open it in your browser
 cargo run --bin mnemo -- inspect app.mnemo --key-file app.key   # a raw-key file (32 bytes or 64 hex digits)
 cargo run --bin mnemo -- inspect agent.mnemo --open   # opens the browser for you
 ```
@@ -944,14 +944,16 @@ to the URL.
   reads it again (one passphrase derivation). If a writer has the file
   open at that moment, it says so and keeps the last read.
 - **It stays on your machine.** It binds `127.0.0.1` only (a random free
-  port unless `--port`), and the printed URL carries a random token. Every
-  data request must carry that token and a `Host` of the loopback address and
+  port unless `--port`). The printed link carries a random one-time code,
+  which the page exchanges for a random session token on its first load
+  and keeps for that tab only. **The link works once** (since v0.13.2): the
+  code is refused after that, so the copy the browser's history records
+  (or `--open`'s forwarding page) opens nothing. A refresh keeps working;
+  another tab needs a new link (run `mnemo inspect` again). Every data
+  request must carry the token and a `Host` of the loopback address and
   port, which stops other sites' pages (DNS rebinding included). Only `GET`
   is served, with no CORS, and no endpoint writes the file. Nothing is
-  written to disk. Once the page has loaded, it keeps the token for that
-  tab only and takes it out of the address bar. The browser's history
-  still records the first visit; the token stops working when the
-  inspector stops.
+  written to disk. The token stops working when the inspector stops.
 - **It stops when it's left alone.** After `--idle-timeout` without a
   request from the page (30 minutes by default; `90s`, `1h`, or `0` for
   never) it wipes the passphrase or key from memory and exits. It holds

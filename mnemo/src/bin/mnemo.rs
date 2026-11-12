@@ -2026,10 +2026,13 @@ fn run() -> std::result::Result<(), String> {
                 .map_err(|e| format!("binding 127.0.0.1: {e}"))?
                 .port();
             let token = inspect::new_token();
-            let url = format!("http://127.0.0.1:{port}/?t={token}");
+            // The link carries a one-time code; the page exchanges it for
+            // the token on its first load.
+            let code = inspect::new_token();
+            let url = format!("http://127.0.0.1:{port}/?c={code}");
             println!("inspecting {path} (read-only; the file is read once and closed)");
             println!("{url}");
-            println!("press Ctrl-C to stop");
+            println!("the link opens one tab (it works once); press Ctrl-C to stop");
             {
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
@@ -2043,7 +2046,7 @@ fn run() -> std::result::Result<(), String> {
             let state = std::sync::Arc::new(std::sync::Mutex::new(inspect::State::new(
                 path, secret, loaded,
             )));
-            inspect::serve(listener, token, state, watch, idle)
+            inspect::serve(listener, token, code, state, watch, idle)
                 .map_err(|e| format!("serving: {e}"))?;
         }
         Command::Recall {

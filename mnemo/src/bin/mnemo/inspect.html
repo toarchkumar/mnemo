@@ -91,19 +91,30 @@
 <main id="main"></main>
 <script>
 "use strict";
-// The token arrives in the URL once. Keep it for this tab only and take it
-// out of the address bar, so it isn't on the screen or in a copied link. The
-// browser's history still records the first visit; the token stops working
-// when the inspector stops.
-const TOKEN = (() => {
-  const fromUrl = new URLSearchParams(location.search).get("t");
-  if (fromUrl) {
-    try { sessionStorage.setItem("mnemo-inspect-token", fromUrl); } catch (e) {}
-    history.replaceState(null, "", location.pathname);
-    return fromUrl;
+// The printed link carries a one-time code, not the token. The page takes it
+// out of the address bar and exchanges it once for the session token, which
+// it keeps for this tab only. The server refuses the code after that, so the
+// copy in the browser's history (and in `--open`'s forwarding page) is dead.
+const TOKEN_KEY = "mnemo-inspect-token";
+let TOKEN = "";
+function storedToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+}
+async function session() {
+  const code = new URLSearchParams(location.search).get("c");
+  if (!code) return { token: storedToken() };
+  history.replaceState(null, "", location.pathname);
+  // A page the browser renders ahead of time waits until it's shown, so a
+  // prerender that's thrown away doesn't use up the link.
+  if (document.prerendering) {
+    await new Promise(r => document.addEventListener("prerenderingchange", r, { once: true }));
   }
-  try { return sessionStorage.getItem("mnemo-inspect-token") || ""; } catch (e) { return ""; }
-})();
+  const r = await fetch("/api/session?" + new URLSearchParams({ c: code }).toString());
+  if (!r.ok) return { token: storedToken(), used: true };
+  const { token } = await r.json();
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+  return { token };
+}
 const main = document.getElementById("main");
 let view = "memories";
 const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null };
@@ -297,12 +308,13 @@ document.getElementById("reload").addEventListener("click", async () => {
   catch (e) { document.getElementById("loaded").textContent = "reload failed: " + e.message; }
   finally { btn.disabled = false; btn.textContent = "Reload"; }
 });
-if (!TOKEN) {
-  main.replaceChildren(el("p", { class: "error" },
-    "This tab has no access token. Open the URL that `mnemo inspect` printed."));
-} else {
-  header(); render();
-}
+session().then(s => {
+  TOKEN = s.token;
+  if (TOKEN) { header(); render(); return; }
+  main.replaceChildren(el("p", { class: "error" }, s.used
+    ? "This link has already been used. Each link `mnemo inspect` prints opens one tab; run it again for a new one."
+    : "This tab has no access. Open the link that `mnemo inspect` printed."));
+}, fail);
 </script>
 </body>
 </html>

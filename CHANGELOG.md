@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **`mnemo inspect`'s printed link works once.** It carries a one-time
+  code, which the page exchanges for the session token on its first load
+  and keeps for its tab; the server refuses the code after that, so a copy
+  of the link (the browser's history, `--open`'s forwarding page) opens
+  nothing. A refresh keeps working; another tab needs a new link. A page
+  the browser renders ahead of time waits until it's shown before using
+  the code.
+
 ### Fixed
 
 - **A failed `rekey` leaves the old secret in force** (REKEY-1, RB-004.2).

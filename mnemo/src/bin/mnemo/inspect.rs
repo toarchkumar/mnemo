@@ -9,9 +9,11 @@
 //! keyword recall), so it needs no embedder and works on v8 files too.
 //!
 //! **How it serves.** A small HTTP/1.1 server on `std::net::TcpListener`,
-//! bound to `127.0.0.1` only. Every request must carry the random token
-//! from the printed URL and a `Host` header naming the loopback address and
-//! this port (against DNS rebinding and other sites' pages). Only `GET` is
+//! bound to `127.0.0.1` only. The printed URL carries a one-time code,
+//! which the page exchanges once (`/api/session`) for the random session
+//! token; every data request must carry that token, and every request a
+//! `Host` header naming the loopback address and this port (against DNS
+//! rebinding and other sites' pages). Only `GET` is
 //! served, with no CORS headers, and no endpoint changes the file. The page
 //! is one static HTML file compiled in (`inspect.html`).
 
@@ -400,7 +402,7 @@ pub fn bind(port: Option<u16>) -> std::io::Result<TcpListener> {
     TcpListener::bind(("127.0.0.1", port.unwrap_or(0)))
 }
 
-/// A random token for the URL: 32 bytes from the engine's key generator.
+/// A random token (or link code): 32 bytes from the engine's key generator.
 pub fn new_token() -> String {
     Mnemo::generate_key()
         .iter()
@@ -468,12 +470,14 @@ pub fn parse_idle(s: &str) -> Result<Option<Duration>, String> {
 pub fn serve(
     listener: TcpListener,
     token: String,
+    code: String,
     state: Arc<Mutex<State>>,
     watch: Arc<Watch>,
     idle: Option<Duration>,
 ) -> std::io::Result<()> {
     let port = listener.local_addr()?.port();
     let token = Arc::new(Zeroizing::new(token));
+    let code = Arc::new(Mutex::new(Some(Zeroizing::new(code))));
     if let Some(idle) = idle {
         let (state, watch) = (state.clone(), watch.clone());
         std::thread::spawn(move || loop {
@@ -493,9 +497,10 @@ pub fn serve(
     }
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        let (token, state, watch) = (token.clone(), state.clone(), watch.clone());
+        let (token, code, state, watch) =
+            (token.clone(), code.clone(), state.clone(), watch.clone());
         std::thread::spawn(move || {
-            let _ = handle(stream, &token, port, &state, &watch);
+            let _ = handle(stream, &token, &code, port, &state, &watch);
         });
     }
     Ok(())
@@ -605,6 +610,7 @@ fn respond_json(s: &mut TcpStream, status: &str, v: &Value) -> std::io::Result<(
 fn handle(
     mut s: TcpStream,
     token: &str,
+    code: &Mutex<Option<Zeroizing<String>>>,
     port: u16,
     state: &Mutex<State>,
     watch: &Watch,
@@ -666,15 +672,10 @@ fn handle(
             "Allow: GET\r\n",
         );
     }
-    // The page holds no data, so it's served without the token: after it
-    // moves the token out of the address bar, a refresh still loads. Every
+    // The page holds no data, so it's served without a code or the token: a
+    // refresh still loads, and it then reads the token its tab kept. Every
     // API route below needs the token.
     if req.path == "/" {
-        // Only the browser that has the token counts as having loaded it.
-        if req.query.get("t").is_some_and(|t| same(t, token)) {
-            watch.page_served.store(true, Ordering::Relaxed);
-            watch.touch();
-        }
         return respond(
             &mut s,
             "200 OK",
@@ -684,6 +685,32 @@ fn handle(
              style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; \
              form-action 'none'; frame-ancestors 'none'\r\n",
         );
+    }
+    // The printed link's one-time code, exchanged once for the token. After
+    // that the code opens nothing, so a copy of the link (the browser's
+    // history, the `--open` page) is dead.
+    if req.path == "/api/session" {
+        let mut slot = code.lock().unwrap_or_else(|p| p.into_inner());
+        let ok = req
+            .query
+            .get("c")
+            .is_some_and(|c| slot.as_deref().is_some_and(|k| same(c, k)));
+        if !ok {
+            return respond(
+                &mut s,
+                "403 Forbidden",
+                "text/plain",
+                b"this link has been used, or is wrong",
+                "",
+            );
+        }
+        *slot = None;
+        drop(slot);
+        // The browser that exchanged the code is the one that loaded the
+        // page (`--open` removes its forwarding page once this is set).
+        watch.page_served.store(true, Ordering::Relaxed);
+        watch.touch();
+        return respond_json(&mut s, "200 OK", &json!({ "token": token }));
     }
     if !req.query.get("t").is_some_and(|t| same(t, token)) {
         return respond(
@@ -966,11 +993,11 @@ mod tests {
 
     #[test]
     fn the_redirect_page_is_private_and_points_at_the_url() {
-        let url = "http://127.0.0.1:9/?t=abc123";
+        let url = "http://127.0.0.1:9/?c=abc123";
         let (dir, page) = write_redirect(url).unwrap();
         let body = std::fs::read_to_string(&page).unwrap();
         assert!(
-            body.contains("content=\"0;url=http://127.0.0.1:9/?t=abc123\""),
+            body.contains("content=\"0;url=http://127.0.0.1:9/?c=abc123\""),
             "{body}"
         );
         #[cfg(unix)]

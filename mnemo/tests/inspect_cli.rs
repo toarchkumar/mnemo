@@ -22,10 +22,12 @@ use serde_json::Value;
 
 const PW: &str = "inspect-pw";
 
-/// A running `mnemo inspect`, killed on drop.
+/// A running `mnemo inspect`, killed on drop. `token` is what the printed
+/// link's one-time `code` was exchanged for (empty until then).
 struct Inspector {
     child: Child,
     port: u16,
+    code: String,
     token: String,
 }
 
@@ -41,6 +43,21 @@ fn spawn(path: &Path, pp: &str, env: &[(&str, &Path)]) -> Inspector {
 }
 
 fn spawn_with(path: &Path, pp: &str, env: &[(&str, &Path)], extra: &[&str]) -> Inspector {
+    let mut ins = spawn_unexchanged(path, pp, env, extra);
+    let (status, body) = request(
+        ins.port,
+        "GET",
+        &format!("/api/session?c={}", ins.code),
+        &ins.host(),
+    );
+    assert_eq!(status, 200, "exchanging the link's code: {body}");
+    let v: Value = serde_json::from_str(&body).unwrap();
+    ins.token = v["token"].as_str().unwrap().to_string();
+    ins
+}
+
+/// A running inspector whose printed link hasn't been used yet.
+fn spawn_unexchanged(path: &Path, pp: &str, env: &[(&str, &Path)], extra: &[&str]) -> Inspector {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mnemo"));
     cmd.args(["inspect", path.to_str().unwrap()])
         .args(extra)
@@ -74,11 +91,14 @@ fn spawn_with(path: &Path, pp: &str, env: &[(&str, &Path)], extra: &[&str]) -> I
     let rest = url
         .strip_prefix("http://127.0.0.1:")
         .expect("a loopback URL");
-    let (port, token) = rest.split_once("/?t=").unwrap();
+    let (port, code) = rest
+        .split_once("/?c=")
+        .expect("a link with a one-time code");
     Inspector {
         child,
         port: port.parse().unwrap(),
-        token: token.to_string(),
+        code: code.to_string(),
+        token: String::new(),
     }
 }
 
@@ -209,6 +229,49 @@ fn fixture(dir: &Path) -> PathBuf {
     path
 }
 
+/// The printed link carries a one-time code, not the token. The page
+/// exchanges it once for the token; after that the code opens nothing, so a
+/// copy in the browser's history or `--open`'s forwarding page is dead.
+#[test]
+fn the_printed_link_works_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture(dir.path());
+    let mut ins = spawn_unexchanged(&path, PW, &[], &[]);
+    let host = ins.host();
+    let session = |q: &str| request(ins.port, "GET", &format!("/api/session{q}"), &host);
+    assert_eq!(ins.code.len(), 64);
+
+    // The code is not the token: it opens no data route.
+    let as_token = format!("/api/about?t={}", ins.code);
+    assert_eq!(request(ins.port, "GET", &as_token, &host).0, 403);
+    // A missing or wrong code is refused and doesn't use up the right one.
+    assert_eq!(session("").0, 403);
+    assert_eq!(session("?c=nope").0, 403);
+    let last = if ins.code.ends_with('0') { '1' } else { '0' };
+    assert_eq!(session(&format!("?c={}{last}", &ins.code[..63])).0, 403);
+    // Another site's Host can't exchange it either.
+    let code_q = format!("/api/session?c={}", ins.code);
+    assert_eq!(request(ins.port, "GET", &code_q, "evil.example:80").0, 403);
+
+    // The first use gives the token; the second is refused.
+    let (status, body) = session(&format!("?c={}", ins.code));
+    assert_eq!(status, 200, "{body}");
+    let token = serde_json::from_str::<Value>(&body).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(token.len(), 64);
+    assert_ne!(token, ins.code);
+    let (status, body) = session(&format!("?c={}", ins.code));
+    assert_eq!(status, 403, "a second use of the code: {body}");
+    assert!(body.contains("used"), "{body}");
+
+    // The token works, and the page (which holds no data) still loads.
+    ins.token = token;
+    assert!(ins.json("/api/about", "")["path"].is_string());
+    assert_eq!(request(ins.port, "GET", "/", &host).0, 200);
+}
+
 #[test]
 fn it_binds_loopback_and_refuses_wrong_tokens_hosts_and_methods() {
     let dir = tempfile::tempdir().unwrap();
@@ -220,7 +283,11 @@ fn it_binds_loopback_and_refuses_wrong_tokens_hosts_and_methods() {
     assert_eq!(ins.get("/", "").0, 200);
     let (status, page) = request(ins.port, "GET", "/", &host);
     assert_eq!(status, 200);
-    assert!(page.contains("history.replaceState") && !page.contains("Tuesdays"));
+    assert!(
+        page.contains("history.replaceState")
+            && page.contains("/api/session")
+            && !page.contains("Tuesdays")
+    );
     assert_eq!(
         request(ins.port, "GET", "/api/about", &host).0,
         403,
