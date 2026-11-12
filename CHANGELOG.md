@@ -17,6 +17,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   nothing. A refresh keeps working; another tab needs a new link. A page
   the browser renders ahead of time waits until it's shown before using
   the code.
+- **The release's mobile mode is in the release commit** (RB-004.4): a tag
+  reads `.github/release-mobile` (`true` or `false`) from the tagged
+  commit, which `version check` validates, so the mode is reviewed with the
+  release and a re-run can't change it. The `ENABLE_MOBILE_PUBLISH`
+  variable is now only an off switch. Maintainers: see RELEASING.md.
 
 ### Fixed
 

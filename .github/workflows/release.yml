@@ -23,7 +23,7 @@ on:
         type: boolean
         default: true
       mobile:
-        description: "Include the mobile packages (a tag uses the ENABLE_MOBILE_PUBLISH variable)"
+        description: "Include the mobile packages (a tag uses the commit's .github/release-mobile)"
         type: boolean
         default: true
 
@@ -561,20 +561,36 @@ jobs:
           echo "version=$engine" >> "$GITHUB_OUTPUT"
 
           # REL-1: the mobile packages publish on a rule (RELEASING.md), so
-          # a release may leave them out. A tag follows the
-          # ENABLE_MOBILE_PUBLISH variable; a dry run, its `mobile` input.
-          # The version check above runs either way.
+          # a release may leave them out. RB-004.4: a tag reads the mode from
+          # the tagged commit (`.github/release-mobile`, `true` or `false`,
+          # set by the release commit), so it's reviewed with the release and
+          # a re-run can't change it. ENABLE_MOBILE_PUBLISH is only an off
+          # switch: `false` turns mobile off for every tag. A dry run follows
+          # its `mobile` input. The version check above runs either way.
+          committed=""
+          if [ -f .github/release-mobile ]; then committed=$(tr -d '[:space:]' < .github/release-mobile); fi
+          case "$committed" in
+            true|false) ;;
+            *) echo "::error::.github/release-mobile must say true or false (it says \"$committed\")"; exit 1 ;;
+          esac
+          echo "the commit says mobile: $committed"
           if [ "${{ github.event_name }}" = push ]; then
-            mobile="${{ vars.ENABLE_MOBILE_PUBLISH == 'true' }}"
+            mobile="$committed"
+            why="the tagged commit's .github/release-mobile"
+            if [ "$mobile" = true ] && [ "${{ vars.ENABLE_MOBILE_PUBLISH }}" = false ]; then
+              mobile=false
+              why="ENABLE_MOBILE_PUBLISH=false (the off switch; the commit says true)"
+            fi
           else
             mobile="${{ inputs.mobile }}"
+            why="the dry run's \`mobile\` input"
           fi
           if [ "$mobile" = true ]; then
-            echo "mobile: on"
+            echo "mobile: on ($why)"
           else
             mobile=false
-            echo "mobile: off: the Swift and Android build, publish and verify jobs are skipped"
-            echo "Mobile packages skipped in this run (ENABLE_MOBILE_PUBLISH or the dry run's \`mobile\` input)." >> "$GITHUB_STEP_SUMMARY"
+            echo "mobile: off ($why): the Swift and Android build, publish and verify jobs are skipped"
+            echo "Mobile packages skipped in this run ($why)." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
 

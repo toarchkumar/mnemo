@@ -46,24 +46,24 @@ Otherwise a release publishes only crates.io, PyPI and the CLI binaries.
 Every manifest stays on one version number, so the mobile version numbers
 skip; each package carries the engine version it was built from.
 
-**The switch is the `ENABLE_MOBILE_PUBLISH` repository variable**
-(Settings > Secrets and variables > Actions > Variables, or
-`gh variable set ENABLE_MOBILE_PUBLISH --body true`). Before tagging, set it
-to `true` if the rule above says this release publishes mobile, and to
-`false` if it doesn't. With it not `true`, a tag skips the Swift and
-Android build, publish and verify jobs, and the GitHub Release says
-"Mobile packages not published in this release", with the newest published
-versions. The version check still runs, and still requires one version in
-every manifest. A dry run picks with its own `mobile` input instead
-(Actions > Release > Run workflow), so you can rehearse either kind of
-release.
+**The release commit sets the mode** (RB-004.4, from v0.13.2): the file
+`.github/release-mobile` says `true` if the rule above says this release
+publishes mobile, and `false` if it doesn't. The tag run reads it from the
+tagged commit, so the mode is reviewed with the release, and no re-run can
+change it. `version check` refuses anything but `true` or `false`, and
+prints the mode and where it came from. With mobile off, a tag skips the
+Swift and Android build, publish and verify jobs, and the GitHub Release
+says "Mobile packages not published in this release", with the newest
+published versions. The version check still runs, and still requires one
+version in every manifest. A dry run picks with its own `mobile` input
+instead (Actions > Release > Run workflow), so you can rehearse either kind
+of release.
 
-**The tag run reads the variable when `version check` starts, and keeps it
-for "Re-run failed jobs"; "Re-run all jobs" reads it again.** So:
-- flip it back (for example to `true` after a release without mobile) only
-  once the tag run has finished;
-- after that, never use "Re-run all jobs" on that tag run. Use "Re-run
-  failed jobs", which keeps the mode the run started with.
+**`ENABLE_MOBILE_PUBLISH` is only an off switch** (Settings > Secrets and
+variables > Actions > Variables). Set to `false`, it turns mobile off for
+every tag, whatever the commit says (for example while a mobile credential
+is broken). Otherwise leave it `true` or unset: there's nothing to flip
+before or after a tag.
 
 Every job has a 45-minute limit, and every step a limit of 10 to 20
 minutes, so a hang fails the step instead of running for hours.
@@ -90,8 +90,9 @@ pinned to a commit (Dependabot keeps them current).
 
 ## Before the tag
 
-1. **Versions.** Bump every one of these to `X.Y.Z`. The workflow refuses a
-   tag that disagrees with them.
+1. **Versions and the mobile mode.** Bump every one of these to `X.Y.Z`.
+   The workflow refuses a tag that disagrees with them. Set
+   `.github/release-mobile` to `true` or `false` by the rule above.
    - the engine and Python manifests and their lockfiles;
    - Node's `Cargo.toml`;
    - `mnemo-uniffi`;
@@ -106,8 +107,9 @@ pinned to a commit (Dependabot keeps them current).
    the libraries from this repository, so they still take the new version).
 4. **CI is green** on the release commit.
 5. **The dry run.** It publishes nothing and never waits for an approval,
-   so run it on the release branch, with mobile set as the tag will have
-   it:
+   so run it on the release branch, with `mobile` set as
+   `.github/release-mobile` says (the dry run's summary also prints what
+   the commit says):
 
    ```bash
    gh workflow run release.yml --ref <release branch> -f dry_run=true -f mobile=true
