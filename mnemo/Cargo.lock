@@ -821,7 +821,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mnemo-engine"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "mnemo-node"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mnemo-engine",
  "napi",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "mnemo-uniffi"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mnemo-engine",
  "serde_json",

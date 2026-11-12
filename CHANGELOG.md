@@ -8,6 +8,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-11-12
+
+A patch release: a refused or wrong-secret open no longer writes to the
+file, `--key-file` on the CLI's read and convert commands, Python exception
+types, a leaner and safer `mnemo inspect`, and one approval per release.
+The Swift and Android packages don't publish with this release (RELEASING.md's
+rule); they stay at 0.13.0.
+
 ### Added
 
 - **`--key-file` on the CLI's read and convert commands** (RB-003.6):
@@ -33,7 +41,6 @@ Pre-1.0, the minor component carries the breaking-change signal.
   publishes nothing anywhere. The dry run now builds the CLI binaries, the
   wheels and the sdist too, and rehearses the asset attach and both engine
   publishes; it never waits for an approval. Maintainers: see RELEASING.md.
-
 - **`mnemo inspect`:**
   - `--idle-timeout` (default `30m`; `90s`, `1h`, or `0` for never): the
     server stops after that long without a request from the page, wiping
@@ -3493,7 +3500,9 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.12.3...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/toarchkumar/mnemo/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/toarchkumar/mnemo/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/toarchkumar/mnemo/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/toarchkumar/mnemo/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/toarchkumar/mnemo/compare/v0.12.0...v0.12.1

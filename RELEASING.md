@@ -91,7 +91,10 @@ pinned to a commit (Dependabot keeps them current).
      and the `mnemo-android` version in the Android sample).
 2. **The changelog.** Cut `[Unreleased]` into `[X.Y.Z] - <date>`.
 3. **Install lines.** The Swift and Kotlin package READMEs
-   (`mnemo/bindings/*/README.md`) name the new version.
+   (`mnemo/bindings/*/README.md`) name the new version. On a release that
+   leaves mobile out, they keep the newest published version, since the
+   new one won't exist on `mnemo-swift` or Maven Central (the samples build
+   the libraries from this repository, so they still take the new version).
 4. **CI is green** on the release commit.
 5. **The dry run.** It publishes nothing and never waits for an approval,
    so run it on the release branch, with mobile set as the tag will have
