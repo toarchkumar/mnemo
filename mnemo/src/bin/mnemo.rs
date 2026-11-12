@@ -336,7 +336,9 @@ enum Command {
         /// Port on 127.0.0.1 (default: a random free one).
         #[arg(long)]
         port: Option<u16>,
-        /// Open the page in the default browser.
+        /// Open the page in the default browser. For a machine only you
+        /// use: the URL, token included, goes to the system's browser
+        /// launcher. On a shared machine, copy the printed URL instead.
         #[arg(long)]
         open: bool,
         /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a

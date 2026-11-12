@@ -899,9 +899,15 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
 `mnemo inspect` serves a read-only web view of a file on your machine:
 
 ```sh
-cargo run --bin mnemo -- inspect agent.mnemo --open      # passphrase: prompt or MNEMO_PASSPHRASE
+cargo run --bin mnemo -- inspect agent.mnemo   # prints a URL with a token: open it in your browser
 cargo run --bin mnemo -- inspect app.mnemo --key-file app.key   # a raw-key file (32 bytes or 64 hex digits)
+cargo run --bin mnemo -- inspect agent.mnemo --open   # opens the browser for you: single-user machines only
 ```
+
+The passphrase comes from the prompt or `MNEMO_PASSPHRASE`. **Copy the
+printed URL** into your browser. `--open` does that for you, but it hands
+the URL, token included, to the system's browser launcher, so use it only
+on a machine nobody else logs into.
 
 - **Views:** memories (filter by type, agent, keyed or not, and thread;
   keyword search with BM25, no embedder needed), keyed history (each

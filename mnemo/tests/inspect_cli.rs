@@ -248,6 +248,27 @@ fn it_binds_loopback_and_refuses_wrong_tokens_hosts_and_methods() {
         request(ins.port, "GET", &good, &format!("localhost:{}", ins.port)).0,
         200
     );
+    // Exactly one Host header: a second one, in either order, is refused.
+    let raw = |head: &str| -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", ins.port)).unwrap();
+        write!(s, "{head}\r\nConnection: close\r\n\r\n").unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        out
+    };
+    for head in [
+        format!("GET {good} HTTP/1.1\r\nHost: evil.example\r\nHost: {host}"),
+        format!("GET {good} HTTP/1.1\r\nHost: {host}\r\nHost: evil.example"),
+        format!("GET {good} HTTP/1.1\r\nHost: {host}\r\nhost: {host}"),
+    ] {
+        let out = raw(&head);
+        assert!(out.starts_with("HTTP/1.1 400"), "{head:?}: {out}");
+    }
+    assert!(raw(&format!("GET {good} HTTP/1.1\r\nHost: {host}")).starts_with("HTTP/1.1 200"));
+    assert!(
+        raw(&format!("GET {good} HTTP/1.1")).starts_with("HTTP/1.1 400"),
+        "no Host"
+    );
     // Only GET.
     for m in ["POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"] {
         assert_eq!(request(ins.port, m, &good, &host).0, 405, "{m}");

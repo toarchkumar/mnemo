@@ -409,6 +409,8 @@ struct Request {
     path: String,
     query: BTreeMap<String, String>,
     host: Option<String>,
+    /// How many `Host` headers the request carried (only one is served).
+    hosts: usize,
 }
 
 fn percent_decode(s: &str) -> String {
@@ -448,9 +450,11 @@ fn parse(head: &str) -> Option<Request> {
         query.insert(percent_decode(k), percent_decode(v));
     }
     let mut host = None;
+    let mut hosts = 0;
     for line in lines {
         if let Some((k, v)) = line.split_once(':') {
             if k.trim().eq_ignore_ascii_case("host") {
+                hosts += 1;
                 host = Some(v.trim().to_ascii_lowercase());
             }
         }
@@ -460,6 +464,7 @@ fn parse(head: &str) -> Option<Request> {
         path: path.to_string(),
         query,
         host,
+        hosts,
     })
 }
 
@@ -531,6 +536,17 @@ fn handle(mut s: TcpStream, token: &str, port: u16, state: &Mutex<State>) -> std
     };
     // DNS rebinding: a page on another site that resolves its name to
     // 127.0.0.1 still sends its own name as the Host.
+    // Exactly one Host: with several, which one counts would be up to
+    // whoever reads them.
+    if req.hosts != 1 {
+        return respond(
+            &mut s,
+            "400 Bad Request",
+            "text/plain",
+            b"exactly one Host header",
+            "",
+        );
+    }
     let ok_host = req
         .host
         .as_deref()
