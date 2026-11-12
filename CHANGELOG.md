@@ -8,50 +8,71 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
-- **Upgrading: the v8 sunset.** v9 (the default since v0.11) is now the
-  only format this build writes.
-  - **A v8 file opens read-only.** `Mnemo::open` / `open_with_key` (and so
-    the CLI's write commands, `mnemo serve`, Python's `mnemo.open` and the
-    mobile stores) fail on it with the new `MnemoError::FormatTooOld {
-    version }`, whose message says to run `mnemo compact`.
-    `open_read_only` and the CLI's read commands work as before (`recall`
-    and `cache get` fall back to read-only on a v8 file).
-  - **Run `mnemo compact <file>` once** to convert it to v9. It keeps every
-    live memory, the result cache, threads and essence, and collapses the
-    snapshot history (as every compaction does). It also converts v4–v7
-    files, which no longer open in any mode.
-  - **No new v8 file:** `MnemoConfig { format_version: 8, .. }` is refused,
-    `Mnemo::compact_file_to` and `mnemo compact --format v8` are removed,
-    and the Swift `MnemoStoreConfiguration.formatVersion` and Kotlin
-    `formatVersion` (deprecated in 0.12.2) are gone. A Kotlin call that
-    passed `vectorCacheBudgetBytes` positionally after `directory` needs a
-    named argument.
-  - The FFI gets `FormatTooOld { version, message }`, which isn't
-    retryable ("fix the call").
-  - The engine's own v8 coverage is now read tests on committed v8
-    fixtures that the published v0.12.3 engine wrote.
-  - A file is now bound to the first embedder attached to it, with or
-    without a manifest. Attaching another identity (another name, width or
-    `normalize` flag) fails with the new `MnemoError::EmbedderMismatch {
-    stored, given }`. Before, only files with a manifest (`mnemo init`)
-    checked this; a file from `Mnemo::create`, Python or the mobile
-    bindings accepted any embedder of the right width.
-  - **Existing files** record whatever embedder is attached first after the
-    upgrade. The check protects from then on; it can't tell which model
-    made the vectors already in the file.
-  - `MnemoError` isn't `#[non_exhaustive]`, so a Rust `match` over it
-    without a catch-all arm needs a new `EmbedderMismatch` arm. A manifest
-    mismatch used to be `MnemoError::Invalid`; it's `EmbedderMismatch` now,
-    and its message still starts with "embedder identity mismatch" (the
-    string Python's `RuntimeError` carries).
-  - Swift and Kotlin: a new `MnemoError.EmbedderMismatch(stored:given:)` /
-    `MnemoException.EmbedderMismatch` case, not retryable ("fix the call").
-    A Swift `switch` over `MnemoError` without a `default` needs the new
-    case.
-  - Cache namespaces starting with `_mnemo.` are now reserved: the cache API
-    refuses them (`Invalid`).
-  - No file-format change: the identity lives in a reserved result-cache
-    entry, which v8 and v9 files both have.
+## [0.13.0] — 2026-11-11
+
+A readable export (`mnemo export`) and a read-only inspector (`mnemo
+inspect`), the v8 sunset (v8 files open read-only until `mnemo compact`
+converts them), an embedder-identity check on every file, restore points in
+`stats`, and Apple's on-device embedders for the Swift package
+(`MnemoAppleEmbedder`). The Swift and Android packages publish with this
+release.
+
+- **Upgrading from 0.12.3:**
+  - **The v8 sunset.** v9 (the default since v0.11) is now the
+    only format this build writes.
+    - **A v8 file opens read-only.** `Mnemo::open` / `open_with_key` (and so
+      the CLI's write commands, `mnemo serve`, Python's `mnemo.open` and the
+      mobile stores) fail on it with the new `MnemoError::FormatTooOld {
+      version }`, whose message says to run `mnemo compact`.
+      `open_read_only` and the CLI's read commands work as before (`recall`
+      and `cache get` fall back to read-only on a v8 file).
+    - **Run `mnemo compact <file>` once** to convert it to v9. It keeps every
+      live memory, the result cache, threads and essence, and collapses the
+      snapshot history (as every compaction does). It also converts v4–v7
+      files, which no longer open in any mode.
+    - **No new v8 file:** `MnemoConfig { format_version: 8, .. }` is refused,
+      `Mnemo::compact_file_to` and `mnemo compact --format v8` are removed,
+      and the Swift `MnemoStoreConfiguration.formatVersion` and Kotlin
+      `formatVersion` (deprecated in 0.12.2) are gone. A Kotlin call that
+      passed `vectorCacheBudgetBytes` positionally after `directory` needs a
+      named argument.
+    - The FFI gets `FormatTooOld { version, message }`, which isn't
+      retryable ("fix the call"). Like `EmbedderMismatch` below, it's a new
+      `MnemoError` case, so a Rust `match` or a Swift `switch` without a
+      catch-all needs an arm for it.
+    - The engine's own v8 coverage is now read tests on committed v8
+      fixtures that the published v0.12.3 engine wrote.
+  - **The embedder identity (EMBED-ID-1).**
+    - A file is now bound to the first embedder attached to it, with or
+      without a manifest. Attaching another identity (another name, width or
+      `normalize` flag) fails with the new `MnemoError::EmbedderMismatch {
+      stored, given }`. Before, only files with a manifest (`mnemo init`)
+      checked this; a file from `Mnemo::create`, Python or the mobile
+      bindings accepted any embedder of the right width.
+    - **Existing files** record whatever embedder is attached first after the
+      upgrade. The check protects from then on; it can't tell which model
+      made the vectors already in the file.
+    - `MnemoError` isn't `#[non_exhaustive]`, so a Rust `match` over it
+      without a catch-all arm needs a new `EmbedderMismatch` arm. A manifest
+      mismatch used to be `MnemoError::Invalid`; it's `EmbedderMismatch` now,
+      and its message still starts with "embedder identity mismatch" (the
+      string Python's `RuntimeError` carries).
+    - Swift and Kotlin: a new `MnemoError.EmbedderMismatch(stored:given:)` /
+      `MnemoException.EmbedderMismatch` case, not retryable ("fix the call").
+      A Swift `switch` over `MnemoError` without a `default` needs the new
+      case.
+    - Cache namespaces starting with `_mnemo.` are now reserved: the cache API
+      refuses them (`Invalid`).
+    - No file-format change: the identity lives in a reserved result-cache
+      entry, which v8 and v9 files both have.
+  - **New fields:** `Stats` and `StatsSummary` gain the restore-point
+    fields, and `CompactReport` gains `zero_vector_manifests` and
+    `zero_vector_memories`. None of them is `#[non_exhaustive]`, so a
+    struct literal of one needs the new fields. The FFI's `DbStats` and
+    `CompactReport` records gain them too.
+  - **Release builds carry no test hooks** (HOOKS-1): the hidden `__*`
+    methods and the `MNEMO_DEV_*` switches exist only with the `dev-hooks`
+    feature.
 
 ### Added
 
@@ -108,6 +129,25 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **`mnemo_engine::KeywordIndex`:** an in-memory keyword index over texts
   you already hold, with the tokenizer and BM25 scoring (k1 1.2, b 0.75) of
   v9's keyword recall.
+
+- **`MnemoAppleEmbedder`: Apple's on-device embedders for the Swift
+  package** (SAMPLE-1, RB-001.11). A new library product, separate from
+  `Mnemo`, that links NaturalLanguage only when an app adds it.
+  - `AppleSentenceEmbedder` (iOS 15, macOS 12), over
+    `NLEmbedding.sentenceEmbedding`, with the identity
+    `apple-nl-sentence-<lang>-r<revision>`.
+  - `AppleContextualEmbedder` (iOS 17, macOS 14), mean-pooled and
+    normalized, with `hasAvailableAssets`, `requestAssets()`, `load()` and
+    `unload()` for the model download, and the identity
+    `apple-nl-contextual-<lang>-r<revision>`.
+  - `AppleEmbedders.bestAvailable()` picks the contextual model when its
+    assets are on the device. A store is bound to the model that first
+    wrote to it (EMBED-ID-1), so a new model or revision means a new
+    store.
+  - The iOS sample uses it, and gains an Export button (a passphrase
+    export for the share sheet, which `mnemo inspect` opens on a Mac).
+    Anyone can contribute a device run (`test/scripts/device_runs/`,
+    checked in CI).
 
 ### Fixed
 

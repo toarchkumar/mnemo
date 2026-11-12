@@ -20,7 +20,7 @@ product. Or, in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.12.3"),
+    .package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.13.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "Mnemo", package: "mnemo-swift")]),
