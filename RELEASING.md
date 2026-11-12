@@ -17,9 +17,11 @@ below):
 1. **`version check`:** every manifest agrees, with the tag on a tag run.
 2. **Every build, in parallel:** the CLI binaries, the wheels, the sdist,
    and (with mobile on) the Swift and Android packages.
-3. **`approve the release`: the one human approval** (the `release`
-   environment). It appears only once every build is green, so a failed
-   build publishes nothing anywhere. Approve it there; nothing else asks.
+3. **`approve the release (vX.Y.Z, mobile true|false)`: the one human
+   approval** (the `release` environment). It appears only once every
+   build is green, so a failed build publishes nothing anywhere. Its name
+   shows the version and the mobile mode the run read: check both before
+   approving. Approve it there; nothing else asks.
 4. **The GitHub Release and the engine publishes:** the Release and its
    assets, crates.io and PyPI.
 5. **`engine published (gate)`:** the mobile packages publish only after
@@ -55,6 +57,13 @@ versions. The version check still runs, and still requires one version in
 every manifest. A dry run picks with its own `mobile` input instead
 (Actions > Release > Run workflow), so you can rehearse either kind of
 release.
+
+**The tag run reads the variable when `version check` starts, and keeps it
+for "Re-run failed jobs"; "Re-run all jobs" reads it again.** So:
+- flip it back (for example to `true` after a release without mobile) only
+  once the tag run has finished;
+- after that, never use "Re-run all jobs" on that tag run. Use "Re-run
+  failed jobs", which keeps the mode the run started with.
 
 Every job has a 45-minute limit, and every step a limit of 10 to 20
 minutes, so a hang fails the step instead of running for hours.

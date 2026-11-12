@@ -62,7 +62,8 @@ jobs:
   #     `v*` tags; the four registry environments keep their secrets and
   #     their rules but no reviewer, so dry runs never pause.
   approve-release:
-    name: approve the release
+    # RB-004.4: the pending approval shows what it releases.
+    name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
     needs: [mobile-prepare, build-cli, build-wheels, build-sdist, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
@@ -582,7 +583,9 @@ jobs:
   #     run with mobile off writes the same note to the run summary only.
   mobile-skipped-note:
     name: mobile (skipped, release note)
-    needs: [mobile-prepare, create-release]
+    # RB-004.3: after `attach`, which rewrites the Release body it read, so
+    # the two never update the body at the same moment.
+    needs: [mobile-prepare, create-release, attach]
     if: >-
       ${{ !cancelled() && needs.mobile-prepare.result == 'success'
       && needs.mobile-prepare.outputs.mobile != 'true'
