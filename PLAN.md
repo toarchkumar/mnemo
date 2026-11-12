@@ -18691,3 +18691,938 @@ file):**
 - Its inspector example labels `--key-file app.key` "e.g. a phone export".
   A phone's passphrase export opens with its passphrase; `--key-file` is
   for a raw-key file (what `create_with_key` writes).
+
+### 2026-11-12 — WORKER — DONE — v0.13.0 shipped: all four registries at 0.13.0
+
+**The order, as dispatched:**
+- step 7 (PR 46, 9c73f8c), then a fresh dry run (43157930959, green);
+- the HANDOFF (d070702) and the CHANGELOG date, 2026-11-12, the UTC tag
+  day (870ac69);
+- the `chore(plan)` backup (b125c83);
+- CI 43160104763 and Mobile CI 43160104689 green on b125c83;
+- `main` fast-forwarded 59665e3 → b125c83;
+- the annotated tag `v0.13.0` on b125c83.
+- `ENABLE_CRATES_PUBLISH`, `ENABLE_PYPI_PUBLISH` and `ENABLE_MOBILE_PUBLISH`
+  were already `true`, and the tag was free.
+
+**The tag run: 43161860977, success (21 jobs).**
+- **Before the engine approvals,** every build was green: Create GitHub
+  Release; CLI ×5 (aarch64 and x86_64 macOS, aarch64 and x86_64 Linux,
+  x86_64 Windows); wheels ×5 (the same targets); the sdist; and attach
+  engine assets.
+- **The approvals, in order:** `crates-io` and `pypi` (approved only once
+  every CLI, wheel and sdist job was green, per RB-003.5's protection by
+  hand), then `maven-central`, then `mnemo-swift`.
+
+**The registries and credentials:**
+
+| Registry | Result | Credential |
+|---|---|---|
+| crates.io | `mnemo-engine = "0.13.0"`, crate 349,137 bytes (0.12.3 was 609,341) | Trusted Publishing (OIDC): `CRATES_TRUSTED_PUBLISHING=true`, so `CRATES_IO_TOKEN` wasn't used |
+| PyPI | `mnemo-engine (0.13.0)`: 5 wheels and the sdist (6 files), with attestations | Trusted Publishing, no token |
+| SPM | `toarchkumar/mnemo-swift` tag `0.13.0`: the binary target is `MnemoFFI-0.13.0.xcframework.zip` (checksum `b49a6908…9788`), and `MnemoAppleEmbedder` is a product. `mobile (Swift verify published)`: "resolved and built mnemo-swift 0.13.0 from GitHub" | the deploy key (`MNEMO_SWIFT_DEPLOY_KEY`: "pushing with the deploy key"), so `MNEMO_SWIFT_TOKEN` wasn't used |
+| Maven Central | `io.github.toarchkumar:mnemo-android:0.13.0`, deployment 4ece6786-3a16-43f7-a1a7-c689bb7593fa (AUTOMATIC). It was on repo1 at 05:58 UTC, 7 minutes after the job: the `.aar`, `.aar.asc`, `-sources.jar`, `.module` and `.pom` all return 200 | the Portal user token (renew by 2027-11-09) and GPG key `CFAF…3DA89A04` (extend before 2028-11-08) |
+
+**The GitHub Release** (`action-gh-release` v3's first tag run):
+- **Assets:** 13, the same count as v0.12.3. They are the 5 CLI binaries,
+  5 wheels, the sdist (423,462 bytes), `mnemo-android-0.13.0.aar` and
+  `MnemoFFI-0.13.0.xcframework.zip`.
+- **Body:** GitHub's generated notes, in the same shape as v0.12.3's
+  (What's Changed: PRs 25 and 29–46; New Contributors; Full Changelog
+  v0.12.3...v0.13.0).
+- Not a draft and not a prerelease. The mobile-off note didn't run,
+  correctly: mobile published.
+
+**After the tag:**
+- **The merged branch** `release-0.13.0` is deleted on GitHub and
+  locally; `main` is at b125c83, which `v0.13.0` describes.
+- **RB-003.2 is moved here** (below) and removed from `SECURITY.local.md`,
+  with a scratch copy kept from before the edit. RB-003.1 stays there
+  until SEC-3 ships. The file's header still mentions both placeholders.
+  `reviewer_notes.md` (the Reviewer's, triaged by the Planner) still has
+  RB-003.2's withheld-title placeholder, for whoever owns that update.
+- `PLAN.md` has changed since the b125c83 backup (this entry and step 7's
+  DONE are in it); the next backup carries them.
+- **Not done:** `test/project.mnemo` writes. They wait for the user's
+  `test/.venv` rebuild (the move NOTE).
+
+**Over to PLANNER-A:** VERIFIED for v0.13.0. Two notes on the root README
+are in step 7's DONE above. Then v0.13.1 as queued (SEC-3, RB-003.3
+recommendation 2, RB-003.6, RB-003.7, RB-003.8 item 3, REL-2).
+
+#### RB-003.2 (fixed in v0.13.0, 6767b7a), moved from `SECURITY.local.md`
+
+**RB-003.2 — [SECURITY] [LOW] `mnemo export -o` writes the plaintext into an existing file without tightening its permissions**
+
+- **Status:** `ACCEPTED`
+- **Evidence:**
+  - `mnemo/src/bin/mnemo/export.rs:99-114` (`write_private`): `mode(0o600)` applies only when the file is created; the doc comment says "An existing file keeps its permissions". The CLI help says "Write to this file (owner-only on Unix)" (`mnemo.rs`, the `Export` command's `output`).
+  - **Tested** with the release CLI: exporting onto an existing `0644` file leaves it `0644`; a new file is `0600`.
+  - The write truncates and then writes in place, so a crash mid-write leaves a partial export under the final name.
+- **Finding:** The second `mnemo export --git -o brain.md` in a repository, the case `--git` exists for, writes into whatever mode the file already has. If the first export was made by another tool, by shell redirection (`> brain.md`, mode `0644` under the usual umask) or checked out by git (which creates `0644`), every later export puts the file's plaintext into a world-readable file while the help text says owner-only.
+- **Recommendation:** write to a `0600` temp file beside the target and rename it over (atomic, and the mode is right every time), or `chmod` an existing target to `0600` and say so on stderr. Fix the help text either way. For the `--git` workflow, note in the README that git stores no mode beyond the executable bit, so a checkout elsewhere is `0644` whatever the export did.
+- **Would I hold the tag for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **before the v0.13.0 tag:**
+  - write to a 0600 temp file beside the target, then rename it over the
+    target (atomic, and the mode is right every time);
+  - fix the help text;
+  - add one README sentence that git stores no mode beyond the executable
+    bit, so another checkout of a committed export is 0644;
+  - test: exporting onto an existing 0644 file leaves a 0600 file.
+
+  Neutral commit message. After the tag, move this item into PLAN.md.
+- **Fixed (6767b7a, v0.13.0):** `write_private` now writes a
+  `create_new` file beside the target (0600 on Unix), syncs it and
+  renames it over the target, so the mode is right whatever the target
+  had and a crash never leaves a partial export. The help text and the
+  engine README say so, with the git file-mode note. Test: an existing
+  0644 file becomes a 0600 file with the export, and no temp file is left.
+
+### 2026-11-12 — PLANNER-A — VERIFIED + HANDOFF + DISPATCH — v0.13.0 verified; two README fixes; v0.13.1 dispatched (REVIEWER-B reviews it: it touches the open path and the release workflow)
+
+**VERIFIED: v0.13.0** (tag run 43161860977, 21 jobs green). Checked by me
+from the user's machine:
+- crates.io `mnemo-engine` max_version 0.13.0, published
+  2026-11-12T05:40:23Z;
+- PyPI 0.13.0 with 6 files;
+- `mnemo-swift` tag `0.13.0` on commit `e203b6f`;
+- the GitHub Release `v0.13.0` (not a draft) with 13 assets, so
+  `action-gh-release` v3's first real run kept the body and the assets;
+- Maven Central isn't reachable from my side; I accept the Worker's check.
+
+The crate shrank from 609 KB to 349 KB (RB-003.4). The user approved the
+engine publishes only once every build was green. **Credential expiry
+dates** (from the Worker): the Central Portal token by 2027-11-09, and
+the GPG signing key before 2028-11-08. These replace my earlier
+"about 2027-11-11".
+
+**HANDOFF: commit on `main` on their own** (docs-only, no release; the
+crates.io README catches up at v0.13.1):
+- `README.md`: the two errors the Worker caught. The `--key-file` example
+  is labelled "a raw-key file (what create_with_key writes)", not "a phone
+  export" (a phone's passphrase export opens with its passphrase). The v8
+  bullet now gives raw-key users `Mnemo::compact_file_with_key` in Rust
+  until `compact --key-file` ships. Python has no such call yet; see item 2
+  below.
+- `reviewer_notes.md`: RB-003.2's ledger row now carries its title, since
+  it's fixed.
+- **Commit message:** `docs: README key-file wording; RB-003.2's ledger title`.
+- Delete `test/project.mnemo` writes from your queue only once the user's
+  `test/.venv` is rebuilt.
+
+**DISPATCH: v0.13.1.** Work on a `release-0.13.1` branch, one PR per step,
+squash-merging any step that has WIP commits.
+1. **RB-003.3, recommendation 2 (the open path):**
+   - when the header is intact, check the key **before** replaying the WAL;
+   - refuse a read-write open of an older format **before** any write;
+   - **tests:** a wrong passphrase, and a refused read-write open of the v8
+     pending-WAL fixture, each leave the file byte-identical, on v8 and
+     v9; the right key still recovers;
+   - a CHANGELOG line under Fixed.
+2. **RB-003.6, `--key-file` everywhere it's cheap:** `compact` and
+   `export` at least, plus `about`, `info`, `list`, `verify` and `recall`
+   if they share the open path.
+   - `FormatTooOld`'s message names `mnemo compact --key-file` for raw-key
+     files;
+   - Python gains `compact_file_with_key`.
+3. **RB-003.8 item 3, Python exception types:** a base
+   `mnemo_engine.MnemoError` that subclasses `RuntimeError` (so existing
+   `except RuntimeError` keeps working), with subclasses for at least
+   `FormatTooOld`, `EmbedderMismatch`, `WrongPassphrase`, `Locked`,
+   `ReadOnly`, `NeedsWriteOpen` and `Corrupt`. The README's prefix table
+   becomes a table of types.
+4. **RB-003.7, the inspector's memory:**
+   - count the matches, then clone only the page;
+   - drop the `Vec<Memory>` once the JSON is built;
+   - release the lock before writing the response;
+   - PERF-2's spec gains the cell "`mnemo inspect` load time and peak
+     memory at 10K and 100K" (note it in your DONE; I'll add it to the
+     spec).
+5. **SEC-3** (RB-003.1's remaining recommendations, in
+   `SECURITY.local.md`). Neutral commit messages, and no write-up in PR
+   text until v0.13.1 ships.
+6. **REL-2** (RB-003.5, RB-003.8 item 4, and the single release approval
+   in my 2026-11-12 DECISION):
+   - the dry run builds the CLI, wheels and sdist and rehearses `attach`,
+     with the publish steps replaced;
+   - `approve-release` on the new `release` environment; every publish
+     needs it, and it needs every build;
+   - the mobile-off note's two edges;
+   - RELEASING.md.
+   - **The user's settings change** (create `release`; remove the
+     reviewers from the four): list it as steps in REL-2's DONE. The user
+     does it right after REL-2 merges into `release-0.13.1`. No tag is
+     pushed in between, so main's old workflow never runs unprotected.
+   - **Two dry runs after the settings change:** mobile on and mobile off.
+     Neither should pause.
+7. **The release commit:**
+   - **mobile off** for v0.13.1. Under DECISION 1's rule nothing here
+     needs a phone release, and it's the first real run of the mobile-off
+     note. Set `ENABLE_MOBILE_PUBLISH=false` for the tag, and back to
+     `true` afterwards;
+   - 0.13.1 everywhere the release check reads (the mobile manifests keep
+     the same number, per REL-1);
+   - the CHANGELOG `[0.13.1]` entry;
+   - CI green, then a mobile-off dry run;
+   - **log READY and stop.**
+
+**REVIEWER-B reviews v0.13.1 at READY,** under AGENTS.md `Reviewer` rule
+4: it's a patch, but it touches the open path (the key and the WAL order)
+and the release workflow. It's a scoped pass on steps 1, 5 and 6. Then I
+accept, and the tag is the first one-click release.
+
+### 2026-11-12 — PLANNER-A — NOTE — Handover for the next Planner session (the user is starting a fresh chat)
+
+**Read first:** AGENTS.md (the roles, `Reviewer` rule 4, "Never commit"
+and its fixture exception, the cloud-sync tripwire), then the Status
+section and the "Planner handover" section (the team is now four), then
+the WORKLOG from 2026-11-11 on.
+
+**Where things stand:**
+- v0.13.0 is published and VERIFIED.
+- v0.13.1 is dispatched (the entry above): the open-path order,
+  `--key-file`, Python exceptions, the inspector's memory, SEC-3, REL-2
+  (one-click releases), and mobile off for the tag.
+- REVIEWER-B reviews v0.13.1 at READY. The order after that is the 12.4
+  design note, 12.4, 12.3, 12.2 (with `mnemo onboard` and GUIDE-1), 13a,
+  HARNESS-DOGFOOD-1, PERF-2, 13b, 14, 15. CLEANUP-1 is marked, not
+  scheduled.
+
+**How the user works with the Planner:**
+- Plain English, short status, no jargon without a gloss.
+- Relay prompts in the form "Send this to the worker:" plus one blockquote:
+  an opening paragraph naming the PLAN.md entry, a bullet list of steps,
+  and a closing line saying what to log.
+- Verify claims in the code, on GitHub (the GitHub API works from the
+  device shell; WebFetch to the registries doesn't) and on the registries
+  (`curl` crates.io and PyPI, `git ls-remote` mnemo-swift; Maven Central is
+  blocked, so accept the Worker's check).
+- Run a WebSearch before stating product or platform facts.
+- Log decisions in PLAN.md (and triage in `reviewer_notes.md`) before
+  telling the user. Never edit PLAN.md while the Worker is mid-step;
+  append at its DONE or BLOCKED checkpoints.
+
+**Standing rules that bite:**
+- The Planner never commits. Edits to tracked files go to the Worker as a
+  HANDOFF.
+- No agent handles passphrases: the user types them, and scripts read
+  `test/.env`.
+- Unfixed security findings live only in `SECURITY.local.md`. RB-003.1
+  (SEC-3) is there now.
+- The Worker never approves a GitHub deployment. Until REL-2 ships the
+  user clicks four times per tag, approving the engine publishes only once
+  every build is green.
+- The repo lives at `~/Documents/GitHub/mnemo.nosync`. An empty
+  `~/Documents/GitHub/mnemo` appears only from a stale folder link; connect
+  only `mnemo.nosync` to the new chat.
+- `test/project.mnemo` is v9 and gitignored. The user must rebuild
+  `test/.venv` (see the move NOTE) before the next dogfood write.
+
+**Open threads, not yet scheduled:**
+- the Android Export button (deferred, with DOCS-1 or MOBILE-3);
+- RB-001.20's device checks (at the next device run, which is optional);
+- FUZZ-2 (before 14.1);
+- DOCS-1 (after INSP-1, now unblocked);
+- MOBILE-3 (a candidate; the user picks its priority);
+- RB-001.12 and RB-001.13 (deferred);
+- the open question of a management platform (NEEDS-USER when Phase 14
+  is near);
+- **credential renewals:** the Central Portal token by 2027-11-09, and the
+  GPG key before 2028-11-08.
+
+### 2026-11-12 — WORKER — BLOCKED — v0.13.1 step 2: AGENTS.md's cloud-sync tripwire matched (stale `name N.ext` copies); stopped at the user's choice
+
+**What matched.** While adding Python's `compact_file_with_key` I listed
+`mnemo-python/python/mnemo_engine/` and found `mnemo_engine.abi3 2.so`
+through `mnemo_engine.abi3 11.so` beside the real `.so`. A wider `find`
+(outside `.git/` and `target/`) shows the same pattern elsewhere, all in
+gitignored build output:
+- `mnemo-python/python/mnemo_engine/mnemo_engine.abi3 {2..11}.so`;
+- `mnemo/bindings/swift/build/MnemoFFI.xcframework {2..5}.zip`;
+- `mnemo/bindings/swift/TestHost/MnemoTestHost {2,3}.xcodeproj`;
+- `mnemo/bindings/swift/.build/out/Products/Debug/libmnemo_uniffi {2..6}.a`.
+
+**The evidence that they predate the move:** the newest copy is dated
+2026-11-11 11:21 local (`abi3 11.so`); the oldest 2026-11-07. None is newer
+than this session's edits (`find -newer PLAN.md` finds nothing), and none
+appeared while I built in `mnemo.nosync` (the XCFramework rebuild, the
+wheel builds). So they look like iCloud-era leftovers that moved with the
+folder, not new syncing. **I asked the user; they chose to stop and log
+BLOCKED,** per the tripwire. Nothing was staged or deleted.
+
+**Where v0.13.1 stands:**
+- **The HANDOFF** is on `main`: f8c86bb `docs: README key-file wording;
+  RB-003.2's ledger title`. `release-0.13.1` was created from it and
+  pushed.
+- **Step 1** (the open-path order, RB-003.3 recommendation 2) is PR 47,
+  `rel0131-1-open-order` at its one commit. CI is green (12/12; Mobile CI
+  doesn't run, since no mobile path changed). **Not merged:** I stopped
+  before the merge.
+- **Step 2** (`--key-file`, RB-003.6) is **uncommitted** on a local
+  branch, `rel0131-2-key-file`, created from step 1's tip. The working
+  tree has:
+  - `mnemo/src/bin/mnemo.rs`: `unlock`, `open_ro` and `open_rw`;
+    `--key-file` on `info`, `compact`, `verify`, `about`, `list`, `export`
+    and `recall` (recall's open closure, with its locked and v8
+    fallbacks, takes the secret). It builds;
+  - `mnemo/src/error.rs` and `mnemo/src/store/open.rs`: `FormatTooOld` and
+    the pre-v9 pending-WAL reason name `--key-file <key>` for raw-key files;
+  - `mnemo-python/src/lib.rs`: `compact_file_with_key(path, key)` and a
+    shared `compact_report_dict`. `cargo check` passes.
+  - Not yet written: the tests (the CLI on `v8_key.mnemo` with
+    `v8_key.key`; Python's call), the docs, and the PR.
+
+**To unblock (user):** confirm iCloud (or any sync) isn't managing
+`~/Documents/GitHub/mnemo.nosync`, and say whether to delete the stale
+copies (all gitignored build outputs; deleting them is safe, and `maturin
+develop` / `scripts/build-xcframework.sh` recreate what's needed). Then
+I merge PR 47, log step 1's DONE, and carry on with step 2.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 1: the key and the format are checked before the WAL is replayed (RB-003.3 recommendation 2); the stale sync copies are deleted
+
+**Unblocked.** The user relayed PLANNER-A's check: the `name N.ext` copies
+are iCloud leftovers from before the move, and none is newer than
+2026-11-12 03:19 UTC, so the BLOCKED above is resolved.
+
+**The cleanup (the user's instructions, PLANNER-A's pattern):**
+- `find . \( -name "* [0-9].*" -o -name "* [0-9]" \) -not -path "./.git/*"`
+  listed **3,092** entries, the Planner's count: 3,089 files and 3
+  directories. The 3 directories were themselves copies (`mnemo/target/release
+  2`, empty; `MnemoTestHost 2.xcodeproj` and `3.xcodeproj`, 3 files each),
+  not folders that hold copies. The newest was 2026-11-12 00:16 UTC.
+- Each entry was checked again at deletion: not in `git ls-files` (for a
+  directory, nothing tracked under it), covered by `git check-ignore`, and
+  older than 03:19 UTC. All 3,092 passed and were deleted. The find then
+  printed nothing.
+- **What the pattern missed:** two-digit copies (`… 10.so`, `libmnemo_engine
+  12.dylib`, `mnemo 41`), since `* [0-9].*` needs a dot right after one
+  digit. A two-digit find listed **2,410** more: 2,408 under `target/`,
+  plus `mnemo_engine.abi3 10.so` and `11.so` beside the tracked package
+  files. All were untracked, ignored, and no newer than 00:16 UTC. **The
+  user approved deleting them** with the same per-entry checks, and all
+  2,410 passed.
+- **Total: 5,502 deleted, none newer than the move.** Both finds (the
+  one- and the two-digit pattern) now print nothing. The tracked files in
+  `mnemo-python/python/mnemo_engine/` (`__init__.py`) are untouched, and
+  no folder holding tracked files was removed. From now on, a new copy is
+  a real alarm, and the tripwire applies.
+
+**Step 1: PR 47 into `release-0.13.1`** (`rel0131-1-open-order`, one
+commit, 2520bdc). Fast-forwarded in; GitHub marked it merged. The branch
+is deleted. CI 43171332519 green (12/12; Mobile CI doesn't run on an
+engine-only PR).
+- **The change** (`open_secret_with`):
+  - the WAL frames are read, but not yet written;
+  - the key is derived against the header the replay would leave (the
+    WAL's page-0 frame, else the current header);
+  - a format older than v9 is refused (unless compaction asked for it);
+  - only then are the frames written;
+  - the torn-header path, whose scan already checks the key, refuses an
+    old format before healing.
+- **Tests:**
+  - `engine_safety` (failpoints): a wrong key on a v9 pending WAL leaves
+    the file byte-identical, and the right key recovers all 15; at each of
+    a rekey's cut points 0–39, a wrong passphrase writes nothing and the
+    file opens with the old or the new passphrase (both outcomes seen);
+  - `v8_fixture`: a wrong passphrase, and a right one refused with
+    `FormatTooOld`, leave `v8_pending_wal.mnemo` byte-identical.
+- **What the rekey case showed:** I first wrote a test for "page 0 under
+  the old wrap, WAL under the new". A rekey can't produce that: it logs
+  the new page 0 into a fresh WAL region that the old page 0 doesn't point
+  to, so after a cut either the old or the new passphrase opens. The test
+  checks that instead. The open's check against the replay's header still
+  covers the other case, should anything produce it.
+- **CHANGELOG** `### Fixed` under `[Unreleased]`.
+- **Locally:** `cargo test --features failpoints --no-fail-fast` passes
+  370; clippy clean; uniffi green.
+
+**Next:** step 2, `--key-file` (already in progress on
+`rel0131-2-key-file`, which is built on 2520bdc).
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 2: `--key-file` on the read and convert commands; Python `compact_file_with_key` (RB-003.6)
+
+**PR 48 into `release-0.13.1`** (`rel0131-2-key-file`, one commit,
+d42f4e3). Fast-forwarded in; GitHub marked it merged. The branch is
+deleted. CI 43175095313 green (12/12).
+- **CLI:** `info`, `about`, `list`, `verify`, `recall`, `export` and
+  `compact` take `--key-file <path>` (32 raw bytes or 64 hex digits;
+  conflicts with `--passphrase`), as `inspect` did.
+  - One `unlock()` turns either secret into the value that `open_ro` and
+    `open_rw` take; `compact` picks `compact_file` or
+    `compact_file_with_key`.
+  - recall's open closure takes the secret, so its locked-file and v8
+    fallbacks work with a raw key.
+- **Messages:** `FormatTooOld` and the pre-v9 pending-WAL reason say
+  "(with `--key-file <key>` for a raw-key file)".
+- **Python:** `mnemo.compact_file_with_key(path, key)`, with a shared
+  `compact_report_dict`. It uses the key as a plain `[u8; 32]`, like the
+  crate's other raw-key calls (`open_with_key`, `rekey_with_key`); the
+  Python crate has no `zeroize` dependency.
+- **Tests:** `tests/key_file_cli.rs` (2):
+  - every command, with the key both hex and raw, leaves the file
+    byte-identical;
+  - a wrong key, a malformed key file, and `--key-file` with
+    `--passphrase` are refused;
+  - `compact --key-file` converts `v8_key.mnemo` (3 → 3, v9), and the
+    library's refusal of that fixture names `--key-file`.
+  `test_mnemo.py` gains `test_compact_file_with_key` (and a short key
+  raises `ValueError`).
+- **Docs:** the engine README's paragraph on raw-key files, the Python
+  README's API row, and CHANGELOG `### Added`. **For PLANNER-A:** the root
+  README's v8 bullet says `compact --key-file` is "planned for v0.13.1";
+  at the release it can name the flag.
+- **Locally:** 372 engine tests; clippy clean in four runs (with the
+  Python crate's); uniffi green; Rust 1.75 builds. The full Python suite
+  passed against a `dev-hooks` test wheel in a scratch venv (not
+  `test/.venv`).
+
+**Steps 3, 4 and 5** are open as PRs 49, 50 and 51 against
+`release-0.13.1`, stacked in that order. Each merges by fast-forward once
+its CI is green, and each gets its own DONE.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 3: Python exception types (RB-003.8 item 3)
+
+**PR 49 into `release-0.13.1`** (`rel0131-3-py-errors`, one commit,
+4a7bc04). Fast-forwarded in; GitHub marked it merged. The branch is
+deleted. Runs: CI 43176497797, 12/12 green.
+- **The base type:** `mnemo_engine.MnemoError` subclasses `RuntimeError`, so
+  `except RuntimeError` keeps working, and the messages are unchanged.
+- **Subclasses:** `FormatTooOldError`, `NeedsWriteOpenError`,
+  `EmbedderMismatchError`, `WrongPassphraseError`, `LockedError`,
+  `ReadOnlyError`, `DimensionMismatchError`, `InvalidArgumentError`,
+  `NotFoundError`, `UnsupportedVersionError`, `NotAMnemoFileError`, and
+  `CorruptError` (`PageAuthFailed`, `HeaderChecksum`, `HeaderTampered`).
+  I/O, crypto, KDF and serialization errors are the base type. The
+  binding's own checks ("database is closed", argument errors) are
+  unchanged (`RuntimeError` / `ValueError`).
+- **How:** `pyo3::create_exception!` in a module `exc`, registered on the
+  module, so `from mnemo_engine import *` and `mnemo_engine.<Name>` both
+  work. One `#[allow(unexpected_cfgs)]` covers PyO3 0.22's macro, which
+  checks a `gil-refs` cfg the crate doesn't declare.
+- **Test:** `test_exception_types` raises 12 types for real: a deleted id;
+  a zero vector; the wrong width; a second open (Locked); a wrong
+  passphrase; a second embedder (EmbedderMismatch); a write on
+  `read_only=True`; a junk file; the v8 fixture read-write; the v8
+  pending-WAL fixture read-only. It checks each is a `MnemoError` and a
+  `RuntimeError`.
+- **Docs:** the Python README's "Errors" table now lists the types, with
+  an example; CHANGELOG `### Added`.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 4: the inspector's paging and memory (RB-003.7)
+
+**PR 50 into `release-0.13.1`** (`rel0131-4-inspect-memory`, one commit,
+bf178f6). Fast-forwarded in; GitHub marked it merged. The branch is
+deleted. Runs: CI 43176501233, 12/12 green.
+- `/api/memories` collects the matching indices, counts them, then clones
+  only the page. `limit` is capped at 1,000 (`MAX_PAGE`), and the agent
+  list is built once at load instead of on every request.
+- The load builds the memory JSON, the `KeywordIndex` and the agent list,
+  then drops the `Vec<Memory>` (vectors included) before the thread turns
+  are read.
+- Each response is built under the state lock and written after it's
+  released (Reload included: the load runs under the lock, the write
+  doesn't).
+- **Test:** paging returns the requested slice with the full `total`, and
+  an offset past the end returns an empty page.
+- **For PLANNER-A (PERF-2's spec):** the cell "`mnemo inspect` load time
+  and peak memory at 10K and 100K". Not measured in this step.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 5: SEC-3 (inspector: `--idle-timeout`, the token out of the address bar, `--open` through a local page)
+
+**PR 51 into `release-0.13.1`** (`rel0131-5-sec3`, two commits: 1032e5b,
+and c6ac8ca, a Windows lint fix). Fast-forwarded in; GitHub marked it
+merged. The branch is deleted. CI 43177702890, 12/12 green.
+- **The first CI run** failed only on `rust (windows-latest)`: `let mut
+  builder = DirBuilder::new()` is mutated only inside a `#[cfg(unix)]`
+  block, so on Windows `-D warnings` refused the unused `mut`. c6ac8ca
+  builds it per platform.
+- **What shipped,** in neutral terms (the commits and the PR text are
+  neutral too; the finding's details stay in `SECURITY.local.md` until
+  v0.13.1 ships):
+  - `--idle-timeout` (default `30m`; `90s`, `1h`, or `0` for never). With
+    no request carrying the token for that long, the server replaces the
+    secret (so the old one is wiped) and exits 0.
+  - The passphrase and the key are held in `Zeroizing` (the `--key-file`
+    bytes too), on every command that uses the shared `unlock()`.
+  - The page keeps the token in `sessionStorage` for its tab and calls
+    `history.replaceState` to drop it from the URL. The page (no data) is
+    served without the token so that a refresh works; every API route
+    still needs it. A tab with no token says to open the printed URL.
+  - `--open` writes a forwarding page in a new private directory (0700,
+    the file 0600) and passes that path to the launcher. A cleanup thread
+    removes it once the page has been loaded with the token, or after 60
+    seconds.
+- **Tests:**
+  - `inspect_cli`: `/` loads without the token and holds no file data,
+    while `/api/about` and `/api/memories` refuse it;
+    `it_stops_after_the_idle_timeout` keeps the server up with requests
+    for 4 s, then sees it exit 0 within the timeout and the port close;
+  - unit tests: the forwarding page's permissions (0700, 0600) and
+    contents, and the duration parser.
+- **Docs:** the `--open` help text, the engine README's inspector section
+  (`--open` no longer marked single-user-only), and CHANGELOG `### Changed`.
+  **For PLANNER-A:** the root README still says `--open` is for
+  single-user machines; at the release it can drop that.
+- **After v0.13.1 ships:** move RB-003.1 from `SECURITY.local.md` into this
+  log (your 2026-11-12 entry).
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 6: REL-2, one approval per release after every build; the dry run builds the engine (settings change pending, then two dry runs)
+
+**PR 52 into `release-0.13.1`** (`rel0131-6-rel2`: 60b4611, plus a merge
+commit a5c9f72 that brings in step 5's Windows fix, with no rebase).
+Fast-forwarded in; GitHub marked it merged. The branch is deleted. CI
+43178781623 and Mobile CI 43178781578, 18/18 green.
+
+**The workflow (`release.yml`):**
+- `version check` (`mobile-prepare`) runs first, with no dependencies.
+  Every build needs only it: CLI ×5, wheels ×5, sdist, Swift, Android. The
+  CLI asset names come from the manifest's version.
+- `approve the release` (environment `release`; tags only) needs every
+  build and runs only when all are green (the mobile ones only with mobile
+  on).
+- After it: `Create GitHub Release`, then attach, crates.io and PyPI.
+  `publish-crates` used to need only the CLI builds; now a failed build
+  publishes nothing.
+- `engine published (gate)`: the old engine check, moved out of the version
+  check. Mobile publishes only after every engine publish succeeded.
+- The mobile publishes need the approval and the gate on a tag; in a dry
+  run, their builds.
+- **The dry run's engine half:** attach downloads with the tag's pattern
+  and checks 11 files; crates.io runs `cargo publish --dry-run`; PyPI checks
+  5 wheels and 1 sdist. No upload, no `action-gh-release`, no approval.
+- **The mobile-off note (RB-003.8 item 4):** a failed lookup gives
+  "unknown"; the append is skipped when the Release body already has the
+  note.
+- **RELEASING.md:** the order, the environments, and the trade-off.
+  CHANGELOG `### Changed`.
+- **Checked:** the YAML parses (Ruby's), and the job graph reads back as
+  above. Not yet run: the two dry runs below.
+
+**The user's GitHub settings change, to do now** (REL-2 is merged into
+`release-0.13.1`; no tag is pushed until both dry runs pass, so `main`'s
+old workflow never runs unprotected):
+1. **Create `release`:** Settings > Environments > New environment, name
+   `release`.
+   - Required reviewers: tick, add `toarchkumar`, and save protection
+     rules.
+   - Deployment branches and tags: "Selected branches and tags", then Add
+     deployment branch or tag rule, type **Tag**, pattern `v*`. No branch
+     rule: a dry run never uses `release`.
+   - No secrets.
+2. **Remove the reviewer from the four registry environments,** keeping
+   everything else (the secrets, and the `v*` and `release-*` rules): open
+   `crates-io`, `pypi`, `maven-central` and `mnemo-swift` in turn, untick
+   Required reviewers, and save protection rules. (Read by the API just now:
+   all four have `toarchkumar` as reviewer and custom deployment
+   policies.)
+3. **Then tell me.** I run two dry runs on `release-0.13.1`, `mobile=true`
+   and `mobile=false`. Neither should pause.
+
+### 2026-11-12 — WORKER — BLOCKED — v0.13.1 step 6 dry runs: AGENTS.md's cloud-sync tripwire matched again (one copy newer than the cleanup)
+
+**The user finished the settings change** (`release` created, reviewer
+`toarchkumar`, tags `v*` only, no secrets; the reviewer removed from
+`crates-io`, `pypi`, `maven-central` and `mnemo-swift`) and asked for the two
+dry runs, then step 7. **Before starting, I ran the tripwire check, and it
+matched.** Nothing was run, staged or deleted.
+
+**What matched** (the cleanup's one- and two-digit patterns, `.git/`
+excluded, run at 15:59 UTC): exactly one entry.
+- `mnemo/target/debug/incremental/mnemo_uniffi-32tw9mz1ygmmn/s-ho33975vdz-1t29dv4-4plrtnywd4aacscv2to0rhq5u/metadata 2.rmeta`
+- It is a hard link (link count 2) to
+  `mnemo/target/debug/deps/libmnemo_uniffi-ab8df6c2796b6d62.rmeta`. Its
+  inode was born 2026-11-12 07:21:19 UTC.
+- No `metadata.rmeta` sits beside it. The session directory holds only
+  `dep-graph.bin`, `query-cache.bin`, `work-products.bin` and this file, and
+  its mtime is 08:42:42 UTC.
+- **Why it is a real alarm:** the cleanup ran at about 07:15 to 07:18 UTC,
+  and both finds then printed nothing. This file is newer than the move
+  (03:19 UTC) and newer than the cleanup. The directory's 08:42 mtime
+  suggests the entry was renamed or created about 80 minutes after the
+  build that wrote it. I have no evidence that rustc writes a `name 2.ext`
+  file, so I cannot rule out something still syncing or renaming inside
+  `mnemo.nosync`.
+- It is gitignored build output (`target/`). It is not tracked.
+
+**Also present, outside the Planner's pattern** (which excludes `.git/`):
+`.git/index 2` to `.git/index 6`, dated 2026-11-10 16:11 to 2026-11-11 17:20
+local (all before the move). They look like iCloud-era leftovers, like the
+5,502. Git uses only `.git/index`, and I have not touched them.
+
+**Where v0.13.1 stands:**
+- Steps 1 to 6 are merged; `release-0.13.1` is at a5c9f72, the same locally
+  and on origin. Nothing is uncommitted except this WORKLOG.
+- The two dry runs (mobile on and off) and step 7 are not started. The
+  dry runs run on GitHub and cannot touch this tree, but the tripwire says
+  stop, so I stopped.
+
+**What the Planner or the user decides:**
+1. Whether anything still syncs or renames inside `mnemo.nosync` (for
+   example a sync client other than iCloud, or a backup tool).
+2. Whether to delete the one `metadata 2.rmeta` (untracked, ignored), with the
+   same per-entry checks as the cleanup, or to run `cargo clean`.
+3. Whether to delete `.git/index 2` to `index 6`.
+4. Then: continue with the two dry runs and step 7.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 6 dry runs (the settings change) and step 7 (the release commit, mobile off); the stray copy deleted; BLOCKED cleared
+
+**Unblocked.** The user's sync check came back clean: the home folder
+isn't iCloud-managed, `~/Library/CloudStorage` is empty (no other sync
+service), and `mnemo.nosync` is not managed. The repository stays where it
+is. The user's instruction was to delete the stray copy after the usual
+checks, log it here, and clear the BLOCKED above. **That BLOCKED is resolved.**
+
+**The cleanup:** one entry,
+`mnemo/target/debug/incremental/mnemo_uniffi-32tw9mz1ygmmn/s-ho33975vdz-1t29dv4-4plrtnywd4aacscv2to0rhq5u/metadata 2.rmeta`.
+- It was not in `git ls-files`, and `git check-ignore` covered it.
+- I deleted only that file, not the incremental folder. Its other link,
+  `target/debug/deps/libmnemo_uniffi-ab8df6c2796b6d62.rmeta`, is untouched.
+- The one- and two-digit finds (outside `.git/`) now print nothing. I
+  checked again after step 7's builds, and they still print nothing.
+- `.git/index 2` to `index 6` (before the move, outside the pattern) are
+  left as they are, since there was no instruction to remove them.
+- The tripwire is unchanged: another new copy means stop again.
+
+**Step 6: the two dry runs after the settings change,** on a5c9f72. **Neither
+paused,** and `approve the release` was skipped in both, as a dry run does.
+- **Mobile on, 43275719483: green.**
+  - Every engine and mobile build passed.
+  - `attach engine assets` listed 11 files.
+  - crates.io: `cargo publish --dry-run` packaged 59 files, then printed
+    "aborting upload due to dry run".
+  - PyPI: "5 wheels and 1 sdist".
+  - Swift: publish (dry) and verify-published passed. Android: publish
+    (dry) passed.
+- **Mobile off, 43275739745: green on attempt 2.**
+  - Attempt 1 failed only because `wheels (x86_64-apple-darwin)` never got
+    a runner. GitHub's annotation: "The job was not acquired by Runner of
+    type hosted even after multiple attempts" (macOS capacity). Its
+    dependent jobs (attach, the publish rehearsals) were skipped. All the
+    other jobs passed.
+  - `gh run rerun --failed` then passed every job. The Swift and Android
+    jobs were skipped, and the release note job ran.
+
+**Step 7: PR 53 into `release-0.13.1`** (`rel0131-7-release`, one commit,
+d350d53 `release: v0.13.1`). It was fast-forwarded in, GitHub marked it
+merged, and the branch is deleted. CI on the PR was green on every check,
+including Mobile CI (the samples changed).
+- **0.13.1** in every manifest the version check reads (`mnemo`,
+  `mnemo-uniffi`, `VERSION_NAME`), plus `mnemo-python`'s `Cargo.toml` and
+  `pyproject.toml`, Node, both lockfiles (version lines only), and the
+  samples (`MARKETING_VERSION`, and the sample's `mnemo-android`).
+  - The mobile manifests keep the same number, per REL-1.
+  - The samples build the libraries from this repository (a local SPM path,
+    and a Gradle included build with dependency substitution), so the
+    number there is only a label.
+- **The CHANGELOG:** `[0.13.1] — 2026-11-12` cut from `[Unreleased]`, with a
+  summary that says mobile isn't published and stays at 0.13.0.
+  - The compare links are fixed: `[Unreleased]` still pointed at
+    `v0.12.3...HEAD`, and `[0.13.0]` had no link.
+- **Mobile off, so the install lines stay at 0.13.0:** in
+  `mnemo/bindings/swift/README.md` and `mnemo/bindings/kotlin/README.md`,
+  and in the `release-check` comment. 0.13.1 won't exist on `mnemo-swift`
+  or Maven Central.
+  - RELEASING.md's "Install lines" step said to name the new version.
+    It now says a mobile-off release keeps the newest published version.
+- **The post-merge mobile-off dry run, 43279923650 (d350d53): green, no
+  pause.**
+  - version check: "engine 0.13.1, mnemo-uniffi 0.13.1, mnemo-android
+    0.13.1", with mobile off.
+  - attach: 11 files, the wheels and sdist named 0.13.1.
+  - crates.io: "Uploading mnemo-engine v0.13.1", then "aborting upload due
+    to dry run".
+  - PyPI: 5 wheels and 1 sdist.
+  - The release note job (the first run of the mobile-off note at a new
+    version) found "Swift 0.13.0, Android 0.13.0".
+  - The Swift and Android build, publish and verify jobs were skipped.
+
+**For PLANNER-A (Planner-owned, not touched):** the root README still says
+`--key-file` on compact is "planned for v0.13.1" (line 138), still lists
+"current 0.13.0" for mobile (right for this release), and still says
+`--open` is for single-user machines only.
+
+### 2026-11-12 — WORKER — READY — v0.13.1 (`release-0.13.1` at d350d53), for REVIEWER-B
+
+**What's on the branch:** steps 1 to 7 of the v0.13.1 DISPATCH, each with
+its DONE above:
+1. the open path (the key and the format checked before the WAL is
+   replayed);
+2. `--key-file` on the CLI's read and convert commands, and Python's
+   `compact_file_with_key`;
+3. Python exception types;
+4. the inspector's paging and memory;
+5. SEC-3;
+6. REL-2;
+7. the release commit, with mobile off.
+
+**The gates:** CI green on every step PR and on d350d53's PR 53. The release
+dry runs (after the settings change) are all green, and none paused: mobile
+on 43275719483, mobile off 43275739745 (attempt 2), and mobile off on the
+release commit 43279923650.
+
+**For REVIEWER-B** (the scoped pass under AGENTS.md `Reviewer` rule 4):
+- step 1, `mnemo/src/store/open.rs`'s order, and its three byte-identical
+  tests;
+- step 5, `mnemo/src/bin/mnemo/inspect.rs` (the `Secret` zeroing, the idle
+  watchdog, the token handling, `write_redirect`) and `inspect.html`;
+- step 6, `.github/workflows/release.yml`'s new `needs` graph.
+
+**Not done until the tag (after REVIEWER-B and PLANNER-A accept):**
+- `ENABLE_MOBILE_PUBLISH` is `true` now. Set it to `false` right before the
+  tag, and back to `true` once the Release is out.
+- The coordination-file backup (`chore(plan): sync coordination files`).
+- Fast-forward `main` and push the tag `v0.13.1`. The tag run then pauses once,
+  at `approve the release`, for the user.
+- After it ships: move RB-003.1 from `SECURITY.local.md` into PLAN.md.
+
+**Stopped here.** Nothing is tagged, and `main` is unchanged.
+
+### 2026-11-12 — PLANNER-A — REVIEW — v0.13.1 READY received; one red run the READY missed; REVIEWER-B's scoped pass can start
+
+**Checked through the GitHub API:** the release dry runs 43275719483,
+43275739745 and 43279923650 are green and didn't pause, so REL-2's
+settings change works. **But Mobile CI on the push of `d350d53`
+(43279893187) failed:** `swift (macos-latest, iOS simulator)`, in the
+step "xcodebuild test (iOS simulator, hosted by TestHost for the
+Keychain)". The PR run on the same tree was green, which points to a
+flaky test. The release commit changes only versions and docs. The job
+log needs authentication, so I can't read which test failed. **For the
+Worker:**
+- find the failing test with `gh run view 43279893187 --log-failed`;
+- re-run the failed job;
+- log the test name, and whether the re-run passed.
+
+If it's a timing test (the T9 or starvation family, or anything around
+the embed queue), it becomes **FLAKE-3**, test-only, to fix before the
+tag if it's small, or in v0.13.2 if not. A failure that repeats is a
+BLOCKED. **From now on, a READY lists the push runs as well as the PR
+runs.**
+
+**Housekeeping, the user's choice:**
+- `cargo clean` in `mnemo/` and `mnemo-python/` frees about 62 GB. The
+  disk is 95% full, which slows builds and could fail one.
+- `.git/index 2` to `index 6` are stale sync copies from before the move.
+  Git uses only `.git/index`, so they're safe to delete.
+
+**REVIEWER-B's scoped pass** (RB-004: steps 1, 5 and 6, as the READY
+lists) can start now. It's read-only and runs in its own scratch copy.
+
+### 2026-11-12 — WORKER — NOTE — The red Mobile CI push run on d350d53 is a timing flake (T9 (a)); FLAKE-3 proposed
+
+**The failing test** (Mobile CI 43279893187, push of d350d53, `swift
+(macos-latest, iOS simulator)`, attempt 1):
+`StoreHardeningTests.t9aAnEmbedderThatCallsCacheGetReturnsAtOnce()`, at
+`StoreHardeningTests.swift:38`:
+"Expectation failed: (Date().timeIntervalSince(start) → 2.381448984146118)
+< (2 → 2.0)". The test failed after 2.514 s, with one issue. The other
+expectation, `embedder.timedOut == false`, **passed**: the embedder's
+`cacheGet` came back inside its 3 s wait, so the store did not deadlock (the
+bug T9 (a) guards). The whole `rememberText` was just slow. That was the only
+failure, out of 50 tests.
+
+**The re-run** (`gh run rerun --failed`, attempt 2): **green.** t9a passed
+in 0.232 s, all 50 tests passed, and the run is now a success.
+
+**It is a timing test,** the T9 family. Its durations on the recent green
+Mobile CI runs: 0.251 s (PR, d350d53), 0.608 s (push, a5c9f72), 0.689 s (PR,
+a5c9f72), 0.596 s (push, c6ac8ca), 0.276 s (push, bf178f6) and 0.319 s
+(push, d42f4e3). So 2.38 s is a slow-runner outlier, 3 to 9 times the usual,
+not a test that runs close to its bound. Nothing in d350d53 touches the
+Swift code (it changes versions and docs only).
+
+**FLAKE-3 (proposed, test-only, one file):** in `StoreHardeningTests.swift`,
+T9 (a) and `CacheReadingEmbedder`:
+- **The cause:** the test checks the deadlock twice. `timedOut` checks it
+  exactly: before 2c, `cacheGet` waited on the busy actor until the 3 s
+  semaphore gave up. The `< 2` bound on the whole `rememberText` checks it
+  again, but more tightly and with more noise: it also times the store's
+  write, the commit and the simulator's scheduling on a shared runner.
+- **The fix:**
+  - `CacheReadingEmbedder` records how long `cacheGet` itself took (from
+    the detached task's start to its signal).
+  - The test drops the `< 2` bound on `rememberText`. It keeps `timedOut ==
+    false` as the pass/fail check, and prints the measured `cacheGet` time
+    in the message, so a slow run is still visible.
+  - It's about 6 lines. A regression still fails the test deterministically
+    at 3 s.
+- **When: before the tag, I recommend.**
+  - It's small and test-only. The Swift package doesn't publish in v0.13.1,
+    so it changes no shipped artifact.
+  - With the new READY rule (push runs listed), the commit we tag should
+    have a green push run on its own tip. Fixing it now makes another red
+    push run less likely.
+  - It would be step 8, one PR into `release-0.13.1`. It moves the tip past
+    d350d53, but it touches nothing in REVIEWER-B's RB-004 scope (steps 1,
+    5 and 6).
+  - **The case for v0.13.2 instead:** one flake in about 14 green runs, the
+    re-run is green, and waiting leaves the reviewed SHA as it is. Your call.
+
+**Housekeeping, done by the user:** I confirmed `mnemo/target` and
+`mnemo-python/target` are gone, so the next build is a full one. No `.git/index N`
+copies remain, and the copy search (now including `.git/`) prints nothing.
+`release-0.13.1` is still at d350d53, locally and on origin.
+
+**From now on, a READY lists the push runs as well as the PR runs.** For
+d350d53: CI 43279893622 is green (attempt 1), and Mobile CI 43279893187 is
+green on attempt 2, as above.
+
+### 2026-11-12 — PLANNER-A — REVIEW + DISPATCH + HANDOFF — RB-004 triaged; v0.13.1 step 8 (pre-tag fixes, with FLAKE-3), then the first one-click tag; v0.13.2 queued
+
+**RB-004, REVIEWER-B's scoped pass:**
+- **The open order (step 1) is right.** The three tests fail on v0.13.0's
+  `open.rs` and pass now, and ten more torn-header and rekey cases leave
+  the file byte-identical.
+- **REL-2's graph holds** (simulated over 65,536 combinations): nothing
+  publishes without `approve-release` and every build green. The
+  environments match RELEASING.md.
+- **SEC-3 holds,** except one overstated sentence (RB-004.1).
+- RB-003.2 and RB-003.4 are now VERIFIED.
+- **All five items are ACCEPTED.** The triage lines are in
+  `reviewer_notes.md`, and RB-004.1's details are only in
+  `SECURITY.local.md`.
+- **FLAKE-3 is accepted as the Worker proposed it,** before the tag: T9
+  (a) passes or fails on `timedOut` and prints `cacheGet`'s time, with no
+  2 s bound.
+
+**DISPATCH: v0.13.1 step 8, pre-tag fixes.** One PR into `release-0.13.1`
+(two if that's cleaner). Use a neutral message for the RB-004.1 wording.
+1. **RB-004.1:** the history sentence in `mnemo/README.md`, `CHANGELOG.md`
+   and the `inspect.html` comment, plus "Every data request" (see
+   `SECURITY.local.md`).
+2. **RB-004.3:** `mobile-skipped-note` needs `attach` too.
+3. **RB-004.4:**
+   - `approve-release`'s job name shows the version and the mobile mode
+     (`approve the release (v…, mobile …)`), from `mobile-prepare`'s
+     outputs;
+   - RELEASING.md: flip `ENABLE_MOBILE_PUBLISH` back only once the tag run
+     has finished, and never "Re-run all jobs" on a finished tag run.
+4. **RB-004.2, recommendation 4:** one sentence in `rekey`'s Rust and
+   Python docs: after an error, close the handle without writing, and try
+   both secrets.
+5. **RB-004.5:** item 1 (the `open.rs` comment, and the rekey test's) and
+   item 3 (`--idle-timeout` uses `checked_mul` and refuses an overflow,
+   with a test).
+6. **FLAKE-3:** the T9 (a) change, test-only.
+7. **The gates:** CI and Mobile CI green **on the PR and on the push**, then
+   a mobile-off dry run on the new tip. Its approval job is skipped in a
+   dry run, so the new name shows only on the tag.
+
+**HANDOFF: commit on `release-0.13.1`, on their own, after step 8:**
+- `README.md`:
+  - a new "What's new in v0.13.1: safer opens, raw-key files from the CLI"
+    (the open order; `--key-file` on the CLI and Python's
+    `compact_file_with_key`; Python exception types; the leaner inspector
+    with its idle stop and `--open` change; mobile staying at 0.13.0);
+  - the v0.13.0 section corrected: "a private link that works only while
+    the inspector runs" instead of "a one-time link"; `--open` without
+    the single-user caveat, plus the idle stop; the raw-key v8 route is
+    now `--key-file`. This is RB-004.5 item 6;
+- `index.html`: the pill and the "current release" line at v0.13.1;
+- **commit message:** `docs: v0.13.1 README and site (safer opens, --key-file, Python errors)`.
+
+**The tag: the first one-click release.**
+1. Step 8, then this HANDOFF, then the `chore(plan)` backup.
+2. **Set `ENABLE_MOBILE_PUBLISH=false`.**
+3. Fast-forward `main`, tag `v0.13.1`, and push.
+4. **The user's one click,** on "approve the release (v0.13.1, mobile
+   false)". Before clicking, the user checks that the name says mobile
+   false and that every build job is green.
+5. After the run has finished, set `ENABLE_MOBILE_PUBLISH=true` again.
+6. Log DONE:
+   - the registries: crates.io and PyPI at 0.13.1, with Swift and Maven
+     still at 0.13.0;
+   - that the Release body carries the "Mobile packages not published" line
+     (RB-004.3);
+   - the credentials used.
+7. Move RB-003.1 (SEC-3, fixed) and RB-004.1's recommendation 1 from
+   `SECURITY.local.md` into PLAN.md, then delete the merged branch.
+
+**v0.13.2, queued:**
+- **REKEY-1** (RB-004.2, recommendations 1 to 3): first;
+- **SEC-4** (RB-004.1 recommendation 2, the single-use link code);
+- RB-004.4 recommendation 2 (the mobile mode from the tagged commit);
+- RB-004.5 items 2, 4 and 5.
+
+Then the 12.4 design note.
+
+**Correction to my handover NOTE:** the user is **not** starting a fresh
+Planner chat (decided 2026-11-12). The NOTE stays as a summary for any
+future session.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 step 8: pre-tag fixes (RB-004.1 wording, RB-004.2 rec. 4, RB-004.3, RB-004.4 rec. 1 and 3, RB-004.5 items 1 and 3) and FLAKE-3
+
+**PR 54 into `release-0.13.1`** (`rel0131-8-pretag`, four commits). It was
+fast-forwarded in, so `release-0.13.1` is at 80e592f. GitHub marked it merged,
+and the branch is deleted.
+- 4fc4fc1 `docs(inspect)`: the RB-004.1 wording, in `mnemo/README.md`
+  (plus "Every data request") and the `inspect.html` comment. The
+  CHANGELOG's copy is in 9fe8074.
+- 5a561c1 `ci(release)`:
+  - RB-004.3: `mobile-skipped-note` needs `[mobile-prepare,
+    create-release, attach]`.
+  - RB-004.4 rec. 1: the job is named `approve the release (v${{
+    needs.mobile-prepare.outputs.version }}, mobile ${{
+    needs.mobile-prepare.outputs.mobile }})`.
+  - RB-004.4 rec. 3: RELEASING.md says the tag run reads the variable when
+    `version check` starts, so flip it back only once the tag run has
+    finished, and never use "Re-run all jobs" on it after that. The
+    approval step names what to check.
+- 9fe8074 `fix(inspect)`:
+  - RB-004.5 item 3: `parse_idle` uses `checked_mul` and refuses an
+    overflow ("too long (use 0 for never)"). The unit test covers
+    `1152921504606846976h`, `u64::MAX/60+1` minutes, and `u64::MAX`
+    seconds, which is accepted.
+  - RB-004.2 rec. 4: the sentence is in `rekey` and `rekey_with_key`'s
+    Rust docs, both Python docstrings, and the Python README's table.
+  - RB-004.5 item 1: the `open.rs` comment now says no engine write
+    leaves a pending page-0 frame with a different wrap, and the check is
+    the defence if one ever does. The rekey test says it passes on the
+    v0.13.0 order too.
+  - CHANGELOG lines for the approval name, the rekey advice and the
+    overflow.
+- 80e592f `test(FLAKE-3)`: as proposed. `CacheReadingEmbedder` records
+  `cacheGet`'s own time from a synchronous helper. (`NSLock` inside the
+  detached task warned that it would be an error in Swift 6, so I moved it.)
+  T9 (a) checks only `timedOut` and prints the time.
+
+**Local:**
+- `cargo fmt --check`, and clippy `-D warnings` for the engine with
+  failpoints and for Python;
+- `engine_safety` (7), `inspect_cli` (8), and the CLI's unit tests (9);
+- `swift build --build-tests` with no new warnings, and `swift test
+  --filter StoreHardeningTests` on macOS: 6/6, t9a in 0.135 s.
+
+**The gates on 80e592f:**
+- **PR:** CI 43299680674 green, and Mobile CI 43299680944 green (18/18
+  checks, the Swift simulator job included).
+- **Push:**
+  - CI 43301214179 is green on attempt 2. Attempt 1's `rust (macos-latest)`
+    never got a runner ("The job was not acquired by Runner of type hosted
+    even after multiple attempts"; no steps ran).
+  - Mobile CI 43301214328 is green on attempt 1.
+- **Mobile-off dry run 43301254252: green on attempt 2.** Attempt 1's
+  `wheels (x86_64-apple-darwin)` never got a runner (the same annotation).
+  Then:
+  - version check: "engine 0.13.1, mnemo-uniffi 0.13.1, mnemo-android
+    0.13.1", with mobile off;
+  - attach: 11 files;
+  - crates.io: "Uploading mnemo-engine v0.13.1", then "aborting upload due
+    to dry run";
+  - PyPI: 5 wheels and 1 sdist;
+  - the note: "Swift 0.13.0, Android 0.13.0". **It now waits for attach**
+    (attach ended at 20:53:44, the note started at 20:53:47).
+  - A skipped job's name isn't evaluated, so the dry run shows the
+    approval name as written. The evaluated name shows only on the tag, as
+    the DISPATCH said.
+
+**For v0.13.2 (noticed, not changed):** the same README paragraph says
+"Nothing is written to disk". `--open` writes the forwarding page (owner-only,
+and deleted once loaded), so that sentence is true only without `--open`.
+
+**A rule slip, recorded:** while staging, a cleanup line ran `git reset -q --
+CHANGELOG.md` (unstaging one path). AGENTS.md says never `reset`. Nothing was
+staged for that file, so it changed nothing. Every commit above was staged by
+explicit path.
+
+**Next:** the HANDOFF commit (README.md and index.html), the `chore(plan)`
+backup, `ENABLE_MOBILE_PUBLISH=false`, fast-forward `main`, and the tag.
