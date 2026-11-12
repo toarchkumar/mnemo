@@ -6,6 +6,9 @@ mnemo.tar
 .DS_Store
 target/
 *.mnemo
+# Test fixtures may be committed: synthetic data under throwaway test
+# secrets only, never real memories (AGENTS.md, "Never commit").
+!mnemo/tests/fixtures/**/*.mnemo
 .env
 
 # Dogfooding sandbox — runtime artifacts stay local; tooling is tracked

@@ -105,7 +105,10 @@ ingests a structured measurement set as episodic memories — see
 `test/scripts/perf_v0.1.0.json` for the schema.
 
 **Never commit:** `test/.env`, `test/project.mnemo`, or any other `.mnemo`
-file. The `.gitignore` already excludes them.
+file. The `.gitignore` already excludes them. **The one exception:** test
+fixtures under `mnemo/tests/fixtures/`, which hold synthetic data under
+throwaway test secrets only, never real memories. `.gitignore` lets those
+through, so nobody needs `git add -f`.
 
 ## Common task locations
 
