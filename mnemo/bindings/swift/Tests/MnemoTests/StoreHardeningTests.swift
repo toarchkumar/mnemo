@@ -27,16 +27,21 @@ import Testing
     /// T9 (a): an embedder that reads the store (`cacheGet`) from a detached
     /// task and waits up to 3 s for it. Before 2c it timed out (the actor was
     /// busy embedding). After: it returns at once.
+    ///
+    /// FLAKE-3: `timedOut` is the check. It catches the deadlock every time,
+    /// at 3 s. A wall-clock bound on the whole `rememberText` (it was `< 2`)
+    /// also timed the write and a shared simulator's scheduling, and missed
+    /// once at 2.4 s with `cacheGet` back in time. `cacheGet`'s own time is
+    /// printed in the message instead.
     @Test func t9aAnEmbedderThatCallsCacheGetReturnsAtOnce() async throws {
         let embedder = CacheReadingEmbedder()
         let store = try MnemoStore(
             configuration: MnemoStoreConfiguration(name: "t9a", dimensions: 32, directory: try scratchDirectory()),
             keyStore: MemoryKeyStore(), embedder: embedder)
         embedder.store = store
-        let start = Date()
         try await store.rememberText("hello")
-        #expect(Date().timeIntervalSince(start) < 2)
-        #expect(embedder.timedOut == false)
+        let secs = embedder.cacheGetSeconds.map { String(format: "%.3f", $0) } ?? "none"
+        #expect(embedder.timedOut == false, "cacheGet took \(secs) s (the embedder gives up at 3 s)")
         try await store.close()
     }
 
@@ -124,9 +129,14 @@ final class CacheReadingEmbedder: MnemoEmbedder, @unchecked Sendable {
     weak var store: MnemoStore?
     private let lock = NSLock()
     private var _timedOut = false
+    private var _cacheGetSeconds: Double?
     private let words = WordEmbedder()
 
     var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return _timedOut }
+    /// How long the detached `cacheGet` took, once it has come back.
+    var cacheGetSeconds: Double? { lock.lock(); defer { lock.unlock() }; return _cacheGetSeconds }
+
+    private func recordCacheGet(_ secs: Double) { lock.lock(); _cacheGetSeconds = secs; lock.unlock() }
 
     func identity() -> EmbedderIdentity { words.identity() }
 
@@ -134,8 +144,10 @@ final class CacheReadingEmbedder: MnemoEmbedder, @unchecked Sendable {
         let done = DispatchSemaphore(value: 0)
         let store = self.store
         let text = texts[0]
-        Task.detached {
+        Task.detached { [weak self] in
+            let start = Date()
             _ = try? await store?.cacheGet(namespace: "emb", key: text)
+            self?.recordCacheGet(Date().timeIntervalSince(start))
             done.signal()
         }
         if done.wait(timeout: .now() + 3) == .timedOut {
