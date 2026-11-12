@@ -41,7 +41,7 @@ pub enum MnemoError {
     /// A read-only open needs a read-write open first: the file has a WAL
     /// transaction to recover, or a format migration to apply. Open it
     /// read-write once, then read-only again.
-    #[error("read-only open blocked: {reason}; open read-write once to fix")]
+    #[error("read-only open blocked: {reason}{}", if reason.contains("mnemo compact") { "" } else { "; open read-write once to fix" })]
     NeedsWriteOpen { reason: String },
     /// The file's format is older than v9, so it can't be opened read-write
     /// (the v8 sunset, v0.13). A v8 file still opens read-only; `compact_file`

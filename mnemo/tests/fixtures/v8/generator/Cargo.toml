@@ -5,6 +5,7 @@
 # made.
 #
 #   cd mnemo/tests/fixtures/v8/generator && cargo run --locked
+#   cargo run --locked -- pending-wal      # v8_pending_wal.mnemo only
 #
 # Not part of the mnemo workspace: its own `[workspace]` table keeps it out.
 [package]
@@ -14,7 +15,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
-mnemo-engine = "=0.12.3"
+# `failpoints` arms a write failure for the pending-WAL fixture; it does
+# nothing unless armed.
+mnemo-engine = { version = "=0.12.3", features = ["failpoints"] }
 serde_json = "1"
 ulid = "1"
 

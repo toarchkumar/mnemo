@@ -821,8 +821,16 @@ impl Mnemo {
         )?
         .is_some()
         {
+            // RB-003.3: a pre-v9 file can't be opened read-write any more,
+            // so the usual advice would send the user in a circle.
+            // Compaction recovers the WAL and converts the file.
             return Err(MnemoError::NeedsWriteOpen {
-                reason: "pending WAL recovery",
+                reason: if header.version < VERSION_V9 {
+                    "pending WAL recovery in a pre-v9 file; run `mnemo compact <file>`, \
+                     which recovers it and converts the file to v9"
+                } else {
+                    "pending WAL recovery"
+                },
             });
         }
 

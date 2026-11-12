@@ -90,7 +90,12 @@ pub enum MnemoError {
     /// that requires a write handle to complete — a committed-but-unchecked
     /// WAL transaction, or a format-version migration older than the current
     /// `VERSION`. Open read-write once, close cleanly, then reopen read-only.
-    #[error("read-only open blocked: {reason} — open read-write once to fix")]
+    ///
+    /// On a file older than v9 (which no build opens read-write since the
+    /// v8 sunset) the reason itself says to run `mnemo compact`, which
+    /// completes the work and converts the file, and the generic advice is
+    /// left off.
+    #[error("read-only open blocked: {reason}{}", needs_write_open_hint(reason))]
     NeedsWriteOpen {
         /// Human-readable reason (e.g. `"pending WAL recovery"`).
         reason: &'static str,
@@ -135,3 +140,13 @@ pub enum MnemoError {
 
 /// Convenience result alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, MnemoError>;
+
+/// The advice after a [`MnemoError::NeedsWriteOpen`] reason. A reason that
+/// names its own fix (`mnemo compact`, for a pre-v9 file) needs no other.
+pub(crate) fn needs_write_open_hint(reason: &str) -> &'static str {
+    if reason.contains("mnemo compact") {
+        ""
+    } else {
+        " — open read-write once to fix"
+    }
+}

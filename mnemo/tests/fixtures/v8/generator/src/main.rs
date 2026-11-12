@@ -39,8 +39,68 @@ fn cfg() -> MnemoConfig {
     }
 }
 
+/// `v8_pending_wal.mnemo` (RB-003.3): what a kill between a commit and
+/// its checkpoint leaves under v0.12. Ten memories are checkpointed; five
+/// more are committed in the WAL but not written to their home pages.
+///
+/// A child process (`crash <path> <n>`) adds the five, arms the published
+/// engine's write failpoint at the `n`th write and flushes, then exits
+/// without running destructors, as a kill would. The smallest `n` that
+/// leaves all five recoverable is the one between the WAL commit and the
+/// checkpoint.
+fn pending_wal(out: &Path) {
+    let path = out.join("v8_pending_wal.mnemo");
+    let exe = std::env::current_exe().expect("own path");
+    for n in 0..400 {
+        let _ = std::fs::remove_file(&path);
+        let mut db = Mnemo::create(&path, PASSPHRASE, cfg()).expect("create v8");
+        for i in 0..10 {
+            db.remember(Memory::new(format!("checkpointed note {i}"), MemoryType::Semantic, vec_for(i)))
+                .unwrap();
+        }
+        db.close().unwrap();
+        let status = std::process::Command::new(&exe)
+            .args(["crash", path.to_str().unwrap(), &n.to_string()])
+            .status()
+            .expect("run the crash child");
+        assert!(status.success());
+        // Still pending? Then a copy opened read-write (v0.12.3 can) must
+        // recover all fifteen.
+        if Mnemo::open_read_only(&path, PASSPHRASE).is_ok() {
+            continue;
+        }
+        let probe = out.join("v8_pending_wal.probe");
+        std::fs::copy(&path, &probe).unwrap();
+        let recovered = Mnemo::open(&probe, PASSPHRASE).map(|d| d.len()).unwrap_or(0);
+        let _ = std::fs::remove_file(&probe);
+        if recovered == 15 {
+            println!("wrote {} (failpoint at write {n})", path.display());
+            return;
+        }
+    }
+    panic!("no failpoint left a committed, un-checkpointed WAL");
+}
+
+fn crash(path: &str, n: i64) -> ! {
+    let mut db = Mnemo::open(path, PASSPHRASE).expect("open");
+    for i in 0..5 {
+        db.remember(Memory::new(format!("note in the WAL {i}"), MemoryType::Episodic, vec_for(20 + i)))
+            .unwrap();
+    }
+    mnemo_engine::__failpoints::set_writes_until_fail(n);
+    let _ = db.flush();
+    // A kill: no destructor, no further write.
+    std::process::exit(0)
+}
+
 fn main() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("crash") => crash(&args[2], args[3].parse().unwrap()),
+        Some("pending-wal") => return pending_wal(&out),
+        _ => {}
+    }
     let pass_path = out.join("v8_passphrase.mnemo");
     let key_path = out.join("v8_key.mnemo");
     for p in [&pass_path, &key_path] {

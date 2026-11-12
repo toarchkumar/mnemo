@@ -248,3 +248,74 @@ fn no_new_file_can_be_v8() {
     }
     assert!(!dir.path().join("new.mnemo").exists());
 }
+
+/// RB-003.3: a v8 file left mid-commit (`v8_pending_wal.mnemo`: 10
+/// memories checkpointed, 5 committed in the WAL but not checkpointed, as
+/// a kill under v0.12 leaves it). The read-only open can't recover it and
+/// no build opens it read-write, so the message points at `mnemo compact`,
+/// which recovers the WAL and converts the file.
+#[test]
+fn a_v8_file_with_a_pending_wal_points_at_compact() {
+    let (_dir, path) = copy("v8_pending_wal.mnemo");
+    let pass = "v8-fixture-passphrase";
+    match Mnemo::open_read_only(&path, pass) {
+        Err(err @ MnemoError::NeedsWriteOpen { .. }) => {
+            let msg = err.to_string();
+            assert!(msg.contains("run `mnemo compact <file>`"), "{msg}");
+            assert!(!msg.contains("open read-write once"), "{msg}");
+        }
+        other => panic!("expected NeedsWriteOpen, got {:?}", other.err()),
+    }
+
+    // The CLI's read commands give the same advice.
+    let mnemo = env!("CARGO_BIN_EXE_mnemo");
+    let p = path.to_str().unwrap();
+    for args in [
+        vec!["about", p],
+        vec!["list", p],
+        vec!["info", p],
+        vec!["verify", p],
+        vec!["export", p, "--git"],
+    ] {
+        let out = std::process::Command::new(mnemo)
+            .args(&args)
+            .env("MNEMO_PASSPHRASE", pass)
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(
+            err.contains("run `mnemo compact <file>`"),
+            "{args:?}: {err}"
+        );
+    }
+
+    // And compaction recovers all of it.
+    let out = std::process::Command::new(mnemo)
+        .args(["compact", p])
+        .env("MNEMO_PASSPHRASE", pass)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("(v9): 15 -> 15 live memories"), "{stdout}");
+    let mut db = Mnemo::open(&path, pass).unwrap();
+    assert_eq!(db.stats().unwrap().format_version, 9);
+    let contents: Vec<String> = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
+    for i in 0..5 {
+        assert!(
+            contents.contains(&format!("note in the WAL {i}")),
+            "{contents:?}"
+        );
+    }
+    assert_eq!(contents.len(), 15);
+}
