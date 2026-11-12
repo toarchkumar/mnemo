@@ -112,19 +112,39 @@ The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 
+## What's new in v0.13.1: safer opens, raw-key files from the CLI
+
+- **A wrong passphrase never changes the file.** Opening a file that has
+  an unfinished save now checks the passphrase or key, and the format,
+  before completing that save, so a typo or a refused open of an old file
+  leaves it byte-for-byte as it was.
+- **Raw-key files work from the CLI.** `info`, `about`, `list`, `verify`,
+  `recall`, `export` and `compact` take `--key-file`, as `inspect` does,
+  and Python gains `compact_file_with_key`.
+- **Python errors have types.** Every engine error is a
+  `mnemo_engine.MnemoError` (still a `RuntimeError`), with subclasses such
+  as `WrongPassphraseError`, `FormatTooOldError` and
+  `EmbedderMismatchError`, so you can catch the one you mean.
+- **`mnemo inspect` is lighter and tidier:** it holds much less in memory
+  on large files, stops after 30 minutes without use, and `--open` no
+  longer passes the link to the browser on its command line.
+- The iOS and Android packages are unchanged and stay at 0.13.0.
+
 ## What's new in v0.13.0: see what your agents remember
 
 - **`mnemo inspect`: a read-only view of a memory file in your browser.**
   Browse and search memories, follow the history of a keyed fact, read a
   thread's essence and turns, and check restore points and stats. It runs
-  only on your own machine, behind a one-time link, and never changes the
-  file or blocks an agent that's writing to it.
+  only on your own machine, behind a private link that works only while
+  the inspector runs, and never changes the file or blocks an agent that's
+  writing to it.
   ```sh
   mnemo inspect agent.mnemo                  # prints a link; open it in your browser
   mnemo inspect app.mnemo --key-file app.key # a raw-key file (what create_with_key writes)
   ```
-  Copy the printed link into your browser. `--open` launches the browser
-  for you; use it only on a machine where you're the only user.
+  Copy the printed link into your browser, or add `--open` to launch it.
+  The inspector stops on its own after 30 minutes without use
+  (`--idle-timeout`).
 - **`mnemo export`: a readable copy of a file,** as Markdown or JSON Lines.
   `--git` writes a stable version for a repository: the same file always
   gives the same output, and a new memory changes only its own lines (a new
@@ -133,9 +153,8 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
   themselves.
 - **Old v8 files are now read-only.** Run `mnemo compact <file>` once to
   upgrade a file to the current format; that also repairs files from
-  early versions that compaction used to refuse. For a raw-key v8 file, use
-  `Mnemo::compact_file_with_key` in Rust until the CLI's `compact` gains
-  `--key-file` (planned for v0.13.1).
+  early versions that compaction used to refuse. For a raw-key file, add
+  `--key-file <key>` (from v0.13.1).
 - **Every file records which embedding model made its vectors,** and
   refuses a different one, so a model change can't quietly mix
   incompatible vectors.
