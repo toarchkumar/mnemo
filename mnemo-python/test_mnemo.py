@@ -658,6 +658,67 @@ def test_compact_file_with_key():
     print("ok  mnemo.compact_file_with_key(path, key)")
 
 
+def test_exception_types():
+    """v0.13.1 (RB-003.8 item 3): each engine error has its own type, all
+    under `mnemo.MnemoError`, which is a `RuntimeError`."""
+    import shutil
+    here = os.path.dirname(os.path.abspath(__file__))
+    v8 = os.path.join(here, "..", "mnemo", "tests", "fixtures", "v8")
+
+    def raises(kind, fn):
+        try:
+            fn()
+        except kind as e:
+            assert isinstance(e, mnemo.MnemoError), type(e)
+            assert isinstance(e, RuntimeError), type(e)
+            return e
+        raise AssertionError(f"expected {kind.__name__}")
+
+    assert issubclass(mnemo.MnemoError, RuntimeError)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=2)
+        gone = db.remember("gone", "semantic", [1.0, 0.0])
+        db.delete(gone)
+        raises(mnemo.NotFoundError, lambda: db.get(gone))
+        raises(mnemo.InvalidArgumentError, lambda: db.remember("z", "semantic", [0.0, 0.0]))
+        raises(mnemo.DimensionMismatchError,
+               lambda: db.remember("w", "semantic", [1.0, 0.0, 0.0]))
+        db.set_embedder(_fake_embedder(2), name="model-a", dimensions=2, normalize=True)
+        raises(mnemo.LockedError, lambda: mnemo.open(path, "pw"))
+        db.close()
+        del db
+        raises(mnemo.WrongPassphraseError, lambda: mnemo.open(path, "nope"))
+        db = mnemo.open(path, "pw")
+        e = raises(mnemo.EmbedderMismatchError,
+                   lambda: db.set_embedder(_fake_embedder(2), name="model-b",
+                                          dimensions=2, normalize=True))
+        assert str(e).startswith("embedder identity mismatch"), e
+        db.close()
+        del db
+        ro = mnemo.open(path, "pw", read_only=True)
+        raises(mnemo.ReadOnlyError, lambda: ro.remember("x", "semantic", [1.0, 0.0]))
+        ro.close()
+        del ro
+
+        junk = os.path.join(d, "junk.mnemo")
+        with open(junk, "wb") as f:
+            f.write(b"\x07" * 16384)
+        raises(mnemo.NotAMnemoFileError, lambda: mnemo.open(junk, "pw"))
+
+        old = os.path.join(d, "v8.mnemo")
+        shutil.copy(os.path.join(v8, "v8_passphrase.mnemo"), old)
+        e = raises(mnemo.FormatTooOldError, lambda: mnemo.open(old, "v8-fixture-passphrase"))
+        assert "mnemo compact" in str(e), e
+        mnemo.open(old, "v8-fixture-passphrase", read_only=True).close()
+
+        pending = os.path.join(d, "pending.mnemo")
+        shutil.copy(os.path.join(v8, "v8_pending_wal.mnemo"), pending)
+        raises(mnemo.NeedsWriteOpenError,
+               lambda: mnemo.open(pending, "v8-fixture-passphrase", read_only=True))
+    print("ok  exception types (MnemoError and its subclasses)")
+
+
 def test_recall_accepts_n_probe_n_rerank_overrides():
     """PR ANN-1: Python callers can tune the ANN index per query.
 
@@ -1291,6 +1352,7 @@ if __name__ == "__main__":
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     test_compact_file_with_key()
+    test_exception_types()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()
     test_mnemo_alias_is_as_import_only_and_wheel_ships_no_mnemo_package()

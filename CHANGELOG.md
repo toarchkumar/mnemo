@@ -18,6 +18,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `FormatTooOld`'s message, and the pre-v9 pending-WAL message, name it.
 - **Python `mnemo.compact_file_with_key(path, key)`,** `compact_file` for a
   raw-key file.
+- **Python exception types** (RB-003.8 item 3). Every engine error is now
+  an `mnemo_engine.MnemoError`, a subclass of `RuntimeError` (so `except
+  RuntimeError` still catches it), with subclasses: `FormatTooOldError`,
+  `NeedsWriteOpenError`, `EmbedderMismatchError`, `WrongPassphraseError`,
+  `LockedError`, `ReadOnlyError`, `DimensionMismatchError`,
+  `InvalidArgumentError`, `NotFoundError`, `UnsupportedVersionError`,
+  `NotAMnemoFileError` and `CorruptError`. The messages are unchanged.
 
 ### Fixed
 

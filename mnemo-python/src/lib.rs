@@ -38,9 +38,116 @@ use mnemo_core::{
 
 // --- error / value conversion -------------------------------------------
 
-/// Map a core error onto a Python exception.
+/// v0.13.1 (RB-003.8 item 3): the engine's errors as Python exception
+/// types. `MnemoError` subclasses `RuntimeError`, so code that catches
+/// `RuntimeError` (every error was one before) keeps working.
+// PyO3 0.22's `create_exception!` checks a `gil-refs` cfg this crate
+// doesn't declare.
+#[allow(unexpected_cfgs)]
+mod exc {
+    use pyo3::exceptions::PyRuntimeError;
+    pyo3::create_exception!(
+        mnemo_engine,
+        MnemoError,
+        PyRuntimeError,
+        "Base class of every error the engine raises (a RuntimeError)."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        FormatTooOldError,
+        MnemoError,
+        "The file predates v9: a v8 file opens only read-only; run `mnemo compact` to convert it."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        UnsupportedVersionError,
+        MnemoError,
+        "The file comes from a newer engine than this one."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        EmbedderMismatchError,
+        MnemoError,
+        "The embedder given isn't the one the file's vectors came from."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        WrongPassphraseError,
+        MnemoError,
+        "The passphrase or key doesn't open this file."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        LockedError,
+        MnemoError,
+        "Another handle holds the file's lock."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        ReadOnlyError,
+        MnemoError,
+        "A write on a read-only handle."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        NeedsWriteOpenError,
+        MnemoError,
+        "The file has pending work a read-only open can't finish."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        CorruptError,
+        MnemoError,
+        "A page or the header failed its integrity check: corrupt or tampered."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        NotAMnemoFileError,
+        MnemoError,
+        "The file isn't a .mnemo database."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        NotFoundError,
+        MnemoError,
+        "No memory with that id."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        DimensionMismatchError,
+        MnemoError,
+        "A vector of the wrong width for this file."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        InvalidArgumentError,
+        MnemoError,
+        "An argument the engine refused."
+    );
+}
+
+/// Map a core error onto its Python exception type (the message is the
+/// engine's, unchanged).
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
-    PyRuntimeError::new_err(e.to_string())
+    use mnemo_core::MnemoError as E;
+    let msg = e.to_string();
+    match e {
+        E::FormatTooOld { .. } => exc::FormatTooOldError::new_err(msg),
+        E::UnsupportedVersion(_) => exc::UnsupportedVersionError::new_err(msg),
+        E::EmbedderMismatch { .. } => exc::EmbedderMismatchError::new_err(msg),
+        E::WrongPassphrase => exc::WrongPassphraseError::new_err(msg),
+        E::Locked { .. } => exc::LockedError::new_err(msg),
+        E::ReadOnly => exc::ReadOnlyError::new_err(msg),
+        E::NeedsWriteOpen { .. } => exc::NeedsWriteOpenError::new_err(msg),
+        E::PageAuthFailed(_) | E::HeaderChecksum | E::HeaderTampered => {
+            exc::CorruptError::new_err(msg)
+        }
+        E::BadMagic => exc::NotAMnemoFileError::new_err(msg),
+        E::NotFound(_) => exc::NotFoundError::new_err(msg),
+        E::DimensionMismatch { .. } => exc::DimensionMismatchError::new_err(msg),
+        E::Invalid(_) => exc::InvalidArgumentError::new_err(msg),
+        _ => exc::MnemoError::new_err(msg),
+    }
 }
 
 /// Phase 12.6: parse a Python filter dict into a core [`CoreFilter`].
@@ -2596,6 +2703,44 @@ fn build_info(py: Python<'_>) -> PyResult<PyObject> {
 /// v0.8.0.
 #[pymodule]
 fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    m.add("MnemoError", py.get_type_bound::<exc::MnemoError>())?;
+    m.add(
+        "FormatTooOldError",
+        py.get_type_bound::<exc::FormatTooOldError>(),
+    )?;
+    m.add(
+        "UnsupportedVersionError",
+        py.get_type_bound::<exc::UnsupportedVersionError>(),
+    )?;
+    m.add(
+        "EmbedderMismatchError",
+        py.get_type_bound::<exc::EmbedderMismatchError>(),
+    )?;
+    m.add(
+        "WrongPassphraseError",
+        py.get_type_bound::<exc::WrongPassphraseError>(),
+    )?;
+    m.add("LockedError", py.get_type_bound::<exc::LockedError>())?;
+    m.add("ReadOnlyError", py.get_type_bound::<exc::ReadOnlyError>())?;
+    m.add(
+        "NeedsWriteOpenError",
+        py.get_type_bound::<exc::NeedsWriteOpenError>(),
+    )?;
+    m.add("CorruptError", py.get_type_bound::<exc::CorruptError>())?;
+    m.add(
+        "NotAMnemoFileError",
+        py.get_type_bound::<exc::NotAMnemoFileError>(),
+    )?;
+    m.add("NotFoundError", py.get_type_bound::<exc::NotFoundError>())?;
+    m.add(
+        "DimensionMismatchError",
+        py.get_type_bound::<exc::DimensionMismatchError>(),
+    )?;
+    m.add(
+        "InvalidArgumentError",
+        py.get_type_bound::<exc::InvalidArgumentError>(),
+    )?;
     m.add_class::<Mnemo>()?;
     m.add_class::<Session>()?;
     m.add_class::<Turn>()?;

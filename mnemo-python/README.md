@@ -200,34 +200,38 @@ nested dict.
 
 ### Errors
 
-Every engine error is raised as `RuntimeError` (argument errors the binding
-catches itself, before the engine sees them, are `ValueError`). Until the
-exception subclasses arrive (v0.13.1), tell them apart by how the message
-starts:
+Since v0.13.1 every engine error is an `mnemo_engine.MnemoError`, which
+subclasses `RuntimeError`, so `except RuntimeError` keeps working. The
+subclasses tell the cases apart (argument errors the binding catches itself,
+before the engine sees them, are still `ValueError`):
 
-| The message starts with | What happened | What to do |
+| Exception | What happened | What to do |
 |---|---|---|
-| `this file is format v` | the file predates v9: a v8 file opens only with `read_only=True`, v4–v7 not at all | run `mnemo compact <file>` once (it keeps every live memory) |
-| `read-only open blocked:` | the file has pending work (a committed write to finish, a torn header to repair) | open it read-write once; on a pre-v9 file the message says to run `mnemo compact` instead |
-| `embedder identity mismatch` | the embedder given isn't the one the file's vectors came from | use the original embedder, or create a new file for the new model |
-| `wrong passphrase` | the passphrase or key doesn't open this file | check the secret |
-| `file already locked by another handle` | another handle (another process, or one not yet closed) has the file | close it, or open read-only alongside a reader |
-| `operation requires a read-write handle` | a write on a `read_only=True` handle | reopen read-write |
-| `vector dimension mismatch` | a vector of the wrong width | embed with the file's model |
-| `invalid argument:` | a bad argument the engine refused | fix the call |
-| `memory '` | the id isn't in the file (`… not found`) | |
-| `unsupported .mnemo format version` | a file from a newer engine | upgrade `mnemo-engine` |
-| `bad magic bytes`, `header checksum mismatch`, `header seal authentication failed`, `page ` | not a `.mnemo` file, or a corrupt or tampered one | restore from a backup or an export |
+| `FormatTooOldError` | the file predates v9: a v8 file opens only with `read_only=True`, v4–v7 not at all | run `mnemo compact <file>` once (`--key-file` for a raw-key file, or `compact_file_with_key`); it keeps every live memory |
+| `NeedsWriteOpenError` | the file has pending work (a committed write to finish, a torn header to repair) | open it read-write once; on a pre-v9 file the message says to run `mnemo compact` instead |
+| `EmbedderMismatchError` | the embedder given isn't the one the file's vectors came from | use the original embedder, or create a new file for the new model |
+| `WrongPassphraseError` | the passphrase or key doesn't open this file | check the secret |
+| `LockedError` | another handle (another process, or one not yet closed) has the file | close it, or open read-only alongside a reader |
+| `ReadOnlyError` | a write on a `read_only=True` handle | reopen read-write |
+| `DimensionMismatchError` | a vector of the wrong width | embed with the file's model |
+| `InvalidArgumentError` | a bad argument the engine refused (an all-zero vector, say) | fix the call |
+| `NotFoundError` | the id isn't in the file | |
+| `UnsupportedVersionError` | a file from a newer engine | upgrade `mnemo-engine` |
+| `NotAMnemoFileError` | not a `.mnemo` file | check the path |
+| `CorruptError` | a page or the header failed its integrity check: corrupt or tampered | restore from a backup or an export |
+| `MnemoError` (only) | I/O, cryptography, key derivation or serialization | the message says which |
 
 ```python
+import mnemo_engine as mnemo
+
 try:
     db = mnemo.open(path, passphrase)
-except RuntimeError as e:
-    if str(e).startswith("this file is format v"):
-        db = mnemo.open(path, passphrase, read_only=True)  # a v8 file; compact it later
-    else:
-        raise
+except mnemo.FormatTooOldError:
+    db = mnemo.open(path, passphrase, read_only=True)  # a v8 file; compact it later
 ```
+
+Each message is the engine's own, unchanged from before, so code that
+matched on a message's start keeps working too.
 
 ## Result caching
 
