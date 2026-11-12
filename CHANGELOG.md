@@ -90,7 +90,9 @@ release.
     ordered by key, then id (keyed memories first), never by access time;
     no thread turns, no access stats and no counts. Exporting the same
     unchanged file twice gives the same bytes, a recall doesn't change it,
-    and one new memory adds only its own lines. The result cache (and so
+    and one new memory adds only its own lines (a new version of a keyed
+    fact also changes the line of the version it supersedes). The result
+    cache (and so
     the embedder-identity record) is never exported.
 
 - **Restore points in `stats`** (RB-001.25). `Stats` and `StatsSummary`

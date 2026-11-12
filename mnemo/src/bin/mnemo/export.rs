@@ -15,7 +15,9 @@
 //!   of an export.
 //!
 //! The same unchanged file exports to the same bytes, and one new memory
-//! adds only its own lines.
+//! adds only its own lines. A new version of a keyed fact also changes the
+//! line of the version it supersedes (its `_mnemo.superseded_by` and
+//! `_mnemo.invalid_at`).
 
 use std::io::Write;
 

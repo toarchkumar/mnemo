@@ -892,7 +892,8 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
 - **`--git`** orders records by key, then id (keyed memories first), and
   leaves out thread turns, access stats and counts. The same unchanged file
   exports to the same bytes, a recall doesn't change the output, and one new
-  memory adds only its own lines.
+  memory adds only its own lines (a new version of a keyed fact also
+  changes the line of the version it supersedes).
 - The result cache (and so the embedder-identity record) is never exported.
 - **A committed export is world-readable elsewhere.** Git stores no file
   mode beyond the executable bit, so another checkout of a committed

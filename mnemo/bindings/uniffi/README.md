@@ -21,6 +21,12 @@ Kotlin package (`mnemo/bindings/kotlin/`) are built from it.
 One object, `MnemoDb`, plus a few free functions. Metadata crosses the
 FFI as a JSON object string; keys as bytes, never strings.
 
+**Key bytes leave Rust as a copy it can't wipe.** `generate_key` and
+`import_with_passphrase` return a key that UniFFI copies into a buffer the
+host language owns and Rust never frees, so the engine can't zero that copy
+the way it zeroes its own. The Swift and Kotlin stores zero the buffers they
+own as soon as the key is stored.
+
 | area | calls |
 |---|---|
 | open and lifecycle | `MnemoDb.create`, `create_with_key`, `open`, `open_with_key`, `open_read_only`, `open_read_only_with_key`, `close`, `flush`, `len`, `is_empty`, `dimensions`, `path`; free `generate_key`, `compact_file`, `compact_file_with_key` |

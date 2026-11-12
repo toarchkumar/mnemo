@@ -197,6 +197,37 @@ context manager (exiting consolidates).
 Memories and results are returned as plain dicts; `metadata` round-trips as a
 nested dict.
 
+### Errors
+
+Every engine error is raised as `RuntimeError` (argument errors the binding
+catches itself, before the engine sees them, are `ValueError`). Until the
+exception subclasses arrive (v0.13.1), tell them apart by how the message
+starts:
+
+| The message starts with | What happened | What to do |
+|---|---|---|
+| `this file is format v` | the file predates v9: a v8 file opens only with `read_only=True`, v4–v7 not at all | run `mnemo compact <file>` once (it keeps every live memory) |
+| `read-only open blocked:` | the file has pending work (a committed write to finish, a torn header to repair) | open it read-write once; on a pre-v9 file the message says to run `mnemo compact` instead |
+| `embedder identity mismatch` | the embedder given isn't the one the file's vectors came from | use the original embedder, or create a new file for the new model |
+| `wrong passphrase` | the passphrase or key doesn't open this file | check the secret |
+| `file already locked by another handle` | another handle (another process, or one not yet closed) has the file | close it, or open read-only alongside a reader |
+| `operation requires a read-write handle` | a write on a `read_only=True` handle | reopen read-write |
+| `vector dimension mismatch` | a vector of the wrong width | embed with the file's model |
+| `invalid argument:` | a bad argument the engine refused | fix the call |
+| `memory '` | the id isn't in the file (`… not found`) | |
+| `unsupported .mnemo format version` | a file from a newer engine | upgrade `mnemo-engine` |
+| `bad magic bytes`, `header checksum mismatch`, `header seal authentication failed`, `page ` | not a `.mnemo` file, or a corrupt or tampered one | restore from a backup or an export |
+
+```python
+try:
+    db = mnemo.open(path, passphrase)
+except RuntimeError as e:
+    if str(e).startswith("this file is format v"):
+        db = mnemo.open(path, passphrase, read_only=True)  # a v8 file; compact it later
+    else:
+        raise
+```
+
 ## Result caching
 
 MNemo doubles as a durable result cache — memoize LLM tool-call outputs,
