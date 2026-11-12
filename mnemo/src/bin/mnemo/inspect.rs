@@ -845,12 +845,15 @@ pub fn write_redirect(url: &str) -> std::io::Result<(std::path::PathBuf, std::pa
         .map(|b| format!("{b:02x}"))
         .collect();
     let dir = std::env::temp_dir().join(format!("mnemo-inspect-{}-{tag}", std::process::id()));
-    let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    {
+    let builder = {
         use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
+        let mut b = std::fs::DirBuilder::new();
+        b.mode(0o700);
+        b
+    };
+    #[cfg(not(unix))]
+    let builder = std::fs::DirBuilder::new();
     builder.create(&dir)?;
     let page = dir.join("open.html");
     let mut opts = std::fs::OpenOptions::new();
