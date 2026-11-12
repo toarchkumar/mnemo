@@ -28,6 +28,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **`mnemo inspect`:**
+  - `--idle-timeout` (default `30m`; `90s`, `1h`, or `0` for never): the
+    server stops after that long without a request from the page, wiping
+    the passphrase or key, which it now holds in memory that's zeroed when
+    dropped.
+  - The page keeps the token for its tab and takes it out of the address
+    bar, so it isn't in the browser's history; the page itself (which
+    holds no data) loads without it, so a refresh still works. Every API
+    route still needs it.
+  - `--open` hands the browser a private local page (owner-only, deleted
+    once it has loaded) that forwards to the URL, instead of the URL.
 - **`mnemo inspect` holds less in memory** (RB-003.7). The load lets the
   file's records (vectors included) go as soon as the views' JSON and the
   keyword index are built, before it reads the thread turns.

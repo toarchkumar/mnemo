@@ -91,7 +91,17 @@
 <main id="main"></main>
 <script>
 "use strict";
-const TOKEN = new URLSearchParams(location.search).get("t") || "";
+// The token arrives in the URL once. Keep it for this tab only and take it
+// out of the address bar, so it isn't in the history or on the screen.
+const TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get("t");
+  if (fromUrl) {
+    try { sessionStorage.setItem("mnemo-inspect-token", fromUrl); } catch (e) {}
+    history.replaceState(null, "", location.pathname);
+    return fromUrl;
+  }
+  try { return sessionStorage.getItem("mnemo-inspect-token") || ""; } catch (e) { return ""; }
+})();
 const main = document.getElementById("main");
 let view = "memories";
 const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null };
@@ -285,7 +295,12 @@ document.getElementById("reload").addEventListener("click", async () => {
   catch (e) { document.getElementById("loaded").textContent = "reload failed: " + e.message; }
   finally { btn.disabled = false; btn.textContent = "Reload"; }
 });
-header(); render();
+if (!TOKEN) {
+  main.replaceChildren(el("p", { class: "error" },
+    "This tab has no access token. Open the URL that `mnemo inspect` printed."));
+} else {
+  header(); render();
+}
 </script>
 </body>
 </html>

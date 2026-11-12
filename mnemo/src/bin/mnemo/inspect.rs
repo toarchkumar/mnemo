@@ -18,8 +18,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use zeroize::Zeroizing;
 
 use mnemo_engine::{
     EssenceScope, KeywordIndex, Memory, Mnemo, MnemoError, Scope, MNEMO_META_INVALID_AT,
@@ -41,18 +44,19 @@ const MAX_PAGE: usize = 1000;
 const MAX_HEAD: usize = 16 * 1024;
 
 /// What unlocks the file.
+/// Both are wiped from memory when dropped.
 pub enum Secret {
     /// A passphrase (the prompt, `MNEMO_PASSPHRASE` or `--passphrase`).
-    Passphrase(String),
+    Passphrase(Zeroizing<String>),
     /// A raw 32-byte key (`--key-file`).
-    Key([u8; 32]),
+    Key(Zeroizing<[u8; 32]>),
 }
 
 /// A raw key from `--key-file`: 32 bytes as they are, or 64 hex digits.
-pub fn read_key_file(path: &str) -> Result<[u8; 32], String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("reading {path}: {e}"))?;
+pub fn read_key_file(path: &str) -> Result<Zeroizing<[u8; 32]>, String> {
+    let bytes = Zeroizing::new(std::fs::read(path).map_err(|e| format!("reading {path}: {e}"))?);
     if bytes.len() == 32 {
-        let mut k = [0u8; 32];
+        let mut k = Zeroizing::new([0u8; 32]);
         k.copy_from_slice(&bytes);
         return Ok(k);
     }
@@ -63,7 +67,7 @@ pub fn read_key_file(path: &str) -> Result<[u8; 32], String> {
             "{path}: a key file holds 32 raw bytes or 64 hex digits"
         ));
     }
-    let mut k = [0u8; 32];
+    let mut k = Zeroizing::new([0u8; 32]);
     for (i, byte) in k.iter_mut().enumerate() {
         *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("checked hex");
     }
@@ -404,19 +408,89 @@ pub fn new_token() -> String {
         .collect()
 }
 
-/// Accept connections until the process stops, one thread each.
+/// What the server and its helper threads share: when the last request
+/// with the token came in, and whether the page has been served.
+pub struct Watch {
+    started: Instant,
+    last_secs: AtomicU64,
+    page_served: AtomicBool,
+}
+
+impl Watch {
+    /// A watch that starts now.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            started: Instant::now(),
+            last_secs: AtomicU64::new(0),
+            page_served: AtomicBool::new(false),
+        })
+    }
+
+    fn touch(&self) {
+        self.last_secs
+            .store(self.started.elapsed().as_secs(), Ordering::Relaxed);
+    }
+
+    fn idle_for(&self) -> Duration {
+        let last = Duration::from_secs(self.last_secs.load(Ordering::Relaxed));
+        self.started.elapsed().saturating_sub(last)
+    }
+}
+
+/// `--idle-timeout`: `30m`, `90s`, `1h`, or a bare number of minutes.
+/// `0` means never.
+pub fn parse_idle(s: &str) -> Result<Option<Duration>, String> {
+    let s = s.trim();
+    let (num, unit) = match s.char_indices().find(|(_, c)| !c.is_ascii_digit()) {
+        Some((i, _)) => s.split_at(i),
+        None => (s, "m"),
+    };
+    let n: u64 = num
+        .parse()
+        .map_err(|_| format!("--idle-timeout {s:?}: use a number with s, m or h (30m)"))?;
+    let secs = match unit {
+        "s" => n,
+        "m" => n * 60,
+        "h" => n * 3600,
+        _ => return Err(format!("--idle-timeout {s:?}: use s, m or h (30m)")),
+    };
+    Ok((secs > 0).then(|| Duration::from_secs(secs)))
+}
+
+/// Accept connections until the process stops, one thread each. With
+/// `idle`, the server stops once no request carrying the token has come in
+/// for that long: it wipes the secret, drops what it read, and exits.
 pub fn serve(
     listener: TcpListener,
     token: String,
     state: Arc<Mutex<State>>,
+    watch: Arc<Watch>,
+    idle: Option<Duration>,
 ) -> std::io::Result<()> {
     let port = listener.local_addr()?.port();
-    let token = Arc::new(token);
+    let token = Arc::new(Zeroizing::new(token));
+    if let Some(idle) = idle {
+        let (state, watch) = (state.clone(), watch.clone());
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(250));
+            if watch.idle_for() >= idle {
+                let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+                // Dropping wipes it (Zeroizing).
+                st.secret = Secret::Key(Zeroizing::new([0u8; 32]));
+                println!(
+                    "stopping: no request for {}s (--idle-timeout)",
+                    idle.as_secs()
+                );
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                std::process::exit(0);
+            }
+        });
+    }
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
-        let (token, state) = (token.clone(), state.clone());
+        let (token, state, watch) = (token.clone(), state.clone(), watch.clone());
         std::thread::spawn(move || {
-            let _ = handle(stream, &token, port, &state);
+            let _ = handle(stream, &token, port, &state, &watch);
         });
     }
     Ok(())
@@ -523,7 +597,13 @@ fn respond_json(s: &mut TcpStream, status: &str, v: &Value) -> std::io::Result<(
     )
 }
 
-fn handle(mut s: TcpStream, token: &str, port: u16, state: &Mutex<State>) -> std::io::Result<()> {
+fn handle(
+    mut s: TcpStream,
+    token: &str,
+    port: u16,
+    state: &Mutex<State>,
+    watch: &Watch,
+) -> std::io::Result<()> {
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     s.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut buf = Vec::new();
@@ -581,16 +661,15 @@ fn handle(mut s: TcpStream, token: &str, port: u16, state: &Mutex<State>) -> std
             "Allow: GET\r\n",
         );
     }
-    if !req.query.get("t").is_some_and(|t| same(t, token)) {
-        return respond(
-            &mut s,
-            "403 Forbidden",
-            "text/plain",
-            b"missing or wrong token",
-            "",
-        );
-    }
+    // The page holds no data, so it's served without the token: after it
+    // moves the token out of the address bar, a refresh still loads. Every
+    // API route below needs the token.
     if req.path == "/" {
+        // Only the browser that has the token counts as having loaded it.
+        if req.query.get("t").is_some_and(|t| same(t, token)) {
+            watch.page_served.store(true, Ordering::Relaxed);
+            watch.touch();
+        }
         return respond(
             &mut s,
             "200 OK",
@@ -601,6 +680,16 @@ fn handle(mut s: TcpStream, token: &str, port: u16, state: &Mutex<State>) -> std
              form-action 'none'; frame-ancestors 'none'\r\n",
         );
     }
+    if !req.query.get("t").is_some_and(|t| same(t, token)) {
+        return respond(
+            &mut s,
+            "403 Forbidden",
+            "text/plain",
+            b"missing or wrong token",
+            "",
+        );
+    }
+    watch.touch();
     // RB-003.7: build the response under the lock, then release it before
     // writing to the client, so a slow reader doesn't hold up other
     // requests.
@@ -747,8 +836,48 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
     }
 }
 
-/// Open `url` in the default browser.
-pub fn open_browser(url: &str) -> std::io::Result<()> {
+/// Write a page that redirects to `url` into a new private directory
+/// (0700, the file 0600, on Unix), so the URL never goes on a command line.
+/// Returns the directory and the page's path.
+pub fn write_redirect(url: &str) -> std::io::Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let tag: String = Mnemo::generate_key()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let dir = std::env::temp_dir().join(format!("mnemo-inspect-{}-{tag}", std::process::id()));
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&dir)?;
+    let page = dir.join("open.html");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(&page)?;
+    // The URL is ours: digits, hex and fixed characters, nothing to escape.
+    write!(
+        f,
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
+         <meta http-equiv=\"refresh\" content=\"0;url={url}\"><title>mnemo inspect</title>\
+         <a href=\"{url}\">Open the inspector</a>"
+    )?;
+    f.sync_all()?;
+    Ok((dir, page))
+}
+
+/// Open the inspector in the default browser. The launcher gets the path of
+/// a private redirect page, not the URL: a launcher's arguments are visible
+/// to other users of the machine. The page is deleted once the browser has
+/// loaded the inspector, or after a minute.
+pub fn open_browser(url: &str, watch: Arc<Watch>) -> std::io::Result<()> {
+    let (dir, page) = write_redirect(url)?;
     #[cfg(target_os = "macos")]
     let mut cmd = std::process::Command::new("open");
     #[cfg(target_os = "windows")]
@@ -759,11 +888,22 @@ pub fn open_browser(url: &str) -> std::io::Result<()> {
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let mut cmd = std::process::Command::new("xdg-open");
-    cmd.arg(url)
+    let launched = cmd
+        .arg(&page)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map(|_| ())
+        .map(|_| ());
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        while !watch.page_served.load(Ordering::Relaxed)
+            && start.elapsed() < Duration::from_secs(60)
+        {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+    launched
 }
 
 #[cfg(test)]
@@ -814,6 +954,36 @@ mod tests {
         .map(|x| x.id)
         .collect();
         assert_eq!(order, ["z", "a", "m"]);
+    }
+
+    #[test]
+    fn the_redirect_page_is_private_and_points_at_the_url() {
+        let url = "http://127.0.0.1:9/?t=abc123";
+        let (dir, page) = write_redirect(url).unwrap();
+        let body = std::fs::read_to_string(&page).unwrap();
+        assert!(
+            body.contains("content=\"0;url=http://127.0.0.1:9/?t=abc123\""),
+            "{body}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode =
+                |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&dir), 0o700);
+            assert_eq!(mode(&page), 0o600);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn idle_timeouts_parse() {
+        assert_eq!(parse_idle("30m").unwrap(), Some(Duration::from_secs(1800)));
+        assert_eq!(parse_idle("90s").unwrap(), Some(Duration::from_secs(90)));
+        assert_eq!(parse_idle("1h").unwrap(), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_idle("45").unwrap(), Some(Duration::from_secs(2700)));
+        assert_eq!(parse_idle("0").unwrap(), None);
+        assert!(parse_idle("soon").is_err() && parse_idle("5d").is_err());
     }
 
     #[test]

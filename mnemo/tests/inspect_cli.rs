@@ -37,8 +37,13 @@ impl Drop for Inspector {
 }
 
 fn spawn(path: &Path, pp: &str, env: &[(&str, &Path)]) -> Inspector {
+    spawn_with(path, pp, env, &[])
+}
+
+fn spawn_with(path: &Path, pp: &str, env: &[(&str, &Path)], extra: &[&str]) -> Inspector {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mnemo"));
     cmd.args(["inspect", path.to_str().unwrap()])
+        .args(extra)
         .env("MNEMO_PASSPHRASE", pp)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -210,9 +215,22 @@ fn it_binds_loopback_and_refuses_wrong_tokens_hosts_and_methods() {
     let path = fixture(dir.path());
     let ins = spawn(&path, PW, &[]);
     let host = ins.host();
-    // The page and the API both need the token.
+    // The page holds no data and loads without the token (so a refresh
+    // works once it has left the address bar); every API route needs it.
     assert_eq!(ins.get("/", "").0, 200);
-    assert_eq!(request(ins.port, "GET", "/", &host).0, 403, "no token");
+    let (status, page) = request(ins.port, "GET", "/", &host);
+    assert_eq!(status, 200);
+    assert!(page.contains("history.replaceState") && !page.contains("Tuesdays"));
+    assert_eq!(
+        request(ins.port, "GET", "/api/about", &host).0,
+        403,
+        "no token"
+    );
+    assert_eq!(
+        request(ins.port, "GET", "/api/memories", &host).0,
+        403,
+        "no token"
+    );
     assert_eq!(request(ins.port, "GET", "/api/about?t=nope", &host).0, 403);
     let last = if ins.token.ends_with('0') { '1' } else { '0' };
     let wrong = format!("/api/about?t={}{last}", &ins.token[..63]);
@@ -612,4 +630,40 @@ fn it_shows_an_ios_passphrase_export() {
     );
     // The export has no project-scope essence, so there's none to show.
     assert!(ins.json("/api/threads", "")["project_essence"].is_null());
+}
+
+/// `--idle-timeout`: requests with the token keep the server up; once none
+/// has come in for that long, it stops by itself (exit 0) and says why.
+#[test]
+fn it_stops_after_the_idle_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture(dir.path());
+    let mut ins = spawn_with(&path, PW, &[], &["--idle-timeout", "2s"]);
+    for _ in 0..5 {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        assert_eq!(ins.get("/api/about", "").0, 200, "a request keeps it up");
+    }
+    // Requests without the token don't keep it alive.
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Ok(mut c) = TcpStream::connect(("127.0.0.1", ins.port)) {
+            let _ = write!(
+                c,
+                "GET /api/about?t=nope HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+                ins.host()
+            );
+            let _ = c.read_to_string(&mut String::new());
+        }
+        if let Some(st) = ins.child.try_wait().unwrap() {
+            break st;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "still running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert!(status.success());
+    assert!(start.elapsed() >= std::time::Duration::from_millis(1500));
+    assert!(std::net::TcpStream::connect(("127.0.0.1", ins.port)).is_err());
 }

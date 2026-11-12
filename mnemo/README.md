@@ -914,13 +914,13 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
 ```sh
 cargo run --bin mnemo -- inspect agent.mnemo   # prints a URL with a token: open it in your browser
 cargo run --bin mnemo -- inspect app.mnemo --key-file app.key   # a raw-key file (32 bytes or 64 hex digits)
-cargo run --bin mnemo -- inspect agent.mnemo --open   # opens the browser for you: single-user machines only
+cargo run --bin mnemo -- inspect agent.mnemo --open   # opens the browser for you
 ```
 
-The passphrase comes from the prompt or `MNEMO_PASSPHRASE`. **Copy the
-printed URL** into your browser. `--open` does that for you, but it hands
-the URL, token included, to the system's browser launcher, so use it only
-on a machine nobody else logs into.
+The passphrase comes from the prompt or `MNEMO_PASSPHRASE`. Copy the
+printed URL into your browser, or pass `--open`, which hands the browser a
+private local page (owner-only, deleted once it has loaded) that forwards
+to the URL.
 
 - **Views:** memories (filter by type, agent, keyed or not, and thread;
   keyword search with BM25, no embedder needed), keyed history (each
@@ -937,7 +937,13 @@ on a machine nobody else logs into.
   request must carry that token and a `Host` of the loopback address and
   port, which stops other sites' pages (DNS rebinding included). Only `GET`
   is served, with no CORS, and no endpoint writes the file. Nothing is
-  written to disk.
+  written to disk. Once the page has loaded, it keeps the token for that
+  tab only and takes it out of the address bar, so it isn't in the
+  browser's history.
+- **It stops when it's left alone.** After `--idle-timeout` without a
+  request from the page (30 minutes by default; `90s`, `1h`, or `0` for
+  never) it wipes the passphrase or key from memory and exits. It holds
+  the secret only so that Reload works.
 - It works on v8 files too, and on passphrase exports from the phone
   libraries.
 

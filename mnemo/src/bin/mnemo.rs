@@ -362,11 +362,16 @@ enum Command {
         /// Port on 127.0.0.1 (default: a random free one).
         #[arg(long)]
         port: Option<u16>,
-        /// Open the page in the default browser. For a machine only you
-        /// use: the URL, token included, goes to the system's browser
-        /// launcher. On a shared machine, copy the printed URL instead.
+        /// Open the page in the default browser. The browser gets a
+        /// private local page that forwards to the URL (deleted once it has
+        /// loaded), not the URL itself.
         #[arg(long)]
         open: bool,
+        /// Stop after this long without a request from the page: `30m`,
+        /// `90s`, `1h`, or `0` for never. The server then wipes the secret
+        /// and exits.
+        #[arg(long, default_value = "30m", value_name = "DURATION")]
+        idle_timeout: String,
         /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
         /// passphrase.
         #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
@@ -936,7 +941,9 @@ fn unlock(
 ) -> std::result::Result<inspect::Secret, String> {
     match key_file {
         Some(k) => Ok(inspect::Secret::Key(inspect::read_key_file(k)?)),
-        None => Ok(inspect::Secret::Passphrase(passphrase(pp)?)),
+        None => Ok(inspect::Secret::Passphrase(zeroize::Zeroizing::new(
+            passphrase(pp)?,
+        ))),
     }
 }
 
@@ -1996,13 +2003,12 @@ fn run() -> std::result::Result<(), String> {
             path,
             port,
             open,
+            idle_timeout,
             key_file,
             passphrase: pp,
         } => {
-            let secret = match key_file {
-                Some(k) => inspect::Secret::Key(inspect::read_key_file(&k)?),
-                None => inspect::Secret::Passphrase(passphrase(&pp)?),
-            };
+            let idle = inspect::parse_idle(&idle_timeout)?;
+            let secret = unlock(&pp, &key_file)?;
             let loaded = inspect::load(&path, &secret)?;
             let listener = inspect::bind(port).map_err(|e| format!("binding 127.0.0.1: {e}"))?;
             let port = listener
@@ -2018,15 +2024,17 @@ fn run() -> std::result::Result<(), String> {
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
             }
+            let watch = inspect::Watch::new();
             if open {
-                if let Err(e) = inspect::open_browser(&url) {
+                if let Err(e) = inspect::open_browser(&url, watch.clone()) {
                     eprintln!("warning: couldn't open a browser ({e}); open the URL above");
                 }
             }
             let state = std::sync::Arc::new(std::sync::Mutex::new(inspect::State::new(
                 path, secret, loaded,
             )));
-            inspect::serve(listener, token, state).map_err(|e| format!("serving: {e}"))?;
+            inspect::serve(listener, token, state, watch, idle)
+                .map_err(|e| format!("serving: {e}"))?;
         }
         Command::Recall {
             path,
