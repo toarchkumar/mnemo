@@ -277,3 +277,84 @@ fn t6_key_opens_answers_on_a_file_with_a_wal_to_recover() {
     std::fs::write(&junk, vec![7u8; 16384]).unwrap();
     assert!(Mnemo::key_opens(&junk, &key).is_err());
 }
+
+/// RB-003.3 (v0.13.1): on an intact header, the key is checked before a
+/// pending WAL is replayed, so a wrong key leaves the file byte-identical;
+/// the right key still recovers everything.
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_wrong_key_leaves_a_pending_wal_untouched() {
+    let _g = lock();
+    let dir = tempdir().unwrap();
+    let (path, key, _) = pending_wal_fixture(dir.path(), 9);
+    let before = std::fs::read(&path).unwrap();
+    let wrong = Mnemo::generate_key();
+    assert!(matches!(
+        Mnemo::open_with_key(&path, &wrong),
+        Err(MnemoError::WrongPassphrase)
+    ));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "a wrong key replayed the WAL"
+    );
+    let db = Mnemo::open_with_key(&path, &key).unwrap();
+    assert_eq!(db.len(), 15, "the right key recovers the pending commit");
+    db.close().unwrap();
+    assert_ne!(std::fs::read(&path).unwrap(), before);
+}
+
+/// RB-003.3 (v0.13.1): at every point a rekey can be cut off, a wrong
+/// passphrase leaves the file byte-identical, and the file opens with the
+/// old passphrase or the new one. (A rekey logs the new page 0 into a fresh
+/// WAL region, so a cut-off one never leaves the new wrap pending behind
+/// the old page 0; the key check against the replay's header covers that
+/// case anyway.)
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_cut_off_rekey_opens_with_one_passphrase_and_a_wrong_one_writes_nothing() {
+    let _g = lock();
+    let dir = tempdir().unwrap();
+    let mut saw = (false, false);
+    for n in 0..40 {
+        let path = dir.path().join(format!("rk-{n}.mnemo"));
+        let mut db = Mnemo::create(&path, "old-pw", cfg(9)).unwrap();
+        for i in 0..3 {
+            db.remember(mem(&format!("kept {i}"), i)).unwrap();
+        }
+        db.flush().unwrap();
+        mnemo_engine::__failpoints::set_writes_until_fail(n);
+        let _ = db.rekey("new-pw", KdfParams::fast());
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
+        drop(db);
+        let before = std::fs::read(&path).unwrap();
+        assert!(
+            matches!(
+                Mnemo::open(&path, "wrong-pw"),
+                Err(MnemoError::WrongPassphrase)
+            ),
+            "n={n}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "n={n}: a wrong passphrase wrote"
+        );
+        let old = Mnemo::open(&path, "old-pw");
+        if let Ok(db) = old {
+            assert_eq!(db.len(), 3, "n={n}");
+            db.close().unwrap();
+            saw.0 = true;
+        } else {
+            let db = Mnemo::open(&path, "new-pw")
+                .unwrap_or_else(|e| panic!("n={n}: neither opens: {e}"));
+            assert_eq!(db.len(), 3, "n={n}");
+            db.close().unwrap();
+            saw.1 = true;
+        }
+    }
+    assert!(
+        saw.0 && saw.1,
+        "the cut points covered both outcomes: {saw:?}"
+    );
+}

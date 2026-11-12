@@ -319,3 +319,31 @@ fn a_v8_file_with_a_pending_wal_points_at_compact() {
     }
     assert_eq!(contents.len(), 15);
 }
+
+/// RB-003.3 (v0.13.1): a read-write open of the v8 pending-WAL fixture
+/// writes nothing, whether the passphrase is wrong (`WrongPassphrase`) or
+/// right (`FormatTooOld`, refused before the WAL is replayed); compaction
+/// still recovers it (above).
+#[test]
+fn a_refused_open_of_a_v8_pending_wal_leaves_it_byte_identical() {
+    let (_dir, path) = copy("v8_pending_wal.mnemo");
+    let before = std::fs::read(&path).unwrap();
+    assert!(matches!(
+        Mnemo::open(&path, "not the passphrase"),
+        Err(MnemoError::WrongPassphrase)
+    ));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "a wrong passphrase wrote"
+    );
+    assert!(matches!(
+        Mnemo::open(&path, "v8-fixture-passphrase"),
+        Err(MnemoError::FormatTooOld { version: 8 })
+    ));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "a refused v8 open wrote"
+    );
+}

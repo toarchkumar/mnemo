@@ -11,6 +11,15 @@ use super::*;
 /// bounded buffer. (DUR-1 R-002.1 part 2.)
 const TORN_HEADER_SCAN_CHUNK: usize = 1 << 20; // 1 MiB
 
+/// The header a set of recovery frames would write to page 0, if they hold
+/// one that parses.
+fn page_zero_header(frames: &[(u64, Vec<u8>)]) -> Option<Header> {
+    frames
+        .iter()
+        .find(|(page_no, _)| *page_no == 0)
+        .and_then(|(_, bytes)| Header::from_page(bytes).ok())
+}
+
 /// Walk the file for every 8 KiB-aligned page whose first four bytes are
 /// `MWAL`, treating each as a candidate WAL-region start, and return the
 /// frames of the highest-`txn_id` committed transaction whose header
@@ -398,6 +407,15 @@ impl Mnemo {
                 // non-mnemo files still report `BadMagic`.
                 let scan = scan_header_recovery_candidates(&mut file, secret)?;
                 let frames = scan.ok_or(e)?;
+                // RB-003.3: the scan has checked the key; refuse an old
+                // format before healing anything.
+                if !allow_old {
+                    if let Some(h) = page_zero_header(&frames) {
+                        if h.version < VERSION_V9 {
+                            return Err(MnemoError::FormatTooOld { version: h.version });
+                        }
+                    }
+                }
                 for (page_no, bytes) in &frames {
                     if bytes.len() != PAGE_SIZE {
                         return Err(MnemoError::Invalid("WAL frame is not page-sized".into()));
@@ -413,15 +431,41 @@ impl Mnemo {
             }
         };
 
-        // Crash recovery: replay a committed-but-uncheckpointed transaction.
-        // Each frame is a finished page image; the header frame, replayed to
-        // page 0, supersedes the header just read.
-        if let Some(frames) = wal::recover(
+        // Crash recovery: a committed-but-uncheckpointed transaction is
+        // replayed below. Each frame is a finished page image; the header
+        // frame, replayed to page 0, supersedes the header just read.
+        let pending = wal::recover(
             &mut file,
             header.wal_start,
             header.wal_pages,
             header.wal_seq,
-        )? {
+        )?;
+
+        // RB-003.3: settle the key and the format before writing anything,
+        // so a wrong secret or a refused old format leaves the file
+        // byte-identical. Both are checked against the header the file will
+        // have once the WAL is replayed (its page-0 frame, else the current
+        // header): after a crash mid-rekey, page 0 still wraps the data key
+        // under the old secret and the WAL under the new one, and only the
+        // new one may open and recover it.
+        let target = match pending.as_deref().and_then(page_zero_header) {
+            Some(h) => h,
+            None => header.clone(),
+        };
+        let kdf = KdfParams {
+            m_cost: target.m_cost,
+            t_cost: target.t_cost,
+            p_cost: target.p_cost,
+        };
+        let kek = crypto::derive_kek(secret, &target.salt, kdf)?;
+        let dek = crypto::unwrap_dek(&kek, &target.dek_nonce, &target.wrapped_dek)?;
+        if !allow_old && target.version < VERSION_V9 {
+            return Err(MnemoError::FormatTooOld {
+                version: target.version,
+            });
+        }
+
+        if let Some(frames) = pending {
             for (page_no, bytes) in &frames {
                 if bytes.len() != PAGE_SIZE {
                     return Err(MnemoError::Invalid("WAL frame is not page-sized".into()));
@@ -436,14 +480,6 @@ impl Mnemo {
             file.read_exact(&mut hbuf)?;
             header = Header::from_page(&hbuf)?;
         }
-
-        let kdf = KdfParams {
-            m_cost: header.m_cost,
-            t_cost: header.t_cost,
-            p_cost: header.p_cost,
-        };
-        let kek = crypto::derive_kek(secret, &header.salt, kdf)?;
-        let dek = crypto::unwrap_dek(&kek, &header.dek_nonce, &header.wrapped_dek)?;
 
         // Validate the v7 header seal now that we have the DEK. Returns
         // `MnemoError::HeaderTampered` if any of the sealed mutable fields

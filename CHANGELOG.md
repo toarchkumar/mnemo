@@ -8,6 +8,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A refused or wrong-secret open no longer writes to the file**
+  (RB-003.3). A read-write open replayed a pending WAL before checking the
+  key or the format, so a mistyped passphrase, or a v8 file's refused
+  read-write open, completed the committed transaction and then failed.
+  The open now checks the key, against the header the replay would leave,
+  and refuses an old format before writing anything, so both leave the
+  file byte-identical. The right secret still recovers the WAL, and
+  `mnemo compact` still recovers and converts a v8 file.
+
 ## [0.13.0] — 2026-11-12
 
 A readable export (`mnemo export`) and a read-only inspector (`mnemo
