@@ -886,13 +886,18 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
 ```
 
 - Vectors are always left out; superseded keyed versions are included.
-- It writes a file only with `-o` (owner-only on Unix), and never over the
+- It writes a file only with `-o`, and replaces it whole: a new
+  owner-only file (on Unix) renamed over the old one, never over the
   `.mnemo` file itself.
 - **`--git`** orders records by key, then id (keyed memories first), and
   leaves out thread turns, access stats and counts. The same unchanged file
   exports to the same bytes, a recall doesn't change the output, and one new
   memory adds only its own lines.
 - The result cache (and so the embedder-identity record) is never exported.
+- **A committed export is world-readable elsewhere.** Git stores no file
+  mode beyond the executable bit, so another checkout of a committed
+  export is `0644` whatever `-o` wrote. Commit one only where everyone who
+  can read the repository may read the memories.
 
 ### The inspector
 

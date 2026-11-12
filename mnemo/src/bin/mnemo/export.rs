@@ -96,21 +96,56 @@ pub fn render(memories: &[Memory], o: &ExportOptions, facts: &FileFacts) -> Stri
     }
 }
 
-/// Write `body` to `path`, readable by its owner only on Unix (it's the
-/// plaintext of an encrypted file). An existing file keeps its permissions.
+/// Write `body` to `path` whole: into a new file beside it, readable by
+/// its owner only on Unix (it's the plaintext of an encrypted file), then
+/// renamed over `path`. So the result is owner-only even when `path`
+/// already existed with a wider mode, and a crash leaves either the old
+/// file or the new one, never a partial export under the final name.
 pub fn write_private(path: &str, body: &str) -> std::result::Result<(), String> {
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+    let target = std::path::Path::new(path);
+    let dir = match target.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    };
+    let name = target
+        .file_name()
+        .ok_or_else(|| format!("{path}: not a file name"))?
+        .to_string_lossy()
+        .into_owned();
+    let mut last_err = None;
+    for attempt in 0..16u32 {
+        let tmp = dir.join(format!(".{name}.{}-{attempt}.tmp", std::process::id()));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = match opts.open(&tmp) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_err = Some(e);
+                continue;
+            }
+            Err(e) => return Err(format!("writing beside {path}: {e}")),
+        };
+        let written = f
+            .write_all(body.as_bytes())
+            .and_then(|_| f.sync_all())
+            .and_then(|_| {
+                drop(f);
+                std::fs::rename(&tmp, target)
+            });
+        return written.map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("writing {path}: {e}")
+        });
     }
-    let mut f = opts
-        .open(path)
-        .map_err(|e| format!("opening {path}: {e}"))?;
-    f.write_all(body.as_bytes())
-        .map_err(|e| format!("writing {path}: {e}"))
+    Err(format!(
+        "writing beside {path}: {}",
+        last_err.map(|e| e.to_string()).unwrap_or_default()
+    ))
 }
 
 fn scope_str(s: Scope) -> &'static str {

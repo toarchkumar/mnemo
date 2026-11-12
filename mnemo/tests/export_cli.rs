@@ -284,6 +284,46 @@ fn it_warns_that_the_output_is_plaintext_and_writes_a_file_only_with_o() {
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    // Over an existing file with a wider mode: replaced whole, owner-only,
+    // with no temp file left behind.
+    let shared = dir.path().join("shared.md");
+    std::fs::write(&shared, "an older export\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let (ok, _, err) = run(
+        &[
+            "export",
+            path.to_str().unwrap(),
+            "-o",
+            shared.to_str().unwrap(),
+        ],
+        PW,
+    );
+    assert!(ok, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&shared).unwrap(),
+        export(&path, &[])
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&shared).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "the existing 0644 file is now owner-only"
+        );
+    }
+    let leftovers: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+
     // Never over the file itself.
     let (ok, _, err) = run(
         &[

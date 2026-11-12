@@ -318,7 +318,9 @@ enum Command {
         /// unchanged file always exports to the same bytes.
         #[arg(long)]
         git: bool,
-        /// Write to this file (owner-only on Unix) instead of stdout.
+        /// Write to this file instead of stdout. It's replaced whole (a new
+        /// file renamed over it), and owner-only on Unix even if it existed
+        /// with a wider mode.
         #[arg(long, short = 'o')]
         output: Option<String>,
         #[arg(long)]
