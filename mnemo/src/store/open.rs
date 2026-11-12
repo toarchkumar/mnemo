@@ -831,6 +831,18 @@ impl Mnemo {
             Err(parse_err) => {
                 let recoverable = scan_header_recovery_candidates(&mut file, secret)?;
                 return Err(match (parse_err, recoverable) {
+                    // RB-004.5 item 2: as for a pending WAL (RB-003.3), a
+                    // pre-v9 file can't be opened read-write, so the advice
+                    // names the step that does heal it.
+                    (_, Some(frames))
+                        if page_zero_header(&frames).is_some_and(|h| h.version < VERSION_V9) =>
+                    {
+                        MnemoError::NeedsWriteOpen {
+                            reason: "torn header page in a pre-v9 file; run `mnemo compact \
+                                     <file>` (with `--key-file <key>` for a raw-key file), \
+                                     which recovers it and converts the file to v9",
+                        }
+                    }
                     (_, Some(_)) => MnemoError::NeedsWriteOpen {
                         reason: "torn header page needs recovery from WAL",
                     },

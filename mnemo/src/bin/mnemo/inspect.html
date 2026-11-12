@@ -109,7 +109,8 @@ async function session() {
   if (document.prerendering) {
     await new Promise(r => document.addEventListener("prerenderingchange", r, { once: true }));
   }
-  const r = await fetch("/api/session?" + new URLSearchParams({ c: code }).toString());
+  const r = await fetch("/api/session?" + new URLSearchParams({ c: code }).toString())
+    .catch(() => { throw new Error(STOPPED); });
   if (!r.ok) return { token: storedToken(), used: true };
   const { token } = await r.json();
   try { sessionStorage.setItem(TOKEN_KEY, token); } catch (e) {}
@@ -119,10 +120,14 @@ const main = document.getElementById("main");
 let view = "memories";
 const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null };
 
+// RB-004.5 item 4: once the server has stopped (`--idle-timeout`, or
+// Ctrl-C), a request can't connect; say that instead of the browser's text.
+const STOPPED = "The inspector has stopped (after --idle-timeout without use, or Ctrl-C), " +
+  "so this page can't read the file any more. Run `mnemo inspect <file>` again for a new link.";
 function api(path, params) {
   const u = new URLSearchParams(params || {});
   u.set("t", TOKEN);
-  return fetch(path + "?" + u.toString()).then(async r => {
+  return fetch(path + "?" + u.toString()).catch(() => { throw new Error(STOPPED); }).then(async r => {
     const body = await r.json().catch(() => ({ error: r.statusText }));
     if (!r.ok) throw new Error(body.error || r.statusText);
     return body;

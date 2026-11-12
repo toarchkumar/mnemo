@@ -931,7 +931,9 @@ cargo run --bin mnemo -- inspect agent.mnemo --open   # opens the browser for yo
 The passphrase comes from the prompt or `MNEMO_PASSPHRASE`. Copy the
 printed URL into your browser, or pass `--open`, which hands the browser a
 private local page (owner-only, deleted once it has loaded) that forwards
-to the URL.
+to the URL. On Linux, a browser installed as a snap or a flatpak (Ubuntu's
+default Firefox is a snap) has its own private `/tmp` and can't read that
+page, so copy the printed link instead.
 
 - **Views:** memories (filter by type, agent, keyed or not, and thread;
   keyword search with BM25, no embedder needed), keyed history (each

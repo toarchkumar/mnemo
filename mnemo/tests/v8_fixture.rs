@@ -347,3 +347,39 @@ fn a_refused_open_of_a_v8_pending_wal_leaves_it_byte_identical() {
         "a refused v8 open wrote"
     );
 }
+
+/// RB-004.5 item 2 (v0.13.2): a v8 file with a torn header page. The
+/// read-only open can't heal it and a read-write open refuses a v8 file, so
+/// the error names `mnemo compact`, which does heal it; the file is left
+/// byte-identical until then.
+#[test]
+fn a_torn_v8_header_names_compact_and_compact_heals_it() {
+    let e = expected();
+    let e = &e["passphrase_file"];
+    let (_dir, path) = copy("v8_passphrase.mnemo");
+    let pass = e["passphrase"].as_str().unwrap();
+    let live = Mnemo::open_read_only(&path, pass).unwrap().len();
+
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes[..16].fill(0);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let err = Mnemo::open_read_only(&path, pass)
+        .err()
+        .expect("a torn header");
+    let msg = err.to_string();
+    assert!(
+        matches!(err, MnemoError::NeedsWriteOpen { .. })
+            && msg.contains("pre-v9")
+            && msg.contains("mnemo compact")
+            && !msg.contains("open read-write once"),
+        "{msg}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the refusal wrote");
+
+    let report = Mnemo::compact_file(path.to_str().unwrap(), pass).unwrap();
+    assert_eq!(report.after, live);
+    let mut db = Mnemo::open_read_only(&path, pass).unwrap();
+    assert_eq!(db.len(), live);
+    assert_eq!(db.stats().unwrap().format_version, 9);
+}

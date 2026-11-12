@@ -364,7 +364,10 @@ enum Command {
         port: Option<u16>,
         /// Open the page in the default browser. The browser gets a
         /// private local page that forwards to the URL (deleted once it has
-        /// loaded), not the URL itself.
+        /// loaded), not the URL itself. On Linux, a browser installed as a
+        /// snap or a flatpak (Ubuntu's default Firefox is a snap) has its
+        /// own private /tmp and can't read that page: copy the printed link
+        /// instead.
         #[arg(long)]
         open: bool,
         /// Stop after this long without a request from the page: `30m`,
@@ -2041,6 +2044,13 @@ fn run() -> std::result::Result<(), String> {
             if open {
                 if let Err(e) = inspect::open_browser(&url, watch.clone()) {
                     eprintln!("warning: couldn't open a browser ({e}); open the URL above");
+                } else if cfg!(target_os = "linux") {
+                    // RB-004.5 item 5: a snap or flatpak browser can't read
+                    // the forwarding page under /tmp (tested: snap Firefox).
+                    eprintln!(
+                        "note: if the browser says the file can't be found (a snap or \
+                         flatpak browser can't read /tmp), copy the link above instead"
+                    );
                 }
             }
             let state = std::sync::Arc::new(std::sync::Mutex::new(inspect::State::new(

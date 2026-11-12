@@ -22,9 +22,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
   commit, which `version check` validates, so the mode is reviewed with the
   release and a re-run can't change it. The `ENABLE_MOBILE_PUBLISH`
   variable is now only an off switch. Maintainers: see RELEASING.md.
+- **`mnemo inspect`, after it stops** (`--idle-timeout` or Ctrl-C): the page
+  says the inspector has stopped and how to start it again, instead of the
+  browser's "Failed to fetch".
+- **`mnemo inspect --open` on Linux:** a browser installed as a snap or a
+  flatpak can't read the forwarding page under `/tmp` (tested with snap
+  Firefox). The help text, the README and a note on Linux say to copy the
+  printed link instead.
 
 ### Fixed
 
+- **A pre-v9 file with a torn header** now gets advice that works: the
+  read-only error names `mnemo compact`, which heals and converts it,
+  instead of "open read-write once", which a v8 file refuses.
 - **A failed `rekey` leaves the old secret in force** (REKEY-1, RB-004.2).
   `rekey` and `rekey_with_key` put the new key wrap in the handle before
   writing it, and kept it when a write failed, so the next flush could

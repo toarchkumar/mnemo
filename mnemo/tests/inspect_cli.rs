@@ -286,6 +286,7 @@ fn it_binds_loopback_and_refuses_wrong_tokens_hosts_and_methods() {
     assert!(
         page.contains("history.replaceState")
             && page.contains("/api/session")
+            && page.contains("The inspector has stopped")
             && !page.contains("Tuesdays")
     );
     assert_eq!(
