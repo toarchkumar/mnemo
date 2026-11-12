@@ -34,6 +34,9 @@ const PAGE: &str = include_str!("inspect.html");
 /// The byte budget for each essence render (the views show it whole).
 const ESSENCE_BUDGET: usize = 64 * 1024;
 
+/// The most memories one `/api/memories` page returns.
+const MAX_PAGE: usize = 1000;
+
 /// The longest request head read, in bytes.
 const MAX_HEAD: usize = 16 * 1024;
 
@@ -123,6 +126,8 @@ pub struct Loaded {
     /// Every live record except thread turns, by id.
     memories: Vec<Value>,
     contents: KeywordIndex,
+    /// The agents of `memories`, sorted.
+    agents: Vec<String>,
     /// `(key, owner)` → versions, oldest first. The owner is the agent for
     /// a private key and empty for a shared one.
     keys: BTreeMap<(String, String), Vec<Version>>,
@@ -275,6 +280,19 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         .into_iter()
         .map(|(k, vs)| (k, chain_order(vs)))
         .collect();
+    // RB-003.7: build what the views keep, then let the records (vectors
+    // and all) go before the thread turns are read, so the peak doesn't
+    // hold both.
+    let contents = KeywordIndex::new(shown.iter().map(|m| m.content.as_str()));
+    let memories: Vec<Value> = shown.iter().map(|m| memory_json(m)).collect();
+    let agents: Vec<String> = shown
+        .iter()
+        .map(|m| m.agent_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    drop(shown);
+    drop(all);
 
     let mut threads = Vec::new();
     for id in &thread_ids {
@@ -340,11 +358,11 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         "pinned_bytes": summary.snapshot_pinned_bytes,
         "list": snaps,
     });
-    let contents = KeywordIndex::new(shown.iter().map(|m| m.content.as_str()));
     Ok(Loaded {
         about,
-        memories: shown.into_iter().map(memory_json).collect(),
+        memories,
         contents,
+        agents,
         keys,
         threads,
         // The render has a header even with no items.
@@ -583,21 +601,28 @@ fn handle(mut s: TcpStream, token: &str, port: u16, state: &Mutex<State>) -> std
              form-action 'none'; frame-ancestors 'none'\r\n",
         );
     }
-    let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-    if req.path == "/api/reload" {
-        return match load(&st.path, &st.secret) {
-            Ok(l) => {
-                st.loaded = l;
-                respond_json(&mut s, "200 OK", &about(&st.loaded))
+    // RB-003.7: build the response under the lock, then release it before
+    // writing to the client, so a slow reader doesn't hold up other
+    // requests.
+    let (status, body) = {
+        let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+        if req.path == "/api/reload" {
+            match load(&st.path, &st.secret) {
+                Ok(l) => {
+                    st.loaded = l;
+                    ("200 OK", about(&st.loaded))
+                }
+                // The previous load stays, so the views keep working.
+                Err(e) => ("409 Conflict", json!({ "error": e })),
             }
-            // The previous load stays, so the views keep working.
-            Err(e) => respond_json(&mut s, "409 Conflict", &json!({ "error": e })),
-        };
-    }
-    match route(&st.loaded, &req) {
-        Some(v) => respond_json(&mut s, "200 OK", &v),
-        None => respond_json(&mut s, "404 Not Found", &json!({ "error": "not found" })),
-    }
+        } else {
+            match route(&st.loaded, &req) {
+                Some(v) => ("200 OK", v),
+                None => ("404 Not Found", json!({ "error": "not found" })),
+            }
+        }
+    };
+    respond_json(&mut s, status, &body)
 }
 
 fn about(l: &Loaded) -> Value {
@@ -638,9 +663,21 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
                         _ => true,
                     }
             };
-            let hits: Vec<Value> = order
+            // RB-003.7: count the matches, then clone only the page.
+            let matches: Vec<(usize, Option<f32>)> = order
                 .into_iter()
                 .filter(|(i, _)| keep(&l.memories[*i]))
+                .collect();
+            let limit: usize = q("limit")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(200)
+                .min(MAX_PAGE);
+            let offset: usize = q("offset").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let total = matches.len();
+            let page: Vec<Value> = matches
+                .into_iter()
+                .skip(offset)
+                .take(limit)
                 .map(|(i, score)| {
                     let mut m = l.memories[i].clone();
                     if let Some(s) = score {
@@ -649,15 +686,7 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
                     m
                 })
                 .collect();
-            let limit: usize = q("limit").and_then(|v| v.parse().ok()).unwrap_or(200);
-            let offset: usize = q("offset").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let total = hits.len();
-            let page: Vec<Value> = hits.into_iter().skip(offset).take(limit).collect();
-            let agents: BTreeSet<&str> = l
-                .memories
-                .iter()
-                .filter_map(|m| m["agent"].as_str())
-                .collect();
+            let agents = &l.agents;
             Some(json!({ "total": total, "offset": offset, "memories": page, "agents": agents }))
         }
         "/api/keys" => Some(Value::Array(

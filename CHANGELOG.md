@@ -26,6 +26,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `InvalidArgumentError`, `NotFoundError`, `UnsupportedVersionError`,
   `NotAMnemoFileError` and `CorruptError`. The messages are unchanged.
 
+### Changed
+
+- **`mnemo inspect` holds less in memory** (RB-003.7). The load lets the
+  file's records (vectors included) go as soon as the views' JSON and the
+  keyword index are built, before it reads the thread turns.
+  `/api/memories` counts the matches and copies only the page it returns
+  (at most 1,000), and every response is written after the state lock is
+  released.
+
 ### Fixed
 
 - **A refused or wrong-secret open no longer writes to the file**

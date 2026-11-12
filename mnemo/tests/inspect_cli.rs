@@ -338,6 +338,15 @@ fn each_view_serves_the_right_json() {
         "{}",
         all["agents"]
     );
+    // Paging: `total` counts every match; only the page comes back.
+    let n = all["total"].as_u64().unwrap();
+    let page = ins.json("/api/memories", "limit=2&offset=1");
+    assert_eq!(page["total"].as_u64().unwrap(), n);
+    assert_eq!(page["memories"].as_array().unwrap().len(), 2);
+    assert_eq!(page["memories"][0]["id"], all["memories"][1]["id"]);
+    let past = ins.json("/api/memories", &format!("offset={n}"));
+    assert!(past["memories"].as_array().unwrap().is_empty());
+    assert_eq!(past["total"].as_u64().unwrap(), n);
     let ops = ins.json("/api/memories", "agent=ops");
     assert!(ops["memories"]
         .as_array()
