@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>mnemo inspect</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e3e3e8;
+    --panel: #f6f6f8; --accent: #2f5fd0; --tag: #eef1fb; --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --line: #2e2e33;
+      --panel: #1f1f23; --accent: #8aa8ff; --tag: #262a3a; --warn: #f0b45a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .file { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 4px; padding: 8px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  nav button, .btn {
+    border: 1px solid transparent; background: none; color: var(--fg);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit;
+  }
+  nav button.on { background: var(--panel); border-color: var(--line); font-weight: 600; }
+  .btn { border-color: var(--line); background: var(--panel); }
+  main { padding: 16px 20px 40px; max-width: 1100px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+  input, select {
+    font: inherit; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  input[type=search] { min-width: 240px; flex: 1; }
+  .count { color: var(--muted); margin: 0 0 8px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .card.old { opacity: 0.65; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .tag { background: var(--tag); border-radius: 4px; padding: 0 6px; color: var(--fg); }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .content { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre.json, pre.essence {
+    background: var(--panel); border-radius: 6px; padding: 10px; overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, Menlo, monospace; margin: 6px 0;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; width: 220px; }
+  .layout { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 16px; }
+  @media (max-width: 700px) { .layout { grid-template-columns: 1fr; } }
+  .list button {
+    display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--bg);
+    color: var(--fg); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; font: inherit;
+  }
+  .list button.on { border-color: var(--accent); }
+  .list small { color: var(--muted); display: block; }
+  .error { color: var(--warn); }
+  .empty { color: var(--muted); }
+  .turn { border-left: 3px solid var(--line); padding: 4px 10px; margin: 6px 0; }
+  .turn b { font-weight: 600; }
+  h2 { font-size: 15px; margin: 18px 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>mnemo inspect</h1>
+  <span class="file" id="file"></span>
+  <span class="spacer"></span>
+  <span class="count" id="loaded" style="margin:0"></span>
+  <button class="btn" id="reload" title="Read the file again (one passphrase derivation)">Reload</button>
+</header>
+<nav id="tabs">
+  <button data-view="memories" class="on">Memories</button>
+  <button data-view="keys">Keyed history</button>
+  <button data-view="threads">Threads</button>
+  <button data-view="snapshots">Snapshots</button>
+  <button data-view="about">About</button>
+</nav>
+<main id="main"></main>
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const main = document.getElementById("main");
+let view = "memories";
+const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null };
+
+function api(path, params) {
+  const u = new URLSearchParams(params || {});
+  u.set("t", TOKEN);
+  return fetch(path + "?" + u.toString()).then(async r => {
+    const body = await r.json().catch(() => ({ error: r.statusText }));
+    if (!r.ok) throw new Error(body.error || r.statusText);
+    return body;
+  });
+}
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+function when(secs) {
+  if (secs == null) return "—";
+  return new Date(secs * 1000).toISOString().replace(".000Z", "Z").replace("T", " ");
+}
+function bytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KiB";
+  return (n / 1048576).toFixed(1) + " MiB";
+}
+function fail(e) { main.replaceChildren(el("p", { class: "error" }, String(e.message || e))); }
+
+function memoryCard(m) {
+  const tags = [el("span", { class: "tag" }, m.type), el("span", {}, "agent " + m.agent)];
+  if (m.key) tags.push(el("span", { class: "tag mono" }, "key " + m.key));
+  if (m.thread) tags.push(el("span", { class: "tag mono" }, "thread " + m.thread));
+  if (m.kind) tags.push(el("span", { class: "tag" }, m.kind));
+  if (m.superseded_by) tags.push(el("span", {}, "superseded " + when(m.invalid_at)));
+  if (m.score != null) tags.push(el("span", {}, "score " + m.score.toFixed(2)));
+  tags.push(el("span", {}, when(m.created_at)), el("span", {}, "importance " + m.importance));
+  return el("div", { class: "card" + (m.superseded_by ? " old" : "") },
+    el("div", { class: "meta" }, tags),
+    el("pre", { class: "content" }, m.content),
+    el("details", {}, el("summary", {}, el("span", { class: "mono" }, m.id)),
+      el("pre", { class: "json" }, JSON.stringify(m.metadata, null, 2))));
+}
+
+async function showMemories() {
+  const params = { limit: 200 };
+  for (const k of ["q", "type", "agent", "keyed", "thread"]) if (state[k]) params[k] = state[k];
+  const [data, threads] = await Promise.all([api("/api/memories", params), api("/api/threads")]);
+  const sel = (name, opts) => {
+    const s = el("select", { onchange: e => { state[name] = e.target.value; render(); } },
+      opts.map(([v, label]) => { const o = el("option", { value: v }, label); if (state[name] === v) o.selected = true; return o; }));
+    return s;
+  };
+  const search = el("input", { type: "search", placeholder: "Keyword search (BM25)", value: state.q });
+  search.addEventListener("keydown", e => { if (e.key === "Enter") { state.q = search.value.trim(); render(); } });
+  const filters = el("div", { class: "filters" },
+    search,
+    sel("type", [["", "All types"], ["semantic", "semantic"], ["episodic", "episodic"], ["procedural", "procedural"], ["working", "working"]]),
+    sel("agent", [["", "All agents"], ...data.agents.map(a => [a, a])]),
+    sel("keyed", [["", "Keyed or not"], ["yes", "Keyed"], ["no", "Not keyed"]]),
+    sel("thread", [["", "Any thread"], ...threads.threads.map(t => [t.id, t.id])]));
+  const shown = data.memories.length;
+  const note = shown < data.total ? `showing ${shown} of ${data.total}` : `${data.total} ${data.total === 1 ? "memory" : "memories"}`;
+  main.replaceChildren(filters,
+    el("p", { class: "count" }, note + (state.q ? `, best match first` : "") + ". Thread turns are under Threads."),
+    ...(data.memories.length ? data.memories.map(memoryCard) : [el("p", { class: "empty" }, "Nothing matches.")]));
+  if (state.q) search.focus();
+}
+
+async function showKeys() {
+  const keys = await api("/api/keys");
+  if (!keys.length) { main.replaceChildren(el("p", { class: "empty" }, "No keyed facts in this file.")); return; }
+  const pick = keys.find(k => state.key && k.key === state.key.key && k.owner === state.key.owner) || keys[0];
+  state.key = { key: pick.key, owner: pick.owner };
+  const hist = await api("/api/history", { key: pick.key, owner: pick.owner });
+  const list = el("div", { class: "list" }, keys.map(k =>
+    el("button", { class: k === pick ? "on" : "", onclick: () => { state.key = { key: k.key, owner: k.owner }; render(); } },
+      el("span", { class: "mono" }, k.key),
+      el("small", {}, (k.owner ? "agent " + k.owner : "shared") + ` · ${k.versions} version${k.versions === 1 ? "" : "s"}`))));
+  const chain = hist.versions.map((v, i) => el("div", { class: "card" + (v.current ? "" : " old") },
+    el("div", { class: "meta" },
+      el("span", { class: "tag" }, v.current ? "current" : `version ${i + 1}`),
+      el("span", {}, "written " + when(v.created_at)),
+      v.current ? null : el("span", {}, "stopped being current " + when(v.invalid_at))),
+    el("pre", { class: "content" }, v.content),
+    el("div", { class: "meta mono" }, v.id)));
+  main.replaceChildren(el("div", { class: "layout" }, list,
+    el("div", {}, el("p", { class: "count" }, "Oldest to newest. A new version supersedes the old one; nothing is erased."), chain)));
+}
+
+async function showThreads() {
+  const data = await api("/api/threads");
+  const project = data.project_essence
+    ? [el("h2", {}, "Project essence"), el("pre", { class: "essence" }, data.project_essence)] : [];
+  if (!data.threads.length) {
+    main.replaceChildren(...project, el("p", { class: "empty" }, "No threads in this file."));
+    return;
+  }
+  const id = data.threads.some(t => t.id === state.threadId) ? state.threadId : data.threads[0].id;
+  state.threadId = id;
+  const t = await api("/api/thread", { id });
+  const turnsBox = el("div", {});
+  const loadTurns = el("button", { class: "btn", onclick: async () => {
+    loadTurns.disabled = true;
+    try {
+      const full = await api("/api/thread", { id, turns: "1" });
+      turnsBox.replaceChildren(...full.turns.map(x => el("div", { class: "turn" },
+        el("div", { class: "meta" }, el("b", {}, x.role), x.timestamp != null ? el("span", {}, when(x.timestamp)) : null, el("span", { class: "mono" }, x.turn_id)),
+        el("pre", { class: "content" }, x.content))));
+      loadTurns.remove();
+    } catch (e) { turnsBox.replaceChildren(el("p", { class: "error" }, e.message)); }
+  } }, `Show the ${t.turn_count} archived turn${t.turn_count === 1 ? "" : "s"}`);
+  const list = el("div", { class: "list" }, data.threads.map(x =>
+    el("button", { class: x.id === id ? "on" : "", onclick: () => { state.threadId = x.id; render(); } },
+      el("span", { class: "mono" }, x.id),
+      el("small", {}, `${x.turns} turn${x.turns === 1 ? "" : "s"} · ${x.essence_items} essence item${x.essence_items === 1 ? "" : "s"}`))));
+  main.replaceChildren(el("div", { class: "layout" }, list, el("div", {},
+    el("h2", { style: "margin-top:0" }, "Essence"),
+    t.essence ? el("pre", { class: "essence" }, t.essence) : el("p", { class: "empty" }, "No essence for this thread."),
+    el("h2", {}, "Turn archive"), t.turn_count ? loadTurns : el("p", { class: "empty" }, "No turns."), turnsBox,
+    ...project)));
+}
+
+async function showSnapshots() {
+  const s = await api("/api/snapshots");
+  const rows = [
+    ["Restore points retained", s.retained],
+    ["Oldest restorable", when(s.oldest_restorable_at)],
+    ["Kept from reuse (pinned)", bytes(s.pinned_bytes)],
+  ];
+  main.replaceChildren(
+    el("table", {}, rows.map(([k, v]) => el("tr", {}, el("th", {}, k), el("td", {}, v)))),
+    el("p", { class: "count" }, "These are the snapshots the file holds now; under heavy churn the retention cap can keep fewer than its policy. `mnemo restore` rolls back to one."),
+    el("h2", {}, "Snapshots, newest first"),
+    el("table", {}, el("tr", {}, el("th", {}, "Transaction"), el("th", {}, "Committed"), el("th", {}, "Memories")),
+      s.list.slice().reverse().map(x => el("tr", {}, el("td", { class: "mono" }, x.txn_id), el("td", {}, when(x.created_at)), el("td", {}, x.memory_count)))));
+}
+
+async function showAbout() {
+  const a = await api("/api/about");
+  const fmtEmb = e => `${e.name} (${e.dimensions} dims, normalize ${e.normalize})`;
+  const emb = a.embedder ? fmtEmb(a.embedder)
+    : a.manifest_embedder && a.manifest_embedder.name ? fmtEmb(a.manifest_embedder) + ", from the manifest (no identity recorded yet)"
+    : "none recorded yet";
+  const rows = [
+    ["Format", "v" + a.format_version + (a.format_version < 9 ? " (read-only; mnemo compact converts it to v9)" : "")],
+    ["Recall mode", a.recall_mode],
+    ["Embedder", emb],
+    ["Dimensions", a.dimensions],
+    ["Memories", `${a.memories} live, ${a.tombstoned} tombstoned`],
+    ["Threads / keyed facts", `${a.threads} / ${a.keys}`],
+    ["Agents", a.agents.join(", ") || "—"],
+    ["File size", bytes(a.file_bytes)],
+    ["Vector column", bytes(a.vector_column_bytes)],
+    ["ANN index", a.has_index ? "yes" : "no"],
+    ["WAL region", a.wal_pages + " pages"],
+    ["Result cache", `${a.cache.entries} entries, ${bytes(a.cache.bytes)}`],
+    ["Created", when(a.created_at)],
+  ];
+  main.replaceChildren(el("table", {}, rows.map(([k, v]) => el("tr", {}, el("th", {}, k), el("td", {}, v)))),
+    el("h2", {}, "Onboarding (mnemo about)"),
+    ...(a.onboarding.length ? a.onboarding.map(o => el("div", { class: "card" },
+      el("div", { class: "meta" }, o.topic ? el("span", { class: "tag" }, o.topic) : null, el("span", { class: "mono" }, o.id)),
+      el("pre", { class: "content" }, o.content))) : [el("p", { class: "empty" }, "No onboarding memories.")]));
+}
+
+const views = { memories: showMemories, keys: showKeys, threads: showThreads, snapshots: showSnapshots, about: showAbout };
+function render() { views[view]().catch(fail); }
+async function header() {
+  try {
+    const a = await api("/api/about");
+    document.getElementById("file").textContent = a.path + " · v" + a.format_version + " · read-only";
+    document.getElementById("loaded").textContent = "read " + when(a.loaded_at);
+  } catch (e) { fail(e); }
+}
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  view = b.dataset.view;
+  for (const x of document.querySelectorAll("#tabs button")) x.classList.toggle("on", x === b);
+  render();
+});
+document.getElementById("reload").addEventListener("click", async () => {
+  const btn = document.getElementById("reload");
+  btn.disabled = true; btn.textContent = "Reading…";
+  try { await api("/api/reload"); await header(); render(); }
+  catch (e) { document.getElementById("loaded").textContent = "reload failed: " + e.message; }
+  finally { btn.disabled = false; btn.textContent = "Reload"; }
+});
+header(); render();
+</script>
+</body>
+</html>

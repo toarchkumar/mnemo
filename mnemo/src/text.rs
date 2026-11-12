@@ -72,6 +72,77 @@ pub(crate) fn idf(n: usize, df: usize) -> f32 {
     (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
 }
 
+/// An in-memory keyword index over a set of texts, with the tokenizer and
+/// BM25 scoring (k1 1.2, b 0.75) of v9's keyword recall, for tools that
+/// search what they've already read, without the file open (`mnemo
+/// inspect`). It needs no embedder and works on texts from any format.
+///
+/// ```
+/// use mnemo_engine::KeywordIndex;
+/// let ix = KeywordIndex::new(["the deploy runs on v0.9.0", "tea, not coffee"]);
+/// assert_eq!(ix.search("v0.9.0", 5)[0].0, 0);
+/// assert!(ix.search("nothing", 5).is_empty());
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct KeywordIndex {
+    postings: std::collections::BTreeMap<String, Vec<(usize, u8)>>,
+    lens: Vec<u16>,
+    avgdl: f32,
+}
+
+impl KeywordIndex {
+    /// Index `texts`; a hit's index is the text's position here.
+    pub fn new<'a>(texts: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut ix = Self::default();
+        for (doc, text) in texts.into_iter().enumerate() {
+            let (tfs, len) = term_freqs(text);
+            for (term, tf) in tfs {
+                ix.postings.entry(term).or_default().push((doc, tf));
+            }
+            ix.lens.push(len);
+        }
+        let total: u64 = ix.lens.iter().map(|&l| l as u64).sum();
+        ix.avgdl = if ix.lens.is_empty() {
+            0.0
+        } else {
+            total as f32 / ix.lens.len() as f32
+        };
+        ix
+    }
+
+    /// The texts that match any of `query`'s terms, best first, at most
+    /// `top_k`, as `(index, score)`. Ties keep the texts' order.
+    pub fn search(&self, query: &str, top_k: usize) -> Vec<(usize, f32)> {
+        let terms: std::collections::BTreeSet<String> = tokenize(query).into_iter().collect();
+        let n = self.lens.len();
+        let mut scores: std::collections::BTreeMap<usize, f32> = std::collections::BTreeMap::new();
+        for term in &terms {
+            let Some(posts) = self.postings.get(term) else {
+                continue;
+            };
+            let idf = idf(n, posts.len());
+            for &(doc, tf) in posts {
+                *scores.entry(doc).or_default() +=
+                    bm25(tf, idf, self.lens[doc], self.avgdl, 1.2, 0.75);
+            }
+        }
+        let mut hits: Vec<(usize, f32)> = scores.into_iter().collect();
+        hits.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        hits.truncate(top_k);
+        hits
+    }
+
+    /// How many texts it holds.
+    pub fn len(&self) -> usize {
+        self.lens.len()
+    }
+
+    /// Whether it holds no text.
+    pub fn is_empty(&self) -> bool {
+        self.lens.is_empty()
+    }
+}
+
 /// One dict entry: a term and its postings' byte range.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct DictEntry {

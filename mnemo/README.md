@@ -750,6 +750,7 @@ cargo run --bin mnemo -- <command>
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters) |
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output |
+| `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
 | `get`     | Fetch one memory by its ULID                         |
 | `search`  | Exact nearest-neighbour search (similarity only)     |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
@@ -892,6 +893,38 @@ cargo run --bin mnemo -- export agent.mnemo --git -o memory.md
   exports to the same bytes, a recall doesn't change the output, and one new
   memory adds only its own lines.
 - The result cache (and so the embedder-identity record) is never exported.
+
+### The inspector
+
+`mnemo inspect` serves a read-only web view of a file on your machine:
+
+```sh
+cargo run --bin mnemo -- inspect agent.mnemo --open      # passphrase: prompt or MNEMO_PASSPHRASE
+cargo run --bin mnemo -- inspect app.mnemo --key-file app.key   # a raw-key file (32 bytes or 64 hex digits)
+```
+
+- **Views:** memories (filter by type, agent, keyed or not, and thread;
+  keyword search with BM25, no embedder needed), keyed history (each
+  key's versions, oldest first, with when each stopped being current),
+  threads (the essence render, and the turn archive on demand), snapshots
+  (the restore points `stats` reports) and about (format, recall mode,
+  embedder identity, sizes).
+- **It never holds the file.** It reads it once, read-only, and closes it,
+  so an agent writing to the file is never blocked. **Reload** in the page
+  reads it again (one passphrase derivation). If a writer has the file
+  open at that moment, it says so and keeps the last read.
+- **It stays on your machine.** It binds `127.0.0.1` only (a random free
+  port unless `--port`), and the printed URL carries a random token. Every
+  request must carry that token and a `Host` of the loopback address and
+  port, which stops other sites' pages (DNS rebinding included). Only `GET`
+  is served, with no CORS, and no endpoint writes the file. Nothing is
+  written to disk.
+- It works on v8 files too, and on passphrase exports from the phone
+  libraries.
+
+`mnemo_engine::KeywordIndex` is the in-memory keyword index it searches
+with: the tokenizer and BM25 scoring of v9's keyword recall, over texts
+you already hold.
 
 ## Build and test
 

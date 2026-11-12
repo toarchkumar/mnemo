@@ -83,6 +83,32 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `StatsSummary` aren't `#[non_exhaustive]`, so code that builds them with
   a struct literal needs the new fields.
 
+- **`mnemo inspect`: a read-only inspector** (PLAN.md 14.2, the read-only
+  half). `mnemo inspect <file> [--port N] [--open] [--key-file PATH]`
+  serves a local web view of the file.
+  - **Views:** memories (filters by type, agent, keyed or not, and
+    thread, plus BM25 keyword search with no embedder), keyed history (the
+    supersession chain, oldest first, with when each version stopped being
+    current), threads (the essence render and, on demand, the turn
+    archive), snapshots (the new restore-point fields) and about (format,
+    recall mode, embedder identity, sizes).
+  - **It holds no lock.** It reads the file once, read-only, and closes
+    it, so a writer is never blocked. The page's Reload reads it again; a
+    file a writer holds gives "a writer has this file open; close it or try
+    again", and the last read stays.
+  - **Loopback only:** `127.0.0.1`, a random token in the URL, a `Host`
+    check against DNS rebinding, `GET` only and no CORS. No endpoint
+    changes the file, and nothing is written to disk.
+  - Unlocks with the passphrase prompt, `MNEMO_PASSPHRASE`, or
+    `--key-file` for raw-key files (32 bytes or 64 hex digits). Opens v8
+    files.
+  - Built on `std::net` and `serde_json`, with the page compiled in: no new
+    dependency, and the mobile and Python builds don't include it (it's in
+    the CLI binary only).
+- **`mnemo_engine::KeywordIndex`:** an in-memory keyword index over texts
+  you already hold, with the tokenizer and BM25 scoring (k1 1.2, b 0.75) of
+  v9's keyword recall.
+
 ### Fixed
 
 - **Compaction no longer refuses a file that holds an all-zero vector.**

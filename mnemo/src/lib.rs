@@ -102,6 +102,7 @@ pub use store::{
     DEFAULT_TURN_COMPRESS_AFTER_SECS, DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES,
     INDEX_PERSIST_EVERY_COMMITS, V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };
+pub use text::KeywordIndex;
 pub use transcript::{read_transcript, TranscriptFormat};
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.

@@ -9,6 +9,8 @@ use std::process::ExitCode;
 
 #[path = "mnemo/export.rs"]
 mod export;
+#[path = "mnemo/inspect.rs"]
+mod inspect;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
@@ -319,6 +321,28 @@ enum Command {
         /// Write to this file (owner-only on Unix) instead of stdout.
         #[arg(long, short = 'o')]
         output: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Browse the file in a local, read-only web view.
+    ///
+    /// Reads the file once (read-only) and closes it, so a writer is never
+    /// blocked; "Reload" in the page reads it again. Serves on 127.0.0.1
+    /// only, at a URL carrying a random token, and only GET: nothing in the
+    /// view can change the file. Press Ctrl-C to stop.
+    Inspect {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// Port on 127.0.0.1 (default: a random free one).
+        #[arg(long)]
+        port: Option<u16>,
+        /// Open the page in the default browser.
+        #[arg(long)]
+        open: bool,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -1896,6 +1920,42 @@ fn run() -> std::result::Result<(), String> {
                     let _ = std::io::stdout().lock().write_all(body.as_bytes());
                 }
             }
+        }
+        Command::Inspect {
+            path,
+            port,
+            open,
+            key_file,
+            passphrase: pp,
+        } => {
+            let secret = match key_file {
+                Some(k) => inspect::Secret::Key(inspect::read_key_file(&k)?),
+                None => inspect::Secret::Passphrase(passphrase(&pp)?),
+            };
+            let loaded = inspect::load(&path, &secret)?;
+            let listener = inspect::bind(port).map_err(|e| format!("binding 127.0.0.1: {e}"))?;
+            let port = listener
+                .local_addr()
+                .map_err(|e| format!("binding 127.0.0.1: {e}"))?
+                .port();
+            let token = inspect::new_token();
+            let url = format!("http://127.0.0.1:{port}/?t={token}");
+            println!("inspecting {path} (read-only; the file is read once and closed)");
+            println!("{url}");
+            println!("press Ctrl-C to stop");
+            {
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
+            if open {
+                if let Err(e) = inspect::open_browser(&url) {
+                    eprintln!("warning: couldn't open a browser ({e}); open the URL above");
+                }
+            }
+            let state = std::sync::Arc::new(std::sync::Mutex::new(inspect::State::new(
+                path, secret, loaded,
+            )));
+            inspect::serve(listener, token, state).map_err(|e| format!("serving: {e}"))?;
         }
         Command::Recall {
             path,

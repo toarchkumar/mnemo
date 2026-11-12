@@ -1082,3 +1082,169 @@ fn stats_is_the_cheap_path_and_track_access_defaults_off() {
     let page = db.recall(vec![1.0, 0.5, 0.0, 1.0], recall_opts()).unwrap();
     assert!(!page.hits.is_empty());
 }
+
+// --- INSP-1 step 5: the inspector's acceptance fixture --------------------
+
+/// The iOS sample's last-resort embedder (`DemoWordEmbedder` in
+/// `examples/mobile/ios/MnemoSample/Embedders.swift`), ported: hashed words
+/// (FNV-1a) on 64 axes, normalized; an empty text is the unit spike.
+struct DemoWordEmbedder;
+
+impl MnemoEmbedder for DemoWordEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: "demo-word-hash".into(),
+            dimensions: 64,
+            normalize: true,
+        }
+    }
+    fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, EmbedderError> {
+        Ok(texts
+            .iter()
+            .map(|t| {
+                let mut v = vec![0f32; 64];
+                for word in t
+                    .to_lowercase()
+                    .split(|c: char| !c.is_alphabetic() && !c.is_numeric())
+                    .filter(|w| !w.is_empty())
+                {
+                    let mut h: u32 = 2_166_136_261;
+                    for b in word.bytes() {
+                        h = (h ^ b as u32).wrapping_mul(16_777_619);
+                    }
+                    v[(h % 64) as usize] += 1.0;
+                }
+                let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    v.iter_mut().for_each(|x| *x /= norm);
+                } else {
+                    v[0] = 1.0;
+                }
+                v
+            })
+            .collect())
+    }
+}
+
+/// The passphrase of `mnemo/tests/fixtures/inspect/ios_export.mnemo`.
+const INSPECT_FIXTURE_PASSPHRASE: &str = "inspect-fixture-passphrase";
+
+/// Build a passphrase export the way the iOS sample does (`NotesModel`):
+/// a raw-key store with the demo embedder, notes through `remember_text`,
+/// a keyed fact set twice, turns on `demo-thread` through `ingest_thread`,
+/// a decision and a timeline item through `essence_add` and
+/// `essence_append_timeline`, then `export_with_passphrase` (the Export
+/// button). Returns the export's path.
+fn build_ios_export(dir: &std::path::Path) -> std::path::PathBuf {
+    let store = dir.join("notes-notes-demo-embedder.mnemo");
+    let cfg = MnemoConfig {
+        dimensions: 64,
+        ..config()
+    };
+    let db = MnemoDb::create_with_key(store.display().to_string(), generate_key(), cfg).unwrap();
+    db.set_embedder(Arc::new(DemoWordEmbedder)).unwrap();
+    let note = || RememberOptions {
+        memory_type: Some(MemoryType::Episodic),
+        ..remember_opts()
+    };
+    for text in [
+        "Buy oat milk and coffee beans on the way home",
+        "The plumber comes Thursday between 9 and 11",
+        "Idea: a weekly review every Sunday evening",
+    ] {
+        db.remember_text(text.into(), note()).unwrap();
+    }
+    for value in ["oat", "almond"] {
+        db.remember_text(
+            format!("milk: {value}"),
+            RememberOptions {
+                memory_type: Some(MemoryType::Semantic),
+                key: Some("fact:milk".into()),
+                ..remember_opts()
+            },
+        )
+        .unwrap();
+    }
+    let thread = "demo-thread".to_string();
+    for (i, (role, text)) in [
+        ("user", "Plan the kitchen repaint for next weekend"),
+        (
+            "assistant",
+            "Sage green for the walls, white for the trim. Two coats.",
+        ),
+        ("user", "Book the paint delivery for Friday"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        db.ingest_thread(
+            thread.clone(),
+            vec![ThreadTurn {
+                turn_id: format!("turn-{i}"),
+                role: role.to_string(),
+                content: text.to_string(),
+                timestamp: None,
+            }],
+        )
+        .unwrap();
+    }
+    let scope = EssenceScope::Thread {
+        thread_id: thread.clone(),
+    };
+    db.essence_add(
+        scope.clone(),
+        EssenceSection::Decisions,
+        "Sage green walls, white trim, two coats".into(),
+        None,
+    )
+    .unwrap();
+    db.essence_append_timeline(scope, "Paint delivery booked for Friday".into(), None)
+        .unwrap();
+    db.flush().unwrap();
+    let export = dir.join("mnemo-notes-export.mnemo");
+    db.export_with_passphrase(
+        export.display().to_string(),
+        INSPECT_FIXTURE_PASSPHRASE.into(),
+    )
+    .unwrap();
+    db.close().unwrap();
+    export
+}
+
+#[test]
+fn the_ios_style_export_holds_notes_a_thread_and_essence() {
+    let dir = tempdir().unwrap();
+    let export = build_ios_export(dir.path());
+    let db = MnemoDb::open_read_only(
+        export.display().to_string(),
+        INSPECT_FIXTURE_PASSPHRASE.into(),
+    )
+    .unwrap();
+    assert_eq!(db.history("fact:milk".into()).unwrap().len(), 2);
+    assert_eq!(db.thread_export("demo-thread".into()).unwrap().len(), 3);
+    let essence = db
+        .essence(
+            EssenceScope::Thread {
+                thread_id: "demo-thread".into(),
+            },
+            4096,
+        )
+        .unwrap();
+    assert!(
+        essence.contains("Sage green") && essence.contains("Friday"),
+        "{essence}"
+    );
+}
+
+/// Writes the committed fixture `mnemo/tests/fixtures/inspect/ios_export.mnemo`:
+/// `cargo test -p mnemo-uniffi -- --ignored write_the_inspect_fixture`.
+#[test]
+#[ignore]
+fn write_the_inspect_fixture() {
+    let dir = tempdir().unwrap();
+    let export = build_ios_export(dir.path());
+    let dest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/inspect/ios_export.mnemo");
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::copy(export, &dest).unwrap();
+}
