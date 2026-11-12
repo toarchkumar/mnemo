@@ -121,7 +121,7 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
   file or blocks an agent that's writing to it.
   ```sh
   mnemo inspect agent.mnemo                  # prints a link; open it in your browser
-  mnemo inspect app.mnemo --key-file app.key # a raw-key file, e.g. a phone export
+  mnemo inspect app.mnemo --key-file app.key # a raw-key file (what create_with_key writes)
   ```
   Copy the printed link into your browser. `--open` launches the browser
   for you; use it only on a machine where you're the only user.
@@ -133,7 +133,9 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
   themselves.
 - **Old v8 files are now read-only.** Run `mnemo compact <file>` once to
   upgrade a file to the current format; that also repairs files from
-  early versions that compaction used to refuse.
+  early versions that compaction used to refuse. For a raw-key v8 file, use
+  `Mnemo::compact_file_with_key` in Rust until the CLI's `compact` gains
+  `--key-file` (planned for v0.13.1).
 - **Every file records which embedding model made its vectors,** and
   refuses a different one, so a model change can't quietly mix
   incompatible vectors.
