@@ -332,6 +332,17 @@ rewrites the file under a fresh DEK. `Mnemo::export_rekeyed` writes a copy
 under a fresh DEK and a new secret, sharing no key material with the
 source. Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
 
+**A `rekey` that fails leaves the old secret in force** (REKEY-1, v0.13.2),
+for the handle and for the file, including after later writes and a
+close. It takes effect at one point, the write of the new page 0; a
+failure before that puts the old header back. The one exception is a
+failure to write the new page 0 followed by a failure to put the old one
+back; the error then says the file may open with either secret. Once the
+new page 0 is on disk, scrubbing the old key wrap from the file is
+hygiene: if part of it fails, `rekey` still succeeds, and
+`Mnemo::rekey_cleanup_error` (a warning in the CLI, a `RuntimeWarning` in
+Python) says what was left. `--rotate` covers it.
+
 The file is a sequence of fixed **8 KiB pages**:
 
 - **Page 0** — the header (plaintext): magic, version, KDF parameters, salt,

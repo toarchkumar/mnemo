@@ -1466,7 +1466,17 @@ fn run() -> std::result::Result<(), String> {
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
             db.rekey(&new, mnemo_engine::KdfParams::secure())
                 .map_err(fmt)?;
+            // REKEY-1: the rekey took effect; part of the old wrap's cleanup
+            // didn't. `--rotate` rewrites the file, which covers it.
+            let left = db.rekey_cleanup_error().map(str::to_owned);
             db.close().map_err(fmt)?;
+            if let (Some(left), false) = (&left, rotate) {
+                eprintln!(
+                    "warning: the new passphrase is in force, but part of the old key \
+                     wrap's cleanup failed ({left}); run `mnemo rekey --rotate` to be sure \
+                     the old passphrase opens nothing"
+                );
+            }
             if rotate {
                 let r = Mnemo::compact_file(&path, &new).map_err(fmt)?;
                 println!(

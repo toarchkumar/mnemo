@@ -8,6 +8,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed `rekey` leaves the old secret in force** (REKEY-1, RB-004.2).
+  `rekey` and `rekey_with_key` put the new key wrap in the handle before
+  writing it, and kept it when a write failed, so the next flush could
+  commit the new secret after an error (in every release since at least
+  v0.12.1). Now a failure before the new header is on disk puts the old
+  one back, and zeroes the new WAL region, so an error means the old
+  secret opens the file, including after later writes and a close. Once
+  the new header is on disk the rekey has taken effect: a failure to
+  scrub the old key wrap no longer fails it, and
+  `Mnemo::rekey_cleanup_error` (a CLI warning, a Python `RuntimeWarning`)
+  says what was left. A failpoint test covers every write a rekey makes.
+
 ## [0.13.1] — 2026-11-12
 
 A patch release: a refused or wrong-secret open no longer writes to the

@@ -997,6 +997,9 @@ pub struct Mnemo {
     superseded: Option<std::collections::HashSet<u128>>,
     /// R-004.2: thread layers + onboarding ids, built by the same lazy scan.
     layers: Option<LayerCache>,
+    /// REKEY-1 (RB-004.2): what the last successful rekey couldn't scrub
+    /// once the new secret was in force (see [`Mnemo::rekey_cleanup_error`]).
+    rekey_cleanup: Option<String>,
     /// FMT-9e: thread turns are compressed once older than this many
     /// seconds (`0`: at write). Per handle, not persisted.
     turn_compress_after: i64,

@@ -128,6 +128,24 @@ mod exc {
 
 /// Map a core error onto its Python exception type (the message is the
 /// engine's, unchanged).
+/// REKEY-1: a rekey that succeeded but couldn't scrub every copy of the
+/// old key wrap says so as a `RuntimeWarning` (the new secret is in force).
+fn warn_rekey_cleanup(py: Python<'_>, core: &Core) -> PyResult<()> {
+    if let Some(left) = core.rekey_cleanup_error() {
+        let msg = format!(
+            "rekey succeeded, but part of the old key wrap's cleanup failed ({left}); \
+             to be sure the old secret opens nothing, compact the file (compact_file)"
+        );
+        PyErr::warn_bound(
+            py,
+            &py.get_type_bound::<pyo3::exceptions::PyRuntimeWarning>(),
+            &msg,
+            1,
+        )?;
+    }
+    Ok(())
+}
+
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
     use mnemo_core::MnemoError as E;
     let msg = e.to_string();
@@ -1630,9 +1648,11 @@ impl Mnemo {
     /// `False` so the new KEK inherits the same protection level as
     /// the file's original creation-time parameters.
     ///
-    /// If it raises, the file may already be under the new secret, or may
-    /// move to it at the next write: close the handle without writing
-    /// anything more, then try both secrets.
+    /// If it raises, the old secret is still in force, including after later
+    /// writes; the one exception is an error that says the file may open with
+    /// either secret. If it returns but couldn't scrub every copy of the old
+    /// key wrap, it emits a `RuntimeWarning` saying what was left (the new
+    /// secret is in force either way).
     #[pyo3(signature = (new_passphrase, fast=false))]
     fn rekey(&mut self, py: Python<'_>, new_passphrase: &str, fast: bool) -> PyResult<()> {
         // FIX-1 R-001.5: `fast=False` now really does "inherit the
@@ -1652,7 +1672,8 @@ impl Mnemo {
         // Python thread for no reason.
         let core = self.core_mut()?;
         py.allow_threads(|| core.rekey(new_passphrase, kdf))
-            .map_err(to_py)
+            .map_err(to_py)?;
+        warn_rekey_cleanup(py, core)
     }
 
     /// Switch this database to (or rotate) a raw 256-bit key (32 bytes, e.g.
@@ -1660,14 +1681,17 @@ impl Mnemo {
     /// minimal Argon2id parameters, so later `open_with_key` calls skip the
     /// KDF cost. Only the wrapped data key changes.
     ///
-    /// If it raises, the file may already be under the new secret, or may
-    /// move to it at the next write: close the handle without writing
-    /// anything more, then try both secrets.
+    /// If it raises, the old secret is still in force, including after later
+    /// writes; the one exception is an error that says the file may open with
+    /// either secret. If it returns but couldn't scrub every copy of the old
+    /// key wrap, it emits a `RuntimeWarning` saying what was left (the new
+    /// secret is in force either way).
     fn rekey_with_key(&mut self, py: Python<'_>, key: &[u8]) -> PyResult<()> {
         let key = key_from_bytes(key)?;
         let core = self.core_mut()?;
         py.allow_threads(|| core.rekey_with_key(&key))
-            .map_err(to_py)
+            .map_err(to_py)?;
+        warn_rekey_cleanup(py, core)
     }
 
     /// Return the database's self-describing onboarding memories (those tagged

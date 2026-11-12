@@ -123,9 +123,15 @@ impl Mnemo {
     /// [`Mnemo::compact_file`] (`mnemo rekey --rotate`), which rewrites the
     /// file under a fresh data key. Rotation can't erase old ciphertext the storage hardware still holds: flash keeps rewritten blocks until it reuses them, and that's out of the engine's hands.
     ///
-    /// **If it returns an error, the file may already be under the new secret,
-    /// or may move to it at the next write** (RB-004.2). Close the handle
-    /// without writing anything more, then try both secrets.
+    /// **An error means the old secret is still in force,** for this handle
+    /// and for the file, including after later writes and a close (REKEY-1).
+    /// The one exception is when the new header's write fails and putting
+    /// the old one back fails too: the error then says so, and the file may
+    /// open with either secret.
+    ///
+    /// `Ok` means the new secret is in force. Scrubbing the old wrap
+    /// afterwards is hygiene; if part of it fails, the rekey still succeeds
+    /// and [`Mnemo::rekey_cleanup_error`] says what was left.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
         self.rekey_secret(new_passphrase.as_bytes(), kdf)
     }
@@ -135,9 +141,7 @@ impl Mnemo {
     /// wrapped DEK changes; pages aren't rewritten, and it doesn't revoke
     /// the old key (see [`Mnemo::rekey`]).
     ///
-    /// **If it returns an error, the file may already be under the new secret,
-    /// or may move to it at the next write** (RB-004.2). Close the handle
-    /// without writing anything more, then try both secrets.
+    /// Errors and the cleanup report work as in [`Mnemo::rekey`].
     pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
         self.rekey_secret(new_key, KdfParams::raw_key())
     }
@@ -146,6 +150,7 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        self.rekey_cleanup = None;
         self.flush()?;
         let new_salt = crypto::random_salt();
         let new_kek = crypto::derive_kek(secret, &new_salt, kdf)?;
@@ -165,6 +170,11 @@ impl Mnemo {
         old_wrap.extend_from_slice(&self.header.salt);
         old_wrap.extend_from_slice(&self.header.dek_nonce);
         old_wrap.extend_from_slice(&self.header.wrapped_dek);
+
+        // REKEY-1 (RB-004.2): until the new page 0 is on disk, a failure puts
+        // these back, so an `Err` means "still the old secret".
+        let before = self.header.clone();
+        let before_kdf = self.kdf;
 
         self.header.salt = new_salt;
         self.header.dek_nonce = new_nonce;
@@ -186,19 +196,101 @@ impl Mnemo {
         self.header.wal_start = new_start;
         self.header.wal_pages = new_pages;
         self.header.wal_seq += 1;
-        self.relocate_header_through_wal(old_wal_start)?;
-        // SEC-2 (RB-001.30): the old region holds page-0 images with the old
-        // wrap; `relocate_header_through_wal` only zeroed its first frame
-        // header. Zero all of it, then overwrite any other stale copy of
-        // the old wrap in the file (an earlier, grown or relocated region).
+
+        // The steps of `relocate_header_through_wal`, apart, so a failure
+        // can be told from one before page 0 and one after it.
+        self.header.write_counter = self.pager.write_counter;
+        let mut page = self.header.to_page();
+        if let Err(e) = self.header.apply_seal(&mut page, self.pager.dek()) {
+            return Err(self.undo_rekey(before, before_kdf, None, false, e));
+        }
+        let frames = vec![(0u64, page.to_vec())];
+        let txn_id = self.header.wal_seq;
+        if let Err(e) = wal::commit(self.pager.file_mut(), new_start, new_pages, txn_id, &frames) {
+            let region = Some((new_start, new_pages));
+            return Err(self.undo_rekey(before, before_kdf, region, false, e));
+        }
+        if let Err(e) = self
+            .pager
+            .write_raw(0, &page)
+            .and_then(|_| self.pager.sync())
+        {
+            let region = Some((new_start, new_pages));
+            return Err(self.undo_rekey(before, before_kdf, region, true, e));
+        }
+
+        // The new page 0 is on disk: the new secret is in force, and nothing
+        // below fails the rekey. SEC-2 (RB-001.30): zero the old region's
+        // first frame header (so no scan reads it as a WAL), then all of it
+        // (its frames hold page-0 images with the old wrap), then any other
+        // stale copy of the old wrap in the file (an earlier, grown or
+        // relocated region). Each step runs even if the one before failed.
         // Hygiene only: a copy of the file taken before the rekey still
         // opens with the old secret (see `rekey`).
-        wal::scrub_region(self.pager.file_mut(), old_wal_start, new_pages)?;
-        scrub_bytes(self.pager.file_mut(), &old_wrap)?;
+        let mut left = Vec::new();
+        if let Err(e) = wal::invalidate_region(self.pager.file_mut(), old_wal_start) {
+            left.push(format!("clearing the old WAL region's first frame: {e}"));
+        }
+        if let Err(e) = wal::scrub_region(self.pager.file_mut(), old_wal_start, new_pages) {
+            left.push(format!("zeroing the old WAL region: {e}"));
+        }
+        if let Err(e) = scrub_bytes(self.pager.file_mut(), &old_wrap) {
+            left.push(format!("overwriting other copies of the old key wrap: {e}"));
+        }
+        self.rekey_cleanup = (!left.is_empty()).then(|| left.join("; "));
         // FMT-9 (a): the old region is freed by the next commit (see
         // `ensure_wal_capacity`).
         self.release_pages(old_wal_start, new_pages);
         Ok(())
+    }
+
+    /// REKEY-1: a rekey failed before its new page 0 was on disk. Put the
+    /// header and the KDF back, so the handle (and every later write) uses
+    /// the old secret. Then, best effort: zero the new WAL region, whose
+    /// commit wraps the data key under the new secret, so a later
+    /// torn-header scan can't find it; and, if page 0 may have been
+    /// written, write the old one back.
+    fn undo_rekey(
+        &mut self,
+        before: crate::format::Header,
+        before_kdf: KdfParams,
+        new_region: Option<(u64, u64)>,
+        page0_written: bool,
+        err: MnemoError,
+    ) -> MnemoError {
+        self.header = before;
+        self.kdf = before_kdf;
+        if let Some((start, pages)) = new_region {
+            let _ = wal::scrub_region(self.pager.file_mut(), start, pages);
+        }
+        if !page0_written {
+            return err;
+        }
+        self.header.write_counter = self.pager.write_counter;
+        let mut page = self.header.to_page();
+        let put_back = self
+            .header
+            .apply_seal(&mut page, self.pager.dek())
+            .and_then(|_| self.pager.write_raw(0, &page))
+            .and_then(|_| self.pager.sync());
+        match put_back {
+            Ok(()) => err,
+            Err(again) => MnemoError::Io(std::io::Error::other(format!(
+                "rekey failed writing the new header ({err}), and the old header \
+                 couldn't be written back ({again}): the file may open with either \
+                 secret; close it without writing and try both"
+            ))),
+        }
+    }
+
+    /// REKEY-1 (RB-004.2): after a successful [`Mnemo::rekey`] or
+    /// [`Mnemo::rekey_with_key`], what couldn't be scrubbed of the old key
+    /// wrap, or `None` if it all was. The rekey took effect either way; what
+    /// is left is plaintext key-wrap bytes the old secret could still use, so
+    /// to be sure, rotate (`compact_file`) as [`Mnemo::rekey`] describes.
+    /// Each rekey resets it.
+    pub fn rekey_cleanup_error(&self) -> Option<&str> {
+        self.rekey_cleanup.as_deref()
     }
 
     /// SEC-2 (RB-001.30): write a copy of this database at `dest` under a
