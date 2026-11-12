@@ -12,14 +12,23 @@ below):
 - **the Android library:** `io.github.toarchkumar:mnemo-android` on Maven
   Central, and the AAR on the GitHub Release.
 
-`.github/workflows/release.yml` does all of it. The mobile jobs run only
-after every engine job succeeded: the GitHub Release, the CLI binaries,
-the wheels, the sdist, and both publish jobs. The one exception is a
-registry switched off with its `ENABLE_CRATES_PUBLISH` or
-`ENABLE_PYPI_PUBLISH` variable: its publish job is skipped, and mobile
-still runs. The `mobile (version check)` job checks this and fails with
-each job's result if anything else happened. A mobile failure doesn't
-undo crates.io or PyPI: fix the cause and re-run the failed jobs.
+`.github/workflows/release.yml` does all of it, in this order (REL-2):
+
+1. **`version check`:** every manifest agrees, with the tag on a tag run.
+2. **Every build, in parallel:** the CLI binaries, the wheels, the sdist,
+   and (with mobile on) the Swift and Android packages.
+3. **`approve the release`: the one human approval** (the `release`
+   environment). It appears only once every build is green, so a failed
+   build publishes nothing anywhere. Approve it there; nothing else asks.
+4. **The GitHub Release and the engine publishes:** the Release and its
+   assets, crates.io and PyPI.
+5. **`engine published (gate)`:** the mobile packages publish only after
+   every engine publish succeeded (a registry switched off with
+   `ENABLE_CRATES_PUBLISH` or `ENABLE_PYPI_PUBLISH` counts as done). A
+   mobile failure doesn't undo crates.io or PyPI: fix the cause and re-run
+   the failed jobs.
+6. **The mobile publishes:** `mnemo-swift` and Maven Central, then the
+   published-package check.
 
 **The mobile packages publish on a rule, not on every release** (user
 decision, 2026-11-11). The Swift and Android packages are released only
@@ -67,7 +76,8 @@ attach or publish it:
 
 The publish jobs run in the environments `crates-io`, `pypi`, `mnemo-swift`
 and `maven-central`, and each secret is visible only to the step that uses
-it. Every action is pinned to a commit (Dependabot keeps them current).
+it. Every publish also waits for `approve the release`. Every action is
+pinned to a commit (Dependabot keeps them current).
 
 ## Before the tag
 
@@ -83,13 +93,21 @@ it. Every action is pinned to a commit (Dependabot keeps them current).
 3. **Install lines.** The Swift and Kotlin package READMEs
    (`mnemo/bindings/*/README.md`) name the new version.
 4. **CI is green** on the release commit.
-5. **The dry run.** It publishes nothing, so run it on the release branch:
+5. **The dry run.** It publishes nothing and never waits for an approval,
+   so run it on the release branch, with mobile set as the tag will have
+   it:
 
    ```bash
-   gh workflow run release.yml --ref <release branch> -f dry_run=true
+   gh workflow run release.yml --ref <release branch> -f dry_run=true -f mobile=true
    ```
 
    It checks:
+   - **the engine artifacts (REL-2):** builds the five CLI binaries, the
+     five wheels and the sdist exactly as a tag does; the attach job
+     downloads them with the tag's pattern and lists the 11 files; the
+     crates.io job runs `cargo publish --dry-run`; the PyPI job counts 5
+     wheels and 1 sdist. Only the upload steps and `action-gh-release`
+     are left out;
    - **the Swift package:** builds the XCFramework zip and its checksum,
      then runs an SPM consumer on the iOS simulator against the
      `mnemo-swift` tree, using that zip;
@@ -165,11 +183,19 @@ crates.io does the same once the trusted publisher is added on crates.io
 (repository `toarchkumar/mnemo`, workflow `release.yml`, environment
 `crates-io`) and the variable `CRATES_TRUSTED_PUBLISHING` is `true`.
 
-**The environments.** `crates-io`, `pypi`, `mnemo-swift` and
-`maven-central` should each have a required reviewer (you), and deployment
-rules allowing only `v*` tags and the release branches the dry run runs
-from. The release then waits for one approval per environment before
-anything irreversible happens. A dry run asks for the same approvals.
+**The environments (REL-2: one approval per release).**
+- `release`: the required reviewer (you), and a deployment rule allowing
+  only `v*` tags. Only `approve the release` uses it, on a tag, once every
+  build is green; every publish waits for it.
+- `crates-io`, `pypi`, `mnemo-swift` and `maven-central`: the secrets (and,
+  for crates.io and PyPI, the Trusted Publishing claim), and deployment
+  rules allowing `v*` tags and the release branches the dry run runs from.
+  **No required reviewer:** the `release` approval covers them, and dry
+  runs don't pause.
+- **The trade-off:** a dry run on a `release-*` branch can use the registry
+  secrets without a click. Only your account can push those branches, and
+  every real publish still waits for you. An agent never approves a
+  deployment.
 
 **The mirror.** A tag ruleset on `toarchkumar/mnemo-swift` that blocks
 updating and deleting tags keeps a published version from being moved.

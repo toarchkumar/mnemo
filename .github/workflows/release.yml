@@ -8,11 +8,14 @@ on:
       # this workflow just builds and attaches artifacts to the GitHub
       # Release that auto-creates from the tag.
       - "v*"
-  # The dry run of the mobile release (MOBILE-1e): builds and checks the
-  # Swift and Android packages, proves the mnemo-swift token can push, and
-  # uploads a Maven Central deployment that's validated and then dropped.
-  # It creates no GitHub Release and publishes nothing; the engine jobs
-  # (crates.io, PyPI) don't run. Real releases come only from tags.
+  # The dry run (MOBILE-1e, REL-2): builds everything a tag builds (the CLI
+  # binaries, the wheels, the sdist, the Swift and Android packages) and
+  # rehearses each publish with its upload replaced: the release assets are
+  # listed, crates.io gets `cargo publish --dry-run`, PyPI's files are
+  # counted, the mnemo-swift credential pushes and deletes a branch, and a
+  # Maven Central deployment is validated and dropped. It creates no GitHub
+  # Release and publishes nothing, and it never waits for an approval.
+  # Real releases come only from tags.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -42,22 +45,53 @@ env:
 # release or attach assets ask for write themselves. No checkout keeps the
 # token in .git/config (`persist-credentials: false`), so build scripts of
 # dependencies never see it, and secrets are scoped to the steps that use
-# them, in jobs that build nothing from source. The three publish jobs run in
-# environments (`crates-io`, `maven-central`, `mnemo-swift`, like `pypi`),
-# so a required reviewer and branch rules apply once the repository sets
-# them up. Before that the environments exist without rules, and every
-# secret can still be a repository secret: the workflow works either way.
+# them, in jobs that build nothing from source. The publish jobs run in
+# environments (`crates-io`, `pypi`, `maven-central`, `mnemo-swift`) that
+# hold their secrets and deployment rules. REL-2: the one required reviewer
+# is on the `release` environment, used only by `approve-release`, which
+# every publish waits for.
 permissions:
   contents: read
 
 jobs:
-  # --- Create the GitHub Release once (idempotent on re-runs). Subsequent
-  #     binary / wheel jobs attach to this release by tag name.
+  # --- REL-2: the one human approval of a release. Tags only. It waits for
+  #     every build, engine and mobile, so a failed build publishes nothing
+  #     anywhere, and every publish (the GitHub Release and its assets,
+  #     crates.io, PyPI, mnemo-swift, Maven Central) waits for it. The
+  #     `release` environment carries the required reviewer and allows only
+  #     `v*` tags; the four registry environments keep their secrets and
+  #     their rules but no reviewer, so dry runs never pause.
+  approve-release:
+    name: approve the release
+    needs: [mobile-prepare, build-cli, build-wheels, build-sdist, build-swift, build-android]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push'
+      && needs.mobile-prepare.result == 'success'
+      && needs.build-cli.result == 'success'
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+      && (needs.mobile-prepare.outputs.mobile != 'true'
+          || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: release
+    steps:
+      - name: Every build is green
+        timeout-minutes: 10
+        env:
+          VERSION: ${{ needs.mobile-prepare.outputs.version }}
+          MOBILE: ${{ needs.mobile-prepare.outputs.mobile }}
+        run: |
+          echo "Approved: MNemo $VERSION (mobile: $MOBILE). Publishing now."
+          echo "Approved MNemo $VERSION (mobile: $MOBILE) after every build passed." >> "$GITHUB_STEP_SUMMARY"
+
+  # --- Create the GitHub Release once (idempotent on re-runs), after the
+  #     approval. The attach and mobile publish jobs add to it by tag name.
   create-release:
     name: Create GitHub Release
-    # Tags only. Every engine job below needs this one, so a manual dry run
-    # skips them all.
-    if: github.event_name == 'push'
+    needs: approve-release
+    if: ${{ !cancelled() && needs.approve-release.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -81,7 +115,7 @@ jobs:
   #     pay for a separate arm runner.
   build-cli:
     name: cli (${{ matrix.target }})
-    needs: create-release
+    needs: mobile-prepare
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -145,7 +179,9 @@ jobs:
         working-directory: mnemo
         run: |
           src="target/${{ matrix.target }}/release/mnemo${{ matrix.ext }}"
-          tag="${GITHUB_REF#refs/tags/}"
+          # The version check (mobile-prepare) made the tag and the manifests
+          # agree; a dry run has no tag, so the name comes from the manifest.
+          tag="v${{ needs.mobile-prepare.outputs.version }}"
           out="mnemo-${tag}-${{ matrix.target }}${{ matrix.ext }}"
           cp "$src" "$out"
           echo "asset=$out" >> "$GITHUB_OUTPUT"
@@ -165,7 +201,7 @@ jobs:
   #     (OIDC), so no `PYPI_API_TOKEN` secret is needed anywhere.
   build-wheels:
     name: wheels (${{ matrix.target }})
-    needs: create-release
+    needs: mobile-prepare
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -230,7 +266,7 @@ jobs:
   #     platform-independent and there's no point in the matrix.
   build-sdist:
     name: sdist
-    needs: create-release
+    needs: mobile-prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -261,11 +297,17 @@ jobs:
           path: mnemo-python/dist/*.tar.gz
 
   # --- Attach the CLI binaries, the wheels and the sdist to the GitHub
-  #     Release: the only engine job with write access, and it builds
-  #     nothing.
+  #     Release: it builds nothing. A dry run downloads them with the same
+  #     pattern and lists them instead.
   attach:
     name: attach engine assets
-    needs: [create-release, build-cli, build-wheels, build-sdist]
+    needs: [mobile-prepare, create-release, build-cli, build-wheels, build-sdist]
+    if: >-
+      ${{ !cancelled()
+      && needs.build-cli.result == 'success'
+      && needs.build-wheels.result == 'success'
+      && needs.build-sdist.result == 'success'
+      && (needs.create-release.result == 'success' || needs.mobile-prepare.outputs.dry_run == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -278,8 +320,19 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: What a tag attaches (dry run)
+        timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'true'
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          n=$(ls dist/ | wc -l)
+          echo "$n files would be attached" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$n" -eq 11 ] || { echo "::error::expected 11 files (5 CLI, 5 wheels, 1 sdist), got $n"; exit 1; }
+
       - name: Attach to the release
         timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'false'
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist/*
@@ -307,10 +360,17 @@ jobs:
   # already created + populated by prior jobs).
   publish-pypi:
     name: publish to PyPI
-    needs: [build-wheels, build-sdist]
+    # REL-2: after the approval, which needs every build.
+    needs: [mobile-prepare, approve-release, build-cli, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    if: ${{ vars.ENABLE_PYPI_PUBLISH == 'true' }}
+    if: >-
+      ${{ !cancelled() && vars.ENABLE_PYPI_PUBLISH == 'true'
+      && (needs.approve-release.result == 'success'
+          || (needs.mobile-prepare.outputs.dry_run == 'true'
+              && needs.build-cli.result == 'success'
+              && needs.build-wheels.result == 'success'
+              && needs.build-sdist.result == 'success')) }}
     environment:
       name: pypi
       url: https://pypi.org/p/mnemo-engine
@@ -328,8 +388,19 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: What a tag uploads (dry run)
+        timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'true'
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          wheels=$(ls dist/*.whl | wc -l); sdists=$(ls dist/*.tar.gz | wc -l)
+          echo "PyPI would get $wheels wheels and $sdists sdist" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$wheels" -eq 5 ] && [ "$sdists" -eq 1 ] || { echo "::error::expected 5 wheels and 1 sdist"; exit 1; }
+
       - name: Publish to PyPI (Trusted Publishing, no token)
         timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'false'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           # Idempotent on re-runs: skip files PyPI already has.
@@ -344,10 +415,9 @@ jobs:
   #     repository toarchkumar/mnemo, workflow release.yml, environment
   #     crates-io), and the `CRATES_IO_TOKEN` secret until then. Cargo reads
   #     the token from the environment, never from the command line.
-  #     Depends on `build-cli`: if the CLI binary
-  #     compiles on every release target, the library source we're about
-  #     to publish also compiles — that's the strongest sanity check we
-  #     can do before pushing to a registry that doesn't allow takebacks.
+  #     It waits for the approval, which waits for every build: the CLI
+  #     compiling on every release target is the strongest check that the
+  #     library source compiles, before a registry that allows no takebacks.
   #
   #     cargo publish will *fail* if the version already exists on
   #     crates.io. That's the intended behavior — failures are loud and
@@ -355,10 +425,18 @@ jobs:
   #     equivalent for cargo.
   publish-crates:
     name: publish to crates.io
-    needs: build-cli
+    # REL-2: after the approval, which needs every build (before, only the
+    # CLI builds, so a failed wheel could leave crates.io ahead of PyPI).
+    needs: [mobile-prepare, approve-release, build-cli, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    if: ${{ vars.ENABLE_CRATES_PUBLISH == 'true' }}
+    if: >-
+      ${{ !cancelled() && vars.ENABLE_CRATES_PUBLISH == 'true'
+      && (needs.approve-release.result == 'success'
+          || (needs.mobile-prepare.outputs.dry_run == 'true'
+              && needs.build-cli.result == 'success'
+              && needs.build-wheels.result == 'success'
+              && needs.build-sdist.result == 'success')) }}
     environment:
       name: crates-io
       url: https://crates.io/crates/mnemo-engine
@@ -382,56 +460,43 @@ jobs:
         working-directory: mnemo
         run: cargo package
 
+      - name: What a tag publishes (dry run)
+        timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'true'
+        working-directory: mnemo
+        run: cargo publish --dry-run --no-verify
+
       - name: crates.io Trusted Publishing (OIDC)
         id: auth
         timeout-minutes: 10
-        if: ${{ vars.CRATES_TRUSTED_PUBLISHING == 'true' }}
+        if: ${{ needs.mobile-prepare.outputs.dry_run == 'false' && vars.CRATES_TRUSTED_PUBLISHING == 'true' }}
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1
 
       - name: Publish core crate
         timeout-minutes: 10
+        if: needs.mobile-prepare.outputs.dry_run == 'false'
         working-directory: mnemo
         run: cargo publish --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CRATES_IO_TOKEN }}
 
-  # === The mobile packages (MOBILE-1e) ===================================
-  #
-  # They run after every engine job succeeded, on a tag. A mobile failure
-  # doesn't undo crates.io or PyPI: fix it and re-run the failed jobs. On
-  # a manual run (the dry run) the engine jobs are skipped and these run
-  # alone, in dry-run mode.
-
-  # --- The engine gate (MOBILE-2a), the version and the mode, checked once.
-  mobile-prepare:
-    name: mobile (version check)
-    # Every engine job, so a failure anywhere upstream is seen here. A
-    # publish job that fails makes its dependents skip, and a skipped job
-    # isn't a failure, so the gate checks each result itself instead of
-    # looking for 'failure' (RB-001.17).
-    needs: [create-release, build-cli, build-wheels, build-sdist, attach, publish-crates, publish-pypi]
-    # Runs whenever the run wasn't cancelled; the gate step below decides,
-    # and fails loudly, so mobile never starts after a broken engine run.
-    if: ${{ !cancelled() }}
+  # --- REL-2: the engine gate (MOBILE-2a). On a tag the mobile packages
+  #     publish only after every engine publish succeeded: a mobile failure
+  #     doesn't undo crates.io or PyPI (fix it and re-run the failed jobs),
+  #     and mobile never publishes after a broken engine release. A publish
+  #     job that fails makes its dependents skip, and a skipped job isn't a
+  #     failure, so the gate checks each result itself (RB-001.17).
+  engine-gate:
+    name: engine published (gate)
+    needs: [create-release, attach, publish-crates, publish-pypi]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      version: ${{ steps.v.outputs.version }}
-      dry_run: ${{ steps.v.outputs.dry_run }}
-      mobile: ${{ steps.v.outputs.mobile }}
+    timeout-minutes: 15
     steps:
-      # On a tag, each engine job must have succeeded. A publish job may
-      # be skipped only when its ENABLE_* variable switches that registry
-      # off. On a manual run every engine job is skipped, and none may
-      # have failed.
       - name: The engine jobs succeeded
         timeout-minutes: 10
         env:
-          EVENT: ${{ github.event_name }}
           CREATE_RELEASE: ${{ needs.create-release.result }}
-          BUILD_CLI: ${{ needs.build-cli.result }}
-          BUILD_WHEELS: ${{ needs.build-wheels.result }}
-          BUILD_SDIST: ${{ needs.build-sdist.result }}
           ATTACH: ${{ needs.attach.result }}
           PUBLISH_CRATES: ${{ needs.publish-crates.result }}
           PUBLISH_PYPI: ${{ needs.publish-pypi.result }}
@@ -443,25 +508,27 @@ jobs:
             echo "$1: $2"
             case " $3 " in *" $2 "*) ;; *) echo "::error::$1 is $2 (wanted: $3)"; bad=1 ;; esac
           }
-          if [ "$EVENT" = push ]; then
-            check create-release "$CREATE_RELEASE" success
-            check build-cli "$BUILD_CLI" success
-            check build-wheels "$BUILD_WHEELS" success
-            check build-sdist "$BUILD_SDIST" success
-            check attach "$ATTACH" success
-            if [ "$ENABLE_CRATES" = true ]; then ok=success; else ok="success skipped"; fi
-            check publish-crates "$PUBLISH_CRATES" "$ok"
-            if [ "$ENABLE_PYPI" = true ]; then ok=success; else ok="success skipped"; fi
-            check publish-pypi "$PUBLISH_PYPI" "$ok"
-          else
-            for pair in "create-release:$CREATE_RELEASE" "build-cli:$BUILD_CLI" \
-                "build-wheels:$BUILD_WHEELS" "build-sdist:$BUILD_SDIST" "attach:$ATTACH" \
-                "publish-crates:$PUBLISH_CRATES" "publish-pypi:$PUBLISH_PYPI"; do
-              check "${pair%%:*}" "${pair#*:}" "skipped success"
-            done
-          fi
+          check create-release "$CREATE_RELEASE" success
+          check attach "$ATTACH" success
+          if [ "$ENABLE_CRATES" = true ]; then ok=success; else ok="success skipped"; fi
+          check publish-crates "$PUBLISH_CRATES" "$ok"
+          if [ "$ENABLE_PYPI" = true ]; then ok=success; else ok="success skipped"; fi
+          check publish-pypi "$PUBLISH_PYPI" "$ok"
           [ "$bad" = 0 ] || { echo "::error::an engine job didn't succeed: no mobile release"; exit 1; }
 
+  # === The version check, then the mobile packages (MOBILE-1e) ===========
+
+  # --- The version and the mode, checked once, first: every build needs
+  #     this job, so a version mismatch builds nothing.
+  mobile-prepare:
+    name: version check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      dry_run: ${{ steps.v.outputs.dry_run }}
+      mobile: ${{ steps.v.outputs.mobile }}
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 10
         with:
@@ -515,8 +582,11 @@ jobs:
   #     run with mobile off writes the same note to the run summary only.
   mobile-skipped-note:
     name: mobile (skipped, release note)
-    needs: mobile-prepare
-    if: ${{ !cancelled() && needs.mobile-prepare.result == 'success' && needs.mobile-prepare.outputs.mobile != 'true' }}
+    needs: [mobile-prepare, create-release]
+    if: >-
+      ${{ !cancelled() && needs.mobile-prepare.result == 'success'
+      && needs.mobile-prepare.outputs.mobile != 'true'
+      && (needs.mobile-prepare.outputs.dry_run == 'true' || needs.create-release.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -527,15 +597,30 @@ jobs:
         with:
           persist-credentials: false
 
+      # RB-003.8 item 4: a lookup that fails says "unknown" instead of
+      # failing the job (on a tag the engine has published by now), and a
+      # re-run doesn't add the note a second time.
       - name: The newest published mobile versions
         timeout-minutes: 10
         id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          swift=$(mnemo/bindings/swift/scripts/check-published-package.sh latest)
-          android=$(curl -fsS https://repo1.maven.org/maven2/io/github/toarchkumar/mnemo-android/maven-metadata.xml \
-            | sed -n 's|.*<release>\(.*\)</release>.*|\1|p' || true)
+          set -uo pipefail
+          swift=$(mnemo/bindings/swift/scripts/check-published-package.sh latest) || swift=unknown
+          if meta=$(curl -fsS https://repo1.maven.org/maven2/io/github/toarchkumar/mnemo-android/maven-metadata.xml); then
+            android=$(printf '%s' "$meta" | sed -n 's|.*<release>\(.*\)</release>.*|\1|p')
+          else
+            android=unknown
+          fi
           echo "Swift ${swift:-none}, Android ${android:-none}"
+          present=false
+          if [ "${{ github.event_name }}" = push ]; then
+            if body=$(gh release view "$GITHUB_REF_NAME" --repo "${{ github.repository }}" --json body -q .body); then
+              case "$body" in *"Mobile packages not published in this release"*) present=true ;; esac
+            fi
+          fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
           {
             echo "note<<EOF"
             echo ""
@@ -546,7 +631,7 @@ jobs:
 
       - name: Add the note to the GitHub Release
         timeout-minutes: 10
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.latest.outputs.present != 'true'
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           body: ${{ steps.latest.outputs.note }}
@@ -637,8 +722,11 @@ jobs:
   #     sees it.
   publish-swift:
     name: mobile (Swift publish)
-    needs: [mobile-prepare, build-swift]
-    if: ${{ !cancelled() && needs.build-swift.result == 'success' }}
+    needs: [mobile-prepare, build-swift, approve-release, engine-gate]
+    if: >-
+      ${{ !cancelled() && needs.build-swift.result == 'success'
+      && (needs.mobile-prepare.outputs.dry_run == 'true'
+          || (needs.approve-release.result == 'success' && needs.engine-gate.result == 'success')) }}
     runs-on: macos-latest
     timeout-minutes: 45
     environment:
@@ -879,8 +967,11 @@ jobs:
   #     are passed only to the steps that sign or upload.
   publish-android:
     name: mobile (Android publish)
-    needs: [mobile-prepare, build-android]
-    if: ${{ !cancelled() && needs.build-android.result == 'success' }}
+    needs: [mobile-prepare, build-android, approve-release, engine-gate]
+    if: >-
+      ${{ !cancelled() && needs.build-android.result == 'success'
+      && (needs.mobile-prepare.outputs.dry_run == 'true'
+          || (needs.approve-release.result == 'success' && needs.engine-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:

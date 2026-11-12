@@ -28,6 +28,12 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **The release workflow (REL-2):** one approval per release, given only
+  once every build (engine and mobile) is green, so a failed build
+  publishes nothing anywhere. The dry run now builds the CLI binaries, the
+  wheels and the sdist too, and rehearses the asset attach and both engine
+  publishes; it never waits for an approval. Maintainers: see RELEASING.md.
+
 - **`mnemo inspect`:**
   - `--idle-timeout` (default `30m`; `90s`, `1h`, or `0` for never): the
     server stops after that long without a request from the page, wiping
