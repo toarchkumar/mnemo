@@ -83,12 +83,12 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `R-005.1` | 2026-11-08 | `CORRECTNESS` | `MEDIUM` | CLI `mnemo demo` fails at runtime with `MnemoError::Locked` (`mnemo.rs:2617-2618`) due to shadowed handle drop order after `db.close()` | `VERIFIED` | Shipped in `b08469b` (`v0.11.0`, `cli_smoke.rs:2161`) and consuming `Mnemo::close(self)` in `REFAC-1` (`5254395`, `v0.12.0`, `store/flush.rs:852`) |
 | `R-005.2` | 2026-11-08 | `DX/DOCS` | `LOW` | Stale `mnemo/bindings/node` v0.4 skeleton (`Cargo.toml` pre-`NAME-1` dep) & post-`FMT-9` modularization of `mnemo/src/store.rs` (`8,104` lines) | `VERIFIED` | Shipped in `b08469b` (`mnemo/bindings/node/README.md` status note) and `REFAC-1` (`b0a0018`..`49feaea`, `v0.12.0`, 16 `mnemo/src/store/` submodules) |
 | `RB-001.1` | 2026-11-09 | `PERF` | `HIGH` | Recall slows about 9× once the vector column passes its budget; under the mobile defaults that's about 21.7K rows at 384 dims (turns and tombstones count) | `ACCEPTED` | MOBILE-2 (v0.12.1): rec. 1, 3 and 5; rec. 2 → PERF-2; rec. 4 DEFERRED |
-| `RB-001.2` | 2026-11-09 | `PERF` | `MEDIUM` | Coalesced flush policy and a background batch scope in the Swift and Kotlin stores (battery, flash writes, write latency) | `ACCEPTED` | MOBILE-2 (v0.12.1), folded into RB-001.18 |
+| `RB-001.2` | 2026-11-09 | `PERF` | `MEDIUM` | Coalesced flush policy and a background batch scope in the Swift and Kotlin stores (battery, flash writes, write latency) | `VERIFIED` | MOBILE-2 (v0.12.1), folded into RB-001.18; verified in RB-003 at `afd65b3` |
 | `RB-001.3` | 2026-11-09 | `PERF` | `MEDIUM` | PERF-2 refinement: a lazy fill can't help the exact scan's first recall (the whole phone range); the levers are `pread` runs, decrypt in place and parallel page decrypt | `ACCEPTED` | PERF-2 spec |
 | `RB-001.4` | 2026-11-09 | `PERF` | `MEDIUM` | Apple platforms: three `F_FULLFSYNC`s per commit; use `F_BARRIERFSYNC` where only ordering is needed | `ACCEPTED` | PERF-2 (with crash tests) |
-| `RB-001.5` | 2026-11-09 | `PERF` | `MEDIUM` | `track_access` defaults to on in the mobile binding, so every recall dirties the catalog and every iOS background recall ends in a full commit | `ACCEPTED` | MOBILE-2e (v0.12.2) |
+| `RB-001.5` | 2026-11-09 | `PERF` | `MEDIUM` | `track_access` defaults to on in the mobile binding, so every recall dirties the catalog and every iOS background recall ends in a full commit | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
 | `RB-001.6` | 2026-11-09 | `PERF` | `LOW` | Library size and build graph: `clap` and `rpassword` are unconditional engine dependencies; per-package `opt-level` trial for cold crates | `REJECTED` | Size half refuted by RB-002; no time gain |
-| `RB-001.7` | 2026-11-09 | `DX/DOCS` | `MEDIUM` | CI time: no `concurrency` cancel and no path filters, so every docs push runs all 18 jobs (three on macOS) | `ACCEPTED` | MOBILE-2e (v0.12.2) (CI chore) |
+| `RB-001.7` | 2026-11-09 | `DX/DOCS` | `MEDIUM` | CI time: no `concurrency` cancel and no path filters, so every docs push runs all 18 jobs (three on macOS) | `VERIFIED` | MOBILE-2e (v0.12.2) (CI chore); verified in RB-003 at `afd65b3` |
 | `RB-001.8` | 2026-11-09 | `DX/DOCS` | `MEDIUM` | `file_growth_per_single_write_bytes` (57,344) measures the first 20 commits only; steady state is about 2 KB per write | `ACCEPTED` | PERF-2 (bench methodology) |
 | `RB-001.9` | 2026-11-09 | `PERF` | `IDEA` | One maintenance call for charging-and-idle windows (`BGProcessingTask`, `WorkManager`): compaction, cold-turn compression, index build | `DEFERRED` | PERF-2 spec, with automatic indexing |
 | `RB-001.10` | 2026-11-09 | `PRODUCT` | `MEDIUM` | Adapters for the phones' own agent frameworks (Apple Foundation Models tools, Android on-device function calling): the mobile counterpart of the MCP server | `DEFERRED` | after INSP-1; a candidate for MOBILE-3 (the user picks) |
@@ -98,30 +98,38 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-001.14` | 2026-11-09 | `PRODUCT` | `IDEA` | The demo: export a phone's memory with a passphrase and open it in the inspector on a Mac; make it an INSP-1 acceptance test | `ACCEPTED` | INSP-1 acceptance test + SAMPLE-1 Export button, after SEC-2 |
 | `RB-001.15` | 2026-11-09 | `PRODUCT` | `IDEA` | A community device table: one measured phone today; let sample-app users contribute `device_runs/*.json` | `ACCEPTED` | SAMPLE-1 |
 | `RB-001.16` | 2026-11-09 | `PRODUCT` | `IDEA` | A mobile adoption kit: hosted API docs (DocC, Dokka), package-index listings and a two-screen quickstart | `ACCEPTED` | DOCS-1, after INSP-1 |
-| `RB-001.17` | 2026-11-09 | `CORRECTNESS` | `HIGH` | `release.yml`: the mobile publish jobs still run when an engine build job fails (a skipped publish isn't a `failure`), so Maven Central and `mnemo-swift` can ship without crates.io or PyPI | `ACCEPTED` | MOBILE-2 step 1 (v0.12.1), before any further tag |
-| `RB-001.18` | 2026-11-09 | `CORRECTNESS` | `HIGH` | The mobile stores make writes durable only at background, close or an explicit `flush()`; on Android, writes made in the background are never flushed | `ACCEPTED` | MOBILE-2 (v0.12.1), with RB-001.2 |
-| `RB-001.19` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | The store's lock is held while the app's embedder runs: calling the store from `embed` deadlocks, and a slow embedder blocks every call and the iOS background close | `ACCEPTED` | MOBILE-2 (v0.12.1) |
+| `RB-001.17` | 2026-11-09 | `CORRECTNESS` | `HIGH` | `release.yml`: the mobile publish jobs still run when an engine build job fails (a skipped publish isn't a `failure`), so Maven Central and `mnemo-swift` can ship without crates.io or PyPI | `VERIFIED` | MOBILE-2 step 1 (v0.12.1), before any further tag; verified in RB-003 at `afd65b3` |
+| `RB-001.18` | 2026-11-09 | `CORRECTNESS` | `HIGH` | The mobile stores make writes durable only at background, close or an explicit `flush()`; on Android, writes made in the background are never flushed | `VERIFIED` | MOBILE-2 (v0.12.1), with RB-001.2; verified in RB-003 at `afd65b3` |
+| `RB-001.19` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | The store's lock is held while the app's embedder runs: calling the store from `embed` deadlocks, and a slow embedder blocks every call and the iOS background close | `VERIFIED` | MOBILE-2 (v0.12.1); verified in RB-003 at `afd65b3` |
 | `RB-001.20` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | iOS background close: long calls can't be interrupted, a call proceeds on an already-expired activity, and app extensions never close the file | `ACCEPTED` | MOBILE-2e (v0.12.2); device check in the next device run |
-| `RB-001.21` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | `MnemoKeystore` (Android): transient Keystore errors are reported as `KeyMissing`, the wrapping key can be regenerated over a live alias, and key files aren't fsynced | `ACCEPTED` | MOBILE-2e (v0.12.2) (priority) |
-| `RB-001.22` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | REFAC-1 `close(self)`: a failed final flush destroys the handle, so the buffered writes can't be retried (disk full on a phone) | `ACCEPTED` | MOBILE-2e (v0.12.2) |
-| `RB-001.23` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | FFI error mapping: `Kdf`, `Crypto` and `Serialize` become `Corrupt`; `NeedsWriteOpen` becomes `Invalid` and breaks the try-each-key probe; no retryable class | `ACCEPTED` | MOBILE-2e (v0.12.2) |
-| `RB-001.24` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | Caller-supplied `_mnemo.*` metadata is honoured as engine state (verified: such memories vanish from recall); reject it at every public write surface before 13.4 and 13.5 | `ACCEPTED` | MOBILE-2e (v0.12.2) |
+| `RB-001.21` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | `MnemoKeystore` (Android): transient Keystore errors are reported as `KeyMissing`, the wrapping key can be regenerated over a live alias, and key files aren't fsynced | `VERIFIED` | MOBILE-2e (v0.12.2) (priority); verified in RB-003 at `afd65b3` |
+| `RB-001.22` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | REFAC-1 `close(self)`: a failed final flush destroys the handle, so the buffered writes can't be retried (disk full on a phone) | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
+| `RB-001.23` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | FFI error mapping: `Kdf`, `Crypto` and `Serialize` become `Corrupt`; `NeedsWriteOpen` becomes `Invalid` and breaks the try-each-key probe; no retryable class | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
+| `RB-001.24` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | Caller-supplied `_mnemo.*` metadata is honoured as engine state (verified: such memories vanish from recall); reject it at every public write surface before 13.4 and 13.5 | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
 | `RB-001.25` | 2026-11-09 | `DX/DOCS` | `MEDIUM` | FMT-9 retention: the READMEs promise "the newest 16, plus the last 24 hours"; the pin cap left 6 restore points in a churn test | `ACCEPTED` | Docs in MOBILE-2; `stats` fields in INSP-1; the minimum-count option DEFERRED |
 | `RB-001.26` | 2026-11-09 | `PLAN-REFINEMENT` | `MEDIUM` | FMT-9: no fuzz target covers the v9 page, column, delta, free-list, BM25 or key-slot decoders, and the decompression bound is 64 MiB for 7.9 KB records; needed before 14.1 | `ACCEPTED` | The bound in MOBILE-2e (v0.12.2); the fuzz targets before 14.1 |
-| `RB-001.27` | 2026-11-09 | `PLAN-REFINEMENT` | `LOW` | The new Swift and Kotlin configurations expose `formatVersion: 8` one release before v8 becomes read-only | `ACCEPTED` | MOBILE-2e (v0.12.2) |
-| `RB-001.28` | 2026-11-09 | `CORRECTNESS` | `LOW` | Swift: changing `keyPolicy` on an existing store half-applies; the key probe does a full read-only open per stored key | `ACCEPTED` | MOBILE-2e (v0.12.2) (part 1); part 2 REJECTED |
+| `RB-001.27` | 2026-11-09 | `PLAN-REFINEMENT` | `LOW` | The new Swift and Kotlin configurations expose `formatVersion: 8` one release before v8 becomes read-only | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
+| `RB-001.28` | 2026-11-09 | `CORRECTNESS` | `LOW` | Swift: changing `keyPolicy` on an existing store half-applies; the key probe does a full read-only open per stored key | `VERIFIED` | MOBILE-2e (v0.12.2) (part 1); part 2 REJECTED; verified in RB-003 at `afd65b3` |
 | `RB-001.29` | 2026-11-09 | `DX/DOCS` | `LOW` | Release builds carry 18 `__*` test hooks (three mutate the file) and two `MNEMO_DEV_*` environment switches | `ACCEPTED` | HOOKS-1, with v0.13 |
-| `RB-001.30` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships | `ACCEPTED` | SEC-2 (v0.12.1); details in SECURITY.local.md |
-| `RB-001.31` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships | `ACCEPTED` | SEC-2 (v0.12.1); details in SECURITY.local.md |
+| `RB-001.30` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships | `VERIFIED` | SEC-2 (v0.12.1); details in SECURITY.local.md; verified in RB-003 at `afd65b3` |
+| `RB-001.31` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships | `VERIFIED` | SEC-2 (v0.12.1); details in SECURITY.local.md; verified in RB-003 at `afd65b3` |
 | `RB-001.32` | 2026-11-09 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships | `ACCEPTED` | SEC-2 (v0.12.1); details in SECURITY.local.md |
 | `RB-002.1` | 2026-11-09 | `CORRECTNESS` | `MEDIUM` | `release.yml`: the post-publish "Resolve the published package" step can't pass (it names a scheme Xcode doesn't generate), the dry run never runs it, and no release job has a timeout; the v0.12.0 run was still `in_progress` 45 minutes after everything had published | `VERIFIED` | Fixed in MOBILE-2a (`6bc592c`, `86e6836`, v0.12.1); verified on tag run 42919069975 and dry run 42901448023 (`6e32b68`) |
-| `RB-002.2` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships (refines RB-001.30's fix and its acceptance test) | `ACCEPTED` | SEC-2b, MOBILE-2e (v0.12.2); details in SECURITY.local.md |
-| `RB-002.3` | 2026-11-09 | `PERF` | `MEDIUM` | The first `stats()` on a handle decrypts every record (12 ms at 10K, 26 ms at 20K) for an agent list the mobile binding throws away; fix it before MOBILE-2 puts the recall mode in `stats()` | `ACCEPTED` | MOBILE-2e (v0.12.2) |
-| `RB-002.4` | 2026-11-09 | `PLAN-REFINEMENT` | `MEDIUM` | MOBILE-2 and the RB-001.22–.24 fixes: ten in-process regression tests that need no device or emulator, with today's result and the result to expect after each fix | `ACCEPTED` | The test plan for MOBILE-2e (v0.12.2) |
-| `RB-002.5` | 2026-11-09 | `PERF` | `LOW` | What an app should do at the recall cliff: raising the budget by 1 MB restores 4.9 ms at 22K rows; `buildIndex` also works but took 50 s on an M1 Pro; the MOBILE-2 table should say which first | `ACCEPTED` | Docs in MOBILE-2e (v0.12.2) |
+| `RB-002.2` | 2026-11-09 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships (refines RB-001.30's fix and its acceptance test) | `VERIFIED` | SEC-2b, MOBILE-2e (v0.12.2); details in SECURITY.local.md; verified in RB-003 at `afd65b3` |
+| `RB-002.3` | 2026-11-09 | `PERF` | `MEDIUM` | The first `stats()` on a handle decrypts every record (12 ms at 10K, 26 ms at 20K) for an agent list the mobile binding throws away; fix it before MOBILE-2 puts the recall mode in `stats()` | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
+| `RB-002.4` | 2026-11-09 | `PLAN-REFINEMENT` | `MEDIUM` | MOBILE-2 and the RB-001.22–.24 fixes: ten in-process regression tests that need no device or emulator, with today's result and the result to expect after each fix | `VERIFIED` | The test plan for MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
+| `RB-002.5` | 2026-11-09 | `PERF` | `LOW` | What an app should do at the recall cliff: raising the budget by 1 MB restores 4.9 ms at 22K rows; `buildIndex` also works but took 50 s on an M1 Pro; the MOBILE-2 table should say which first | `VERIFIED` | Docs in MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
 | `R-006.1` | 2026-11-10 | `PRODUCT` | `HIGH` | Post-`INSP-1` sequencing: pull the Local Multi-Agent Harness stack (`12.4 + 12.3 + 12.2 + 13a`) ahead of `PERF-2`, splitting Phase 13 into Local Coordination (`13a`) vs Multi-Party Crypto (`13b`) | `ACCEPTED` | Order changed (harness stack ahead of PERF-2; 13a/13b); 12.4 design note first |
 | `R-006.2` | 2026-11-10 | `PRODUCT` | `HIGH` | Personal-harness edge over Git (`CLAUDE.md`/`PLAN.md`/`Beads`): `git worktree` resolution, zero-embedder BM25 mode, `mnemo harness init` (Claude Code + Cursor), deterministic `--git` projection, and `--personal` brain mount | `ACCEPTED` | Folded into 12.2–12.5 |
 | `R-006.3` | 2026-11-10 | `PLAN-REFINEMENT` | `HIGH` | Double-Run Dogfood Cutover (`HARNESS-DOGFOOD-1`): 2-PR dual-run orchestrating `Planner`/`Worker`/`Reviewer` through `test/project.mnemo` alongside `PLAN.md` to prove zero drift before retiring manual `WORKLOG` relay | `ACCEPTED` | HARNESS-DOGFOOD-1, with the parity checklist; private brain kept separate |
+| `RB-003.1` | 2026-11-12 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships (`mnemo inspect`, new in v0.13) | `ACCEPTED` | Before the tag: the docs part, plus the duplicate-`Host` refusal; the rest in v0.13.1. Details in SECURITY.local.md |
+| `RB-003.2` | 2026-11-12 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (`mnemo export`, new in v0.13) | `ACCEPTED` | Before the tag. Details in SECURITY.local.md |
+| `RB-003.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | A v8 file that crashed mid-commit gets two errors that point at each other (`compact` does fix it); a refused read-write open, even with a wrong passphrase, still replays the WAL into the file | `ACCEPTED` | Rec. 1 before the tag; rec. 2 (key before replay; refuse old formats before any write) in v0.13.1 |
+| `RB-003.4` | 2026-11-12 | `DX/DOCS` | `LOW` | The published crate doubles to 1.2 MB because the test fixtures ship in it, and the tests it ships don't compile from it; decide before the tag, since a published version can't change | `ACCEPTED` | Option 1 before the tag: exclude tests, benches and the fixture generators from the crate; fixtures README |
+| `RB-003.5` | 2026-11-12 | `PLAN-REFINEMENT` | `MEDIUM` | The engine half of `release.yml` never runs before a tag, so each change to it (this time nine bumped actions) is first tried on the real one; and a failed wheel leg still lets crates.io publish | `ACCEPTED` | Before v0.13.1 or the next release.yml bump: dry-run the engine builds; publishes wait for every build. For this tag the user holds approval until every build is green |
+| `RB-003.6` | 2026-11-12 | `DX/DOCS` | `LOW` | `--key-file` exists only on `inspect`: raw-key files can't be exported or converted from the CLI, and `FormatTooOld`'s advice doesn't work for a raw-key v8 file | `ACCEPTED` | v0.13.1: --key-file on export and compact; FormatTooOld names compact_file_with_key |
+| `RB-003.7` | 2026-11-12 | `PERF` | `LOW` | The inspector clones every matching memory per request before paging and keeps the file in memory several times over (by reading; not measured) | `ACCEPTED` | v0.13.1 fixes; a PERF-2 cell for load time and peak memory at 10K and 100K |
+| `RB-003.8` | 2026-11-12 | `DX/DOCS` | `LOW` | Small things: the CHANGELOG date, the "only its own lines" claim for keyed writes, Python's single `RuntimeError`, two edges of the mobile-off note | `ACCEPTED` | 1 and 2 before the tag; 3 docs before the tag, subclasses in v0.13.1; 4 with REL-2 |
 
 ---
 
@@ -620,7 +628,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED`, modified (PLANNER-A, 2026-11-09). Verified: `ensure_column` sizes the resident column by `self.catalog.len()` (`records.rs:1096-1098`), so turns, essence items and tombstones count against the budget. **In MOBILE-2:** (1) size it by the rows recall scans (live facts); (3) `stats()` reports the recall mode (`exact_resident`, `exact_paged`, `indexed`), and the Swift and Kotlin READMEs get a rows-by-dimension table for the default budget; (5) a `device_budget` over-budget cell. **(2) the cheap paged path goes to PERF-2.** (4) automatic index building is DEFERRED to PERF-2's spec, together with RB-001.9. RB-002's on-Mac measurement replaces the wheel-based 8.7× figure.
 
 #### RB-001.2 — [PERF] [MEDIUM] Coalesced flush policy and a background batch scope in the Swift and Kotlin stores (battery, flash writes, write latency)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - `test/scripts/device_runs/iphone18_3.json` (10K): a single durable write is 11.99 ms; a batch of 100 is 17.36 ms (0.17 ms per memory). `device_budget_v0_11_0`: 3 fsyncs per commit.
   - The same file: background close 12.80 ms, the reopen after it 10.18 ms, first recall on a fresh handle 7.08 ms.
@@ -666,7 +674,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) into **PERF-2**. RB-002 measured `F_BARRIERFSYNC` as 16× cheaper on the Mac. Only orderings that don't need durability may use it, so PERF-2's design states which syncs need durability and which only ordering, and the crash-injection suite covers it. The iPhone is measured in the next device run.
 
 #### RB-001.5 — [PERF] [MEDIUM] `track_access` defaults to on in the mobile binding, so every recall dirties the catalog and every iOS background recall ends in a full commit
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - `mnemo/bindings/uniffi/src/types.rs:211-214`: `track_access` defaults to `true`.
   - `mnemo/src/store/recall.rs:614-626`: tracked hits update the catalog rows.
@@ -691,7 +699,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `REJECTED` (PLANNER-A, 2026-11-10, after RB-002). RB-002 measured no size gain from either change, and the build-graph half has no time benefit. Revisit only if the CLI split comes up for its own reasons.
 
 #### RB-001.7 — [DX/DOCS] [MEDIUM] CI time: no `concurrency` cancel and no path filters, so every docs push runs all 18 jobs (three on macOS)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `.github/workflows/ci.yml:3-18`: the only ignored paths are `PLAN.md` and `reviewer_notes.md`. No workflow has a `concurrency:` block. One run is 18 jobs: rust ×3, deny, msrv, python, compat, mobile ×3, msrv-uniffi, swift, kotlin, fuzz-smoke ×5. The rust macOS leg, the iOS build and the swift job run on macOS runners.
 - **Finding:** The Planner's README and `index.html` handoffs, and CHANGELOG-only commits such as `8112fc9` and `15e1001`, each run the full matrix. A second push to a branch doesn't cancel the first run. With one serialized Worker queue, CI wall time is the queue's clock.
 - **Recommendation:**
@@ -796,7 +804,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **The release workflow:** a manual run can't publish (`release.yml:351-354`), the `mnemo-swift` push refuses an existing tag (`:470-472`), and SwiftPM's checksum pins the zip.
 
 #### RB-001.17 — [CORRECTNESS] [HIGH] `release.yml`: the mobile publish jobs still run when an engine build job fails (a skipped publish isn't a `failure`), so Maven Central and `mnemo-swift` can ship without crates.io or PyPI
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `.github/workflows/release.yml` at `8a9af2e`:
   - `:297-301`: `publish-crates` needs `build-cli` and has a plain `if:` (the repo variable), so when a `build-cli` leg fails the job is **skipped**.
   - `:259-261`: `publish-pypi` is skipped the same way when a wheel or the sdist fails.
@@ -812,7 +820,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-09). Verified at `release.yml:322-327`: `mobile-prepare` needs only `publish-crates`/`publish-pypi`, and a build failure upstream makes them `skipped`, not `failure`. **The v0.12.0 run was not affected:** crates.io has 0.12.0 (03:18 UTC), PyPI has all five wheels plus the sdist, so every `build-cli`, `build-wheels` and `build-sdist` leg and `create-release` succeeded (both publish jobs depend on them), and `mnemo-swift` has `main` plus the tag `0.12.0`. Fix in MOBILE-2: `mobile-prepare` needs every engine job, and on `push` it requires each publish job to be `success` unless its `ENABLE_*` variable is off. The dry run must still pass, and `RELEASING.md` must match.
 
 #### RB-001.18 — [CORRECTNESS] [HIGH] The mobile stores make writes durable only at background, close or an explicit `flush()`; on Android, writes made in the background are never flushed
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - Engine: `Mnemo::remember` only stages the write (`mnemo/src/store/crud.rs:252-257`); dirty pages stay pinned in memory until a flush (`mnemo/src/pager.rs:8`); a dropped handle never flushes (`mnemo/src/store/flush.rs:827-828`).
   - Swift: the only flushes are `flush()`, `close()`, the background close and the close after a background call (`MnemoStore.swift:301-312, 379-393, 425-439`).
@@ -831,7 +839,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-09). Verified: the Swift store flushes only in `flush()`, `close()`, the background close and the close after a background call; the Kotlin store only on `ON_STOP` and explicit calls (`MnemoStore.kt:221, 284-298`). In MOBILE-2: a store-level flush policy with **`.coalesced` as the default** (commit within about 1 s or 64 writes, one timer), plus `.everyWrite` and `.manual`. Android tracks the stopped state and commits after calls made while stopped. The READMEs and method docs state the durability window. Test: write, force-stop with no lifecycle event (`am force-stop` on the emulator, a kill on the simulator), reopen, count.
 
 #### RB-001.19 — [CORRECTNESS] [MEDIUM] The store's lock is held while the app's embedder runs: calling the store from `embed` deadlocks, and a slow embedder blocks every call and the iOS background close
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - The binding's contract: `embed` "is called … never while the handle's lock is held, so it may call back into the same database" (`mnemo/bindings/uniffi/src/embedder.rs:9-12`), tested at the `MnemoDb` level.
   - Kotlin: `withDatabase` runs the whole engine call, embedder included, inside a non-reentrant coroutine `Mutex` (`MnemoStore.kt:321-337`).
@@ -862,7 +870,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2). A call must not proceed on an already-expired activity: it closes and fails with a retryable error. Long calls check for expiry between engine steps where they can. The README's extension paragraph says what's true. The device checks from RB-002's run sheet go into the next device run.
 
 #### RB-001.21 — [CORRECTNESS] [MEDIUM] `MnemoKeystore` (Android): transient Keystore errors are reported as `KeyMissing`, the wrapping key can be regenerated over a live alias, and key files aren't fsynced
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `mnemo/bindings/kotlin/src/main/kotlin/io/github/toarchkumar/mnemo/MnemoKeystore.kt`.
 - **Finding:**
   1. **Transient errors look permanent** (`:62-92`). Any exception from the unwrap, and any `IOException` reading the key file, becomes `KeyMissing`. The README's recovery advice for `KeyMissing` includes "delete the file and start over". Keystore calls can fail for reasons that pass (the keystore service busy or restarting, a binder error), and the code can't tell those from a lost key. An app that follows the documentation destroys a readable database on a glitch. The Swift side gets this right: `errSecItemNotFound` is `keyMissing`, everything else is `.keychain(status:)` (`MnemoKeychain.swift:86-91`).
@@ -876,7 +884,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2), **first in the batch**. Reporting transient Keystore errors as `KeyMissing` is dangerous, because the documented `KeyMissing` recovery includes deleting the file. Regenerating the wrapping key over a live alias would orphan every key. **Fix:** a distinct retryable `Keystore` error; never generate when the alias exists; fsync and rename for key files; JVM tests per RB-002.4.
 
 #### RB-001.22 — [CORRECTNESS] [MEDIUM] REFAC-1 `close(self)`: a failed final flush destroys the handle, so the buffered writes can't be retried (disk full on a phone)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - `mnemo/src/store/flush.rs:852-862`: `close(mut self)` runs `self.flush()?`. On an error the handle has already been moved in, so it's dropped, with everything unflushed. The rustdoc states this (`:825-828`).
   - Before `5254395`, `close(&mut self)` left the handle with the caller, who could free space and try again.
@@ -890,7 +898,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2). Confirmed by RB-002 with a failpoint. `close` flushes **first**, and on failure returns the error **with the handle kept** so the caller can retry. In Rust that means `close(self) -> Result<(), (Mnemo, Error)>`, or a `try_close` beside it (your call, without breaking 0.12 callers if you can). The Swift and Kotlin `close()` keep the handle on failure.
 
 #### RB-001.23 — [CORRECTNESS] [MEDIUM] FFI error mapping: `Kdf`, `Crypto` and `Serialize` become `Corrupt`; `NeedsWriteOpen` becomes `Invalid` and breaks the try-each-key probe; no retryable class
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `mnemo/bindings/uniffi/src/error.rs:49-77`; `MnemoStore.swift:503-530`; `MnemoStore.kt:420-454`.
 - **Finding:**
   1. **`Corrupt` is a catch-all** (`error.rs:72-74`). `Kdf` errors land there, and Argon2's 19 MiB allocation can fail on a low-memory phone during `open`, the export or the import. So do `Crypto` and `Serialize`, which can come from the write side. An app reads `Corrupt` as "the file is damaged" and may reset it.
@@ -905,7 +913,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2). The FFI error enum gains distinct `Kdf`, `Crypto`, `NotAMnemoFile` (bad magic) and `NeedsWriteOpen` cases, and a `retryable` flag. `UnsupportedVersion` carries the engine's message. The try-each-key probe treats only key and decrypt failures as "not this key".
 
 #### RB-001.24 — [CORRECTNESS] [MEDIUM] Caller-supplied `_mnemo.*` metadata is honoured as engine state (verified: such memories vanish from recall); reject it at every public write surface before 13.4 and 13.5
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - `mnemo/bindings/uniffi/src/db.rs:174-178` and `types.rs:383-393`: metadata JSON is inserted key by key with no check.
   - The only filters on the reserved namespace are in the keyed-write comparison and in `update`'s preservation (`mnemo/src/store/keyed.rs:29, 216`). Plain `remember` has none, on any surface.
@@ -941,14 +949,14 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002). **The decompression bound in MOBILE-2e (v0.12.2):** a v9 turn record decompresses to at most its chunk size, so the bound drops from 64 MiB to 1 MiB, with a test using RB-002's 2,067-byte frame. **The v9 decoder fuzz targets** (page, column, delta, free list, BM25, key slot) become **FUZZ-2**, required before Phase 14.1.
 
 #### RB-001.27 — [PLAN-REFINEMENT] [LOW] The new Swift and Kotlin configurations expose `formatVersion: 8` one release before v8 becomes read-only
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `MnemoStore.swift:15-17, 28` and `MnemoStoreConfiguration.kt:14, 25` ("`8` creates a v8 file for readers on v0.10 or earlier"); `mnemo/bindings/uniffi/src/types.rs:55-58`. The `[0.12.0]` CHANGELOG says "v0.13 makes them read-only" (`8112fc9`).
 - **Finding:** No mobile reader older than v0.12 exists, so nothing on a phone can need a v8 file. The option is new public API that the next release has to deprecate, and a file created with it misses every v9 gain the mobile numbers are built on (1.3 KB per memory, keyword recall, compression).
 - **Recommendation:** Remove `formatVersion` from the two store configurations before the packages have users (it can stay in the low-level `MnemoConfig` for tests), or mark it deprecated. v0.12.0 is tagged, so do it in v0.13 together with the v8 sunset.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2). Remove `formatVersion: 8` from the Swift and Kotlin configurations (v8 becomes read-only in v0.13).
 
 #### RB-001.28 — [CORRECTNESS] [LOW] Swift: changing `keyPolicy` on an existing store half-applies; the key probe does a full read-only open per stored key
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** `MnemoStore.swift:454-479` (`open`), `:503-530` (`resolveKey`); `FilePolicy.swift:62-71`; `MnemoKeychain.swift:66-77`.
 - **Finding:**
   1. **Policy changes.** On every open, `FilePolicy.apply` sets the backup flag from the *configured* policy, but the Keychain item keeps the attributes it was created with. Switching a store from `.deviceOnly` to `.iCloudSynced` puts the file into backups while the key stays device-only and unsynced. A restore then brings the file without its key (`keyMissing`), which is the outcome the policy table says `.iCloudSynced` avoids. The reverse switch leaves a synced key behind for a file that's now excluded.
@@ -1171,12 +1179,12 @@ The tree has moved since the batch was written. Two commits follow the tag, both
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002). Already fixed in MOBILE-2a, in v0.12.1: the scheme comes from `-list -json`, packages are resolved as their own step, there are time limits, and the dry run exercises the check. REVIEWER-B marks it `VERIFIED` after the v0.12.1 tag run.
 
 #### RB-002.2 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** One finding from the RB-001.30 reproduction, written up in the gitignored `SECURITY.local.md` with the tests. It refines an accepted fix and its acceptance test; it doesn't contradict the triage. Per AGENTS.md it stays out of this file until the fix ships.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10), as SEC-2b in v0.12.2. The full triage is in `SECURITY.local.md`.
 
 #### RB-002.3 — [PERF] [MEDIUM] The first `stats()` on a handle decrypts every record for an agent list the mobile binding throws away; fix it before MOBILE-2 puts the recall mode in `stats()`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - `mnemo/src/store/maintenance.rs:290-302`: on the first call per handle `stats()` runs `self.memories()?` and collects each record's `agent_id`. Later calls reuse the set. `mnemo/src/store/crud.rs:318`: a `delete` clears it, so the next `stats()` pays again.
   - `maintenance.rs:319-322`: `stats()` also calls `ensure_ann()`, which loads a persisted index.
@@ -1195,7 +1203,7 @@ The tree has moved since the batch was written. Two commits follow the tag, both
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002) → MOBILE-2e (v0.12.2). `stats()` takes the cheap path: no record decrypts and no index load (the header says whether one is persisted). Recall mode and retention fields go there, and the agent set is filled only by an explicit `agents()` (or `stats_full()`) for Rust and Python. Plus a `device_budget` cell for the first `stats()` on a fresh handle.
 
 #### RB-002.4 — [PLAN-REFINEMENT] [MEDIUM] Ten in-process regression tests for MOBILE-2 and the RB-001.22–.24 fixes, none needing a device or an emulator
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:** MOBILE-2's accepted tests for RB-001.18 are `am force-stop` on the emulator and a kill on the simulator; for .19, "a re-entrancy test in each suite". Every reproduction in this batch ran in-process: under `cargo test` or under `swift test` on macOS, in seconds. RB-001's own scripts were lost with its sandbox, so the recipes are written down here.
 - **Finding:** The emulator and simulator jobs are the slowest and least-run legs of CI (the swift job is 730 s). The behaviours MOBILE-2 changes can be pinned by ordinary unit tests that run on every PR, with the device checks kept as confirmation.
 - **Recommendation:** add these with their fixes. "Today" is the result at `f79715e`.
@@ -1220,7 +1228,7 @@ The tree has moved since the batch was written. Two commits follow the tag, both
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-10, after RB-002). The ten in-process tests are MOBILE-2e's acceptance tests, each with its before and after result.
 
 #### RB-002.5 — [PERF] [LOW] What an app should do at the recall cliff: raise the budget first, build the index second; the MOBILE-2 table should say so
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-003, `afd65b3`)
 - **Context / Evidence:**
   - RB-001.1's triage puts three things in MOBILE-2: the budget sized by live facts, `stats()` reporting `exact_resident`, `exact_paged` or `indexed`, and a rows-by-dimension table for the default budget. Automatic index building is deferred to PERF-2.
   - **Measured at 22,000 facts × 384** (the first size over the 16 MiB default, which needs 17.0 MB):
@@ -1269,7 +1277,7 @@ The tree has moved since the batch was written. Two commits follow the tag, both
   4. **Deterministic Git Projection (`12.5` + `13.5`):** Developers keep `PLAN.md` and `AGENTS.md` in Git because they want human-readable `git diff`s in PRs. `12.5`'s `mnemo export` should include a `--git` mode that writes a deterministic, diff-clean Markdown/JSONL summary of **only `public` and `team` Essence, active Tasks, and Decision Ledger rows** (excluding high-churn lock claims, raw turn archives, vectors, and `private` security notes like `SECURITY.local.md`).
   5. **Dual-scope Personal + Project Brain (`12.2` / `12.4`):** A developer's personal harness has two scopes: user-wide conventions/lessons (`~/.mnemo/personal.mnemo`) and repo-specific state (`project.mnemo`). Allowing MCP / CLI `about` and `recall` to optionally attach a secondary read-only/read-write `--personal <path>` brain gives developers cross-repo memory continuity that repo-bound `CLAUDE.md` files cannot match.
 - **Recommendation:** Fold (1) `git-common-dir` worktree resolution into `12.4`/`12.2`, (2) zero-embedder v9 BM25 operation into `12.3`, (3) Cursor + Claude Code `mnemo harness init` into `12.2`, (4) visibility-filtered deterministic `--git` projection into `12.5` (starting in `INSP-1`), and (5) optional `--personal <path>` mounting into `12.2`/`12.4`.
-- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-11), all five, folded into 12.2–12.5. (b) is a format question: today `create` refuses `dimensions == 0` (`store/open.rs:197`) and `remember_text` needs an embedder (`store/crud.rs:231`), so 12.3 decides how text is stored without a vector and how vectors are filled in later. (c) Cursor: `.cursor/mcp.json` (`mcpServers`) and `.cursor/rules/*.mdc`, re-checked when 12.2 is specified. (d) first version in INSP-1, the visibility filter with 13.5.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-11), all five, folded into 12.2–12.5. (b) is a format question: today `create` refuses `dimensions == 0` (`store/open.rs:197`) and `remember_text` needs an embedder (`store/crud.rs:231`), so 12.3 decides how text is stored without a vector and how vectors are filled in later. (c) Cursor: `.cursor/mcp.json` (`mcpServers`) and `.cursor/rules/*.mdc`, re-checked when 12.2 is specified. **Renamed (user, 2026-11-11):** `mnemo harness init` becomes `mnemo onboard`, which also prints the GUIDE-1 instructions (`--guide` for the guide alone). (d) first version in INSP-1, the visibility filter with 13.5.
 
 #### R-006.3 — [PLAN-REFINEMENT] [HIGH] Double-Run Dogfood Cutover (`HARNESS-DOGFOOD-1`): 2-PR dual-run orchestrating `Planner`/`Worker`/`Reviewer` through `test/project.mnemo` alongside `PLAN.md` to prove zero drift before retiring manual `WORKLOG` relay
 - **Status:** `ACCEPTED`
@@ -1283,4 +1291,214 @@ The tree has moved since the batch was written. Two commits follow the tag, both
   2. **Run 2 (Unified Brain Primary + Auto-Projected Git Markdown PR):**
      - Once Run 1 passes with zero context loss or lock contention, `test/project.mnemo` becomes the **sole primary write target** for `Planner`, `Worker`, and `Reviewers` (including `visibility = private` findings replacing `SECURITY.local.md`).
      - Hand-editing `WORKLOG` and `Decision Ledger` tables stops; instead, the `Worker`'s backup step runs `mnemo export test/project.mnemo --git` (`12.5`) to deterministically generate the Git-tracked Markdown summary for `git diff` and GitHub backup.
-- **Planner Triage:** `ACCEPTED`, modified (PLANNER-A, 2026-11-11). **Success criterion (user):** everything the project does today through git Markdown runs entirely in MNemo; see the parity checklist in PLAN.md's 2026-11-11 entry. Met when Run 2 takes one full release, dispatch to tag, with no hand-edited PLAN.md or reviewer_notes.md. **Changed:** private findings never go into `test/project.mnemo` (public, committed, and readable by any key holder until 13b); a separate, never-committed private brain replaces `SECURITY.local.md`.
+- **Planner Triage:** `ACCEPTED`, modified (PLANNER-A, 2026-11-11). **Success criterion (user):** everything the project does today through git Markdown runs entirely in MNemo; see the parity checklist in PLAN.md's 2026-11-11 entry. Met when Run 2 takes one full release, dispatch to tag, with no hand-edited PLAN.md or reviewer_notes.md. **Changed:** private findings never go into the shared project brain (every agent holds its key, anyone with the key reads everything until 13b, and Run 2's `--git` export is committed; corrected 2026-11-11: `test/project.mnemo` itself is gitignored); a separate, never-committed private brain replaces `SECURITY.local.md`.
+
+---
+
+### Batch `RB-003` — 2026-11-12 (REVIEWER-B: the v0.13.0 READY review, before the tag, with PLANNER-A's three checks, a verification sweep of shipped RB items, and eight new items)
+
+**What was reviewed.** `release-0.13.0` at `afd65b3` (`release: v0.13.0`), which is what the READY and the dry run 43138424847 cover. The branch head is `1afdfd7`, which adds only `.gitignore` and `AGENTS.md`. Nothing is tagged. The change since `v0.12.3` is 29 commits, 109 files, +7,996 / −914 lines.
+
+**How.**
+- **Pinned.** Every build and test ran on a scratch copy made with `git archive afd65b3`, never on the live tree, with `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`. Scratch crates depend on that copy by path; their own lock files were generated once from the repo's pins (`cargo update --workspace --offline`), then used with `--locked`.
+- **No benchmarks.** One figure below is a count of bytes; nothing was timed.
+- **Machine:** Apple M1 Pro, macOS 26.7.1, Rust 1.95.0.
+- **Baselines at `afd65b3`, both green:** `cargo test --locked --features failpoints`: **366 passed, 0 failed** (the Worker's count). `cargo test --locked -p mnemo-uniffi`: **23 passed**. The Swift and Kotlin suites were not run here (the Swift build script calls cargo without `--locked`; this Mac has no JDK); Mobile CI is green on `afd65b3`.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else. One exception to record: the repo moved to `mnemo.nosync` mid-session and my shell's working directory still resets to the old path, where an empty `~/Documents/GitHub/mnemo` folder exists. I created nothing in it.
+- **Unfixed security findings** from this pass (`RB-003.1`, `RB-003.2`) are only in `SECURITY.local.md`, with the inspector's probe results.
+
+---
+
+**The verdict first: I would not hold the v0.13.0 tag for any item below.**
+
+Four things are worth doing before it anyway, because they're small and the tag makes two of them permanent:
+1. **`RB-003.4`: decide what ships in the crate.** Once `mnemo-engine 0.13.0` is on crates.io it can't be changed, and as staged it carries 745 KB of test fixtures and doubles in size.
+2. **`RB-003.3`: one error string.** This is the release that makes v8 read-only, and a v8 file that crashed mid-commit currently gets two messages that point at each other.
+3. **`RB-003.1` (security, in `SECURITY.local.md`): two sentences of help and README text.** The rest of that item can wait for v0.13.1.
+4. **The CHANGELOG heading** says `[0.13.0] — 2026-11-11`; the tag will land on a later day (the Worker's READY already notes this).
+
+The three checks PLANNER-A asked for all pass; details next.
+
+---
+
+**PLANNER-A's three checks**
+
+**1. The release artifacts are built without `dev-hooks` (HOOKS-1): yes.**
+- **How the feature reaches the tests:** the crate dev-depends on itself with `features = ["dev-hooks"]` (`mnemo/Cargo.toml:141-145`). A dev-dependency's features apply only to test, bench and example builds.
+- **Feature resolution, checked for each release build shape** (`cargo tree --locked -e features --edges normal,build -i mnemo-engine | grep 'feature "dev-hooks"'`): the workspace root, `-p mnemo-uniffi`, `-p mnemo-node`, and `mnemo-python`: **0 matches each**. With dev edges included, as a control: 1.
+- **The release workflow's build commands** carry no feature flag: `cargo build --release --target …` (`release.yml:138`), maturin `args: --release --out dist` (`:210`) and `--out dist` (`:253`), `cargo publish --no-verify` (`:394`), `cargo rustc -p mnemo-uniffi --lib --release` in both mobile scripts. Only CI's test wheel passes `--features dev-hooks` (`ci.yml:248`).
+- **The artifacts themselves.** I downloaded what dry run 43138424847 built at `afd65b3` and searched each library for the two switch names (`MNEMO_DEV_`), with a string that must be there as a sanity check:
+
+  | Artifact | `MNEMO_DEV_` | Sanity string |
+  |---|---|---|
+  | `MnemoFFI-0.13.0.xcframework`: `ios-arm64`, `macos-arm64`, simulator `arm64`, simulator `x86_64` | 0, 0, 0, 0 | present in all |
+  | `mnemo-android-0.13.0.aar`: `arm64-v8a`, `x86_64` | 0, 0 | present in both |
+  | Control: the published `mnemo-android-0.12.3.aar`, `arm64-v8a` | **2** (`MNEMO_DEV_ANN_MIN_FACTS`, `MNEMO_DEV_TURN_ZSTD`) | present |
+  | The CLI, built here as the workflow builds it (`cargo build --release --locked`) | 0 | present |
+
+- **Not covered by any artifact:** the wheels and the CLI binaries the tag will build, because a dry run skips the engine jobs. For those the evidence is the feature resolution and the build commands above.
+- **`cargo package` works with the self dev-dependency:** it's stripped from the published manifest, so `cargo publish` won't trip on it. Two side effects are in `RB-003.4`.
+- **`RB-001.29` is fixed at `afd65b3`.** I'll mark it `VERIFIED` once v0.13.0 is published.
+
+**2. `mnemo export --git` never leaks vectors, turns, the cache or the embedder-identity record: confirmed, with one thing to know.**
+- **Test** (scratch crate, release CLI, both formats). A file with an embedder named by a marker string, vectors with marker values and `store_float_vectors` on, three thread turns with marker text (one longer than a chunk), essence items, an exact-key cache entry and a semantic cache entry with marker values, key and model.
+
+  | In the `--git` output | Markdown | JSON Lines |
+  |---|---|---|
+  | Thread turn text, turn records | absent | absent |
+  | Cache value, cache key, semantic cache value, cache model | absent | absent |
+  | A `vector` field, or any marker vector value | absent | absent |
+  | The embedder's name (the identity record) | absent | absent |
+  | `accessed_at`, `access_count` | absent | absent |
+  | Essence items and timeline entries; superseded versions of a keyed fact; the thread id on essence items | present (by design) | present (by design) |
+
+- **The thing to know:** a file that has a manifest memory (one made by `mnemo init`) names its embedder in that memory's metadata, and the manifest is a memory, so it's exported. The v8 fixture's `--git` export contains `"embedder":{"dimensions":8,"name":"fixture-embedder-r1","normalize":true}`. The identity *record* (the reserved cache entry) is never exported, which is what the documentation claims.
+- **Determinism:** two exports in a row are byte-identical. They stay identical after a tracked recall, a cache write and a commit, and **across a compaction from v8 to v9**. One new unkeyed memory adds exactly one JSON line and changes none.
+- **One wording nit** (in `RB-003.8`): "one new memory adds only its own lines" isn't true of a keyed write. A new version added 2 lines and changed 1, because the superseded version gains `_mnemo.superseded_by` and `_mnemo.invalid_at`. That's correct behaviour, just not what the sentence says.
+
+**3. `action-gh-release` v3 and REL-1's mobile-off note: both right by reading. Neither can be proved before a tag.**
+- **The pin is what it says.** `8a0cd651e5b2…` is the commit that the annotated tag `v3.0.4` points to ("release 3.0.4").
+- **What changed from what v0.12.3 ran.** v0.12.3 used `3bb12739…` = **2.6.2**. Between it and 3.0.4 there are 61 commits: the move of the action's runtime from Node 20 to Node 24 (3.0.0), dependency updates, and four reliability fixes in 3.0.2 (small-asset uploads, draft prereleases, Gitea, clearer 404s). No input was removed or renamed.
+- **The five uses** (`release.yml:68, 283, 550, 668, 967`) pass only `generate_release_notes`, `draft`, `prerelease`, `files`, `body` and `append_body`, all defined in 3.0.4's `action.yml`.
+- **The attach steps keep the release body.** I read the update path in the action's source at the pinned commit (`src/github.ts:684-716`): with no `body` input it re-sends the existing body, and it preserves `draft` and `prerelease` from the existing release.
+- **Node 24 actions need runner 2.327.1 or newer.** Every job runs on GitHub-hosted runners (the v0.12.1 run used 2.338.2).
+- **Immutable releases are off** for the repo (`gh api …/immutable-releases`: `enabled: false`), so attaching assets after the release is published still works.
+- **The mobile-off note** (`release.yml:516-553`): on a tag with `ENABLE_MOBILE_PUBLISH` not `true`, `mobile-prepare` still checks the versions, the build, publish and verify jobs are skipped by their `if:` conditions, and `mobile-skipped-note` appends one line to the release body. With `append_body: true` and a non-empty existing body, the action writes `existing + "\n" + note`. The note's two versions come from `mnemo-swift`'s newest tag and Maven's `<release>`. That's right.
+  - Two small edges, in `RB-003.8`: re-running that job appends the line a second time, and a failed lookup of the Swift tags fails the job, which turns a fully published engine release red.
+- **For this tag the note won't run:** `ENABLE_MOBILE_PUBLISH` is `true` (set 2026-11-11), with `ENABLE_CRATES_PUBLISH` and `ENABLE_PYPI_PUBLISH`. All four publish environments have a required reviewer, so the run will pause four times for approval.
+- **What a real tag will run for the first time** (the same Dependabot PR bumped these, and a dry run skips the engine jobs):
+  - `action-gh-release` 3.0.4: all five uses;
+  - `download-artifact` 8.0.2 with `pattern` and `merge-multiple` (`release.yml:274-279, 321-329`). The dry run exercised 8.0.2 by `name` only. Its release notes change two things, neither of which touches this use: files are unzipped by content type, and a digest mismatch is now an error;
+  - `setup-python` 7.1.0 and `upload-artifact` 7.0.2 on the macOS and Windows wheel and CLI legs (CI and the dry run used them on Linux and macOS).
+  - By the release notes none of these changes behaviour here, so I don't hold the tag for it. The standing gap is `RB-003.5`.
+
+---
+
+**Blind spots: what else I looked at**
+
+**Held up, no item raised.**
+- **The inspector's request handling** (token, `Host`, method, paths, bind address, headers) and its page: 13 live probes and a read of both files. Results are in `SECURITY.local.md`.
+- **EMBED-ID-1's identity record survives the cache's own maintenance.** It's stored as a result-cache entry in a reserved namespace, so I tried to lose it: `cache_put`, `cache_delete` and `cache_get` on the reserved namespace are refused; 50 puts into a 3-entry namespace don't evict it (budgets are per namespace); `cache_purge(None, false)` leaves it; it survives `compact_file` and is in an `export_rekeyed` copy; `cache_stats` doesn't count it. A second embedder is refused with `EmbedderMismatch`.
+- **A new revision of an Apple model strands a store's text path.** The Swift docs say so plainly (`AppleEmbedders.swift:7-20`), and the engine-side re-embed is already queued (12.3). Not re-raised.
+- **The committed fixtures are synthetic.** I exported all of them: grocery notes, an offsite plan, a repaint plan. No names, paths or device identifiers. `v8_key.key` is a throwaway raw key for one fixture.
+- **The v8 sunset's ordinary paths.** On the v8 fixture, `about`, `list`, `verify`, `snapshots`, `cache stats` and `thread export` work and leave the file byte-identical; `index` is refused with a clear `FormatTooOld`; `compact` converts it (17 → 17 memories) and the `--git` export is unchanged by the conversion.
+- **Mobile artifacts match the READY:** the Swift tree from the dry run has the `MnemoAppleEmbedder` product and no `formatVersion` on the store configuration.
+
+**Raised:** `RB-003.3` to `RB-003.8` below.
+
+---
+
+**Verification of shipped RB items** (the scheduled pass; each was confirmed at `afd65b3`, by test where one is named, otherwise by reading)
+
+| Item | Result | Evidence |
+|---|---|---|
+| RB-001.2, RB-001.18 | **`VERIFIED`** (v0.12.1) | Both stores default to `.coalesced()` (`FlushPolicy.swift:26`, Kotlin `FlushPolicy.Coalesced`), with `withSession` in both and a commit before a write returns while the Android process is stopped. Tests exist in both suites (`theDefaultIsCoalesced`, `coalescedCommitsOnceWithinTheWindow`, `whileStoppedACoalescedWriteCommitsBeforeItReturns`). Binding test T1 is in. Read, not run by me. |
+| RB-001.5 | **`VERIFIED`** (v0.12.2) | `RecallOptions.track_access` defaults to `false` in the binding (`types.rs:212-218`). |
+| RB-001.7 | **`VERIFIED`** (v0.12.2) | `ci.yml:45-47` cancels superseded runs; `:18-27` ignores docs-only changes; mobile jobs moved to `mobile-ci.yml` with path filters. |
+| RB-001.17 | **`VERIFIED`** (v0.12.1) | The gate now needs seven engine jobs including `attach` and checks each result (`release.yml:412-463`). Tag runs 42919069975 (v0.12.1) and 42979921391 (v0.12.3) are green. The refusing path has still only been read, never seen. |
+| RB-001.19 | **`VERIFIED`** (v0.12.1) | Swift's text methods are `nonisolated` and embed before entering the actor (`MnemoStore.swift:183-195, 228`); Kotlin embeds before taking the lock. `aSlowEmbedderDoesNotBlockAnUnrelatedGet` is in both suites. Read, not run by me. |
+| RB-001.21 | **`VERIFIED`** (v0.12.2) | `MnemoKeystore.kt`: only a bad tag, a missing wrapping key or a permanently invalidated key is `KeyMissing` (`:160`); anything else is `Keystore("unwrap", …)` (`:117`); the key file is synced (`:76`); generation checks `containsAlias` (`:326`). `aTransientUnwrapFailureIsRetryableNotKeyMissing` is in the JVM suite. Read only. |
+| RB-001.22 | **`VERIFIED`** (v0.12.2) | **Test:** with the flush failing once, `try_close()` returns the handle with the error, a retry succeeds, and the file has 40 of 40. Through the binding: `close()` errors, `flush()` then succeeds, 40 of 40. |
+| RB-001.23 | **`VERIFIED`** (v0.12.2) | **Test:** on a file with a WAL to recover, `key_opens` answers `true` for the right key and `false` for a wrong one, in the engine and the binding, and leaves the file untouched. `Kdf`, `Crypto`, `NotAMnemoFile`, `NeedsWriteOpen` are distinct cases and `UnsupportedVersion` carries the engine's message. Item 3 (a poisoned handle) wasn't tested. |
+| RB-001.24 | **`VERIFIED`** (v0.12.2) | **Test:** each of four forged `_mnemo.*` writes is `Invalid`, including an unknown `_mnemo.author`, and through `metadata_json` in the binding; nothing is stored. An ordinary update of a keyed memory still works. |
+| RB-001.27 | **`VERIFIED`** (v0.12.2, removed in v0.13) | Neither store configuration has `formatVersion`. |
+| RB-001.28 (part 1) | **`VERIFIED`** (v0.12.2) | A changed `keyPolicy` is refused with `keyPolicyMismatch` (`MnemoStore.swift:741`); test T10 is in. Read only. |
+| RB-001.30, RB-002.2 | **`VERIFIED`** (v0.12.1, v0.12.2) | **Test, in a second scratch copy with crate internals:** after a plain rekey the old wrapped key is gone from the file and the old data key still validates the header (documented: plain rekey doesn't revoke); an `export_rekeyed` copy has a different data key and none of the live file's wrap; after rekey plus compact (the CLI's `--rotate`) the old data key no longer validates the header. The graft is now the repo's own acceptance test (`src/store/header_graft_tests.rs`). |
+| RB-001.31 | **`VERIFIED`** (v0.12.1) | Top-level `contents: read` (`release.yml:50-51`); write only on the five jobs that touch the release; `persist-credentials: false` on every checkout; every action pinned to a commit; all four secrets families step-scoped; crates.io by Trusted Publishing; four environments with a required reviewer; the derived credential masked (`central-dry-run.sh:19`). |
+| RB-002.3 | **`VERIFIED`** (v0.12.2) | The binding's `stats()` calls `stats_summary(&self)` (`db.rs:627-631`), which can't decrypt records. |
+| RB-002.4 | **`VERIFIED`** (v0.12.2) | Tests T1, T4, T6, T8 are in `tests/engine_safety.rs` and the binding's tests; T10 and the embedder and flush-policy tests are in the Swift and Kotlin suites. |
+| RB-002.5 | **`VERIFIED`** (v0.12.2) | Both mobile READMEs have the table with "Budget to stay resident" (`swift/README.md:119-121`). |
+| RB-001.1 | stays `ACCEPTED` | The MOBILE-2 parts hold. **Test:** with 100 facts and 2,000 turn rows, a budget with room for 150 rows gives `ExactResident` and one with room for 50 gives `ExactPaged`, so turns no longer count. The over-budget cell is in `device_budget.rs`. The cheap paged path is still PERF-2's. |
+| RB-001.20 | stays `ACCEPTED` | An expired first callback now throws `noBackgroundTime` (`Lifecycle.swift:152-171`). The device checks are still owed. |
+| RB-001.25 | stays `ACCEPTED` | The docs state the cap (`README.md:246`, `mnemo/README.md:460`). The `stats` fields are in v0.13, not yet published. |
+| RB-001.26 | stays `ACCEPTED` | The bound is 1 MiB. **Test:** a frame declaring 1 MiB + 1 byte, or 64 MiB, is refused as "too large". The fuzz targets are still owed before 14.1. |
+| RB-001.29 | stays `ACCEPTED` until the tag | Fixed at `afd65b3`; see check 1. |
+| RB-001.32 | stays `ACCEPTED` | Items 1, 2 and 4 are done (`Zeroizing` before the first fallible call; the binding keeps no secret; Swift zeroes a buffer it owns). **Item 3 is unchanged:** `generate_key` still returns `key.to_vec()` (`db.rs:858-861`), and that `Vec` goes to the FFI unwiped. It may not be fixable on the Rust side; if so, say that in the triage and close it. |
+
+---
+
+**New items**
+
+#### RB-003.1 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** One finding about `mnemo inspect`, new in v0.13 and not yet released, written up in the gitignored `SECURITY.local.md` with what was tested and what held up. Not a hold for the tag; one part of its recommendation is two sentences of documentation worth taking before it.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). Before the tag: the documentation part and one small hardening; the rest in v0.13.1. Full triage in `SECURITY.local.md`.
+
+#### RB-003.2 — [SECURITY] [LOW] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** One finding about `mnemo export`, new in v0.13 and not yet released, in `SECURITY.local.md` with a test. Not a hold for the tag.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), fixed before the tag. Full triage in `SECURITY.local.md`.
+
+#### RB-003.3 — [CORRECTNESS] [LOW] A v8 file that crashed mid-commit gets two errors that point at each other; and a refused read-write open still writes to the file
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `afd65b3` with the release CLI.
+  - **The fixture:** a v8 passphrase file written by the published `mnemo-engine 0.12.3` (a scratch crate on crates.io's 0.12.3 with `failpoints`), 10 memories checkpointed and 5 committed in the WAL but not checkpointed. That's what a kill between the commit and the checkpoint leaves under v0.12.
+  - **Every read command** (`about`, `list`, `export --git`, `verify`) fails with: "read-only open blocked: pending WAL recovery — open read-write once to fix".
+  - **Every read-write command** (`index` here) fails with: "this file is format v8, which this build opens read-only; run `mnemo compact <file>` to convert it to v9".
+  - **`mnemo compact` works:** "compacted … (v9): 15 -> 15 live memories", and all 15 are there, including the 5 from the WAL.
+  - **The refused `index` changed the file** (212,992 → 229,376 bytes): it replayed the WAL into the v8 file and then refused. After it, `about` works and shows 15 memories.
+  - **So did a read-write open with the wrong passphrase.** It returns `WrongPassphrase` and has already replayed the WAL. The order in `open_secret_with` is recovery (`mnemo/src/store/open.rs:416-419`), then the key (`:445-446`), then the format check. The same holds for v9 (test in this batch: "open rw(WRONG) → WrongPassphrase; file changed by it: true"). That part is older than v0.13.
+- **Finding:**
+  - Nothing is lost and the fix is one command, but the user is sent to "open read-write", which v0.13 no longer allows for this file, before the second message tells them about `compact`. v0.13 is the release where people meet v8 files for the last time.
+  - "v8 opens read-only" isn't strictly what happens: a refused read-write open writes recovered pages into a v8 file. The write is the right data (a committed transaction), so this is harmless, but it's accidental.
+  - Replaying before the key is checked gives no one a capability they lack (whoever can make the app open a file could also write to it, and pages are authenticated when read). It does mean a mistyped passphrase modifies the file.
+- **Recommendation:**
+  1. In the read-only open, when the file is older than v9, make the pending-WAL error say "run `mnemo compact <file>`" (it recovers and converts). One string and one test on a fixture like the one above; the generator for it is ten lines on top of `tests/fixtures/v8/generator`.
+  2. Decide the order on purpose: check the key before replaying when the header is intact (the torn-header path already validates the key first, `open.rs:101-150`), and either refuse old formats before any write or document that a refused open may complete a committed transaction.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Recommendation 1 before the tag:** on a file older than v9, the read-only open's pending-WAL error says to run `mnemo compact <file>`, with the fixture test. **Recommendation 2 in v0.13.1:** check the key before replaying when the header is intact, and refuse old formats before any write; a test that a wrong passphrase and a refused v8 read-write open leave the file byte-identical, on v8 and v9.
+
+#### RB-003.4 — [DX/DOCS] [LOW] The published crate doubles in size because the new test fixtures ship in it, and the tests it ships no longer compile from it
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** `cargo package --locked --no-verify` on the pinned copy.
+  - **Size:** `mnemo-engine-0.13.0.crate` is **1,205,799 bytes**; 0.12.3 on crates.io is 609,341. The difference is four `.mnemo` fixtures (745,472 bytes, encrypted, so they don't compress) plus `tests/fixtures/v8/v8_key.key`. The PyPI sdist packages the same directory.
+  - **The packaged tests:** the self dev-dependency that turns `dev-hooks` on is stripped from the published `Cargo.toml` (correctly, or publishing would fail). `tests/fmt9_skeleton.rs`, `fmt9b_column.rs`, `fmt9c_commit.rs`, `fmt9d_bm25.rs` and `examples/gen_v8_zero_vector_fixture.rs` call the hooks, so `cargo test` from the published crate fails to compile unless `--features dev-hooks` is passed.
+  - `mnemo/Cargo.toml` has no `include` or `exclude`.
+- **Finding:** Neither matters to someone who depends on the crate. It matters to anyone who builds or tests from the registry tarball (distribution packagers, registry-wide test runs), and a raw key file in a published crate is the kind of thing secret scanners flag, harmless as this one is. A published version can't be amended.
+- **Recommendation (pick one before the tag):**
+  1. `exclude = ["tests/", "benches/", "examples/gen_*"]` in `mnemo/Cargo.toml`: the crate goes back to about 0.5 MB and ships no tests that can't build. Check that `cargo publish --dry-run` still passes and that the sdist follows.
+  2. Or keep the tests and make them honest: `required-features = ["dev-hooks"]` on the four test targets and the example, and a line in the crate README saying how to run them.
+  3. Either way, a short `tests/fixtures/README.md` saying the files are synthetic and the key and passphrases are throwaway.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **option 1, before the tag:** `exclude` the test, bench and fixture-generator files from `mnemo-engine`'s package, plus a `tests/fixtures/README.md` (synthetic data, throwaway secrets). Check `cargo package --list` and `cargo publish --dry-run --locked`, and that the PyPI sdist no longer carries the fixtures either. Report the new `.crate` size.
+
+#### RB-003.5 — [PLAN-REFINEMENT] [MEDIUM] The engine half of the release workflow never runs before a tag, so every change to it is first tried on the real one
+- **Status:** `ACCEPTED`
+- **Context / Evidence:**
+  - `release.yml` at `afd65b3`: on `workflow_dispatch`, `create-release`, `build-cli` (5 legs), `build-wheels` (5 legs), `build-sdist`, `attach`, `publish-pypi` and `publish-crates` are skipped (`:60` and the jobs that need it). The dry runs I've read show those as `skipped` (42901448023 for v0.12.1: 7 jobs skipped, 5 run; the READY says the same of 43138424847).
+  - This release is the first tag since `eb6c8e0` bumped nine actions by a major version or more. Check 3 lists what will run for the first time on the v0.13.0 tag.
+  - The order of the engine jobs makes a failure there a split release: `publish-crates` needs only `build-cli` (`:356-358`), and `publish-pypi` needs the wheels and the sdist (`:308-310`). If a wheel leg fails, crates.io gets 0.13.0 and PyPI doesn't, and the mobile gate (rightly) stops the rest. A failure caused by the workflow file itself can't be fixed by re-running, because a re-run uses the file at the tag.
+  - Related, and fixed: RB-002.1 was this same pattern in the mobile half (a step that first ran on the v0.12.0 tag and hung). REL-1 fixed it there by making the dry run exercise the step.
+- **Finding:** The mobile half is now rehearsed end to end before every tag. The engine half, which publishes to the two registries with the most users, is rehearsed never. By the release notes this tag's action bumps are safe; the next change to those jobs gets the same first night.
+- **Recommendation:**
+  1. In the dry run, run the engine **build** jobs too, with their publish steps replaced: build the CLI and the wheels and the sdist, upload them as artifacts, download them in `attach` with the real `pattern`, and list `dist/` instead of calling `action-gh-release`. That covers every bumped action except the release action itself, in about five minutes.
+  2. Make both publish jobs wait for all the builds (`needs: [build-cli, build-wheels, build-sdist, attach]`), so a build failure anywhere publishes nothing anywhere.
+  3. Rehearse `action-gh-release` once on a throwaway prerelease tag in a fork, or accept it as read (check 3).
+  4. This is a release-workflow change, so it wants its own dry run; I wouldn't squeeze it in before v0.13.0. Do it before v0.13.1 or the next Dependabot bump of that workflow, whichever comes first.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), as **REL-2**, before v0.13.1 or the next Dependabot bump of `release.yml`, whichever is first: recommendations 1 and 2 (the dry run builds the CLI, wheels and sdist and rehearses `attach`; both publish jobs need every build). 3 is accepted as read. **For the v0.13.0 tag itself:** the user approves `crates-io` and `pypi` only once every CLI, wheel and sdist job is green, which gives recommendation 2's protection by hand.
+
+#### RB-003.6 — [DX/DOCS] [LOW] `--key-file` exists only on `inspect`, so a raw-key file can't be exported or converted from the CLI, and `FormatTooOld`'s advice doesn't work for one
+- **Status:** `ACCEPTED`
+- **Context / Evidence:**
+  - `mnemo/src/bin/mnemo.rs:333-348`: `inspect` takes `--key-file`. `export`, `compact`, `list`, `about` and `recall` don't (checked from each command's `--help`).
+  - `mnemo/src/error.rs` (`FormatTooOld`): "run `mnemo compact <file>` to convert it to v9". For `tests/fixtures/v8/v8_key.mnemo`, a raw-key v8 file, that command asks for a passphrase. The library call exists (`Mnemo::compact_file_with_key`), and the fixture tests use it.
+- **Finding:** Raw-key files are what phones write and what `create_with_key` writes on the desktop. v0.13 adds two commands meant for exactly those files' owners (look at a phone's memory; export it readably). One of the two can open them. And the one file the v8 sunset's message can't help is a raw-key v8 file, which only the library can convert.
+- **Recommendation:** give `export` and `compact` the same `--key-file` (the parsing is already in `inspect::read_key_file`), and have `FormatTooOld` name `compact_file_with_key` for raw-key files. A few lines each; v0.13.1 is fine.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12) → v0.13.1: `--key-file` on `export` and `compact` (and the other read commands where it's cheap), and `FormatTooOld`'s message names the raw-key route. The v0.13.0 README points raw-key users at `compact_file_with_key` until then.
+
+#### RB-003.7 — [PERF] [LOW] The inspector clones every matching memory on each request before it pages, and holds the whole file in memory two or three times
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** by reading at `afd65b3`; not measured (no benchmarks this pass).
+  - `mnemo/src/bin/mnemo/inspect.rs:625-639`: `/api/memories` builds `hits` by cloning each matching memory's JSON value, then applies `skip(offset).take(limit)`. The page asks for 200.
+  - `:232-346`: one load keeps `db.memories()` (with vectors) until it has built a JSON value per memory, a `KeywordIndex` over every content, and each thread's turns as JSON.
+  - `:570-584`: the state lock is held while a response is written to the client.
+- **Finding:** On the files the inspector is for today (a phone's export, a project's brain: thousands of memories) this is invisible. On a 100K-memory file each page view copies 100K values to show 200, and the load needs a multiple of the plaintext in RAM. Nothing bounds it.
+- **Recommendation:** count first and clone only the page; drop the `Vec<Memory>` as soon as the JSON is built; release the lock before writing the response. Add a cell to the PERF-2 measurements: load time and peak memory of `mnemo inspect` at 10K and 100K.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12) → v0.13.1: count, then clone only the page; drop the `Vec<Memory>` once the JSON is built; release the lock before writing the response. PERF-2 gains a cell: `mnemo inspect` load time and peak memory at 10K and 100K.
+
+#### RB-003.8 — [DX/DOCS] [LOW] Small things in the v0.13 text and edges
+- **Status:** `ACCEPTED`
+- **Context / Evidence and recommendation, one line each:**
+  1. **The CHANGELOG heading** is `## [0.13.0] — 2026-11-11` (`CHANGELOG.md:11`). Set it to the tag's date.
+  2. **"One new memory adds only its own lines"** (`CHANGELOG.md:93`, `mnemo/README.md:894`, `export.rs:17-18`). Measured: an unkeyed memory adds 1 line and changes 0; a new version of a keyed fact adds 2 and changes 1. Say "a new version of a keyed fact also changes the line of the version it supersedes".
+  3. **Python can't tell the new errors apart.** Every engine error becomes `RuntimeError` (`mnemo-python/src/lib.rs:43`), including `FormatTooOld` (which wants `compact`) and `EmbedderMismatch` (which wants the original embedder). At least document the message prefixes to match on; exception subclasses are the real fix.
+  4. **The mobile-off note** (`release.yml:516-553`): re-running the job appends the line again, and a failed tag lookup fails the job after the engine has fully published. Make the lookup's failure print "latest: unknown", and skip the append when the body already has the line.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Before the tag:** 1 (the CHANGELOG date, set on the tag day) and 2 (the keyed-write wording; the root README already uses it); 3's documentation (the Python README lists the message prefixes to match on). **v0.13.1:** 3's exception subclasses. **With REL-2:** 4, the mobile-off note's two edges.

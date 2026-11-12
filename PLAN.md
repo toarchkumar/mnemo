@@ -66,16 +66,17 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-11, after v0.12.2)
+## Status (2026-11-11, after v0.12.3)
 
-**Published:** v0.12.2, the second round of mobile hardening (MOBILE-2e
-and SEC-2b, plus CI-DEPS-1), on crates.io, PyPI, Maven Central
+**Published:** v0.12.3, after v0.12.1–v0.12.2's mobile hardening
+(MOBILE-2, SEC-2, MOBILE-2e, SEC-2b), on crates.io, PyPI, Maven Central
 (`io.github.toarchkumar:mnemo-android`) and SPM (`toarchkumar/mnemo-swift`);
 PLANNER-A VERIFIED. Releases publish through approval-gated environments
 with no long-lived tokens except the Maven Central user token (expires
-about 2027-11-11). **In progress:** v0.12.3 (MOBILE-2f: the Swift store
-stops blocking the cooperative pool; FLAKE-1). **Then:** REL-1 → SAMPLE-1
-→ INSP-1 (v0.13, with the v8 sunset) → the local harness stack (12.4,
+about 2027-11-11). **Also done:** REL-1 (CI and the release workflow; mobile
+publishes by rule). **Also done (to ship in v0.13):** EMBED-ID-1 and
+SAMPLE-1. **In progress:** INSP-1 → v0.13.0 (the inspector, the
+readable export, the v8 sunset, HOOKS-1). **Then:** the local harness stack (12.4,
 12.3, 12.2, Phase 13a) → HARNESS-DOGFOOD-1 (the first-success milestone:
 this project's git Markdown workflow runs entirely in MNemo) → PERF-2 →
 Phase 13b → 14 → 15 (see "Authoritative execution order"). **Reviewers** come in at milestones
@@ -109,6 +110,13 @@ execution order.
 3. Reviewer items that shipped in v0.6.0 are waiting for the Reviewer to
    mark them VERIFIED. No Planner action unless the user asks for a triage.
 
+**The team now (user decision 2026-11-12):** one Planner (`PLANNER-A`),
+one Worker (Worker A), and two Reviewers at milestones (`REVIEWER-A`,
+product direction; `REVIEWER-B`, code health; AGENTS.md `Reviewer` rule
+4). PLANNER-B and the backup Worker are retired. The lane rules below
+stay for reference, and apply again only if a second Planner is ever
+added.
+
 **Two Planners, one Worker queue (user decision 2026-11-06)**
 
 Two Planner sessions can be active at once. They plan in parallel
@@ -119,7 +127,7 @@ last one stopped.
 | Lane | Owner | Scope | State |
 |---|---|---|---|
 | A — roadmap and releases | `PLANNER-A` (the Cowork sandbox session) | **Everything that reaches the Worker:** Phase 12, Phase 13 and every later phase; specs, DISPATCH, READY/BLOCKED answers, VERIFIED, release docs and Reviewer triage | **Owns the queue.** Holds the ACTIVE PR |
-| B — side ideas | `PLANNER-B` (the Antigravity session) | **Backup ideator** (user decision 2026-11-06): explores ideas, often the Reviewer's, and writes them up as `PLANNER-B — NOTE` proposals for PLANNER-A to adopt, adapt or decline. Doesn't own specs or dispatch | Never dispatches, unless the user asks it to cover lane A (rule 4) |
+| B — side ideas | `PLANNER-B` (the Antigravity session) | **Backup ideator** (user decision 2026-11-06): explores ideas, often the Reviewer's, and writes them up as `PLANNER-B — NOTE` proposals for PLANNER-A to adopt, adapt or decline. Doesn't own specs or dispatch | **Retired (user, 2026-11-12).** Its past NOTEs stay as inputs |
 
 **Ownership change (user, 2026-11-06):** PLANNER-A owns Phase 12 as well.
 PLANNER-B's earlier Phase 12 drafts are kept as inputs (12.1 amendment,
@@ -1577,7 +1585,9 @@ of this file applies to every one.
 >    **(Reordered again 2026-11-11, REV-006 triage):** after v0.12.3 come
 >    REL-1 → SAMPLE-1 → INSP-1 (v0.13) → the 12.4 design note → 12.4 →
 >    12.3 → 12.2 → Phase 13a (13.1, 13.3, 13.5, 13.6) → HARNESS-DOGFOOD-1
->    → PERF-2 → Phase 13b (13.2, 13.4, 13.7) → Phase 14 → Phase 15. This
+>    → PERF-2 → Phase 13b (13.2, 13.4, 13.7) → Phase 14 → Phase 15, with
+>    **CLEANUP-1** when the product is close to robust (not before
+>    HARNESS-DOGFOOD-1; the user decides; see 2026-11-12). This
 >    replaces item 3a's and item 5's placement of PERF-2 and Phase 13. See
 >    the WORKLOG entry of that date.
 >    **Also queued from RB-001/RB-002:** HOOKS-1 (with v0.13), DOCS-1
@@ -16792,3 +16802,1892 @@ against the code:
    everything. Run 2 replaces `SECURITY.local.md` with the separate private
    brain from the checklist, never with `visibility = private` in the
    public file.
+
+### 2026-11-11 — WORKER — DONE — v0.12.3 shipped: all four registries at 0.12.3
+
+**On `main` (f0254f6), tagged `v0.12.3`** (annotated, "MNemo 0.12.3"), in
+the Planner's order:
+1. the HANDOFF commit **9d9558c** `docs: v0.12.3 README and site (Swift
+   embed queue, lock release)`, `README.md` and `index.html` only;
+2. the backup **f0254f6** `chore(plan): sync coordination files`,
+   `PLAN.md` and `reviewer_notes.md` only;
+3. `main` fast-forwarded cd5cfd2..f0254f6 (5 commits), then the tag.
+
+**The tag run 42979921391: green, 20/20 jobs, no job retried.** The user
+approved `crates-io` and `pypi`, then `maven-central`, then `mnemo-swift`.
+CI on `main` at f0254f6 (42979919148) is green.
+
+| Registry | Result | Credential |
+|---|---|---|
+| crates.io | `mnemo-engine` 0.12.3 (`max_version`, 07:43Z) | **Trusted Publishing (OIDC)**: the short-lived token was revoked after the job ("Token revoked successfully") |
+| PyPI | `mnemo-engine` 0.12.3, 6 files (5 abi3 wheels and the sdist) | **Trusted Publishing**, "Publish to PyPI (Trusted Publishing, no token)" |
+| Swift (`toarchkumar/mnemo-swift`) | tag `0.12.3` (commit f11cbfb); the published-package check resolved the zip (10,563,012 B, checksum matches) and built | **the deploy key**: "pushing with the deploy key", `TOKEN` empty |
+| Maven Central | `io.github.toarchkumar:mnemo-android` 0.12.3: `<latest>` and `<release>` 0.12.3; `.aar`, `.aar.asc`, `.pom` and `.module` all 200 on repo1 at 08:04Z (the job ended 07:52Z) | **the Central Portal user token** in the `maven-central` environment, signed with `MAVEN_SIGNING_KEY`; deployment 2fca08db-c93f-4f43-8bd2-1baf55f843ea, AUTOMATIC |
+
+**GitHub Release `v0.12.3`:** not a draft, 13 assets.
+`MnemoFFI-0.12.3.xcframework.zip` has checksum
+`7f0490aba4152b98433c76a7d6f1b5373c7c7979d278937a7bebbe86d0e39350`.
+
+**Nothing failed or was retried** in the tag run. (Before it: the release
+commit's push CI needed one rerun of the Kotlin job, T3's race, in my READY.
+That's REL-1's FLAKE-2.)
+
+**After the tag:** `release-0.12.3` was deleted on GitHub and locally (it
+was merged into `main`). The step branches `v0123-1-embed-queue`,
+`v0123-2-flake1` and `v0123-3-release` (PRs 26–28, merged) are still on
+GitHub; only the release branch was asked for.
+
+**Next:** REL-1, started (below).
+
+### 2026-11-11 — WORKER — DONE — REL-1: verify-published, ENABLE_MOBILE_PUBLISH, mobile CI on mobile PRs only, FLAKE-2; both dry runs green
+
+**On `release-rel1` (89421e9), one PR per step, each fast-forwarded in.**
+No tag, as the dispatch says, and `release-rel1` isn't merged into `main`.
+The next release carries it.
+
+| Step | PR | Commits | CI |
+|---|---|---|---|
+| 1. `verify-published` | 29 | aedbdf4 (the job), d185820 and b44af99 (RELEASING.md names it) | 42980370499, 18/18 |
+| 2. `ENABLE_MOBILE_PUBLISH` | 30 | 52d5339 | 42983296156, 18/18 |
+| 3. Mobile CI on mobile PRs only | 31 | 067096e | ci 42984918836, 12/12; Mobile CI 42984918977, 6/6 |
+| 4. FLAKE-2 | 32 | 89421e9 | ci 42986876720, 12/12; Mobile CI 42986876622, 6/6 |
+
+**1. `verify-published`** (`mobile (Swift verify published)`):
+- It needs `[mobile-prepare, publish-swift]` and runs when `publish-swift`
+  succeeded. It holds the "Resolve the published package" and "Build
+  against the published package" steps, which moved unchanged. It can be
+  re-run on its own.
+- `publish-swift` now ends at "pushed main and tag".
+- **Android: nothing to move.** `publish-android` has no Central metadata
+  check. RELEASING.md's after-the-tag check (repo1 `maven-metadata.xml`)
+  is still a manual step.
+
+**2. `ENABLE_MOBILE_PUBLISH`:**
+- The repository variable has been set to `true` since 2026-11-11T07:43:42Z.
+- A tag reads the variable. A dry run reads the new `workflow_dispatch`
+  input `mobile` (boolean, default `true`).
+- `mobile-prepare` outputs `mobile`. When it isn't `true`, the Swift and
+  Android build jobs are skipped, and the publish and verify jobs after
+  them are skipped too.
+- The version check still requires one version across all manifests.
+- The engine gate needs no change. No gate waits on a mobile job, so a
+  skipped mobile job can't block a release.
+- A new job, `mobile (skipped, release note)`, runs only when mobile is
+  off. It looks up the latest Swift tag (`check-published-package.sh
+  latest`) and Android version (repo1 `<release>`) and writes them to the
+  run summary. On a tag, it also appends "**Mobile packages not published
+  in this release** (latest: Swift X, Android Y)" to the GitHub Release
+  (softprops, `append_body: true`).
+- RELEASING.md states DECISION 1's rule:
+  1. the mobile code changed;
+  2. an engine fix matters on phones;
+  3. at least once per minor version.
+
+  It also says how to set the switch (`gh variable set
+  ENABLE_MOBILE_PUBLISH --body true|false`).
+
+**3. Mobile CI:**
+- The `mobile` ×3, `msrv-uniffi`, `swift` and `kotlin` jobs moved
+  unchanged from `ci.yml` to a new `mobile-ci.yml` ("Mobile CI").
+- On a PR (into `main`, `release/**` or `release-*`), it runs only when the
+  PR touches `mnemo/bindings/**`, `examples/mobile/**`, `mnemo/Cargo.toml`,
+  `**/Cargo.lock` or `.github/workflows/**`.
+- On a push to `main`, `release/**` or `release-*`, it always runs (with
+  the same docs-only `paths-ignore` as `ci.yml`).
+- The filter is a workflow-level `paths` filter, not a "changes" job:
+  `main` has no branch protection, rulesets or required status checks, so
+  a skipped workflow blocks nothing.
+- `android-emulator.yml` is unchanged: it never ran on PRs (nightly, `v*`
+  tags and manual runs only).
+- AGENTS.md's CI section has a paragraph on `mobile-ci.yml`. That's a
+  technical section, part of PR 31.
+- **Engine-only PR CI time, before and after: 15.4 min, then 10.2 min.**
+  - Before: PR 27 (FLAKE-1, engine only), run 42969081798. The `swift` job
+    was the longest, at 15.4 min.
+  - After: measurement PR 33 (a one-line comment in
+    `mnemo/src/format.rs`), run 42986906356, 12 jobs and no Mobile CI. The
+    longest job was Windows `rust`, at 9.7 min; the run took 10.2 min.
+  - PR 33 was closed unmerged and its branch deleted.
+
+**4. FLAKE-2 (test-only):**
+- Kotlin `FlushPolicyTests.kt` gains `committedCountOrNull`, which returns
+  `null` on `MnemoException.NeedsWriteOpen` (a mid-commit byte copy with a
+  pending WAL).
+- T3 in `StoreHardeningTests.kt` polls `committedCountOrNull(...) == 25uL`
+  inside `eventually`.
+- Swift: nothing to change. No Swift test polls `committedCount` inside
+  `eventually`.
+
+**5. Dry runs on `release-rel1` at 89421e9.** I used `release-rel1` because
+the environments accept only `release-*` branches and `v*` tags. See the
+deviations below.
+- **Mobile off: 42988796274, success.**
+  - Version check: engine, `mnemo-uniffi` and `mnemo-android` all at 0.12.3.
+  - "mobile: off". The note job succeeded, with "Swift 0.12.3, Android
+    0.12.3" in the summary.
+  - The Swift and Android build, publish and verify jobs were all skipped.
+    No approval was asked for.
+- **Mobile on: 42988750794, success.**
+  - The version check and the Swift and Android builds passed (08:39 to
+    08:49Z). The note job was skipped.
+  - The run then waited for `maven-central` and `mnemo-swift` until the
+    user approved them, at 15:17Z.
+  - Swift publish: "pushing with the deploy key", "pushed and deleted
+    dry-run-0.12.3".
+  - **`verify-published` ran green as its own job** (15:18 to 15:20Z): "dry
+    run: checking the newest published version, 0.12.3", "10563012 bytes,
+    checksum matches", `** BUILD SUCCEEDED **`.
+  - Android publish succeeded. `central-dry-run.sh` gave the notice
+    "mnemo-android 0.12.3 is already on Maven Central, which refuses a
+    second upload: nothing to validate". This is the script working as
+    designed: the version on the branch is already released, so there was
+    no bundle to validate. The next release's dry run exercises the upload.
+
+**Deviations:**
+- **`release-rel1` instead of `rel-1`.** CI's `pull_request` branches
+  (`main`, `release/**`, `release-*`) didn't cover PRs into `rel-1`, and
+  the environments need a `release-*` name for the dry runs. I created
+  `release-rel1`, retargeted PR 29 (a close and reopen started its CI) and
+  deleted `rel-1`.
+- **A new commit instead of an amend.** RELEASING.md's after-the-tag fix is
+  its own commit (b44af99).
+- **Not exercised yet:** the note job's GitHub Release edit (its
+  `if: github.event_name == 'push'` step). Only its summary path ran. The
+  first tag with mobile off will run the edit.
+
+**Left as they are:**
+- `release-rel1` (not merged to `main`).
+- The step branches `rel1-1-verify-published` to `rel1-4-flake2` (PRs
+  29–32, merged), and `v0123-1-embed-queue`, `v0123-2-flake1` and
+  `v0123-3-release` (PRs 26–28) on GitHub.
+- Dependabot PR 25, which is outside REL-1.
+- The PLAN.md entries since the f0254f6 backup are uncommitted. They wait
+  for the next backup.
+- `test/project.mnemo`: no memory written for REL-1. The durable facts
+  (the switch, the mobile CI paths, `verify-published`) are in RELEASING.md
+  and AGENTS.md.
+
+### 2026-11-11 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.12.3 verified; REL-1 accepted; housekeeping, CI-DEPS-2 (PR 25) and SAMPLE-1 dispatched
+
+**VERIFIED: v0.12.3** (tag run 42979921391, 20/20 green). Checked by me
+from the user's machine: crates.io `mnemo-engine` max_version 0.12.3;
+PyPI 0.12.3 with 6 files; `mnemo-swift` tag `0.12.3` on commit `f11cbfb`.
+Maven Central isn't reachable from my side; I accept the Worker's check.
+Every publish used Trusted Publishing, the deploy key, or the
+environment's Central token.
+
+**REL-1 accepted** (the DONE above). `verify-published` ran green as its
+own job; the mobile-off dry run skipped every mobile job without asking
+for approval; and an engine-only PR's CI went from 15.4 to 10.2 minutes.
+- **The deviations are fine:** `release-rel1` instead of `rel-1`, and a new
+  commit instead of an amend.
+- **The one path not yet exercised,** the GitHub Release note when mobile
+  is off, runs on the first engine-only tag. Check it then.
+- **No Android-side verify job:** there's no Central metadata check to
+  move, so RELEASING.md's manual check stays.
+
+**DISPATCH, in order:**
+
+**0. Housekeeping (no PR of its own):**
+- fast-forward `main` to `release-rel1` (CI-only changes; there's no tag
+  for REL-1) and push. Then delete `release-rel1`;
+- delete the merged step branches on GitHub: `v0123-1-embed-queue`,
+  `v0123-2-flake1`, `v0123-3-release` and `rel1-1-…` to `rel1-4-flake2`.
+  **From now on, delete each step branch when its PR merges.**
+
+**1. CI-DEPS-2: Dependabot PR 25** (the actions group, 9 updates, now
+without `dtolnay/rust-toolchain`):
+- it's based on `fc7c9b1`, before REL-1 split `mobile-ci.yml` out and added
+  `verify-published`, so ask Dependabot to recreate it on the new `main`
+  (`@dependabot recreate`). Then check that the new workflow files' actions
+  are included;
+- take it with CI green, **plus** a release dry run with mobile on, on a
+  `release-deps2` branch at the PR's head. The bumps that touch
+  `release.yml` (`download-artifact`, `upload-artifact`,
+  `action-gh-release`, which the mobile-off note uses with `append_body`)
+  must pass there. Android can't validate a bundle, because 0.12.3 is
+  already on Central; that's expected;
+- if one action's new major version breaks something, leave that one out
+  (a Dependabot `ignore` for its major version, with the reason) and take
+  the rest. Log which.
+
+**2. SAMPLE-1** (no release of its own: it ships with v0.13, which
+publishes mobile under DECISION 1's rule 1). Its items are RB-001.11, .14
+and .15, all accepted. One PR per part:
+1. **The `MnemoAppleEmbedder` library target** in the Swift package,
+   optional, so apps that don't link it pay nothing:
+   - a sentence embedder over `NLEmbedding.sentenceEmbedding`, and a
+     contextual one over `NLContextualEmbedding` with mean pooling over the
+     token vectors. Its asset check and download are exposed so an app can
+     offer a "Download Apple's model" button;
+   - **versioned identities** that include the model revision, e.g.
+     `apple-nl-sentence-en-r1` and `apple-nl-contextual-en-r<revision>`, so
+     the engine's embedder-identity check catches a model change;
+   - `NLContextualEmbedding` needs a newer OS than the package's iOS 15 and
+     macOS 12 floor. Check its availability in Apple's docs and gate it with
+     `@available`; the sentence embedder covers older systems;
+   - **dimensions are fixed when a store is created.** So "the chain" means
+     choosing an embedder at creation, not falling back from one to another
+     on a live store. Document how an app moves to the contextual model
+     later: a new store and a re-embed, or the engine's identity-mismatch
+     path, whichever exists today;
+   - the generated `mnemo-swift` package (`release.yml`'s release tree and
+     the `Package.swift` it writes) gains the target and its product. The
+     SPM consumer check in the release workflow builds against it;
+   - **tests** run on macOS with NaturalLanguage, and **skip, not fail,** when
+     the model assets aren't installed on the runner. Report on your DONE
+     which ones ran in CI and which skipped.
+2. **The iOS sample** uses the target instead of its own `Embedders.swift`
+   chain: the contextual model if available, with the download button, then
+   the sentence model, then the demo embedder, labelled as now. Add the
+   iPhone18,x models to `DeviceInfo.swift`'s SoC table.
+3. **An Export button** in the iOS sample (RB-001.14). It asks for a
+   passphrase twice, calls the passphrase export, and opens the share sheet
+   with the file. The Android sample gets the same button if it costs less
+   than half a day; otherwise log it as deferred. The export must open with
+   `mnemo` on a Mac (`mnemo stats` or `mnemo recall` with that passphrase).
+   Show that in a test or in your DONE: a simulator export opened by the CLI
+   is enough. **This is INSP-1's demo input.**
+4. **Device results anyone can contribute** (RB-001.15):
+   - `test/scripts/device_runs/README.md`, with the `device_budget_mobile/1`
+     schema and how to submit a run;
+   - a validator script, run in CI when `test/scripts/device_runs/**`
+     changes;
+   - a "Share results" button in the iOS sample's Benchmark screen (the
+     Android one if cheap), sharing the JSON it already writes.
+
+**Not in SAMPLE-1:** the Android embedder recipe (DEFERRED, after INSP-1),
+DocC and Dokka (DOCS-1), and any engine change. **A device run is
+optional:** if the user wants to try the contextual model and the Export
+button on the iPhone, add the steps to `examples/mobile/README.md`'s run
+sheet, together with RB-001.20's two background cases.
+
+Log DONE after each numbered item (SAMPLE-1 as one DONE with its four
+parts). Then I write INSP-1's spec.
+
+### 2026-11-11 — WORKER — DONE — housekeeping: `main` at REL-1's tip; the merged branches deleted
+
+- **`main` fast-forwarded** f0254f6..89421e9 (REL-1's six commits) and pushed.
+  No tag. The push's CI is 43049274646 (CI) and 43049274333 (Mobile CI);
+  CI-DEPS-2's DONE reports how they finished.
+- **Deleted on GitHub** (each checked as an ancestor of `main` first):
+  `release-rel1`, `v0123-1-embed-queue`, `v0123-2-flake1`,
+  `v0123-3-release`, `rel1-1-verify-published`, `rel1-2-mobile-switch`,
+  `rel1-3-mobile-ci` and `rel1-4-flake2`. The four `rel1-*` branches were
+  deleted locally too.
+- **Remote branches now:** `main`, `release/0.5.x` (the old maintenance
+  line) and Dependabot's PR 25 branch.
+- **From now on, each step branch is deleted when its PR merges.**
+
+### 2026-11-11 — WORKER — BLOCKED — SAMPLE-1 part 1: the embedder-identity check never runs on a store created through the Swift or Kotlin bindings
+
+**The spec says:** "versioned identities that include the model revision ...
+so the engine's embedder-identity check catches a model change", and
+"document how an app moves to the contextual model later ... or the engine's
+identity-mismatch path, whichever exists today".
+
+**The code:**
+- `Mnemo::set_embedder` (`mnemo/src/store/crud.rs:148-193`) compares
+  identities only against an identity stored in an onboarding (scaffold)
+  memory's metadata. It finds those memories through `about()`.
+- With no onboarding memory, it records nothing and accepts any embedder
+  whose width matches (lines 176-191: `upsert_target` stays `None`).
+- Only the CLI's `init` writes a scaffold manifest
+  (`Memory::scaffold_manifest`, called only at `mnemo/src/bin/mnemo.rs:1248`).
+- `Mnemo::create` and `create_with_key` don't write one, and neither do
+  `MnemoDb::create` and `create_with_key` in
+  `mnemo/bindings/uniffi/src/db.rs:276-304`, which `MnemoStore` uses.
+- So on every store created from Swift or Kotlin, the identity is never
+  stored or checked. Only `DimensionMismatch` guards it.
+
+**Shown by a test** (uncommitted: `mnemo/bindings/swift/Tests/MnemoAppleEmbedderTests/AppleEmbedderTests.swift`,
+`aStoreRefusesAnotherRevision`):
+- A store written with `apple-nl-sentence-en-r<n>` was reopened with an
+  embedder that has the same vectors and width but the name
+  `apple-nl-sentence-en-r<n+1>`.
+- `count()` returned 1 instead of throwing: "Expectation failed: an error
+  was expected but none was thrown and "1" was returned".
+- So a revision or model change of the same width passes silently today.
+  NLEmbedding revisions keep 512 dimensions, so this is the case that
+  matters.
+
+**Fixing it is an engine or binding change, which SAMPLE-1 excludes.**
+Options:
+- **A. The bindings' `create` and `create_with_key` write the scaffold
+  manifest,** as `mnemo init` does. Then `set_embedder` stores the identity
+  on first use and checks it on every later open. It's a mnemo-uniffi
+  change, with no engine or format change.
+  - Cost: a new mobile store gains one onboarding memory, so `count()`
+    and `len()` include it (`open.rs:949` counts every live catalog
+    entry), and a few Swift and Kotlin tests that assert exact counts would
+    change.
+  - Existing mobile stores stay unchecked until they're recreated.
+- **B. The engine stores the identity even when there's no manifest.**
+  For example, `set_embedder` writes a small reserved `_mnemo.*` record
+  and leaves it out of `count`. It covers `Mnemo::create`, Python and the
+  bindings alike, without a format bump (the MessagePack rule allows
+  reserved metadata keys). It's an engine change: a PR of its own,
+  probably before SAMPLE-1.
+- **C. Ship SAMPLE-1 as specced, with the identity as a label only.** The
+  docs say the check works only on files with a manifest and that a new
+  store per model (named after its identity) is the safe path. Log an
+  EMBED-ID-1 follow-up.
+
+**Where it stands:**
+- SAMPLE-1 part 1 is written but uncommitted: the
+  `Sources/MnemoAppleEmbedder/` target (sentence, contextual with mean
+  pooling and asset request/download, and `AppleEmbedders.bestAvailable`),
+  `Package.swift`'s new product, and the tests.
+- On this Mac (macOS 26, contextual assets installed), 9 of the 10 tests
+  pass. The one without assets is skipped as designed. The failure is the
+  revision test above.
+- Nothing is pushed for SAMPLE-1, and parts 2 to 4 aren't started.
+- CI-DEPS-2 isn't affected and carries on.
+
+**Needs:** a Planner decision (A, B, C or another).
+
+### 2026-11-11 — WORKER — DONE — CI-DEPS-2: Dependabot PR 25 (the actions group, 9 updates) taken whole
+
+- **Recreated:** `@dependabot recreate` on PR 25. Dependabot rebuilt it on
+  `main` at 89421e9 as eb6c8e0, "bump the actions group across 1 directory
+  with 9 updates".
+  - It covers all six workflow files, including the new `mobile-ci.yml`
+    and `verify-published` in `release.yml`.
+  - Afterwards no workflow uses an old major of the nine actions.
+    `dtolnay/rust-toolchain` isn't in the group, as the entry says.
+- **The bumps:**
+  - `actions/checkout` 4 to 7;
+  - `actions/setup-java` 4 to 6;
+  - `actions/setup-python` 5 to 7;
+  - `actions/upload-artifact` 4 to 7;
+  - `actions/download-artifact` 4.3.0 to 8.0.2;
+  - `gradle/actions` 4 to 6, with `wrapper-validation` and `setup-gradle`
+    4.4.3 to 6.4.1;
+  - `softprops/action-gh-release` 2.6.2 to 3.0.4.
+- **PR CI on eb6c8e0:** CI 43049817752, 12/12; Mobile CI 43049817742, 6/6.
+- **Release dry run, mobile on, on `release-deps2` at eb6c8e0:
+  43049867381, success.** The user approved `maven-central` and
+  `mnemo-swift`.
+  - `upload-artifact` v7 and `download-artifact` v8 carried the Android
+    generated directory, the Swift zip and the release tree, and the AAR
+    upload (each "Download artifact has finished successfully").
+  - The SPM consumer: "checksum matches".
+  - Swift publish: "pushing with the deploy key", "pushed and deleted
+    dry-run-0.12.3".
+  - `verify-published`: "dry run: checking the newest published version,
+    0.12.3", "10563012 bytes, checksum matches", `** BUILD SUCCEEDED **`.
+  - Android: the expected notice that 0.12.3 is already on Central, so no
+    bundle was validated.
+- **`action-gh-release` v3 doesn't run in a dry run** (every Release step
+  is tag-only), so I checked it by reading its source.
+  - v3.0.0's only change is the runtime, Node 20 to Node 24.
+  - Its `action.yml` at the pinned commit (8a0cd65) still has every input
+    we pass: `append_body`, `body`, `draft`, `files`,
+    `generate_release_notes` and `prerelease`.
+  - The first tag runs it for real, together with REL-1's mobile-off note.
+- **Left out: none.** No new major broke anything, so there's no Dependabot
+  `ignore`.
+- **Taken:** `main` fast-forwarded 89421e9..eb6c8e0 and pushed. GitHub
+  marked PR 25 merged. `main`'s CI on eb6c8e0 is 43053953112 (CI) and
+  43053953090 (Mobile CI).
+- **Branches:** `release-deps2` deleted. Dependabot deleted its own branch
+  on the merge.
+- **Next:** SAMPLE-1 waits on the BLOCKED entry above (the identity check
+  on stores the bindings create).
+
+### 2026-11-11 — PLANNER-A — DECISION — SAMPLE-1's BLOCKED: option B, as EMBED-ID-1, before SAMPLE-1 resumes; CI-DEPS-2 accepted
+
+**CI-DEPS-2 accepted** (the DONE above). Taking all nine bumps was right,
+given the green mobile-on dry run and your reading of
+`action-gh-release` v3. The first real tag exercises v3 together with
+REL-1's mobile-off note; check both on that run.
+
+**The BLOCKED: a good catch. Option B.** It's a real engine gap, and not
+only a mobile one. Every file made by `Mnemo::create`, Python or the
+bindings accepts any embedder of the right width, so a model change that
+keeps the dimensions silently mixes two vector spaces. That breaks recall
+quietly, and nothing reports it.
+- **Not A:** an onboarding memory counted in every mobile store's `count()`
+  would surprise every app developer, and it fixes only the bindings.
+- **Not C:** a library whose versioned identities protect nothing would be
+  misleading.
+- **B is the base 12.3 needs anyway:** zero-setup embedding and filling in
+  vectors later both depend on the file knowing which model its vectors
+  came from.
+
+**DISPATCH: EMBED-ID-1 (engine; ships in v0.13). One PR, before SAMPLE-1
+resumes.**
+- **Store the identity on every file, with or without a manifest.** The
+  first `set_embedder` on a read-write handle with no recorded identity
+  records it (trust on first use). Every later `set_embedder` checks it.
+  A read-only handle checks and never writes. You choose the storage
+  (a reserved record, or a field where the file already keeps metadata),
+  within these rules:
+  - no format-version bump, per the MessagePack rule;
+  - not counted by `len()`, `count()` or `stats()`, and never returned by
+    recall, `about`, `export` or `get`;
+  - carried over by `compact_file`, the rekeyed exports and the passphrase
+    import;
+  - v8 and v9 files alike.
+- **Files with a manifest:** the manifest's identity and the new record
+  must agree. Keep the manifest path working as today; if both exist and
+  disagree, the error names both.
+- **The error on a mismatch:** a distinct `MnemoError::EmbedderMismatch {
+  stored, given }`. v0.13 is a minor release, so the new variant is
+  allowed; if `MnemoError` isn't `#[non_exhaustive]`, say so in the
+  CHANGELOG's upgrade notes. In the FFI it's a new case, not retryable
+  ("fix the call"). Its message says to create a new store for the new
+  model. Re-embedding an existing store is 12.3's job, not this PR's.
+- **Existing files** record whatever embedder is attached first after the
+  upgrade. The CHANGELOG says so plainly: the check protects from then on,
+  and can't tell what made the older vectors.
+- **Tests:**
+  - on v8 and v9: a file without a manifest refuses a second identity of
+    the same width; a read-only open checks but doesn't write; counts are
+    unchanged; the identity survives compaction, the rekeyed export and
+    the import;
+  - a file with a manifest behaves as before;
+  - through the binding, the Swift `aStoreRefusesAnotherRevision` passes,
+    plus a Kotlin equivalent.
+- **Docs:** `set_embedder`'s rustdoc, and the engine, Swift and Kotlin
+  READMEs' embedder sections. CHANGELOG under `[Unreleased]`.
+
+**SAMPLE-1's part 1 stays out of `main`.** Move the uncommitted
+`MnemoAppleEmbedder` work and its `Package.swift` change to a branch
+(`sample1-1-apple-embedder`) as a WIP commit. Don't push it to `main`, and
+don't include it in EMBED-ID-1's PR. Then:
+1. EMBED-ID-1: PR, CI green (Mobile CI runs, since the binding changes),
+   merged to `main`, branch deleted, DONE;
+2. rebase nothing: merge `main` into `sample1-1-apple-embedder` and finish
+   part 1 there, with the revision test now passing;
+3. SAMPLE-1's parts 2 to 4 as dispatched.
+
+**The `MnemoAppleEmbedder` docs** state the rule EMBED-ID-1 enforces: a
+store is bound to the model that first wrote to it, so moving to the
+contextual model (or a new revision) means a new store, until 12.3's
+re-embed exists.
+
+### 2026-11-11 — WORKER — DONE — EMBED-ID-1: every file records its embedder identity and refuses another
+
+**Commit 8f0ef1a, PR 34, fast-forwarded into `main`** (eb6c8e0..8f0ef1a).
+GitHub marked it merged at 17:54:50Z, and `embed-id1` is deleted on GitHub
+and locally. No tag: it ships in v0.13. The push's CI on `main` is
+43072700122 (CI) and 43072700304 (Mobile CI).
+
+**The design (the entry left the storage to me):**
+- **Where it's stored:** a reserved, encrypted **result-cache entry**
+  (namespace `_mnemo.embedder`, key `identity`, JSON `{name, dimensions,
+  normalize}`).
+- **Why the cache:**
+  - It's in both v8 and v9 files, so there's no format bump and no
+    change to a persisted struct (the MessagePack rule).
+  - It isn't a memory: no vector, not in the catalog, so `len`, recall,
+    `about`, `memories`, `get` and `stats` can't see it.
+  - `copy_live_into` already copies cache entries, so compaction, both
+    `export_rekeyed` variants and the binding's passphrase import carry it
+    with no new code.
+  - The header was the alternative, but it's unencrypted (the model name
+    would leak) and a new field would change its layout.
+- **Kept out of view:**
+  - `cache_put`, `cache_get`, `cache_delete`, `cache_purge(Some)` and the
+    semantic put and get refuse `_mnemo.*` namespaces (`Invalid`).
+  - `cache_purge(None)`, `cache_stats`, `verify()`'s count and
+    `CompactReport`'s cache counts skip the entry.
+- **`set_embedder`:**
+  - The dimension check runs first, as before.
+  - It reads both identities, the manifest's (if any) and the record's.
+    If both exist and disagree, it returns `Invalid` naming both.
+  - It checks the given identity against the record, else the manifest,
+    and a mismatch is `EmbedderMismatch { stored, given }`.
+  - On a read-write handle it records whatever is missing (the manifest
+    upsert as before, plus the record) and flushes. A read-only handle
+    writes nothing.
+- **The error:**
+  - `MnemoError` isn't `#[non_exhaustive]`; the CHANGELOG's upgrade notes
+    say so.
+  - The manifest mismatch moved from `Invalid` to `EmbedderMismatch`. The
+    message still starts with "embedder identity mismatch" (Python's
+    `RuntimeError` carries that string) and says "create a new store for
+    the new model".
+  - The FFI's `EmbedderMismatch { stored, given }` (records) isn't
+    retryable, and the error docs list it under "fix the call".
+- **Also:**
+  - New `Mnemo::embedder_identity()`, engine only; it isn't mirrored in
+    Python.
+  - CHANGELOG `[Unreleased]` (the upgrade notes plus Changed), and a
+    `seed.json` memory (topic `embedder-identity`).
+
+**Tests (all green in CI on 8f0ef1a: CI 43068551720, 12/12; Mobile CI
+43068551624, 6/6):**
+- **Engine v8 and v9:** `mnemo/tests/embed_id1.rs`, 10 tests × 2 formats,
+  "20 passed" on ubuntu, macOS and Windows. They cover:
+  - a file without a manifest refuses a second identity (and a different
+    `normalize`), on the handle and after a reopen;
+  - the message;
+  - a read-only open checks and leaves the file byte-identical;
+  - counts, recall, `about`, `memories`, `get`, `verify` and
+    `cache_stats` don't see the record, the reserved namespace is
+    refused, and `cache_purge(None)` keeps it;
+  - it survives `compact_file_to` (in the file's own format),
+    `export_rekeyed`, and the import (read-only source,
+    `export_rekeyed_with_key`);
+  - a manifest file behaves as before;
+  - a manifest identity without a record is checked, then recorded;
+  - a manifest/record conflict names both;
+  - the dimension check still comes first.
+- **Engine, the two existing manifest-mismatch tests**
+  (`set_embedder_identity_mismatch_rejected_after_persist`,
+  `set_embedder_nested_manifest_mismatch_rejected`) now expect
+  `EmbedderMismatch`. The rest of the suite is unchanged and green.
+- **Binding (mnemo-uniffi):** `a_binding_store_refuses_another_embedder_identity`
+  passed on all three OSes, and the retryability table includes the new
+  case.
+- **Swift:** `aStoreRefusesAnotherEmbedderIdentity` passed in `swift test`
+  on macOS ("40 tests in 5 suites passed") and on the iOS simulator
+  through TestHost ("50 tests in 6 suites passed").
+- **Kotlin:** `StoreTests > aStoreRefusesAnotherEmbedderIdentity PASSED`
+  (JVM). I couldn't run it locally (no Java runtime on this Mac); CI ran
+  it.
+- **Python:** `test_set_embedder_identity_checked_without_a_manifest`
+  ("ok  set_embedder identity checked without a manifest"), and the
+  existing manifest test passed unchanged.
+- **Locally, before the push:**
+  - `cargo test --features failpoints` green;
+  - clippy (`--features failpoints,benches`, and `-p mnemo-uniffi`) clean;
+  - `cargo fmt` applied;
+  - `swift test` 40/40 after `build-xcframework.sh`;
+  - `python test_mnemo.py` green.
+
+**Deviation:** none from the spec. Note the `Invalid` to `EmbedderMismatch`
+move on the manifest path. It's what "a distinct error" requires, and it's
+in the upgrade notes.
+
+**Next:** SAMPLE-1, merging `main` up through the four part branches.
+
+### 2026-11-11 — WORKER — DONE — SAMPLE-1: MnemoAppleEmbedder, the iOS sample on it, the Export button, device runs anyone can contribute
+
+**How it landed:**
+- I merged `main` (EMBED-ID-1, 8f0ef1a) into `sample1-1-apple-embedder`
+  (ab3d9d4), with no rebase, and carried it up: part 2 (26db7e7), part 3
+  (d96998c), part 4 (59665e3).
+- Four PRs into `main`, merged in order by fast-forward:
+
+  | Part | PR | Head | Runs |
+  |---|---|---|---|
+  | 1 | 35 | ab3d9d4 | CI 43073152777, Mobile CI 43073152685 |
+  | 2 | 36 | 26db7e7 | CI 43073206490, Mobile CI 43073206547 |
+  | 3 | 37 | d96998c | CI 43073211897, Mobile CI 43073211886 |
+  | 4 | 38 | 59665e3 | CI 43073217864, Mobile CI 43073217763, Device runs 43073218149 |
+
+- Every run is green, and GitHub marked each PR merged.
+- **One rerun:** on PR 35, `rust (macos-latest)` was cancelled, not
+  failed: "The job was not acquired by Runner of type hosted even after
+  multiple attempts", during a macOS arm64 capacity notice. Its rerun
+  (attempt 2) passed. PR 36 had passed the same job on the same commits.
+- `main` is at 59665e3. Its push CI is running: 43077844541 (CI),
+  43077844558 (Mobile CI), 43077844471 (Device runs).
+- All four branches are deleted on GitHub and locally. No tag: it ships
+  with v0.13.
+
+**1. The `MnemoAppleEmbedder` target (PR 35, RB-001.11):**
+- **The product:** a new library product in the Swift package, depending
+  only on `Mnemo` and linking NaturalLanguage only when an app adds it.
+- **`AppleSentenceEmbedder`:**
+  - over `NLEmbedding.sentenceEmbedding`, on iOS 15 and macOS 12;
+  - identity `apple-nl-sentence-<lang>-r<revision>` (`-en-r1` on macOS
+    26);
+  - an `init?(language:revision:)` reopens stores written with an older
+    revision.
+- **`AppleContextualEmbedder`:**
+  - `@available(iOS 17.0, macOS 14.0, *)`: the SDK header has
+    `NS_CLASS_AVAILABLE(14_0, 17_0)`;
+  - mean-pooled over its token vectors, then normalized;
+  - for the "Download Apple's model" button: `hasAvailableAssets`,
+    `requestAssets()` (downloads them) and `load()` / `unload()`;
+  - identity `apple-nl-contextual-<lang>-r<revision>`.
+- **`AppleEmbedders.bestAvailable()`** returns the contextual model when
+  its assets are on the device, else the sentence model. "The chain" is
+  a choice made at creation; there's no fallback on a live store.
+- **The docs** (the type's doc comment and the Swift README section) state
+  EMBED-ID-1's rule: a store is bound to the model that first wrote to it,
+  so a new model or revision means a new store, until 12.3's re-embed
+  exists.
+- **The generated `mnemo-swift` package:**
+  - `make-release-package.sh` copies the target and adds its product.
+  - `check-release-package.sh`'s SPM consumer links the product and
+    checks the identity.
+  - That check runs only in release dry runs, so I ran it locally on the
+    iOS simulator: both consumer tests passed
+    (`testTheAppleEmbedderProductLinks` included). The next release dry
+    run exercises it in the workflow.
+- **The tests in CI** (`swift test` on macos-latest, PR 36's Mobile CI,
+  "50 tests in 8 suites passed"):
+  - **8 ran and passed:**
+    - sentence: `identityNamesTheLanguageAndRevision`,
+      `vectorsAreUnitLengthAndSimilarTextsAreCloser`,
+      `aStoreRecallsByMeaning`, `aStoreRefusesAnotherRevision` and
+      `aZeroVectorBecomesANonZeroUnitVector`;
+    - contextual: `identityNamesTheLanguageAndRevision`, and
+      `withoutAssetsAnEmbedThrows`, which ran because the runner has the
+      model but not its assets;
+    - `bestAvailablePicksTheContextualModelOnlyWhenItsAssetsAreThere`.
+  - **2 skipped:** the contextual
+    `meanPooledVectorsAreUnitLengthAndSimilarTextsAreCloser` and
+    `aStoreRecallsByMeaning`, both "the contextual model's assets aren't on
+    this machine".
+  - **On this Mac** (macOS 26, assets installed) it's the other way
+    round: 9 ran and passed, and `withoutAssetsAnEmbedThrows` was skipped.
+    So every test has run somewhere.
+- **`aStoreRefusesAnotherRevision` passes** after the merge of `main`:
+  EMBED-ID-1 makes the reopen with `-r<n+1>` throw `EmbedderMismatch` on
+  the first call.
+
+**2. The iOS sample on the target (PR 36):**
+- **The notes pick their embedder** when the store opens:
+  `AppleEmbedders.bestAvailable()` (the contextual model if its assets are
+  there, else the sentence model), else the demo embedder, labelled as
+  before.
+- **Each model gets its own store,** named `notes-<identity>`.
+- **A "Download Apple's model" button** (iOS 17, when the model exists but
+  its assets don't) calls `requestAssets()` and moves the notes to a new,
+  empty store for the contextual model.
+- **The sample's `SentenceEmbedder` is gone.** `project.yml` adds the
+  product to the app target only; SizeProbe is unchanged, so the size
+  report is too.
+- **`DeviceInfo`'s SoC table** gains iPhone18,1, 18,2 and 18,4 (A19 Pro:
+  17 Pro, 17 Pro Max, Air) and iPhone18,3 (A19: iPhone 17), from EveryMac.
+  **iPhone18,5 is left out:** I couldn't confirm which model it is.
+- CI built the sample for the simulator.
+
+**3. The Export button (PR 37, RB-001.14, INSP-1's demo input):**
+- **The button:** in the notes' toolbar. It asks for the passphrase twice
+  (at least 8 characters, and the two must match), calls
+  `exportWithPassphrase` (a fresh data key, no Keychain key) and offers the
+  file in `ShareLink`.
+- **The export opened with the `mnemo` CLI on the Mac.** I couldn't use
+  the simulator: the user didn't answer the access request. So a macOS
+  program ran the sample's code path: a store named after
+  `apple-nl-sentence-en-r1`, two notes through `rememberText`, then
+  `exportWithPassphrase`. Then the CLI built from part 4's merged tree
+  (EMBED-ID-1 included):
+  - `MNEMO_PASSPHRASE=… mnemo info`: v9, 2 memories, 512 dimensions,
+    "cache: 0 entries" (the identity record isn't counted);
+  - `mnemo recall --text "UA 931"`: "Flight UA 931 leaves on 12 March"
+    (keyword-only);
+  - `mnemo verify`: "verified 2 records — all pages decrypt and decode".
+  - The passphrase was a throwaway test value.
+- **A simulator or device export** is still open, for the optional device
+  run.
+
+**4. Device runs anyone can contribute (PR 38, RB-001.15):**
+- **`test/scripts/device_runs/README.md`:** the `device_budget_mobile/1`
+  schema (the required fields per section and per result phase, and what
+  is only recorded) and the seven steps to submit a run.
+- **`validate.py`** (stdlib Python): errors exit 1, and the warnings are a
+  debug build, a simulator or emulator, low-power mode, charging, a hot
+  phone or a dirty tree.
+  - Locally, it passed `iphone18_3.json`, and caught all four planted
+    errors in a broken copy (a bad name, the schema, the platform, a
+    missing `open_ms`).
+- **In CI:** `.github/workflows/device-runs.yml` runs it on PRs and pushes
+  that touch `test/scripts/device_runs/**`. On PR 38: `device runs
+  (schema check)` passed in 3 s, with "ok    iphone18_3.json", "1 of 1
+  device runs valid".
+- **"Share results":** both samples already had a Benchmark share button
+  ("Share the JSON"), so I renamed it on iOS and Android. The iOS footer
+  says where the JSON goes, and `examples/mobile/README.md` links the new
+  README.
+- AGENTS.md's CI section names the new workflow (a technical section,
+  part of PR 38).
+
+**Deferred:**
+- **The Android Export button.** It needs a `FileProvider` (manifest and
+  paths XML) and a share intent. There's no Java runtime on this Mac to
+  build or check it, and doing it blind would take more than half a day.
+  The Android Share results button needed nothing new.
+- **The optional device run** (the contextual model and the Export button
+  on the iPhone, with RB-001.20's two background cases). It isn't added to
+  the run sheet, because the user hasn't asked for one.
+- **The sample on the simulator.** CI built it, but I didn't launch it,
+  because the simulator access request went unanswered.
+
+**A note, not a SAMPLE-1 item:** the committed `iphone18_3.json` (v0.11.0)
+has `compacted_file_bytes: 1000` and `compacted_bytes_per_memory: 1`, the
+memory count rather than a size. The current `Benchmark.swift` measures
+the copy's size, so a new run would be right. The validator doesn't check
+those fields.
+
+**Uncommitted:** PLAN.md (the entries since f0254f6), for the next backup.
+
+### 2026-11-11 — PLANNER-A — REVIEW + DISPATCH — EMBED-ID-1 and SAMPLE-1 accepted; INSP-1 → v0.13.0 dispatched (the inspector, the readable export, the v8 sunset, HOOKS-1)
+
+**EMBED-ID-1 accepted.** Storing the identity as a reserved, encrypted
+result-cache entry was a good choice:
+- both formats already have the cache, so there was no format change;
+- compaction and the exports carry it with no new code;
+- the header would have leaked the model name;
+- eviction is per namespace, and the reserved namespace has one entry that
+  callers can't write, so nothing can evict it.
+
+Moving the manifest mismatch from `Invalid` to `EmbedderMismatch` is what
+"a distinct error" means, and it's in the upgrade notes.
+
+**SAMPLE-1 accepted.** Choosing a separate store per model is EMBED-ID-1's
+rule applied, as intended.
+- **Deferred, and logged here:** the Android Export button (it needs a
+  `FileProvider`; it goes with DOCS-1's quickstart or MOBILE-3), the
+  optional device run, and launching the sample on the simulator.
+- **The `iphone18_3.json` compacted-size fields** record a count, not a
+  size. The next device run corrects them. Until then, `validate.py` warns
+  when `compacted_bytes_per_memory` is under 100 (add that in INSP-1's PR 1;
+  it's a one-liner).
+
+**Before INSP-1: `test/project.mnemo` is a v8 file** (byte 4 of its header
+is `08`). The v8 sunset below makes v8 files read-only, which would break
+the project's own dogfood writes. Step 2 compacts it to v9 first. Run
+`mnemo compact` with the passphrase from `test/.env`, check that the
+memory count matches, then commit the file in that step's PR.
+
+**DISPATCH: INSP-1 → v0.13.0.** Work on a `release-0.13.0` branch, one PR
+per step, and delete each step branch on merge. Mobile publishes in this
+release (rules 1 and 3).
+
+**1. HOOKS-1 (RB-001.29):** the 18 `__*` test hooks (the three that
+mutate the file first) and the two `MNEMO_DEV_*` switches compile only
+behind a non-default `dev-hooks` feature, the way `failpoints` already
+works. The test, bench and example targets that need them enable it.
+Check that the release artifacts (the CLI binaries, wheels and mobile
+libraries) are built without it. Plus the `validate.py` one-liner above.
+
+**2. The v8 sunset (the format-version policy):**
+- a **read-write** open of a v8 file fails with a distinct error (say
+  `MnemoError::FormatTooOld { version }`) whose message says to run
+  `mnemo compact`, which converts it to v9;
+- `open_read_only` on v8 keeps working, so old files stay readable, and so
+  does `compact_file` from v8;
+- creating a v8 file is refused; `compact --format v8` and the engine's v8
+  write path for new files go;
+- the Swift and Kotlin store configurations lose `formatVersion`, which was
+  deprecated in 0.12.2;
+- **tests:** the suites that write on both formats keep their v8 coverage
+  as reads of committed v8 fixtures. Generate the fixtures with the v0.12.3
+  engine before the write path goes, and record how;
+- `test/project.mnemo` compacted to v9, as above;
+- CHANGELOG upgrade notes and the engine README's format section;
+- **the FFI error** gets a matching case, not retryable ("fix the call").
+
+**3. 12.5, the readable export:**
+- `mnemo export <file> --format markdown|jsonl [--type T] [--agent A]
+  [-o path]`. It writes to stdout by default, with a stderr warning that
+  the output is plaintext, and writes a file only with an explicit `-o`.
+  It opens the file read-only;
+- **`--git`** (R-006.2 (d), first version): deterministic and diff-clean.
+  - Order by key, then id, and never by access time.
+  - Leave out vectors, raw turn archives, the result cache (and so the
+    identity record), access counts, and anything that changes on a plain
+    read.
+  - Exporting the same unchanged file twice gives byte-identical output,
+    and one new memory changes only its own lines.
+  - Visibility filtering comes with 13.5.
+- **Tests:** both formats as output, the filters, `--git`'s determinism
+  and one-change-one-diff, the plaintext warning, and a v8 file (through
+  the read-only path).
+
+**4. Restore points in `stats`** (RB-001.25): `Stats` and `StatsSummary`
+gain the retained snapshot count, the oldest restorable time and the
+pinned bytes, taken from what `snapshots()` reports, not from the policy.
+The binding's `DbStats` gains them too. It stays cheap: no record
+decrypts, per RB-002.3.
+
+**5. `mnemo inspect <file>`, the read-only inspector (14.2's read-only
+half):**
+- **The server:** a local web view on `127.0.0.1` only, on a random free
+  port unless `--port` is given.
+  - The URL it prints carries a random token. Every request checks the
+    token and that the `Host` header is the loopback address and port,
+    which guards against DNS rebinding and other sites' pages.
+  - There's no CORS, and only `GET` is served. **No endpoint changes the
+    file.**
+  - `--open` launches the browser.
+- **It holds no lock between reads.** It reads the file once at start,
+  serves from memory, and re-reads only when you press "Reload" (one KDF
+  per reload). An agent that holds the writer's lock is never blocked. If
+  the file is locked at load, say so clearly ("a writer has this file
+  open; close it or try again", 12.4 will improve this) instead of failing
+  silently.
+- **Unlocking:** a passphrase prompt (no echo), `MNEMO_PASSPHRASE`, or
+  `--key-file` for raw-key files. The keychain comes with 12.3.
+- **The views:**
+  - **Memories:** filter by type, agent, keyed or not, and thread; search
+    by keyword (BM25, no embedder needed).
+  - **Keyed history:** the supersession chain for one key, oldest to
+    newest, with when each version stopped being current.
+  - **Threads:** the essence render, and the turn archive on demand.
+  - **Snapshots:** the step 4 fields and the list.
+  - **About and stats:** the format version, the recall mode, the embedder
+    identity (EMBED-ID-1's `embedder_identity()`), and the sizes.
+  - The Phase 13 views come later.
+- **How it's built:**
+  - **Prefer std only:** a small `GET`-only server on
+    `std::net::TcpListener`, with JSON through `serde_json`, which is
+    already a dependency.
+  - The page is one static HTML file, with its JS and CSS, embedded with
+    `include_str!`. No npm and no build step.
+  - If you need a crate, it goes behind a feature that the mobile and
+    Python builds don't enable, and the size gate proves the `.so` didn't
+    grow.
+- **Tests:**
+  - binding: loopback only; a wrong token or a wrong `Host` is refused;
+    `POST` is refused;
+  - the file is byte-identical after a session;
+  - nothing in plaintext is written to disk;
+  - a locked file gives the clear message;
+  - each view's JSON endpoint is right on a fixture with memories, keyed
+    history, a thread with essence, and snapshots.
+- **The acceptance test (RB-001.14):** it opens a passphrase export made
+  through the iOS sample's code path and shows that file's memories,
+  threads and essence. SAMPLE-1's export had no thread, so build the
+  fixture through the same binding calls with a thread and essence added.
+  A simulator export is welcome too, if the user grants simulator access.
+- **The page isn't a product.** Make it clean and readable, and spend no
+  more than that on it. Screenshots go in your DONE.
+
+**6. The release commit:**
+- 0.13.0 everywhere, the CHANGELOG `[0.13.0]` entry (the inspector, the
+  export, the v8 sunset with upgrade notes, EMBED-ID-1, HOOKS-1, the stats
+  fields, and SAMPLE-1's `MnemoAppleEmbedder`);
+- CI green;
+- a release dry run with mobile on, which also exercises the
+  `MnemoAppleEmbedder` product in the SPM consumer check for the first
+  time;
+- then **log READY and stop.** This is a minor release, so **REVIEWER-B
+  reviews it at READY** (AGENTS.md `Reviewer` rule 4), before I accept it
+  and hand off the README and site.
+
+**Out of scope:** `--write` and edits (14.2), the keychain unlock (12.3),
+vector recall in the inspector, the Phase 13 views, and the Android Export
+button.
+
+### 2026-11-11 — PLANNER-A — NOTE — Corrections: `test/project.mnemo` is gitignored and never committed
+
+**Two of my statements were wrong.** `test/project.mnemo` is gitignored
+(`.gitignore:18`), and AGENTS.md says never to commit it or `test/.env`.
+1. **INSP-1 step 2 ("commit the file in that step's PR"): withdrawn.** The
+   user compacts it locally, with the Worker's commands, and it stays
+   uncommitted. The Worker checks the format byte (9) and the memory count
+   afterwards, and the rest of step 2 goes on as dispatched.
+2. **The R-006.3 triage gave a wrong reason** ("public by design and
+   committed") for keeping private findings out of the project brain. The
+   decision stands, for the correct reasons:
+   - every agent that shares the project brain holds its key, and until 13b
+     anyone with the key reads everything;
+   - Run 2's `mnemo export --git` projection *is* committed, so the shared
+     brain's contents reach git through it.
+
+   A separate private brain, never shared and never exported, still
+   replaces `SECURITY.local.md`. `reviewer_notes.md`'s R-006.3 triage line
+   is corrected the same way.
+
+### 2026-11-11 — PLANNER-A — DECISION — INSP-1 step 2 gains a blocker fix: compaction refuses files that hold a legacy all-zero vector, so they could never be upgraded
+
+**What happened.** The user ran `mnemo compact test/project.mnemo`
+(v0.12.3, crates.io). It failed with `invalid argument: all-zero vector
+refused …`. The file is unchanged: still v8, 88 memories, and `verify` is
+clean. The user's backup is `test/project.mnemo.v8-backup`.
+
+**The cause (read in the code):**
+- `copy_live_into` (`store/maintenance.rs:293`) copies each live memory
+  through `put`, which refuses all-zero vectors (`store/records.rs:1414`,
+  from Phase 3 PR 10a).
+- Files created before that change can hold such a record. The scaffold
+  manifest used a zero vector until it switched to the sentinel unit
+  vector, and `test/project.mnemo` dates from 2026-05.
+- So `compact_file`, `export_rekeyed` and the passphrase export all fail
+  on those files.
+
+**Why it blocks v0.13.** The v8 sunset makes `mnemo compact` the only
+way to make an old file writable again. Without this fix, every older
+`mnemo init` file would be stuck read-only.
+
+**The fix, the first PR of step 2, before the sunset itself:**
+- the copy path doesn't re-apply write-time validation to records already
+  in the file. Use an internal put that skips the zero-vector check (the
+  dimension check stays);
+- **a legacy onboarding or manifest memory with a zero vector** gets the
+  sentinel unit vector that current manifests use, so it behaves like a
+  new one. **Any other zero-vector memory** is carried as it is: its
+  content isn't touched and its recall behaviour doesn't change;
+- `CompactReport` (and the `compact` CLI line) counts both kinds, and
+  `verify` warns when zero-vector records exist;
+- **tests:** a committed v8 fixture holding a zero-vector manifest and a
+  zero-vector ordinary memory. Build it with the v0.12.3 engine through a
+  `dev-hooks` hook (HOOKS-1 makes those test-only). Then compaction to v9
+  succeeds, the export and import succeed, the counts are right, and a
+  plain `remember` of a zero vector is still refused.
+
+**Then the user compacts `test/project.mnemo`** with the fixed build,
+using the same commands with the repo's binary
+(`cargo run --release --bin mnemo -- …` from `mnemo/`). The Worker gives
+the exact command once the fix is merged into `release-0.13.0`. The user
+runs it, and the Worker checks the result: v9, 88 live memories,
+`verify` clean.
+
+**Also seen, already documented:** the crates.io build reports
+`aes: armv8 software (constant-time fallback)`. That's the known
+`aes_armv8` cfg gap (`.cargo/config.toml`'s header and the engine
+README's Performance section), and it's unrelated to this. No action.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 1: HOOKS-1 (test hooks only with `dev-hooks`), plus the `validate.py` warning
+
+**PR 39 into `release-0.13.0`**, which I created from `main` at 59665e3.
+Commits c35caf8 and 50a6b89 were fast-forwarded in, and GitHub marked the
+PR merged. `rel013-1-hooks` is deleted.
+- **PR CI on 50a6b89:** CI 43086565477, Mobile CI 43086565304, Device
+  runs 43086565328, all green (19/19).
+- **The push to `release-0.13.0`:** CI 43089581563, Mobile CI 43089581389,
+  Device runs 43089581459.
+
+**What's gated behind the new non-default `dev-hooks` feature:**
+- the 18 `__*` hooks: 17 in `store/hooks.rs` (`mod hooks` behind the
+  feature) and `__crash_partial_flush_for_testing`;
+- `BudgetReport`;
+- the hook-only helpers (the `heap_bytes` methods, `hash_map_bytes`, and
+  the `KeySlot` import);
+- `MNEMO_DEV_ANN_MIN_FACTS` and `MNEMO_DEV_TURN_ZSTD`. Without the
+  feature, the threshold is a constant and turn compression is always on.
+
+**How the targets get it:**
+- **The crate's own tests, benches and examples:** a dev-dependency on
+  itself (`mnemo-engine = { path = ".", features = ["dev-hooks"] }`), so
+  plain `cargo test` works as before.
+- **The CLI:** it read the format version through `__format_version`; it
+  uses `stats_summary().format_version` now.
+
+**The release artifacts are built without it:**
+- `cargo tree -e features --edges normal,build -i mnemo-engine` shows
+  only `default` for `mnemo-engine` (the CLI), `mnemo-uniffi` (the phone
+  libraries), `mnemo-node` and `mnemo-python` (the wheel). With dev edges
+  included, it shows `dev-hooks`.
+- CI's `deny` job now checks the four on every run.
+- `release.yml` passes no features to the CLI, the wheels or the mobile
+  builds.
+
+**One fix after the first CI run (50a6b89):**
+- `python bindings (linux)` failed at `assert db.has_index()`.
+- The cause: `test_mnemo.py` sets `MNEMO_DEV_ANN_MIN_FACTS=0`, which a
+  wheel without the feature now ignores. The Python tests are a target
+  that needs the hooks.
+- The fix: `mnemo-python` gets a `dev-hooks` feature (forwarding to the
+  engine's), and CI's test wheel builds with `--features dev-hooks`. The
+  released wheels don't.
+
+**`validate.py`:** it warns when `compacted_bytes_per_memory` is under
+100. `iphone18_3.json` now shows that warning on both cells, and still
+passes.
+
+**Locally:**
+- `cargo test --features failpoints`: green.
+- Clippy, clean in all three ways (`--all-targets --features
+  failpoints,benches`, `--release` without `dev-hooks`, and `-p
+  mnemo-uniffi`).
+- `cargo +1.75 build --lib --bins --tests --features failpoints`: builds.
+- Python with `--features dev-hooks`: green.
+
+**Not gated:** `mnemo_engine::__wal` and `__fuzz`, the fuzz targets'
+entry points. RB-001.29 counted the `Mnemo` methods and the two
+switches, not these, and gating them would mean changing the fuzz crate.
+They don't change a file.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 2a: compaction carries legacy all-zero vectors; `test/project.mnemo` is v9
+
+**PR 40 into `release-0.13.0`** (commit 9e4ebe8, from `rel013-2a-zero-vector`,
+based on step 1's tip 50a6b89). Fast-forwarded in; GitHub marked it merged.
+The branch is deleted.
+- **PR CI:** CI 43088667638, Mobile CI 43088667745 (attempt 2), Device
+  runs 43088667688, all green (19/19). Attempt 1 of Mobile CI failed only on
+  the Swift T9 (a) timing check on the simulator (5.07 s against 2 s), a
+  runner-speed flake in code this PR doesn't touch; the rerun passed.
+- **The push to `release-0.13.0`:** CI 43093933958, Mobile CI 43093934320.
+
+**The fix, as the DECISION specified:**
+- `copy_live_into` copies through a new `put_existing` (the dimension check
+  only), not `put`, so compaction, `export_rekeyed` and the passphrase
+  export no longer re-apply the write-time zero-vector rule to records
+  already in the file.
+- A legacy onboarding or manifest memory with a zero vector gets
+  `Memory::scaffold_manifest(dims).vector` (the sentinel spike). Any other
+  zero-vector memory is carried unchanged.
+- `CompactReport` gains `zero_vector_manifests` and `zero_vector_memories`
+  (also in the Python dict and the FFI record), and `mnemo compact` prints
+  them.
+- `Mnemo::verify_report()` returns `VerifyReport { records,
+  zero_vector_memories }` (`verify()` is unchanged), and `mnemo verify`
+  warns when the count isn't zero.
+- A plain `remember` of a zero vector is still refused.
+- Tests: `tests/zero_vector_compaction.rs` (4: verify counts them;
+  compaction carries both kinds and fixes the manifest; the rekeyed
+  exports and the import carry them; a new zero vector is refused).
+
+**Deviation (fixture).** The DECISION said to build the fixture with the
+v0.12.3 engine through a `dev-hooks` hook, but v0.12.3 has neither
+`dev-hooks` nor any way to write a zero vector. So
+`tests/fixtures/v8/v8_zero_vectors.mnemo` was written by
+`examples/gen_v8_zero_vector_fixture.rs` on the 2a engine, through a new
+hook `__put_unvalidated_for_testing` (`dev-hooks` only). The 2a engine is
+the last that creates v8 files, and its v8 writer is unchanged since
+v0.12.3. The example says so; after the sunset it no longer runs (it
+creates a v8 file), and the committed fixture is what the tests read.
+
+**`test/project.mnemo`, compacted by the user** with the CLI built from
+9e4ebe8 (the user's terminal, which holds the passphrase; not committed):
+- before: `format: v8`, `memories: 88`;
+- `compacted … (v9): 88 -> 88 live memories`, `all-zero vectors: 0 legacy
+  manifest memories given the sentinel vector, 3 other memories carried
+  unchanged`;
+- after: `format: v9`, `memories: 88`; the header's version bytes read
+  `0900`. The file went from 2,949,120 bytes to 262,144;
+- `verified 88 records — all pages decrypt and decode`, with the new
+  warning that 3 memories have an all-zero vector.
+- **What that means:** the manifest was already on the sentinel vector.
+  The 3 zero-vector memories are old ordinary memories; they score 0.0 on
+  vector queries (as they did on v8) and are still found by keyword
+  recall. Re-embedding them is a separate choice for the user, not part of
+  this step. The backup `test/project.mnemo.v8-backup` is untouched.
+
+**Next:** step 2b, the rest of the v8 sunset (`rel013-2-v8-sunset`, two WIP
+commits), after merging `release-0.13.0` into it.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 2: the v8 sunset (`FormatTooOld`; v8 read-only; no new v8 files; v8 coverage on committed fixtures)
+
+**PR 41 into `release-0.13.0`** (`rel013-2-v8-sunset`; it merges in step
+2a). Fast-forwarded to 9bd9d2f; GitHub marked it merged. The branch is
+deleted. Commits: 680b149 and b346a87 (the sunset, written before 2a and
+labelled `wip`), 0cf99e9 (the merge of `release-0.13.0` with 2a, no
+conflicts), 8c137aa (fmt, a clippy fix, the fixture example's doc), 9bd9d2f
+(the Kotlin rename).
+- **PR CI on 9bd9d2f:** CI 43115258305, Mobile CI 43115258242, 18/18
+  green. On 8c137aa, Mobile CI 43113463551 failed only in `kotlin`: see
+  below.
+- **The push to `release-0.13.0`:** CI 43117251044, Mobile CI 43117251015.
+
+**What changed, as dispatched:**
+- `MnemoError::FormatTooOld { version }`. Every read-write open of a v4–v8
+  file returns it, with "run `mnemo compact <file>`" in the message.
+  `open_read_only` still reads v8; v4–v7 are `FormatTooOld` there too.
+- No new v8 file: `format_version` takes only 0 or 9.
+  `Mnemo::compact_file_to` and `mnemo compact --format` are removed.
+  Compaction is the one read-write open that takes an old file
+  (`open_secret_with(.., allow_old: true)`), and it always writes v9.
+- CLI: `compact` prints `(v9)` plus 2a's zero-vector line. `recall` and
+  `cache get` fall back to a read-only open on v8.
+- UniFFI: `MnemoError::FormatTooOld { version, message }`. Swift
+  `MnemoStore` and the Kotlin `MnemoStoreConfiguration` lose
+  `formatVersion`. Their v8 index tests are gone; the uniffi test
+  `a_v8_file_opens_read_only_and_compacts_to_v9` covers the FFI case.
+- v8 coverage is now reads of the committed fixtures in
+  `mnemo/tests/fixtures/v8/`. The v0.12.3 engine wrote
+  `v8_passphrase.mnemo` (17 memories, an index, 7 snapshots, a thread,
+  essence, a cache entry, a manifest embedder) and `v8_key.mnemo` through
+  the standalone `generator/` crate; `expected.json` records what they hold.
+  `tests/v8_fixture.rs` has 4 tests. The v8 halves of the integration,
+  DUR-1, FIX-1, SEC-1 and EMBED-ID-1 suites are gone.
+- Docs: CHANGELOG (the upgrade notes and Changed), the engine README's
+  format section and compact row, the AGENTS.md format policy (a technical
+  section), and the Swift and Kotlin README error lists.
+
+**The one CI fix (9bd9d2f).** The Kotlin bindings didn't compile:
+`FormatTooOld`'s `message` field clashes with `Throwable.message`.
+`uniffi.toml` now renames it to `reason`, like every other case. I couldn't
+catch it locally because this machine has no Java runtime (see below).
+
+**Locally, after the merge with 2a:**
+- `cargo test --features failpoints --no-fail-fast`: green.
+- Clippy clean in all three runs (`--all-targets --features
+  failpoints,benches`, `--release`, `-p mnemo-uniffi --all-targets`).
+- `cargo fmt --check` clean; `cargo test -p mnemo-uniffi` green (20 + 2).
+- XCFramework rebuilt; `swift test` passed 40 + 10. The iOS-only suite
+  runs in CI's `swift` job.
+- `v0_10_fixture` passed against a real v0.10.0 binary before the merge.
+- **Not run locally:** the Kotlin JVM tests (no Java runtime or Android
+  SDK on this machine). CI's `kotlin` job ran them on 9bd9d2f: green.
+
+**Deviation:** none from the dispatch. Two notes:
+- `examples/gen_v8_zero_vector_fixture.rs` (2a) can't run any more, since
+  it creates a v8 file. It stays as the record of how its fixture was made.
+- The two sunset commits carry `wip(...)` subjects. They were written
+  before 2a merged, and the no-amend, no-rebase rule keeps them as they are.
+
+**`test/project.mnemo`** is v9 (step 2a's DONE), so this build opens it
+read-write.
+
+**Next:** step 3, `mnemo export` with `--git`.
+
+### 2026-11-11 — PLANNER-A — DECISION — GUIDE-1 and `mnemo onboard` (user, 2026-11-11); steps 1, 2a and 2 accepted
+
+**Steps 1, 2a and 2 accepted** (the three DONE entries above).
+`test/project.mnemo` is v9 (header byte 4 is `09`), with 88 memories and
+a clean `verify`. Renaming the error's `message` field to `reason` for
+Kotlin is right. The five `… 2.*` files in `mnemo/tests/fixtures/v8/` are
+Finder or iCloud copies; the user deletes them, and they must never be
+committed. The user can delete `test/project.mnemo.v8-backup` too.
+
+**DECISION (user): one onboarding command, and evergreen instructions for
+LLMs.**
+- **`mnemo onboard`** is the single entry point, safe to re-run. It
+  replaces `mnemo harness init` in R-006.2 (c):
+  - finds or creates the project brain, resolved through `git rev-parse
+    --git-common-dir` so every worktree shares one file;
+  - sets up the key in the system keychain (12.3), the one step that may
+    need the human;
+  - detects Claude Code and Cursor and wires both (MCP config, rules,
+    hooks);
+  - ends by printing the guide.
+
+  `mnemo onboard --guide` prints only the guide. `mnemo init` stays as
+  the low-level create command that `onboard` calls.
+- **GUIDE-1, the guide:**
+  - **one source text** in the repo, compiled into the binary;
+  - **delivered** by `mnemo onboard --guide`, by the MCP server (as an
+    MCP prompt or resource, offered on connect), by the rule files
+    `onboard` writes, and on the site as `llms.txt`, all from that one
+    source;
+  - **evergreen means tested:** every command and tool call in it runs in
+    CI against the release, so a wrong guide fails the build. Each binary
+    carries its own matching guide;
+  - **three layers, each written only when its feature exists:** (1)
+    setup; (2) organizing memory (types, keys, threads, essence, budgets,
+    what to save and when); (3) orchestration (roles, tasks, inbox,
+    claims, handoffs), with this project's Planner, Worker and Reviewer
+    setup as the first role template;
+  - **a trust boundary:** the guide lives in the binary, where agents
+    can't change it. A project's own conventions can go in the file's
+    manifest, but agents treat them as project notes, never as overriding
+    the guide.
+- **Where it slots in:** layers 1 and 2, `mnemo onboard` and the MCP offer
+  ship with **12.2**. Layer 3 ships with **13a**.
+- **The acceptance test for 12.2 and HARNESS-DOGFOOD-1:** a fresh agent,
+  told only "run `cargo install mnemo-engine`, then `mnemo onboard`",
+  runs the workflow unaided. The only human step is the keychain prompt.
+- R-006.2's triage line in `reviewer_notes.md` notes the rename.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 3: `mnemo export` (Markdown or JSON Lines, filters, `--git`)
+
+**PR 42 into `release-0.13.0`** (`rel013-3-export`, one commit, 4d87d30).
+Fast-forwarded in; GitHub marked it merged. The branch is deleted.
+- **PR CI:** CI 43118712484, 12/12 green. Mobile CI didn't run: the PR
+  touches no mobile path.
+- **The push to `release-0.13.0`:** CI 43119995984, Mobile CI 43119996045.
+
+**What shipped, as dispatched:**
+- `mnemo export <file> [--format markdown|jsonl] [--type T] [--agent A]
+  [--git] [-o path]`. Markdown is the default.
+- **Read-only:** it opens the file read-only, so a v8 file exports too,
+  and the file is byte-identical afterwards (tested).
+- **Output:** stdout by default, with a stderr warning that the output is
+  plaintext (also given with `-o`). A file is written only with `-o`:
+  mode 0600 on Unix, and never over the `.mnemo` file itself.
+- **What's in it:** every live record, without vectors. That includes
+  superseded keyed versions with their `_mnemo.*` metadata, and without
+  `--git` the thread turns and the access stats. Markdown fences are longer
+  than any backtick run in the content, and inline values escape backticks
+  and line breaks, so identifiers survive.
+- **`--git`:**
+  - order: key, then id (keyed first), never access time;
+  - no thread turns (the raw archive), no access stats and no counts;
+  - the result cache, and so the identity record, isn't in any export.
+  - Tested: two exports of an unchanged file are byte-identical (both
+    formats); a tracked recall changes the plain JSONL but not the
+    `--git` output; one new memory inserts one contiguous block (Markdown)
+    or one line (JSONL), and no old line changes.
+- **Code:** the rendering is in `mnemo/src/bin/mnemo/export.rs` (a
+  `#[path]` module, because a file in `src/bin/` would be a binary of its
+  own). `mnemo.rs` has the variant and the arm.
+- **Tests:** `tests/export_cli.rs` has 7 tests: both formats, the filters,
+  `--git` determinism and order, one-change-one-diff, the warning and `-o`,
+  and the v8 fixture (17 records, 13 with `--git`). The module has 3 unit
+  tests.
+- **Docs:** the engine README's CLI-table row and a "Readable export"
+  section, and CHANGELOG `### Added`.
+
+**Locally:**
+- `cargo test --features failpoints --no-fail-fast`: 351 passed.
+- Clippy clean (`--all-targets --features failpoints,benches`, and
+  `--release`); fmt clean.
+- `cargo +1.75 build --locked --bins --tests --features failpoints`:
+  builds.
+
+**Choices the spec left open:**
+- With `--git`, a keyed update also changes the superseded version's
+  `metadata` line (it gains `_mnemo.superseded_by` and
+  `_mnemo.invalid_at`). That's rule 2, "supersede, don't erase", showing in
+  the diff. The one-new-memory guarantee is for a plain `remember`.
+- Expired-but-not-compacted memories are exported. Filtering by the clock
+  would make the same file export differently over time.
+- No MCP or Python surface: the dispatch asked for the CLI only.
+
+**Next:** step 4, the restore-point fields in `stats`.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 4: restore points in `stats` (RB-001.25)
+
+**PR 43 into `release-0.13.0`** (`rel013-4-stats`, one commit, 224076c).
+Fast-forwarded in; GitHub marked it merged. The branch is deleted.
+- **PR CI:** CI 43122291260, Mobile CI 43122291298, 18/18 green (the
+  Kotlin and Python jobs included).
+- **The push to `release-0.13.0`:** CI 43123134771, Mobile CI 43123134725.
+
+**What shipped, as dispatched:**
+- `Stats` and `StatsSummary` gain:
+  - `snapshots_retained: usize`;
+  - `oldest_restorable_at: Option<i64>` (unix seconds; `None` with no
+    snapshot);
+  - `snapshot_pinned_bytes: u64`.
+- **Where the values come from:** the snapshots that exist now, not the
+  policy.
+  - A private `Mnemo::restore_points()` (`store/snapshots.rs`) reads the
+    manifest (its count and the oldest snapshot's `created_at`) and the
+    free list.
+  - Pinned bytes = `free.pinned_pages(oldest txn) × 8 KiB`, the figure
+    `apply_retention`'s pin cap measures. They're `0` on v8, which never
+    reuses pages.
+  - **Cheap, per RB-002.3:** no record decrypts. `stats_summary()` stays
+    `&self`.
+- **Surfaces:** the UniFFI `DbStats` (`snapshotsRetained`,
+  `oldestRestorableAt`, `snapshotPinnedBytes`; the Swift and Kotlin stores
+  pass `DbStats` through), Python's `stats()` dict, the MCP `stats` tool,
+  and `mnemo info` (`snapshots:   7 retained, oldest 2026-11-11T19:20:22Z
+  (0 bytes pinned)`).
+- **Tests:**
+  - `tests/restore_points.rs` (3):
+    - under churn, both stats paths agree with `snapshots()`, and the
+      pinned bytes are > 0 and whole pages;
+    - with `set_max_snapshots(1)` the newest pins 0, and a read-only
+      handle agrees;
+    - compaction resets the fields;
+    - the v8 fixture reports 7 snapshots with 0 pinned.
+  - New assertions in the uniffi, Swift, Kotlin and Python stats tests.
+- **Docs:** the engine README's snapshot section, the Swift and Kotlin
+  History sections, the Python `stats()` row and CHANGELOG `### Added`. I
+  also fixed the stale `Stats::format_version` doc ("a v8 file still opens
+  and writes as v8").
+
+**Locally:**
+- `cargo test --features failpoints --no-fail-fast`: 354 passed.
+- Clippy clean in all three runs; fmt clean.
+- `cargo test -p mnemo-uniffi`: green.
+- XCFramework rebuilt; `swift test` passed 40 + 10.
+- Kotlin and Python ran in CI only (no Java runtime here; no local wheel
+  built).
+
+**Note:** `Stats` and `StatsSummary` aren't `#[non_exhaustive]`, so a
+struct literal of either needs the new fields (in the CHANGELOG). Nothing
+in the tree builds one.
+
+**Also:** the user tried `mnemo export` with the crates.io 0.12.3 binary on
+PATH, which has no `export`. I pointed them at the repo build
+(`mnemo/target/release/mnemo`, rebuilt at 4d87d30), with `-o` outside the
+repository: the export is plaintext, and only `.mnemo` files are
+gitignored.
+
+**Next:** step 5, `mnemo inspect`.
+
+### 2026-11-11 — WORKER — DONE — v0.13.0 step 5: `mnemo inspect`, the read-only inspector (14.2's read-only half)
+
+**PR 44 into `release-0.13.0`** (`rel013-5-inspect`, one commit, 994d61a).
+Fast-forwarded in; GitHub marked it merged. The branch is deleted.
+- **PR CI:** CI 43126560113, Mobile CI 43126560172, 18/18 green (Windows
+  and macOS included).
+- **The push to `release-0.13.0`:** CI 43128392300, Mobile CI 43128392236.
+
+**What shipped, as dispatched:**
+- `mnemo inspect <file> [--port N] [--open] [--key-file PATH]`.
+- **The server** (`mnemo/src/bin/mnemo/inspect.rs`):
+  - on `std::net::TcpListener`, one thread per connection;
+  - bound to `127.0.0.1` only, on a random free port unless `--port`;
+  - the URL carries a 32-byte random token from `Mnemo::generate_key`,
+    compared in equal time;
+  - every request needs that token and a `Host` of `127.0.0.1:PORT` or
+    `localhost:PORT`; wrong ones get 403;
+  - only `GET` (anything else gets 405, `Allow: GET`), and no CORS
+    headers. Responses carry `no-store`, `nosniff`, `no-referrer`,
+    `X-Frame-Options: DENY` and a strict CSP on the page;
+  - no endpoint writes.
+- **No lock between reads:** `load()` opens read-only, reads everything
+  into memory, and drops the handle. `/api/reload` (the page's Reload)
+  repeats it with one KDF. A held file gives "a writer has this file open;
+  close it or try again": at start the command exits with it, and on a
+  reload it's a 409 and the last read stays.
+- **Unlocking:** the prompt, `MNEMO_PASSPHRASE`, or `--key-file` (32
+  bytes or 64 hex digits).
+- **The views** (one page, `inspect.html`, compiled in with
+  `include_str!`; all content goes in through `textContent`):
+  - memories, with type, agent, keyed or not, and thread filters, and a
+    BM25 keyword search;
+  - keyed history, oldest to newest, with "stopped being current";
+  - threads: the essence render, and the turn archive on demand
+    (`turns=1`);
+  - snapshots: the step 4 fields and the list;
+  - about: format, recall mode, embedder identity, sizes, agents,
+    onboarding.
+- **Std only:** no new dependency. It's in the CLI binary only, so the
+  `.so` and the wheels don't change; no size gate was needed.
+
+**Decisions the spec left open:**
+- **Search runs from memory.** Keyword recall needs an open handle, and
+  v9 only. So the engine gains a small public
+  `mnemo_engine::KeywordIndex`, which uses keyword recall's tokenizer
+  and BM25 (k1 1.2, b 0.75) over texts you already hold. Search works with
+  the file closed, and on v8.
+- **Keyed history follows the `_mnemo.superseded_by` links, not the id
+  order.** Two ULIDs from the same millisecond sort randomly, and the
+  acceptance fixture's two versions came out reversed by id. That's a
+  unit test now.
+- **Embedder on old files:** a file from before EMBED-ID-1 (all v8
+  fixtures) records no identity, so About shows the manifest's embedder,
+  labelled as such.
+- **Project essence** shows only when there are project-scope items; the
+  engine's render has a header even with none.
+
+**Tests:**
+- `mnemo/tests/inspect_cli.rs` has 7 tests, the binary over raw HTTP:
+  - loopback only (and unreachable on the default-route address);
+  - no token, a wrong token, or a token one digit off → 403;
+  - a wrong `Host` (another name, or another port) → 403;
+  - six methods → 405; no `Access-Control-Allow-*`;
+  - each view's JSON right on a library-built fixture (memories over three
+    agents, a key with 3 versions, a thread with turns and essence,
+    project essence, 5 snapshots);
+  - the file byte-identical after a session with a reload, with nothing
+    beside it and `HOME` and `TMPDIR` empty;
+  - a reload during a writer (409, old data) and after it (the new
+    memory);
+  - a held file at start gives the message;
+  - `--key-file` on `v8_key.mnemo`; the v8 passphrase fixture
+    (format 8, the manifest embedder, the essence, 7 snapshots).
+- **The acceptance test (RB-001.14):**
+  - `tests/fixtures/inspect/ios_export.mnemo` was built through the
+    binding's calls in the iOS sample's order (`NotesModel`):
+    `create_with_key`, `set_embedder` (`DemoWordEmbedder` ported:
+    FNV-1a over 64 axes), three notes through `remember_text`,
+    `fact:milk` set twice, three turns on `demo-thread` through
+    `ingest_thread`, `essence_add` (decisions) and
+    `essence_append_timeline`, then `export_with_passphrase`.
+  - The inspector shows its notes, the keyed history (oat then almond),
+    the thread's 3 turns, and its essence.
+  - The uniffi test `write_the_inspect_fixture` (ignored) writes the
+    file, and `the_ios_style_export_holds_notes_a_thread_and_essence`
+    keeps the builder tested.
+  - The fixture is synthetic data under a throwaway test passphrase. It's
+    force-added: the auto-mode check stopped the `git add -f`, and the
+    user chose to commit it, as with the v8 fixtures.
+  - No simulator export: this run didn't use the simulator.
+- **Unit tests (4):** request parsing and percent-decoding, token
+  comparison, the loopback bind, and chain order.
+- **Flakiness:** `inspect_cli` ran green 30 times in a row after one fix
+  to the test: replacing the token's last digit with `0` was a no-op one
+  time in 16.
+
+**Locally:**
+- `cargo test --features failpoints --no-fail-fast`: 366 passed.
+- `cargo test -p mnemo-uniffi`: 21 passed, 1 ignored.
+- Clippy clean in all three runs; fmt clean.
+- `cargo +1.75 build --locked --bins --tests --features failpoints`:
+  builds.
+
+**Screenshots** (the acceptance fixture, in the browser pane, dark mode),
+in `/private/tmp/claude-501/-Users-archkumar-Documents-GitHub-mnemo/ac58fe13-1fb0-496d-bb51-b159c87e2361/scratchpad/inspect-screenshots/`:
+`1-memories.jpg`, `2-keyword-search.jpg` ("oat milk", best match first,
+with scores), `3-keyed-history.jpg`, `4-threads.jpg` (the essence, and
+the archive expanded), `5-snapshots.jpg`, `6-about.jpg`.
+Two page bugs the screenshots caught were fixed before the commit: arrays
+passed to `replaceChildren` unspread, and an empty project-essence
+block.
+
+**Docs:** the engine README's CLI row and "The inspector" section,
+CHANGELOG `### Added` (the inspector and `KeywordIndex`), and an
+AGENTS.md task-table row ("Change the inspector").
+
+**Next:** step 6, the release commit (0.13.0 everywhere, the CHANGELOG
+`[0.13.0]`) and a dry run with mobile on, then READY.
+
+### 2026-11-12 — PLANNER-A — REVIEW + HANDOFF — v0.13 steps 3–5 checked in the repo and on GitHub; the committed `.mnemo` fixtures get a written exception
+
+**Checked (at the user's request) against git and the GitHub API:**
+- one PR per step (39–45), each merged into `release-0.13.0`, with its
+  branch deleted;
+- CI and Mobile CI green on every push from `9e4ebe8` to `994d61a`; the
+  release dry run on `afd65b3` is running as I write;
+- no code commit includes PLAN.md, reviewer_notes.md, `SECURITY.local.md`,
+  `test/.env` or `test/project.mnemo`;
+- `inspect.rs` does what the spec asked:
+  - it binds `127.0.0.1` only;
+  - it compares the token in constant time;
+  - it checks `Host` against the loopback address and the port;
+  - it serves `GET` only (405 otherwise);
+  - it caps the request head (431) and times reads out after 10 s;
+  - it sends `no-store`, `nosniff`, `no-referrer`, `DENY` and a CSP;
+  - it opens read-only and holds no lock between reads.
+- Following the supersession links rather than the id order for keyed
+  history is the right call.
+
+**Two things to fix in passing, neither blocking:**
+1. **The committed `.mnemo` fixtures** (`tests/fixtures/v8/*`,
+   `tests/fixtures/inspect/ios_export.mnemo`) were force-added past
+   `*.mnemo`, with the user's consent. My own spec asked for committed
+   fixtures, but AGENTS.md said never commit any `.mnemo`. `git add -f` as
+   a habit is how `test/project.mnemo` could leak one day. **HANDOFF,
+   commit on `release-0.13.0` on its own:**
+   - `.gitignore`: a negation, `!mnemo/tests/fixtures/**/*.mnemo`, with a
+     comment. `test/project.mnemo` stays ignored; I checked with
+     `git check-ignore`;
+   - `AGENTS.md` ("Never commit"): the one exception, for synthetic
+     fixtures under throwaway test secrets;
+   - **commit message:** `chore: let test fixtures through .gitignore; AGENTS.md names the exception`.
+   - The negation now shows two iCloud duplicates,
+     `tests/fixtures/v8/v8_key 2.mnemo` and `v8_passphrase 2.mnemo`. They
+     were hidden before. **Never stage them;** the user deletes them.
+2. **The `wip(...)` commits** (`680b149`, `b346a87`, and SAMPLE-1's two)
+   are now permanent in history, because rewriting isn't allowed.
+   They're harmless, but from now on a step's commits go in under their
+   final message: commit WIP on the step branch locally, and push only once
+   it's ready.
+
+Everything else waits for the READY. Then REVIEWER-B reviews before the
+tag.
+
+### 2026-11-12 — PLANNER-A — NOTE — Correction to point 2 above (the `wip(...)` commits)
+
+"Commit WIP locally, push only once it's ready" doesn't do what I meant.
+A WIP commit made locally still lands in history when the branch is
+pushed and fast-forwarded, and removing it would need `--amend` or a
+rebase, which the Worker's rules forbid. The rule instead:
+- **parking unfinished work in a WIP commit is fine,** as in step 2, which
+  had to wait for 2a. Its message says what's done and what isn't;
+- **when a step's PR contains WIP commits, merge it with GitHub's "Squash
+  and merge",** so the release branch gets one commit with the step's
+  final message. That creates a new commit on the target branch and
+  rewrites nothing already pushed. Steps without WIP commits keep the
+  fast-forward;
+- the existing WIP commits stay as they are. Leave them alone.
+
+### 2026-11-11 — WORKER — READY — v0.13.0: all six steps are on `release-0.13.0`; the release commit's dry run (mobile on) passed
+
+**Stopping here, as dispatched: REVIEWER-B reviews v0.13 before the tag.**
+Nothing is tagged. `main` is still at 59665e3. `release-0.13.0` is at
+afd65b3 and carries everything; the tag and the merge into `main` follow
+acceptance.
+
+**Step 6, the release commit (PR 45, afd65b3 `release: v0.13.0`):**
+- **0.13.0 everywhere,** the same 14 files as v0.12.3's release commit:
+  - the engine, Python (Cargo and `pyproject.toml`), Node and
+    `mnemo-uniffi` manifests;
+  - both lockfiles (only our four version lines changed);
+  - `VERSION_NAME`, and the `release-check` comment;
+  - the iOS sample's `MARKETING_VERSION` and the Android sample's
+    dependency;
+  - the Swift and Kotlin README install lines.
+- **Left alone on purpose:** the v8 fixture generator stays on `=0.12.3`
+  (it's what wrote the fixtures). The root `README.md` and `index.html`
+  are the Planner's, for the handoff after acceptance; both still say
+  0.12.3.
+- **CHANGELOG `[0.13.0] — 2026-11-11`:** a summary, then one "Upgrading
+  from 0.12.3" block:
+  - the v8 sunset;
+  - the embedder identity (EMBED-ID-1). Its bullets had been sitting inside
+    the v8 bullet since the merges, and are now under their own heading;
+  - the new struct fields;
+  - HOOKS-1;
+  - `FormatTooOld` as a new `MnemoError` case for exhaustive matches.
+  Then Added (the export, the stats fields, the inspector, `KeywordIndex`,
+  and SAMPLE-1's `MnemoAppleEmbedder`, which had no entry), Fixed (the
+  zero-vector compaction) and Changed (the v8 sunset, HOOKS-1,
+  EMBED-ID-1). If the tag lands on another day, the date needs changing.
+- **PR CI:** CI 43134445581 and Mobile CI on afd65b3, 18/18 green.
+  - **One GitHub glitch:** `cargo-deny (linux)` finished in 6 s (every
+    step succeeded at 01:25:55), but its check run stayed `in_progress`
+    with `conclusion: success` for 33 minutes. I re-ran that one job
+    (job 130918722993): it passed in 14 s.
+  - Locally: fmt, `cargo build --locked` (both workspaces), clippy, 366
+    tests, and `mnemo --version` = 0.13.0.
+
+**The dry run: run 43138424847 on `release-0.13.0`, `mobile=true`,
+success.** The user approved `maven-central` and `mnemo-swift`.
+- `mobile (version check)`: every manifest at 0.13.0.
+- `mobile (Swift build)`: the XCFramework zip, and the SPM consumer on the
+  iOS simulator. This was the first workflow run of the
+  `MnemoAppleEmbedder` product: `testTheAppleEmbedderProductLinks`
+  passed.
+- `mobile (Swift publish)`: "pushed and deleted dry-run-0.13.0" on
+  `mnemo-swift`.
+- `mobile (Swift verify published)`: resolved and built the newest
+  published version, 0.12.3.
+- `mobile (Android build)`, then `mobile (Android publish)`: the signed
+  bundle uploaded as deployment 90765003-4921-45f3-81c7-0492dfce47cd, came
+  back `VALIDATED`, and was dropped (HTTP 204). Nothing was released.
+- The engine jobs (Release, CLI, wheels, sdist, crates.io, PyPI) are
+  skipped in a dry run, by design.
+
+**v0.13.0 in full** (each step has its own DONE above):
+
+| Step | What | PR | Head |
+|---|---|---|---|
+| 1 | HOOKS-1 + the `validate.py` warning | 39 | 50a6b89 |
+| 2a | compaction carries legacy zero vectors | 40 | 9e4ebe8 |
+| 2 | the v8 sunset | 41 | 9bd9d2f |
+| 3 | `mnemo export` (`--git`) | 42 | 4d87d30 |
+| 4 | restore points in `stats` | 43 | 224076c |
+| 5 | `mnemo inspect` | 44 | 994d61a |
+| 6 | `release: v0.13.0` | 45 | afd65b3 |
+
+**For REVIEWER-B (AGENTS.md rule 4: a minor release, and it touches the
+file format's open paths and the release workflow's inputs):**
+- **New public API:**
+  - `MnemoError::FormatTooOld`, `EmbedderMismatch`;
+  - `VerifyReport` and `Mnemo::verify_report`;
+  - `KeywordIndex`;
+  - the `Stats`, `StatsSummary` and `CompactReport` fields;
+  - the UniFFI `DbStats` and `CompactReport` fields and `FormatTooOld`;
+  - the CLI's `export` and `inspect`.
+- **Removed:** `Mnemo::compact_file_to`, `mnemo compact --format`, and
+  Swift/Kotlin `formatVersion`.
+- **The inspector's security surface** (`mnemo/src/bin/mnemo/inspect.rs`):
+  the loopback bind, the token, the `Host` check, GET only, the lock
+  handling, the page's CSP and `textContent` rendering.
+- **New committed fixtures** (force-added, synthetic, throwaway
+  passphrases): `tests/fixtures/v8/` and
+  `tests/fixtures/inspect/ios_export.mnemo`.
+
+**Open before the tag:**
+- REVIEWER-B's pass, then the Planner's acceptance.
+- The root `README.md` and `index.html` handoff.
+- `ENABLE_MOBILE_PUBLISH=true` (rule 3: a minor release publishes mobile).
+- The `chore(plan): sync coordination files` backup commit of `PLAN.md`
+  and `reviewer_notes.md`, just before tagging.
+- `test/project.mnemo` durable findings: not written. The passphrase
+  lives only in the user's terminal; the file itself is v9 (step 2a's
+  DONE).
+
+### 2026-11-12 — PLANNER-A — REVIEW + DECISION — v0.13.0 READY received (REVIEWER-B reviews before I accept); CLEANUP-1 marked, with a running candidates list
+
+**The READY** (`release-0.13.0` at `afd65b3`): the dry run 43138424847
+is green with mobile on; the `MnemoAppleEmbedder` product linked in the
+SPM consumer for the first time; and Android went VALIDATED and was
+dropped. CI and Mobile CI are green on `afd65b3` (I checked through the
+GitHub API). **I'll accept after REVIEWER-B's pass,** per AGENTS.md
+`Reviewer` rule 4. The user moves the repo to `mnemo.nosync` (out of
+iCloud sync) first, so the review and the tag run from the new path.
+
+**DECISION (user, 2026-11-11): CLEANUP-1, marked, not scheduled.**
+- **The trigger:** when the product is close to robust, before 1.0. The
+  earliest is after HARNESS-DOGFOOD-1, and the user decides when. It
+  starts with a REVIEWER-B pass that checks the candidates list below
+  against the code.
+- **Never in scope:** rewriting git history or tags (published packages
+  point at them), and dropping the ability to read and upgrade old files
+  before 1.0.
+- **The running candidates list.** Whenever something is deprecated,
+  replaced or left over, add one line here (or in a later Planner entry
+  that names this list): what it is, why it's still there, and what must
+  be true before it goes.
+  - plain `Mnemo::close()` beside `try_close` (since EMBED-ID-1's
+    release, v0.12.2): goes when callers have moved;
+  - `stats()` beside `stats_summary()` (v0.12.2): merge or rename them;
+  - the legacy flat manifest keys (`embedder_name` and so on), accepted
+    as an alias: goes when no supported file can have them;
+  - v8 read and upgrade support: kept until 1.0, then dropped with notice;
+  - the `release/0.5.x` branch;
+  - early `test/scripts/perf_v0.*.json` files and size baselines that
+    nothing reads;
+  - the root README's version-by-version "What's new" sections: they move
+    into CHANGELOG.md, leaving the README about the current product;
+  - after HARNESS-DOGFOOD-1: PLAN.md's WORKLOG and `reviewer_notes.md`'s
+    batches, archived (into the brain, or an archive file) once the
+    `--git` export replaces them;
+  - the `wip(...)` commits stay, since history isn't rewritten.
+
+### 2026-11-12 — PLANNER-A — NOTE — The repo moved out of iCloud sync: `~/Documents/GitHub/mnemo.nosync`
+
+- **Why:** iCloud made files cloud-only mid-work ("Resource deadlock
+  avoided"), created `… 2.*` duplicate files, and can sync a half-written
+  `.mnemo` file. iCloud skips folders whose names end in `.nosync`.
+- **What changed:** only the folder name. Git, the branches, the
+  uncommitted files and `test/project.mnemo` (v9) moved with it. I
+  checked the repo at the new path.
+- **For every agent:**
+  - work only in `~/Documents/GitHub/mnemo.nosync`;
+  - never create anything under the old `~/Documents/GitHub/mnemo`. An
+    empty folder of that name can reappear (a stale folder link in the
+    Planner chat), and it's safe to remove with `rmdir`;
+  - old session history under the old path doesn't carry over. PLAN.md
+    and AGENTS.md carry everything.
+- **Still to do (user):** rebuild `test/.venv` (python.org 3.11, then
+  `pip install -r test/requirements.txt`, then `maturin develop --release`
+  in `mnemo-python`) before the next dogfood write to `test/project.mnemo`.
+- **Backups** of the uncommitted files (`test/.env`, `SECURITY.local.md`,
+  `test/project.mnemo`) now rely on Time Machine, not iCloud.
+
+### 2026-11-12 — WORKER — DONE — PLANNER-A's HANDOFF (the fixtures' `.gitignore` exception), at the new path
+
+- **Committed as its own commit** on `release-0.13.0`: 1afdfd7
+  `chore: let test fixtures through .gitignore; AGENTS.md names the
+  exception`. It holds exactly the two listed paths, `.gitignore` and
+  `AGENTS.md`, and the diff matches the HANDOFF. Pushed as a fast-forward
+  from afd65b3.
+- **Checked before staging:**
+  - `git check-ignore -v test/project.mnemo` still matches `.gitignore:21`;
+  - the fixture paths are no longer ignored;
+  - no `… 2.mnemo` duplicates exist any more (the user removed them), so
+    nothing extra could be staged.
+- **The repo move:** I read the NOTE and work only in
+  `~/Documents/GitHub/mnemo.nosync`. `git status` there showed the same
+  branch (`release-0.13.0`), the same head (afd65b3) and the same
+  uncommitted files as before the move.
+- **The WIP rule (the correction NOTE):** noted. From the next release on,
+  a step PR that contains WIP commits merges with "Squash and merge"; one
+  without keeps the fast-forward.
+- **v0.13.0 is unchanged otherwise.** READY stands; the release
+  content is afd65b3 plus this one chore commit. Still waiting for
+  REVIEWER-B's pass and the Planner's acceptance; nothing is tagged.
+
+### 2026-11-12 — PLANNER-A — NOTE — The team is now four sessions (user decision)
+
+**The team:**
+- **PLANNER-A:** plans, dispatches, verifies, triages, and owns the
+  release docs;
+- **the Worker (Worker A):** the sole committer;
+- **REVIEWER-A:** product direction, at milestones;
+- **REVIEWER-B:** code health and blind spots, at milestones.
+
+**Retired:** PLANNER-B and the backup Worker. The "Planner handover" lane
+table says so, and its lane rules (and AGENTS.md's `Planner` rule 4) apply
+again only if a second Planner is ever added. With one Planner and one
+Worker, nobody needs to coordinate lanes. Still re-read the WORKLOG's tail
+before appending, because the Worker writes to it too.
+
+### 2026-11-12 — PLANNER-A — NOTE — `.nosync` is working; a tripwire instead of monitoring
+
+The user checked: `mnemo.nosync` isn't on iCloud.com, and Finder shows
+no sync status tooltip for it. Finder's cloud badge on it is the
+known Tahoe display glitch. **No active monitoring.** Instead there's a
+tripwire in AGENTS.md (after "Never commit"): on a `name 2.ext` file,
+EDEADLK, or files that aren't on disk, an agent stops and logs
+`BLOCKED`. The user re-checks iCloud.com after macOS updates.
+**HANDOFF:** this AGENTS.md paragraph goes in the same commit as the
+`.gitignore` fixture exception (my 2026-11-12 REVIEW + HANDOFF).
+
+### 2026-11-12 — PLANNER-A — REVIEW + DECISION + DISPATCH + HANDOFF — RB-003 triaged; v0.13.0 step 7 (pre-tag fixes), then the tag; v0.13.1 queued
+
+**RB-003, REVIEWER-B's milestone review: a thorough pass.** Nothing is
+held for, and my three checks pass: release artifacts carry no
+`dev-hooks` (proved on the dry run's XCFramework and AAR), `--git` leaks
+nothing, and `action-gh-release` v3 and the mobile-off note are right by
+reading. Fourteen shipped RB items are now VERIFIED. All eight new items
+are ACCEPTED; the triage lines are in `reviewer_notes.md`, and
+RB-003.1/.2's details are only in `SECURITY.local.md`.
+- **RB-001.32 item 3** (`generate_key` returns a `Vec` that crosses the
+  FFI unwiped): **closed as a documented limitation.** UniFFI copies the
+  bytes into a foreign buffer that Rust doesn't free, so Rust can't wipe
+  that copy. The Swift and Kotlin stores zero the buffers they own. Say
+  so in one line in the binding's README (part of step 7).
+
+**DISPATCH: v0.13.0 step 7, pre-tag fixes.** One PR into
+`release-0.13.0` (or two, engine and docs). Neutral commit messages for
+the RB-003.1/.2 parts.
+1. **RB-003.4:** add `exclude = ["tests/", "benches/", "examples/gen_*"]`
+   (adjust to what's actually there) to `mnemo/Cargo.toml`, plus a
+   `mnemo/tests/fixtures/README.md` (synthetic data, throwaway secrets).
+   Check `cargo package --list --locked` and `cargo publish --dry-run
+   --locked`, check that the PyPI sdist no longer carries the fixtures,
+   and report the `.crate` size.
+2. **RB-003.3, recommendation 1:** on a file older than v9, the read-only
+   open's pending-WAL error says to run `mnemo compact <file>`. Add a
+   fixture, a v8 file written by 0.12.3 with a committed but
+   un-checkpointed WAL (ten lines on the v8 generator), and a test that
+   the read commands give that message and `compact` recovers all of it.
+3. **RB-003.1, the pre-tag part** (see `SECURITY.local.md`): the
+   `--open` help text and the engine README; and refuse a request with more
+   than one `Host` header, with a test.
+4. **RB-003.2** (see `SECURITY.local.md`): write the export through a 0600
+   temp file and a rename; fix the help text; add the README sentence; and
+   a test.
+5. **RB-003.8:** the keyed-write wording (CHANGELOG, `mnemo/README.md`,
+   `export.rs`); the Python README lists the error-message prefixes to
+   match on (`FormatTooOld`, `EmbedderMismatch` and the others); the
+   binding README's one line for RB-001.32 item 3. **Set the CHANGELOG
+   date on the tag day.**
+6. **CI green, then a fresh release dry run with mobile on,** because the
+   engine changed and the mobile libraries embed it. Tell the user when
+   each environment waits.
+
+**HANDOFF: commit on `release-0.13.0`, on their own, after step 7:**
+- `README.md`: the install lines at 0.13.0; a new "What's new in v0.13.0:
+  see what your agents remember" (the inspector, with the copy-the-link
+  form first and `--open` for single-user machines; the export and
+  `--git`; v8 read-only and `compact`; the embedder identity; restore
+  points; `MnemoAppleEmbedder`; the upgrade notes); the v0.11 upgrade note
+  saying `--format v8` is gone; the known-limitations v8 line;
+- `index.html`:
+  - the pill and the "current release" line at v0.13.0;
+  - Shipped is v0.4 – v0.13, with the inspector and the export;
+  - Next is shared access, `mnemo onboard` and agent coordination on one
+    machine;
+  - After that has the faster first search, plus teams across people and
+    machines;
+- `AGENTS.md`: the cloud-sync tripwire paragraph (my 2026-11-12 NOTE), if
+  it's not in `1afdfd7` already;
+- **commit message:** `docs: v0.13.0 README and site (inspector, export, v8 read-only)`.
+
+**The tag, in order:**
+1. step 7, then this HANDOFF, then the `chore(plan)` backup;
+2. fast-forward `main` to `release-0.13.0`;
+3. tag `v0.13.0`;
+4. **the user approves `crates-io` and `pypi` only once every CLI, wheel
+   and sdist job is green** (RB-003.5's protection, by hand, for this tag),
+   then `maven-central` and `mnemo-swift`;
+5. DONE with the registries and credentials. Check that the GitHub Release
+   body and its 13+ assets came through `action-gh-release` v3 intact.
+6. After the tag: move RB-003.2 (fixed) from `SECURITY.local.md` into this
+   log. RB-003.1 stays there until SEC-3 ships. Delete the merged branch.
+
+**v0.13.1, queued** (dispatched after the v0.13.0 VERIFIED):
+- **SEC-3:** RB-003.1's remaining recommendations (1, 3, 4);
+- **RB-003.3** recommendation 2: check the key before replay, and refuse
+  old formats before any write;
+- **RB-003.6:** `--key-file` on `export` and `compact`;
+- **RB-003.7:** the inspector's paging and memory;
+- **RB-003.8** item 3: Python exception subclasses;
+- **REL-2** (RB-003.5 and RB-003.8 item 4): the dry run builds the engine
+  artifacts, and the publishes wait for every build.
+
+Then the 12.4 design note.
+
+### 2026-11-12 — PLANNER-A — DECISION — REL-2 gains a single release approval (user, 2026-11-12)
+
+**The problem:** four approval clicks on every tag run, and on every dry
+run too, while the Worker runs releases on its own. **Decided: one human
+click per release, and none for dry runs.** The Worker never approves a
+deployment itself: the click is the human gate before an irreversible
+publish, and an agent approving its own release would make it a
+formality.
+
+**Added to REL-2** (v0.13.1, with RB-003.5's items):
+1. **A `release` environment** with the user as required reviewer,
+   deployable from `v*` tags only. One new job, `approve-release`, uses it.
+   It `needs` every engine and mobile build job, and runs on a tag only.
+2. **Every publish job needs `approve-release`:** `publish-crates`,
+   `publish-pypi`, the Swift and Android publishes, and the release-asset
+   attach. One click after every build is green publishes everything, and
+   a failed build publishes nothing (RB-003.5 recommendation 2, by design).
+3. **The four registry environments** (`crates-io`, `pypi`,
+   `maven-central`, `mnemo-swift`) keep their secrets and their `v*` and
+   `release-*` deployment rules, and Trusted Publishing still names them,
+   but they **drop their required reviewer.** Dry runs then never pause.
+4. **The user's settings change** goes in the Worker's REL-2 DONE as
+   steps: create `release` with the reviewer and the tag rule, then remove
+   the reviewer from the four. Do it only after the REL-2 workflow is
+   merged, so no release is ever unprotected in between.
+5. **RELEASING.md** says it: one approval per release, when every build is
+   green.
+6. **The trade-off, accepted:** a dry run on a `release-*` branch can use
+   the registry secrets without a click. Only the user's account can push
+   those branches, and every real publish still waits for the user.
+
+**Until REL-2 ships,** including the v0.13.0 tag: four clicks, with
+`crates-io` and `pypi` approved only once every build is green.
+
+### 2026-11-12 — WORKER — DONE — v0.13.0 step 7: the pre-tag fixes (RB-003.4, .3, .1 pre-tag, .2, .8, RB-001.32 item 3); the fresh dry run passed
+
+**PR 46 into `release-0.13.0`** (`rel013-7-pretag`, five commits, no WIP,
+so fast-forwarded; head 9c73f8c). GitHub marked it merged; the branch is
+deleted. PR CI: CI 43156546672 and Mobile CI 43156546843, 18/18 green.
+1. **RB-003.4, the published crate (561ee97):**
+   - `exclude` in `mnemo/Cargo.toml`: `tests/`, `benches/*` but
+     `!benches/corpus.rs`, `fuzz/`, `bindings/`, `examples/gen_*`,
+     `examples/device_budget.rs`, `examples/fmt9_proto.rs`.
+     - Six measurement examples include `benches/corpus.rs`, so that one
+       file ships.
+     - The Swift and Kotlin package sources had been in every crate so
+       far, Gradle wrapper jar included; nothing in the crate uses them.
+     - `device_budget` and `fmt9_proto` call `dev-hooks`-only APIs, so
+       they couldn't build from the tarball.
+   - **`.crate`: 1,205,799 → 347,846 bytes** (0.12.3: 609,341).
+   - `cargo package --list --locked` lists `src/`, 11 examples,
+     `benches/corpus.rs`, the README and the manifests.
+     `cargo publish --dry-run --locked` passes.
+   - From the unpacked tarball, the examples and the CLI build, and every
+     test it carries passes (50 lib, 7 CLI, 5 doctests).
+   - **The PyPI sdist follows:** `maturin sdist` gives 420,394 bytes with
+     no `.mnemo` or key file and no `tests/`, `bindings/` or `fuzz/`, and
+     a wheel builds from the unpacked sdist.
+   - `mnemo/tests/fixtures/README.md` lists every fixture, what wrote it
+     and its throwaway secret.
+2. **RB-003.3, recommendation 1 (2a793e5):**
+   - On a pre-v9 file, the read-only open's pending-WAL reason says to
+     run `mnemo compact <file>`, and the message leaves off "open
+     read-write once to fix". The same goes for the FFI's message.
+   - `NeedsWriteOpen` keeps its shape; the generic advice moved into a
+     helper that skips it when the reason names its own fix.
+   - **The fixture** `tests/fixtures/v8/v8_pending_wal.mnemo`, from the
+     published 0.12.3 engine:
+     - the generator gains `pending-wal` mode, and its dependency gains
+       0.12.3's `failpoints` feature, which is inert unless armed. Its
+       lockfile is unchanged;
+     - a child process adds 5 memories, arms the write failpoint and
+       flushes, then exits without destructors;
+     - the generator keeps the smallest failpoint that leaves all 5
+       committed in the WAL and un-checkpointed (write 6).
+   - **The test** (`tests/v8_fixture.rs`): the library's message, the
+     CLI's `about`, `list`, `info`, `verify` and `export --git` all say to
+     compact, and `mnemo compact` gives "15 -> 15" with the 5 WAL memories
+     present.
+3. **RB-003.1's pre-tag part (b1800e8, neutral message):**
+   - the inspector serves a request only with exactly one `Host` header,
+     and returns 400 otherwise. Tested with a foreign header before and
+     after the right one, a repeated header, and none;
+   - the `--open` help text and the engine README lead with copying the
+     printed URL, and say `--open` is for a machine only you use.
+4. **RB-003.2 (6767b7a, neutral message):**
+   - `export -o` writes to a new `create_new` file beside the target
+     (0600 on Unix), syncs it and renames it over the target; on error the
+     temp file is removed;
+   - the help text says so, and the README adds that git keeps no mode
+     beyond the executable bit;
+   - **the test:** exporting over an existing 0644 file leaves a 0600
+     file with the export and no `.tmp` file. I also checked a relative
+     `-o memory.md` by hand.
+5. **RB-003.8 and RB-001.32 item 3 (9c73f8c):**
+   - the keyed-write wording in the CHANGELOG, `mnemo/README.md` and
+     `export.rs`;
+   - the Python README's "Errors" table of message prefixes, with an
+     example;
+   - the UniFFI README: key bytes from `generate_key` and
+     `import_with_passphrase` cross the FFI as a copy Rust can't wipe.
+
+**Locally:**
+- `cargo test --features failpoints --no-fail-fast`: 367 passed.
+- Clippy clean in all three runs; fmt clean.
+- `cargo test -p mnemo-uniffi`: 21 passed, 1 ignored.
+- The Rust 1.75 build passes.
+- XCFramework rebuilt; `swift test` passed 40 + 10.
+
+**The fresh dry run: run 43157930959 on 9c73f8c, `mobile=true`,
+success.** The user approved `maven-central` and `mnemo-swift`.
+- `testTheAppleEmbedderProductLinks` passed.
+- Central deployment 7029fc7d-6cd1-4a37-878b-91327caf15fc came back
+  `VALIDATED` and was dropped.
+- `mnemo-swift` pushed and deleted `dry-run-0.13.0`.
+- The published-package check built 0.12.3.
+
+**The HANDOFF, committed on its own:** d070702 `docs: v0.13.0 README and
+site (inspector, export, v8 read-only)`, holding `README.md`, `index.html`
+and the AGENTS.md cloud-sync tripwire paragraph (it wasn't in 1afdfd7).
+**The CHANGELOG date** is 2026-11-12 (870ac69). That's the UTC tag day, as
+0.12.3's heading was.
+
+**Two notes on the root README, for PLANNER-A (not edited; it's your
+file):**
+- RB-003.6's triage said the v0.13.0 README points raw-key users at
+  `compact_file_with_key` until `--key-file` reaches `compact`. The new
+  section doesn't.
+- Its inspector example labels `--key-file app.key` "e.g. a phone export".
+  A phone's passphrase export opens with its passphrase; `--key-file` is
+  for a raw-key file (what `create_with_key` writes).
