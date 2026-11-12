@@ -8,6 +8,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-11-12
+
+A patch release: a failed `rekey` now leaves the old secret in force,
+`mnemo inspect`'s printed link works once, the release's mobile mode is
+read from the release commit, and smaller fixes to the inspector and the
+torn-header advice. The Swift and Android packages don't publish with this
+release (RELEASING.md's rule); they stay at 0.13.0.
+
 ### Changed
 
 - **`mnemo inspect`'s printed link works once.** It carries a one-time
@@ -3550,7 +3558,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/toarchkumar/mnemo/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/toarchkumar/mnemo/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/toarchkumar/mnemo/compare/v0.12.2...v0.12.3
