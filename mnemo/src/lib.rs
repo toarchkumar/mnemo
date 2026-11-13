@@ -100,9 +100,9 @@ pub use shared::{CancelToken, SharedOptions};
 pub use store::BudgetReport;
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
-    RecallResult, SnapshotInfo, Stats, StatsSummary, VerifyReport, DEFAULT_KEYWORD_WEIGHT,
-    DEFAULT_TURN_COMPRESS_AFTER_SECS, DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES,
-    INDEX_PERSIST_EVERY_COMMITS, V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
+    RecallResult, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,
+    DEFAULT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS, DEFAULT_VECTOR_CACHE_BUDGET,
+    INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS, V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };
 pub use text::KeywordIndex;
 pub use transcript::{read_transcript, TranscriptFormat};
@@ -261,6 +261,29 @@ pub mod __failpoints {
     /// invariant the property test asserts.
     pub fn set_writes_until_fail(n: i64) {
         crate::pager::failpoints::set_writes_until_fail(n)
+    }
+
+    /// Like [`set_writes_until_fail`], but `count` writes in a row fail.
+    pub fn set_writes_until_fail_n(n: i64, count: u32) {
+        crate::pager::failpoints::set_writes_until_fail_n(n, count)
+    }
+
+    thread_local! {
+        static AFTER_SHARED_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Run `f` once, inside this thread's next shared-mode write, after its
+    /// commit and before the identity check that follows (12.4 protocol
+    /// step 8). Lets a test rename a file over the path at that moment.
+    pub fn after_next_shared_commit(f: impl FnOnce() + 'static) {
+        AFTER_SHARED_COMMIT.with(|c| *c.borrow_mut() = Some(Box::new(f)));
+    }
+
+    pub(crate) fn run_after_shared_commit() {
+        if let Some(f) = AFTER_SHARED_COMMIT.with(|c| c.borrow_mut().take()) {
+            f();
+        }
     }
 
     thread_local! {

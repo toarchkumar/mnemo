@@ -80,6 +80,7 @@ mod maintenance;
 mod open;
 mod recall;
 mod records;
+mod shared;
 mod snapshots;
 mod threads;
 use crud::*;
@@ -88,6 +89,7 @@ use load::*;
 pub(crate) use load::{is_file_at, is_lock_conflict};
 pub(crate) use records::plain_record;
 use records::*;
+pub use shared::SharedMnemo;
 
 /// Default initial size of the write-ahead log region, in pages (64 KiB).
 /// The region grows automatically when a transaction's control plane outgrows
@@ -1003,6 +1005,14 @@ pub struct Mnemo {
     /// REKEY-1 (RB-004.2): what the last successful rekey couldn't scrub
     /// once the new secret was in force (see [`Mnemo::rekey_cleanup_error`]).
     rekey_cleanup: Option<String>,
+    /// 12.4 shared mode: access statistics from reads made under the
+    /// shared lock (recall hits, cache hits), applied with this handle's
+    /// next commit. `None` on every other handle.
+    access_delta: Option<shared::AccessDelta>,
+    /// 12.4 shared mode: the transaction id of the commit `flush` had
+    /// reached the WAL with, when it fails after that point. A shared write
+    /// uses it to tell a lost write from one that may be in the file.
+    commit_point: Option<u64>,
     /// FMT-9e: thread turns are compressed once older than this many
     /// seconds (`0`: at write). Per handle, not persisted.
     turn_compress_after: i64,

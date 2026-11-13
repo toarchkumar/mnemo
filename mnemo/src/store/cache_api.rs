@@ -169,6 +169,10 @@ impl Mnemo {
             self.cache_dir[pos].accessed_at = now;
             self.cache_dir[pos].access_count = self.cache_dir[pos].access_count.saturating_add(1);
             self.dirty_cache = true;
+        } else if let Some(delta) = self.access_delta.as_mut() {
+            // 12.4: a shared read keeps the hit for the next commit.
+            let e = &self.cache_dir[pos];
+            delta.cache_hit(&e.namespace, e.key_hash, now);
         }
         self.cache_counters.hits += 1;
         // On a mutating handle: access_count reflects the just-bumped
@@ -563,6 +567,10 @@ impl Mnemo {
             self.cache_dir[pos].accessed_at = now;
             self.cache_dir[pos].access_count = self.cache_dir[pos].access_count.saturating_add(1);
             self.dirty_cache = true;
+        } else if let Some(delta) = self.access_delta.as_mut() {
+            // 12.4: a shared read keeps the hit for the next commit.
+            let e = &self.cache_dir[pos];
+            delta.cache_hit(&e.namespace, e.key_hash, now);
         }
         self.cache_counters.hits += 1;
         let access_count = self.cache_dir[pos].access_count;

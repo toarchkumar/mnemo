@@ -526,7 +526,9 @@ impl Mnemo {
         // Access-tracking bumps `accessed_at` / `access_count` in the
         // catalog, which is a mutation. On a read-only handle the caller
         // must pass `track_access(false)` (via CLI `--no-track`).
-        if self.read_only && req.track_access {
+        // 12.4: a shared read (read-only for the call, with a delta) keeps
+        // the bumps for the handle's next commit instead.
+        if self.read_only && req.track_access && self.access_delta.is_none() {
             return Err(MnemoError::ReadOnly);
         }
         // Phase 12.1 **fix** (lane A v0.8.0 REVIEW): do NOT call
@@ -611,7 +613,13 @@ impl Mnemo {
         // turning a top-K recall into K full record rewrites. Now the
         // catalog is the source of truth for these two fields and the
         // record body stays untouched until the next real edit.
-        if req.track_access {
+        if req.track_access && self.read_only {
+            if let Some(delta) = self.access_delta.as_mut() {
+                for r in &scored {
+                    delta.memory_hit(r.memory.id.0, now);
+                }
+            }
+        } else if req.track_access {
             for r in &mut scored {
                 if let Some(idx) = self.index.get(r.memory.id.0, &self.catalog) {
                     self.touch(idx);

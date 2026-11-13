@@ -24,7 +24,36 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - a note from a long operation, so a caller that times out learns what
     holds the file;
   - refusal of network filesystems and, on macOS, synced folders, unless
-    `allow_network_fs` is set. On Linux the check is an allow-list.
+    `allow_network_fs` is set. On Linux the check is an allow-list (ext4,
+    xfs, btrfs, tmpfs, f2fs, overlayfs, zfs); shared mode on overlayfs
+    assumes Linux 4.19 or later. On Windows it refuses UNC paths; a drive
+    letter mapped to a network share may not be detected.
+- **`Mnemo::open_shared` and `open_shared_with_key`** (v0.14.0 step 2b),
+  returning a `SharedMnemo`: several processes, sessions and tools on one
+  brain. Rust API only; the Python, CLI and MCP surfaces come later.
+  - Each call is a window on the file: `SharedMnemo::read` runs a closure
+    under the shared lock on a read-only handle, and `SharedMnemo::write`
+    runs one under the exclusive lock and commits before it lets go. No
+    lock and no descriptor is held between calls.
+  - A call catches up with other processes' commits first: it compares the
+    header's seal (and, on Unix, the file's identity) with what it holds,
+    and reloads if they differ. The reload keeps the data key when the seal
+    verifies (no KDF), clears the page cache, and keeps the page cache's
+    size, the vector cache budget and the embedder. After a compaction (a
+    new data key) it reopens with the secret the handle keeps; a pending
+    WAL or a torn page 0 is healed under the exclusive lock first.
+  - A write that fails before its commit point stored nothing, and the
+    handle reloads at its next call. One that fails after it is finished
+    by the handle (`Ok`), or returns `MnemoError::MaybeStored`. A file
+    renamed away during the commit returns
+    `MnemoError::ReplacedDuringWrite`.
+  - Each write window takes a fresh generation lease, so no two writers
+    seal pages under the same generation.
+  - Recall's and cache hits' access statistics from read windows are
+    applied with the handle's next commit, and dropped at close.
+  - Settings that act on the whole file (snapshot retention, cache budgets,
+    the cache flush policy, turn compression) are refused in shared mode
+    with `MnemoError::Unsupported`.
 - **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
   mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
   the compiler's version. The released binaries and wheels are built with
@@ -33,11 +62,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **`MnemoError` is `#[non_exhaustive]`, and so is its `Locked` variant**:
+  a `match` on it needs a catch-all arm, and a `Locked` pattern needs `..`.
+  Later variants and fields then don't break callers.
 - **`MnemoError::Locked` has a `holder` field** (`Option<String>`), naming
-  what holds the file when it left a note. A pattern that lists only `path`
-  needs `..`. Two new variants: `MnemoError::Cancelled` and
-  `MnemoError::Unsupported`. The Swift and Kotlin bindings report both as
-  `Io`, with the engine's message.
+  what holds the file when it left a note. New variants:
+  `MnemoError::Cancelled`, `Unsupported`, `MaybeStored` and
+  `ReplacedDuringWrite`. The Swift and Kotlin bindings report them as `Io`,
+  with the engine's message.
 
 ### Fixed
 

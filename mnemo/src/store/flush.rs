@@ -165,6 +165,7 @@ impl Mnemo {
         // fsync count is a viable write-latency win before we touch
         // the write path's durability model.
         let fsync_before = crate::fsync_count();
+        self.commit_point = None;
         // PERF-1 step 3: while the index is unloaded, records written since
         // its run pile up for the next load to re-assign. Once there are
         // INDEX_PERSIST_EVERY_CHANGES of them, load it now so this flush
@@ -568,6 +569,8 @@ impl Mnemo {
             self.direct_writes = false;
         }
         let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
+        // 12.4: from here a failure may leave the transaction committed.
+        self.commit_point = Some(txn_id);
         wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
 
         // 5. Checkpoint — fold the WAL into the home pages.
