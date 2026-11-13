@@ -3,7 +3,11 @@
 use thiserror::Error;
 
 /// All errors the Mnemo engine can produce.
+///
+/// `#[non_exhaustive]` (v0.14): new variants can arrive in a minor release,
+/// so a `match` needs a catch-all arm.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum MnemoError {
     /// An underlying I/O failure.
     #[error("io error: {0}")]
@@ -83,12 +87,32 @@ pub enum MnemoError {
         "file already locked by another handle: {path}{}",
         holder_suffix(holder)
     )]
+    #[non_exhaustive]
     Locked {
         /// The path whose lock was requested and refused.
         path: std::path::PathBuf,
         /// What holds the file, when the holder left a note: a shared-mode
         /// long operation (compaction, an index build, an import) writes one.
         holder: Option<String>,
+    },
+
+    /// A shared-mode write failed after its commit point and the handle
+    /// couldn't finish the commit itself, so the write **may have been
+    /// stored**: the next process to open the file finishes it. Don't retry
+    /// the same write blindly; check whether it's there.
+    #[error("the write may have been stored: {0}")]
+    MaybeStored(String),
+
+    /// A shared-mode write committed to a file that something renamed away
+    /// from the handle's path during the commit (an older `mnemo compact`,
+    /// say). The write isn't in the file now at the path.
+    #[error(
+        "the file at {path} was replaced during the write; the write isn't in the file \
+         now at that path"
+    )]
+    ReplacedDuringWrite {
+        /// The path that now names a different file.
+        path: std::path::PathBuf,
     },
 
     /// A shared-mode call was cancelled from another thread (an iOS

@@ -346,6 +346,8 @@ impl Mnemo {
             superseded: None,
             layers: None,
             rekey_cleanup: None,
+            access_delta: None,
+            commit_point: None,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free: FreeList::default(),
             pending_free: Vec::new(),
@@ -405,8 +407,20 @@ impl Mnemo {
         allow_old: bool,
     ) -> Result<Mnemo> {
         let path: PathBuf = path.into();
-        let mut file = open_with_lock(&path, /*write=*/ true, Create::No)?;
+        let file = open_with_lock(&path, /*write=*/ true, Create::No)?;
+        Self::load_locked(path, file, secret, allow_old)
+    }
 
+    /// The read-write open's work on a file its caller already holds
+    /// exclusively: heal a torn header, replay a pending WAL, derive the key
+    /// from `secret`, and build the handle. A shared-mode handle (12.4)
+    /// reloads through it with the call's locked file.
+    pub(super) fn load_locked(
+        path: PathBuf,
+        mut file: LockedFile,
+        secret: &[u8],
+        allow_old: bool,
+    ) -> Result<Mnemo> {
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;
         file.read_exact(&mut hbuf)?;
@@ -503,6 +517,21 @@ impl Mnemo {
             header = Header::from_page(&hbuf)?;
         }
 
+        Self::from_locked(path, file, header, dek, kdf, allow_old)
+    }
+
+    /// Build a read-write handle from a locked file whose page 0 is
+    /// `header`, with the data key already unwrapped. The shared-mode reload
+    /// (12.4) comes here directly when the seal verifies under the key it
+    /// holds, so it pays no KDF.
+    pub(super) fn from_locked(
+        path: PathBuf,
+        file: LockedFile,
+        mut header: Header,
+        dek: zeroize::Zeroizing<[u8; crypto::KEY_LEN]>,
+        kdf: KdfParams,
+        allow_old: bool,
+    ) -> Result<Mnemo> {
         // Validate the v7 header seal now that we have the DEK. Returns
         // `MnemoError::HeaderTampered` if any of the sealed mutable fields
         // were rewritten after the last legitimate flush. No-op for v6 and
@@ -726,6 +755,8 @@ impl Mnemo {
             superseded: None,
             layers: None,
             rekey_cleanup: None,
+            access_delta: None,
+            commit_point: None,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),
@@ -991,6 +1022,8 @@ impl Mnemo {
             superseded: None,
             layers: None,
             rekey_cleanup: None,
+            access_delta: None,
+            commit_point: None,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),

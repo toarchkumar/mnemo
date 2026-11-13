@@ -13,7 +13,9 @@ use crate::error::{MnemoError, Result};
 /// Linux and Android filesystems shared mode runs on: an allow-list of
 /// `statfs` magic numbers, so NFS, SMB, FUSE, virtiofs and 9p (a host and
 /// a container, or WSL, sharing a file) are refused. overlayfs is allowed:
-/// it's how a container sees its own disk, and its locks are local.
+/// it's how a container sees its own disk, and its locks are local, from
+/// Linux 4.19 on (before that, a lock taken before a file's copy-up could
+/// land on the lower file). zfs's locks are local.
 #[cfg_attr(not(any(target_os = "linux", target_os = "android")), allow(dead_code))]
 pub(crate) const LINUX_ALLOWED: &[(u32, &str)] = &[
     (0xEF53, "ext2/3/4"),
@@ -145,9 +147,9 @@ fn filesystem_problem(path: &Path) -> Result<Option<String>> {
 }
 
 /// Windows: a UNC path, which is what a network share or a mapped network
-/// drive resolves to. (`GetDriveType` would also see a drive letter mapped
-/// to a share before it resolves; it needs `unsafe`, which this crate
-/// forbids, and canonicalizing the path covers the common case.)
+/// drive normally canonicalizes to. A drive letter mapped to a network
+/// share may not be detected: `GetDriveType` would see it, but it needs
+/// `unsafe`, which this crate forbids.
 #[cfg(windows)]
 fn filesystem_problem(path: &Path) -> Result<Option<String>> {
     let s = path.as_os_str().to_string_lossy();

@@ -29,6 +29,9 @@ pub(crate) mod failpoints {
         // the first-touch branch and satisfies clippy's
         // `missing_const_for_thread_local` on stable.
         static WRITES_UNTIL_FAIL: Cell<i64> = const { Cell::new(-1) };
+        // How many writes in a row fail once the counter fires (12.4's
+        // MaybeStored test fails the checkpoint and then the recovery).
+        static FAILS_LEFT: Cell<u32> = const { Cell::new(1) };
     }
 
     /// Arm the pager (and the WAL commit writer) to fail its Nth
@@ -37,6 +40,14 @@ pub(crate) mod failpoints {
     /// counter disarms itself the moment it fires.
     pub fn set_writes_until_fail(n: i64) {
         WRITES_UNTIL_FAIL.with(|c| c.set(n));
+        FAILS_LEFT.with(|c| c.set(1));
+    }
+
+    /// Like [`set_writes_until_fail`], but `count` writes in a row fail
+    /// once the counter fires, then it disarms.
+    pub fn set_writes_until_fail_n(n: i64, count: u32) {
+        WRITES_UNTIL_FAIL.with(|c| c.set(n));
+        FAILS_LEFT.with(|c| c.set(count.max(1)));
     }
 
     /// Called by every file-writing code path in the pager and the
@@ -46,7 +57,12 @@ pub(crate) mod failpoints {
         WRITES_UNTIL_FAIL.with(|c| {
             let v = c.get();
             if v == 0 {
-                c.set(-1);
+                let left = FAILS_LEFT.with(|f| f.get());
+                if left > 1 {
+                    FAILS_LEFT.with(|f| f.set(left - 1));
+                } else {
+                    c.set(-1);
+                }
                 Err(std::io::Error::other(
                     "injected crash (Phase 1.3 failpoint)",
                 ))
@@ -139,9 +155,16 @@ pub const DEFAULT_CACHE_PAGES: usize = 1024;
 /// little; `Mnemo::set_cache_capacity` still raises it.
 pub const V9_DEFAULT_CACHE_PAGES: usize = 256;
 
+/// What a shared-mode handle's pager reports if anything reaches the file
+/// between calls (it holds none then).
+const DETACHED: &str = "the brain's file isn't open outside a shared-mode call";
+
 /// Encrypted page reader/writer with a bounded write-back cache.
 pub struct Pager {
-    file: LockedFile,
+    /// The brain's file. A shared-mode handle (12.4) holds it only inside a
+    /// call: [`Pager::attach_file`] at the start, [`Pager::detach_file`] at
+    /// the end, so no descriptor stays open between calls.
+    file: Option<LockedFile>,
     dek: Zeroizing<[u8; KEY_LEN]>,
     /// Monotonic write counter persisted in the header (lease / replay
     /// machinery; see `Mnemo::prepare_for_flush`). **No longer used in
@@ -187,7 +210,7 @@ impl Pager {
         version: u16,
     ) -> Self {
         Self {
-            file,
+            file: Some(file),
             dek,
             write_counter,
             // Fresh 64-bit random per Pager construction = per writable
@@ -268,14 +291,37 @@ impl Pager {
     }
 
     /// The underlying file (its identity is checked before each commit).
+    ///
+    /// Panics outside a shared-mode call, where the pager holds no file:
+    /// nothing reaches the file there.
     pub fn file(&self) -> &File {
-        &self.file
+        self.file.as_deref().expect(DETACHED)
     }
 
     /// Mutable access to the underlying file. Used by the WAL, which writes
-    /// its log frames directly rather than through the page cache.
+    /// its log frames directly rather than through the page cache. Panics
+    /// like [`Pager::file`].
     pub fn file_mut(&mut self) -> &mut File {
-        &mut self.file
+        self.file.as_deref_mut().expect(DETACHED)
+    }
+
+    /// The file for this pager's own I/O; an error, not a panic, if a
+    /// shared-mode handle reaches it between calls.
+    fn f(&mut self) -> std::io::Result<&mut File> {
+        self.file
+            .as_deref_mut()
+            .ok_or_else(|| std::io::Error::other(DETACHED))
+    }
+
+    /// 12.4: give a shared-mode handle's pager the call's locked file.
+    pub(crate) fn attach_file(&mut self, file: LockedFile) {
+        self.file = Some(file);
+    }
+
+    /// 12.4: take the call's locked file back at the end of the call. The
+    /// caller drops it, which unlocks and closes it.
+    pub(crate) fn detach_file(&mut self) -> Option<LockedFile> {
+        self.file.take()
     }
 
     /// Resize the page cache, evicting clean pages if it shrank.
@@ -292,9 +338,9 @@ impl Pager {
     /// Used only for the header (page 0).
     pub fn write_raw(&mut self, page_no: u64, data: &[u8; PAGE_SIZE]) -> Result<()> {
         __failpoint_check()?;
-        self.file
+        self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-        self.file.write_all(data)?;
+        self.f()?.write_all(data)?;
         Ok(())
     }
 
@@ -305,9 +351,9 @@ impl Pager {
     #[allow(dead_code)]
     pub fn read_raw(&mut self, page_no: u64) -> Result<[u8; PAGE_SIZE]> {
         let mut buf = [0u8; PAGE_SIZE];
-        self.file
+        self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-        self.file.read_exact(&mut buf)?;
+        self.f()?.read_exact(&mut buf)?;
         Ok(buf)
     }
 
@@ -352,15 +398,15 @@ impl Pager {
     /// or the plaintext header) to their home locations.
     pub fn write_sealed(&mut self, page_no: u64, bytes: &[u8; PAGE_SIZE]) -> Result<()> {
         __failpoint_check()?;
-        self.file
+        self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-        self.file.write_all(bytes)?;
+        self.f()?.write_all(bytes)?;
         Ok(())
     }
 
     /// Flush OS buffers to stable storage.
     pub fn sync(&mut self) -> Result<()> {
-        self.file.sync_all()?;
+        self.f()?.sync_all()?;
         crate::bump_fsync();
         Ok(())
     }
@@ -372,9 +418,9 @@ impl Pager {
             return Ok(p);
         }
         let mut disk = [0u8; PAGE_SIZE];
-        self.file
+        self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-        self.file.read_exact(&mut disk)?;
+        self.f()?.read_exact(&mut disk)?;
 
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&disk[0..NONCE_LEN]);
@@ -396,9 +442,9 @@ impl Pager {
             return Ok(p.to_vec());
         }
         let mut disk = [0u8; PAGE_SIZE];
-        self.file
+        self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-        self.file.read_exact(&mut disk)?;
+        self.f()?.read_exact(&mut disk)?;
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&disk[0..NONCE_LEN]);
         let aad = self.page_aad(page_no, gen);
@@ -458,11 +504,11 @@ impl Pager {
             debug_assert_eq!(disk.len(), PAGE_SIZE);
 
             __failpoint_check()?;
-            self.file
+            self.f()?
                 .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
-            self.file.write_all(&disk)?;
+            self.f()?.write_all(&disk)?;
         }
-        self.file.sync_all()?;
+        self.f()?.sync_all()?;
         crate::bump_fsync();
         // The pages just written are now clean and so evictable; settle the
         // cache back within its bound.

@@ -104,7 +104,10 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             // 12.4 step 2a. The mobile shared mode arrives with mobile's
             // opt-in; until then these come only from the Rust API. `Io`
             // keeps the engine's message without a new binding variant.
-            other @ (E::Cancelled | E::Unsupported(_)) => MnemoError::Io {
+            other @ (E::Cancelled
+            | E::Unsupported(_)
+            | E::MaybeStored(_)
+            | E::ReplacedDuringWrite { .. }) => MnemoError::Io {
                 message: other.to_string(),
             },
             // v0.14.0 step 1: the file at the handle's path was replaced, and

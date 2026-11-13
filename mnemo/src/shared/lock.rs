@@ -31,6 +31,12 @@ pub struct SharedOptions {
     pub deadline: Duration,
     /// Use shared mode on a network or synced filesystem anyway, where the
     /// lock may not reach every process that opens the file.
+    ///
+    /// The check refuses network filesystems (on Linux, anything but ext4,
+    /// xfs, btrfs, tmpfs, f2fs, overlayfs and zfs; overlayfs assumes Linux
+    /// 4.19 or later) and, on macOS, iCloud Drive and File Provider folders.
+    /// On Windows it refuses UNC paths; a drive letter mapped to a network
+    /// share may not be detected.
     pub allow_network_fs: bool,
     /// Cancels the handle's waiting calls from another thread.
     pub cancel: Option<CancelToken>,
@@ -131,6 +137,7 @@ impl BrainLocks {
     /// whether or not it got in.
     pub(crate) fn acquire(&self, kind: LockKind, opts: &SharedOptions) -> Result<Held> {
         let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+        let mut replaced_once = false;
         loop {
             call.check()?;
             let intent = match self.try_intent(kind)? {
@@ -152,13 +159,19 @@ impl BrainLocks {
                         });
                     }
                     // A compaction renamed a new file over the path between
-                    // our open and our lock: open the new one, at once,
-                    // within the same deadline.
+                    // our open and our lock: open the new one, at once the
+                    // first time, then with the backoff, so a path that
+                    // keeps failing the check can't spin a core until the
+                    // deadline.
                     Main::Replaced => {
                         call.check()?;
                         if call.past_deadline() {
                             return Err(self.locked());
                         }
+                        if replaced_once {
+                            self.wait(&mut call)?;
+                        }
+                        replaced_once = true;
                         continue;
                     }
                     Main::Busy => {}
@@ -268,6 +281,13 @@ impl Held {
     /// The locked file.
     pub(crate) fn file(&self) -> &File {
         self.file.as_ref().expect("held until dropped")
+    }
+
+    /// Hand the locked file to the caller (a shared handle's pager), which
+    /// then owns the lock. Drop this `Held` first, so its `lock-info` note
+    /// goes before the caller's unlock.
+    pub(crate) fn take_file(&mut self) -> LockedFile {
+        self.file.take().expect("taken once")
     }
 
     /// Say what this exclusive call is doing, for callers that time out
