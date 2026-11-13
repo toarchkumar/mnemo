@@ -21167,3 +21167,244 @@ found lands before v0.14.0's READY. The user decides.
 - Rust API only; surfaces are step 4.
 - Log DONE when the PR is green, with the PR number and the runs, and stop
   before merging.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION — step 2b (PR 66): accepted once two fixes land; then REVIEWER-B on 2a and 2b
+
+**State checked on GitHub:** PR 65 (2a) merged 05:55 UTC; PR 66 open from
+`rel0140-2b-open-shared` at 86a49a2 (two commits, 15 files, +1,333/−44).
+18 of 19 checks green; `swift (macos-latest, iOS simulator)` still running
+when I looked. **No Worker DONE entry for 2b is in PLAN.md** (the session
+moved to tmux); the PR body has the details. Log one with the next push.
+
+**Read `store/shared.rs` against the note: the design is right.**
+- The stamp (seal, plus identity on Unix), the three outcomes, the reload
+  without the KDF when the seal verifies and with the kept secret when it
+  doesn't, the exclusive lock for a pending WAL or a torn page 0, and the
+  reload after a replay: as signed off.
+- A write window clears the stamp first, takes a fresh lease, applies the
+  delta, commits, checks the path again, and only then restamps.
+  `finish_failed_commit` returns `Ok` only when the replayed header shows
+  the transaction. The delta goes back on a failure.
+- My 2a follow-ups (`#[non_exhaustive]`, the backoff after a first
+  replaced-file retry, the two docs lines) are in.
+- The 14 tests cover the dispatch's list, and two were checked against
+  broken code.
+
+**Fix before merging (small):**
+1. **A panic inside a closure keeps the file locked.** `window` detaches
+   the pager's file (which holds the main lock) only after `run` returns. If
+   the closure panics and the caller catches it (UniFFI catches panics at
+   the boundary; so do thread pools and `catch_unwind`), the handle lives on
+   holding the lock, shared or exclusive, and every other process gets
+   `Locked` until it drops. Detach in a drop guard so an unwind unlocks too.
+   Add a test: a write window whose closure panics, caught with
+   `catch_unwind`; then a second handle writes at once, and the first
+   handle's next call reloads (its stamp was cleared).
+2. **The settings check compares the cache budgets' count only.** Changing
+   a budget's value isn't caught. Compare the budgets themselves.
+
+**Note, no change needed now:** in a write window, a closure that calls
+`flush()` itself and then changes a setting gets "nothing was changed",
+although its commit is in. Leave it: step 4's surfaces never do both in one
+window. Say so in the `write` doc comment.
+
+**Then:** when the fixes are pushed and all 19 checks are green, merge PR 66
+normally. **REVIEWER-B reviews 2a and 2b together** after the merge (the
+user calls it), before step 3 starts, focused on `src/shared/` and
+`store/shared.rs` against the 12.4 note and RB-006.11. Step 3 waits for
+that review.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 2b: `Mnemo::open_shared` (PR 66, green, not merged: for review)
+
+**Before it:**
+- PR 65 fast-forwarded into `release-0.14.0` (70096be..332df27, five
+  commits, no WIP), with its branch deleted;
+- push runs on 332df27: CI 43375129978 and Mobile CI 43375130056, green;
+- the coordination sync 9695a79 `chore(plan): sync coordination files`;
+- 2b branched from it.
+
+**PR 66 into `release-0.14.0`** (`rel0140-2b-open-shared`, head 86a49a2,
+two commits, no WIP):
+- **0a25b06 `refactor(store)`, the groundwork:**
+  - `MnemoError` and its `Locked` variant are `#[non_exhaustive]`, with new
+    `MaybeStored` and `ReplacedDuringWrite` variants (UniFFI: `Io` with the
+    message);
+  - the pager's file is an `Option` (`attach_file`/`detach_file` per
+    shared call; its I/O errors if it's reached while detached);
+  - the read-write open is split into `open_with_lock` → `load_locked`
+    (heal, replay, KDF) → `from_locked` (build from a header and a data
+    key). There's no behaviour change: 403 of 403 pass before the new
+    tests;
+  - `acquire` retries a replaced file at once the first time, then with
+    the backoff;
+  - `Held::take_file`;
+  - the two docs lines, in the note, the `fscheck` comments and
+    `SharedOptions`: overlayfs assumes Linux 4.19 or later; a drive letter
+    mapped to a network share on Windows may not be detected.
+- **86a49a2 `feat(store)`, the handle** (`src/store/shared.rs`):
+  `open_shared` and `open_shared_with_key` return a `SharedMnemo`, used
+  through `read(|db| ..)` (shared lock, read-only handle) and
+  `write(|db| ..)` (exclusive lock, commits before the unlock).
+  - **The stamp:** the header's seal (nonce and tag), with `dev`/`ino` as
+    the quick test on Unix (Windows: the seal alone, since std has no
+    stable file index). Three outcomes:
+    - equal: no reload;
+    - the seal verifies under the held key: `from_locked` with that key,
+      no KDF;
+    - it doesn't: `load_locked` with the kept secret, which returns
+      `WrongPassphrase` or `HeaderTampered`.
+    - A pending WAL or a torn page 0 under the shared lock takes the
+      exclusive lock, and `load_locked` heals it and reloads.
+  - **The reload** builds a new pager, so the page cache is cleared. It
+    carries the page cache's capacity, the vector cache budget and the
+    embedder.
+  - **A write window:**
+    - the stamp is cleared first;
+    - a fresh generation lease is committed (`gen_leased = false`, then
+      `ensure_gen_lease`);
+    - the delta is applied, and the closure runs;
+    - a refused setting is checked for;
+    - `flush`, which records `commit_point` just before `wal::commit`.
+    - On a failure without a `commit_point`: the error, and the stamp stays
+      cleared.
+    - With one: the handle replays the WAL itself (each frame write goes
+      through the failpoint), then runs `load_locked`. It returns `Ok` if
+      the transaction id is in the file, the error if it isn't, and
+      `MaybeStored` if replaying or reading back fails.
+    - An error from the closure after an inner commit point is
+      `MaybeStored`.
+    - Then the after-commit identity check (`ReplacedDuringWrite`).
+  - **The delta:** recall with tracking and cache hits in read windows go
+    to an `AccessDelta`, applied in the next write window and dropped at
+    close.
+  - **Refused settings:** a change to snapshot retention (and its explicit
+    cap), turn compression, cache budgets or the flush policy is
+    `Unsupported`, and nothing is written.
+  - **Test hooks:** `__failpoints::set_writes_until_fail_n` (several writes
+    in a row) and `after_next_shared_commit`, plus `__reloads`,
+    `__page_cache` and `__state` on `SharedMnemo`. All are doc-hidden.
+- **The tests** (`tests/shared_handle.rs`, 14, failpoints builds):
+  - the seal's three outcomes: no reload when nothing changed; another
+    handle's and a plain writer's commits seen; a compaction followed with
+    the kept secret; a plain rekey kept; a compaction under a new secret
+    gives `WrongPassphrase`;
+  - a reload keeping the page cache's capacity and the embedder
+    (`remember_text` works after it), with a new page cache;
+  - every write n of a commit failed in a handle that lives on, with the
+    handle's memories equal to a fresh open's after every outcome, and a
+    reload after each error;
+  - after the commit point, one failure finished (`Ok`, stored) and two
+    failures giving `MaybeStored` (stored once anything opens the file);
+  - a plain writer dying after its commit point, then the current shared
+    handle replaying and reloading;
+  - generations strictly increasing across interleaved windows of two
+    handles, and after a failed window;
+  - the identity check after the commit;
+  - the statistics delta (recall and a cache hit: 0 on disk after the
+    reads, 1 after the next write, still 1 after a read then close);
+  - an explicit setting refused in a write and in a read;
+  - a read window can't write;
+  - existing v9 files only (missing, or a wrong passphrase);
+  - four handles in four threads (60 writes, all present).
+  - **Checked against broken code:** without the stamp clearing the
+    failed-commit test fails; with the commit finishing disabled the
+    after-commit-point test fails ("n=5 count=1 … but it was stored").
+  - **Can't fail today:** the generation test. With the full reload, any
+    foreign commit makes a handle start over with `gen_leased = false`, so
+    a generation can't repeat even without the per-window lease. It
+    guards step 6's incremental catch-up.
+  - **No direct test:** the replaced-file backoff.
+- **CHANGELOG `[Unreleased]`:** Added (`open_shared`, the filesystem lines)
+  and Changed (`#[non_exhaustive]`, the new variants).
+- **Local:**
+  - `cargo test --features failpoints` (418 pass) and the doc tests;
+  - on Rust 1.75 (macOS): `shared_handle`, `shared_lock` and
+    `replaced_file`;
+  - clippy `-D warnings` on all targets;
+  - UniFFI (23);
+  - `cargo deny`;
+  - the Python suite.
+- **The gates on 86a49a2** (PR runs; push runs come at the merge):
+  - CI 43378286430, green on attempt 1, all 13 jobs, including
+    `windows-msrv (rust 1.75)`; `shared_handle` ran and passed on the
+    ubuntu, macOS and Windows `rust` jobs;
+  - Mobile CI 43378286452, green on attempt 1.
+- **Stopped** before merging, for review. The Planner's recommendation to
+  the user was one REVIEWER-B review of 2a and 2b together now, before step
+  3.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION — step 2b's fixes accepted (2d374a3); merge PR 66 when green; REVIEWER-B reviews 2a and 2b
+
+- **2d374a3 read:** `window` now runs the closure under `catch_unwind`,
+  drops the `lock-info` note, detaches the pager's file (the unlock), then
+  resumes the panic. Two new tests (a panicking write window and a
+  panicking read window, each caught, then another handle gets in within
+  500 ms and the first reloads). The settings check compares the budgets
+  by namespace, entries and bytes, with a test. The `write` doc comment
+  carries the flush-then-setting note. All as asked. **ACCEPTED.**
+- **Checks on 2d374a3 when I looked:** 17 of 19 green, none failed; `rust
+  (windows-latest)` and the iOS simulator job still running.
+- **The Worker's DONE** above describes 86a49a2; this entry records the
+  fix commit. In the merge's DONE, list the push runs.
+- **Noted from the DONE, no action:** the generation test can't fail while
+  catch-up is a full reload; it guards step 6. The replaced-file backoff
+  has no direct test; REVIEWER-B may say whether it needs one.
+
+**Next:**
+1. The Worker merges PR 66 normally once all 19 checks on 2d374a3 are
+   green, logs DONE with the push runs, commits PLAN.md as a coordination
+   sync, and stops.
+2. **REVIEWER-B** (the user calls it) reviews `release-0.14.0` after that
+   merge: `src/shared/` and `src/store/shared.rs`, plus the changed
+   `pager.rs`, `open.rs`, `recall.rs`, `cache_api.rs` and `flush.rs`,
+   against the 12.4 note and the RB-006 triage (RB-006.11 (a) and (b) in
+   `SECURITY.local.md`). A new batch `RB-007`; security findings only in
+   `SECURITY.local.md`.
+3. Step 3 (the cross-process test suite) is dispatched after I triage
+   RB-007.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 2b merged (PR 66, with the two review fixes)
+
+**The fixes from PLANNER-A's PR 66 review, 2d374a3**
+`fix(store): a panicking closure releases the shared lock; compare cache
+budgets by value`, pushed to PR 66:
+- **The lock after a panic:** `SharedMnemo::window` runs the closure under
+  `catch_unwind`, then drops the `lock-info` note and detaches the pager's
+  file (the unlock), then resumes the panic. A drop guard would need a
+  mutable borrow of the pager while `run(self)` holds `self`, so the unwind
+  is caught instead. The effect is the same: an unwind unlocks too. A write
+  window has cleared its stamp before the closure runs, so the next call
+  reloads.
+- **The settings check** compares the cache budgets themselves (namespace,
+  max entries, max bytes, sorted), not their count.
+- **The `write` doc comment** says that a closure that flushes and then
+  changes a setting gets the settings error, although its commit is in.
+- **Tests** (`tests/shared_handle.rs`, now 16):
+  - a write window whose closure panics, caught with `catch_unwind`; a
+    second handle then writes at once (500 ms deadline), and the first
+    handle's next call reloads without the half-done write;
+  - the same for a read window;
+  - a budget whose value alone changes is refused. Shared mode refuses
+    setting any budget, so the test puts one in through the `__state` hook.
+  - **Checked against the old code:** without the unwind catch the second
+    handle gets `Locked`; with the count-only check the changed budget
+    isn't refused.
+- **Local:**
+  - `cargo test --features failpoints` (420 pass);
+  - on Rust 1.75 (macOS): `shared_handle`, `shared_lock` and
+    `replaced_file`;
+  - clippy `-D warnings` on all targets;
+  - UniFFI (23).
+- **PR runs on 2d374a3:** all 19 checks green. CI 43380367563 and Mobile
+  CI 43380367727, both on attempt 1; `rust (windows-latest)`,
+  `windows-msrv (rust 1.75)` and `swift (macos-latest, iOS simulator)`
+  included.
+
+**The merge:**
+- PR 66 was fast-forwarded into `release-0.14.0` (9695a79..2d374a3: three
+  commits, 0a25b06, 86a49a2, 2d374a3, no WIP). GitHub marked it merged, and
+  `rel0140-2b-open-shared` is deleted.
+- **Push runs on 2d374a3:** CI 43382373730 and Mobile CI 43382373681, green
+  on attempt 1, the iOS simulator job included.
+
+**Stopped.** Step 3 waits for REVIEWER-B's review of 2a and 2b (RB-007).
