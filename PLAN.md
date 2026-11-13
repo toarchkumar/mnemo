@@ -22419,3 +22419,608 @@ messages carry pointers, the ledgers carry instructions".
   embedder, wording that recalled badly). That's DOGFOOD-0's real output:
   it feeds 12.2, 12.3 and 13.x.
 - Log DONE and send the pointer.
+
+### 2026-11-13 — WORKER — BLOCKED — an intermittent failure in step 3's sidecar-removal test (a race in the test's own setup); step 4b built, not committed
+
+**What's done:**
+- **PR 69** fast-forwarded into `release-0.14.0` (`c2bce06..0bd953b`); its
+  branch is deleted.
+- **Push runs on `0bd953b`:** CI 43492425869 and Mobile CI 43492425990, both
+  green on attempt 1, all six mobile jobs included.
+- **Coordination sync:** `b8f6297` (my 4a DONE and the 4a review entry).
+- **The new AGENTS.md tmux section** (uncommitted, PLANNER-A's) is read and
+  followed: this entry is followed by `BLOCKED:` to `planner-a`. AGENTS.md
+  stays unstaged until a HANDOFF lists it.
+
+**The failure.** While I was checking step 4b, the full local suite
+(`cargo test --features failpoints`) gave **463 passed, 1 failed**:
+`the_sidecar_removed_while_two_processes_write`
+(`mnemo/tests/cross_process.rs`, step 3, merged in `e1886fc`) panicked at
+line 904:
+```
+called `Result::unwrap()` on an `Err` value: Os { code: 66, kind: DirectoryNotEmpty, message: "Directory not empty" }
+```
+- **It's intermittent.** Eight runs of that test alone straight after all
+  passed. It passed on CI on Linux, macOS and Windows for PR 68, and in
+  every earlier local run.
+- **My diagnosis: a race in the test's setup, not in the engine.** No
+  assertion failed: the panic is the test's own `remove_dir_all(&gone)`.
+  - The test moves the sidecar away (`rename(side, gone)`) and then deletes
+    `gone`. The comment says the move keeps the removal from racing a
+    child, but that's wrong: each writer child still holds a descriptor on
+    the moved directory (`Sidecar::dir`).
+  - Until the directory is gone, a child's `lock_file` (`openat` with
+    `O_CREAT` on `intent.lock`) and `write_lock_info`'s temp file still
+    create names in it.
+  - If one lands between `remove_dir_all`'s listing and its final `rmdir`,
+    the `rmdir` fails with ENOTEMPTY.
+  - The engine's behaviour there is as built in 2c: it uses the moved
+    directory until a lock file can't be opened, then reopens by path.
+- **It doesn't touch step 4b.** 4b changes the CLI, MCP and inspect opens.
+  The children in this test use `Mnemo::open_shared`, whose paths 4b
+  doesn't change, and no other test failed.
+
+**Why I stopped:** the step 3 dispatch says "An intermittent failure is a bug
+until shown otherwise; if one turns up, stop and log it." Fixing it means
+changing a test's removal step, and the obvious fix is a retry of that step,
+which the same dispatch rules out ("no retries inside tests"). That's yours
+to decide. **Options**, none applied:
+1. **Ignore the race when removing.** A retry of the setup step, not an
+   assertion: `remove_dir_all` until it succeeds, with a bound. The
+   assertions stay as they are.
+2. **Removal that can't race.** Instead of deleting, swap a regular file in
+   at the name after the move:
+   - the children's next lock-file open in the moved directory still works
+     through their stale descriptor, so they never reopen;
+   - so this tests something else, and it's weaker than today's case.
+3. **Stop the children around each removal.** A pause file that the writer
+   loop honours between calls, then remove, then resume. No race and no
+   retry, but the removal no longer happens while the handles are mid-run.
+4. **Keep the test, and drop the "can't race" claim from its comment.**
+   Accept a rare failure of the setup step. That's a flaky test.
+
+My recommendation is 3: it keeps "removed while handles run, between
+calls", has no retry, and asserts the same things. Delete `gone` only once
+both children have acknowledged the pause.
+
+**Step 4b, built and uncommitted on `release-0.14.0`** (a patch copy is in my
+scratchpad):
+- **The CLI:** a global `--wait <duration>` (default `10s`; `500ms`, `2m`,
+  or seconds).
+  - Every read goes through `Mnemo::open_read_only_waiting`, a new waiting
+    read-only open: `info`, `about`, `verify`, `list`, `export`, `get`,
+    `search`, `history`, `snapshots`, `cache get`/`stats`, `thread export`,
+    `essence render`, and `recall --no-track`.
+  - Every write goes through `Mnemo::open_exclusive` with the command as
+    its note: `remember`, `update`, `index`, `restore`, the `cache`,
+    `thread` and `essence` writes, `recall` with tracking, `import` and
+    `rekey`.
+  - `compact` and `rekey --rotate` go through the new
+    `compact_file_waiting`.
+  - `Locked` names the holder ("held by import since … (pid …, mnemo)").
+- **`serve --mcp --shared`** (and `--allow-network-fs`):
+  - each tool call is one read window (about, history, thread_export,
+    recall, list, snapshot_list, stats, cache_get, cache_stats,
+    cache_get_semantic) or one write window (the rest);
+  - a tool error aborts its window, unless it's `MaybeStored`;
+  - notices go to stderr once at start;
+  - library: `mcp::serve_stdio_with_options` and
+    `serve_with_streams_opts`.
+- **`inspect`:** a waiting read-only open, and for `NeedsWriteOpen` the
+  message "…the inspector never writes; any writer's next call recovers
+  it…". `Locked` names the holder.
+- **The owner check** in `remove_dead_compaction_temps`: Unix, a file's
+  `uid` must equal the effective uid. A failpoints override,
+  `set_euid_override`, lets the test see a file as another user's without
+  root; the real `chown` case runs only as root and is skipped otherwise,
+  with a message.
+- **Hooks with `--wait 2s`:** no session hook exists in the tree yet (they
+  come with 12.2), so nothing to change. `--wait`'s help, the crate
+  README's CLI text and `docs/shared-mode.md` say a session hook should
+  pass `--wait 2s`.
+- **Tests:** `mnemo/tests/cli_shared.rs` (6), plus an owner test in
+  `plain_callers.rs`. Each was checked against its change undone (8 of 8
+  caught): plain reads, `--wait` ignored, plain import, serve without
+  `--shared`, inspect's plain open, inspect's message, no note, no owner
+  check.
+- **Local:** `cargo test -p mnemo-uniffi` 23 passed; clippy (engine
+  `--all-targets --features failpoints,benches`, `-p mnemo-uniffi`,
+  `mnemo-python` with `dev-hooks`) and fmt clean; the full suite as above.
+- **Docs:** `docs/shared-mode.md` (CLI, MCP and inspect rows, the plain
+  callers and the `for_plain` sidecar rule, the owner condition), the crate
+  README (the MCP section's `--shared`, `--wait` after the CLI table), and
+  the CHANGELOG.
+
+**To unblock:** pick a fix for the test (or another). I'll apply it in 4b's
+PR, or in its own small PR first if you'd rather keep 4b to its scope, and
+then open 4b's PR and log the DONE as dispatched.
+
+### 2026-11-13 — PLANNER-A — DECISION — unblocked: the sidecar-removal test's own delete is bounded and retried (option 1); AGENTS.md's HANDOFF still to commit; go on with 4b
+
+**The diagnosis holds** (read `tests/cross_process.rs:897-906`,
+`shared/sidecar.rs:201` and `shared/lock.rs:247`). The panic is the test's
+own `remove_dir_all(&gone)`, not an assertion. A child keeps its descriptor
+on the moved directory and, as built in 2c, goes on creating
+`intent.lock` and `lock-info`'s temp name there (`openat` with `O_CREAT`)
+until an open fails. Only then does it reopen by path. A name created between
+`remove_dir_all`'s listing and its `rmdir` gives ENOTEMPTY. That's expected
+engine behaviour and the test's own race, so it isn't an engine bug. The
+comment's "can't race" is wrong.
+
+**DECISION: option 1,** not option 3.
+- **Why:** removing the directory at any moment, mid-call included, is the
+  real case (`git clean -fdx` doesn't wait for a pause), and today's test
+  shows the engine takes it with no unexpected error and no lost write.
+  Option 3 would drop that mid-call coverage to avoid a retry of a
+  filesystem action the test itself performs.
+- **The rule, clarified:** "no retries inside tests" is about assertions and
+  engine calls; it stays absolute there. A test may retry **its own
+  environment action** (here, deleting a directory that a live child is
+  legitimately writing into) when the retry is bounded, the race is named in
+  a comment, and exhausting the bound fails the test.
+- **The change:** `remove_dir_all(&gone)` in a loop that retries only on
+  `DirectoryNotEmpty` (and `NotFound` counts as done), at most 50 tries,
+  10 ms apart, then `panic!` with the error. Fix the comment to say what
+  races and why the retry is safe. The assertions stay as they are.
+- **Undo check:** none needed (no fix to undo); run the test alone 50 times
+  locally under `MNEMO_STRESS=1` and give the count in the DONE.
+- **Where:** its own `test(shared): …` commit in 4b's PR. No separate PR.
+
+**Missed HANDOFF:** my 2026-11-13 tmux entry ("the team moves to tmux…")
+lists `AGENTS.md` (the "Running in tmux…" subsection) for the next
+coordination sync. `b8f6297` synced PLAN.md only, and AGENTS.md is still
+uncommitted. Commit `AGENTS.md` alone with the message
+`docs(agents): sessions in tmux pass pointers to ledger entries; the user's
+gates`, before 4b's branch, and cite the hash in the DONE.
+
+**Then go on with 4b** as dispatched: branch, PR, green on every check, and
+log DONE with the PR number, the runs, the list of plain callers left and
+the proposed root README lines for the CLI and MCP. Stop before merging.
+What's described in the BLOCKED entry looks in scope; I review it at the
+DONE.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 4b, the CLI, serve --mcp --shared and inspect (PR 70, green, not merged)
+
+**Before the PR:**
+- AGENTS.md's HANDOFF (the "Running in tmux…" subsection) committed alone
+  as **`5490584`** ("docs(agents): sessions in tmux pass pointers to ledger
+  entries; the user's gates") on `release-0.14.0` and pushed.
+- The 4a merge, its push runs (CI 43492425869, Mobile CI 43492425990, all
+  green) and the sync `b8f6297` are in the BLOCKED entry above.
+
+**PR 70** (`rel0140-4b-cli-mcp-inspect` into `release-0.14.0`), three commits:
+- `b94e665` step 4b;
+- `009ae2a` the test fix (its own `test(shared): …` commit, as decided);
+- `4b92dfc` a fix-up: `euid_override` was dead code on Windows, which broke
+  `rust (windows-latest)` and `windows-msrv` on the first push. It's now
+  `cfg(unix)`.
+
+It has a fix-up, so **Squash and merge**. **Runs on `4b92dfc`:** CI
+43498294495, **14 of 14 checks green** on attempt 1. CI 43497926090 on
+`009ae2a` was superseded. Mobile CI didn't run on the PR (no bindings,
+manifest, lockfile or workflow change); it runs on the merge push. Stopped
+before merging.
+
+**The test fix (option 1):** `remove_dir_racing_children` in
+`tests/cross_process.rs`.
+- It retries `remove_dir_all` of the moved sidecar only on ENOTEMPTY, at
+  most 50 times 10 ms apart, then panics with the error. `NotFound` counts
+  as done; any other error panics at once.
+- It matches the errno through `rustix::io::Errno::NOTEMPTY`, because
+  `ErrorKind::DirectoryNotEmpty` needs Rust 1.83 and clippy's MSRV check
+  refused it.
+- The comment now says what races and why only the test's own delete is
+  retried.
+- **50 of 50 runs passed** with `MNEMO_STRESS=1`, on the final code (and
+  50 of 50 on the version before the errno change).
+
+**What's in 4b:**
+- **The CLI.** A global `--wait <duration>` on every command: default `10s`;
+  `500ms`, `2m`, or a bare number of seconds; anything else is "not a
+  duration". The shared options are kept in a `OnceLock` read by
+  `wait_opts()`.
+  - **Reads** go through `open_r` / `open_ro`, now
+    `Mnemo::open_read_only_waiting`, a new public API: the shared lock
+    through `BrainLocks::for_plain`, waiting, alongside readers. The
+    commands are `info`, `about`, `verify`, `list`, `export`, `get`,
+    `search`, `history`, `snapshots`, `cache get` (its read-only fallback)
+    and `cache stats`, `thread export`, `essence render`, and
+    `recall --no-track` (also recall's read-only fallback).
+  - **Writes** go through `open_w` / `open_rw`, which is
+    `Mnemo::open_exclusive` with the command as its note: `remember`,
+    `update`, `index`, `restore`, `cache get` (it tracks), `put`, `delete`
+    and `purge`, `thread ingest`, `forget` and `start`, `essence add`,
+    `append`, `update`, `resolve` and `remove`, `recall` with tracking,
+    `import`, and `rekey`.
+  - **`compact` and `rekey --rotate`'s compaction** go through
+    `Mnemo::compact_file_waiting` / `_with_key` (new; `compact_file`
+    stays at the default 10 s).
+  - **`Locked` names the holder:** the engine's message already has "(held
+    by …)"; the CLI prints it.
+- **`serve --mcp --shared`** (and `--allow-network-fs`, which requires
+  `--shared`):
+  - **Read windows:** `about`, `history`, `thread_export`, `recall`,
+    `list`, `snapshot_list`, `stats`, `cache_get`, `cache_stats`,
+    `cache_get_semantic`. I checked that none of them calls `flush`.
+    `recall`'s statistics ride the next write.
+  - **Write windows:** every other tool.
+  - **A tool's `RpcError`** aborts its window (returned as `Invalid` to
+    the window) and goes back to the client as the tool's error; a
+    `MaybeStored` wins over it.
+  - Notices go to stderr once at start, plus one "shared mode" line. A
+    shared server doesn't flush at shutdown (it holds nothing).
+  - Library: `mcp::serve_stdio_with_options` and `serve_with_streams_opts`;
+    the old entry points are unchanged.
+  - **A limitation:** with `--embed-cmd`, the text tools embed inside their
+    window, so the file's lock is held while the embedder runs. Moving the
+    embedding out of the window means restructuring each text tool; noted
+    for later.
+- **`inspect`:** `load` uses the waiting read-only open with `--wait`. On
+  `NeedsWriteOpen`: "the file has a write to finish (a pending WAL or a
+  torn header) and the inspector never writes; any writer's next call
+  recovers it (a shared handle's next call, or any mnemo write command),
+  then try again". `Locked` names the holder when there is one.
+- **The owner check** in `remove_dead_compaction_temps`:
+  - On Unix the file's `uid` must equal `rustix::process::geteuid()`.
+  - A failpoints hook, `__failpoints::set_euid_override`, makes the check
+    compare against another uid. The new test sees the file as another
+    user's (kept), then as ours (removed).
+  - The real case (a file `chown`ed to 65534) runs only as root. It was
+    **skipped locally and will be on CI** (not root), with a message.
+- **Hooks with `--wait 2s`:** no session hook exists in the tree (they come
+  with 12.2), so there was nothing to pass it to. The `--wait` help, the
+  crate README and `docs/shared-mode.md` say a session hook should pass
+  `--wait 2s`. 12.2 should use it.
+
+**Tests:**
+- **`mnemo/tests/cli_shared.rs`** (new, 6):
+  - `--wait`'s forms, before and after the subcommand, and the error for a
+    bad one;
+  - a read waits for a plain writer (≥ 0.8 s) and gives up at
+    `--wait 300ms`;
+  - `list`, `info`, `verify` and `recall --no-track` run alongside a 4 s
+    shared read, and `import` waits for a 1.5 s one;
+  - a write's `Locked` says "held by import since";
+  - `serve --mcp --shared`: a plain write from outside gets in while the
+    server is idle; the server's `list` sees it and its `remember` lands; a
+    bad `forget` comes back as an error; one notice and the shared-mode
+    line on stderr;
+  - `inspect` waits for a 1 s writer, and explains a pending WAL.
+- **`plain_callers.rs`:** the owner case.
+- **Undo checks, 8 of 8 caught:** plain reads, `--wait` ignored, plain
+  import, serve without `--shared`, inspect's plain open, inspect's
+  message, no note, no owner check.
+- **Local (macOS):**
+  - `cargo test --features failpoints`: **464 passed, 0 failed** (457 at
+    4a).
+  - `cargo test -p mnemo-uniffi`: 23 passed.
+  - Clippy is clean three ways: the engine with `--all-targets --features
+    failpoints,benches`, `-p mnemo-uniffi`, and `mnemo-python` with
+    `dev-hooks`.
+  - `cargo fmt --check` is clean.
+
+**Plain callers left** (RB-007.4: what still opens with one try at the lock,
+and why):
+- `Mnemo::open`, `open_with_key`, `open_read_only`,
+  `open_read_only_with_key`: by design (the note's "keep failing at once"),
+  for callers that hold a handle.
+- `Mnemo::create` / `create_with_key`, and the CLI's `init` and `demo`: they
+  create the file; there's nothing to wait for.
+- `serve --mcp` without `--shared`: a long-lived plain handle, by design,
+  until step 8 decides the default.
+- Python's plain handle (`shared=False`): by design.
+- The UniFFI `MnemoDb` (Swift, Kotlin): mobile, later.
+- `Mnemo::key_opens`: reads page 0 with no lock at all, as before.
+- `export_encrypted` and `export_rekeyed`: they work on a handle the caller
+  already opened.
+
+Every other CLI command, compaction (all its callers), Python's
+`compact_file`, `inspect`, and `serve --mcp --shared` now go through the
+lock layer.
+
+**Docs:**
+- `docs/shared-mode.md`:
+  - **CLI**, **MCP server** and **`inspect`** rows replace the "step 4b"
+    row;
+  - notices for the server;
+  - the long-operations section rewritten: every CLI command,
+    `open_read_only_waiting` and `compact_file_waiting`, plain `open` and a
+    non-shared `serve` still one try;
+  - **the `for_plain` rule** as accepted (the sidecar used only if a
+    shared handle made it, so no new sibling for plain users);
+  - the owner condition on the temp cleanup.
+- `mnemo/README.md`: `--shared` in the MCP section, and `--wait` after the
+  CLI table.
+- CHANGELOG `[Unreleased]` Added: the CLI's `--wait`, `serve --mcp
+  --shared`, inspect waiting, the two new APIs, the plain opens that still
+  don't wait. The temp cleanup line gains "that this user owns".
+
+**Proposed root README lines for the CLI and MCP** (yours to place):
+- "**The CLI waits for the file** (v0.14): every command takes
+  `--wait <duration>` (default 10 s). Reads run alongside other readers,
+  writes wait with writer preference, and a timed-out command says what
+  holds the file. A session hook should pass `--wait 2s`."
+- "**Several agents on one brain** (v0.14): `mnemo serve --mcp --shared
+  <file>` holds no lock between tool calls, so more than one MCP server,
+  the CLI and Python can use the file together. Off by default; update
+  every `mnemo` on the machine first. See `docs/shared-mode.md`."
+- Taken from 4a, as you said: the Rust and Python shared-mode line and the
+  kept-secret line; plus RB-007.9's file-mode line at the release.
+
+**Not done:** `test/project.mnemo` not updated (I don't handle passphrases).
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION — step 4b (PR 70): accepted once two fixes land (embedding before the lock; recall's fallback one try); fix round 1 of 3
+
+**Checked on GitHub:** PR 70 at `4b92dfc`, 14 of 14 checks green.
+`5490584` (AGENTS.md) is on `release-0.14.0`. Read the diff of `mcp.rs`,
+`bin/mnemo.rs`, `inspect.rs`, `store/open.rs`, `store/load.rs`,
+`store/maintenance.rs` and the test fix.
+
+**In scope and right:** `open_read_only_waiting` (the shared lock through
+`for_plain`, one deadline and the cancel, one plain try where shared mode is
+refused); `--wait` and its parser; every CLI read and write on the waiting
+opens, with the command as the note; `compact_file_waiting`; `serve --mcp
+--shared` with one window per tool call, the read list (I checked that
+`cache_get_semantic` doesn't flush on a miss), `MaybeStored` winning over a
+tool's error, no flush at shutdown, notices once; `inspect`'s waiting open
+and its `NeedsWriteOpen` message; the owner check and its hook; the test fix
+as decided (50 of 50); the list of plain callers left. The proposed README
+lines are taken; I place them in the release HANDOFF.
+
+**Fix before merging** (one new commit each, or together; then squash):
+1. **Embedding before the lock** (the note's protocol step 1, "slow work
+   first, unlocked"; 4a's Python already does it). The DONE lists this as a
+   limitation for later. I don't accept that for v0.14. A local
+   `--embed-cmd` can take hundreds of milliseconds to seconds, and under
+   `--shared` every other session waits behind it, up to its 10 s deadline
+   (a hook's 2 s).
+   - **MCP, shared mode:** the four text sites (`remember`, `recall`,
+     `cache_put_semantic`, `cache_get_semantic`; `embed_text_via_server`).
+     In `shared_tools_call`, when the tool takes `text` and the server has an
+     embedder, embed it **before** the window through
+     `SharedMnemo::embedder_arc`, and hand the vector to the tool (for
+     example an `Option<Vec<f32>>` that `embed_text_via_server` returns
+     first), so no tool is restructured. The text still goes to the tool
+     wherever it's stored or used for the model name, and the error messages
+     stay the same. The plain server may stay as it is (it holds the file
+     for its life anyway).
+   - **The CLI:** `remember`, `update` and `thread ingest` with
+     `--embed-cmd` currently `open_w` first, then embed (thread ingest
+     embeds every turn under the lock). Embed first, then take the write
+     window. The file's dimensions are needed for the identity: prefer
+     getting them without a second KDF (if the header or a plaintext field
+     has them); otherwise a waiting read-only open to read them, closed
+     before the embedder runs, is acceptable (one KDF, about 15 to 45 ms).
+     A vector whose length doesn't match the file is refused after the open
+     with the same error as today, writing nothing.
+   - **Tests:** a shared MCP server whose `--embed-cmd` sleeps (say 1.5 s):
+     during its `remember` with `text`, a CLI write with `--wait 500ms`
+     succeeds. The same for the CLI's `remember --embed-cmd` against a
+     shared reader or writer. Check both against the old order (undo).
+2. **A tracked CLI `recall` can wait twice its deadline.** On `Locked`
+   after `open_rw`'s full wait, the fallback `open_ro` waits a full
+   deadline again (up to 20 s by default). An exclusive holder that kept the
+   write out keeps the read out too, so the second wait almost never helps.
+   Make the fallback one try (`Mnemo::open_read_only` /
+   `_with_key`). One line in the CLI test or a comment saying why.
+
+**Noted, no change:** an unknown MCP tool name goes to a write window; since
+RB-007.6 a window that seals nothing commits nothing, so it costs only the
+lock.
+
+**Then:** push, all checks green, and log DONE with the runs (the fix
+commit, the undo checks). Stop before merging; I accept, and the merge, the
+push runs (Mobile CI runs there) and the coordination sync follow. Then
+DOGFOOD-0, as dispatched in my tmux entry.
+
+### 2026-11-13 — WORKER — BLOCKED — 4b fix round 1 pushed (8bdf795), 13 of 14 green; an intermittent Windows failure in step 3's kill-test harness (an allowed Locked at shutdown reported as an error)
+
+**Fix round 1 is done and pushed:** `8bdf795` on PR 70.
+- **Embedding before the lock, MCP `--shared`:**
+  - `pre_embed` runs before each window for the four text tools
+    (`remember`, `recall`, `cache_put_semantic`, `cache_get_semantic`): when
+    the tool has `text`, no `vector`/`query`, and the server has an
+    embedder.
+  - It embeds through `SharedMnemo::embedder_arc` and leaves the vector in a
+    thread-local that `embed_text_via_server` takes first (it matches on
+    the text), so no tool is restructured and the messages are unchanged.
+  - An embedder error comes back as the same `RpcError` as before. An unused
+    vector is cleared after the window.
+  - The plain server is as it was.
+- **Embedding before the lock, the CLI:**
+  - `remember` and `update --text` with `--embed-cmd` get the width from
+    the header through a new `Mnemo::peek_dimensions(path)` (page 0, no
+    key, no lock, no KDF). They start the embedder and embed, then take the
+    write lock (`open_w`), then `set_embedder` (the identity check) and
+    write.
+  - `update` keeps `update_text`'s width check, with the same
+    `DimensionMismatch`.
+  - A header that can't be read (torn) falls back to the old order. (A
+    write open heals it.)
+  - `thread ingest` plans under a short waiting read
+    (`ingest_thread_texts`, one KDF, closed before the embedder runs),
+    embeds, then takes the write lock and plans again. If the plan is the
+    same it writes with `ingest_thread_with_vectors`. If another process
+    ingested meanwhile, it embeds under the lock only the texts it doesn't
+    have yet.
+- **`recall`'s read-only fallback** after `Locked` is now one try
+  (`Mnemo::open_read_only` / `_with_key`), with a comment saying why.
+- **Tests** (`cli_shared.rs`, 2 new; both sync on a marker file the slow
+  embedder writes when a request arrives, not on sleeps):
+  - a shared MCP server with a 1.5 s embedder: during its `remember` with
+    `text`, `mnemo --wait 500ms import` succeeds;
+  - the CLI's `remember --embed-cmd` with a 1.5 s embedder: a shared write
+    with a 500 ms deadline succeeds meanwhile.
+- **Undo checks, both caught:** MCP without `pre_embed`; the CLI forced
+  into the old order.
+  - The first version of the CLI test synced on a 500 ms sleep and passed
+    with the old order. A freshly built binary's first launch on macOS can
+    take longer than that, so the write got in before the CLI started. The
+    marker fixed it.
+- **Local:** 466 passed, 0 failed. Clippy (engine, uniffi) and fmt clean.
+
+**Runs on `8bdf795`:** CI 43501371709, **13 of 14 green; `rust
+(windows-latest)` failed** (job 132147715922) in
+`kills_lose_no_acknowledged_write` (`tests/cross_process.rs`, step 3):
+```
+a child failed; errors.log: "writer w1g4: open_shared: file already locked by another handle: C:\Users\RUNNER~1\AppData\Local\Temp\.tmpY1e146\b.mnemo"
+```
+That test passed on Windows on every earlier run (PR 68's three heads, PR
+69, PR 70's first two heads).
+
+**My diagnosis: the test harness misreports an allowed error, not an engine
+bug.**
+- The kill test allows `Locked` and asserts only that nothing else fails.
+- `role_writer` treats `Locked` as "try again", but its first call,
+  `open_child`, loops on `Locked` only while the stop file is absent
+  (`Err(MnemoError::Locked { .. }) if !stopped() => continue`), and
+  returns any other case as an error.
+- Writer `w1g4`, restarted after its fourth kill near the end of the 6 s
+  run, was opening when the parent created the stop file. Its open waited
+  its 2 s deadline (slower Windows runners, a compaction or another writer
+  holding the file) and got `Locked`. With the stop file there, that was
+  reported as an error and the process exited 3.
+- No acknowledged write was missing, nothing was stored twice, and
+  `verify` wasn't reached: the run failed on the child's exit code first.
+- It's in no file 4b changed. The children's `open_shared` and the lock
+  layer aren't touched by fix round 1.
+
+**Why I stopped:** your step 3 rule, "an intermittent failure is a bug until
+shown otherwise; if one turns up, stop and log it." The fix is a change to a
+merged test's harness.
+
+**Proposed fix** (one line in the harness, not applied): in `open_child`,
+`Locked` once the stop file exists means "stop": return a value the roles
+treat as a clean exit (code 0), because `Locked` is the allowed error and a
+child that was told to stop has nothing left to do. Everything else stays as
+it is.
+- No retry is added: the open already loops on `Locked` while the run lasts.
+- It removes only the misreport of the allowed error at shutdown.
+- I'd also check the other roles' first calls for the same shape
+  (`role_reader` uses `open_child` too).
+
+**To unblock:** say yes (or another fix), and I'll apply it as its own
+`test(shared): …` commit in PR 70, re-run CI, and log the DONE for 4b and
+this fix round.
+
+### 2026-11-13 — PLANNER-A — DECISION — unblocked: a child told to stop treats `Locked` as a clean exit (the kill-test harness); then 4b's DONE
+
+**The diagnosis holds** (read `tests/cross_process.rs:172-180` at
+`8bdf795`). `open_child` loops on `Locked` only while the stop file is absent,
+and reports a `Locked` that comes after it as an error. The kill test's
+contract allows `Locked` everywhere, so this is the harness misreporting
+an allowed outcome at shutdown, not an engine fault. Nothing was lost or
+stored twice.
+
+**DECISION: yes, the proposed fix.** In `open_child`, `Locked` once the stop
+file exists ends the role cleanly (exit 0, no write attempted). Check every
+role's first call for the same shape (`role_writer`, `role_reader` and the
+third caller at line 334) and apply the same rule there. Nothing is retried
+that wasn't already; no assertion changes. Its own `test(shared): …` commit
+in PR 70.
+- In the DONE, say whether the 2 s `Locked` at a child's open on Windows was
+  seen in other runs (the children's logs, if they count it). If Windows
+  opens routinely wait out 2 s under the kill load, that's a number for step
+  5's bench, not a fix now.
+- This doesn't count as a new fix round (the hop cap counts review rounds);
+  4b stays at round 1.
+
+**Fix round 1 itself, read at `8bdf795`:** the shape is what I asked for
+(`pre_embed` through `embedder_arc` with the tools unchanged;
+`peek_dimensions` with no key, lock or KDF; `thread ingest` planning under a
+short read and re-planning under the lock; recall's fallback one try; two
+tests synced on a marker file, both caught by their undo). I accept it once
+CI is green on the harness fix.
+
+**Then:** all checks green, log 4b's DONE (round 1 and this fix, the runs),
+and stop before merging.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 4b, fix round 1 and the kill-test harness fix (PR 70, green, not merged)
+
+**PR 70** now has five commits on `rel0140-4b-cli-mcp-inspect`:
+- `b94e665` step 4b;
+- `009ae2a` the sidecar-removal test fix;
+- `4b92dfc` the Unix-only hook;
+- `8bdf795` fix round 1;
+- `ff9f72c` the harness fix.
+
+Merge with **Squash and merge**. **Runs on `ff9f72c`:** CI 43502654695, **14
+of 14 checks green** on attempt 1. CI 43501371709 on `8bdf795` was the
+Windows harness failure in the BLOCKED entry above. Mobile CI doesn't run on
+the PR (no paths it watches); it runs on the merge push. Stopped before
+merging.
+
+**Fix round 1 (`8bdf795`)**, as in the BLOCKED entry above. In short:
+- **MCP `--shared`:** `pre_embed` embeds a text tool's `text` through
+  `SharedMnemo::embedder_arc` before the window, and hands the vector to
+  `embed_text_via_server` through a thread-local. The tools are unchanged.
+- **The CLI:**
+  - `remember` and `update --text` take the width from
+    `Mnemo::peek_dimensions` (new: page 0, no key, lock or KDF), embed,
+    then take the write lock.
+  - `thread ingest` plans under a short read, embeds, then re-plans under
+    the lock and writes with `ingest_thread_with_vectors`, embedding under
+    the lock only texts another process's ingest added.
+  - A torn header falls back to the old order.
+- **`recall`'s read-only fallback** is one try, with a comment.
+- **Tests:** two, synced on a marker the slow embedder writes, both caught
+  by their undo: MCP without `pre_embed`, and the CLI forced into the old
+  order.
+
+**The harness fix (`ff9f72c`, `test(shared): …`):**
+- `open_child` now returns `Option`: `Locked` once the stop file exists
+  gives `None`.
+- All three callers end their role with exit 0 and write nothing:
+  `role_writer`, `role_reader`, and `role_crash_op` (which has no stop
+  file, so it can't happen there, but the rule is the same).
+- Nothing is retried that wasn't already, and no assertion changed.
+
+**The 2 s `Locked` at a child's open, as asked:** the children didn't count
+it before. They do now (`open_locked.log`), and the kill test prints the
+count.
+- **macOS, CI size (6 s):** 0 child opens waited out their 2 s deadline.
+- **macOS, full size (`MNEMO_STRESS=1`, 60 s):** **17** did, in a run with
+  254 kills, 260 compactions and 633 writes acknowledged, with nothing
+  missing, nothing stored twice and `verify` clean.
+- **Windows:** not visible. The rust jobs run `cargo test` without
+  `--nocapture`, so a passing test's count isn't printed. The one failing
+  run says at least one Windows open waited 2 s at the end of a 6 s run.
+- My reading: under the kill load (a compaction every ~100 ms plus three
+  writers), an open's first read can wait out 2 s. That's a number for step
+  5's bench, as you said, not a fix now.
+
+**Local:** `cargo test --features failpoints` 466 passed, 0 failed; the
+cross-process file 13 passed; clippy and fmt clean.
+
+**Unchanged from 4b's DONE:** the list of plain callers left, and the
+proposed root README lines for the CLI and MCP.
+
+**Not done:** `test/project.mnemo` not updated (I don't handle passphrases).
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 4b accepted (PR 70); merge, then DOGFOOD-0
+
+**Step 4b (PR 70, head `ff9f72c`): ACCEPTED.** 14 of 14 checks green
+(checked with `gh pr checks 70`). Read `ff9f72c`: `open_child` returns
+`None` on `Locked` after the stop file, its three callers end with exit 0
+and write nothing, and every waited-out open is counted; nothing else
+retried, no assertion changed. Fix round 1 was read at `8bdf795` (my
+previous entry). Step 4 of 12.4 is done.
+
+**Noted for step 5's bench:** under the full-size kill load on macOS, 17
+child opens waited out a 2 s deadline (254 kills, 260 compactions, 633
+writes; nothing lost). Measure the open-time wait under compaction load on
+macOS and Windows there, with the Windows count printed.
+
+**DISPATCH:**
+1. **Squash and merge PR 70** (it has fix-ups), delete the branch, and check
+   the push runs on the merge: CI and Mobile CI, every job run and green (a
+   "not run" job per the 2026-11-13 rule is re-run once and logged).
+2. **Coordination sync** (`chore(plan): sync coordination files`).
+3. **DOGFOOD-0,** as dispatched in my 2026-11-13 tmux entry ("the team moves
+   to tmux…"). The script reads `test/.env` itself; no passphrase is typed,
+   printed or pasted. If `test/.env` or a working `test/.venv` can't be
+   set up without one, log BLOCKED with what's missing; that's the user's
+   item.
+4. Log DONE (the merge, its runs, the sync, DOGFOOD-0's recalls and its
+   "what worked, what was awkward" notes) and stop. REKEY-2 is next; I
+   dispatch it after reading the DONE.
