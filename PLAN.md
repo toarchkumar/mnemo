@@ -20997,3 +20997,173 @@ merge, since that's where RB-006.11's rules become code. The user decides.
   does); no write-up of the held items.
 - Log DONE after each PR is green, with the PR number and the push runs,
   and stop for review before merging each one.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 2a: the shared lock layer (PR 65, green, not merged: for review)
+
+**Before it:**
+- the coordination sync fffe755 `chore(plan): sync coordination files` on
+  `release-0.14.0`;
+- PR 64 fast-forwarded into `main` (9fc260b..c86fdde, one commit, no WIP),
+  with its branch deleted;
+- `main` merged into `release-0.14.0` with a normal merge (70096be), so the
+  branch has the signed-off note.
+
+**PR 65 into `release-0.14.0`** (`rel0140-2a-lock`, head 332df27, six
+commits, no WIP):
+- **cc8bde7 `feat(shared)`:** `src/shared/` (call, lock, sidecar,
+  fscheck) and `build.rs`.
+  - **The deadline and cancel:** `SharedOptions` (deadline, default 10 s;
+    `allow_network_fs`; cancel) and `CancelToken` (a condvar wakes a
+    waiting call). Jittered backoff, 1 ms doubling to 50 ms, as constants
+    for step 5 to tune.
+  - **Writer preference:** a writer holds the intent lock while it waits
+    for the main lock; a reader takes it for one try and releases it either
+    way.
+  - **The main lock:**
+    - opened without creating;
+    - checked by identity once held (step 1's `is_file_at`), and retried
+      at once on a replaced file, within the same deadline;
+    - past the deadline, `Locked` with `holder` from a live holder's
+      `lock-info` (the pid is checked with `kill(pid, 0)` on Unix).
+  - **The sidecar** `<resolved brain>.mnemo-shared/`, created and checked
+    before use, with its files opened relative to it.
+    - `lock-info` is written after the lock by temp name and rename, and
+      removed before the unlock.
+    - When the sidecar is unusable or unwritable, the main lock is taken
+      alone, with a notice.
+    - On Windows the checks are the ones std offers safely; there's no
+      owner check there.
+    - `rustix` 0.38.44 (already in the tree through fs4, same version) is
+      added as a Unix dependency with the `process` feature. No new crates;
+      `cargo deny` passes.
+  - **The filesystem checks:**
+    - macOS: `MNT_LOCAL`, plus iCloud Drive and `CloudStorage` refused and
+      `~/Desktop` and `~/Documents` warned outside a `*.nosync` folder;
+    - Linux: an allow-list;
+    - Windows: UNC paths refused.
+    - `allow_network_fs` overrides. The refusal is `MnemoError::Unsupported`.
+  - **The Windows refusal:** `build.rs` sets `mnemo_windows_old_rename` on
+    Windows with rustc < 1.85. The constructor then returns "shared mode on
+    Windows needs a build with Rust 1.85 or later".
+  - **Errors:** `MnemoError::Locked` gains `holder: Option<String>`, and
+    there are new `Cancelled` and `Unsupported` variants. UniFFI reports
+    both as `Io`; Python falls back to its base `MnemoError`.
+  - **Docs:** the CHANGELOG `[Unreleased]` (Added and Changed), and the
+    design note's Windows line, which now says shared mode refuses there.
+  - **Test hooks:** `__shared` (failpoints builds only), since nothing
+    calls the layer until 2b.
+- **6df0ad1 `ci`:** the `windows-msrv` job (windows-latest, Rust 1.75,
+  `--locked`) runs `replaced_file` and `shared_lock`.
+- **6b0a7bf:** the HANDOFF, `*.mnemo-shared/` in `.gitignore` after the
+  `*.mnemo` lines.
+- **c90b281, 332df27:**
+  - The job sets `MNEMO_EXPECT_SHARED_REFUSAL`, so the refusal test
+    requires the refusal instead of passing either way.
+  - Clippy's `assertions_on_constants` (stable 1.100 on CI; not raised by
+    1.95 locally) is allowed on that test.
+  - CI on c90b281 (43367742947) failed on that lint in the three `rust`
+    jobs. The earlier heads' runs were cancelled or superseded.
+- **The tests** (`tests/shared_lock.rs`, 16):
+  - the deadline and the holder's note;
+  - a cancelled wait, returning at once and holding no lock;
+  - a writer against eight busy readers (100 writes; longest wait about
+    8 ms locally, asserted under 1 s);
+  - the one-try reader (the intent lock free while readers wait);
+  - never creating the brain, at setup or after a delete;
+  - the lock on the file at the path;
+  - FLAKE-1's pattern (3,492 calls while 201 children spawned; after every
+    call a fresh open finds both locks free);
+  - the Linux allow-list and the macOS synced-folder rule;
+  - on Unix: the resolved path, a symlinked or open (0755) sidecar
+    directory, a symlink at each fixed name (the other file is untouched),
+    and an unwritable directory.
+- **Not tested:** a sidecar owned by another user (it needs a second user;
+  the 0700 check covers the shape), Windows sidecar edge cases, and a real
+  network filesystem.
+- **Local:**
+  - `cargo test --features failpoints` (403 pass);
+  - on Rust 1.75 (macOS): `shared_lock` and `replaced_file`;
+  - clippy `-D warnings` on all targets;
+  - UniFFI (23);
+  - `cargo deny`;
+  - the Python suite.
+- **The gates on 332df27** (PR runs; there are no push runs until it
+  merges):
+  - CI 43368855991, green on attempt 1, all 13 jobs, `windows-msrv (rust
+    1.75)` included. Its log shows rustc 1.75.0 and
+    `MNEMO_EXPECT_SHARED_REFUSAL: 1`; `replaced_file` passes 6 and
+    `shared_lock` passes 11 (the Unix-only tests aren't built there),
+    including the refusal test;
+  - Mobile CI 43368855993, green on attempt 1.
+- **For the Planner:**
+  - The Linux allow-list adds overlayfs (a container's own disk; its locks
+    are local) and zfs to the note's five.
+  - On Windows the network check refuses UNC paths only: `GetDriveType`
+    needs `unsafe`, and a mapped drive that doesn't canonicalize to UNC
+    isn't caught.
+  - `Locked`'s new field is a small break for exhaustive patterns (0.x
+    minor).
+- **Stopped** before merging, for review. 2b starts after PR 65 merges.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 2a accepted (PR 65); step 2b dispatched
+
+**Step 2a (PR 65, head 332df27): ACCEPTED, merge it.**
+- Checked on GitHub: open, mergeable, 19 of 19 checks green on 332df27,
+  `windows-msrv (rust 1.75)` included. 20 files, about 1,750 lines.
+- Read `shared/lock.rs`, `shared/sidecar.rs`, `shared/fscheck.rs` and the
+  error changes against the note:
+  - the one-try reader, the writer keeping the intent lock while it waits,
+    and one deadline across both locks and the identity retries: as
+    signed off;
+  - the sidecar: `mkdir` 0700, opened `O_NOFOLLOW | O_DIRECTORY` and
+    checked through its descriptor (directory, owner, no group or other
+    bits); files by `openat` with `O_NOFOLLOW` (and `O_EXCL` when new,
+    `O_NONBLOCK` so a FIFO can't hang an open), each existing file checked
+    as a regular file of this user's; `lock-info` by temp name and rename,
+    after the lock, removed before the unlock, and cleaned of control
+    characters before it's shown. As the held rules ask;
+  - the Windows pre-1.85 refusal through `build.rs`, and the CI leg that
+    requires it.
+- **The Worker's three points:**
+  - **overlayfs and zfs on the Linux allow-list: accepted.** zfs's locks
+    are local. overlayfs's `flock` is consistent across a file's copy-up
+    from Linux 4.19 (2018) on; before that a lock could land on the lower
+    file. Add a line to the docs: shared mode on overlayfs assumes Linux
+    4.19 or later.
+  - **Windows checks UNC paths only: accepted for v0.14.** The crate
+    forbids `unsafe`, and a canonicalized mapped share is usually UNC. A
+    docs line says a drive letter mapped to a network share may not be
+    detected. Later candidate: `GetDriveType` through a small helper
+    outside the `forbid(unsafe_code)` crate.
+  - **`Locked`'s new field: accepted** (0.x minor, in the CHANGELOG).
+- **Two small changes, in 2b's PR:**
+  - mark `MnemoError` `#[non_exhaustive]` (and the `Locked` variant), in
+    this breaking release, so 2b's `MaybeStored` and later variants or
+    fields don't break callers again. CHANGELOG under Changed;
+  - in `acquire`, retry a `Replaced` file at once the first time, then
+    with the normal backoff, so a path that keeps failing the identity
+    check can't spin a core until the deadline.
+
+**REVIEWER-B:** my recommendation to the user is one REVIEWER-B review of
+2a and 2b together once 2b is green, before step 3, rather than one per
+PR. Merging 2a into the release branch now is reversible, and anything
+found lands before v0.14.0's READY. The user decides.
+
+**DISPATCH — v0.14.0 step 2b, `open_shared`.**
+- Merge PR 65 normally (no WIP commits), then branch 2b from
+  `release-0.14.0`.
+- Build it to my 2026-11-13 step 2 dispatch and the note's "The protocol"
+  steps 4 to 8, "Catching up" (the full reload), and "Writes that only this
+  handle makes" items 1 and 2, plus the two small changes above and the
+  two docs lines (overlayfs, Windows mapped drives).
+- Tests for 2b's own code: the seal's three outcomes (equal, another
+  commit, a compaction's new key); a reload keeping settings and the
+  embedder and clearing the page cache; a failed commit leaving the stamp
+  cleared (failpoints, in a process that lives on); `MaybeStored`; the
+  reload after a replay; the lease per window (no generation reused across
+  two handles' interleaved windows); the identity check after a commit; the
+  statistics delta applied with the next commit and dropped at close; an
+  explicit setting refused.
+- Rust API only; surfaces are step 4.
+- Log DONE when the PR is green, with the PR number and the runs, and stop
+  before merging.
