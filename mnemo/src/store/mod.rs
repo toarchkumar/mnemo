@@ -901,7 +901,9 @@ pub struct Mnemo {
     header: Header,
     catalog: Vec<CatalogEntry>,
     index: IdIndex,
-    #[allow(dead_code)]
+    /// The path this handle opened, made absolute at open (so a later
+    /// change of the process's directory doesn't change what it names).
+    /// `ensure_not_replaced` checks that it still names the open file.
     path: PathBuf,
     dimensions: usize,
     kdf: KdfParams,

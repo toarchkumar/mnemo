@@ -837,6 +837,7 @@ dependencies = [
  "rmp",
  "rmp-serde",
  "rpassword",
+ "same-file",
  "serde",
  "serde_json",
  "sha2",

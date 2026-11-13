@@ -267,6 +267,11 @@ impl Pager {
         &self.dek
     }
 
+    /// The underlying file (its identity is checked before each commit).
+    pub fn file(&self) -> &File {
+        &self.file
+    }
+
     /// Mutable access to the underlying file. Used by the WAL, which writes
     /// its log frames directly rather than through the page cache.
     pub fn file_mut(&mut self) -> &mut File {

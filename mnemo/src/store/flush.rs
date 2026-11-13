@@ -206,6 +206,9 @@ impl Mnemo {
             self.fsyncs_last_flush = 0;
             return Ok(());
         }
+        // v0.14.0 step 1: nothing is written to a file that was replaced at
+        // this handle's path.
+        self.ensure_not_replaced()?;
 
         // FIX-1 R-001.8 part 3: snapshot the memory/index-dirty flags
         // before step 3b decides whether to push a restore point.

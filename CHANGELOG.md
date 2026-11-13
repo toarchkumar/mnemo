@@ -8,6 +8,34 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A write racing a compaction is no longer lost.** `compact_file` (and so
+  `mnemo compact` and `mnemo rekey --rotate`) released the old file's lock
+  before renaming the compacted copy over it. A process waiting on the lock
+  could take it in that moment, commit to the file being replaced, and see
+  its write succeed and then vanish: in a test that retries a writer
+  against a compaction loop, 149 of 150 acknowledged writes were lost on
+  v0.13.2. Now the lock is held through the rename and the directory sync,
+  and every open checks, once it holds the lock, that the path still names
+  the file it locked (and retries if not). The rename over a file another
+  handle holds open and locked works on Linux, macOS and Windows (tested on
+  CI). The test runs on every CI OS.
+- **A handle refuses to write to a file that was replaced at its path**
+  (another program moved a file over it, say). Each commit and `rekey`
+  checks the file's identity (`dev`/`ino`, or the volume serial number and
+  file index on Windows), and returns the new `MnemoError::Replaced`
+  without writing anything; reopen the path to use the new file. The
+  Swift and Kotlin bindings report it as `Io`, with the same message.
+- **A refused `create` no longer empties the file it was refused.**
+  `Mnemo::create` truncated the path before it tried the lock, so creating
+  over a file another handle had open destroyed it, then returned `Locked`.
+  The file is now truncated only once the lock is held.
+- **Compaction and `export_encrypted` temp files have unique names**
+  (`<file>.compact-<pid>-<n>-<nanos>.tmp`), so two never share one. A
+  crash can leave one behind; it's safe to delete when no compaction is
+  running.
+
 ## [0.13.2] — 2026-11-12
 
 A patch release: a failed `rekey` now leaves the old secret in force,

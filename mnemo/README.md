@@ -438,6 +438,16 @@ with the default `track_access(true)` counts as a mutation (it bumps
 catalog access stats) and requires `track_access(false)` on a read-only
 handle. The matching CLI knob is `mnemo recall --no-track`.
 
+**Compaction replaces the file, safely** (v0.14.0). `compact_file` writes
+the compacted copy to a temp file next to the original and renames it over
+the path while it still holds the old file's exclusive lock, so a process
+waiting on the lock never commits to the file being replaced. Every open
+checks, once it holds its lock, that the path still names the locked file,
+and retries if not. A handle whose path was replaced while it was open
+(another program moved a file over it) refuses its next commit with
+`MnemoError::Replaced` and writes nothing; reopen the path. The rename
+works the same on Linux, macOS and Windows.
+
 Two conditions block a read-only open and return `MnemoError::NeedsWriteOpen`:
 a committed-but-uncheckpointed WAL transaction waiting to be replayed on
 open, and an on-disk format version older than the current build. Both cases

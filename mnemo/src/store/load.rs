@@ -13,14 +13,87 @@ use super::*;
 /// The file comes back as a [`LockedFile`], which unlocks explicitly on
 /// drop, so a failed open (a wrong key, say) releases the lock as promptly
 /// as a closed handle does.
+///
+/// v0.14.0 step 1 (12.4's design note, "Gaps in today's code"):
+/// - **Truncation waits for the lock.** `create` used to open with
+///   `O_TRUNC`, which empties the file before the lock is even tried, so a
+///   refused `create` over a file another handle had open destroyed it. Now
+///   the file is truncated only once the exclusive lock is held.
+/// - **The lock must be on the file the path names.** Between the open and
+///   the lock, another process can rename a new file over the path (a
+///   compaction does, holding the old file's lock until it has). The lock
+///   then lands on the replaced file, and every write to it is lost. So
+///   after locking, the open file is compared with the one at the path,
+///   and on a mismatch the open is retried on the new file.
 pub(super) fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<LockedFile> {
+    const ATTEMPTS: usize = 8;
+    for _ in 0..ATTEMPTS {
+        let file = open_and_lock_once(path, write, create)?;
+        if is_file_at(&file, path)? {
+            if create {
+                file.set_len(0)?;
+            }
+            return Ok(file);
+        }
+        // Replaced between our open and our lock: unlock (on drop) and open
+        // whatever the path names now.
+    }
+    Err(MnemoError::Replaced {
+        path: path.to_path_buf(),
+    })
+}
+
+/// `path` made absolute against the current directory, without resolving
+/// symlinks (a later check re-resolves them, so it follows the path as it
+/// is then). If the current directory can't be read, the path is kept as
+/// given. (`std::path::absolute` needs Rust 1.79; the MSRV is 1.75.)
+pub(super) fn absolute(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    match std::env::current_dir() {
+        Ok(dir) => dir.join(path),
+        Err(_) => path,
+    }
+}
+
+impl Mnemo {
+    /// v0.14.0 step 1: refuse to write when the file at this handle's path
+    /// is no longer the one it has open (something renamed another file
+    /// over it), since every write would go to the replaced file and be
+    /// lost. Called before each commit (`flush`, `rekey`); costs a `stat`
+    /// of the path and of the open file.
+    pub(super) fn ensure_not_replaced(&self) -> Result<()> {
+        if is_file_at(self.pager.file(), &self.path)? {
+            Ok(())
+        } else {
+            Err(MnemoError::Replaced {
+                path: self.path.clone(),
+            })
+        }
+    }
+}
+
+/// Does `path` still name the file `file` has open? `false` when the path
+/// names another file, or none (it was removed or renamed away).
+pub(super) fn is_file_at(file: &File, path: &Path) -> Result<bool> {
+    let open = same_file::Handle::from_file(file.try_clone()?)?;
+    match same_file::Handle::from_path(path) {
+        Ok(at_path) => Ok(at_path == open),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(MnemoError::Io(e)),
+    }
+}
+
+fn open_and_lock_once(path: &Path, write: bool, create: bool) -> Result<LockedFile> {
     let mut opts = OpenOptions::new();
     opts.read(true);
     if write {
         opts.write(true);
     }
     if create {
-        opts.create(true).truncate(true);
+        // No `truncate(true)`: see `open_with_lock`.
+        opts.create(true);
     }
     let file = opts.open(path)?;
     // On success the returned `Result<()>` is `Ok(())`. On conflict:
@@ -73,9 +146,24 @@ pub(super) fn paths_refer_to_same_file(a: &Path, b: &Path) -> Option<bool> {
 /// `.export-tmp`. Lives in `dest`'s own parent directory so the final
 /// [`std::fs::rename`] is same-filesystem (and therefore atomic on
 /// every platform mnemo supports).
-pub(super) fn temp_sibling(dest: &Path) -> PathBuf {
+/// A temp file name next to `dest`, unique to this call: `<dest>.<what>-<pid>-<n>.tmp`.
+/// Two exports or compactions of one file, in one process or two, never
+/// share a temp file (v0.14.0 step 1; the fixed `.compact-tmp` name let a
+/// second compaction truncate the first one's copy mid-write). A crash can
+/// leave one behind; it's safe to delete when no compaction is running.
+pub(super) fn temp_sibling(dest: &Path, what: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
     let mut buf = dest.as_os_str().to_os_string();
-    buf.push(".export-tmp");
+    buf.push(format!(
+        ".{what}-{}-{n}-{nanos:08x}.tmp",
+        std::process::id()
+    ));
     PathBuf::from(buf)
 }
 

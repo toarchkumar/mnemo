@@ -101,6 +101,14 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             E::Locked { path } => MnemoError::Locked {
                 path: path.display().to_string(),
             },
+            // v0.14.0 step 1: the file at the handle's path was replaced, and
+            // nothing was written. `Io` with the engine's message, which says
+            // to reopen. Not `Closed`: the stores retry a `Closed` call on a
+            // fresh handle, which would hide that writes buffered in this
+            // handle since its last commit were meant for the replaced file.
+            other @ E::Replaced { .. } => MnemoError::Io {
+                message: other.to_string(),
+            },
             E::WrongPassphrase => MnemoError::WrongPassphrase,
             E::HeaderTampered => MnemoError::HeaderTampered,
             other @ E::UnsupportedVersion(_) => {

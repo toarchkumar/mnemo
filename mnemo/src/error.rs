@@ -81,6 +81,20 @@ pub enum MnemoError {
         path: std::path::PathBuf,
     },
 
+    /// The file at this handle's path is no longer the file the handle
+    /// opened: something renamed another file over it (a compaction in
+    /// another process, or another program). Writing would go to the
+    /// replaced file and be lost, so the handle refuses, and writes nothing.
+    /// Reopen the path to use the file that's there now.
+    #[error(
+        "the file at {path} was replaced after this handle opened it (by a \
+         compaction, or by another program); nothing was written. Reopen it"
+    )]
+    Replaced {
+        /// The path that now names a different file.
+        path: std::path::PathBuf,
+    },
+
     /// A mutation was attempted on a handle opened via
     /// [`crate::Mnemo::open_read_only`]. Reopen read-write to mutate.
     #[error("operation requires a read-write handle (this one is read-only)")]

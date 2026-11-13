@@ -24,9 +24,9 @@ impl Mnemo {
     /// `O_TRUNC`, so a naive export-to-self destroys the source).
     /// Unix: compares `(dev, ino)` of both paths via `MetadataExt`,
     /// catching symlinks and hard links. Windows: compares
-    /// canonicalized paths; a rename onto an open file also fails on
-    /// Windows because of the mandatory lock the handle holds, so the
-    /// rename step is a second line of defense.
+    /// canonicalized paths. (The rename is no second line of defense:
+    /// renaming over a file another handle holds open and locked
+    /// succeeds on Windows too, as a 2026-11-13 CI probe showed.)
     ///
     /// Reads the bytes from the already-open file handle, not by
     /// `fs::copy`. On Windows that matters: `LockFileEx` locks are
@@ -62,7 +62,7 @@ impl Mnemo {
                 dest.display()
             ))
         })?;
-        let tmp = temp_sibling(dest);
+        let tmp = temp_sibling(dest, "export");
         // Scope the temp handle so it closes before the rename on
         // Windows (which refuses to rename over an open file).
         {
@@ -152,6 +152,9 @@ impl Mnemo {
         }
         self.rekey_cleanup = None;
         self.flush()?;
+        // v0.14.0 step 1: `flush` checks only when it has something to
+        // write; the rekey writes either way.
+        self.ensure_not_replaced()?;
         let new_salt = crypto::random_salt();
         let new_kek = crypto::derive_kek(secret, &new_salt, kdf)?;
         let new_nonce = crypto::random_nonce();
@@ -721,10 +724,41 @@ impl Mnemo {
         let mut old = Mnemo::open_secret_with(path, secret, true)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
-        let tmp = format!("{path}.compact-tmp");
+        // v0.14.0 step 1: a name no other compaction shares.
+        let tmp = temp_sibling(Path::new(path), "compact");
+        let result = Self::compact_into(&mut old, path, &tmp, secret, dims, kdf, format_version);
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        // Only now does the old file's lock go: see `compact_into`.
+        drop(old);
+        result
+    }
 
+    /// Write the compacted copy of `old` to `tmp`, then rename it over
+    /// `path`, all while `old` holds the old file's exclusive lock.
+    ///
+    /// v0.14.0 step 1 (12.4's design note, "Gaps in today's code"): the lock
+    /// used to be released before the rename. A process that opened the
+    /// path in that window locked the old file and wrote to it, and the
+    /// rename then replaced it, losing those writes. Holding the lock
+    /// through the rename and the directory sync means a process either
+    /// waits on the old file's lock (and then finds, by `open_with_lock`'s
+    /// identity check, that the path names the new file) or opens the new
+    /// file. Renaming over a file another handle holds open and locked
+    /// works on Linux, macOS and Windows (probed on CI, 2026-11-13).
+    #[allow(clippy::too_many_arguments)]
+    fn compact_into(
+        old: &mut Mnemo,
+        path: &str,
+        tmp: &Path,
+        secret: &[u8],
+        dims: usize,
+        kdf: KdfParams,
+        format_version: u16,
+    ) -> Result<CompactReport> {
         let mut new = Mnemo::create_secret(
-            &tmp,
+            tmp,
             secret,
             MnemoConfig {
                 dimensions: dims,
@@ -740,10 +774,24 @@ impl Mnemo {
         let report = old.copy_live_into(&mut new)?;
 
         new.flush()?;
+        // The new file is closed before the rename: Windows won't rename a
+        // file this process still has open.
         drop(new);
-        drop(old);
 
-        std::fs::rename(&tmp, path)?;
+        std::fs::rename(tmp, path)?;
+        // Make the rename durable before the old file's lock goes.
+        #[cfg(unix)]
+        if let Some(parent) = Path::new(path).parent() {
+            let parent = if parent.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                parent
+            };
+            if let Ok(dir) = File::open(parent) {
+                let _ = dir.sync_all();
+                crate::bump_fsync();
+            }
+        }
         Ok(report)
     }
 

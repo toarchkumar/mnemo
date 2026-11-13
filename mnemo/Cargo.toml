@@ -113,6 +113,12 @@ rpassword = "=7.3.1"
 # See CHANGELOG's Phase 1.1 entry. If this fails to build on your
 # toolchain, the fallback is `fd-lock`.
 fs4 = { version = "=0.9.1", default-features = false, features = ["sync"] }
+# The identity of an open file and of the file at a path, compared to tell
+# whether the path still names the file a handle opened (`dev`/`ino` on
+# Unix; the volume serial number and file index on Windows). Safe Rust over
+# `winapi-util` on Windows, so it fits `#![forbid(unsafe_code)]`. Already in
+# the lockfile through criterion's walkdir.
+same-file = "=1.0.6"
 # SHA-256 for the result-cache key hashing (Phase 10.1). Pure Rust,
 # widely deployed, small. RustCrypto family, so it interops with the
 # same digest traits `argon2` and `blake2` already pull in transitively.
