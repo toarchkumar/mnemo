@@ -32,6 +32,27 @@ pub(crate) mod failpoints {
         // How many writes in a row fail once the counter fires (12.4's
         // MaybeStored test fails the checkpoint and then the recovery).
         static FAILS_LEFT: Cell<u32> = const { Cell::new(1) };
+        // REKEY-2 (RB-005.4 item 5): writes counted from the last
+        // `set_writes_failing` (or from the thread's start), and the
+        // write numbers in that count that fail.
+        static WRITES_SEEN: Cell<u64> = const { Cell::new(0) };
+        static FAILING: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Fail exactly the writes numbered in `ns`, counting from 0 at this
+    /// call (each write the pager or the WAL makes is one number). Unlike
+    /// [`set_writes_until_fail_n`], the failing writes needn't be
+    /// consecutive. An empty set disarms it. Independent of
+    /// [`set_writes_until_fail`].
+    pub fn set_writes_failing(ns: &[u64]) {
+        WRITES_SEEN.with(|c| c.set(0));
+        FAILING.with(|f| *f.borrow_mut() = ns.to_vec());
+    }
+
+    /// How many writes this thread has made since the last
+    /// [`set_writes_failing`].
+    pub fn writes_seen() -> u64 {
+        WRITES_SEEN.with(|c| c.get())
     }
 
     /// Arm the pager (and the WAL commit writer) to fail its Nth
@@ -54,6 +75,16 @@ pub(crate) mod failpoints {
     /// WAL commit. Returns `Err` when the counter reaches zero,
     /// simulating a torn write mid-flush.
     pub(crate) fn check() -> std::io::Result<()> {
+        let n = WRITES_SEEN.with(|c| {
+            let n = c.get();
+            c.set(n + 1);
+            n
+        });
+        if FAILING.with(|f| f.borrow().contains(&n)) {
+            return Err(std::io::Error::other(
+                "injected crash (REKEY-2 failpoint set)",
+            ));
+        }
         WRITES_UNTIL_FAIL.with(|c| {
             let v = c.get();
             if v == 0 {

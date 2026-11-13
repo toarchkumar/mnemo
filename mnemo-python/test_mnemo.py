@@ -464,10 +464,33 @@ def test_rekey_cleanup_warning_never_fails_the_call():
                 db.rekey("new-pw", fast=True)
         finally:
             mnemo._dev_set_writes_until_fail(-1)
+        # REKEY-2 (RB-005.3): the same report without the warning.
+        left = db.rekey_cleanup_error()
+        assert left and "injected crash" in left, left
         db.close()
         kinds = [w.category for w in seen]
         assert kinds == [RuntimeWarning], kinds
         assert "rekey succeeded" in str(seen[0].message), seen[0].message
+
+        # A clean rekey resets it; a shared handle has it too.
+        path = os.path.join(d, "c.mnemo")
+        db = mnemo.open(path, "old-pw", dimensions=2)
+        db.remember("clean", "semantic", [1.0, 0.0])
+        assert db.rekey_cleanup_error() is None
+        db.rekey("new-pw", fast=True)
+        assert db.rekey_cleanup_error() is None
+        db.close()
+        s = mnemo.open(path, "new-pw", shared=True)
+        assert s.rekey_cleanup_error() is None
+        mnemo._dev_set_writes_until_fail(2)
+        try:
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                s.rekey("third-pw", fast=True)
+        finally:
+            mnemo._dev_set_writes_until_fail(-1)
+        assert s.rekey_cleanup_error(), "the shared handle reports it too"
+        s.close()
 
         # Under `-W error`, in a fresh interpreter.
         path = os.path.join(d, "e.mnemo")

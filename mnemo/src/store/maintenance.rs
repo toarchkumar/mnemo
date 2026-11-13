@@ -290,11 +290,24 @@ impl Mnemo {
     ) -> MnemoError {
         self.header = before;
         self.kdf = before_kdf;
-        if let Some((start, pages)) = new_region {
-            let _ = wal::scrub_region(self.pager.file_mut(), start, pages);
-        }
+        // RB-005.2: a failed zeroing is reported, not dropped. The old
+        // secret is still in force either way; what's left is a committed
+        // copy of the new key wrap in the region past the file's end,
+        // which a torn-header scan could use with the new secret until a
+        // later write over those pages, or a compaction, clears it.
+        let scrub_failed = new_region.and_then(|(start, pages)| {
+            wal::scrub_region(self.pager.file_mut(), start, pages).err()
+        });
+        let with_scrub_note = |err: MnemoError| match &scrub_failed {
+            None => err,
+            Some(e) => MnemoError::Io(std::io::Error::other(format!(
+                "{err}; the old secret is still in force, but zeroing the new key wrap's \
+                 copy failed ({e}), so a copy may be left in the file until a later write \
+                 or `mnemo compact` clears it"
+            ))),
+        };
         if !page0_written {
-            return err;
+            return with_scrub_note(err);
         }
         self.header.write_counter = self.pager.write_counter;
         let mut page = self.header.to_page();
@@ -304,7 +317,7 @@ impl Mnemo {
             .and_then(|_| self.pager.write_raw(0, &page))
             .and_then(|_| self.pager.sync());
         match put_back {
-            Ok(()) => err,
+            Ok(()) => with_scrub_note(err),
             // `mnemo rekey` looks for "may open with either secret" to leave
             // out its "the passphrase was not changed": keep the phrase.
             Err(again) => MnemoError::Io(std::io::Error::other(format!(

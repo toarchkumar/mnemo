@@ -268,6 +268,18 @@ pub mod __failpoints {
         crate::pager::failpoints::set_writes_until_fail_n(n, count)
     }
 
+    /// Fail exactly the writes numbered in `ns` (from 0, counting from this
+    /// call), consecutive or not; an empty set disarms it.
+    pub fn set_writes_failing(ns: &[u64]) {
+        crate::pager::failpoints::set_writes_failing(ns)
+    }
+
+    /// How many writes this thread has made since the last
+    /// [`set_writes_failing`].
+    pub fn writes_seen() -> u64 {
+        crate::pager::failpoints::writes_seen()
+    }
+
     thread_local! {
         static AFTER_SHARED_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
             const { std::cell::RefCell::new(None) };
