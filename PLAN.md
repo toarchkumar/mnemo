@@ -23024,3 +23024,436 @@ macOS and Windows there, with the Windows count printed.
 4. Log DONE (the merge, its runs, the sync, DOGFOOD-0's recalls and its
    "what worked, what was awkward" notes) and stop. REKEY-2 is next; I
    dispatch it after reading the DONE.
+
+### 2026-11-13 — WORKER — DONE — PR 70 merged; DOGFOOD-0 (35 handover facts in test/project.mnemo, three recalls, notes)
+
+**The merge:**
+- PR 70 squash-merged as **`02a7514`** on `release-0.14.0`;
+  `rel0140-4b-cli-mcp-inspect` deleted.
+- **Push runs on `02a7514`, every job run and green on attempt 1:** CI
+  43504034844 (14 of 14 jobs) and Mobile CI 43504034824 (all six: the iOS
+  cross-build, the Swift simulator, both Android cross-builds, Kotlin,
+  `msrv-uniffi`).
+- **Coordination sync:** **`cafe3e0`** (my 4b DONEs and PLANNER-A's 4b
+  entries).
+- The squash's message body is 4b's first commit's. Fix round 1 and the
+  two test fixes are in the PR's history and in the DONEs above, not in
+  that body.
+
+**DOGFOOD-0:**
+- **Setup:**
+  - `test/.env`, `test/project.mnemo`, `test/requirements.txt` and
+    `test/.venv` (Python 3.11.2, `sentence-transformers` installed) were
+    all there. I checked only that `.env` exists; it was never read or
+    printed by me, only by the script.
+  - **The venv's `mnemo_engine` was stale:** it had no `CancelToken`, so it
+    predated 4a. I rebuilt it with `maturin develop --release` in
+    `mnemo-python`, with the venv active. Nothing else was needed, and no
+    passphrase passed through me.
+- **35 facts stored**, one `project_memory.py remember` call each (182 s in
+  all, about 5 s a call): 23 `semantic`, 6 `procedural`, 6 `episodic`, with
+  importance 0.5 to 0.9 and metadata `{"area":"handover","source":"PLAN.md
+  handover refresh 2026-11-13"}`.
+  - They cover the team and its tmux setup, the pointer protocol, the
+    user's gates, the hop cap, one writer on PLAN.md, the user's style,
+    tmux hygiene, the repo's location and the sync history, how
+    `test/project.mnemo` and `test/.env` are handled, rebuilding the venv,
+    how to check things, the "not run" rule, review triage, where security
+    findings live (the rule only), the release approval, the mobile mode,
+    the credential dates (no values), the queue to v0.14.0, REKEY-2's
+    scope, the release-prep HANDOFF, 12.3 next, the carried notes for
+    12.4 steps 7 to 9, CLEANUP-1, DOGFOOD-0 and HARNESS-DOGFOOD-1, the
+    target market, the spec metrics, the team decision, and where the
+    refresh lives.
+  - **Nothing from `SECURITY.local.md`:** the refresh's line about moving
+    held items out of it was left out, and the file-mode fact is worded
+    from the public CHANGELOG. No secret values.
+
+**The three recalls** (top 3 each; score / similarity; `[handover]` marks the
+new facts):
+1. **"how releases are approved"**
+   1. 0.944 / 0.684 [handover] "A release needs one human approval: the
+      approve-release job on the release environment, whose reviewer is
+      toarchkumar. The four registry environments have no reviewer and hold
+      the secrets."
+   2. 0.622 / 0.451 [handover] "What stops for the user: … the release
+      approval click …"
+   3. 0.593 / 0.468 (older, procedural) "Release flow (MOBILE-1e): one v*
+      tag runs release.yml: the engine (crates.io, PyPI), then the Swift
+      package … and the Android library …"
+2. **"where the repo lives and why"**
+   1. 0.479 / 0.354 [handover] "The old ~/Documents/GitHub/mnemo folder is
+      stale: it reappeared once as iCloud placeholders and was deleted. If
+      it shows up again, touch nothing in it."
+   2. 0.454 / 0.329 [handover] "The repo lives at
+      ~/Documents/GitHub/mnemo.nosync. It was renamed out of iCloud's reach
+      on 2026-11-12, after stale 'name 2.ext' sync copies tripped the
+      Worker twice."
+   3. 0.414 / 0.304 [handover] "Security findings stay in the gitignored
+      SECURITY.local.md, …" (off topic)
+3. **"what stops for the user"**
+   1. 0.665 / 0.482 [handover] "What stops for the user: starting a new
+      roadmap phase or minor release, anything marked 'the user decides', …"
+   2. 0.466 / 0.382 (older, procedural) "Android instrumented tests:
+      ActivityScenario.moveToState(CREATED) stops an activity …" (off
+      topic: it matched on "stops")
+   3. 0.387 / 0.280 [handover] "Sessions send each other pointer messages
+      only …"
+
+**What worked:**
+- **Setup was one command** once I saw the binding was stale. The script
+  reads `test/.env` itself, so the passphrase never passed through an
+  agent.
+- **A fact that opens with the question's own words recalls first, with a
+  clear margin:** "A release needs one human approval…" at 0.94 against
+  0.62, and "What stops for the user: …" at 0.67 against 0.47.
+- One fact per call kept each memory small and specific, and the
+  `[handover]` area tag makes the new facts easy to tell from the old ones.
+
+**What was awkward:**
+1. **The stale binding was invisible.** The venv's wheel and the tree both
+   say 0.13.2, because the version doesn't move until the release, so
+   nothing said the binding predated 4a until I checked for a new name.
+   - For 12.2: a dogfood helper should check its binding against the tree
+     (a build hash in `build_info()`, or a feature check) and say when to
+     rebuild.
+2. **About 5 s per `remember`, almost all of it start-up:** a new Python
+   process, loading MiniLM, and the KDF, for every fact (182 s for 35).
+   - For 12.3 and 13.x: a batch mode (`remember --from-file`, one process,
+     one model load, one open) would make a 35-fact refresh take seconds.
+   - The KDF goes with 12.3's keychain raw key.
+3. **"Why" questions recall weakly.** "where the repo lives and why" had
+   top similarities of 0.35 and 0.33. The stale-folder fact, which shares
+   "~/Documents/GitHub/mnemo", beat the fact that answers the question, and
+   an unrelated fact came third.
+   - MiniLM matches surface words: the answer's "renamed out of iCloud's
+     reach" doesn't look like "why".
+   - Writing facts as answers to the questions people will ask ("The repo
+     lives at X because …") would help, and so would keyword recall:
+     `recall_text` has `keywords=` (BM25), which `project_memory.py
+     recall` doesn't expose.
+4. **One shared word pulls in off-topic memories:** "stops" brought an
+   Android lifecycle note into "what stops for the user" at #2.
+   - Scoping recall by `metadata.area` (the script has no filter flag; the
+     engine has `filter=`), or a minimum similarity, would keep the
+     handover answers together.
+5. **The script opens the brain plainly**, which holds the lock for the
+   call. Any reader at the time (the Planner reads read-only) makes a write
+   fail with `Locked`, instead of waiting. Nobody had it open here, so it
+   didn't happen. With v0.14 the script can open with `shared=True` (and
+   `wait=`), which is what 12.2's hooks will want too.
+
+**Not done:** nothing else from the dispatch. REKEY-2 waits for your
+dispatch.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — PR 70's merge and DOGFOOD-0 accepted; REKEY-2 dispatched; DOGFOOD-1 (the script) queued after it
+
+**Accepted:** PR 70 squash-merged as `02a7514`, CI and Mobile CI green on
+the push with every job run; sync `cafe3e0`; DOGFOOD-0 (35 facts, nothing
+from `SECURITY.local.md`, no secret values, the venv rebuilt without a
+passphrase passing through an agent). **Step 4 of 12.4 is done.**
+
+**DOGFOOD-0's notes are its real output.** Carried into the specs:
+- **12.2:** a dogfood helper checks its binding against the tree and says
+  when to rebuild (a stale wheel that says the same version is invisible);
+  hooks and the script open with `shared=True, wait=2`.
+- **12.3 / 13.x:** a batch `remember` (one process, one model load, one
+  open; 35 facts took 182 s, about 5 s each, nearly all start-up); the
+  keychain raw key removes the per-process KDF.
+- **Recall quality:** "why" questions recall weakly with MiniLM alone;
+  facts written as answers ("X because Y") and keyword recall (BM25) help;
+  one shared word pulls in off-topic memories, so a scope filter or minimum
+  similarity helps.
+- **For me:** `project_memory.py recall` opens the brain read-write
+  (`mnemo.open`), so the Planner and the Reviewers, who must open it
+  read-only, can't use it. That blocks the handover's "try recall next to
+  reading this section".
+
+**DISPATCH — REKEY-2,** one PR into `release-0.14.0` (the scope queued in
+my 2026-11-12 RB-005 triage):
+- **RB-005.2, recommendation 1:** `undo_rekey`
+  (`store/maintenance.rs:294`) no longer discards `wal::scrub_region`'s
+  result. If the zeroing fails, the error says what the double failure
+  says: the old secret is in force, a copy of the new key wrap may be left
+  in the file, and a later write or `compact` clears it. Also through
+  `SharedMnemo::rekey` and the CLI's `rekey` message.
+- **RB-005.3, recommendation 2:** `rekey_cleanup_error()` on the Python
+  handle (plain and shared), as in Rust, with the `RuntimeWarning` kept as a
+  convenience; the Python README row.
+- **RB-005.4 item 5:** a failpoint that fails a **set** of write numbers
+  (not only a run of consecutive ones; `set_writes_until_fail_n` covers
+  runs), so `tests/rekey_cut.rs` keeps tests for: the write-back's failure,
+  the "may open with either secret" message, and a failed zeroing in
+  `undo_rekey` (RB-005.2's case: page 0's write fails, then the zeroing,
+  then the write-back succeeds). Where it's cheap, the same cases through
+  `SharedMnemo::rekey`.
+- Each new test checked against its fix undone, as before. CHANGELOG
+  `[Unreleased]` under Fixed. Neutral wording isn't needed: RB-005.2 and .3
+  are public in `reviewer_notes.md`.
+- Log DONE when green, with the PR number and the runs, and stop before
+  merging.
+
+**Queued after REKEY-2, before step 5: DOGFOOD-1, `test/scripts/project_memory.py`**
+(test tooling, not shipped; its own small PR):
+- `recall` opens read-only (`read_only=True`, with tracking off, as now),
+  or through `shared=True` if read-only can't recall by text; so a Planner
+  or Reviewer can use it;
+- writes open with `shared=True, wait=2.0`;
+- `remember --from-file <jsonl>`: many facts in one process, one model load
+  and one open;
+- `recall --area <name>` (the engine's `filter=` on `metadata.area`) and
+  `--keywords` (BM25);
+- a check that the installed `mnemo_engine` matches the tree (a missing
+  name such as `CancelToken`, or a build hash if one exists), with the
+  rebuild command.
+I'll dispatch it at REKEY-2's DONE.
+
+### 2026-11-13 — WORKER — BLOCKED — REKEY-2 (PR 71) built, 13 of 14 green; a second intermittent failure in step 3's sidecar-removal test (an assertion this time)
+
+**REKEY-2 is built:** PR 71 (`rel0140-rekey2`), two commits.
+- **`349ba44`, the first commit:**
+  - `undo_rekey` keeps `wal::scrub_region`'s error. The error then says the
+    old secret is still in force but a copy of the new key wrap may be left
+    until a later write or `mnemo compact` clears it.
+  - Python `rekey_cleanup_error()` on plain and shared handles, with the
+    README row.
+  - `__failpoints::set_writes_failing(&[..])` and `writes_seen()`.
+  - Three tests in `tests/rekey_cut.rs`.
+- **`6da5649`:** one of those tests read the brain's bytes while its own
+  handle held the lock, which Windows refuses (os error 33; it failed
+  `rust (windows-latest)` on the first push, CI 43507575982). It now drops
+  the handle first; drop writes nothing.
+- **Local:** 469 passed, 0 failed; the Python suite passes; clippy and fmt
+  clean.
+- **Undo check:** dropping the zeroing's error again fails both zeroing
+  tests (2 of 2).
+
+**The failure:** CI 43508928127 on `6da5649`, **13 of 14 green** (Windows
+included). `rust (ubuntu-latest)` (job 132173773059) failed in
+`the_sidecar_removed_while_two_processes_write`
+(`tests/cross_process.rs:958`, step 3, with option 1's delete retry):
+```
+the sidecar wasn't made again
+```
+- **This time it's an assertion, not the test's own delete.** After its
+  last removal, the test sleeps a fixed 300 ms and asserts the two writer
+  children have made the sidecar directory again.
+- It passed on every other run, 50 of 50 locally under `MNEMO_STRESS=1`
+  included. REKEY-2 touches none of this code: the children use
+  `open_shared` and the 2c reopen.
+
+**What I think happened (not proven):** the 300 ms is a timing bound on
+live processes.
+- A child makes the directory again only at its next lock-file open after
+  the deletion. That's a call after its stale descriptor stops working.
+- The bounded delete retry added in 4b can itself take up to about 500 ms
+  while the children write into the moved directory.
+- On a loaded runner, with this binary's other cross-process tests running
+  their own children at the same time, two children may not each finish a
+  call inside 300 ms.
+- I can't rule out an engine path where a child keeps a stale sidecar
+  longer, though I found none by reading:
+  - every failed lock-file open reopens by path once per call;
+  - an `Unavailable` keeps the old `Arc` and tries again on the next call.
+
+**Why I stopped:** the step 3 rule (an intermittent failure is a bug until
+shown otherwise), and this is an assertion, which your last decision kept
+absolute.
+
+**Options**, none applied:
+1. **A bounded wait instead of the fixed sleep.** Poll `side.is_dir()` up
+   to, say, 10 s, then assert. It's the same claim ("the children make it
+   again") with a deadline that fits a loaded runner. This changes the
+   assertion's timing, not what it asserts.
+2. **Make the children's next call deterministic:** a marker each writer
+   child writes after every acknowledged write; wait for one new marker per
+   child after the last removal, then assert. No timing guess at all.
+3. **Run the test alone** (a separate test binary or `--test-threads=1` for
+   that file), to cut the load, and keep the 300 ms. This doesn't fix the
+   bound, only the load.
+
+My recommendation is 2, with 1's deadline as a cap. Then I can also count,
+in the DONE, how long the recreation took.
+
+**To unblock:** pick one. I'll apply it as its own `test(shared): …` commit
+in PR 71 (or a separate PR if you'd rather keep REKEY-2 to its scope),
+re-run CI, and log REKEY-2's DONE.
+
+### 2026-11-13 — PLANNER-A — DECISION — unblocked: the sidecar test waits for calls, not a fixed 300 ms (option 2, two acknowledged writes per child, 10 s cap)
+
+**Read:** `tests/cross_process.rs` at `origin/rel0140-rekey2` (the fixed
+`sleep(300ms)` then `assert!(side.is_dir())`) and `shared/lock.rs:241-253`
+(a failed `lock_file(INTENT)` reopens the sidecar by path once per call).
+The assertion claims "the children make it again at their next calls", but
+it checks that with a wall-clock guess. On a loaded runner, a 300 ms window
+can hold no call that started after the last removal. The diagnosis fits.
+No engine path that keeps a stale sidecar across a call was found, by the
+Worker or by me.
+
+**DECISION: option 2,** with one refinement:
+- After the last removal, wait until **each** writer child has acknowledged
+  **two** more writes. The first may come from a call that started before
+  the removal; the second's call started after the first's acknowledgement,
+  so it started after the removal. Then assert `side.is_dir()`.
+- Cap the wait at 10 s. Hitting the cap fails the test with the counts, so
+  a child that stops making progress is still caught.
+- The claim is unchanged and now exact: a call that starts after the
+  removal makes the sidecar again (no notice, which the test already
+  asserts). Print the time from the last removal to the assertion; give the
+  local and CI numbers in the DONE.
+- Its own `test(shared): …` commit in PR 71. This doesn't count as a fix
+  round.
+
+**On "no retries in tests":** waiting for an event with a deadline isn't a
+retry; it replaces a guess. Use the same shape wherever a test sleeps a fixed
+time and then asserts on another process's progress. In the DONE, list any
+other test in `cross_process.rs` or `cli_shared.rs` that does that, with a
+one-line verdict for each. Change only this one now.
+
+**REKEY-2 itself** (read from the BLOCKED entry; I'll read the diff at the
+DONE): the shape matches the dispatch.
+
+**Then:** all checks green, log REKEY-2's DONE, and stop before merging.
+
+### 2026-11-13 — WORKER — DONE — REKEY-2 (PR 71, green, not merged), with the sidecar test's wait
+
+**PR 71** (`rel0140-rekey2` into `release-0.14.0`), three commits:
+- `349ba44` REKEY-2;
+- `6da5649` a Windows fix to one of its new tests;
+- `b78c7c9` the sidecar test's wait, as decided.
+
+It has fix-ups, so **Squash and merge**. **Runs on `b78c7c9`:** CI
+43510594865, **14 of 14 checks green** on attempt 1. The earlier heads:
+- CI 43507575982 on `349ba44`: my new test read a locked file on Windows;
+- CI 43508928127 on `6da5649`: the sidecar assertion on Linux (the BLOCKED
+  entry above).
+
+Mobile CI doesn't run on the PR (no paths it watches); it runs on the merge
+push. Stopped before merging.
+
+**REKEY-2:**
+- **RB-005.2, recommendation 1:** `undo_rekey` keeps `wal::scrub_region`'s
+  error instead of dropping it.
+  - When the zeroing fails, the error becomes "<the original error>; the
+    old secret is still in force, but zeroing the new key wrap's copy
+    failed (<error>), so a copy may be left in the file until a later write
+    or `mnemo compact` clears it". That's for both undo paths: page 0
+    written or not.
+  - A failed write-back keeps its "may open with either secret" message,
+    which the CLI keys on.
+  - The note reaches `SharedMnemo::rekey` (its error passes through the
+    window as a plain error) and `mnemo rekey`, which prints it with its
+    usual "; the passphrase was not changed".
+- **RB-005.3, recommendation 2:** `Mnemo.rekey_cleanup_error()` in Python,
+  on plain and shared handles; the `RuntimeWarning` is kept; the README row.
+- **RB-005.4 item 5:** `__failpoints::set_writes_failing(&[..])` fails a set
+  of write numbers, consecutive or not, counted from the call, with
+  `writes_seen()`. It's independent of `set_writes_until_fail`.
+- **Tests, `tests/rekey_cut.rs` (3 new):**
+  - **A failed zeroing in the undo**, passphrase and raw key: page 0's
+    write fails, then the zeroing, then the write-back succeeds.
+    - The message says what's left, and not "either secret".
+    - The old secret opens the file; the new one gets `WrongPassphrase`.
+    - **A torn copy taken right after lets the new secret recover**, so the
+      copy really is there. After a later write and close, a torn copy
+      doesn't, so the later write clears it, as the message says.
+  - **A failed write-back** (page 0's write and the write-back fail, the
+    zeroing works): "may open with either secret", and one of the two
+    secrets opens the file.
+  - **The zeroing case through `SharedMnemo::rekey`:** the same message,
+    the handle keeps the old secret, and it follows a compaction under it.
+- **The Python test** checks `rekey_cleanup_error()` after the cut-short
+  cleanup (plain), `None` after a clean rekey, and the report on a shared
+  handle.
+- **Undo check:** dropping the zeroing's error again fails both zeroing
+  tests.
+- **Windows fix (`6da5649`):** the zeroing test read the brain's bytes
+  while its own handle held the lock, which Windows refuses. It now drops
+  the handle first, since drop writes nothing.
+
+**The sidecar test's wait (`b78c7c9`, option 2):**
+- After the last removal, the test waits until each writer child has
+  acknowledged two more writes (counted in `acks/a` and `acks/b`), capped
+  at 10 s. Hitting the cap fails the test with the counts and the
+  children's logs.
+- Then it asserts `side.is_dir()`, and prints the time.
+- **The numbers:**
+  - **Locally (macOS):** 1.50 s, 1.77 s and 1.54 s from the last removal
+    to the assertion, in three runs. That's far longer than the old 300 ms
+    sleep, so the old assertion was mostly passing on calls that had
+    started before the removal.
+  - **On CI:** not printed. The rust jobs run `cargo test` without
+    `--nocapture`, so a passing test's line is captured. It passed on
+    ubuntu and macos.
+
+**Other fixed-sleep-then-assert-on-another's-progress sites,** one verdict
+each (none changed, as you said):
+- **`cross_process.rs`, the cancel test's watcher** (`sleep(300 ms)`, then
+  it asserts the waiting writer holds the intent lock): **the same shape.**
+  On a slow runner the writer may not hold the intent lock yet at 300 ms.
+  It should poll until `try_lock_exclusive` fails, with a cap, then cancel.
+- **The sidecar test's 150 ms between removals:** pacing only; nothing is
+  asserted on it.
+- **The kill test's 50 to 400 ms between kills:** pacing; the assertions
+  are on the final file.
+- **The children's 2 ms, 5 ms and 20 to 120 ms sleeps**, and the old
+  compactor's 10 to 80 ms: workload pacing inside the roles, not
+  assertions.
+- **The `ready`-file, stop-file and marker polls** (5 ms with a 60 s cap):
+  already waits with deadlines.
+- **`cli_shared.rs`, `hold` and `hold_shared_read`** (a held handle
+  released after a fixed time): **not the same shape.** The tests assert
+  how long the command waited against a hold that is already in place when
+  the command starts (≥ 800 of 1200 ms, ≥ 1000 of 1500 ms, ≥ 700 of
+  1000 ms), so a slow runner makes the wait longer, not the assertion
+  wrong. The "< 3000 ms alongside a 4 s read" checks can only pass more
+  easily if the hold runs out.
+- **`cli_shared.rs`, the slow embedder's 1.5 s:** the work being measured;
+  the tests already sync on the marker.
+
+**Local:** `cargo test --features failpoints` 469 passed, 0 failed; the
+Python suite passes; clippy (engine, uniffi, binding) and fmt clean.
+
+**Next, per your queue:** DOGFOOD-1 (the script) at your dispatch.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — REKEY-2 accepted (PR 71); merge; DOGFOOD-1 dispatched, with the cancel test's wait and one wording fix
+
+**REKEY-2 (PR 71, head `b78c7c9`): ACCEPTED.** 14 of 14 checks green (`gh
+pr checks 71`). Read `undo_rekey`'s diff: the zeroing's error is kept and
+appended to the original on both undo paths, and the write-back failure keeps
+its "may open with either secret" phrase for the CLI. The three `rekey_cut`
+tests, the failpoint over a set of write numbers and Python's
+`rekey_cleanup_error()` match the dispatch, and the torn-copy check proves the
+copy is really there. The sidecar test's wait is as decided. The 1.5 to 1.8 s
+local recreation time shows the old 300 ms mostly passed on calls that began
+before the removal, so the change was worth making.
+
+**One wording fix** (in DOGFOOD-1's PR, a one-line `fix(store)` commit):
+RB-005.2 said "I don't know that every later write does" clear the copy,
+and the test proves it for one write. Make the message certain where it can
+be: "…so a copy may be left in the file until `mnemo compact` clears it (a
+later write over those pages also does)". Match the CHANGELOG line.
+
+**DISPATCH:**
+1. **Squash and merge PR 71,** delete the branch, and check the push runs
+   (CI and Mobile CI, every job run and green). Coordination sync.
+2. **DOGFOOD-1,** one PR into `release-0.14.0`, as queued in my DOGFOOD-0
+   entry: `project_memory.py` with a read-only (or shared) `recall`, writes
+   with `shared=True, wait=2.0`, `remember --from-file`, `recall --area` and
+   `--keywords`, and the binding check. Add to it:
+   - **the cancel test's watcher** (`cross_process.rs`, the Worker's
+     verdict): poll until the writer holds the intent lock, capped, then
+     cancel, instead of a fixed 300 ms; its own `test(shared)` commit;
+   - **the wording fix** above.
+   - Check the script by running it: a `--from-file` batch of three
+     throwaway facts **into a scratch brain** (not `test/project.mnemo`;
+     use a temp path and a throwaway passphrase through the script's env
+     override, or a flag if it has none, and say which), then `recall
+     --area` and `--keywords`, then a read-only `recall` while another
+     process holds a shared read. Give the timings for the batch against
+     three single calls.
+   - Then one real use: `recall "where the repo lives and why" --keywords
+     nosync` against `test/project.mnemo`, read-only, with its top 3 in
+     the DONE, next to DOGFOOD-0's.
+3. Log DONE when green and stop before merging. **Step 5, the bench,** is
+   next after that.
