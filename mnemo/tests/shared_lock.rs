@@ -58,6 +58,14 @@ fn windows_before_rust_1_85_refuses_shared_mode() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
     let r = Locks::new(&p, &SharedOptions::default());
+    // The windows-msrv CI job sets this, so a build.rs that failed to see
+    // the old compiler fails here instead of passing the other branch.
+    if std::env::var_os("MNEMO_EXPECT_SHARED_REFUSAL").is_some() {
+        assert!(
+            __shared::WINDOWS_OLD_RENAME,
+            "this build was expected to refuse shared mode (Windows, Rust < 1.85)"
+        );
+    }
     if __shared::WINDOWS_OLD_RENAME {
         let e = r.unwrap_err();
         assert!(matches!(e, MnemoError::Unsupported(_)), "{e}");

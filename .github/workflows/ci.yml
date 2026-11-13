@@ -236,6 +236,10 @@ jobs:
       - name: cargo test (the compaction fallback and the shared-mode refusal)
         working-directory: mnemo
         shell: bash
+        env:
+          # The refusal test then requires the refusal (a build.rs that
+          # missed the old compiler fails instead of skipping).
+          MNEMO_EXPECT_SHARED_REFUSAL: "1"
         run: |
           rustc --version
           cargo test --locked -p mnemo-engine --features failpoints --test replaced_file --test shared_lock
