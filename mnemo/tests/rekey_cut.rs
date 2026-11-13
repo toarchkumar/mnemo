@@ -267,12 +267,16 @@ fn a_failed_zeroing_in_the_undo_is_reported() {
         );
         assert!(!msg.contains("may open with either secret"), "{s:?}: {msg}");
         // The copy is really there: a torn header taken now lets the new
-        // secret recover the new page 0.
+        // secret recover the new page 0. The handle is dropped first (it
+        // writes nothing on drop): Windows won't let another handle read a
+        // locked file.
+        drop(db);
         let early = dir.path().join(format!("zeroing-{s:?}-early.mnemo"));
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[..16].fill(0);
         std::fs::write(&early, &bytes).unwrap();
         assert!(open(&early, s, true).is_ok(), "{s:?}: no copy was left");
+        let mut db = open(&path, s, false).unwrap();
         db.remember(mem(3)).unwrap();
         db.close().unwrap();
         assert_eq!(open(&path, s, false).unwrap().len(), 4, "{s:?}");
