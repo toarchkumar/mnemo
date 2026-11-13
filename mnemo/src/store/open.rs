@@ -20,6 +20,13 @@ fn page_zero_header(frames: &[(u64, Vec<u8>)]) -> Option<Header> {
         .and_then(|(_, bytes)| Header::from_page(bytes).ok())
 }
 
+/// Whether `h` is a v9 header sealed under `dek` (RB-007.2). The version
+/// matters: `validate_seal` passes any header older than v7, which has no
+/// seal.
+fn sealed_under(h: &Header, dek: &[u8; crypto::KEY_LEN]) -> bool {
+    h.version >= VERSION_V9 && h.validate_seal(dek).is_ok()
+}
+
 /// Walk the file for every 8 KiB-aligned page whose first four bytes are
 /// `MWAL`, treating each as a candidate WAL-region start, and return the
 /// frames of the highest-`txn_id` committed transaction whose header
@@ -46,6 +53,7 @@ fn page_zero_header(frames: &[(u64, Vec<u8>)]) -> Option<Header> {
 fn scan_header_recovery_candidates(
     file: &mut File,
     secret: &[u8],
+    held_dek: Option<&[u8; crypto::KEY_LEN]>,
 ) -> Result<Option<Vec<wal::Frame>>> {
     let file_len = file.seek(SeekFrom::End(0))?;
     if file_len < PAGE_SIZE as u64 * 2 {
@@ -80,7 +88,9 @@ fn scan_header_recovery_candidates(
         while inner + 4 <= filled {
             if &chunk[inner..inner + 4] == wal::FRAME_MAGIC_BYTES {
                 let page_no = (offset + inner as u64) / page_sz;
-                if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, secret)? {
+                if let Some((txn_id, frames)) =
+                    try_recover_candidate(file, page_no, secret, held_dek)?
+                {
                     let keep = match &best {
                         None => true,
                         Some((id, _)) => txn_id > *id,
@@ -111,6 +121,7 @@ fn try_recover_candidate(
     file: &mut File,
     candidate_page_no: u64,
     secret: &[u8],
+    held_dek: Option<&[u8; crypto::KEY_LEN]>,
 ) -> Result<Option<(u64, Vec<wal::Frame>)>> {
     let Some((txn_id, frames)) = wal::scan_committed_txn(file, candidate_page_no)? else {
         return Ok(None);
@@ -138,6 +149,13 @@ fn try_recover_candidate(
     // from being accepted as a new region's root.
     if candidate.wal_start != candidate_page_no || candidate.wal_seq != txn_id {
         return Ok(None);
+    }
+    // RB-007.2: a shared handle's data key, when the candidate's seal
+    // verifies under it, without the KDF.
+    if let Some(held) = held_dek {
+        if sealed_under(&candidate, held) {
+            return Ok(Some((txn_id, frames)));
+        }
     }
     // DEK unwrap under this candidate's own salt + KDF params.
     let kdf = KdfParams {
@@ -348,6 +366,8 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            window_committed: false,
+            shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free: FreeList::default(),
             pending_free: Vec::new(),
@@ -417,8 +437,25 @@ impl Mnemo {
     /// reloads through it with the call's locked file.
     pub(super) fn load_locked(
         path: PathBuf,
+        file: LockedFile,
+        secret: &[u8],
+        allow_old: bool,
+    ) -> Result<Mnemo> {
+        Self::load_locked_with(path, file, secret, None, allow_old)
+    }
+
+    /// [`Mnemo::load_locked`], with a data key the caller already holds (a
+    /// shared handle's, RB-007.2). The torn-header scan accepts a candidate
+    /// whose seal verifies under it, and a pending WAL is replayed with it
+    /// when the header the replay writes verifies under it, without running
+    /// the KDF: a rekey changes the secret, never the data key. Anything
+    /// that doesn't verify under it is checked with `secret`, as an open
+    /// does.
+    pub(super) fn load_locked_with(
+        path: PathBuf,
         mut file: LockedFile,
         secret: &[u8],
+        held_dek: Option<&[u8; crypto::KEY_LEN]>,
         allow_old: bool,
     ) -> Result<Mnemo> {
         let mut hbuf = [0u8; PAGE_SIZE];
@@ -438,7 +475,7 @@ impl Mnemo {
                 // regions, pick the highest `txn_id`, and replay it. If
                 // nothing valid is found, return the *original* error so
                 // non-mnemo files still report `BadMagic`.
-                let scan = scan_header_recovery_candidates(&mut file, secret)?;
+                let scan = scan_header_recovery_candidates(&mut file, secret, held_dek)?;
                 let frames = scan.ok_or(e)?;
                 // RB-003.3: the scan has checked the key; refuse an old
                 // format before healing anything.
@@ -493,8 +530,13 @@ impl Mnemo {
             t_cost: target.t_cost,
             p_cost: target.p_cost,
         };
-        let kek = crypto::derive_kek(secret, &target.salt, kdf)?;
-        let dek = crypto::unwrap_dek(&kek, &target.dek_nonce, &target.wrapped_dek)?;
+        let dek = match held_dek {
+            Some(held) if sealed_under(&target, held) => zeroize::Zeroizing::new(*held),
+            _ => {
+                let kek = crypto::derive_kek(secret, &target.salt, kdf)?;
+                crypto::unwrap_dek(&kek, &target.dek_nonce, &target.wrapped_dek)?
+            }
+        };
         if !allow_old && target.version < VERSION_V9 {
             return Err(MnemoError::FormatTooOld {
                 version: target.version,
@@ -757,6 +799,8 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            window_committed: false,
+            shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),
@@ -838,7 +882,7 @@ impl Mnemo {
             Ok(h) => h,
             // A candidate frame only counts when it validates with `key`.
             Err(parse_err) => {
-                return match scan_header_recovery_candidates(&mut file, key)? {
+                return match scan_header_recovery_candidates(&mut file, key, None)? {
                     Some(_) => Ok(true),
                     None => Err(parse_err),
                 }
@@ -878,7 +922,7 @@ impl Mnemo {
         let header = match Header::from_page(&hbuf) {
             Ok(h) => h,
             Err(parse_err) => {
-                let recoverable = scan_header_recovery_candidates(&mut file, secret)?;
+                let recoverable = scan_header_recovery_candidates(&mut file, secret, None)?;
                 return Err(match (parse_err, recoverable) {
                     // RB-004.5 item 2: as for a pending WAL (RB-003.3), a
                     // pre-v9 file can't be opened read-write, so the advice
@@ -1024,6 +1068,8 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            window_committed: false,
+            shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
             free,
             pending_free: Vec::new(),

@@ -165,21 +165,7 @@ impl Mnemo {
             });
         }
 
-        // The manifest's identity, if the file has one, and the first
-        // onboarding memory without one (the upsert target).
-        let onboarding = self.about()?;
-        let mut on_manifest: Option<embed::EmbedderIdentity> = None;
-        let mut upsert_target: Option<usize> = None;
-        for (i, m) in onboarding.iter().enumerate() {
-            if let Some(saw) = embed::read_identity_from_metadata(&m.metadata) {
-                on_manifest = Some(saw);
-                break;
-            }
-            if upsert_target.is_none() {
-                upsert_target = Some(i);
-            }
-        }
-        let on_record = self.recorded_identity()?;
+        let (onboarding, on_manifest, upsert_target, on_record) = self.embedder_records()?;
 
         if let (Some(manifest), Some(record)) = (&on_manifest, &on_record) {
             if manifest != record {
@@ -217,6 +203,50 @@ impl Mnemo {
 
         self.embedder = Some(std::sync::Arc::new(embedder));
         Ok(())
+    }
+
+    /// Where the file records an embedder identity (EMBED-ID-1): the
+    /// onboarding memories, the manifest's identity if it has one, the first
+    /// onboarding memory without one (the upsert target), and the reserved
+    /// record's identity.
+    #[allow(clippy::type_complexity)]
+    fn embedder_records(
+        &mut self,
+    ) -> Result<(
+        Vec<Memory>,
+        Option<embed::EmbedderIdentity>,
+        Option<usize>,
+        Option<embed::EmbedderIdentity>,
+    )> {
+        let onboarding = self.about()?;
+        let mut on_manifest: Option<embed::EmbedderIdentity> = None;
+        let mut upsert_target: Option<usize> = None;
+        for (i, m) in onboarding.iter().enumerate() {
+            if let Some(saw) = embed::read_identity_from_metadata(&m.metadata) {
+                on_manifest = Some(saw);
+                break;
+            }
+            if upsert_target.is_none() {
+                upsert_target = Some(i);
+            }
+        }
+        let on_record = self.recorded_identity()?;
+        Ok((onboarding, on_manifest, upsert_target, on_record))
+    }
+
+    /// Whether [`Mnemo::set_embedder`] with this identity would write to the
+    /// file (to record the identity where it's missing). A shared handle
+    /// attaches an already recorded embedder in a read window (RB-007.6).
+    pub(super) fn embedder_would_record(
+        &mut self,
+        identity: &embed::EmbedderIdentity,
+    ) -> Result<bool> {
+        if identity.dimensions != self.dimensions {
+            // `set_embedder` refuses it without writing.
+            return Ok(false);
+        }
+        let (_, on_manifest, upsert_target, on_record) = self.embedder_records()?;
+        Ok((on_manifest.is_none() && upsert_target.is_some()) || on_record.is_none())
     }
 
     /// The embedder identity this file records (EMBED-ID-1), or `None`

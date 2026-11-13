@@ -44,16 +44,37 @@ Pre-1.0, the minor component carries the breaking-change signal.
     WAL or a torn page 0 is healed under the exclusive lock first.
   - A write that fails before its commit point stored nothing, and the
     handle reloads at its next call. One that fails after it is finished
-    by the handle (`Ok`), or returns `MnemoError::MaybeStored`. A file
-    renamed away during the commit returns
-    `MnemoError::ReplacedDuringWrite`.
-  - Each write window takes a fresh generation lease, so no two writers
-    seal pages under the same generation.
+    by the handle (`Ok`), or returns `MnemoError::MaybeStored`. So does a
+    window whose closure committed part of its work itself (a `flush`, or
+    a method that commits, such as `commit_deltas`) before it failed: the
+    message says part of the window is in the file. A file renamed away
+    during the commit returns `MnemoError::ReplacedDuringWrite`.
+  - Each write window takes a fresh generation lease before the first page
+    it seals, so no two writers seal pages under the same generation. A
+    window that writes nothing commits nothing, and `SharedMnemo::set_embedder`
+    is a read when the file already records that embedder.
+  - `SharedMnemo::rekey` and `rekey_with_key` change the passphrase and the
+    secret the handle keeps, so the handle can still follow a compaction;
+    `rekey` inside a closure is refused. A pending WAL, or a torn page 0, is
+    recovered with the data key the handle holds when the header verifies
+    under it, so another process's rekey doesn't lock the handle out.
+  - `SharedMnemo::set_cancel` gives the handle a new cancel token after a
+    cancel. A cancel reaches only a call that is waiting for a lock.
+  - One deadline covers every lock a call takes; a deadline too large for
+    the clock is clamped. A sidecar directory removed under a running
+    handle (`git clean -fdx`, say) is made again at its next call. A write
+    to a brain the process can only read says so, and a read that has to
+    recover such a file returns `MnemoError::NeedsWriteOpen`.
   - Recall's and cache hits' access statistics from read windows are
     applied with the handle's next commit, and dropped at close.
   - Settings that act on the whole file (snapshot retention, cache budgets,
     the cache flush policy, turn compression) are refused in shared mode
     with `MnemoError::Unsupported`.
+- **Plain opens don't wait for shared handles yet.** The CLI, `serve --mcp`,
+  Python and `mnemo compact` open the file with one try at its lock, as
+  before, so while a shared handle holds it for a call they get
+  `MnemoError::Locked`. Step 4 of v0.14.0 moves them onto the lock layer,
+  with its deadline and writer preference.
 - **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
   mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
   the compiler's version. The released binaries and wheels are built with
@@ -70,9 +91,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `MnemoError::Cancelled`, `Unsupported`, `MaybeStored` and
   `ReplacedDuringWrite`. The Swift and Kotlin bindings report them as `Io`,
   with the engine's message.
+- **New brain files are created owner-only** (mode 0600 on Unix): a new
+  brain, a compaction's new file and an export. Compaction (and so
+  `mnemo rekey --rotate`) gives the new file the old file's mode, so a brain
+  made group-readable on purpose stays so; an existing file's mode is never
+  changed.
 
 ### Fixed
 
+- **A compaction through a symlink replaces the file it names, not the
+  link.** `compact_file` (and so `mnemo compact` and `mnemo rekey --rotate`)
+  renamed the compacted copy over the path as given, so a symlink to the
+  brain became a separate file, and handles on the two paths carried on
+  with two different brains. It now resolves the path and builds and
+  renames the copy beside the real file.
 - **A write racing a compaction is no longer lost.** `compact_file` (and so
   `mnemo compact` and `mnemo rekey --rotate`) released the old file's lock
   before renaming the compacted copy over it. A process waiting on the lock

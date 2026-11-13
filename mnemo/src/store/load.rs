@@ -124,6 +124,7 @@ fn open_and_lock_once(path: &Path, write: bool, create: Create) -> Result<Locked
             opts.create_new(true);
         }
     }
+    owner_only(&mut opts);
     let file = opts.open(path)?;
     // On success the returned `Result<()>` is `Ok(())`. On conflict:
     //   * Unix `flock(2)` → `ErrorKind::WouldBlock` (EWOULDBLOCK / EAGAIN)
@@ -146,6 +147,30 @@ fn open_and_lock_once(path: &Path, write: bool, create: Create) -> Result<Locked
         }),
         Err(e) => Err(MnemoError::Io(e)),
     }
+}
+
+/// A file this opens and creates gets mode 0600 on Unix (owner read and
+/// write, whatever the umask allows of that): a brain, a compaction's or an
+/// export's new file. The mode applies only when the file is created, so an
+/// existing file's mode is never changed. Elsewhere, a no-op.
+pub(super) fn owner_only(opts: &mut OpenOptions) -> &mut OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts
+}
+
+/// Give `to` the permissions `from` has (Unix): a compaction's new file
+/// keeps the brain's mode, so one made group-readable on purpose stays so.
+/// Elsewhere, a no-op.
+pub(super) fn copy_mode(from: &File, to: &File) -> Result<()> {
+    #[cfg(unix)]
+    to.set_permissions(from.metadata()?.permissions())?;
+    #[cfg(not(unix))]
+    let _ = (from, to);
+    Ok(())
 }
 
 /// Do two paths resolve to the same on-disk file? Used by

@@ -8,7 +8,8 @@
 //! - it's created with `mkdir`, never "create if missing, else use";
 //! - one that's already there is opened with `O_NOFOLLOW | O_DIRECTORY` and
 //!   checked through its descriptor: a real directory, owned by this user,
-//!   with no group or other access;
+//!   with no group or other access (and given 0700 if a umask left the
+//!   owner without full access);
 //! - files in it are opened relative to that descriptor (`openat`), with
 //!   `O_NOFOLLOW`, and with `O_EXCL` when they're new;
 //! - `lock-info` is written to a new temp name and renamed into place, never
@@ -163,6 +164,19 @@ mod imp {
                 path.display(),
                 st.st_mode & 0o777
             ));
+        }
+        // A umask that clears owner bits (0277, say) makes a directory
+        // nothing can be created in, and every call would then skip the
+        // intent lock without a word. It's this user's own directory with
+        // no access for others, so give it 0700.
+        if st.st_mode & 0o700 != 0o700 {
+            if let Err(e) = rfs::fchmod(&dir, Mode::RWXU) {
+                return SidecarState::Unavailable(format!(
+                    "{} has mode {:o} and can't be given 0700: {e}",
+                    path.display(),
+                    st.st_mode & 0o777
+                ));
+            }
         }
         SidecarState::Ready(Sidecar { path, dir })
     }

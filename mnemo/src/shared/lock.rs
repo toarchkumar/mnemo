@@ -68,6 +68,8 @@ pub(crate) struct BrainLocks {
     /// The path as given (made absolute), which the locks open and the
     /// identity check compares.
     path: PathBuf,
+    /// The path with symlinks resolved, where the sidecar directory lives.
+    resolved: PathBuf,
     sidecar: Option<Arc<Sidecar>>,
     notices: Vec<String>,
 }
@@ -110,6 +112,7 @@ impl BrainLocks {
         };
         Ok(BrainLocks {
             path,
+            resolved,
             sidecar,
             notices,
         })
@@ -131,24 +134,29 @@ impl BrainLocks {
         self.sidecar.as_deref().map(Sidecar::path)
     }
 
-    /// Take the main lock for one call, within `opts.deadline`, unless
+    /// Take the main lock for one call, within the call's deadline, unless
     /// cancelled. Writers queue on the intent lock; a reader takes the
     /// intent lock shared for one try at the main lock and releases it
     /// whether or not it got in.
-    pub(crate) fn acquire(&self, kind: LockKind, opts: &SharedOptions) -> Result<Held> {
-        let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+    ///
+    /// One [`Call`] covers every lock a shared handle's window takes, so a
+    /// read that has to take the exclusive lock to heal the file still
+    /// waits one deadline in all (RB-007.8 item 2).
+    pub(crate) fn acquire(&mut self, kind: LockKind, call: &mut Call) -> Result<Held> {
         let mut replaced_once = false;
-        loop {
+        'call: loop {
             call.check()?;
-            let intent = match self.try_intent(kind)? {
+            let intent = match self.try_intent(kind, call)? {
                 Intent::Held(f) => Some(f),
                 Intent::NotUsed => None,
                 Intent::Busy => {
-                    self.wait(&mut call)?;
+                    self.wait(call)?;
                     continue;
                 }
             };
             loop {
+                #[cfg(any(test, feature = "failpoints"))]
+                crate::__failpoints::count_shared_main_try();
                 match self.try_main(kind)? {
                     Main::Got(file) => {
                         drop(intent);
@@ -162,14 +170,18 @@ impl BrainLocks {
                     // our open and our lock: open the new one, at once the
                     // first time, then with the backoff, so a path that
                     // keeps failing the check can't spin a core until the
-                    // deadline.
+                    // deadline. The backoff sleeps without the intent lock
+                    // (RB-007.8 item 3): a reader holds it for one try only,
+                    // and a writer queues for it again.
                     Main::Replaced => {
                         call.check()?;
                         if call.past_deadline() {
                             return Err(self.locked());
                         }
                         if replaced_once {
-                            self.wait(&mut call)?;
+                            drop(intent);
+                            self.wait(call)?;
+                            continue 'call;
                         }
                         replaced_once = true;
                         continue;
@@ -181,15 +193,15 @@ impl BrainLocks {
                 }
                 // A writer keeps the intent lock while it waits, so new
                 // readers queue behind it.
-                self.wait(&mut call)?;
+                self.wait(call)?;
             }
             drop(intent);
-            self.wait(&mut call)?;
+            self.wait(call)?;
         }
     }
 
     /// One backoff; past the deadline, `Locked` with what holds the file.
-    fn wait(&self, call: &mut Call<'_>) -> Result<()> {
+    fn wait(&self, call: &mut Call) -> Result<()> {
         if call.back_off()? {
             Ok(())
         } else {
@@ -204,19 +216,59 @@ impl BrainLocks {
         }
     }
 
-    fn try_intent(&self, kind: LockKind) -> Result<Intent> {
+    fn try_intent(&mut self, kind: LockKind, call: &mut Call) -> Result<Intent> {
         let Some(side) = &self.sidecar else {
             return Ok(Intent::NotUsed);
         };
-        // A lock file that can't be opened safely (something else is at the
-        // name) costs writer preference for this call, never the call.
-        let Ok(f) = side.lock_file(INTENT) else {
-            return Ok(Intent::NotUsed);
+        let f = match side.lock_file(INTENT) {
+            Ok(f) => f,
+            // The directory may have been removed (`git clean -fdx`) or
+            // replaced since the handle opened it, and the handle's
+            // descriptor still names the old one. Open it again by path,
+            // with every check, once per call (RB-007.7).
+            Err(_) if !call.sidecar_reopened => {
+                call.sidecar_reopened = true;
+                match sidecar::open(&self.resolved) {
+                    SidecarState::Ready(s) => {
+                        let s = Arc::new(s);
+                        self.sidecar = Some(s.clone());
+                        match s.lock_file(INTENT) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                self.notice(format!(
+                                    "can't use {}: {e}; this call takes the main lock alone, \
+                                     without writer preference",
+                                    s.path().join(INTENT).display()
+                                ));
+                                return Ok(Intent::NotUsed);
+                            }
+                        }
+                    }
+                    SidecarState::Unavailable(why) => {
+                        self.notice(format!(
+                            "not using the sidecar directory: {why}; calls take the main \
+                             lock alone, without writer preference or a lock-info note"
+                        ));
+                        return Ok(Intent::NotUsed);
+                    }
+                }
+            }
+            // A lock file that can't be opened safely (something else is at
+            // the name) costs writer preference for this call, never the
+            // call.
+            Err(_) => return Ok(Intent::NotUsed),
         };
         match try_lock(&f, kind) {
             Ok(()) => Ok(Intent::Held(LockedFile::new(f))),
             Err(e) if is_lock_conflict(&e) => Ok(Intent::Busy),
             Err(e) => Err(MnemoError::Io(e)),
+        }
+    }
+
+    /// Add `text` to the notices, once.
+    fn notice(&mut self, text: String) {
+        if !self.notices.contains(&text) {
+            self.notices.push(text);
         }
     }
 
@@ -227,10 +279,28 @@ impl BrainLocks {
             o.write(true);
         }
         // Never creates: a missing file is an error (`NotFound`).
-        let f = o.open(&self.path)?;
+        let f = match o.open(&self.path) {
+            Ok(f) => f,
+            // A file this process can only read (RB-007.8 item 5).
+            Err(e) if kind == LockKind::Exclusive && is_permission_denied(&e) => {
+                return Err(MnemoError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "{} isn't writable by this process ({e}), so a shared-mode write \
+                         can't take its lock; reads still work",
+                        self.path.display()
+                    ),
+                )))
+            }
+            Err(e) => return Err(MnemoError::Io(e)),
+        };
         match try_lock(&f, kind) {
             Ok(()) => {
                 let f = LockedFile::new(f);
+                #[cfg(any(test, feature = "failpoints"))]
+                if crate::__failpoints::take_shared_replaced() {
+                    return Ok(Main::Replaced);
+                }
                 if is_file_at(&f, &self.path)? {
                     Ok(Main::Got(f))
                 } else {
@@ -260,6 +330,11 @@ enum Main {
     Got(LockedFile),
     Busy,
     Replaced,
+}
+
+/// Whether opening the brain for writing failed for lack of permission.
+pub(crate) fn is_permission_denied(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied
 }
 
 fn try_lock(f: &File, kind: LockKind) -> std::io::Result<()> {
