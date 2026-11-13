@@ -337,6 +337,8 @@ pub mod __failpoints {
         EUID_OVERRIDE.with(|c| c.set(uid));
     }
 
+    // Read by the Unix owner check only.
+    #[cfg(unix)]
     pub(crate) fn euid_override() -> Option<u32> {
         EUID_OVERRIDE.with(|c| c.get())
     }
