@@ -23457,3 +23457,172 @@ later write over those pages also does)". Match the CHANGELOG line.
      the DONE, next to DOGFOOD-0's.
 3. Log DONE when green and stop before merging. **Step 5, the bench,** is
    next after that.
+
+### 2026-11-13 — WORKER — DONE — PR 71 merged; DOGFOOD-1 (PR 72, green, not merged), with the cancel test's wait and the rekey wording fix
+
+**The merge:**
+- PR 71 squash-merged as **`619974b`** on `release-0.14.0`; `rel0140-rekey2`
+  deleted.
+- **Push runs on `619974b`:** CI 43512186068 and Mobile CI 43512186043,
+  every job run and green on attempt 1.
+- **Coordination sync:** **`da0b738`**.
+
+**PR 72** (`rel0140-dogfood1` into `release-0.14.0`), three commits, each
+standing alone, so it can merge either way:
+- `c6e5c3f` `fix(store)`, the wording;
+- `b2e738f` `test(shared)`, the cancel test's wait;
+- `4126a8b` `test(dogfood)`, the script.
+
+**Runs on `4126a8b`:** CI 43514216517, **14 of 14 checks green** on attempt 1.
+Mobile CI doesn't run on the PR (no paths it watches). Stopped before
+merging.
+
+**The changes:**
+- **Wording (RB-005.2):** the failed-zeroing message is now "…so a copy may
+  be left in the file until `mnemo compact` clears it (a later write over
+  those pages also does)". The comment and the CHANGELOG line match.
+  `rekey_cut` 6 of 6 passed.
+- **The cancel test's watcher:**
+  - It polls the intent lock every 5 ms: a probe that gets it releases it
+    at once.
+  - Once the writer holds it, the watcher cancels; capped at 10 s, which
+    gives `held_while_waiting = false` and fails the assertion.
+  - It then opens the lock file again for the "free straight after" check.
+  - No undo check: the old sleep only fails under load, which can't be
+    forced locally.
+- **`project_memory.py`:**
+  - **Reads open read-only:** `recall` and `info` open with
+    `read_only=True`, tracking off as before. A missing brain is an error
+    for a read.
+  - **Writes open in shared mode:** `remember`, `remember --from-file` and
+    `perf` open with `shared=True, wait=2.0`. A missing brain is created
+    first with a plain open, then closed, since shared mode never creates
+    one. `bootstrap` stays a plain create.
+  - **`remember --from-file <jsonl>`:** one process, one model load (the
+    model is now cached per process), one `encode` for every fact, one
+    open, then one `remember` with the vector per fact (one write window
+    each). Each line can have `content`, `type`, `importance`, `metadata`
+    and `key`.
+  - **`recall --area <name>`** passes `filter={"metadata": {"area": …}}`,
+    and **`--keywords`** passes `keywords=` (BM25).
+  - **The binding check:** `REQUIRED_NAMES` (`CancelToken`) and
+    `REQUIRED_METHODS` (`rekey_cleanup_error`, `notices`). If one is
+    missing, the script exits saying the installed wheel is older than the
+    tree, names what's missing, and prints the rebuild command. There's no
+    build hash: `build_info()` has only the version, the target and the AES
+    backends.
+  - **`--brain <path>`** (new: the script had no override) for a scratch
+    brain. The passphrase override is the environment: `MNEMO_PASSPHRASE`,
+    which `load_dotenv` never overrides.
+
+**Checked by running it** (a scratch brain in my scratchpad,
+`MNEMO_PASSPHRASE=` a throwaway value in the environment, and `--brain`):
+- **The binding check fired for real:** the dogfood venv's wheel, rebuilt
+  at DOGFOOD-0, predated REKEY-2. The script said "missing
+  Mnemo.rekey_cleanup_error". Its own printed rebuild command, run as
+  printed, fixed it.
+- **Timings:** three single `remember` calls took **14.2 s** (4.7 s each);
+  one `--from-file` batch of three took **4.7 s**.
+- **`recall --area trial-batch`:** only the three batch facts came back.
+- **`recall "which release candidate" --keywords rc2`:** the rc2 fact came
+  first at 1.317, against 0.622 for the next.
+- **A read-only `recall` while another process held a read-only handle**
+  (so the file's shared lock) for 8 s: it succeeded, in 5.0 s, nearly all
+  of it the model load.
+- **Not checked:** a shared write waiting out its 2 s against that holder.
+  My one try ran after the hold had ended, so it proves nothing.
+
+**The real use**, read-only on `test/project.mnemo`, the passphrase from
+`test/.env` through the script:
+- **`recall "where the repo lives and why" --keywords nosync`:** the same
+  top 3 as DOGFOOD-0, with the same scores:
+  1. 0.478 / 0.354 "The old ~/Documents/GitHub/mnemo folder is stale: …"
+  2. 0.454 / 0.329 "The repo lives at ~/Documents/GitHub/mnemo.nosync. It
+     was renamed out of iCloud's reach on 2026-11-12, …"
+  3. 0.414 / 0.304 "Security findings stay in the gitignored
+     SECURITY.local.md, …"
+- **Why `nosync` did nothing:** the BM25 tokenizer (UAX #29 words) keeps
+  `mnemo.nosync` as one word, because a period between letters doesn't
+  split it, so `nosync` alone matches no token. With `--keywords
+  "mnemo.nosync"` the answer comes first: 1.088 (sim 0.329). With `--keywords
+  iCloud` only the stale-folder fact rises (1.153); the answer says
+  "iCloud's", which also stays one word.
+- **For 12.x:** the keyword index should also index the parts of a dotted
+  name and a possessive's stem, or the docs should say keywords must be
+  whole words as written. As it is, a part of a path or a name won't
+  match.
+
+**Next, per your queue:** step 5, the bench, at your dispatch.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — DOGFOOD-1 accepted (PR 72); merge; v0.14.0 step 5, the shared-mode bench, dispatched
+
+**DOGFOOD-1 (PR 72, head `4126a8b`): ACCEPTED.** 14 of 14 checks green (`gh
+pr checks 72`). The script reads read-only, writes in shared mode with
+`wait=2.0`, batches (3 facts in 4.7 s against 14.2 s), filters by area,
+takes keywords, and checks its binding, which caught a real stale wheel on
+its first run. The cancel test now waits for the event. The wording fix is
+in. Merge either way (three standalone commits).
+- **For me:** I can now recall read-only, as the handover asks.
+- **Carried to 12.x (recall quality), not v0.14:** the BM25 tokenizer keeps
+  `mnemo.nosync` and `iCloud's` as single words, so a keyword that's part of
+  a dotted name, a path or a possessive matches nothing. Either index the
+  parts too, or document that keywords must be whole words as written.
+  Candidate ID **TOK-1**; I'll put it in 12.3's or 12.8's spec when that
+  phase starts.
+
+**DISPATCH — v0.14.0 step 5, the bench** (the 12.4 note's "Implementation
+order" item 5, plus RB-007.6 rec. 3 and the open-wait note from my 4b
+entry). After PR 72's merge, push runs green, and a coordination sync.
+- **Where:** a dev-hooks example, `mnemo/examples/shared_bench.rs` (children
+  as the same binary run again, like `cross_process.rs`), so nothing ships.
+  Results go into `test/scripts/perf_v0.5.0.json` as a new section,
+  `shared_v0_14_0`, each cell with its machine, build profile, sizes,
+  repetitions and `remeasured: "2026-11-13"`. Release builds only.
+- **The machine:** the user's M1 Pro, on power, `caffeinate -dims` running,
+  nothing else heavy (REVIEWER-B is idle and runs no benchmark while a PR
+  is open). Say in the DONE if anything else was running.
+- **The cells** (at 1K, 10K and 100K where a size matters; medians plus
+  p99, from enough repetitions that the p99 means something):
+  1. **The per-call check** when nobody else wrote: an empty read window
+     and a `get` in a read window, against the same on a plain handle.
+  2. **A write window's cost:** one `remember` through a shared handle
+     against a plain handle's `remember` plus `flush`, with the fsync
+     count each (the lease's extra two).
+  3. **The no-op window** (RB-007.6 rec. 3): an empty write window and a
+     refused write. The transaction id is unchanged, and so is the cost.
+  4. **The full-reload catch-up:** the next read after another process's
+     commit, at each size. Also RAM per shared handle (RSS before and after
+     opening, as `open_rss.rs` does).
+  5. **Two and eight processes at 10K and 100K:** commits per second and
+     reads per second, for mixes of 1 writer with 1 or 7 readers, and 2 or
+     8 writers.
+  6. **Several writers:** 4 and 8 writers at once, write latency at p50 and
+     p99, and readers' waits at p50 and p99 meanwhile.
+  7. **The backoff's shape:** today's (1 ms doubling to 50 ms, jittered)
+     against the note's "short sleeps while a wait is young" (for example
+     1 to 2 ms for the first 10 to 20 ms, then doubling). Run cells 5 and 6
+     with each.
+  8. **The open wait under compaction:** child opens against a compaction
+     every ~100 ms and 3 writers (the kill test's load without kills): the
+     open-time distribution on macOS. For Windows, a one-off run on CI
+     with `--nocapture` is enough (a throwaway workflow, deleted after, as
+     in step 1), counts only; say if it can't be done cheaply.
+- **Decision rules,** so most of this doesn't come back to me:
+  - **Writer ordering** (the note: added if several writers' p99 is poor):
+    if 8 writers' p99 write latency at 10K is **under 500 ms**, none is
+    needed. If it's over, report it and stop. That's my call.
+  - **The backoff:** if the young-wait shape improves readers' p50 wait or
+    commits per second by **10 % or more** with **no p99 worse by more than
+    10 %**, adopt it in the same PR (constants in `shared/`), with the
+    before-and-after table. Otherwise keep today's.
+  - **The default deadline (10 s) and the hooks' 2 s:** if the open-time
+    p99 of cell 8 is over 1 s on macOS, say so. I'll decide whether hooks
+    need more than 2 s.
+- **Then correct the 12.4 note's numbers** (the "not measured" cells, "tens
+  of commits a second", "readers waiting tens to hundreds of milliseconds",
+  the throughput paragraph), citing `shared_v0_14_0`, and add a CHANGELOG
+  line only if the backoff changes.
+- One PR into `release-0.14.0`. Log DONE when green, with the table (the
+  headline cells in the entry, the rest in the JSON), and stop before
+  merging. **Then READY** is next: I check every job on the branch's push
+  runs and call REVIEWER-B's release review through the user.
