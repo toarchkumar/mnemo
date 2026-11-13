@@ -318,6 +318,48 @@ jobs:
         working-directory: mnemo
         run: MNEMO_V0_10_BIN="$RUNNER_TEMP/v0_10/bin/mnemo" cargo test --test v0_10_fixture -- --nocapture
 
+  # --- 12.4 shared mode against the released v0.13.2 compactor (v0.14.0
+  #     step 3): its `mnemo compact` releases the lock before the rename, so
+  #     shared writers must report every write it loses
+  #     (`ReplacedDuringWrite`), never acknowledge one. See
+  #     `the_0_13_2_compactor_never_loses_an_acknowledged_write` in
+  #     `mnemo/tests/cross_process.rs`.
+  old-compactor:
+    name: old compactor (v0.13.2, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: old-compactor
+
+      - name: Cache the v0.13.2 CLI
+        id: v0_13_2
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/v0_13_2
+          key: mnemo-cli-0.13.2-${{ runner.os }}
+
+      - name: Install the v0.13.2 CLI
+        if: steps.v0_13_2.outputs.cache-hit != 'true'
+        # Its own published lockfile; see the compat job.
+        env:
+          RUSTFLAGS: ""
+        run: cargo install mnemo-engine --version =0.13.2 --locked --root "$RUNNER_TEMP/v0_13_2"
+
+      - name: cargo test (the old compactor case)
+        working-directory: mnemo
+        run: >-
+          MNEMO_V0_13_2_BIN="$RUNNER_TEMP/v0_13_2/bin/mnemo"
+          cargo test --features failpoints --test cross_process --
+          the_0_13_2_compactor_never_loses_an_acknowledged_write --nocapture
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the

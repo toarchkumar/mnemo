@@ -1107,3 +1107,101 @@ proptest! {
         }
     }
 }
+
+// ---------------------------------------------------------------------
+// v0.14.0 step 3 (12.4): the model with a second handle. Two shared
+// handles on one file, with compactions and a plain open between their
+// calls: after every step each handle shows exactly the model's set.
+// ---------------------------------------------------------------------
+
+use mnemo_engine::{SharedMnemo, SharedOptions};
+
+#[derive(Clone, Debug)]
+enum TwoOp {
+    Remember { second: bool, seed: u8 },
+    Delete { second: bool, idx: u8 },
+    Compact,
+    Plain { seed: u8 },
+}
+
+fn arb_two_op() -> impl Strategy<Value = TwoOp> {
+    prop_oneof![
+        4 => (any::<bool>(), any::<u8>()).prop_map(|(second, seed)| TwoOp::Remember { second, seed }),
+        2 => (any::<bool>(), any::<u8>()).prop_map(|(second, idx)| TwoOp::Delete { second, idx }),
+        1 => Just(TwoOp::Compact),
+        1 => any::<u8>().prop_map(|seed| TwoOp::Plain { seed }),
+    ]
+}
+
+fn shared_set(s: &mut SharedMnemo) -> BTreeSet<Fingerprint> {
+    s.read(|db| db.memories())
+        .expect("a shared read")
+        .iter()
+        .map(fp)
+        .collect()
+}
+
+fn two_handle_cases() -> u32 {
+    if std::env::var("MNEMO_STRESS").as_deref() == Ok("1") {
+        256
+    } else {
+        24
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(two_handle_cases()))]
+    #[test]
+    fn prop_two_shared_handles_match_the_model(
+        ops in prop::collection::vec(arb_two_op(), 1..=10),
+    ) {
+        if mnemo_engine::__shared::WINDOWS_OLD_RENAME {
+            return Ok(());
+        }
+        let (_dir, path, db) = fresh_db();
+        drop(db);
+        let mut a = Mnemo::open_shared(&path, "pw", SharedOptions::default()).unwrap();
+        let mut b = Mnemo::open_shared(&path, "pw", SharedOptions::default()).unwrap();
+        let mut model: BTreeSet<Fingerprint> = BTreeSet::new();
+        for (i, op) in ops.iter().enumerate() {
+            match op {
+                TwoOp::Remember { second, seed } => {
+                    let h = if *second { &mut b } else { &mut a };
+                    let (mut m, mut f) = make_memory(*seed, i as u8);
+                    m.content = format!("{}-{i}", m.content);
+                    f.0 = m.content.clone();
+                    h.write(move |db| db.remember(m)).unwrap();
+                    model.insert(f);
+                }
+                TwoOp::Delete { second, idx } => {
+                    let h = if *second { &mut b } else { &mut a };
+                    let mut live = h.read(|db| db.memories()).unwrap();
+                    if live.is_empty() {
+                        continue;
+                    }
+                    live.sort_by(|x, y| x.content.cmp(&y.content));
+                    let gone = live[*idx as usize % live.len()].clone();
+                    h.write(|db| db.delete(&gone.id)).unwrap();
+                    model.remove(&fp(&gone));
+                }
+                TwoOp::Compact => {
+                    Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
+                }
+                TwoOp::Plain { seed } => {
+                    let (mut m, mut f) = make_memory(*seed, i as u8);
+                    m.content = format!("{}-plain-{i}", m.content);
+                    f.0 = m.content.clone();
+                    let mut plain = Mnemo::open(&path, "pw").unwrap();
+                    plain.remember(m).unwrap();
+                    plain.close().unwrap();
+                    model.insert(f);
+                }
+            }
+            prop_assert_eq!(&shared_set(&mut a), &model, "the first handle after {:?}", op);
+            prop_assert_eq!(&shared_set(&mut b), &model, "the second handle after {:?}", op);
+        }
+        let mut reopened = Mnemo::open(&path, "pw").unwrap();
+        prop_assert_eq!(&observed_set(&mut reopened), &model);
+        reopened.verify().unwrap();
+    }
+}
