@@ -19,8 +19,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
   v0.13.2. Now the lock is held through the rename and the directory sync,
   and every open checks, once it holds the lock, that the path still names
   the file it locked (and retries if not). The rename over a file another
-  handle holds open and locked works on Linux, macOS and Windows (tested on
-  CI). The test runs on every CI OS.
+  handle holds open and locked works on Linux and macOS, and on Windows
+  when the engine is built with Rust 1.85 or later (tested on CI; the
+  released binaries and wheels are). Built with Rust 1.75 to 1.84, Windows
+  refuses that rename, so compaction closes the old file first, as before,
+  and the identity check before each commit reports nearly every write
+  that would have been lost as `Replaced` instead. The test runs on every
+  CI OS.
 - **A handle refuses to write to a file that was replaced at its path**
   (another program moved a file over it, say). Each commit and `rekey`
   checks the file's identity (`dev`/`ino`, or the volume serial number and
@@ -31,8 +36,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `Mnemo::create` truncated the path before it tried the lock, so creating
   over a file another handle had open destroyed it, then returned `Locked`.
   The file is now truncated only once the lock is held.
-- **Compaction and `export_encrypted` temp files have unique names**
-  (`<file>.compact-<pid>-<n>-<nanos>.tmp`), so two never share one. A
+- **Compaction's and the exports' temp files are always new files under
+  unique names** (`<file>.compact-<pid>-<n>-<nanos>.tmp`): each is created
+  only if nothing exists at its name, and a taken name gets another. A
   crash can leave one behind; it's safe to delete when no compaction is
   running.
 

@@ -234,3 +234,89 @@ fn compaction_leaves_no_temp_file() {
     assert_eq!(names, vec!["c.mnemo".to_string()], "{names:?}");
     assert_eq!(count(&path), 4);
 }
+
+/// Plant something at the temp name the engine is about to use: a symlink
+/// to another file of the user's (Unix), or a plain file (everywhere).
+/// Returns what to compare afterwards.
+#[cfg(feature = "failpoints")]
+fn plant(at: &Path, victim: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(victim, at).unwrap();
+    #[cfg(not(unix))]
+    std::fs::write(at, std::fs::read(victim).unwrap()).unwrap();
+}
+
+/// RB-006.10: compaction, `export_encrypted` and `export_rekeyed` create
+/// their temp files with `create_new`, so a file or symlink already at the
+/// name is never written through: the call takes another name, and the
+/// other file is left byte-identical. The planted name is the exact one the
+/// engine draws next (`__failpoints::set_next_temp_name`), plus the old
+/// fixed names.
+#[cfg(feature = "failpoints")]
+#[test]
+fn nothing_at_a_temp_name_is_ever_written_through() {
+    use mnemo_engine::__failpoints::set_next_temp_name;
+    let dir = tempdir().unwrap();
+    let victim = dir.path().join("victim.txt");
+    std::fs::write(&victim, b"someone else's file").unwrap();
+    let brain = dir.path().join("brain.mnemo");
+    seed(&brain, 3);
+    let p = brain.to_str().unwrap();
+
+    // The old fixed names (v0.13.2 and earlier).
+    plant(&dir.path().join("brain.mnemo.compact-tmp"), &victim);
+    plant(&dir.path().join("out.mnemo.export-tmp"), &victim);
+    plant(&dir.path().join("re.mnemo.export-tmp"), &victim);
+
+    let check = |what: &str| {
+        assert_eq!(
+            std::fs::read(&victim).unwrap(),
+            b"someone else's file",
+            "{what}: the other file was written through"
+        );
+    };
+
+    // Compaction (and so `rekey --rotate`).
+    let planted = dir.path().join("brain.mnemo.planted-compact.tmp");
+    plant(&planted, &victim);
+    set_next_temp_name(&planted);
+    Mnemo::compact_file(p, PW).unwrap();
+    check("compact_file");
+    assert!(
+        !std::fs::symlink_metadata(&brain)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the brain's path must stay a regular file"
+    );
+    assert_eq!(count(&brain), 3);
+
+    // export_encrypted.
+    let out = dir.path().join("out.mnemo");
+    let planted = dir.path().join("out.mnemo.planted-export.tmp");
+    plant(&planted, &victim);
+    let mut db = Mnemo::open(&brain, PW).unwrap();
+    set_next_temp_name(&planted);
+    db.export_encrypted(&out).unwrap();
+    check("export_encrypted");
+
+    // export_rekeyed.
+    let re = dir.path().join("re.mnemo");
+    let planted = dir.path().join("re.mnemo.planted-rekeyed.tmp");
+    plant(&planted, &victim);
+    set_next_temp_name(&planted);
+    db.export_rekeyed(&re, "other-pw", KdfParams::fast())
+        .unwrap();
+    check("export_rekeyed");
+    drop(db);
+
+    for f in [&out, &re] {
+        assert!(!std::fs::symlink_metadata(f)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+    assert_eq!(count(&out), 3);
+    let mut r = Mnemo::open_read_only(&re, "other-pw").unwrap();
+    assert_eq!(r.stats().unwrap().memories, 3);
+}

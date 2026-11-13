@@ -62,17 +62,29 @@ impl Mnemo {
                 dest.display()
             ))
         })?;
-        let tmp = temp_sibling(dest, "export");
+        // A new file under a fresh name: `create_new` refuses anything
+        // already there, a symlink included, and a taken name gets another.
+        let (tmp, mut out) = {
+            let mut attempt = 0;
+            loop {
+                let tmp = temp_sibling(dest, "export");
+                match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+                    Ok(out) => break (tmp, out),
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::AlreadyExists
+                            && attempt + 1 < TEMP_NAME_ATTEMPTS =>
+                    {
+                        attempt += 1;
+                    }
+                    Err(e) => return Err(MnemoError::Io(e)),
+                }
+            }
+        };
         // Scope the temp handle so it closes before the rename on
-        // Windows (which refuses to rename over an open file).
+        // Windows (which refuses to rename a file this process has open).
         {
             let src = self.pager.file_mut();
             src.seek(SeekFrom::Start(0))?;
-            let mut out = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&tmp)?;
             let mut buf = vec![0u8; 1 << 20]; // 1 MiB
             loop {
                 let n = src.read(&mut buf)?;
@@ -83,6 +95,7 @@ impl Mnemo {
             }
             out.sync_all()?;
             crate::bump_fsync();
+            drop(out);
         }
 
         // Step 4 — atomic rename onto `dest`.
@@ -345,21 +358,14 @@ impl Mnemo {
         if !self.read_only {
             self.flush()?;
         }
-        let mut name = dest.file_name().unwrap_or_default().to_os_string();
-        name.push(".export-tmp");
-        let tmp = dest.with_file_name(name);
-        let _ = std::fs::remove_file(&tmp);
+        let config = MnemoConfig {
+            dimensions: self.dimensions,
+            kdf,
+            store_float_vectors: self.float_vectors(),
+            ..Default::default()
+        };
+        let (tmp, mut new) = create_temp(dest, "export", secret, config)?;
         let result = (|| {
-            let mut new = Mnemo::create_secret(
-                &tmp,
-                secret,
-                MnemoConfig {
-                    dimensions: self.dimensions,
-                    kdf,
-                    store_float_vectors: self.float_vectors(),
-                    ..Default::default()
-                },
-            )?;
             let report = self.copy_live_into(&mut new)?;
             new.flush()?;
             drop(new);
@@ -721,17 +727,26 @@ impl Mnemo {
         format_version: u16,
     ) -> Result<CompactReport> {
         // The one read-write open that takes a v4–v8 file (the v8 sunset).
-        let mut old = Mnemo::open_secret_with(path, secret, true)?;
+        let old = Mnemo::open_secret_with(path, secret, true)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
-        // v0.14.0 step 1: a name no other compaction shares.
-        let tmp = temp_sibling(Path::new(path), "compact");
-        let result = Self::compact_into(&mut old, path, &tmp, secret, dims, kdf, format_version);
+        let config = MnemoConfig {
+            dimensions: dims,
+            kdf,
+            // FMT-9f: compaction writes v9 (upgrading a v8 file),
+            // unless `compact_file_to` asked for v8. A v9 file that
+            // keeps float vectors keeps them.
+            format_version,
+            store_float_vectors: old.float_vectors(),
+            ..Default::default()
+        };
+        // v0.14.0 step 1: a new file under a name no other compaction shares.
+        let (tmp, new) = create_temp(Path::new(path), "compact", secret, config)?;
+        // `compact_into` releases the old file's lock only after the rename.
+        let result = Self::compact_into(old, new, path, &tmp);
         if result.is_err() {
             let _ = std::fs::remove_file(&tmp);
         }
-        // Only now does the old file's lock go: see `compact_into`.
-        drop(old);
         result
     }
 
@@ -745,32 +760,26 @@ impl Mnemo {
     /// through the rename and the directory sync means a process either
     /// waits on the old file's lock (and then finds, by `open_with_lock`'s
     /// identity check, that the path names the new file) or opens the new
-    /// file. Renaming over a file another handle holds open and locked
-    /// works on Linux, macOS and Windows (probed on CI, 2026-11-13).
-    #[allow(clippy::too_many_arguments)]
+    /// file.
+    ///
+    /// **Windows and the toolchain.** Renaming over a file another handle
+    /// holds open and locked works on Linux and macOS with every toolchain,
+    /// and on Windows when the engine is built with Rust 1.85 or later,
+    /// whose `std::fs::rename` uses POSIX semantics. Built with 1.75 to 1.84
+    /// (the MSRV is 1.75), Windows refuses it with "Access is denied" (os
+    /// error 5) while the old file is open, so the rename is retried once
+    /// after the old handle is closed, as before v0.14.0. That leaves the
+    /// old window open for those builds; each commit's identity check
+    /// (`ensure_not_replaced`) then turns nearly every write that would have
+    /// been lost into `Replaced`. (Probed on CI, 2026-11-13: 1.75 to 1.84
+    /// refuse, 1.85 to 1.100 succeed; the released binaries are built with
+    /// stable.)
     fn compact_into(
-        old: &mut Mnemo,
+        mut old: Mnemo,
+        mut new: Mnemo,
         path: &str,
         tmp: &Path,
-        secret: &[u8],
-        dims: usize,
-        kdf: KdfParams,
-        format_version: u16,
     ) -> Result<CompactReport> {
-        let mut new = Mnemo::create_secret(
-            tmp,
-            secret,
-            MnemoConfig {
-                dimensions: dims,
-                kdf,
-                // FMT-9f: compaction writes v9 (upgrading a v8 file),
-                // unless `compact_file_to` asked for v8. A v9 file that
-                // keeps float vectors keeps them.
-                format_version,
-                store_float_vectors: old.float_vectors(),
-                ..Default::default()
-            },
-        )?;
         let report = old.copy_live_into(&mut new)?;
 
         new.flush()?;
@@ -778,7 +787,17 @@ impl Mnemo {
         // file this process still has open.
         drop(new);
 
-        std::fs::rename(tmp, path)?;
+        match std::fs::rename(tmp, path) {
+            Ok(()) => {}
+            #[cfg(windows)]
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                // A toolchain before 1.85: see above.
+                drop(old);
+                std::fs::rename(tmp, path)?;
+                return Ok(report);
+            }
+            Err(e) => return Err(MnemoError::Io(e)),
+        }
         // Make the rename durable before the old file's lock goes.
         #[cfg(unix)]
         if let Some(parent) = Path::new(path).parent() {
@@ -792,6 +811,8 @@ impl Mnemo {
                 crate::bump_fsync();
             }
         }
+        // Only now does the old file's lock go.
+        drop(old);
         Ok(report)
     }
 
@@ -905,4 +926,24 @@ pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usi
         crate::bump_fsync();
     }
     Ok(hits.len())
+}
+
+/// A new, locked temp file next to `dest` (`Create::New`, so nothing already
+/// at the name, a symlink included, is ever written through), under a fresh
+/// name for each attempt while names are taken. RB-006.10.
+fn create_temp(
+    dest: &Path,
+    what: &str,
+    secret: &[u8],
+    config: MnemoConfig,
+) -> Result<(PathBuf, Mnemo)> {
+    let mut attempt = 0;
+    loop {
+        let tmp = temp_sibling(dest, what);
+        match Mnemo::create_secret_new(&tmp, secret, config) {
+            Ok(new) => return Ok((tmp, new)),
+            Err(e) if is_name_taken(&e) && attempt + 1 < TEMP_NAME_ATTEMPTS => attempt += 1,
+            Err(e) => return Err(e),
+        }
+    }
 }

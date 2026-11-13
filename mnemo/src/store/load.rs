@@ -25,15 +25,26 @@ use super::*;
 ///   then lands on the replaced file, and every write to it is lost. So
 ///   after locking, the open file is compared with the one at the path,
 ///   and on a mismatch the open is retried on the new file.
-pub(super) fn open_with_lock(path: &Path, write: bool, create: bool) -> Result<LockedFile> {
+///
+/// `Create::New` refuses any existing name, a symlink included (`O_EXCL`;
+/// `CREATE_NEW` on Windows), with `ErrorKind::AlreadyExists`. Temp files use
+/// it, so nothing already at a temp name is ever written through.
+pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result<LockedFile> {
     const ATTEMPTS: usize = 8;
     for _ in 0..ATTEMPTS {
         let file = open_and_lock_once(path, write, create)?;
         if is_file_at(&file, path)? {
-            if create {
+            if create == Create::Truncate {
                 file.set_len(0)?;
             }
             return Ok(file);
+        }
+        if create == Create::New {
+            // We made this name ourselves, so it can't have been replaced by
+            // a compaction; something else is moving files here.
+            return Err(MnemoError::Replaced {
+                path: path.to_path_buf(),
+            });
         }
         // Replaced between our open and our lock: unlock (on drop) and open
         // whatever the path names now.
@@ -85,15 +96,33 @@ pub(super) fn is_file_at(file: &File, path: &Path) -> Result<bool> {
     }
 }
 
-fn open_and_lock_once(path: &Path, write: bool, create: bool) -> Result<LockedFile> {
+/// How [`open_with_lock`] treats a missing or existing file.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Create {
+    /// Open an existing file only.
+    No,
+    /// Create it, or empty an existing one once the lock is held.
+    Truncate,
+    /// Create a new file; any existing name, a symlink included, is
+    /// `AlreadyExists`.
+    New,
+}
+
+fn open_and_lock_once(path: &Path, write: bool, create: Create) -> Result<LockedFile> {
     let mut opts = OpenOptions::new();
     opts.read(true);
     if write {
         opts.write(true);
     }
-    if create {
+    match create {
+        Create::No => {}
         // No `truncate(true)`: see `open_with_lock`.
-        opts.create(true);
+        Create::Truncate => {
+            opts.create(true);
+        }
+        Create::New => {
+            opts.create_new(true);
+        }
     }
     let file = opts.open(path)?;
     // On success the returned `Result<()>` is `Ok(())`. On conflict:
@@ -152,6 +181,10 @@ pub(super) fn paths_refer_to_same_file(a: &Path, b: &Path) -> Option<bool> {
 /// second compaction truncate the first one's copy mid-write). A crash can
 /// leave one behind; it's safe to delete when no compaction is running.
 pub(super) fn temp_sibling(dest: &Path, what: &str) -> PathBuf {
+    #[cfg(any(test, feature = "failpoints"))]
+    if let Some(planted) = crate::__failpoints::take_next_temp_name() {
+        return planted;
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -165,6 +198,15 @@ pub(super) fn temp_sibling(dest: &Path, what: &str) -> PathBuf {
         std::process::id()
     ));
     PathBuf::from(buf)
+}
+
+/// How many fresh names a temp file gets before a run of collisions
+/// (`AlreadyExists`) is reported as the error.
+pub(super) const TEMP_NAME_ATTEMPTS: usize = 16;
+
+/// Was `e` the `AlreadyExists` a `Create::New` open returns for a taken name?
+pub(super) fn is_name_taken(e: &MnemoError) -> bool {
+    matches!(e, MnemoError::Io(io) if io.kind() == std::io::ErrorKind::AlreadyExists)
 }
 
 /// Was this I/O error the OS reporting a conflicting file lock, or a

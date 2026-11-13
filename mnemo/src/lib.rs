@@ -260,6 +260,23 @@ pub mod __failpoints {
     pub fn set_writes_until_fail(n: i64) {
         crate::pager::failpoints::set_writes_until_fail(n)
     }
+
+    thread_local! {
+        static NEXT_TEMP_NAME: std::cell::RefCell<Option<std::path::PathBuf>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Make the next temp file name this thread asks for (compaction,
+    /// `export_encrypted`, `export_rekeyed`) be `path`, once; the attempts
+    /// after it are generated as usual. Lets a test plant a file or a
+    /// symlink at the exact name the engine is about to use.
+    pub fn set_next_temp_name(path: impl Into<std::path::PathBuf>) {
+        NEXT_TEMP_NAME.with(|n| *n.borrow_mut() = Some(path.into()));
+    }
+
+    pub(crate) fn take_next_temp_name() -> Option<std::path::PathBuf> {
+        NEXT_TEMP_NAME.with(|n| n.borrow_mut().take())
+    }
 }
 
 /// WAL entry points for the PERF-1 allocation test

@@ -202,7 +202,25 @@ impl Mnemo {
         secret: &[u8],
         config: MnemoConfig,
     ) -> Result<Mnemo> {
-        let path: PathBuf = path.into();
+        Self::create_secret_as(path.into(), secret, config, Create::Truncate)
+    }
+
+    /// [`Mnemo::create_secret`] for a temp file: `Create::New` refuses a
+    /// name that already exists (a symlink included), with `AlreadyExists`.
+    pub(super) fn create_secret_new(
+        path: &Path,
+        secret: &[u8],
+        config: MnemoConfig,
+    ) -> Result<Mnemo> {
+        Self::create_secret_as(path.to_path_buf(), secret, config, Create::New)
+    }
+
+    fn create_secret_as(
+        path: PathBuf,
+        secret: &[u8],
+        config: MnemoConfig,
+        create: Create,
+    ) -> Result<Mnemo> {
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
         }
@@ -220,7 +238,7 @@ impl Mnemo {
             FLAG_ENCRYPTED
         };
         // Exclusive lock covers the write path; second writer sees `Locked`.
-        let file = open_with_lock(&path, /*write=*/ true, /*create=*/ true)?;
+        let file = open_with_lock(&path, /*write=*/ true, create)?;
 
         let salt = crypto::random_salt();
         let dek = crypto::random_dek();
@@ -387,7 +405,7 @@ impl Mnemo {
         allow_old: bool,
     ) -> Result<Mnemo> {
         let path: PathBuf = path.into();
-        let mut file = open_with_lock(&path, /*write=*/ true, /*create=*/ false)?;
+        let mut file = open_with_lock(&path, /*write=*/ true, Create::No)?;
 
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;
@@ -812,7 +830,7 @@ impl Mnemo {
 
     pub(super) fn open_read_only_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
-        let mut file = open_with_lock(&path, /*write=*/ false, /*create=*/ false)?;
+        let mut file = open_with_lock(&path, /*write=*/ false, Create::No)?;
 
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;

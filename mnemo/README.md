@@ -445,8 +445,12 @@ waiting on the lock never commits to the file being replaced. Every open
 checks, once it holds its lock, that the path still names the locked file,
 and retries if not. A handle whose path was replaced while it was open
 (another program moved a file over it) refuses its next commit with
-`MnemoError::Replaced` and writes nothing; reopen the path. The rename
-works the same on Linux, macOS and Windows.
+`MnemoError::Replaced` and writes nothing; reopen the path. On Windows,
+holding the lock through the rename needs the engine built with Rust 1.85
+or later (the released binaries and wheels are); with an older toolchain
+compaction closes the old file before the rename, and the identity check
+before each commit is what catches a write that would land in the replaced
+file.
 
 Two conditions block a read-only open and return `MnemoError::NeedsWriteOpen`:
 a committed-but-uncheckpointed WAL transaction waiting to be replayed on
