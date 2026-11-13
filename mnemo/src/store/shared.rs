@@ -120,7 +120,9 @@ struct FileSettings {
     max_snapshots: usize,
     snapshot_cap_explicit: bool,
     turn_compress_after: i64,
-    cache_budgets: usize,
+    /// The per-namespace budgets themselves, sorted: a changed value is a
+    /// change, not only an added or removed namespace.
+    cache_budgets: Vec<(String, usize, u64)>,
     cache_flush_policy: String,
 }
 
@@ -130,7 +132,15 @@ impl FileSettings {
             max_snapshots: db.max_snapshots,
             snapshot_cap_explicit: db.snapshot_cap_explicit,
             turn_compress_after: db.turn_compress_after,
-            cache_budgets: db.cache_budgets.len(),
+            cache_budgets: {
+                let mut b: Vec<_> = db
+                    .cache_budgets
+                    .iter()
+                    .map(|(ns, b)| (ns.clone(), b.max_entries, b.max_bytes))
+                    .collect();
+                b.sort();
+                b
+            },
             cache_flush_policy: format!("{:?}", db.cache_flush_policy),
         }
     }
@@ -268,6 +278,10 @@ impl SharedMnemo {
     /// Run `f` on the handle under the file's exclusive lock, after catching
     /// up, and commit before the lock is released. See [`SharedMnemo`] for
     /// what each failure means.
+    ///
+    /// A closure that calls `flush()` itself and then changes a setting gets
+    /// the settings error ("nothing was changed"), although the commit it
+    /// flushed is in the file: don't do both in one window.
     pub fn write<R>(&mut self, f: impl FnOnce(&mut Mnemo) -> Result<R>) -> Result<R> {
         self.window(LockKind::Exclusive, |s| s.run_write(f))
     }
@@ -333,13 +347,23 @@ impl SharedMnemo {
                 Next::NeedExclusive => lock = LockKind::Exclusive,
             }
         };
-        let r = run(self);
+        // The pager now holds the call's locked file. Release it however
+        // `run` ends: a closure that panics, caught by the caller (UniFFI
+        // catches panics at its boundary, and so do thread pools and
+        // `catch_unwind`), must not leave the handle holding the lock. So
+        // the unwind is caught here, the lock released, and the panic
+        // resumed. A write window has cleared its stamp before running the
+        // closure, so the handle's next call reloads.
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(self)));
         // The lock-info note (if any) goes before the unlock.
         drop(held);
         if let Some(db) = self.db.as_mut() {
             drop(db.pager.detach_file());
         }
-        r
+        match r {
+            Ok(r) => r,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
     }
 
     /// 12.4 protocol steps 5 and 6 (the identity check of step 4 ran in the

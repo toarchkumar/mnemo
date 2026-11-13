@@ -513,3 +513,66 @@ fn four_handles_write_and_read_together() {
     let mut s = shared(&p).unwrap();
     assert_eq!(in_handle(&mut s).len(), 60);
 }
+
+/// A closure that panics inside a write window, caught by the caller: the
+/// handle doesn't keep the lock (another handle writes at once), and its
+/// next call reloads, since the write window cleared its stamp first.
+#[test]
+fn a_panicking_closure_releases_the_lock() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let Some(mut a) = shared(&p) else { return };
+    let m = mem("half done");
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = a.write(move |db| -> Result<()> {
+            db.remember(m)?;
+            panic!("the closure panics after a change");
+        });
+    }));
+    assert!(caught.is_err(), "the panic reaches the caller");
+
+    // Another handle gets the exclusive lock at once (a short deadline).
+    let mut o = SharedOptions::default();
+    o.deadline = std::time::Duration::from_millis(500);
+    let mut b = Mnemo::open_shared(&p, PW, o).unwrap();
+    remember(&mut b, "from b").unwrap();
+
+    // The panicking handle reloads, and never shows the half-done write.
+    let reloads = a.__reloads();
+    assert_eq!(in_handle(&mut a), vec!["from b", "seed 0"]);
+    assert!(a.__reloads() > reloads);
+    assert_eq!(on_disk(&p), vec!["from b", "seed 0"]);
+
+    // A read window that panics releases its shared lock too.
+    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = a.read(|_| -> Result<()> { panic!("a read panics") });
+    }));
+    assert!(caught.is_err());
+    remember(&mut b, "b again").unwrap();
+    assert_eq!(in_handle(&mut a), vec!["b again", "from b", "seed 0"]);
+}
+
+/// The settings check compares the cache budgets themselves: a budget whose
+/// value changes is refused, even though the number of budgets doesn't.
+#[test]
+fn a_changed_cache_budget_value_is_refused() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let Some(mut a) = shared(&p) else { return };
+    // Shared mode refuses setting a budget at all, so put one in the
+    // handle's state directly (a test hook), then change only its value.
+    let budget = |n| mnemo_engine::CacheBudget {
+        max_entries: n,
+        max_bytes: 1 << 20,
+    };
+    a.__state().unwrap().set_cache_budget("ns", budget(10));
+    let m = mem("with a changed budget");
+    let e = a
+        .write(move |db| {
+            db.set_cache_budget("ns", budget(5));
+            db.remember(m)
+        })
+        .unwrap_err();
+    assert!(matches!(e, MnemoError::Unsupported(_)), "{e}");
+    assert_eq!(on_disk(&p), vec!["seed 0"]);
+}
