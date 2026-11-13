@@ -530,7 +530,16 @@ impl Mnemo {
     /// needs: a page is reused only after the transaction that freed it
     /// committed, and that transaction came after the one that wrote it.
     /// `0` on v8, whose page AAD has no generation.
+    ///
+    /// Every v9 page is sealed under a generation from here (or, for the
+    /// control-plane runs `flush` seals, the same id), so the assertion
+    /// below catches a seal that came before the session's or the shared
+    /// window's lease (RB-006.11 (a), RB-007.6).
     pub(super) fn write_gen(&self) -> u64 {
+        debug_assert!(
+            !self.is_v9() || self.gen_leased,
+            "a v9 generation handed out before the generation lease"
+        );
         if self.is_v9() {
             self.header.wal_seq + 1
         } else {

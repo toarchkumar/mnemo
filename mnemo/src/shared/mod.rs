@@ -12,6 +12,8 @@ mod fscheck;
 mod lock;
 mod sidecar;
 
+#[allow(unused_imports)]
+pub(crate) use call::Call;
 pub use call::CancelToken;
 pub use lock::SharedOptions;
 #[allow(unused_imports)]

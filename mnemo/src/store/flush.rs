@@ -32,6 +32,11 @@ impl Mnemo {
         gen: u64,
         frames: &mut Vec<wal::Frame>,
     ) -> Result<()> {
+        // RB-007.6: no v9 page is sealed before this window's lease.
+        debug_assert!(
+            !self.is_v9() || self.gen_leased,
+            "a v9 run sealed before the generation lease"
+        );
         let direct = self.is_v9() && pages > V9_WAL_RUN_MAX_PAGES;
         for i in 0..pages as usize {
             let lo = (i * PAYLOAD).min(bytes.len());
@@ -248,7 +253,8 @@ impl Mnemo {
         //    of every run it seals. A v9 run replaced here is freed by this
         //    same commit (`superseded`); v8 never reuses pages.
         let txn_id = self.header.wal_seq + 1;
-        let gen = if self.is_v9() { txn_id } else { 0 };
+        let gen = self.write_gen();
+        debug_assert!(!self.is_v9() || gen == txn_id);
         let v9 = self.is_v9();
         let mut superseded: Vec<(u64, u64)> = Vec::new();
         let mut frames: Vec<wal::Frame> = Vec::new();
@@ -649,6 +655,8 @@ impl Mnemo {
         // sync_all calls between the snapshot above and this read.
         self.fsyncs_last_flush =
             (crate::fsync_count().wrapping_sub(fsync_before)).min(u32::MAX as u64) as u32;
+        // 12.4 shared mode (RB-007.5): this commit is in the file.
+        self.window_committed = true;
         Ok(())
     }
 

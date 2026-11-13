@@ -302,6 +302,38 @@ pub mod __failpoints {
     pub(crate) fn take_next_temp_name() -> Option<std::path::PathBuf> {
         NEXT_TEMP_NAME.with(|n| n.borrow_mut().take())
     }
+
+    thread_local! {
+        static SHARED_MAIN_TRIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        static SHARED_REPLACED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    /// How many times this thread's shared-mode calls have tried the main
+    /// lock (each open, lock and identity check counts once).
+    pub fn shared_main_tries() -> u64 {
+        SHARED_MAIN_TRIES.with(|c| c.get())
+    }
+
+    pub(crate) fn count_shared_main_try() {
+        SHARED_MAIN_TRIES.with(|c| c.set(c.get() + 1));
+    }
+
+    /// Make this thread's next `n` shared-mode tries at the main lock find
+    /// the file replaced (as if a compaction renamed a new file over the
+    /// path between the open and the lock each time). `0` disarms.
+    pub fn set_shared_replaced(n: u64) {
+        SHARED_REPLACED.with(|c| c.set(n));
+    }
+
+    pub(crate) fn take_shared_replaced() -> bool {
+        SHARED_REPLACED.with(|c| {
+            let n = c.get();
+            if n > 0 {
+                c.set(n - 1);
+            }
+            n > 0
+        })
+    }
 }
 
 /// 12.4 step 2a: the shared lock layer, reached directly by its tests
@@ -314,7 +346,7 @@ pub mod __failpoints {
 pub mod __shared {
     use std::path::{Path, PathBuf};
 
-    use crate::shared::{BrainLocks, Held, LockKind};
+    use crate::shared::{BrainLocks, Call, Held, LockKind};
     use crate::{Result, SharedOptions};
 
     /// The sidecar directory's suffix and its two file names.
@@ -348,11 +380,13 @@ pub mod __shared {
         pub fn new(path: &Path, opts: &SharedOptions) -> Result<Self> {
             BrainLocks::new(path, opts).map(Locks)
         }
-        pub fn shared(&self, opts: &SharedOptions) -> Result<Lock> {
-            self.0.acquire(LockKind::Shared, opts).map(Lock)
+        pub fn shared(&mut self, opts: &SharedOptions) -> Result<Lock> {
+            let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+            self.0.acquire(LockKind::Shared, &mut call).map(Lock)
         }
-        pub fn exclusive(&self, opts: &SharedOptions) -> Result<Lock> {
-            self.0.acquire(LockKind::Exclusive, opts).map(Lock)
+        pub fn exclusive(&mut self, opts: &SharedOptions) -> Result<Lock> {
+            let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+            self.0.acquire(LockKind::Exclusive, &mut call).map(Lock)
         }
         pub fn has_sidecar(&self) -> bool {
             self.0.has_sidecar()

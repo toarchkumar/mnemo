@@ -13,8 +13,9 @@
 //!    lock first, then replays or heals, then reloads;
 //! 3. run the caller's closure on the handle: read-only for a read, with
 //!    access statistics kept as a delta; for a write, the stamp is cleared
-//!    first, a fresh generation lease is taken, the delta is applied, and
-//!    the window commits before it lets go;
+//!    first, the generation lease is reset (the first page the window seals
+//!    takes a fresh one), the delta is applied, and the window commits
+//!    before it lets go;
 //! 4. unlock and close.
 
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 
 use super::*;
-use crate::shared::{BrainLocks, LockKind, SharedOptions};
+use crate::shared::{BrainLocks, Call, CancelToken, LockKind, SharedOptions};
 
 /// Access statistics a shared handle saw while it held only the shared lock
 /// (recall hits, cache hits): applied with the handle's next commit, and
@@ -146,15 +147,27 @@ impl FileSettings {
     }
 }
 
+const SETTINGS_KEPT: &str = "a shared-mode handle keeps the file's default settings in v0.14 \
+     (snapshot retention, cache budgets, the cache flush policy, turn compression): every \
+     process's commits would apply one handle's setting to the whole file";
+
 fn settings_refused() -> MnemoError {
-    MnemoError::Unsupported(
-        "a shared-mode handle keeps the file's default settings in v0.14 (snapshot \
-         retention, cache budgets, the cache flush policy, turn compression): every \
-         process's commits would apply one handle's setting to the whole file. Nothing \
-         was changed"
-            .into(),
-    )
+    MnemoError::Unsupported(format!("{SETTINGS_KEPT}. Nothing was changed"))
 }
+
+/// RB-007.5: the window's closure committed part of its work itself (a
+/// `flush`, or a method that commits, such as `commit_deltas`) before `e`.
+fn part_stored(e: impl std::fmt::Display) -> MnemoError {
+    MnemoError::MaybeStored(format!(
+        "{e}; an earlier commit in this window is in the file, so part of the window \
+         was stored"
+    ))
+}
+
+/// A read had to heal the file (a pending WAL, a torn page 0) and this
+/// process can't open it for writing (RB-007.8 item 5).
+const HEAL_NEEDS_WRITE: &str = "the file has a pending WAL or a torn header to recover, \
+     and this process can't write to it";
 
 /// What tells a shared handle that the file changed (12.4 protocol step 5):
 /// the header's seal, which gets a fresh random nonce on every header
@@ -217,14 +230,25 @@ enum Next {
 ///   recall's or a cache hit's access statistics are kept and applied with
 ///   this handle's next write; they're dropped at [`SharedMnemo::close`].
 /// - **A write** runs under the exclusive lock and commits before the
-///   window ends. If it fails before the commit point, nothing was stored.
-///   If it fails after, the handle finishes the commit itself and returns
-///   `Ok`, or returns [`MnemoError::MaybeStored`]. If the file was renamed
-///   away during the commit, [`MnemoError::ReplacedDuringWrite`].
+///   window ends. If it fails before the commit point, nothing was stored,
+///   for a closure that doesn't commit by itself. A closure that does (it
+///   calls `flush`, or a method that commits, such as `commit_deltas` or
+///   `restore_to`) and then fails gets [`MnemoError::MaybeStored`], saying
+///   part of the window is in the file. If the window's own commit fails
+///   after its commit point, the handle finishes the commit itself and
+///   returns `Ok`, or returns [`MnemoError::MaybeStored`]. If the file was
+///   renamed away during the commit, [`MnemoError::ReplacedDuringWrite`].
+///   Keep to one engine call per window where you can.
+/// - **Access statistics** a failed write window applied are dropped when
+///   its commit fails; they're statistics, and the next hits count again.
 /// - **Settings** that act on the whole file (snapshot retention, cache
 ///   budgets, the cache flush policy, turn compression) are refused in
-///   v0.14 with [`MnemoError::Unsupported`]. The page cache's size, the
-///   vector cache budget and the embedder are kept across reloads.
+///   v0.14 with [`MnemoError::Unsupported`], and so is `rekey` inside a
+///   closure (use [`SharedMnemo::rekey`], which also updates the secret the
+///   handle keeps). The page cache's size, the vector cache budget and the
+///   embedder (however it was set) are kept across reloads.
+/// - **A cancel** ([`SharedMnemo::set_cancel`]) reaches only a call that is
+///   waiting for a lock; once a call holds the lock it runs to its end.
 pub struct SharedMnemo {
     locks: BrainLocks,
     opts: SharedOptions,
@@ -236,6 +260,8 @@ pub struct SharedMnemo {
     delta: AccessDelta,
     embedder: Option<Arc<dyn Embedder>>,
     reloads: u64,
+    /// What the last [`SharedMnemo::rekey`] couldn't scrub.
+    rekey_cleanup: Option<String>,
 }
 
 impl std::fmt::Debug for SharedMnemo {
@@ -261,6 +287,7 @@ impl SharedMnemo {
             delta: AccessDelta::default(),
             embedder: None,
             reloads: 0,
+            rekey_cleanup: None,
         };
         // Load now, so a wrong secret or an old format fails at open.
         s.read(|_| Ok(()))?;
@@ -279,20 +306,78 @@ impl SharedMnemo {
     /// up, and commit before the lock is released. See [`SharedMnemo`] for
     /// what each failure means.
     ///
-    /// A closure that calls `flush()` itself and then changes a setting gets
-    /// the settings error ("nothing was changed"), although the commit it
-    /// flushed is in the file: don't do both in one window.
+    /// A closure that commits part of its work itself and then fails, or
+    /// then changes a setting, gets [`MnemoError::MaybeStored`]: the earlier
+    /// commit is in the file.
     pub fn write<R>(&mut self, f: impl FnOnce(&mut Mnemo) -> Result<R>) -> Result<R> {
         self.window(LockKind::Exclusive, |s| s.run_write(f))
     }
 
-    /// Attach an embedder (as [`Mnemo::set_embedder`], in a write window,
-    /// since a first embedder's identity is recorded in the file). It's kept
-    /// across reloads.
+    /// Attach an embedder (as [`Mnemo::set_embedder`]). It's kept across
+    /// reloads. When the file already records this embedder's identity,
+    /// this is a read window and writes nothing; otherwise the identity is
+    /// recorded in a write window.
     pub fn set_embedder<E: Embedder + 'static>(&mut self, embedder: E) -> Result<()> {
-        self.write(|db| db.set_embedder(embedder))?;
-        self.embedder = self.db.as_ref().and_then(|d| d.embedder.clone());
+        let identity = embedder.identity();
+        let needs_write = self.read(move |db| {
+            if db.embedder_would_record(&identity)? {
+                return Ok(Some(embedder));
+            }
+            db.set_embedder(embedder)?;
+            Ok(None)
+        })?;
+        if let Some(embedder) = needs_write {
+            self.write(|db| db.set_embedder(embedder))?;
+        }
         Ok(())
+    }
+
+    /// Change the passphrase (as [`Mnemo::rekey`], in a write window), and
+    /// replace the secret the handle keeps once the new one is in force, so
+    /// the handle can still follow a compaction or recover the file
+    /// afterwards. An error leaves the old secret in force and kept, unless
+    /// it says the file may open with either.
+    pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
+        self.rekey_secret(new_passphrase.as_bytes(), kdf)
+    }
+
+    /// [`SharedMnemo::rekey`] to a raw 256-bit key (as
+    /// [`Mnemo::rekey_with_key`]).
+    pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
+        self.rekey_secret(new_key, KdfParams::raw_key())
+    }
+
+    /// After a successful [`SharedMnemo::rekey`], what couldn't be scrubbed
+    /// of the old key wrap (see [`Mnemo::rekey_cleanup_error`]).
+    pub fn rekey_cleanup_error(&self) -> Option<&str> {
+        self.rekey_cleanup.as_deref()
+    }
+
+    fn rekey_secret(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
+        // The rekey window applies no statistics, so its only commit is the
+        // rekey's and its errors are the rekey's own; the next write applies
+        // them.
+        let held_back = std::mem::take(&mut self.delta);
+        let mut in_force = None;
+        let r = self.write(|db| {
+            db.rekey_unchecked(secret, kdf)?;
+            in_force = Some(db.rekey_cleanup.clone());
+            Ok(())
+        });
+        self.delta = held_back;
+        if let Some(cleanup) = in_force {
+            self.secret = Zeroizing::new(secret.to_vec());
+            self.rekey_cleanup = cleanup;
+        }
+        r
+    }
+
+    /// Give the handle a new cancel token for its later calls, or none
+    /// (RB-007.1). A cancelled token stays cancelled, so after a cancel the
+    /// handle needs a new one (or `None`) to wait for a lock again. A cancel
+    /// reaches only a call that is waiting for a lock.
+    pub fn set_cancel(&mut self, token: Option<CancelToken>) {
+        self.opts.cancel = token;
     }
 
     /// The warnings to show once: a sidecar directory that can't be used, a
@@ -301,7 +386,8 @@ impl SharedMnemo {
         self.locks.notices()
     }
 
-    /// The options the handle was opened with.
+    /// The handle's options: those it was opened with, and the cancel token
+    /// [`SharedMnemo::set_cancel`] gave it last.
     pub fn options(&self) -> &SharedOptions {
         &self.opts
     }
@@ -313,32 +399,52 @@ impl SharedMnemo {
         Ok(())
     }
 
-    /// **Not a stable API.** How many times the handle has rebuilt its
-    /// state from the file.
+    /// **Not a stable API** (failpoints builds only). How many times the
+    /// handle has rebuilt its state from the file.
+    #[cfg(any(test, feature = "failpoints"))]
     #[doc(hidden)]
     pub fn __reloads(&self) -> u64 {
         self.reloads
     }
 
-    /// **Not a stable API.** The page cache's occupancy and capacity.
+    /// **Not a stable API** (failpoints builds only). The page cache's
+    /// occupancy and capacity.
+    #[cfg(any(test, feature = "failpoints"))]
     #[doc(hidden)]
     pub fn __page_cache(&self) -> (usize, usize) {
         self.db.as_ref().map_or((0, 0), |d| d.pager.cache_stats())
     }
 
-    /// **Not a stable API.** The handle's state as it stands, without a
-    /// window (no lock, no catch-up): for tests that look at what a failed
-    /// call left in memory. Calls that reach the file fail here.
+    /// **Not a stable API** (failpoints builds only). The handle's state as
+    /// it stands, without a window (no lock, no catch-up): for tests that
+    /// look at what a failed call left in memory. No file is attached, so
+    /// only calls that stay in memory may be made; one that reads or
+    /// writes the file panics.
+    #[cfg(any(test, feature = "failpoints"))]
     #[doc(hidden)]
     pub fn __state(&mut self) -> Option<&mut Mnemo> {
         self.db.as_mut()
     }
 
-    /// One window: lock, catch up, run, unlock.
+    /// One window: lock, catch up, run, unlock. One [`Call`], so one
+    /// deadline and one cancel token, covers every lock it takes.
     fn window<R>(&mut self, kind: LockKind, run: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        let mut call = Call::new(self.opts.deadline, self.opts.cancel.as_ref());
         let mut lock = kind;
         let held = loop {
-            let mut held = self.locks.acquire(lock, &self.opts)?;
+            let mut held = match self.locks.acquire(lock, &mut call) {
+                Ok(h) => h,
+                // A read that has to heal the file, which this process can
+                // only read.
+                Err(MnemoError::Io(e))
+                    if lock != kind && e.kind() == std::io::ErrorKind::PermissionDenied =>
+                {
+                    return Err(MnemoError::NeedsWriteOpen {
+                        reason: HEAL_NEEDS_WRITE,
+                    })
+                }
+                Err(e) => return Err(e),
+            };
             let file = held.take_file();
             match self.catch_up(lock, file)? {
                 Next::Ready => break held,
@@ -359,10 +465,18 @@ impl SharedMnemo {
         drop(held);
         if let Some(db) = self.db.as_mut() {
             drop(db.pager.detach_file());
+            // An embedder set inside a closure is kept across reloads too
+            // (RB-007.8 item 4).
+            self.embedder = db.embedder.clone();
         }
         match r {
             Ok(r) => r,
-            Err(panic) => std::panic::resume_unwind(panic),
+            Err(panic) => {
+                // Whatever the closure left half done in memory, read or
+                // write, is reloaded by the next call (RB-007.8 item 6).
+                self.stamp = None;
+                std::panic::resume_unwind(panic)
+            }
         }
     }
 
@@ -423,12 +537,28 @@ impl SharedMnemo {
         self.load(file)
     }
 
-    /// The full open on the call's locked file (heal, replay, KDF), then
-    /// install it.
+    /// The full open on the call's locked file (heal, replay), then install
+    /// it.
     fn load(&mut self, file: LockedFile) -> Result<Next> {
-        let new = Mnemo::load_locked(self.path.clone(), file, &self.secret, false)?;
+        let new = self.reopen(file)?;
         self.install(new);
         Ok(Next::Ready)
+    }
+
+    /// Open the call's locked file as `open` does (heal a torn page 0,
+    /// replay a pending WAL), with the data key the handle holds when the
+    /// header it would recover to verifies under it (no KDF), and the kept
+    /// secret otherwise (RB-007.2): a rekey by another process changes the
+    /// secret but not the data key.
+    fn reopen(&self, file: LockedFile) -> Result<Mnemo> {
+        let held = self.db.as_ref().map(|d| Zeroizing::new(*d.pager.dek()));
+        Mnemo::load_locked_with(
+            self.path.clone(),
+            file,
+            &self.secret,
+            held.as_deref(),
+            false,
+        )
     }
 
     /// Take `new` as the handle's state: carry over what is per-process (the
@@ -442,6 +572,7 @@ impl SharedMnemo {
         if let Some(e) = &self.embedder {
             new.embedder = Some(e.clone());
         }
+        new.shared = true;
         self.stamp = Some(Stamp::of(new.pager.file(), &new.header));
         self.db = Some(new);
         self.reloads += 1;
@@ -471,12 +602,14 @@ impl SharedMnemo {
         db.read_only = false;
         db.access_delta = None;
         db.commit_point = None;
-        // A fresh generation lease for this window, committed before any
-        // page is sealed: every page this window seals carries a generation
-        // no other writer has used, even when windows interleave and one
-        // fails before its commit.
+        db.window_committed = false;
+        // No lease carries over from an earlier window. Every place that
+        // seals a page takes the lease first when it's missing
+        // (`ensure_gen_lease`), so every page this window seals carries a
+        // generation no other writer has used, even when windows interleave
+        // and one fails before its commit; and a window that seals nothing
+        // commits nothing (RB-007.6).
         db.gen_leased = false;
-        db.ensure_gen_lease()?;
         let delta = std::mem::take(&mut self.delta);
         db.apply_access_delta(&delta);
         let before = FileSettings::of(db);
@@ -484,8 +617,9 @@ impl SharedMnemo {
         let db = self.db.as_mut().expect("loaded by the window");
         let r = match r {
             Ok(r) => r,
-            // A commit inside the closure got past its commit point before
-            // the error: it may be in the file.
+            // A commit inside the closure finished (RB-007.5), or got past
+            // its commit point, before the error: it may be in the file.
+            Err(e) if db.window_committed => return Err(part_stored(e)),
             Err(e) if db.commit_point.is_some() => {
                 return Err(MnemoError::MaybeStored(e.to_string()))
             }
@@ -495,11 +629,22 @@ impl SharedMnemo {
             }
         };
         if FileSettings::of(db) != before {
+            if db.window_committed || db.commit_point.is_some() {
+                return Err(part_stored(format!(
+                    "{SETTINGS_KEPT}, so the setting wasn't applied"
+                )));
+            }
             self.delta = delta;
             return Err(settings_refused());
         }
+        let committed_before = db.window_committed;
         if let Err(e) = db.flush() {
-            self.finish_failed_commit(e)?;
+            match self.finish_failed_commit(e) {
+                Ok(()) => {}
+                Err(e @ MnemoError::MaybeStored(_)) => return Err(e),
+                Err(e) if committed_before => return Err(part_stored(e)),
+                Err(e) => return Err(e),
+            }
         }
         #[cfg(any(test, feature = "failpoints"))]
         crate::__failpoints::run_after_shared_commit();
@@ -558,7 +703,7 @@ impl SharedMnemo {
                 "{e}; finishing the commit failed too: {e2}"
             )));
         }
-        match Mnemo::load_locked(self.path.clone(), file, &self.secret, false) {
+        match self.reopen(file) {
             Ok(new) => {
                 let stored = new.header.wal_seq >= txn;
                 self.install(new);

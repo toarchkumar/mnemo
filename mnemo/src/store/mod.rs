@@ -1013,6 +1013,15 @@ pub struct Mnemo {
     /// reached the WAL with, when it fails after that point. A shared write
     /// uses it to tell a lost write from one that may be in the file.
     commit_point: Option<u64>,
+    /// 12.4 shared mode (RB-007.5): a `flush` since the window started
+    /// committed. Set by every committing flush; a shared write window
+    /// clears it first, and then knows that part of the window is in the
+    /// file when a later step fails.
+    window_committed: bool,
+    /// 12.4 shared mode: this handle is a shared handle's state, so a
+    /// `rekey` inside a window is refused (`SharedMnemo::rekey` does it and
+    /// updates the kept secret).
+    shared: bool,
     /// FMT-9e: thread turns are compressed once older than this many
     /// seconds (`0`: at write). Per handle, not persisted.
     turn_compress_after: i64,

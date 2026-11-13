@@ -68,7 +68,7 @@ impl Mnemo {
             let mut attempt = 0;
             loop {
                 let tmp = temp_sibling(dest, "export");
-                match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+                match owner_only(OpenOptions::new().write(true).create_new(true)).open(&tmp) {
                     Ok(out) => break (tmp, out),
                     Err(e)
                         if e.kind() == std::io::ErrorKind::AlreadyExists
@@ -160,6 +160,20 @@ impl Mnemo {
     }
 
     pub(super) fn rekey_secret(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
+        if self.shared {
+            // RB-007.2: the shared handle would keep the old secret, and
+            // fail at the next compaction or recovery.
+            return Err(MnemoError::Unsupported(
+                "inside a shared-mode window, change the passphrase with SharedMnemo::rekey, \
+                 which also updates the secret the handle keeps. Nothing was changed"
+                    .into(),
+            ));
+        }
+        self.rekey_unchecked(secret, kdf)
+    }
+
+    /// The rekey itself; [`SharedMnemo::rekey`] calls it in its window.
+    pub(super) fn rekey_unchecked(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -726,8 +740,12 @@ impl Mnemo {
         secret: &[u8],
         format_version: u16,
     ) -> Result<CompactReport> {
+        // RB-007.3: compact the file the path names, through any symlink,
+        // and rename over that file, so a link stays a link and every path
+        // to the brain names the new file.
+        let real = std::fs::canonicalize(path)?;
         // The one read-write open that takes a v4–v8 file (the v8 sunset).
-        let old = Mnemo::open_secret_with(path, secret, true)?;
+        let old = Mnemo::open_secret_with(&real, secret, true)?;
         let dims = old.dimensions;
         let kdf = old.kdf;
         let config = MnemoConfig {
@@ -741,9 +759,15 @@ impl Mnemo {
             ..Default::default()
         };
         // v0.14.0 step 1: a new file under a name no other compaction shares.
-        let (tmp, new) = create_temp(Path::new(path), "compact", secret, config)?;
+        let (tmp, new) = create_temp(&real, "compact", secret, config)?;
+        // Created owner-only; it keeps the old file's mode.
+        if let Err(e) = copy_mode(old.pager.file(), new.pager.file()) {
+            drop(new);
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         // `compact_into` releases the old file's lock only after the rename.
-        let result = Self::compact_into(old, new, path, &tmp);
+        let result = Self::compact_into(old, new, &real, &tmp);
         if result.is_err() {
             let _ = std::fs::remove_file(&tmp);
         }
@@ -777,7 +801,7 @@ impl Mnemo {
     fn compact_into(
         mut old: Mnemo,
         mut new: Mnemo,
-        path: &str,
+        path: &Path,
         tmp: &Path,
     ) -> Result<CompactReport> {
         let report = old.copy_live_into(&mut new)?;
@@ -800,7 +824,7 @@ impl Mnemo {
         }
         // Make the rename durable before the old file's lock goes.
         #[cfg(unix)]
-        if let Some(parent) = Path::new(path).parent() {
+        if let Some(parent) = path.parent() {
             let parent = if parent.as_os_str().is_empty() {
                 Path::new(".")
             } else {

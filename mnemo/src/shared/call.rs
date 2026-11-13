@@ -11,8 +11,11 @@ use crate::error::{MnemoError, Result};
 /// another thread: an iOS background activity's expiry handler, say. The
 /// call releases every lock it holds and returns [`MnemoError::Cancelled`].
 ///
-/// Clones share one flag. A cancelled token stays cancelled, so make a new
-/// one for the next call.
+/// A cancel reaches only a call that is **waiting** for a lock. Once a call
+/// holds the lock it runs to its end, so a write is never cut off part-way.
+///
+/// Clones share one flag. A cancelled token stays cancelled: give the handle
+/// a new one for its next calls (`SharedMnemo::set_cancel`).
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(Arc<(Mutex<bool>, Condvar)>);
 
@@ -50,10 +53,13 @@ impl CancelToken {
 }
 
 /// One call's deadline, its cancel token, and the backoff between tries.
-pub(crate) struct Call<'a> {
+pub(crate) struct Call {
     deadline: Instant,
-    cancel: Option<&'a CancelToken>,
+    cancel: Option<CancelToken>,
     sleep: Duration,
+    /// Whether this call has already reopened the sidecar directory once
+    /// (RB-007.7).
+    pub(crate) sidecar_reopened: bool,
 }
 
 /// The backoff's first and longest sleep. Step 5's bench tunes them (the
@@ -61,18 +67,28 @@ pub(crate) struct Call<'a> {
 const FIRST_SLEEP: Duration = Duration::from_millis(1);
 const LONGEST_SLEEP: Duration = Duration::from_millis(50);
 
-impl<'a> Call<'a> {
-    pub(crate) fn new(deadline: Duration, cancel: Option<&'a CancelToken>) -> Self {
+/// The latest deadline a call gets: a longer one (`Duration::MAX`, say) is
+/// clamped to it rather than overflowing the clock.
+const LONGEST_DEADLINE: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
+
+impl Call {
+    pub(crate) fn new(deadline: Duration, cancel: Option<&CancelToken>) -> Self {
+        let now = Instant::now();
+        let deadline = now
+            .checked_add(deadline.min(LONGEST_DEADLINE))
+            .or_else(|| now.checked_add(Duration::from_secs(24 * 3600)))
+            .unwrap_or(now);
         Call {
-            deadline: Instant::now() + deadline,
-            cancel,
+            deadline,
+            cancel: cancel.cloned(),
             sleep: FIRST_SLEEP,
+            sidecar_reopened: false,
         }
     }
 
     /// `Err(Cancelled)` once the call is cancelled.
     pub(crate) fn check(&self) -> Result<()> {
-        match self.cancel {
+        match &self.cancel {
             Some(c) if c.is_cancelled() => Err(MnemoError::Cancelled),
             _ => Ok(()),
         }
@@ -98,7 +114,7 @@ impl<'a> Call<'a> {
             Duration::from_secs_f64(rand::thread_rng().gen_range(ms / 2.0..=ms) / 1000.0)
         };
         let d = jittered.min(self.deadline - now);
-        let cancelled = match self.cancel {
+        let cancelled = match &self.cancel {
             Some(c) => c.sleep(d),
             None => {
                 std::thread::sleep(d);

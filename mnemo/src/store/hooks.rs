@@ -116,6 +116,13 @@ impl Mnemo {
         self.bm25.manifest.segments.len()
     }
 
+    /// **Not a stable API.** The id of the last committed transaction (the
+    /// header's `wal_seq`).
+    #[doc(hidden)]
+    pub fn __transaction_id(&self) -> u64 {
+        self.header.wal_seq
+    }
+
     /// **Not a stable API.** FMT-9: the header's next unallocated page.
     #[doc(hidden)]
     pub fn __next_page(&self) -> u64 {

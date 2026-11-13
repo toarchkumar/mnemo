@@ -85,10 +85,10 @@ fn windows_before_rust_1_85_refuses_shared_mode() {
 fn a_call_fails_with_locked_at_its_deadline() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(a) = locks(&p, &opts(1000)) else {
+    let Some(mut a) = locks(&p, &opts(1000)) else {
         return;
     };
-    let b = Locks::new(&p, &opts(200)).unwrap();
+    let mut b = Locks::new(&p, &opts(200)).unwrap();
     let held = a.exclusive(&opts(1000)).unwrap();
     let t = Instant::now();
     let e = b.shared(&opts(200)).err().expect("must time out");
@@ -106,10 +106,10 @@ fn a_call_fails_with_locked_at_its_deadline() {
 fn lock_info_names_the_holder_and_goes_with_the_lock() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(a) = locks(&p, &opts(1000)) else {
+    let Some(mut a) = locks(&p, &opts(1000)) else {
         return;
     };
-    let b = Locks::new(&p, &opts(200)).unwrap();
+    let mut b = Locks::new(&p, &opts(200)).unwrap();
     assert!(a.has_sidecar(), "{:?}", a.notices());
     let info = a.sidecar_path().unwrap().join(__shared::LOCK_INFO);
 
@@ -138,7 +138,7 @@ fn lock_info_names_the_holder_and_goes_with_the_lock() {
 fn a_cancelled_wait_returns_at_once_and_holds_no_lock() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(a) = locks(&p, &opts(1000)) else {
+    let Some(mut a) = locks(&p, &opts(1000)) else {
         return;
     };
     let held = a.exclusive(&opts(1000)).unwrap();
@@ -150,7 +150,7 @@ fn a_cancelled_wait_returns_at_once_and_holds_no_lock() {
         std::thread::spawn(move || {
             let mut o = opts(30_000);
             o.cancel = Some(token);
-            let b = Locks::new(&p, &o).unwrap();
+            let mut b = Locks::new(&p, &o).unwrap();
             let t = Instant::now();
             let r = b.exclusive(&o).err();
             (r, t.elapsed())
@@ -172,7 +172,7 @@ fn a_cancelled_wait_returns_at_once_and_holds_no_lock() {
 fn a_writer_gets_in_against_eight_busy_readers() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(w) = locks(&p, &opts(10_000)) else {
+    let Some(mut w) = locks(&p, &opts(10_000)) else {
         return;
     };
     let stop = Arc::new(AtomicBool::new(false));
@@ -180,7 +180,7 @@ fn a_writer_gets_in_against_eight_busy_readers() {
         .map(|_| {
             let (p, stop) = (p.clone(), stop.clone());
             std::thread::spawn(move || {
-                let r = Locks::new(&p, &opts(10_000)).unwrap();
+                let mut r = Locks::new(&p, &opts(10_000)).unwrap();
                 let mut reads = 0u64;
                 while !stop.load(Ordering::Relaxed) {
                     let held = r.shared(&opts(10_000)).unwrap();
@@ -212,7 +212,7 @@ fn a_writer_gets_in_against_eight_busy_readers() {
 fn a_reader_holds_the_intent_lock_for_one_try_only() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(a) = locks(&p, &opts(1000)) else {
+    let Some(mut a) = locks(&p, &opts(1000)) else {
         return;
     };
     let intent = a.sidecar_path().unwrap().join(__shared::INTENT);
@@ -221,7 +221,7 @@ fn a_reader_holds_the_intent_lock_for_one_try_only() {
         .map(|_| {
             let p = p.clone();
             std::thread::spawn(move || {
-                let r = Locks::new(&p, &opts(10_000)).unwrap();
+                let mut r = Locks::new(&p, &opts(10_000)).unwrap();
                 r.shared(&opts(10_000)).map(|_| ())
             })
         })
@@ -262,7 +262,7 @@ fn shared_mode_never_creates_the_brain() {
 
     // Deleted after the handle was set up: still an error, still not created.
     let p = brain(dir.path());
-    let l = Locks::new(&p, &opts(200)).unwrap();
+    let mut l = Locks::new(&p, &opts(200)).unwrap();
     std::fs::remove_file(&p).unwrap();
     let e = l.exclusive(&opts(200)).err().expect("must fail");
     assert!(
@@ -276,7 +276,7 @@ fn shared_mode_never_creates_the_brain() {
 fn a_lock_is_always_on_the_file_at_the_path() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(l) = locks(&p, &opts(1000)) else {
+    let Some(mut l) = locks(&p, &opts(1000)) else {
         return;
     };
     let other = dir.path().join("new.mnemo");
@@ -296,7 +296,7 @@ fn a_lock_is_always_on_the_file_at_the_path() {
 fn locks_never_outlive_their_call_while_children_spawn() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
-    let Some(l) = locks(&p, &opts(5000)) else {
+    let Some(mut l) = locks(&p, &opts(5000)) else {
         return;
     };
     let intent = l.sidecar_path().unwrap().join(__shared::INTENT);
@@ -419,7 +419,7 @@ mod unix {
         std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o700)).unwrap();
         let side = __shared::sidecar_path(&std::fs::canonicalize(&p).unwrap());
         symlink(&elsewhere, &side).unwrap();
-        let Some(l) = locks(&p, &opts(200)) else {
+        let Some(mut l) = locks(&p, &opts(200)) else {
             return;
         };
         assert!(!l.has_sidecar());
@@ -444,7 +444,7 @@ mod unix {
         let side = __shared::sidecar_path(&std::fs::canonicalize(&p).unwrap());
         std::fs::create_dir(&side).unwrap();
         std::fs::set_permissions(&side, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let Some(l) = locks(&p, &opts(200)) else {
+        let Some(mut l) = locks(&p, &opts(200)) else {
             return;
         };
         assert!(!l.has_sidecar());
@@ -461,7 +461,7 @@ mod unix {
     fn a_symlink_at_a_fixed_name_is_never_followed() {
         let dir = tempdir().unwrap();
         let p = brain(dir.path());
-        let Some(l) = locks(&p, &opts(1000)) else {
+        let Some(mut l) = locks(&p, &opts(1000)) else {
             return;
         };
         let side = l.sidecar_path().unwrap();
@@ -474,7 +474,7 @@ mod unix {
         held.announce("compact");
         drop(held);
         l.shared(&opts(1000)).unwrap();
-        let other = Locks::new(&p, &opts(200)).unwrap();
+        let mut other = Locks::new(&p, &opts(200)).unwrap();
         let held = l.exclusive(&opts(1000)).unwrap();
         let _ = other.exclusive(&opts(200)).err().expect("must time out");
         drop(held);
@@ -501,7 +501,7 @@ mod unix {
         let p = brain(&ro);
         std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
         let result = std::panic::catch_unwind(|| {
-            let Some(l) = locks(&p, &opts(200)) else {
+            let Some(mut l) = locks(&p, &opts(200)) else {
                 return;
             };
             assert!(!l.has_sidecar());
