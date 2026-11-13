@@ -54,6 +54,15 @@ fn retry_locked<T>(mut f: impl FnMut() -> mnemo_engine::Result<T>) -> mnemo_engi
     }
 }
 
+/// Windows built with Rust before 1.85: `std::fs::rename` refuses to
+/// replace a file any handle has open ("Access is denied", os error 5).
+/// A compaction then fails with that error, as in v0.13.2, and nothing is
+/// lost; the caller may try again.
+fn is_rename_refused(e: &MnemoError) -> bool {
+    cfg!(windows)
+        && matches!(e, MnemoError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
 /// The race the step fixes. One thread compacts the file over and over;
 /// another opens it, writes one memory, flushes and closes, as fast as it
 /// can. Every write whose flush returned `Ok` must be in the final file.
@@ -76,10 +85,19 @@ fn a_write_racing_a_compaction_is_never_lost() {
         let (path, done) = (path.clone(), done.clone());
         std::thread::spawn(move || {
             let p = path.to_str().unwrap().to_owned();
-            let mut compactions = 0u32;
+            let (mut compactions, mut refused) = (0u32, 0u32);
             while !done.load(Ordering::Relaxed) || compactions < 5 {
-                retry_locked(|| Mnemo::compact_file(&p, PW)).expect("compaction failed");
-                compactions += 1;
+                match retry_locked(|| Mnemo::compact_file(&p, PW)) {
+                    Ok(_) => compactions += 1,
+                    Err(e) if is_rename_refused(&e) => refused += 1,
+                    Err(e) => panic!("compaction failed: {e}"),
+                }
+                assert!(refused < 100_000, "compactions keep being refused");
+            }
+            if refused > 0 {
+                eprintln!(
+                    "{refused} compactions refused by the platform's rename (Windows, Rust < 1.85)"
+                );
             }
             compactions
         })
@@ -140,7 +158,15 @@ fn a_handle_refuses_to_write_to_a_file_replaced_at_its_path() {
     db.remember(Memory::new("pending", MemoryType::Semantic, vec![1.0, 0.0]))
         .unwrap();
     // Another program moves a file over the path while the handle is open.
-    std::fs::rename(&other, &path).unwrap();
+    // Windows with Rust before 1.85 can't do that while the file is open,
+    // so the case can't arise there through `std`.
+    if let Err(e) = std::fs::rename(&other, &path) {
+        if is_rename_refused(&MnemoError::Io(e)) {
+            eprintln!("skipped: this toolchain's rename can't replace an open file");
+            return;
+        }
+        panic!("rename failed");
+    }
     let before = std::fs::read(&path).unwrap();
 
     let err = db.flush().unwrap_err();
