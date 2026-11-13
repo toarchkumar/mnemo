@@ -911,6 +911,18 @@ impl Mnemo {
         Self::open_read_only_secret(path, key)
     }
 
+    /// The embedding width the file at `path` records, read from its header
+    /// (page 0 is sealed, not encrypted): no key, no lock, no KDF. A caller
+    /// that embeds before it takes the lock uses it to build its embedder's
+    /// identity (12.4: slow work first, unlocked). A torn header is an
+    /// error here (a read-write open heals it).
+    pub fn peek_dimensions(path: impl AsRef<std::path::Path>) -> Result<usize> {
+        let mut file = File::open(path.as_ref())?;
+        let mut hbuf = [0u8; PAGE_SIZE];
+        file.read_exact(&mut hbuf)?;
+        Ok(Header::from_page(&hbuf)?.dimensions as usize)
+    }
+
     /// Whether `key` opens the raw-key file at `path`, decided from its
     /// header alone: no catalog load, no lock, microseconds. `Ok(false)` is
     /// "not this key". Unlike a read-only open, it answers for a file that

@@ -1018,6 +1018,48 @@ fn open_w(path: &str, pp: &str, op: &str) -> mnemo_engine::Result<Mnemo> {
     Mnemo::open_exclusive(path, pp, op, wait_opts())
 }
 
+/// A started embedder and the vectors it made.
+type Embedded = (mnemo_engine::EmbedCmd, Vec<Vec<f32>>);
+
+/// 12.4 (slow work first, unlocked): start the embedder and embed `texts`
+/// before the brain's lock is taken, so a slow embedder never keeps other
+/// sessions waiting. The identity's width comes from the file's header (no
+/// key, no lock); when that can't be read (a torn header), `None`, and the
+/// caller embeds after its write open, as before.
+fn embed_first(
+    path: &str,
+    cmd: &str,
+    name: &str,
+    normalize: bool,
+    timeout: u64,
+    texts: &[&str],
+) -> std::result::Result<Option<Embedded>, String> {
+    use mnemo_engine::Embedder;
+    let Ok(dimensions) = Mnemo::peek_dimensions(path) else {
+        return Ok(None);
+    };
+    let embedder = new_embedder(cmd, name, normalize, timeout, dimensions)?;
+    let vectors = embedder.embed(texts).map_err(fmt)?;
+    Ok(Some((embedder, vectors)))
+}
+
+fn new_embedder(
+    cmd: &str,
+    name: &str,
+    normalize: bool,
+    timeout: u64,
+    dimensions: usize,
+) -> std::result::Result<mnemo_engine::EmbedCmd, String> {
+    let identity = mnemo_engine::EmbedderIdentity {
+        name: name.to_string(),
+        dimensions,
+        normalize,
+    };
+    Ok(mnemo_engine::EmbedCmd::new(cmd, identity)
+        .map_err(fmt)?
+        .with_timeout(std::time::Duration::from_secs(timeout)))
+}
+
 /// A read-only open with either secret (waiting, as [`open_r`]).
 fn open_ro(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
     match s {
@@ -1669,29 +1711,49 @@ fn run() -> std::result::Result<(), String> {
             let mt = parse_memory_types(&r#type)?
                 .pop()
                 .ok_or_else(|| format!("unknown memory type: {type:?}", r#type = r#type))?;
-            let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
-            let identity = EmbedderIdentity {
-                name: embed_name,
-                dimensions: db.dimensions(),
-                normalize: embed_normalize,
-            };
-            let embedder = EmbedCmd::new(&embed_cmd, identity)
-                .map_err(fmt)?
-                .with_timeout(std::time::Duration::from_secs(embed_timeout));
-            db.set_embedder(embedder).map_err(fmt)?;
-            // Embed via the registered embedder in a short-lived
-            // borrow so the subsequent `remember` can take `&mut db`.
-            // We don't call `remember_text` directly because its
-            // Rust-core signature is (content, type); here we also
-            // want importance / agent / metadata on the record.
-            let vector = {
-                let embedder_ref = db
-                    .embedder()
-                    .ok_or_else(|| "no embedder registered".to_string())?;
-                let mut vectors = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
-                vectors
-                    .pop()
-                    .ok_or_else(|| "embedder returned no vector".to_string())?
+            // 12.4: embed first, then take the write lock (the embedder can
+            // take seconds; other sessions shouldn't wait behind it). The
+            // identity check and the width check still run under the lock,
+            // before anything is written.
+            let (mut db, vector) = match embed_first(
+                &path,
+                &embed_cmd,
+                &embed_name,
+                embed_normalize,
+                embed_timeout,
+                &[text.as_str()],
+            )? {
+                Some((embedder, mut vectors)) => {
+                    let vector = vectors
+                        .pop()
+                        .ok_or_else(|| "embedder returned no vector".to_string())?;
+                    let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    (db, vector)
+                }
+                // The header couldn't be read: the old order.
+                None => {
+                    let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
+                    let identity = EmbedderIdentity {
+                        name: embed_name,
+                        dimensions: db.dimensions(),
+                        normalize: embed_normalize,
+                    };
+                    let embedder = EmbedCmd::new(&embed_cmd, identity)
+                        .map_err(fmt)?
+                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    let vector = {
+                        let embedder_ref = db
+                            .embedder()
+                            .ok_or_else(|| "no embedder registered".to_string())?;
+                        let mut vectors = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
+                        vectors
+                            .pop()
+                            .ok_or_else(|| "embedder returned no vector".to_string())?
+                    };
+                    (db, vector)
+                }
             };
             let mut memory = Memory::new(text, mt, vector);
             if let Some(i) = importance {
@@ -2207,7 +2269,14 @@ fn run() -> std::result::Result<(), String> {
                             // notice only if that worked. An exclusive
                             // holder blocks the read-only open too, and
                             // then the `Locked` error is the whole story.
-                            let db = open_ro(path, secret)?;
+                            // One try (12.4): the write open already
+                            // waited `--wait`, and a holder that kept it
+                            // out almost always keeps a read out too, so a
+                            // second full wait would double the delay.
+                            let db = match secret {
+                                inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
+                                inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+                            }?;
                             eprintln!(
                                 "mnemo: another process holds the lock on {path}; \
                                  running recall read-only with --no-track"
@@ -2368,7 +2437,6 @@ fn run() -> std::result::Result<(), String> {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
 
             let mut patch = MemoryPatch::default();
             if let Some(i) = importance {
@@ -2388,7 +2456,7 @@ fn run() -> std::result::Result<(), String> {
                 patch.ttl_secs = Some(Some(ttl));
             }
 
-            let outcome = match text {
+            let (mut db, outcome) = match text {
                 Some(t) => {
                     let ecmd = embed_cmd.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
@@ -2396,18 +2464,54 @@ fn run() -> std::result::Result<(), String> {
                     let ename = embed_name.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
                     })?;
-                    let identity = EmbedderIdentity {
-                        name: ename,
-                        dimensions: db.dimensions(),
-                        normalize: embed_normalize,
-                    };
-                    let embedder = EmbedCmd::new(&ecmd, identity)
-                        .map_err(fmt)?
-                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
-                    db.set_embedder(embedder).map_err(fmt)?;
-                    db.update_text(&ulid, &t, patch).map_err(fmt)?
+                    // 12.4: embed first, then take the write lock.
+                    match embed_first(
+                        &path,
+                        &ecmd,
+                        &ename,
+                        embed_normalize,
+                        embed_timeout,
+                        &[t.as_str()],
+                    )? {
+                        Some((embedder, mut vectors)) => {
+                            let vector = vectors.pop().ok_or_else(|| {
+                                "embedder returned no vector for the input text".to_string()
+                            })?;
+                            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                            db.set_embedder(embedder).map_err(fmt)?;
+                            // As `update_text` does, with the vector already made.
+                            if vector.len() != db.dimensions() {
+                                return Err(fmt(mnemo_engine::MnemoError::DimensionMismatch {
+                                    expected: db.dimensions(),
+                                    got: vector.len(),
+                                }));
+                            }
+                            patch.content = Some(t);
+                            patch.vector = Some(vector);
+                            let outcome = db.update(&ulid, patch).map_err(fmt)?;
+                            (db, outcome)
+                        }
+                        None => {
+                            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                            let identity = EmbedderIdentity {
+                                name: ename,
+                                dimensions: db.dimensions(),
+                                normalize: embed_normalize,
+                            };
+                            let embedder = EmbedCmd::new(&ecmd, identity)
+                                .map_err(fmt)?
+                                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                            db.set_embedder(embedder).map_err(fmt)?;
+                            let outcome = db.update_text(&ulid, &t, patch).map_err(fmt)?;
+                            (db, outcome)
+                        }
+                    }
                 }
-                None => db.update(&ulid, patch).map_err(fmt)?,
+                None => {
+                    let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                    let outcome = db.update(&ulid, patch).map_err(fmt)?;
+                    (db, outcome)
+                }
             };
             db.flush().map_err(fmt)?;
             let outcome_str = match outcome {
@@ -2744,7 +2848,7 @@ fn fmt(e: mnemo_engine::MnemoError) -> String {
 /// into its own function because the three subcommands share nothing
 /// with the top-level dispatch beyond passphrase resolution.
 fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
-    use mnemo_engine::{read_transcript, EmbedCmd, EmbedderIdentity, TranscriptFormat};
+    use mnemo_engine::{read_transcript, TranscriptFormat};
     use std::io::{Read, Write};
     match cmd {
         ThreadCmd::Ingest {
@@ -2775,17 +2879,65 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 read_transcript(file, fmt_enum).map_err(fmt)?
             };
 
-            let mut db = open_w(&path, &pp, "thread ingest").map_err(fmt)?;
-            let identity = EmbedderIdentity {
-                name: embed_name,
-                dimensions: db.dimensions(),
-                normalize: embed_normalize,
+            // 12.4: plan under a short read (which turns are new, and the
+            // chunk texts), embed them with no lock held, then write the
+            // vectors under the write lock. If another process ingested in
+            // between, the plan is made again under the lock and only the
+            // texts that weren't embedded yet are embedded there.
+            let (texts, dimensions) = {
+                let mut db = open_r(&path, &pp).map_err(fmt)?;
+                (
+                    db.ingest_thread_texts(&thread, &turns).map_err(fmt)?,
+                    db.dimensions(),
+                )
             };
-            let embedder = EmbedCmd::new(&embed_cmd, identity)
-                .map_err(fmt)?
-                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+            let embedder = new_embedder(
+                &embed_cmd,
+                &embed_name,
+                embed_normalize,
+                embed_timeout,
+                dimensions,
+            )?;
+            let pre: Vec<Vec<f32>> = if texts.is_empty() {
+                Vec::new()
+            } else {
+                use mnemo_engine::Embedder;
+                let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+                embedder.embed(&refs).map_err(fmt)?
+            };
+            let mut db = open_w(&path, &pp, "thread ingest").map_err(fmt)?;
             db.set_embedder(embedder).map_err(fmt)?;
-            let report = db.ingest_thread(&thread, &turns).map_err(fmt)?;
+            let now = db.ingest_thread_texts(&thread, &turns).map_err(fmt)?;
+            let report = if now == texts {
+                db.ingest_thread_with_vectors(&thread, &turns, &pre)
+                    .map_err(fmt)?
+            } else {
+                let mut have: std::collections::HashMap<&str, &Vec<f32>> =
+                    texts.iter().map(String::as_str).zip(pre.iter()).collect();
+                let missing: Vec<&str> = now
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|t| !have.contains_key(t))
+                    .collect();
+                let extra = if missing.is_empty() {
+                    Vec::new()
+                } else {
+                    db.embedder()
+                        .ok_or_else(|| "no embedder registered".to_string())?
+                        .embed(&missing)
+                        .map_err(fmt)?
+                };
+                for (t, v) in missing.iter().zip(extra.iter()) {
+                    have.insert(t, v);
+                }
+                let vectors = now
+                    .iter()
+                    .map(|t| have.get(t.as_str()).map(|v| (*v).clone()))
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| "embedder returned too few vectors".to_string())?;
+                db.ingest_thread_with_vectors(&thread, &turns, &vectors)
+                    .map_err(fmt)?
+            };
             db.flush().map_err(fmt)?;
             println!(
                 "thread {thread}: added {added} record(s) ({chunked} chunked, {truncated} truncated); \

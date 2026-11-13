@@ -379,3 +379,164 @@ fn inspect_waits_for_a_writer_and_explains_a_pending_wal() {
     }
     panic!("no write left a pending WAL");
 }
+
+// --- Embedding before the lock (12.4 protocol step 1) -----------------------
+
+/// An embedder that takes 1.5 s per call (two dimensions). When a request
+/// arrives it creates the file `MNEMO_TEST_EMBEDDING`, so a test knows the
+/// embedding has started.
+const SLOW_EMBED_PY: &str = r#"
+import sys, json, time, os
+for line in sys.stdin:
+    s = json.loads(line)
+    open(os.environ["MNEMO_TEST_EMBEDDING"], "w").close()
+    time.sleep(1.5)
+    print(json.dumps([1.0, float(len(s)) + 1.0]), flush=True)
+"#;
+
+fn slow_embed_cmd(dir: &Path) -> String {
+    let script = dir.join("slow_embed.py");
+    std::fs::write(&script, SLOW_EMBED_PY).unwrap();
+    let py = if cfg!(windows) { "python" } else { "python3" };
+    format!("{py} \"{}\"", script.display())
+}
+
+/// Wait until the slow embedder has a request (its marker file exists).
+fn wait_until_embedding(marker: &Path) {
+    let start = Instant::now();
+    while !marker.exists() {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "the embedder never got a request"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A shared MCP server embeds a tool's `text` before it takes the lock:
+/// while its slow embedder runs, a CLI write with a 500 ms wait gets in.
+#[test]
+fn a_shared_mcp_server_embeds_before_it_takes_the_lock() {
+    if refused() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let marker = dir.path().join("embedding");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args([
+            "serve",
+            "--mcp",
+            "--shared",
+            p.to_str().unwrap(),
+            "--embed-cmd",
+            &slow_embed_cmd(dir.path()),
+            "--embed-name",
+            "slow-test",
+        ])
+        .env("MNEMO_PASSPHRASE", PW)
+        .env("MNEMO_TEST_EMBEDDING", &marker)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    writeln!(
+        stdin,
+        r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{{}}}}}}"#
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    stdout.next().unwrap().unwrap();
+
+    writeln!(
+        stdin,
+        "{}",
+        mcp_line(
+            2,
+            "remember",
+            r#"{"content":"by the server","memory_type":"semantic","text":"by the server"}"#
+        )
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    // The server is embedding now (1.5 s), holding no lock.
+    wait_until_embedding(&marker);
+    let jsonl = jsonl(dir.path(), "while it embeds");
+    let (out, took) = mnemo(&["--wait", "500ms", "import", p.to_str().unwrap(), &jsonl]);
+    ok(&out);
+    assert!(
+        took < Duration::from_millis(1200),
+        "the import waited {took:?}"
+    );
+    let r: serde_json::Value = serde_json::from_str(&stdout.next().unwrap().unwrap()).unwrap();
+    assert!(r["result"].is_object(), "{r}");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    let n = db
+        .memories()
+        .unwrap()
+        .iter()
+        .filter(|m| m.content == "while it embeds" || m.content.contains("server"))
+        .count();
+    assert_eq!(n, 2);
+}
+
+/// The CLI's `remember --embed-cmd` embeds before it takes the write lock:
+/// while its slow embedder runs, a shared write with a 500 ms deadline gets
+/// in.
+#[test]
+fn the_cli_embeds_before_it_takes_the_lock() {
+    if refused() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let mut s = Mnemo::open_shared(&p, PW, {
+        let mut o = SharedOptions::default();
+        o.deadline = Duration::from_millis(500);
+        o
+    })
+    .unwrap();
+    let marker = dir.path().join("embedding");
+    let cli = Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args([
+            "remember",
+            p.to_str().unwrap(),
+            "--text",
+            "by the cli",
+            "--embed-cmd",
+            &slow_embed_cmd(dir.path()),
+            "--embed-name",
+            "slow-test",
+        ])
+        .env("MNEMO_PASSPHRASE", PW)
+        .env("MNEMO_TEST_EMBEDDING", &marker)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The CLI is embedding now (1.5 s), holding no lock.
+    wait_until_embedding(&marker);
+    let t = Instant::now();
+    s.write(|db| db.remember(mem("while it embeds"))).unwrap();
+    assert!(t.elapsed() < Duration::from_millis(500));
+    let out = cli.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let texts: Vec<String> = s
+        .read(|db| db.memories())
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
+    assert!(texts.contains(&"by the cli".to_string()), "{texts:?}");
+    assert!(texts.contains(&"while it embeds".to_string()));
+}

@@ -782,6 +782,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
 /// back as `MaybeStored`).
 fn shared_tools_call(s: &mut SharedMnemo, params: &Value) -> std::result::Result<Value, RpcError> {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    pre_embed(s, params)?;
     let mut tool_err: Option<RpcError> = None;
     let run = |db: &mut Mnemo, tool_err: &mut Option<RpcError>| match tools_call(db, params) {
         Ok(v) => Ok(v),
@@ -796,6 +797,8 @@ fn shared_tools_call(s: &mut SharedMnemo, params: &Value) -> std::result::Result
     } else {
         s.write(|db| run(db, &mut tool_err))
     };
+    // A vector the tool didn't use (it failed first) never reaches the next.
+    PRE_EMBEDDED.with(|p| p.borrow_mut().take());
     match r {
         Ok(v) => Ok(v),
         // Part of the window is in the file: say so, whatever the tool said.
@@ -822,6 +825,10 @@ fn embed_text_via_server(
     tool: &str,
     text: &str,
 ) -> std::result::Result<Vec<f32>, RpcError> {
+    // 12.4: a shared server embedded this text before it took the lock.
+    if let Some(v) = take_pre_embedded(text) {
+        return Ok(v);
+    }
     let embedder = db.embedder().ok_or_else(|| {
         RpcError::new(
             INVALID_PARAMS,
@@ -838,6 +845,68 @@ fn embed_text_via_server(
             format!("{tool}: embedder returned no vector for the input text"),
         )
     })
+}
+
+thread_local! {
+    /// 12.4: the vector a shared server computed for a tool's `text` before
+    /// its window, for [`embed_text_via_server`] to use inside it.
+    static PRE_EMBEDDED: std::cell::RefCell<Option<(String, Vec<f32>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn take_pre_embedded(text: &str) -> Option<Vec<f32>> {
+    PRE_EMBEDDED.with(|p| {
+        let mut p = p.borrow_mut();
+        match p.as_ref() {
+            Some((t, _)) if t == text => p.take().map(|(_, v)| v),
+            _ => None,
+        }
+    })
+}
+
+/// The four tools that take `text` in place of a vector, and the name of
+/// that vector's argument.
+fn text_tool_vector_arg(name: &str) -> Option<&'static str> {
+    match name {
+        "remember" | "cache_put_semantic" => Some("vector"),
+        "recall" | "cache_get_semantic" => Some("query"),
+        _ => None,
+    }
+}
+
+/// 12.4 (the protocol's step 1, slow work first and unlocked): a shared
+/// server embeds a tool's `text` before it takes the file's lock, so every
+/// other session isn't kept waiting behind the embedder. The tool then
+/// finds the vector through [`embed_text_via_server`], with its messages
+/// unchanged. Nothing happens when the tool has no `text`, was also given a
+/// vector (the tool reports that), or the server has no embedder (the tool
+/// says how to add one).
+fn pre_embed(s: &SharedMnemo, params: &Value) -> std::result::Result<(), RpcError> {
+    let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let Some(vector_arg) = text_tool_vector_arg(name) else {
+        return Ok(());
+    };
+    let Some(args) = params.get("arguments") else {
+        return Ok(());
+    };
+    let (Some(text), None) = (
+        args.get("text").and_then(Value::as_str),
+        args.get(vector_arg),
+    ) else {
+        return Ok(());
+    };
+    let Some(embedder) = s.embedder_arc() else {
+        return Ok(());
+    };
+    let mut vs = embedder.embed(&[text]).map_err(mnemo_err)?;
+    let v = vs.pop().ok_or_else(|| {
+        RpcError::new(
+            INTERNAL_ERROR,
+            format!("{name}: embedder returned no vector for the input text"),
+        )
+    })?;
+    PRE_EMBEDDED.with(|p| *p.borrow_mut() = Some((text.to_string(), v)));
+    Ok(())
 }
 
 fn mnemo_err(e: MnemoError) -> RpcError {
