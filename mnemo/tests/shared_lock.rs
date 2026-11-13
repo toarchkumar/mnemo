@@ -54,6 +54,8 @@ fn free(path: &Path) -> bool {
 }
 
 #[test]
+// It asserts on a constant on purpose: whether build.rs saw the compiler.
+#[allow(clippy::assertions_on_constants)]
 fn windows_before_rust_1_85_refuses_shared_mode() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
