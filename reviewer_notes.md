@@ -139,6 +139,18 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-005.2` | 2026-11-12 | `CORRECTNESS` | `LOW` | When a failed rekey also fails to zero its new WAL region, the error doesn't say so, and a later damaged header lets the new secret recover the file (two I/O failures in a row, then a damaged header) | `ACCEPTED` | Next engine release, as REKEY-2, with RB-005.4 item 5 |
 | `RB-005.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | Python: where warnings are errors, a rekey that succeeded raises, against the docstring's "if it raises, the old secret is still in force" (by reading) | `ACCEPTED` | Before the tag: recommendation 1 and the docstring |
 | `RB-005.4` | 2026-11-12 | `DX/DOCS` | `LOW` | Small things: the off switch's spelling, a dry run whose `mobile` input differs from the file, "no re-run can change it", `mnemo rekey`'s failure message, what `rekey_cut.rs` can't reach, a moved doc comment, a skipped job's raw name, "always" in the root README | `ACCEPTED` | 1 to 4 and 6 before the tag; 5 with REKEY-2; 7 won't fix; 8 done in the README handoff |
+| `RB-006.1` | 2026-11-13 | `CORRECTNESS` | `HIGH` | 12.4 design note: it covers a process that dies, not a commit that fails in a process that lives on. Today such a handle is ahead of the file with an unchanged stamp, an error can still mean "committed", and step 6 doesn't reload after a replay | `ACCEPTED` | Before step 2: all five recommendations go into the note |
+| `RB-006.2` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | 12.4 design note: what tells a handle the file changed. Every compaction makes a new data key, the note doesn't say what a failed seal means, and the stamp can repeat across files at one path | `ACCEPTED` | Before step 2: the seal is the stamp; the third outcome; open without create |
+| `RB-006.3` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | 12.4 design note, mixed versions: an older `mnemo compact` can still lose a shared writer's commit, and today's lifetime lock is what prevents it (not reproduced with the identity check in place; silent when it happens) | `ACCEPTED` | Rec. 1 and 2 before step 2; rec. 3 decided as an upgrade note, revisited before step 8 |
+| `RB-006.4` | 2026-11-13 | `PERF` | `MEDIUM` | 12.4 design note: writer preference works for one writer; the backoff costs more than the note's numbers say, and several writers have no order among themselves (a simulation of the protocol, not the engine) | `ACCEPTED` | Rec. 1 and 3 before step 2; 2, 4 and 5 in step 5's bench |
+| `RB-006.5` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | 12.4 design note: presence by lock probe is wrong in several ordinary cases, and "a dead holder's claim lapses at once" turns each into a claim taken from a working agent; a holder never learns it lost a claim | `ACCEPTED` | Step 7, except rec. 5 (resolve the path) in step 2 |
+| `RB-006.6` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | 12.4 design note, mobile: the presence lock is held between calls, which is what iOS kills for, and a wait for the lock inside a background activity can't be stopped (by reading) | `ACCEPTED` | Rec. 2 (a cancellable wait) before step 2; the rest with mobile's opt-in |
+| `RB-006.7` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | 12.4 design note: what a shared handle keeps or does that the note doesn't cover (`cache_get` writes, per-handle snapshot retention, the embedding, read-then-write, statistics at close, the watcher's descriptor and cost) | `ACCEPTED` | Items 1 and 2 before step 2; the rest at their steps |
+| `RB-006.8` | 2026-11-13 | `CORRECTNESS` | `LOW` | 12.4 design note, incremental catch-up: a cached page is never checked again, so the note's safety argument for stale pages doesn't hold (by reading; the first version is safe) | `ACCEPTED` | Rec. 1 now (fix the sentence); the rest in step 6 |
+| `RB-006.9` | 2026-11-13 | `DX/DOCS` | `LOW` | 12.4 design note, smaller points: `lock-info` written before the lock, the Linux filesystem list, a directory the caller can't write, read-only callers and a pending WAL, the per-call cost, Windows, the "no descriptor" sentence | `ACCEPTED` | Items 1 and 3 in step 2; the rest as edits to the note |
+| `RB-006.10` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code; the lines of `maintenance.rs` and `load.rs` that v0.14.0 step 1 changes) | `ACCEPTED` | In step 1's PR. Details in SECURITY.local.md |
+| `RB-006.11` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the lock layer; no code exists) | `ACCEPTED` | (a) and (b) before step 2; (c) now in the note, the choice at 12.3. Details in SECURITY.local.md |
+| `RB-006.12` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the daemon; no code exists) | `ACCEPTED` | Before step 9 (the daemon). Details in SECURITY.local.md |
 
 ---
 
@@ -1839,3 +1851,291 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
   8. **The root README handoff** (Planner-owned, staged in the working tree): "Now an error **always** means the old secret still opens the file." The engine README states the one exception. Drop "always", or leave it as a headline.
 - **Would I hold the tag for it?** No. Items 1 to 3 belong with the next change to `release.yml`, which needs its own dry run.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Before the tag:** items 1 to 3 (with RB-005.1), item 4 (`mnemo rekey` says "the passphrase was not changed" on an error) and item 6 (the doc comment). **With REKEY-2:** item 5. **Item 7:** won't fix, since GitHub doesn't evaluate a skipped job's name; a line in RELEASING.md is enough. **Item 8:** done; the root README drops "always" and points at the exception.
+
+---
+
+### Batch `RB-006` — 2026-11-13 (REVIEWER-B: an off-cycle review of the 12.4 shared-access design note, before any locking code: the lock protocol, staleness, crash cases, the identity check, presence and claims, the daemon and mobile, with twelve new items)
+
+**What was reviewed.** `docs/design/12.4-shared-access.md` as it stands at `9fc260b` (the note with PLANNER-A's four sign-off changes folded in; 628 lines, SHA-256 `791c622c7ecc806b…`), with PLANNER-A's 2026-11-13 sign-off entry in `PLAN.md`. The user asked for this review; it isn't a scheduled pass. The note describes code that doesn't exist yet, so most findings are about what the note says or leaves out, checked against the engine as it is on `main` at `233eba4` (v0.13.2).
+
+**How.**
+- **By reading,** the note against `mnemo/src/store/{load,open,flush,records,maintenance,snapshots,cache_api}.rs`, `pager.rs`, `wal.rs`, `format.rs`, `mcp.rs` and the Swift `FilePolicy.swift`. Line numbers are at `233eba4`.
+- **Four experiments,** all in my scratch folder, on a `git archive 233eba4` copy, with `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked` and `--offline`:
+  1. `rb6/tests/failed_commit.rs`: the repo's one-shot failpoint, failing each write of a commit in turn, in a handle that then stays open.
+  2. `rb6/tests/old_compactor.rs`: v0.13.2's compactor in a loop against a writer that opens the file for every write, as a shared handle will.
+  3. `rb6/locksim.py`: the note's lock protocol (try-lock, jittered sleeps of 1 ms doubling to 50 ms, the intent lock) with real `flock` between processes. **It simulates the protocol, not the engine:** a read and a commit are sleeps. Read its ratios, not its absolute numbers.
+  4. `rb6/presence.py`: the note's presence probe and identity check with real `flock` and real files on APFS.
+- **Not done:** nothing ran on Linux, Windows, iOS or Android (this Mac has no Docker). Where an item depends on one of them it says "not tested". Nothing in the engine was timed. I read v0.14.0 step 1's commit (`35ab403`) only where an item touches it; that commit is not reviewed here.
+- **Machine:** Apple M1 Pro, macOS 26.7.1, Rust 1.95.0, Python 3.11.2.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **Three security findings** (`RB-006.10` to `.12`) are only in `SECURITY.local.md`. One of them is about shipped code and bears on step 1.
+
+---
+
+**The verdict first.**
+
+- **The shape is right.** (A) as the one protocol, with the daemon as an optional (A) client, survives this review. I found nothing that argues for (B) as the base, and nothing that has to have a format change.
+- **The note isn't yet enough to write step 2 from.** It covers a process that dies. It doesn't cover a commit that fails in a process that lives on, and the engine today leaves such a handle ahead of the file with an unchanged stamp (`RB-006.1`). It also leaves out what a caller does when the header's seal doesn't verify, which is what every compaction causes (`RB-006.2`).
+- **What I'd want settled before step 2's code:**
+  1. `RB-006.1`: the rule for a failed commit, and a reload after a WAL replay.
+  2. `RB-006.2`: what tells a handle the file changed (the stamp, a seal that fails, the identity check).
+  3. `RB-006.11`, parts (a) and (b) (in `SECURITY.local.md`): two things the lock layer's code has to do from its first version.
+  4. From `RB-006.3`: check the file's identity again after the commit, and decide whether older binaries need a gate.
+  5. From `RB-006.4`: a reader shouldn't hold the intent lock while it sleeps, and the backoff's shape. Both are a few lines in step 2 and awkward to change later.
+  6. From `RB-006.6`: on iOS, no lock is held between calls (presence included), and a wait can be cancelled.
+  7. From `RB-006.7`: items 1 and 2 (the second read that writes, and per-handle settings).
+- **What can wait for its own step:** `RB-006.5` (presence and claims, step 7; only its sidecar-path rule lands in step 2), `RB-006.8` (incremental catch-up, step 6), `RB-006.9`, and `RB-006.12` (the daemon, step 9).
+- **For step 1, now:** `RB-006.10` (in `SECURITY.local.md`) is about today's compaction and export. Step 1's commit already changes the lines involved, so it's cheapest to finish there.
+- **Two of the Planner's changes tested as intended.** Without the intent lock a writer starves (8 of 40 commits got the lock within 3 s against eight readers, and 0 of 20 against sixteen). With it, one writer never waited more than 188 ms. And without step 1's fix, v0.13.2's compactor lost 207 of 278 acknowledged writes in my run, which matches the Worker's 149 of 150.
+
+---
+
+**Area by area: what holds and what doesn't.**
+
+| Area | Holds | Doesn't, or isn't said |
+|---|---|---|
+| The lock protocol (steps 1 to 8) | The order is right: slow work first, lock, identity, stamp, WAL, work, commit, unlock, close. `flock` per open file description means two handles in one process exclude each other, as they must | A failed commit (`.1`). A reload after replay (`.1`). The seal failing (`.2`). One deadline across the intent and main locks, and across step 4's retries (`.4`, `.2`) |
+| Writer preference | One writer against 8, 16 and 32 readers: 100 of 100 commits, the longest wait 188 ms | The numbers in the note (`.4`): about 20 commits a second with readers present, not 60; readers wait 50 to 600 ms, not "milliseconds"; several writers have no order among themselves |
+| Staleness and catch-up | Every header write in the engine raises the transaction id (`flush.rs:553`, `flush.rs:75`, `records.rs:1309`, `maintenance.rs:198`), so the stamp never misses a commit to the same file. A restore is a new transaction (`snapshots.rs:131-136`) | The stamp can repeat across different files at one path (`.2`). The page cache's GCM claim (`.8`). What else a handle holds (`.7`) |
+| The crash table | Every row is right for a process that dies | It has no row for a process that gets an error and lives (`.1`), and none for the handle's first write (`.11`) |
+| The identity check | Catches a rename over the path, tested: 337 of 337 against the old compactor | Not a copy over the file, tested (`.2`). Inode numbers can be reused on Linux, not tested (`.2`). An older compactor after the check (`.3`) |
+| Presence and claims | A killed holder is seen as gone at once, tested | Five ordinary cases where the probe is wrong, and no way for a holder to learn it lost a claim (`.5`) |
+| The daemon's trust boundary | Opt-in, never auto-started, and the note says plainly that same-user processes get access | `RB-006.12`, in `SECURITY.local.md` |
+| Mobile | (A) alone is right for phones, and the file's protection class (`completeUntilFirstUserAuthentication`, `FilePolicy.swift:49`) lets a per-call open work on a locked device | The presence lock contradicts "no lock between calls" (`.6`) |
+| Mixed versions | An older long-lived handle only makes shared callers wait | "No version can corrupt another's file" has one exception (`.3`) |
+
+---
+
+**New items**
+
+#### RB-006.1 — [CORRECTNESS] [HIGH] The note covers a process that dies, not a commit that fails in a process that lives on: today such a handle is ahead of the file with an unchanged stamp, and an error can still mean "committed"
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `233eba4` (`rb6/tests/failed_commit.rs`): a 3-memory file, then one `remember` and `flush` with the failpoint failing one write. Each row is one or more failing writes. "Page 0" is the note's stamp (the write counter and the transaction id) and the header's seal.
+
+| Row | The handle | Failing write | The call | The handle then holds | Page 0 | Another process, read-only open | Another process, read-write open |
+|---|---|---|---|---|---|---|---|
+| 1 | has written before | 0 to 2 (up to the WAL commit) | `Err` | 4 memories | unchanged, same seal | 3 | 3 |
+| 2 | has written before | 3 to 8 (after the WAL commit) | `Err` | 4 | unchanged, same seal | `NeedsWriteOpen` | **4** (it replays the WAL) |
+| 3 | new | 0 | `Err` | 3 | unchanged | 3 | 3 |
+| 4 | new | 1 | `Err` | 3 | unchanged | `NeedsWriteOpen` | 3 |
+| 5 | new | 2 to 4 | `Err` | 4 | transaction id 2 → 3, new seal | 3 | 3 |
+| 6 | new | 5 to 8 | `Err` | 4 | the same | `NeedsWriteOpen` | **4** |
+
+  - In every row the same handle's next `flush` succeeded. That is today's design: one owner, which keeps its unflushed writes and retries (`flush.rs:484-491`, `try_close`).
+  - The crash table and step 5 assume the opposite: the process is gone, or its memory matches the header.
+- **Finding:**
+  1. **A handle can be ahead of the file while the stamp says "equal".** After row 1 the handle holds a memory the file doesn't, and page 0 hasn't moved (row 5 is the same, apart from the new handle's first header-only commit). Under the note's step 5 its next call, a read included, serves that memory to its caller. Its next successful commit stores a write whose caller was told it failed. If another process commits first, the handle either drops the write on reload or, with any incremental path, builds on a base that no longer exists.
+  2. **An error can mean "committed".** In rows 2 and 6 the caller got `Err`, and the next process to open the file read-write got the memory. In shared mode that next process is usually another agent, milliseconds later. A caller that retries its `remember` stores it twice.
+  3. **Step 6 doesn't reload after a replay.** It says the caller "re-checks from step 4, replays the WAL as `open` does today, and goes on". The replay rewrites page 0 with a later transaction, and the caller's memory is from before it. By reading: a caller that goes on from there commits a transaction id the file has already used, on top of a catalog that lacks the replayed rows. `open` doesn't have this problem because it loads after it replays (`open.rs:472-486`).
+  4. **A panic inside the window** unlocks through `LockedFile::drop` and leaves the handle half-changed. The same rule has to cover it.
+  5. **A new handle's first write can leave a pending WAL with nothing changed** (row 4). Read-only callers then get `NeedsWriteOpen` until a writer's call.
+- **Recommendation:**
+  1. Add the rule to the protocol: a handle clears its stamp before a mutation touches its memory, and sets it again only from the header a successful commit wrote. A cleared stamp means "reload from the file" at the next call, whatever page 0 says. An error or a panic inside the window leaves it cleared.
+  2. Say what the caller gets when the failure comes after the WAL's commit point. Either finish the checkpoint from the WAL before returning (it's the same replay), or return an error that says the write may have been stored. Never a plain "failed".
+  3. Step 6: after a replay, reload unconditionally.
+  4. Add the rows to the crash table: "a commit fails before the commit point, the process lives", "after it", and "a replay by a handle that was current".
+  5. Step 3's two-process test injects failures in a child that dies. Add the same set in a process that lives and keeps calling, and assert that no call ever returns a memory that a fresh open of the file doesn't have.
+- **Would I want it settled before step 2's code?** Yes. It's the core of what step 2 writes.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **before step 2's code**, all five: the stamp is cleared before a mutation and set only from a successful commit; a failure after the commit point finishes the checkpoint from the WAL before returning, or, if it can't, returns a distinct "may have been stored" error, never a plain failure; step 6 always reloads after a replay; the crash table gains the three rows; the test set runs in a process that lives on.
+
+#### RB-006.2 — [CORRECTNESS] [MEDIUM] What tells a handle the file changed: every compaction makes a new data key, the note doesn't say what a failed seal means, and the stamp can repeat
+- **Status:** `ACCEPTED`
+- **Context / Evidence:**
+  - **Every compaction rotates the data key and restarts the counters.** `compact_file_secret` builds the new file with `create_secret` (`maintenance.rs:726`), which draws a fresh salt and a fresh data key (`open.rs:225-226`) and starts the write counter and the transaction id at 0 (`open.rs:242`, `:263`). The note's gap 2 treats a new data key as what `rekey --rotate` does, and a plain compaction as something a handle might survive without its secret.
+  - **A seal that fails is tampering today.** `open` never heals it (`open.rs:488-502`, the DUR-1 decision). The note's step 5 says "verify its seal under the data key" and then gives two outcomes, "equal" and "different". It doesn't give the third.
+  - **`cp` over the file keeps the inode** (tested, `rb6/presence.py`): the identity check can't see it. A rename changes it.
+  - **APFS didn't reuse an inode number** in 2,000 create-and-delete rounds (tested). ext4 and tmpfs do reuse them soon after a file is freed. That's from general knowledge of those filesystems, not tested here.
+  - **The header's seal has a fresh random 12-byte nonce on every write** (`format.rs:97`), stored at bytes 242 to 270 of page 0.
+- **Finding:**
+  1. After any `mnemo compact`, every running handle holds the wrong data key. On macOS the identity check sees the new inode first. On a filesystem that reuses inode numbers, two compactions in a row can leave the path with the inode the handle remembers. A freshly written small file ends at a low transaction id (2 for my 3-memory test file, with a write counter of 6), and the write counter depends only on how many pages were sealed, so the stamp can match too. Then the only thing that tells the handle is the seal failing under its old key. If step 2's code treats that as `HeaderTampered`, every session dies with a tampering error after an ordinary compaction on Linux.
+  2. A copy written over the file in place (a restored backup, `cp`, a sync tool's in-place mode) keeps the inode and may keep the data key. The stamp catches it only if the counters differ. Two copies that diverged from one ancestor by the same number of commits and pages have equal stamps and different contents.
+  3. Step 2 says "open the path". It must not create it. A handle whose file was deleted (`git clean -fdx` on an ignored brain) should get an error, never a new empty brain.
+  4. Step 4's "go back to step 2" has no bound of its own. Step 1's code uses 8 attempts (`load.rs`, `35ab403`); the note should say the deadline covers it.
+  5. A torn page 0 isn't in step 5 either. The scan that heals it reads the whole file and runs the KDF once per candidate (`open.rs:46-161`), which shouldn't happen under a shared lock.
+- **Recommendation:**
+  1. **Make the stamp the header's seal** (its 12-byte nonce and 16-byte tag, 28 bytes compared), with the file identity as a quick first test. It changes on every header write, and it can't repeat across compactions, copies or restores. It needs no format change, and it's cheaper than parsing two counters.
+  2. **Write the third outcome into step 5:** the seal doesn't verify under the held key → treat the file as replaced, reopen with the kept secret (one KDF run), and only if that fails return the error (`WrongPassphrase`, or `HeaderTampered` when the secret opens the key but the seal still fails).
+  3. Correct gap 2: every compaction needs the kept secret, not only a rotation. That also settles that a shared handle must keep its secret (see `RB-006.11` part (c)).
+  4. Step 2 opens without creating. A missing file is an error.
+  5. A torn page 0: a read-write caller takes the exclusive lock and runs `open`'s recovery; a read-only caller gets `NeedsWriteOpen` at once, without the scan.
+  6. Tests: a handle that lives through two compactions; a copy written over the file in place; a deleted file. On Linux CI, the inode-reuse case if it can be forced.
+- **Would I want it settled before step 2's code?** Yes.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **before step 2**, all six: the stamp is the header seal (nonce and tag) with the identity as the quick test; step 5 gains the "seal doesn't verify" outcome (treat as replaced, reopen with the kept secret, then the specific error); gap 2 says every compaction needs the secret; step 2 never creates the file; the torn-page-0 rule; the tests.
+
+#### RB-006.3 — [CORRECTNESS] [MEDIUM] Mixed versions: an older `mnemo compact` can still lose a shared writer's commit, and today's lifetime lock is what prevents it
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `233eba4` (`rb6/tests/old_compactor.rs`): v0.13.2's `compact_file` in a loop, against a writer that opens, writes one memory and closes, 20 seconds a run.
+
+| The writer | Compactions | Writes acknowledged | Missing at the end | Opens the identity test refused |
+|---|---|---|---|---|
+| retries at once, no identity test | 209 | 278 | **207** | none |
+| retries at once, with the note's step-4 test (as near as a caller can get: the path names the same inode before and after the open) | 337 | 19 | 0 | 336 |
+| 1 to 50 ms backoff, with the test | 144 | 228 | 0 | 1 |
+
+  - The first row is the note's gap 1, and step 1 fixes it for binaries that have the fix.
+  - **Today a running MCP server's lifetime lock makes `mnemo compact` fail with `Locked`.** In shared mode nothing holds the lock between calls, so an older CLI, an older wheel in some virtualenv, or an app built against an older binding compacts whenever it likes. v0.13.2's compactor still drops its lock before it renames (`maintenance.rs:744-746`).
+  - The identity test caught every case I could produce. What it can't catch is a rename that lands after the test passes, during the commit. I didn't hit that in 481 compactions. By reading, nothing prevents it, and when it happens the write is lost with `Ok` returned.
+  - Old binaries ignore the header's `flags` field (`format.rs:447` reads it; nothing checks it), so a new flag wouldn't stop them. Only a format version would.
+- **Finding:** the note says "No version can corrupt another's file, because both use the same OS lock." That's true of corruption. It isn't true of lost writes: an older compactor plus a shared writer is the one pair where the lock doesn't serialize the two. It's rare with the identity test in place, and silent.
+- **Recommendation:**
+  1. **Check the identity again after the commit, before the call returns `Ok`.** If the path no longer names the file just written, return an error that says the file was replaced during the write and the write isn't in it. Step 1's `ensure_not_replaced` runs before each commit; this is the same call after it. An old compactor renames within microseconds of dropping its lock and a commit takes milliseconds, so this turns nearly every silent loss into a reported one.
+  2. Change the note's sentence to name the exception.
+  3. Decide whether pre-0.14 binaries should be kept off a file that shared handles use. The only gate they obey is the format version, which the format-version policy covers. The cheaper answer is a line in the upgrade notes: update every `mnemo` on the machine before turning `--shared` on, and before step 8 makes it the default.
+  4. Step 3's "Windows on CI" should include an old-compactor case if the 0.13.2 binary can be fetched there.
+- **Would I want it settled before step 2's code?** Recommendation 1, yes: it's a line in step 2. Recommendation 3 is a decision to make before step 8.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Before step 2:** recommendation 1 (the identity check again after the commit, with a distinct "replaced during the write" error) and 2 (the note names the exception). **Recommendation 3:** for v0.14 the upgrade notes say to update every `mnemo` on the machine before using `--shared`; whether to gate older binaries by format version is decided before step 8. **Recommendation 4:** if the 0.13.2 binary can be fetched on Windows CI.
+
+#### RB-006.4 — [PERF] [MEDIUM] Writer preference does its job for one writer; the backoff costs more than the note's numbers say, and several writers have no order among themselves
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** `rb6/locksim.py`, a simulation of the note's protocol with real `flock` between processes. A commit is a 16 ms sleep under the exclusive lock. Readers loop with no pause. "Plain" is the note before the sign-off change; its writer gave up after 3 s.
+
+| Readers | A read holds the lock for | Mode | Commits that got the lock | Wait for the lock: median, max | Commits a second | Reads a second | A reader's longest wait |
+|---|---|---|---|---|---|---|---|
+| 8 | 0.2 ms | plain | 8 of 40 | 1,431 ms, 2,018 ms | 0.1 | 23,556 | 52 ms |
+| 8 | 0.2 ms | intent | 100 of 100 | 14 ms, 37 ms | 25.0 | 7,184 | 55 ms |
+| 8 | 2.5 ms | plain | 7 of 40 | 968 ms, 2,315 ms | 0.1 | 2,168 | 78 ms |
+| 8 | 2.5 ms | intent | 100 of 100 | 20 ms, 44 ms | 20.7 | 808 | 54 ms |
+| 8 | 12 ms | intent | 100 of 100 | 34 ms, 99 ms | 15.5 | 190 | 178 ms |
+| 8 | 112 ms | intent | 100 of 100 | 153 ms, 188 ms | 5.6 | 43 | 617 ms |
+| 16 | 2.5 ms | plain | 0 of 20 | none | 0 | 4,257 | 10 ms |
+| 16 | 2.5 ms | intent | 100 of 100 | 22 ms, 76 ms | 19.0 | 1,571 | 64 ms |
+| 32 | 2.5 ms | intent | 100 of 100 | 25 ms, 63 ms | 17.9 | 3,353 | 73 ms |
+
+  Writers only (the intent protocol, no pause between commits; 16 ms back to back would be 62 a second):
+
+| Writers | Commits a second, all together | Wait for the lock: median, 95th percentile, max | Waits over 1 s |
+|---|---|---|---|
+| 1 | 42.9 | 0.2 ms, 0.6 ms, 0.8 ms | 0 of 60 |
+| 2 | 33.3 | 38 ms, 52 ms, 54 ms | 0 of 120 |
+| 4 | 33.5 | 41 ms, 400 ms, 1,045 ms | 1 of 240 |
+| 8 | 32.3 | 50 ms, 874 ms, 2,612 ms | 19 of 480 |
+| 4, with 8 readers | 20.0 | 43 ms, 667 ms, 1,039 ms | 1 of 160 |
+
+- **Finding:**
+  1. **The change was needed and it works.** Without the intent lock a writer mostly never gets in. With it, one writer always did, well inside the sign-off test's 1 s.
+  2. **The note's rate is high by a factor of two to three.** It says "roughly 60 durable commits a second" across all processes. With two or more writers the simulation gives about 33, and about 20 once readers are present. The cause is the backoff: a waiter that sleeps up to 50 ms overshoots a 16 ms hold, and the lock sits free until it wakes.
+  3. **Readers pay more than "milliseconds at most"** (the note's comparison and readers tables). Each commit costs every waiting reader up to one 50 ms sleep, and reads fall to about a third while one writer is busy.
+  4. **Writers have no order.** Each polls on its own, so with 8 writers 4% of commits waited over a second and one waited 2.6 s. The sign-off test has one writer, so its "every write under 1 s" would pass while this case fails.
+  5. **A reader holds the intent lock while it sleeps.** The note says a reader "never holds it during the read", which is true, but it does hold it for as long as it waits for the main lock. While a long operation holds the main lock, every waiting reader holds the intent lock shared, and a second writer can't take it to queue.
+  6. A writer waits for the intent lock "with the same backoff and deadline", then for the main lock. Read literally that's two deadlines, 20 s.
+- **Recommendation:**
+  1. A reader takes the intent lock, tries the main lock once without waiting, and releases the intent lock whether or not it got it. If it didn't, it sleeps and starts again from the intent lock.
+  2. Keep the sleeps short while the wait is young (a cap of a few milliseconds for the first few hundred), and grow them only after. A commit holds the lock for 16 ms, so a 50 ms sleep can't be right for the common case. Measure it in step 5's bench.
+  3. One deadline per call, covering both locks and step 4's retries.
+  4. Add to the starvation test: four and eight writers at once, with the assertion on the 99th percentile; and readers' waits.
+  5. Correct the note's numbers once step 5 has measured them, and until then say "tens of commits a second".
+- **Would I want it settled before step 2's code?** Recommendations 1 and 3, yes: they're part of the lock loop. The rest is measurement.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Before step 2:** recommendations 1 (a reader holds the intent lock only for one try) and 3 (one deadline per call, across both locks and the identity retries). **Step 5:** recommendation 2 (short sleeps first), 4 (multi-writer tests asserting on the 99th percentile, plus readers' waits) and 5 (the note says "tens of commits a second" until measured). If several writers' 99th percentile is poor, step 5 adds an order among writers.
+
+#### RB-006.5 — [CORRECTNESS] [MEDIUM] Presence by lock probe is wrong in several ordinary cases, and "a dead holder's claim lapses at once" turns each one into a claim taken from an agent that is still working
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** `rb6/presence.py`, the note's probe with real `flock` on APFS. "Alive" is what the probe returned.
+
+| Case | The probe says | Right? |
+|---|---|---|
+| nobody holds the file; a holder runs; the holder is killed with `kill -9` | not alive; alive; not alive | yes |
+| the holder is stopped (`SIGSTOP`) | alive | yes, and `expires_at` covers it |
+| the holder forked a worker that never `exec`s (Python's `multiprocessing` fork start), then was killed | **alive** | no |
+| the sidecar directory is deleted while the holder runs, and the probe recreates the file | **not alive** | no |
+| two probes at the same moment, nobody running | the second says **alive** | no |
+| a holder tries to register while a probe has the file | **refused** | it must retry, or it's never seen |
+
+  By reading, not tested:
+  - **The sidecar is found by path, the lock by inode.** Two paths to one brain (a symlinked directory, a hard link) agree on the main lock, as the note says, and get two sidecar directories. Agents on one path are "not alive" to agents on the other.
+  - **An agent with no long-lived process is never alive.** 13.1b's hook-and-poll fallback and the CLI are processes that exit. Their claims are free the moment they return.
+  - **A restart is a gap.** A client that reconnects its MCP server, a crash and restart, or an upgrade leaves the presence file unlocked for a moment.
+- **Finding:**
+  1. The note's rule is "a crashed holder's claim lapses at once (the lock probe says it isn't alive)". In four of the cases above the holder is working and the probe says it isn't. `git clean -fdx` in a repository whose brain's sidecar is ignored (the `.gitignore` pattern makes it so) releases every claim of every running session.
+  2. **A holder never learns it lost a claim.** `claim` returns `Claimed` once. If the claim lapses during a stall (stopped, out of usage, a sleeping laptop past `expires_at`) or is taken through one of the cases above, the first holder resumes and carries on, and two agents work the same topic. That's the thing claims exist to prevent.
+  3. The note says "Deleting the directory while nothing runs loses nothing". While something runs, it loses presence, silently.
+- **Recommendation:**
+  1. **Give a claim a token** (the transaction id that wrote it). `renew`, `release` and a new `check(topic, token)` return `Lost` when the live claim's token differs. Say in 13.3's docs that an agent checks before an irreversible step.
+  2. **Make the early lapse a hint.** Lapse early only when the holder registered a presence lock when it claimed (record that in the claim) and has been not-alive for a short grace period (a few seconds, seen twice). Otherwise wait for `expires_at`.
+  3. Presence files get the main file's identity check on every call: if the path no longer names the locked file, lock the new one.
+  4. The probe retries once after a short sleep before it says "alive", and a holder registers with the bounded backoff.
+  5. Resolve the brain's path (symlinks included) before deriving the sidecar's path, and say that hard links aren't covered.
+  6. The clock: say what a step backwards or forwards does to `expires_at`. Leave claims and presence records out of 13.7's merge, as `export --git` leaves them out.
+- **Would I want it settled before step 2's code?** No, it's step 7. Only recommendation 5 lands in step 2, with the sidecar directory.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13) → step 7 (13.3's engine half): claim tokens with `Lost`, the early lapse as a hint with a grace period, presence files re-checked by identity, the probe's retry, and the clock. **Recommendation 5** (resolve symlinks before deriving the sidecar path; hard links not covered) lands in step 2 with the sidecar directory.
+
+#### RB-006.6 — [CORRECTNESS] [MEDIUM] Mobile: the presence lock is held between calls, which is what iOS kills for, and a wait for the lock inside a background activity has no way to stop
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** by reading; nothing here ran on a device or a simulator.
+  - The mobile section rests on "A shared-mode store holds no lock between calls, so suspension between calls is always safe." The protocol says the same: "no file descriptor and no lock between calls".
+  - The presence section says each shared handle that declares an agent id "holds a shared lock on its own sidecar file for its lifetime". The sidecar directory is next to the brain, so for an App Group file it's in the shared container.
+  - MOBILE-2's reason for its background rules is that iOS kills a suspended app that holds a file lock in a shared container (`0xdead10cc`).
+  - The engine creates the sidecar files. The Swift package's `FilePolicy` sets the protection class and the backup flag on the store's own directory (`FilePolicy.swift:46-58`), not on files the engine adds later.
+- **Finding:**
+  1. A phone app that uses presence holds a lock in the shared container while suspended. That's the case MOBILE-2 exists to avoid.
+  2. A caller waiting for the lock holds the intent lock (a writer always; a reader too, see `RB-006.4`) for up to the 10 s deadline. A background activity can expire sooner than that, and an extension's whole budget is short (a notification service extension gets about 30 s). If the app is suspended mid-wait, it's suspended holding a lock.
+  3. In an app whose default protection is `complete`, sidecar files created by the engine can't be opened while the device is locked, so a notification extension's calls fail there even though the brain itself opens.
+  4. A widget or an extension that opens read-only gets `NeedsWriteOpen` after a writer died mid-commit, and stays that way until the app itself runs.
+  5. Android: "the magic numbers on Linux" has to accept f2fs, which most phones use for app data, and refuse the FUSE-backed shared storage. The note doesn't say whether the list allows or denies.
+- **Recommendation:**
+  1. On iOS, no presence lock. Report `last_active` only, or hold the presence lock for the length of each call.
+  2. A wait can be cancelled from another thread (the activity's expiry handler), and the cancel releases every lock the call holds. The mobile stores pass a deadline no longer than the time the activity has left, and a default much shorter than 10 s.
+  3. The Swift and Kotlin stores create the sidecar directory themselves, through the same policy as the brain's directory (protection class, excluded from backup).
+  4. Say what a read-only extension does with `NeedsWriteOpen`.
+  5. Say that the Linux filesystem list is an allow-list, and name f2fs and ext4 for Android.
+- **Would I want it settled before step 2's code?** Recommendation 2's cancel, yes: it's in the shape of the lock loop's API. The rest goes with mobile's opt-in.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Before step 2:** recommendation 2 (a wait can be cancelled from another thread and releases every lock; the mobile stores pass a deadline no longer than the activity's remaining time). **With mobile's opt-in:** recommendations 1 (no presence lock on iOS), 3, 4 and 5 (the Linux list is an allow-list naming ext4 and f2fs).
+
+#### RB-006.7 — [CORRECTNESS] [MEDIUM] What a shared handle keeps or does that the note doesn't cover: a second read that writes, per-handle settings that change the file, and the watcher's descriptor
+- **Status:** `ACCEPTED`
+- **Context / Evidence and recommendation, one item each:**
+  1. **`cache_get` writes too.** On a read-write handle a cache hit updates the directory's `accessed_at` and `access_count` and sets `dirty_cache` (`cache_api.rs:169-171`; `cache_get_semantic` at `:563-565`). The note defers recall's statistics and nothing else. Treat cache hits the same way, or a cache read needs the exclusive lock and a commit.
+  2. **Per-handle settings decide what a commit deletes.** Snapshot retention runs at every commit with the committing handle's `max_snapshots` (`snapshots.rs:152-178`). An explicit cap in one process ("keep the newest 10") removes restore points that every other process would have kept, at its next commit. The cache budgets and `turn_compress_after` are per handle in the same way. Today that needs two programs opening the file in turn; in shared mode it's continuous. Either store the retention policy in the file, or say that shared handles use the default policy and refuse an explicit one. Separately, a reload "exactly as `open` does" resets these settings and the embedder (`open.rs:691-736`); the reload must carry them over.
+  3. **The embedding from step 1 can be stale.** It's computed before the lock. After the catch-up, check that the file's dimensions (and model, where recorded) still match, and recompute if not.
+  4. **Read, then write, across two calls.** An agent recalls a memory and then updates or forgets it by id. Another process may have changed, superseded or deleted it in between. Say what `update` and `forget` return for a superseded or missing id, and consider an expected-version argument later.
+  5. **Statistics applied "at close".** `close` then needs the exclusive lock and a commit, can wait for the deadline, and can fail. An MCP server's `close` runs only when stdin closes (`mcp.rs:253`); clients often just kill it. And each such commit moves the stamp, so every other process reloads for a change it doesn't care about. Apply them only with a commit the handle makes anyway, and drop them at `close`.
+  6. **The 13.1b watcher needs a descriptor.** `EVFILT_VNODE` watches an open file, so a session's server holds a descriptor between calls after all (no lock; say so, since the protocol says "no file descriptor"). After a compaction it's watching the replaced file, so it must re-arm on rename and delete, or watch the directory. If it watches the directory, writes to `lock-info` wake it.
+  7. **The watcher's cost is a reload, not a header check.** The note says "one header check per foreign commit per session". A moved stamp means the session must catch up before it can query its inbox: 3.2 ms at 10K and about 30 ms at 100K per session per commit by the note's own table, and marking an item `delivered` is another commit that wakes everyone again.
+- **Would I want it settled before step 2's code?** Items 1 and 2, yes. The rest belong to their steps.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Before step 2:** item 1 (cache-hit statistics deferred like recall's) and item 2 (in v0.14, shared handles use the file's default retention, cache budgets and `turn_compress_after`, and refuse explicit settings with a clear error; storing the policy in the file comes later; a reload carries the handle's settings and embedder over). **At their steps:** items 3 to 7, with item 5 as recommended (apply statistics only with a commit the handle makes anyway, and drop them at close).
+
+#### RB-006.8 — [CORRECTNESS] [LOW] Incremental catch-up (step 6): a cached page is never checked again, so the note's safety argument for stale pages doesn't hold
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** by reading.
+  - The note: "v9 binds each page's generation into its AAD, so a stale cached page that was freed and reused fails its GCM check rather than returning wrong data."
+  - The page cache holds decrypted pages keyed by page number alone, and a hit returns before any decryption (`pager.rs:365-368`). The generation is checked only when a page is read from disk.
+  - The note's later rule is to keep the cache "except for pages the free list shows as reused". A page that was freed and then reused since the handle's transaction is no longer on the free list at all.
+  - The catalog's delta chain is dropped and rebuilt at a base rewrite (`flush.rs:269-277`), and that rewrite removes tombstoned rows, which moves row positions (`flush.rs:687-689`); deltas address rows by position (`load.rs:292-295`).
+- **Finding:** the first version (clear the cache, reload everything) is safe. The incremental version as described would serve an old page's contents for a reused page number, with no error, and can't find the reused pages the way it says.
+- **Recommendation:**
+  1. Fix the sentence now, so nobody builds on it.
+  2. For step 6: key the cache by page number and generation, or drop every cached page named by a changed row (old and new location).
+  3. Fall back to the full reload when the chain doesn't reach back to the handle's transaction (a base rewrite happened).
+  4. The "both give the same state" test should include a base rewrite, a compaction of tombstones, and a page reused between the two points.
+- **Would I want it settled before step 2's code?** No. Recommendation 1 is a one-line edit to the note.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Recommendation 1 now, in the note's revision; 2 to 4 in step 6.
+
+#### RB-006.9 — [DX/DOCS] [LOW] Smaller points in the note
+- **Status:** `ACCEPTED`
+- **Context / Evidence and recommendation, one item each:**
+  1. **`lock-info` is written before the lock is taken**, so a second long operation that is still waiting replaces the line of the one that holds the lock (tested with two writers, `rb6/presence.py` step 7: the waiter read the wrong name). Write it after the lock is held, and remove it before unlocking.
+  2. **Which filesystems are refused on Linux.** The note says "the magic numbers", without saying allow or deny. A brain shared between a host and a container or WSL is a likely setup for coding agents, and those mounts (virtiofs, 9p, FUSE) are local-looking filesystems where a lock may not reach the other side. Not tested here. Make it an allow-list, and add a line to the docs.
+  3. **A directory the caller can't write.** A reader of another user's file, or of a file in a read-only directory, can't create the sidecar. Say that it then takes the main lock alone.
+  4. **Read-only callers and a pending WAL.** With hooks reading `--no-track` and servers idle, nobody heals the file until a write-capable call happens. Let the watcher or `serve --mcp --shared` heal it when it sees `NeedsWriteOpen`.
+  5. **The per-call cost** in the comparison table leaves out the WAL check (one more 29-byte read, `wal.rs:358-369`). It's small; list it so step 5's bench measures the real sequence.
+  6. **Windows.** The note plans to test the rename over an open file on CI. `std::fs::rename` has changed its Windows behaviour between toolchains, and the MSRV (1.75) and CI's stable differ. I'm saying this from memory and didn't check it here. Step 1's commit message names one toolchain for its probe; run it on the MSRV too before relying on it.
+  7. **"It holds no file descriptor and no lock between calls"** needs its two exceptions written next to it: the presence lock (`RB-006.5`, `.6`) and the watcher's descriptor (`RB-006.7` item 6).
+- **Would I want it settled before step 2's code?** Item 1 and item 3, since step 2 creates the sidecar directory. The rest are edits to the note.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Items 1 (write `lock-info` after the lock) and 3 (no sidecar when the directory isn't writable) in step 2; items 2, 4, 5, 6 and 7 as edits to the note (item 6: run step 1's Windows probe on the MSRV too).
+
+#### RB-006.10 — [SECURITY] [LOW] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** one finding about shipped code (v0.13.2 and earlier), in the lines of `maintenance.rs` and `load.rs` that step 1's commit `35ab403` is changing. Tested at `233eba4`. Step 1's change already makes it impractical; one more line closes it.
+- **Would I want it settled before step 2's code?** It belongs in step 1's PR.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), in step 1's PR. Full triage in `SECURITY.local.md`.
+
+#### RB-006.11 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** three findings about the design of the lock layer (the protocol and the sidecar directory). No code exists, so nothing shipped is affected. By reading, with line references.
+- **Would I want it settled before step 2's code?** Yes, parts (a) and (b). Part (a) also changes the note's cost for a write.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Full triage in `SECURITY.local.md`.
+
+#### RB-006.12 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** findings about the design of the daemon's discovery and trust boundary. No code exists. By reading.
+- **Would I want it settled before step 2's code?** No. Before step 9.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), before step 9. Full triage in `SECURITY.local.md`.

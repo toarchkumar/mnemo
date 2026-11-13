@@ -66,24 +66,27 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-11, after v0.12.3)
+## Status (2026-11-13, after v0.13.2)
 
-**Published:** v0.12.3, after v0.12.1–v0.12.2's mobile hardening
-(MOBILE-2, SEC-2, MOBILE-2e, SEC-2b), on crates.io, PyPI, Maven Central
+**Published:** v0.13.2, after v0.13.0 (the inspector, `export --git`, the v8
+sunset, HOOKS-1) and v0.13.1, on crates.io, PyPI, Maven Central
 (`io.github.toarchkumar:mnemo-android`) and SPM (`toarchkumar/mnemo-swift`);
-PLANNER-A VERIFIED. Releases publish through approval-gated environments
-with no long-lived tokens except the Maven Central user token (expires
-about 2027-11-11). **Also done:** REL-1 (CI and the release workflow; mobile
-publishes by rule). **Also done (to ship in v0.13):** EMBED-ID-1 and
-SAMPLE-1. **In progress:** INSP-1 → v0.13.0 (the inspector, the
-readable export, the v8 sunset, HOOKS-1). **Then:** the local harness stack (12.4,
-12.3, 12.2, Phase 13a) → HARNESS-DOGFOOD-1 (the first-success milestone:
-this project's git Markdown workflow runs entirely in MNemo) → PERF-2 →
-Phase 13b → 14 → 15 (see "Authoritative execution order"). **Reviewers** come in at milestones
-(AGENTS.md `Reviewer` rule 4). **Target market (user decision
-2026-11-07):** on-device agents and apps, from desktop to tablets, phones
-and other small devices. Read the WORKLOG from the 2026-11-11 entries on
-for the live thread.
+PLANNER-A VERIFIED. A release takes one human approval (REL-2's
+`approve-release` job); the mobile mode comes from `.github/release-mobile`
+in the tagged commit. No long-lived tokens except the Maven Central user
+token (renew by 2027-11-09). **In progress:** v0.14.0 on `release-0.14.0`:
+12.4 shared access, steps 1 to 5 (step 1 done, PR 63; the design note
+revised after RB-006 and signed off, PR 64), plus REKEY-2. **Then:** 12.3 →
+12.2 (`mnemo onboard`, GUIDE-1) → Phase 13a (with 13.1b delivery) →
+HARNESS-DOGFOOD-1 (the first-success milestone: this project's git Markdown
+workflow runs entirely in MNemo) → PERF-2 → Phase 13b → 14 → 15 (see
+"Authoritative execution order"). CLEANUP-1 is marked, not scheduled.
+**The team:** PLANNER-A, the Worker, REVIEWER-A and REVIEWER-B; the
+Reviewers come in at milestones (AGENTS.md `Reviewer` rule 4). **The repo
+lives at** `~/Documents/GitHub/mnemo.nosync` (out of iCloud sync).
+**Target market (user decision 2026-11-07):** on-device agents and apps,
+from desktop to tablets, phones and other small devices. Read the WORKLOG
+from the 2026-11-13 entries on for the live thread.
 
 ## Planner handover (read this first if you are a new Planner session)
 
@@ -1305,9 +1308,33 @@ session start).
   - CLI `mnemo inbox`, `mnemo post`, `mnemo task …`;
   - Python and Rust methods;
   - the SessionStart hook (12.2) shows "2 unread, 1 task ready for you".
-- **Push notifications are out of scope;** agents poll at session start
-  and after each commit. Note: a later MCP `notifications/resources/updated`
-  on the inbox resource is cheap if clients support it.
+- **Delivery (13.1b, user decision 2026-11-12; replaces "push
+  notifications are out of scope"):** agents wake one another instead of
+  the user relaying prompts.
+  - **Every message and task keeps a delivery state:** `sent → delivered →
+    seen → done`. A wake-up that goes nowhere loses nothing.
+  - **Wake-ups:** `mnemo serve --mcp` declares the Claude Code **channel**
+    capability (`claude/channel`, research preview: needs `--channels` and
+    a claude.ai login) and pushes an event into the recipient's running
+    session when its inbox gets work. Clients without channels (Cursor and
+    others) check their inbox at the start of each turn through a hook,
+    and through MCP `notifications/resources/updated` where it's
+    supported. Channels drop events silently when a session hasn't loaded
+    them, so the delivery state is the source of truth.
+  - **Optional `mnemo watch`** (off by default): it starts a session for a
+    role when work arrives and no session is open.
+  - **Guardrails, from the first version:**
+    - a wake-up limit per role per hour, a cooldown, and a hop cap per
+      thread, so no two agents can wake each other forever;
+    - a kill switch (`mnemo wake pause` / `resume`);
+    - messages from agents are information, not authority: tagging,
+      approving a release, deleting and anything irreversible stay with
+      the human;
+    - the sender is unproven on one machine (a shared key) until 13b's
+      per-agent keys.
+  - **Accepted when:** HARNESS-DOGFOOD-1's Run 1 sees the Worker's READY
+    wake the Planner and the Planner's DISPATCH wake the Worker, with the
+    user only approving.
 
 ### 13.2 Per-agent keys and roles (format v9)
 - **Key slots** (like LUKS): the header wraps the data key under several
@@ -20306,3 +20333,667 @@ and the branch is deleted.
 - **Copy search:** nothing.
 - **Next:** the HANDOFF commit (README.md, index.html), the `chore(plan)`
   backup, fast-forward `main`, tag `v0.13.2`.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 released (mobile off)
+
+**Tag `v0.13.2` on 233eba4** (`chore(plan): sync coordination files`, after
+5c115a5, the README and site HANDOFF). `main` was fast-forwarded from
+15bc00f to 233eba4 before the tag. Nothing was flipped: the variable was
+`true`, and the commit says `false`.
+- **The tag run, 43339963803: green on attempt 1.**
+  - version check: `MOBILE_OFF_SWITCH: true`, "engine 0.13.2, mnemo-uniffi
+    0.13.2, mnemo-android 0.13.2", "the commit says mobile: false",
+    "mobile: off (the tagged commit's .github/release-mobile)".
+  - The 11 engine builds finished by 00:53:21 UTC; the Swift and Android
+    builds were skipped.
+  - **"approve the release (v0.13.2, mobile false)"** waited after every
+    build was green; the user approved it, and it ran at 00:59:21.
+  - Then Create GitHub Release, attach, the mobile note (00:59:58, after
+    attach at 00:59:49), PyPI, crates.io, and the engine gate, all green.
+    The mobile publish and verify jobs were skipped.
+- **The registries:**
+  - crates.io: `mnemo-engine` 0.13.2 (01:00:07);
+  - PyPI: `mnemo-engine` 0.13.2, 6 files (5 wheels and the sdist);
+  - `mnemo-swift`: newest tag still 0.13.0;
+  - Maven Central: `io.github.toarchkumar:mnemo-android` latest and
+    release still 0.13.0.
+- **The GitHub Release** `v0.13.2`: 11 assets, not a draft or prerelease,
+  and the line "**Mobile packages not published in this release** (latest:
+  Swift 0.13.0, Android 0.13.0)."
+- **Credentials:** none touched. The `release` environment's one reviewer
+  approved; the four registry environments have no reviewer, and the
+  publishes used Trusted Publishing (OIDC) as before.
+- **After the tag:** RB-004.1 and RB-005.1 moved here from
+  `SECURITY.local.md` (the next entry), and `release-0.13.2` is deleted.
+
+### 2026-11-12 — WORKER — NOTE — RB-004.1 and RB-005.1 moved here from SECURITY.local.md (SEC-4 and the `version check` fix shipped in v0.13.2)
+
+Per AGENTS.md and the DISPATCH: v0.13.2 shipped (tag `v0.13.2` on
+233eba4). It carries SEC-4, RB-004.1's recommendation 2 (7f29ee4, PR 56;
+recommendation 1, the wording, shipped in v0.13.1 and moved in the entry
+"RB-003.1 and RB-004.1's recommendation 1 moved here"), and RB-005.1's fix,
+the off switch read through `env:` (ccea529, PR 61). So both items move from
+the gitignored `SECURITY.local.md` into this log, verbatim below with the
+headings demoted, together with RB-005's SEC-4 probe table. Line numbers are
+as REVIEWER-B wrote them, at `d350d53` (RB-004) and `e7fbb59` (RB-005).
+`SECURITY.local.md` now holds no open finding.
+
+#### RB-004 (REVIEWER-B, 2026-11-12) — RB-004.1 open until SEC-4 ships
+
+RB-004.1's recommendation 1 (the wording) shipped in v0.13.1 and is copied into PLAN.md (same entry as above). Recommendation 2 (SEC-4) is queued for v0.13.2; the item stays here until it ships.
+
+##### RB-004.1 — [SECURITY] [LOW] The README and the CHANGELOG say the token "isn't in the browser's history". It is.
+
+- **Status:** `ACCEPTED`
+- **Evidence:**
+  - **The claim, in three places:**
+    - `mnemo/README.md:940-942`: "Once the page has loaded, it keeps the token for that tab only and takes it out of the address bar, so it isn't in the browser's history."
+    - `CHANGELOG.md:49-50`, the same sentence.
+    - `mnemo/src/bin/mnemo/inspect.html:94-95`, the comment above the code.
+  - **The test.** Chrome 157.0.8103.51, `--headless=new`, with a new `--user-data-dir` in my scratch folder (not the user's profile). I loaded the printed URL, let the page run, and read the profile's `History` database:
+    - from the printed URL: `http://127.0.0.1:<port>/?t=<TOKEN>`, then `http://127.0.0.1:<port>/`;
+    - through the `--open` forwarding page: `file://…/open.html`, then `http://127.0.0.1:<port>/?t=<TOKEN>`, then `http://127.0.0.1:<port>/`.
+  - The browser records the tokened URL as a visit when it loads, before the page's script runs. `replaceState` then adds the clean URL as a second entry; it doesn't remove the first.
+  - Firefox and Safari weren't tested.
+  - **A second stale sentence in the same paragraph:** `mnemo/README.md:936-937` says "Every request must carry that token". Since SEC-3 the page itself doesn't (tested: `/` is 200 without it). The CHANGELOG has this right ("Every API route still needs it").
+- **Finding:**
+  - What `replaceState` does give is real: the token is off the address bar, out of the tab's back and forward entries, and out of a bookmark, a copied link or a shared screen.
+  - The exposure left is small. The token stops working when the inspector stops (30 minutes idle by default), and the history belongs to the same user.
+  - But the sentence is a security claim and it's wrong in the most common browser. `mnemo/README.md` is the crate's README: once `mnemo-engine 0.13.1` is published, that copy can't be corrected.
+- **Recommendation:**
+  1. **Before the tag, reword it in the three places.** For example: "…and takes it out of the address bar. The browser's history still records the first visit; the token stops working when the inspector stops." In the README, also change "Every request must carry that token" to "Every data request".
+  2. **Later, if the claim should be true:** let the printed link carry a single-use code that the page exchanges for the session token on its first load (kept in `sessionStorage` as now), and have the server refuse the code after that. What the history holds is then dead on first use, and the root README's "one-time link" (`README.md:120`) becomes accurate. About 30 lines, with a test that a second use of the code is 403. The cost: a second tab needs the link printed again.
+- **Would I hold the tag for it?** For recommendation 1 only, and it's wording, not code. If re-cutting the release commit isn't worth it, shipping as it is harms no one's data; the published README would carry one wrong sentence until v0.13.2.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12).
+  - **Recommendation 1, before the tag:** reword the history sentence in
+    `mnemo/README.md`, `CHANGELOG.md` and the `inspect.html` comment (the
+    first visit is recorded; the token stops working when the inspector
+    stops), and change "Every request" to "Every data request". The root
+    README's handoff already drops "one-time link" for "a private link
+    that works only while the inspector runs".
+  - **Recommendation 2, in v0.13.2 (SEC-4):** a single-use code in the
+    printed link, exchanged on first load, with a test that a second use
+    is 403. That makes what history holds dead on first use.
+  - RB-003.1 (SEC-3) ships in v0.13.1 with this wording fix; after the
+    tag, move RB-003.1 and this item's recommendation 1 into PLAN.md. This
+    item stays here until SEC-4 ships.
+
+---
+
+#### RB-005 (REVIEWER-B, 2026-11-12) — SEC-4 on `release-0.13.2` at `e7fbb59` (unreleased), and RB-005.1
+
+##### SEC-4 against RB-004.1's recommendation 2: it holds
+
+RB-004.1 stays `ACCEPTED` until v0.13.2 ships. This is the verification of its fix at `e7fbb59`, with the release CLI built from that commit and a copy of the iOS fixture.
+
+**As read** (`mnemo/src/bin/mnemo/inspect.rs:692-714`): the code is in a mutex. One request takes the lock, compares in equal time (`same`, `:574`) and clears the slot before releasing the lock. The `Host` and method checks run first (`:650-674`). Every response has `Cache-Control: no-store` (`:591`), so the exchange can't be replayed from a browser's cache.
+
+| Probe | Result |
+|---|---|
+| `/` with no code, the right code, a wrong code | 200 each: the static page, byte-equal to `inspect.html` |
+| `/api/session` with no `c`, an empty one, three wrong ones, the code upper-cased, one byte longer, one byte shorter | 403 each; none used the code up |
+| The right code with another `Host`; with two `Host` headers; by `POST`; by `HEAD`; at `/api/session/` | 403; 400; 405; 405; 403; none used it up |
+| The first plain request with the right code, after all of the above | 200, a 64-hex token that isn't the code |
+| The same code again, 101 times | 403 every time ("this link has been used, or is wrong") |
+| The token as `c`; the code as `t` on an API route | 403; 403 |
+| 64 connections holding the right code, released together; then 200 | exactly one 200 each time, one token handed out |
+| `c` given twice in one request | the last one counts |
+| A second run of the inspector | a new code and token; the old code and the old token get 403 |
+| `--idle-timeout 5s`, with page loads and wrong codes every 0.5 s | exit 0 at 5.6 s: they don't count as use. The exchange does (exit 5.2 s after it) |
+| `--open`, through a stand-in launcher on `PATH` | argv is the page's path only; folder 0700, page 0600; the page holds `/?c=`, no token; it stays after a plain page load, and goes (with its folder) after the exchange; its code then gets 403 |
+| Chrome 157.0.8103.51, headless, new profile A | the first load shows the 7 memories; the profile's history holds `http://127.0.0.1:<port>/?c=<code>` and `http://127.0.0.1:<port>/`, and no token |
+| The same link again in profile A, then in a new profile B | "This link has already been used. Each link `mnemo inspect` prints opens one tab; run it again for a new one." |
+| The fixture after all of it | byte-identical |
+
+- **So what the history holds is dead after the first load,** which is what RB-004.1's recommendation 2 asked for. The engine README's and the CHANGELOG's sentences about it match what I saw.
+- **By reading only:** the prerender wait (`inspect.html:109-111`). **Not tested:** Firefox, Safari, and `--open` with a real browser (the Worker checked it in the browser pane).
+- **The cost is as documented:** a second tab needs the inspector run again, with the passphrase.
+
+##### RB-005.1 — [SECURITY] [LOW] The off switch's value is pasted into the `version check` script as text, so shell text in it runs
+
+- **Status:** `ACCEPTED`
+- **Evidence:**
+  - `.github/workflows/release.yml:580` at `e7fbb59`: `if [ "$mobile" = true ] && [ "${{ vars.ENABLE_MOBILE_PUBLISH }}" = false ]; then`. GitHub puts the variable's value into the script before bash sees it.
+  - At `v0.13.1` the line was `mobile="${{ vars.ENABLE_MOBILE_PUBLISH == 'true' }}"`, which can only become `true` or `false`.
+  - **The test** (scratch script `rb5/mode_sim.py`): the step's mode lines, run with `bash -eo pipefail` after substituting the expressions as text. With the variable set to `$(touch pwned)`, to the same in backticks, or to text that closes the quote, the file `pwned` was created and the step went on to print "mobile: on". With the variable set to a single `"`, the script is a syntax error and the step fails (on dry runs too, since the text is pasted in whichever branch runs).
+  - The file's value is safe: it's read into a shell variable and always quoted. Shell text in `.github/release-mobile` wasn't run, and the step refused it.
+  - **Who can set the variable.** Repository variables are set by people with admin-level rights. Read through the API: one collaborator (the owner), no organisation, no rulesets. That person can already change the workflow itself.
+  - **What the job can reach.** `version check` runs with `contents: read`, no environment and no secrets. But its outputs are the release's version, dry-run flag and mobile mode, which every later job trusts. Text run there could set `mobile=true` against a commit that says `false`. The approval's name would then read "mobile true", since it shows the same output, and nothing publishes without that approval.
+- **Finding:**
+  - Nobody gains anything from this today: whoever can set the variable can already do more.
+  - It's still the pattern GitHub's own hardening guide says to avoid, in the job whose outputs decide what a release publishes, and RB-004.4's change introduced it. The same file does it the safe way thirty lines up: `engine-gate` passes its variables through `env:` (`release.yml:499-506`).
+  - It would start to matter if the variable were ever set by something that can't push to the repository: an organisation-level variable, a bot, an automation that toggles the switch.
+- **Recommendation:** pass it through the environment and compare the shell variable:
+  ```yaml
+  env:
+    MOBILE_OFF_SWITCH: ${{ vars.ENABLE_MOBILE_PUBLISH }}
+  # ...
+  if [ "$mobile" = true ] && [ "$MOBILE_OFF_SWITCH" = false ]; then
+  ```
+  Take `RB-005.4` item 1 (the switch's spelling) in the same edit, and re-run the dry run. The other expressions in the step (`github.event_name`, `inputs.dry_run`, `inputs.mobile`) are fixed strings or booleans and are fine as they are.
+- **Would I hold the tag for it?** No. It needs the owner's own rights, and changing `release.yml` now would mean another dry run before the tag.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **before the v0.13.2 tag**, as recommended: `MOBILE_OFF_SWITCH` passes through `env:` and is compared as a shell variable, in the same edit as RB-005.4 item 1 (lower-case compare; any value other than `true`, `false` or empty fails `version check`). Then a mobile-off dry run, and one with the variable set to an invalid value to show it fails. Neutral commit message. After the tag, move this item into PLAN.md.
+
+### 2026-11-13 — PLANNER-A — VERIFIED + DECISION + DISPATCH — v0.13.2 verified; 13.1b (delivery) added; the 12.4 design note dispatched
+
+**VERIFIED: v0.13.2** (tag run 43339963803, green on attempt 1). Checked by
+me:
+- crates.io `mnemo-engine` 0.13.2, published 2026-11-13T01:00:07Z;
+- PyPI 0.13.2 with 6 files;
+- `mnemo-swift`'s newest tag is still 0.13.0, as the commit's mode said;
+- the GitHub Release has 11 assets and the mobile note.
+
+The mode came from the tagged commit with nothing flipped by hand, and
+the invalid-switch dry run failed as it should. The v0.13.x hardening
+series is done. **Next engine release:** REKEY-2 (queued in the RB-005
+triage).
+
+**DECISION (user, 2026-11-12): 13.1b, delivery.** Agents wake one another
+through the brain. The spec is in Phase 13's 13.1, above the WORKLOG:
+- a delivery state per message;
+- `mnemo serve --mcp` as a Claude Code channel, with a hook-and-poll
+  fallback for other clients;
+- an optional `mnemo watch`;
+- wake-up limits, a hop cap, a kill switch, and irreversible steps staying
+  human.
+
+It closes the parity checklist's "the user copying prompts between
+agents" row, and it bears directly on 12.4's architecture choice (below).
+
+**On the scheduled REVIEWER-A pass before Phase 12 resumes** (AGENTS.md
+`Reviewer` rule 4): REV-006 (2026-11-10) was exactly that review, so I
+count it. The user can still call REVIEWER-A.
+
+**DISPATCH: the 12.4 design note** (no release; a docs-only PR):
+- **Where:** `docs/design/12.4-shared-access.md`, a new file, as its own
+  PR into `main`. It's a design note, not code. **I sign it off before
+  any 12.4 code starts.**
+- **What it must cover:** everything in 12.4's spec above the WORKLOG
+  (the lock protocol, staleness detection, crash cases; architecture (A),
+  per-operation locking, against (B), a desktop daemon, with a
+  recommendation and a default; claims and presence), plus what has been
+  learned since:
+  1. **FLAKE-1:** agent apps spawn child processes constantly, and an
+     `flock` belongs to the open file description, so the explicit unlock
+     in `LockedFile` is the baseline. Any new lock path must keep it;
+  2. **13.1b, delivery:** wake-ups need something that sees every commit
+     and can reach every session. Under (B) that's the daemon. Under (A),
+     each session's MCP server polls, or watches the file. Weigh it in the
+     comparison;
+  3. **the inspector and other readers:** today a reader gets `Locked`
+     while a writer holds the file. Say what `mnemo inspect` and the CLI's
+     read commands do under each option;
+  4. **worktrees (R-006.2 (a)):** the default brain path resolves through
+     `git rev-parse --git-common-dir`. Say where the daemon's socket, or the
+     lock, lives in that case;
+  5. **mobile:** iOS and Android can't run a daemon, so (A) must work
+     there alone, with the background-close rules from MOBILE-2;
+  6. **the numbers:** the reload cost per operation at 10K and 100K, from
+     the perf file or a quick measurement, and the daemon's warm-call
+     cost. Measure only if the existing numbers don't answer it;
+  7. **the format:** does either option need a file-format change (a
+     write counter in the header, say)? If so, follow the format-version
+     policy;
+  8. **the parity checklist:** which of its rows each option closes.
+- **Length:** short enough to read in one sitting, with a recommendation
+  at the top.
+- **Then log DONE and stop.** I review it. **I suggest REVIEWER-B reviews
+  it too** before any code: it's the riskiest piece in the roadmap, and
+  finding a flaw in a design costs less than finding it in a release. The
+  user decides whether to call REVIEWER-B.
+
+### 2026-11-13 — WORKER — DONE — the 12.4 design note (`docs/design/12.4-shared-access.md`, PR 62, for sign-off)
+
+**PR 62 into `main`** (`design-12.4`, one commit c174c95, docs only, no
+code). Not merged: it waits for PLANNER-A's sign-off (and REVIEWER-B's
+review if the user calls it). `docs/design/` isn't in `ci.yml`'s
+`paths-ignore`, so the PR runs the full CI (43348236068); Mobile CI didn't
+trigger.
+
+**The recommendation (top of the note):** per-operation locking (A) as the
+one protocol on every platform; the desktop daemon (B) optional, off by
+default, and itself an (A) client that never holds the lock between calls,
+so `inspect`, `export --git`, the CLI fallback and the phones never depend
+on it. `serve --mcp --shared` becomes the default one release after it
+ships; today's lifetime lock stays as `--exclusive`.
+
+**What it covers:** everything in 12.4's spec, plus the entry's eight
+additions:
+- **the lock protocol:** slow work (embedding) first, unlocked; a per-call
+  `open(2)` wrapped in `LockedFile`; bounded backoff with a deadline
+  (default 10 s); an identity check (`fstat` against `stat`); a header stamp
+  (`write_counter` and the committed transaction id) for staleness; WAL
+  recovery by the next writer; commit before unlock;
+- the crash-case table, long operations (a lock-info sidecar so `Locked`
+  says who), and the refusal of network filesystems;
+- (A) against (B) on agents, cost, crashes, readers, 13.1/13.3, 13.1b,
+  14.1, mobile, the trust boundary (a daemon is the ssh-agent model) and
+  the format;
+- **claims and presence:** presence split into a lock-probe `alive` (a
+  shared lock on a per-agent sidecar, released by the kernel on a crash)
+  and a `last_active` piggybacked on the agent's own commits. A committed
+  heartbeat would cost a durable write, about 57 KB of growth and a snapshot
+  per agent per minute. Claims are a compare-and-set in one exclusive
+  window, and lapse at `expires_at` or at once when the holder isn't alive;
+- **the eight additions:** FLAKE-1 (every new lock goes through
+  `LockedFile`, with the fork-loop test for each); 13.1b's wake-ups (file
+  watch plus a 30 s stamp poll per session under (A), push from the daemon
+  under (B)); `inspect` and the CLI readers (they wait instead of failing);
+  worktrees (the lock is on the common-dir file; the socket is keyed by the
+  file's identity in the per-user runtime directory); mobile (no lock
+  between calls fits MOBILE-2's iOS rules; opt-in for App Group files);
+  the numbers; the format (no change); the parity checklist rows.
+- **The numbers** come from `perf_v0.5.0.json` (`device_budget_v0_11_0`, v9).
+  No new measurement was needed; the two missing cells (the
+  unchanged-header check and the socket round trip) are marked "not
+  measured" and listed as 12.4's first bench.
+  - Reload: 3.2 ms at 10K, 29.7 ms at 100K.
+  - First recall: 8.8 ms and 112.5 ms.
+  - Warm recall: 2.2 ms and 2.5 ms.
+  - Secure-KDF open: 16.9 ms and 44.2 ms.
+  - MEM-1's 232 ms is the v8 number; v9 opens in about 30 ms, but its first
+    recall loads the fp16 column.
+
+**Two gaps in today's code, found while writing it** (not security items;
+correctness). The note puts them as 12.4's first step:
+1. **`compact_file_secret` (`store/maintenance.rs`) runs `drop(old)`
+   before `rename(tmp, path)`.** A process that opens the file in that
+   window writes to the replaced inode and loses its writes. The window is
+   microseconds today, but shared handles would keep it open for good. The
+   same goes for `rekey --rotate`, and the fixed `.compact-tmp` name is
+   shared by two concurrent compactions.
+2. **No handle checks that the file at its path is still the one it
+   opened.**
+
+The fix: hold the lock through the rename on Unix, check identity per call,
+and test the Windows rename on CI first.
+
+**Six questions for sign-off** end the note:
+1. the shape;
+2. the 10 s deadline;
+3. the presence split;
+4. refusing network filesystems;
+5. mobile opt-in;
+6. fixing the compaction window first.
+
+**Stopped** for PLANNER-A's sign-off. No 12.4 code.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — the 12.4 design note signed off, with four changes; REVIEWER-B reviews it alongside step 1; v0.14.0 planned
+
+**The note** (`docs/design/12.4-shared-access.md`, PR 62): a strong
+piece of work. (A) as the protocol, with an optional daemon that is
+itself an (A) client, is the right shape: one locking protocol to test,
+no reader depends on the daemon, and mobile is covered. Finding the
+`compact_file` rename window, and the missing identity check, is exactly
+what a design pass is for.
+
+**Answers to its six questions:**
+1. **The shape: yes,** (A) as the protocol and the daemon as an optional
+   (A) client.
+2. **The deadline: 10 s by default, yes,** with the lock-info line on
+   failure. Hooks pass a shorter `--wait` (2 s), so a busy file never
+   delays a session's start by much; say so in 12.2's spec.
+3. **Presence: yes,** a lock-probe `alive` and a piggybacked
+   `last_active`.
+4. **Network filesystems: refuse unless `allow_network_fs`, yes.** Add
+   the case we hit ourselves (change 2 below).
+5. **Mobile: yes,** shared mode opt-in for App Group files, and today's
+   mode stays the default.
+6. **The `compact_file` rename window: yes, first.** It's a correctness
+   fix that ships whatever else happens.
+
+**Four changes to the note, to fold in before it merges:**
+1. **Writer starvation.** `flock` has no fairness: dozens of readers taking
+   shared locks back to back could keep a writer's `try_lock` failing until
+   its deadline. Add writer preference, for example an "intent" sidecar
+   lock that a waiting writer holds exclusively, and that readers take
+   shared, briefly, before they take the main lock. Add a test: eight
+   readers in tight loops, and one writer still commits well within its
+   deadline.
+2. **Synced folders on macOS.** `statfs` can't see iCloud, and this repo
+   proved it matters. On macOS, refuse (unless `allow_network_fs`)
+   paths under `~/Library/Mobile Documents` and `~/Library/CloudStorage`,
+   and warn for files that `NSURLIsUbiquitousItemKey` reports as
+   iCloud-managed, through the same check this project used (2026-11-12),
+   if it can be called cheaply from Rust; otherwise warn for `~/Desktop`
+   and `~/Documents`. `.nosync` folders report as not managed and pass.
+3. **The sidecars need ignoring.** `<file>.mnemo-lock-info` and
+   `<file>.presence/` would appear next to `test/project.mnemo` in the
+   working tree. Say that they're named so a `.gitignore` can match them,
+   and list the patterns. I'll add them to `.gitignore` when the code lands.
+4. **The order:** 12.4 comes before 12.3, so until the keychain raw key
+   ships, a hook pays the KDF per process (about 14 ms extra at 10K). Say
+   so in the numbers section; it's accepted.
+
+**Then merge PR 62** (docs only; CI green), and delete the branch.
+
+**REVIEWER-B: I'd like a review of the note** (RB-006) before step 2's
+code. It's the roadmap's riskiest piece, and it's cheap to review on
+paper. **The user decides.** Step 1 below doesn't depend on it.
+
+**v0.14.0, planned:** 12.4's implementation steps 1 to 5, plus REKEY-2.
+- **Mobile publishes** (rule 3, a minor release; and rule 2, since
+  compaction's lost-write window affects phones too).
+- **Later:** incremental catch-up (step 6) goes with PERF-2's work, since
+  project brains are small; presence and claims (step 7) go with 13a; the
+  default flip (step 8) is one release after; the daemon (step 9) only if
+  the numbers call for it.
+
+**DISPATCH, now: v0.14.0 step 1**, on a `release-0.14.0` branch, one PR:
+- **The gaps:**
+  - `compact_file` and `rekey --rotate` hold the old file's exclusive lock
+    through the rename and the directory sync on Unix;
+  - a unique temp name;
+  - a handle checks that the file at its path is still the one it opened
+    (`dev`/`ino`; the volume serial and file ID on Windows), and refuses
+    with a clear error if not. Shared mode's reload uses the same check
+    later;
+  - the Windows rename tested on the CI leg first, and documented;
+- **The test:** a write racing a compaction is never lost, and runs on
+  every CI OS;
+- a CHANGELOG `[Unreleased]` line under Fixed.
+
+Log DONE, then wait: step 2 waits for my word, after RB-006 if the user
+calls it.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — RB-006 triaged: the 12.4 note needs a revision before step 2; step 1 takes RB-006.10
+
+**RB-006, REVIEWER-B's review of the 12.4 design note** (the user asked
+for it). **The verdict: the shape is right,** with (A) as the protocol
+and the daemon as an optional (A) client; no format change. **But the
+note isn't yet enough to write step 2 from.** It covers a process that
+dies, not a commit that fails in a process that lives on (RB-006.1,
+HIGH, tested). It doesn't say what tells a handle the file changed,
+when every compaction makes a new data key (RB-006.2). REVIEWER-B tested
+four things:
+- **failed commits in a living handle:** six cases, some leaving the
+  handle ahead of the file, and some where an error still meant
+  "committed";
+- **an old compactor against a shared writer:** 207 of 278 writes lost
+  without step 1's identity check, none with it;
+- **a simulation of the lock protocol:** my writer-preference change
+  works, but the note's commit rate is two to three times too high;
+- **the presence probe:** wrong in four ordinary cases.
+
+**All twelve items are ACCEPTED.** The triage lines are in
+`reviewer_notes.md`, and RB-006.10 to .12 are only in `SECURITY.local.md`.
+
+**DECISION: revise the note before step 2.** The items to settle before
+step 2's code:
+- **RB-006.1:** clear the stamp on a mutation; a failure after the commit
+  point finishes the checkpoint, or returns "may have been stored";
+  always reload after a replay; the new crash rows; tests in a process
+  that lives on;
+- **RB-006.2:** the stamp is the header seal; the "seal doesn't verify"
+  outcome; every compaction needs the kept secret; never create the file;
+  the torn-page-0 rule;
+- **RB-006.3, recommendations 1 and 2:** the identity check after the
+  commit, and the exception named;
+- **RB-006.4, recommendations 1 and 3:** a reader holds the intent lock
+  for one try only, and one deadline per call;
+- **RB-006.6, recommendation 2:** a cancellable wait;
+- **RB-006.7, items 1 and 2:** cache-hit statistics deferred; shared
+  handles refuse explicit per-handle settings in v0.14; a reload carries
+  the settings over;
+- **RB-006.11 (a) and (b)** (in `SECURITY.local.md`): the generation
+  lease in every exclusive window, and the sidecar directory created and
+  checked safely;
+- **RB-006.8, recommendation 1;** RB-006.9's edits; **RB-006.5,
+  recommendation 5;** RB-006.11 (c)'s sentence; and RB-006.12 written into
+  the daemon section, for step 9.
+
+Every section of the note that changes gets a short "since RB-006" mark,
+so the second review is quick.
+
+**DISPATCH:**
+1. **Step 1 (PR open, branch `rel0140-1-replaced`) takes RB-006.10**
+   before it merges (see `SECURITY.local.md`; use a neutral message):
+   `create_new` for both temp files, a retry on a collision, and the
+   planted-symlink test. Run the Windows rename probe on the MSRV too
+   (RB-006.9 item 6). Then CI green on the PR and the push, merge into
+   `release-0.14.0`, delete the branch, and log DONE.
+2. **The note's revision:** a docs-only PR into `main` (or onto the same
+   design branch), folding in everything in the DECISION above. Log DONE
+   and stop.
+
+**Then:** I review the revision. **I suggest REVIEWER-B checks it
+against RB-006** (a short pass on the marked sections; the user
+decides). Step 2's code starts only after that.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 1: compaction holds its lock through the rename; a replaced file refuses writes (PR 63, with RB-006.10)
+
+**PR 63 into `release-0.14.0`** (`rel0140-1-replaced`, four commits, no
+WIP), fast-forwarded in (`release-0.14.0` at 4244437). GitHub marked it
+merged, and the branch is deleted.
+- **35ab403 `fix(store)`:** the gaps from the note.
+  - `compact_file` (so `mnemo compact` and `rekey --rotate`) holds the old
+    file's exclusive lock through the rename and the directory sync.
+  - `open_with_lock` checks, once it holds the lock, that the path still
+    names the locked file (`same-file` 1.0.6: `dev`/`ino`, or the volume
+    serial and file index on Windows; safe Rust, already in the lockfile
+    through criterion; `cargo deny` passes), and retries up to 8 times.
+  - Each commit and `rekey` refuses with the new `MnemoError::Replaced`,
+    writing nothing, when the path names another file. The handle keeps
+    its path absolute. UniFFI maps it to `Io` with the message (not
+    `Closed`, which the stores retry on a fresh handle).
+  - Found on the way and fixed: `Mnemo::create` truncated the file before
+    it tried the lock, so a refused `create` over a live file emptied it
+    (122,880 bytes to 0, reproduced). It now truncates after the lock.
+  - The race test lost **149, 150 and 149 of 150** acknowledged writes on
+    v0.13.2's code (three runs, in a scratch worktree of `main`), and none
+    with the fix.
+- **06a51d3 `test`:** on Windows the live handle's lock is mandatory, so
+  the refused-create test compares the size, not the bytes (CI run
+  43352648922 caught it; the fix itself passed there).
+- **72b224d `fix(store)`** (neutral message for RB-006.10):
+  - compaction's, `export_encrypted`'s and `export_rekeyed`'s temp files are
+    created with `create_new` (a new `Create::New` mode), and a taken name
+    is retried under a fresh one (16 attempts). `export_rekeyed`'s fixed
+    `.export-tmp` name went too; it wasn't in step 1's first commit;
+  - a test hook, `__failpoints::set_next_temp_name` (failpoints builds
+    only), lets the new test plant something at the exact next temp name
+    and at the old fixed names. It's a symlink to another file on Unix, a
+    plain file on Windows. The other file stays byte-identical, and each
+    call succeeds under another name. With `create(true)` in place of
+    `create_new` the test fails ("compact_file: the other file was written
+    through").
+- **The Windows rename on the MSRV (RB-006.9 item 6): it doesn't hold.**
+  Throwaway workflows, since deleted, ran 43356592640, 43356805539 and
+  43357661098.
+  - On Windows, `std::fs::rename` over a file any handle has open fails
+    with os error 5 on **Rust 1.75 to 1.84**, and succeeds on **1.85 to
+    1.100**. Linux and macOS succeed on both 1.75 and stable.
+  - So a Windows build from 1.75 to 1.84 would have failed every
+    compaction. 72b224d adds the fallback the signed-off note foresaw. On
+    that error, compaction closes the old file and retries once, as
+    v0.13.2 did, and the identity check before each commit covers it.
+  - On those toolchains Windows also refuses the rename while any other
+    handle has the file open. Against a writer in a tight loop, 148 to 149
+    of about 154 compactions failed. They fail with an error and lose
+    nothing, as on v0.13.2.
+  - The CHANGELOG, README and code say so. The released binaries and
+    wheels are built with stable.
+- **4244437 `test`:** the race test counts a compaction the platform
+  refused and tries again, still asserting that no write is lost. The
+  replaced-file test skips the rename it can't do on those toolchains.
+  - Verified on Windows with 1.75, 1.84 and stable (43357661098): 6 of 6
+    tests pass on each.
+  - On 1.75 and 1.84, 150 writes were kept across 5 compactions, with 149
+    and 148 refused.
+  - On stable, 150 writes were kept across 148 compactions.
+- **CHANGELOG `[Unreleased]`, under Fixed:** four entries (the race, the
+  replaced-file refusal, the refused `create`, the temp files), with the
+  toolchain note.
+- **Local:** `cargo test --features failpoints` (387 pass), clippy
+  `-D warnings` (all targets), UniFFI (23), `cargo deny`, the Python suite.
+- **The gates on 4244437:**
+  - PR: CI 43357665182 and Mobile CI 43357665227, green on attempt 1.
+  - Push to `release-0.14.0`: CI 43359081483 and Mobile CI 43359081709,
+    green on attempt 1.
+  - Earlier PR heads: 35ab403 (CI red on Windows, the test above), 06a51d3
+    (green), 72b224d (cancelled by the next push).
+- **For the Planner:**
+  - CI tests Windows only on stable, so the pre-1.85 fallback is covered
+    only by the throwaway runs above. Should `ci.yml` gain a Windows leg on
+    1.84 (or the MSRV), at least for `tests/replaced_file.rs`?
+  - Should shared mode refuse to start on Windows builds before 1.85? The
+    note says "shared mode on Windows assumes a build with Rust 1.85 or
+    later".
+- **RB-006.10** stays in `SECURITY.local.md` until v0.14.0 ships, per its
+  triage.
+
+### 2026-11-13 — WORKER — DONE — the 12.4 design note revised after RB-006 (PR 64, for review)
+
+**PR 64 into `main`** (`design-12.4-rb006`, one commit, docs only; CI
+43359629823 green). Not merged: it waits for PLANNER-A's review, and
+REVIEWER-B's check of the marked sections if the user calls it.
+- **Everything the triage's DECISION put before step 2 is folded in,**
+  each section marked "(since RB-006)", with a table at the top mapping
+  every item to its sections:
+  - **RB-006.1:**
+    - the stamp is cleared before a mutation and set only from a
+      successful commit;
+    - after the commit point, finish the checkpoint, or return
+      `MaybeStored`;
+    - always reload after a replay;
+    - three new crash rows;
+    - the tests in a process that lives on.
+  - **RB-006.2:**
+    - the stamp is the header seal (nonce and tag, 28 bytes), with the
+      identity as the quick test;
+    - the third outcome (the seal doesn't verify: reopen with the kept
+      secret, then `WrongPassphrase` or `HeaderTampered`);
+    - every compaction needs the secret;
+    - the protocol never creates the file;
+    - the torn-page-0 rule;
+    - the tests.
+  - **RB-006.3:** the identity check again after the commit, with a
+    distinct error. The mixed-version exception is named, plus the v0.14
+    upgrade note.
+  - **RB-006.4:** a reader holds the intent lock for one try; one deadline
+    per call; "tens of commits a second" until step 5.
+  - **RB-006.6:** a cancellable wait.
+  - **RB-006.7:**
+    - cache-hit statistics deferred like recall's, applied only with a
+      commit the handle makes anyway, and dropped at close;
+    - shared handles refuse explicit retention, cache-budget and
+      `turn_compress_after` settings in v0.14;
+    - a reload keeps settings and the embedder.
+  - **RB-006.8:** the cached-page sentence is corrected (the cache is
+    keyed by page number, so the AAD doesn't protect a hit).
+  - **RB-006.9:**
+    - `lock-info` after the lock;
+    - Linux an allow-list, naming ext4, xfs, btrfs, tmpfs and f2fs;
+    - no sidecar where the directory isn't writable;
+    - healing a pending WAL from the server or watcher;
+    - the WAL check in the per-call cost;
+    - Windows;
+    - the two exceptions to "nothing between calls".
+  - **RB-006.5:** the brain's path is resolved before the sidecar path;
+    hard links aren't covered. A pointer to step 7's rework.
+  - **The held items, as neutral design rules:**
+    - the generation lease in every exclusive window;
+    - the sidecar directory created with `mkdir`, checked with `lstat`,
+      and opened with `openat` and `O_NOFOLLOW`;
+    - `lock-info` by temp name and rename;
+    - the kept secret in the trust boundary;
+    - the daemon's discovery and trust requirements, for step 9.
+- **Also folded in:**
+  - step 1's Windows toolchain finding;
+  - the gaps section, rewritten as fixed;
+  - "step N" and "protocol step N" kept apart (the protocol now has nine
+    steps).
+- **Length:** about 9,300 words, up from about 5,100. The recommendation
+  is still first.
+- **Stopped.** No step 2 code.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 1 accepted; the revised 12.4 note signed off; step 2 dispatched
+
+**Step 1 (PR 63, merged to `release-0.14.0` at 4244437): ACCEPTED.**
+- Checked on GitHub: PR 63 merged; CI and Mobile CI green on the push run
+  at 4244437.
+- In scope: compaction holds its lock through the rename and the
+  directory sync; every open checks identity once locked (8 retries);
+  `MnemoError::Replaced` before each commit and `rekey`; temp files created
+  new under unique names; RB-006.10 fixed. The `Mnemo::create`
+  truncate-before-lock bug, found on the way, is a real fix and stays in.
+- RB-006.10 stays in `SECURITY.local.md` until v0.14.0 ships.
+
+**The Worker's two questions:**
+1. **A Windows leg at the MSRV: yes.** Add a `windows-msrv` job to
+   `ci.yml` on Rust 1.75 (the declared `rust-version`; 1.75 to 1.84 behave
+   the same, as probed). It runs at least
+   `cargo test --locked -p mnemo-engine --test replaced_file`, so the
+   close-then-rename fallback stays tested, and from step 2 on, the
+   refusal test below. Path filters as for the other engine jobs.
+2. **Refuse shared mode on Windows builds before Rust 1.85: yes.** Detect
+   the compiler version at build time (`build.rs` reading `rustc -V`, or a
+   small probe crate already in the tree), set a cfg, and have
+   `open_shared` (and every surface over it) return a clear error naming
+   the cause: "shared mode on Windows needs a build with Rust 1.85 or
+   later". The released binaries and wheels are built with stable, so
+   users never see it. A test on the `windows-msrv` leg asserts it.
+- **The MSRV stays 1.75 for v0.14.** **CLEANUP-1 candidate:** raise the
+  MSRV to 1.85; that removes the Windows close-then-rename fallback and
+  this refusal.
+
+**The revised 12.4 note (PR 64): SIGNED OFF.** I checked every
+before-step-2 item from the RB-006 triage against the marked sections:
+- RB-006.1, all five: the stamp cleared before a mutation and set only
+  from a successful commit; `MaybeStored` after the commit point; the
+  reload after a replay; the three crash-table rows; the tests in a process
+  that lives on.
+- RB-006.2: the seal as the stamp, the third outcome, every compaction
+  needing the kept secret, open without create, the torn page 0, the tests.
+- RB-006.3 rec. 1 (identity after the commit, protocol step 8) and rec. 2
+  (the exception named in "Things (A) refuses"); rec. 3 as the upgrade note;
+  rec. 4 in step 3.
+- RB-006.4 rec. 1 (the one-try reader) and rec. 3 (one deadline per call).
+- RB-006.5 rec. 5 (the path resolved before the sidecar path).
+- RB-006.6 rec. 2 (a cancellable wait).
+- RB-006.7 items 1 and 2 (the access-statistics delta; explicit settings
+  refused).
+- RB-006.8 rec. 1 and RB-006.9's edits.
+- The held items, as neutral design rules: the lease per window, the
+  sidecar directory's creation and checks, `lock-info` by rename, the kept
+  secret, and the daemon's requirements for step 9.
+
+Nothing is missing. Two small points for step 2's code, not the note:
+- the note says Windows shared mode "assumes" 1.85; with answer 2 above it
+  refuses. Update that line in step 2's PR;
+- name the `allow_network_fs` option the same on every surface (Rust,
+  Python, the CLI's `--allow-network-fs`).
+
+**REVIEWER-B:** a re-check of the note isn't needed for step 2 to start.
+My recommendation to the user: call REVIEWER-B on step 2's PRs before they
+merge, since that's where RB-006.11's rules become code. The user decides.
+
+**DISPATCH — v0.14.0 step 2, the lock layer.**
+- Merge PR 64 (squash if it has WIP commits). Then merge `main` into
+  `release-0.14.0` with a normal merge (no rebase), so the branch has the
+  signed-off note.
+- Build step 2 to the note's "Implementation order" item 2 and "The
+  protocol". Split it into two PRs into `release-0.14.0`, each green before
+  the next starts:
+  - **2a, the lock loop:** one deadline and a cancel per call; bounded
+    backoff; writer preference with the one-try reader; the sidecar
+    directory (`mkdir`, `lstat`, `openat`, `O_NOFOLLOW`, `O_EXCL`; no
+    sidecar when it isn't usable or writable); `lock-info` after the lock,
+    by temp name and rename; the network and synced-folder checks with
+    `allow_network_fs`; the Windows pre-1.85 refusal; the `windows-msrv`
+    CI job. Every lock through `LockedFile`, with FLAKE-1's test pattern.
+  - **2b, `open_shared`:** the seal stamp and its three outcomes; the
+    identity checks (protocol steps 4 and 8); full-reload catch-up that
+    clears the page cache and keeps settings and the embedder; the stamp
+    cleared on a mutation; `MaybeStored`; the reload after a replay; the
+    generation lease per window; the access-statistics delta; explicit
+    per-handle settings refused. Rust API only; surfaces are step 4.
+- Each PR carries its own unit and integration tests from the note's
+  step 3 list where they test that PR's code; the cross-process crash
+  suite is step 3.
+- **HANDOFF (PLANNER-A owns `.gitignore`):** in 2a's PR, add
+  `*.mnemo-shared/` to `.gitignore`, after the `*.mnemo` lines.
+- Use neutral commit and PR wording for the RB-006.11 rules (as the note
+  does); no write-up of the held items.
+- Log DONE after each PR is green, with the PR number and the push runs,
+  and stop for review before merging each one.
