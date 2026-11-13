@@ -875,6 +875,28 @@ fn two_paths_to_one_brain_across_processes() {
 
 // --- 5. The sidecar removed under running processes -------------------------
 
+/// Delete `dir`, which live children may still be creating names in: retry
+/// only on `DirectoryNotEmpty` (a name created mid-delete), at most 50
+/// times 10 ms apart, and panic once that's used up. `NotFound` is done.
+#[cfg(unix)]
+fn remove_dir_racing_children(dir: &Path) {
+    let mut last = None;
+    for _ in 0..50 {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            // `ErrorKind::DirectoryNotEmpty` needs Rust 1.83 (the MSRV is
+            // 1.75), so the errno.
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOTEMPTY.raw_os_error()) => {
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("deleting {}: {e}", dir.display()),
+        }
+    }
+    panic!("deleting {} after 50 tries: {last:?}", dir.display());
+}
+
 #[cfg(unix)]
 #[test]
 fn the_sidecar_removed_while_two_processes_write() {
@@ -896,12 +918,17 @@ fn the_sidecar_removed_while_two_processes_write() {
     let rounds = if stress() { 30 } else { 5 };
     for i in 0..rounds {
         std::thread::sleep(Duration::from_millis(150));
-        // Moved away first, so the removal can't race a child creating a
-        // file in it; the children's descriptors then name a removed
-        // directory.
+        // Moved away, then deleted. The children keep a descriptor on the
+        // moved directory and, until a lock file can't be opened there, go
+        // on creating `intent.lock` and lock-info's temp name in it (as
+        // built: they reopen by path only then). A name created between
+        // `remove_dir_all`'s listing and its `rmdir` gives ENOTEMPTY, so
+        // the delete, this test's own action, is retried on that error
+        // alone, at most 50 times 10 ms apart; running out fails the test.
+        // No assertion or engine call is retried.
         let gone = d.join(format!("gone{i}"));
         if std::fs::rename(&side, &gone).is_ok() {
-            std::fs::remove_dir_all(&gone).unwrap();
+            remove_dir_racing_children(&gone);
         }
     }
     std::thread::sleep(Duration::from_millis(300));
