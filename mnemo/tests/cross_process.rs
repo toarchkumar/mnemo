@@ -391,15 +391,17 @@ fn role_full_disk() -> RoleResult {
     use rustix::process::{getrlimit, setrlimit, Resource, Rlimit};
     let dir = work_dir();
     let limits: usize = var("XP_COUNT").parse().unwrap();
+    let step: u64 = var("XP_STEP").parse().unwrap();
     let hard = getrlimit(Resource::Fsize).maximum;
     let (mut ok, mut plain, mut maybe) = (0, 0, 0);
     for k in 0..limits {
         let p = brain_at(&dir.join(format!("fd{k}")), "b.mnemo", 2);
         let mut s = Mnemo::open_shared(&p, PW, opts(2000)).map_err(|e| e.to_string())?;
         let len = std::fs::metadata(&p).unwrap().len();
-        // From just past the file's end to a few pages beyond it, in
-        // 1 KiB steps, so the limit lands inside every kind of write.
-        let limit = len + (k as u64) * 1024;
+        // From just past the file's end to about 160 KiB beyond it (enough
+        // for every write to fit), so the limit lands inside every kind of
+        // write and past them.
+        let limit = len + (k as u64) * step;
         setrlimit(
             Resource::Fsize,
             Rlimit {
@@ -700,8 +702,17 @@ fn a_real_full_disk_in_a_process_that_lives_on() {
     }
     let dir = tempdir().unwrap();
     let d = dir.path();
-    let limits = if stress() { 160 } else { 40 };
-    let c = spawn_with("full_disk", d, &[("XP_COUNT", limits.to_string())], true);
+    // 160 KiB past the file's end either way, in 1 KiB steps at full size.
+    let (limits, step) = if stress() { (160, 1024) } else { (40, 4096) };
+    let c = spawn_with(
+        "full_disk",
+        d,
+        &[
+            ("XP_COUNT", limits.to_string()),
+            ("XP_STEP", step.to_string()),
+        ],
+        true,
+    );
     wait_ok(c, d);
     no_errors(d);
     let outcome = std::fs::read_to_string(d.join("outcome")).unwrap();
@@ -714,6 +725,7 @@ fn a_real_full_disk_in_a_process_that_lives_on() {
         .map(|x| x.parse().unwrap())
         .collect();
     assert!(n[1] + n[2] > 0, "no limit made a write fail");
+    assert!(n[0] > 0, "no limit let a write through");
 }
 
 // --- 3. Rekey across processes ----------------------------------------------
