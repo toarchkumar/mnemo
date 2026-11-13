@@ -48,18 +48,43 @@ def passphrase() -> str:
     return pp
 
 
+REBUILD_HINT = (
+    "Rebuild it into this venv:\n"
+    "  cd mnemo-python && VIRTUAL_ENV=\"$(cd ../test/.venv && pwd)\" "
+    "PATH=\"$VIRTUAL_ENV/bin:$PATH\" maturin develop --release"
+)
+
+# DOGFOOD-1: names the newest tree's binding has. A wheel built before them
+# reports the same version number (it only moves at a release), so this is
+# how a stale binding shows itself. Add the newest name here when the
+# binding gains one this script relies on.
+REQUIRED_NAMES = ["CancelToken"]
+REQUIRED_METHODS = ["rekey_cleanup_error", "notices"]
+
+
 def require_mnemo():
     try:
         import mnemo_engine as mnemo  # noqa: PLC0415
     except ImportError:
+        sys.exit("mnemo Python package not installed. " + REBUILD_HINT)
+    missing = [n for n in REQUIRED_NAMES if not hasattr(mnemo, n)]
+    missing += [f"Mnemo.{m}" for m in REQUIRED_METHODS if not hasattr(mnemo.Mnemo, m)]
+    if missing:
         sys.exit(
-            "mnemo Python package not installed. Run:\n"
-            "  cd mnemo-python && pip install maturin && maturin develop"
+            f"the installed mnemo_engine ({mnemo.__version__}) is older than this tree "
+            f"(missing {', '.join(missing)}). " + REBUILD_HINT
         )
     return mnemo
 
 
+_MODEL = None
+
+
 def embedder():
+    """The sentence-transformers model, loaded once per process."""
+    global _MODEL
+    if _MODEL is not None:
+        return _MODEL
     try:
         from sentence_transformers import SentenceTransformer  # noqa: PLC0415
     except ImportError:
@@ -70,7 +95,8 @@ def embedder():
     cache = TEST_ROOT / ".cache" / "embeddings"
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(cache))
-    return SentenceTransformer(EMBED_MODEL)
+    _MODEL = SentenceTransformer(EMBED_MODEL)
+    return _MODEL
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -79,22 +105,38 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [v.tolist() for v in vectors]
 
 
-def open_db(*, create: bool = False):
-    """Open (or create) the test database AND register the embedder on
-    the handle. Phase 3 (PR 10a) added `db.set_embedder(fn, ...)` as a
-    per-handle hook; registering once at open time means every
-    subsequent `db.remember_text(...)` / `db.recall_text(...)` call
-    uses the same embedder identity. The Rust core also persists the
-    identity on the scaffold manifest, so swapping embedders between
-    opens is caught loudly."""
+# How long a write waits for the brain's lock (12.4 shared mode): a session
+# hook's figure, so a busy file delays a call by at most about two seconds.
+WRITE_WAIT_SECS = 2.0
+
+
+def open_db(*, create: bool = False, write: bool = True):
+    """Open the test database AND register the embedder on the handle.
+    Phase 3 (PR 10a) added `db.set_embedder(fn, ...)` as a per-handle
+    hook; registering once at open time means every subsequent
+    `db.remember_text(...)` / `db.recall_text(...)` call uses the same
+    embedder identity. The Rust core also persists the identity on the
+    scaffold manifest, so swapping embedders between opens is caught
+    loudly.
+
+    DOGFOOD-1: reads (`write=False`) open read-only, so a Planner or a
+    Reviewer (who must not write) can use them, alongside other readers.
+    Writes open in shared mode (`shared=True, wait=2.0`), so they take the
+    lock per call and wait for other sessions instead of failing. Shared
+    mode never creates a file, so a missing brain is created first with a
+    plain open."""
     mnemo = require_mnemo()
     pp = passphrase()
     if create or not MNEMO_PATH.exists():
+        if not write:
+            sys.exit(f"no brain at {MNEMO_PATH}")
         if MNEMO_PATH.exists() and create:
             MNEMO_PATH.unlink()
-        db = mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS)
+        mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS).close()
+    if write:
+        db = mnemo.open(str(MNEMO_PATH), pp, shared=True, wait=WRITE_WAIT_SECS)
     else:
-        db = mnemo.open(str(MNEMO_PATH), pp)
+        db = mnemo.open(str(MNEMO_PATH), pp, read_only=True)
     db.set_embedder(
         embed_texts,
         name=EMBED_MODEL,
@@ -188,8 +230,43 @@ def cmd_remember(args: argparse.Namespace) -> None:
         print(result)
 
 
-def cmd_recall(args: argparse.Namespace) -> None:
+def cmd_remember_file(args: argparse.Namespace) -> None:
+    """DOGFOOD-1: many facts in one process, with one model load, one
+    embedding call and one open. Each line of the JSONL file is an object
+    with `content` and optionally `type`, `importance`, `metadata` and
+    `key`. Every fact is still its own write (one window each)."""
+    path = Path(args.from_file).expanduser().resolve()
+    facts = []
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        f = json.loads(line)
+        if not isinstance(f, dict) or not f.get("content"):
+            sys.exit(f"{path}:{i}: each line needs an object with 'content'")
+        facts.append(f)
+    if not facts:
+        sys.exit(f"{path}: no facts")
+    vectors = embed_texts([f["content"] for f in facts])
     db = open_db()
+    for f, vector in zip(facts, vectors):
+        result = db.remember(
+            f["content"],
+            f.get("type", "semantic"),
+            vector,
+            agent_id=AGENT_ID,
+            importance=float(f.get("importance", 0.75)),
+            metadata=f.get("metadata"),
+            key=f.get("key"),
+        )
+        if isinstance(result, dict):
+            print(f"{result['id']}\t{result['outcome']}")
+        else:
+            print(result)
+    db.close()
+
+
+def cmd_recall(args: argparse.Namespace) -> None:
+    db = open_db(write=False)
     # Scoring v2 (v0.7.0) made recall's own observation count toward
     # the usage saturation term on later queries. For the dogfood
     # runbook that reads the planner/worker coordination memories
@@ -204,6 +281,10 @@ def cmd_recall(args: argparse.Namespace) -> None:
         agent_id=AGENT_ID,
         memory_types=args.types.split(",") if args.types else None,
         track_access=False,
+        # DOGFOOD-1: scope by `metadata.area`, and add BM25 keyword matching
+        # for identifiers and exact terms (a path, a version, a name).
+        filter={"metadata": {"area": args.area}} if args.area else None,
+        keywords=args.keywords,
     )
     db.close()
 
@@ -310,7 +391,7 @@ def cmd_perf(args: argparse.Namespace) -> None:
 
 
 def cmd_info(_: argparse.Namespace) -> None:
-    db = open_db()
+    db = open_db(write=False)
     stats = db.stats()
     has_index = db.has_index()
     snaps = db.snapshots()
@@ -324,14 +405,26 @@ def cmd_info(_: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    global MNEMO_PATH
     parser = argparse.ArgumentParser(description="MNemo project memory (dogfood)")
+    parser.add_argument(
+        "--brain",
+        help=f"the brain to use (default {MNEMO_PATH}); a scratch brain for trials. "
+        "MNEMO_PASSPHRASE in the environment overrides test/.env",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_boot = sub.add_parser("bootstrap", help="Create project.mnemo from seed.json")
     p_boot.set_defaults(func=cmd_bootstrap)
 
-    p_rem = sub.add_parser("remember", help="Store one new memory")
-    p_rem.add_argument("content")
+    p_rem = sub.add_parser("remember", help="Store one new memory, or a file of them")
+    p_rem.add_argument("content", nargs="?")
+    p_rem.add_argument(
+        "--from-file",
+        metavar="JSONL",
+        help="store every fact in a JSON Lines file (content, type, importance, "
+        "metadata, key per line) in one process",
+    )
     p_rem.add_argument(
         "--type",
         default="semantic",
@@ -347,13 +440,18 @@ def main() -> None:
             "a no-op. Omit for a plain insert."
         ),
     )
-    p_rem.set_defaults(func=cmd_remember)
+    p_rem.set_defaults(func=lambda a: cmd_remember_file(a) if a.from_file else cmd_remember(a))
 
     p_rec = sub.add_parser("recall", help="Retrieve context for a query")
     p_rec.add_argument("query")
     p_rec.add_argument("--top-k", type=int, default=8)
     p_rec.add_argument("--types", help="Comma-separated memory types filter")
     p_rec.add_argument("--format", choices=["md", "json"], default="md")
+    p_rec.add_argument("--area", help="only memories whose metadata.area is this")
+    p_rec.add_argument(
+        "--keywords",
+        help="identifiers or exact terms to match too (BM25), e.g. a path or a version",
+    )
     p_rec.set_defaults(func=cmd_recall)
 
     p_info = sub.add_parser("info", help="Show database stats")
@@ -373,6 +471,10 @@ def main() -> None:
     p_perf.set_defaults(func=cmd_perf)
 
     args = parser.parse_args()
+    if args.cmd == "remember" and not args.from_file and not args.content:
+        parser.error("remember needs CONTENT or --from-file")
+    if args.brain:
+        MNEMO_PATH = Path(args.brain).expanduser().resolve()
     args.func(args)
 
 
