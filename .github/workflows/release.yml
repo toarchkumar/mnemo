@@ -538,6 +538,9 @@ jobs:
       - name: Version and mode
         timeout-minutes: 10
         id: v
+        env:
+          # Read as a shell variable, like engine-gate's variables.
+          MOBILE_OFF_SWITCH: ${{ vars.ENABLE_MOBILE_PUBLISH }}
         run: |
           engine=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/Cargo.toml | head -1)
           uniffi=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/bindings/uniffi/Cargo.toml | head -1)
@@ -564,9 +567,12 @@ jobs:
           # a release may leave them out. RB-004.4: a tag reads the mode from
           # the tagged commit (`.github/release-mobile`, `true` or `false`,
           # set by the release commit), so it's reviewed with the release and
-          # a re-run can't change it. ENABLE_MOBILE_PUBLISH is only an off
-          # switch: `false` turns mobile off for every tag. A dry run follows
-          # its `mobile` input. The version check above runs either way.
+          # no re-run can turn it on. ENABLE_MOBILE_PUBLISH is only an off
+          # switch: `false` (in any case) turns mobile off for every tag,
+          # `true` or unset follows the commit, and anything else fails this
+          # check, on a dry run too. A dry run follows its `mobile` input and
+          # warns when that differs from the commit. The version check above
+          # runs either way.
           committed=""
           if [ -f .github/release-mobile ]; then committed=$(tr -d '[:space:]' < .github/release-mobile); fi
           case "$committed" in
@@ -574,16 +580,27 @@ jobs:
             *) echo "::error::.github/release-mobile must say true or false (it says \"$committed\")"; exit 1 ;;
           esac
           echo "the commit says mobile: $committed"
+          echo "The commit says mobile: $committed (\`.github/release-mobile\`)." >> "$GITHUB_STEP_SUMMARY"
+          switch=$(printf '%s' "$MOBILE_OFF_SWITCH" | tr '[:upper:]' '[:lower:]')
+          case "$switch" in
+            ""|true|false) ;;
+            *) echo "::error::the ENABLE_MOBILE_PUBLISH variable must be true, false or unset"; exit 1 ;;
+          esac
           if [ "${{ github.event_name }}" = push ]; then
             mobile="$committed"
             why="the tagged commit's .github/release-mobile"
-            if [ "$mobile" = true ] && [ "${{ vars.ENABLE_MOBILE_PUBLISH }}" = false ]; then
+            if [ "$mobile" = true ] && [ "$switch" = false ]; then
               mobile=false
               why="ENABLE_MOBILE_PUBLISH=false (the off switch; the commit says true)"
             fi
           else
             mobile="${{ inputs.mobile }}"
             why="the dry run's \`mobile\` input"
+            if [ "$mobile" != "$committed" ]; then
+              msg="this dry run's mobile input ($mobile) differs from .github/release-mobile ($committed): a tag reads the file, not this input"
+              echo "::warning::$msg"
+              echo "Warning: $msg." >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           if [ "$mobile" = true ]; then
             echo "mobile: on ($why)"

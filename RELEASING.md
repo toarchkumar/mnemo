@@ -21,7 +21,9 @@ below):
    approval** (the `release` environment). It appears only once every
    build is green, so a failed build publishes nothing anywhere. Its name
    shows the version and the mobile mode the run read: check both before
-   approving. Approve it there; nothing else asks.
+   approving. Approve it there; nothing else asks. A dry run skips this
+   job, and GitHub doesn't evaluate a skipped job's name, so a dry run
+   shows it raw (`approve the release (v${{ needs.mobile-prepare...`).
 4. **The GitHub Release and the engine publishes:** the Release and its
    assets, crates.io and PyPI.
 5. **`engine published (gate)`:** the mobile packages publish only after
@@ -50,20 +52,25 @@ skip; each package carries the engine version it was built from.
 `.github/release-mobile` says `true` if the rule above says this release
 publishes mobile, and `false` if it doesn't. The tag run reads it from the
 tagged commit, so the mode is reviewed with the release, and no re-run can
-change it. `version check` refuses anything but `true` or `false`, and
-prints the mode and where it came from. With mobile off, a tag skips the
+turn it on (a re-run does read the off switch below again, so it can turn
+mobile off). `version check` refuses anything but `true` or `false`,
+prints the mode and where it came from, and writes what the commit says to
+the run summary. With mobile off, a tag skips the
 Swift and Android build, publish and verify jobs, and the GitHub Release
 says "Mobile packages not published in this release", with the newest
 published versions. The version check still runs, and still requires one
 version in every manifest. A dry run picks with its own `mobile` input
 instead (Actions > Release > Run workflow), so you can rehearse either kind
-of release.
+of release; when the input differs from the file, `version check` warns,
+since a tag of that commit will follow the file.
 
 **`ENABLE_MOBILE_PUBLISH` is only an off switch** (Settings > Secrets and
-variables > Actions > Variables). Set to `false`, it turns mobile off for
-every tag, whatever the commit says (for example while a mobile credential
-is broken). Otherwise leave it `true` or unset: there's nothing to flip
-before or after a tag.
+variables > Actions > Variables). Set to `false` (in any case), it turns
+mobile off for every tag, whatever the commit says (for example while a
+mobile credential is broken). Otherwise leave it `true` or unset: there's
+nothing to flip before or after a tag. Any other value (`off`, `0`, a
+stray space) fails `version check`, on a dry run too, so nothing builds
+until it's fixed.
 
 Every job has a 45-minute limit, and every step a limit of 10 to 20
 minutes, so a hang fails the step instead of running for hours.
@@ -108,8 +115,8 @@ pinned to a commit (Dependabot keeps them current).
 4. **CI is green** on the release commit.
 5. **The dry run.** It publishes nothing and never waits for an approval,
    so run it on the release branch, with `mobile` set as
-   `.github/release-mobile` says (the dry run's summary also prints what
-   the commit says):
+   `.github/release-mobile` says (the run summary prints what the commit
+   says, and `version check` warns if the input differs):
 
    ```bash
    gh workflow run release.yml --ref <release branch> -f dry_run=true -f mobile=true

@@ -28,8 +28,11 @@ release (RELEASING.md's rule); they stay at 0.13.0.
 - **The release's mobile mode is in the release commit** (RB-004.4): a tag
   reads `.github/release-mobile` (`true` or `false`) from the tagged
   commit, which `version check` validates, so the mode is reviewed with the
-  release and a re-run can't change it. The `ENABLE_MOBILE_PUBLISH`
-  variable is now only an off switch. Maintainers: see RELEASING.md.
+  release and no re-run can turn it on. The `ENABLE_MOBILE_PUBLISH`
+  variable is now only an off switch: `false` in any case, and any value
+  but `true`, `false` or unset fails `version check`. A dry run warns when
+  its `mobile` input differs from the commit, and the run summary says what
+  the commit says. Maintainers: see RELEASING.md.
 - **`mnemo inspect`, after it stops** (`--idle-timeout` or Ctrl-C): the page
   says the inspector has stopped and how to start it again, instead of the
   browser's "Failed to fetch".
