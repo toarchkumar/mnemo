@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use fs4::fs_std::FileExt;
 use mnemo_engine::__failpoints::{set_shared_replaced, set_writes_until_fail, shared_main_tries};
-use mnemo_engine::__shared::{self, Locks};
+use mnemo_engine::__shared;
 use mnemo_engine::{
     CancelToken, Embedder, EmbedderIdentity, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig,
     MnemoError, Result, SharedMnemo, SharedOptions, Ulid,
@@ -720,7 +720,7 @@ fn a_sidecar_without_full_owner_access_is_given_0700() {
     if __shared::WINDOWS_OLD_RENAME {
         return;
     }
-    let l = Locks::new(&p, &opts(200)).unwrap();
+    let l = __shared::Locks::new(&p, &opts(200)).unwrap();
     assert!(l.has_sidecar(), "{:?}", l.notices());
     assert_eq!(
         std::fs::metadata(&side).unwrap().permissions().mode() & 0o777,
