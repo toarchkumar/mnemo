@@ -82,6 +82,19 @@ impl BrainLocks {
     /// build before Rust 1.85, a missing file (never creates one), and a
     /// network or synced filesystem unless `allow_network_fs`.
     pub(crate) fn new(path: &Path, opts: &SharedOptions) -> Result<Self> {
+        Self::with_sidecar(path, opts, true)
+    }
+
+    /// [`BrainLocks::new`] for a plain long operation (compaction, an
+    /// import, a rekey): it uses the sidecar directory only if one is
+    /// already there. A shared handle makes it when it opens, so without
+    /// one there's no shared caller to queue against, and a brain nobody
+    /// opens in shared mode gains no sibling.
+    pub(crate) fn for_plain(path: &Path, opts: &SharedOptions) -> Result<Self> {
+        Self::with_sidecar(path, opts, false)
+    }
+
+    fn with_sidecar(path: &Path, opts: &SharedOptions, create: bool) -> Result<Self> {
         if WINDOWS_OLD_RENAME {
             return Err(MnemoError::Unsupported(
                 "shared mode on Windows needs a build with Rust 1.85 or later (this one was \
@@ -100,14 +113,19 @@ impl BrainLocks {
         // creates the brain.
         let resolved = std::fs::canonicalize(&path)?;
         let mut notices = fscheck::check(&resolved, opts.allow_network_fs)?;
-        let sidecar = match sidecar::open(&resolved) {
-            SidecarState::Ready(s) => Some(Arc::new(s)),
-            SidecarState::Unavailable(why) => {
-                notices.push(format!(
-                    "not using the sidecar directory: {why}; each call takes the main lock \
-                     alone, without writer preference or a lock-info note"
-                ));
-                None
+        let present = std::fs::symlink_metadata(sidecar::sidecar_path(&resolved)).is_ok();
+        let sidecar = if !create && !present {
+            None
+        } else {
+            match sidecar::open(&resolved) {
+                SidecarState::Ready(s) => Some(Arc::new(s)),
+                SidecarState::Unavailable(why) => {
+                    notices.push(format!(
+                        "not using the sidecar directory: {why}; each call takes the main \
+                         lock alone, without writer preference or a lock-info note"
+                    ));
+                    None
+                }
             }
         };
         Ok(BrainLocks {

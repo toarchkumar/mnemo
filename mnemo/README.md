@@ -452,6 +452,16 @@ compaction closes the old file before the rename, and the identity check
 before each commit is what catches a write that would land in the replaced
 file.
 
+**Shared mode** (v0.14, 12.4): `Mnemo::open_shared` returns a
+`SharedMnemo`, which takes the lock for each call (`read` under the shared
+lock, `write` under the exclusive one, committing before it returns) and
+holds nothing between calls, so several processes use one file at once.
+Long plain operations wait for shared callers instead of failing:
+`compact_file` (and so `mnemo compact` and `rekey --rotate`), the CLI's
+`import` and `rekey`, and your own through `Mnemo::open_exclusive`, which
+also names the operation to a shared caller that times out. A plain
+`Mnemo::open` still fails at once with `Locked`. See `docs/shared-mode.md`.
+
 Two conditions block a read-only open and return `MnemoError::NeedsWriteOpen`:
 a committed-but-uncheckpointed WAL transaction waiting to be replayed on
 open, and an on-disk format version older than the current build. Both cases

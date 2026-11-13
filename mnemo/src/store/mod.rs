@@ -900,6 +900,11 @@ pub struct VerifyReport {
 
 /// An encrypted, single-file agent memory database.
 pub struct Mnemo {
+    /// 12.4: the lock layer's note for a handle opened through it for a
+    /// long operation ([`Mnemo::open_exclusive`], compaction): its
+    /// `lock-info` line, removed when the handle drops. Declared first so
+    /// it drops before `pager`, whose file's unlock comes after it.
+    lock_note: Option<crate::shared::Held>,
     pager: Pager,
     header: Header,
     catalog: Vec<CatalogEntry>,

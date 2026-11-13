@@ -70,11 +70,35 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - Settings that act on the whole file (snapshot retention, cache budgets,
     the cache flush policy, turn compression) are refused in shared mode
     with `MnemoError::Unsupported`.
-- **Plain opens don't wait for shared handles yet.** The CLI, `serve --mcp`,
-  Python and `mnemo compact` open the file with one try at its lock, as
-  before, so while a shared handle holds it for a call they get
-  `MnemoError::Locked`. Step 4 of v0.14.0 moves them onto the lock layer,
-  with its deadline and writer preference.
+- **Python shared mode**: `mnemo_engine.open(..., shared=True, wait=10.0,
+  allow_network_fs=False, cancel=None)` and the same for `open_with_key`.
+  - Every method is one read or one write window, and each write commits
+    before it returns (`flush()` does nothing).
+  - Shared windows release the GIL while they wait for the lock.
+  - New exception types under `MnemoError`: `CancelledError`,
+    `UnsupportedError`, `MaybeStoredError` and `ReplacedDuringWriteError`.
+  - New `mnemo_engine.CancelToken`, `Mnemo.set_cancel`, `Mnemo.notices()`
+    (each notice is also raised once as a `UserWarning` at open) and
+    `Mnemo.shared`.
+  - Explicit file-wide settings raise `UnsupportedError`.
+  - The file must exist; `shared=True` with `read_only=True` is a
+    `ValueError`.
+- **`Mnemo::open_exclusive` and `open_exclusive_with_key`**: a read-write
+  open through the lock layer for a long operation.
+  - It waits up to `SharedOptions::deadline` with writer preference.
+  - Once it holds the file it writes a `lock-info` note naming the
+    operation, so a shared caller that times out reads
+    `Locked { holder: "import since … (pid …, mnemo)" }`.
+  - Where shared mode isn't available (a network or synced folder, an old
+    Windows build) it opens as `Mnemo::open` does.
+- **`SharedMnemo::embedder_arc`**, so a binding can embed outside a window.
+- **`docs/shared-mode.md`**: how to turn shared mode on, per surface; the
+  upgrade note; what it costs and assumes.
+- **Plain opens still don't wait for shared handles.** `Mnemo::open`,
+  `serve --mcp` and the CLI's other commands try the lock once, as before,
+  so while a shared handle holds it for a call they get `MnemoError::Locked`.
+  The CLI, `serve --mcp --shared` and `inspect` move onto the lock layer in
+  step 4b of v0.14.0.
 - **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
   mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
   the compiler's version. The released binaries and wheels are built with
@@ -82,6 +106,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
   compaction fallback.
 
 ### Changed
+
+- **Compaction waits for shared callers instead of failing at once.**
+  `compact_file` (so `mnemo compact` and `mnemo rekey --rotate`, and
+  Python's `compact_file`) and the CLI's `import` and `rekey` now take the
+  lock through the lock layer: up to 10 s, with writer preference, and a
+  `lock-info` note naming the operation.
+  - The sidecar directory is used only if a shared handle has made it, so a
+    brain nobody opens in shared mode gains no sibling.
+  - A compaction also removes the temp files that killed compactions of the
+    same brain left (`<brain>.compact-<pid>-<n>-<hex>.tmp` whose process no
+    longer runs, regular files in the brain's directory only; Unix only).
 
 - **`MnemoError` is `#[non_exhaustive]`, and so is its `Locked` variant**:
   a `match` on it needs a catch-all arm, and a `Locked` pattern needs `..`.

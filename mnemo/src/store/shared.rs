@@ -380,6 +380,12 @@ impl SharedMnemo {
         self.opts.cancel = token;
     }
 
+    /// The embedder attached to the handle, if any (shared, so a binding can
+    /// embed outside a window and then call [`SharedMnemo::write`]).
+    pub fn embedder_arc(&self) -> Option<Arc<dyn Embedder>> {
+        self.embedder.clone()
+    }
+
     /// The warnings to show once: a sidecar directory that can't be used, a
     /// synced folder, an allowed network filesystem.
     pub fn notices(&self) -> &[String] {

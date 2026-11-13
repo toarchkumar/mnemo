@@ -745,7 +745,19 @@ impl Mnemo {
         // to the brain names the new file.
         let real = std::fs::canonicalize(path)?;
         // The one read-write open that takes a v4–v8 file (the v8 sunset).
-        let old = Mnemo::open_secret_with(&real, secret, true)?;
+        // RB-007.4: through the lock layer, so shared handles' busy reads
+        // can't keep it out, and a shared caller that times out reads
+        // "compact" in the lock-info note.
+        let old = Mnemo::open_exclusive_secret(
+            &real,
+            secret,
+            "compact",
+            &crate::SharedOptions::default(),
+            true,
+        )?;
+        // RB-007.8 item 8: with the exclusive lock held no compaction of
+        // this file is running, so temp files left by dead ones can go.
+        remove_dead_compaction_temps(&real);
         let dims = old.dimensions;
         let kdf = old.kdf;
         let config = MnemoConfig {
@@ -950,6 +962,55 @@ pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usi
         crate::bump_fsync();
     }
     Ok(hits.len())
+}
+
+/// RB-007.8 item 8: remove the temp files that compactions of `brain` left
+/// when their process died: in `brain`'s directory, regular files named
+/// exactly `<brain's name>.compact-<pid>-<n>-<8 hex digits>.tmp` (the
+/// pattern [`temp_sibling`] makes) whose pid isn't this process and no
+/// longer runs. Nothing else is touched. Best effort; returns how many went.
+///
+/// Call it only with `brain`'s exclusive lock held: a live compaction holds
+/// that lock for as long as its temp file exists. Off Unix no process
+/// check is available, so nothing is removed.
+pub(crate) fn remove_dead_compaction_temps(brain: &Path) -> usize {
+    let (Some(dir), Some(name)) = (brain.parent(), brain.file_name()) else {
+        return 0;
+    };
+    let prefix = format!("{}.compact-", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(pid) = file_name.to_str().and_then(|n| dead_temp_pid(n, &prefix)) else {
+            continue;
+        };
+        if pid == std::process::id() || crate::shared::pid_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        let regular = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file());
+        if regular && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// The pid in a compaction temp name `<prefix><pid>-<n>-<8 hex>.tmp`, if the
+/// name is exactly that.
+fn dead_temp_pid(name: &str, prefix: &str) -> Option<u32> {
+    let rest = name.strip_prefix(prefix)?.strip_suffix(".tmp")?;
+    let mut parts = rest.split('-');
+    let (pid, n, nanos) = (parts.next()?, parts.next()?, parts.next()?);
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let hex8 = nanos.len() == 8 && nanos.bytes().all(|b| b.is_ascii_hexdigit());
+    if parts.next().is_some() || !digits(pid) || !digits(n) || !hex8 {
+        return None;
+    }
+    pid.parse().ok()
 }
 
 /// A new, locked temp file next to `dest` (`Create::New`, so nothing already

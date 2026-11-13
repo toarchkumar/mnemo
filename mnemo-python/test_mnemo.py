@@ -1392,6 +1392,237 @@ def test_recall_text_keywords_and_vector_cache_budget():
         db.close()
     print("ok  recall_text keywords + set_vector_cache_budget (v0.11)")
 
+
+# --- 12.4 shared mode (v0.14.0 step 4a) --------------------------------------
+
+def _shared_file(d, n=0):
+    """A closed brain with `n` memories, for `shared=True` (which never
+    creates a file)."""
+    path = os.path.join(d, "s.mnemo")
+    db = mnemo.open(path, "pw", dimensions=2)
+    for i in range(n):
+        db.remember(f"seed {i}", "semantic", [1.0, float(i)])
+    db.close()
+    return path
+
+
+def test_shared_handles_see_each_others_writes():
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 1)
+        a = mnemo.open(path, "pw", shared=True)
+        b = mnemo.open(path, "pw", shared=True, wait=2.0)
+        assert a.shared and b.shared
+        assert repr(a).endswith("shared>"), repr(a)
+        a.remember("from a", "semantic", [1.0, 0.0])
+        # No flush: each write commits before it returns.
+        assert len(b) == 2
+        assert {m["content"] for m in b.memories()} == {"seed 0", "from a"}
+        hits = b.recall([1.0, 0.0], top_k=1)
+        assert hits and hits[0]["content"] in {"seed 0", "from a"}
+        b.cache_put("ns", "k", b"value")
+        assert a.cache_get("ns", "k")["value"] == b"value"
+        a.flush()  # nothing to do
+        assert a.notices() == [] and b.notices() == []
+        # A plain handle holds the lock for its life; shared ones hold
+        # nothing between calls, so a plain open gets in now.
+        a.close()
+        b.close()
+        plain = mnemo.open(path, "pw")
+        assert len(plain) == 2
+        assert plain.notices() == [] and not plain.shared
+        plain.close()
+    print("ok  shared: two handles see each other's writes (12.4)")
+
+
+def test_shared_handle_waits_for_a_plain_one_then_raises_locked():
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 1)
+        s = mnemo.open(path, "pw", shared=True, wait=0.3)
+        plain = mnemo.open(path, "pw")
+        t = time.time()
+        try:
+            len(s)
+            raise AssertionError("expected LockedError")
+        except mnemo.LockedError:
+            pass
+        assert time.time() - t >= 0.25, "it waited its deadline"
+        plain.close()
+        assert len(s) == 1
+        s.close()
+    print("ok  shared: waits its deadline for a plain handle, then LockedError")
+
+
+def test_shared_mode_exception_types():
+    def raises(kind, fn):
+        try:
+            fn()
+        except kind as e:
+            assert isinstance(e, mnemo.MnemoError), type(e)
+            return e
+        raise AssertionError(f"expected {kind.__name__}")
+
+    for name in ("CancelledError", "UnsupportedError", "MaybeStoredError",
+                 "ReplacedDuringWriteError"):
+        assert issubclass(getattr(mnemo, name), mnemo.MnemoError), name
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 1)
+        s = mnemo.open(path, "pw", shared=True)
+        # A file-wide setting: refused, and nothing changed.
+        raises(mnemo.UnsupportedError, lambda: s.set_max_snapshots(3))
+        raises(mnemo.UnsupportedError, lambda: s.set_cache_budget("ns", 1, 1))
+        s.set_cache_capacity(64)  # per handle: fine
+        assert len(s) == 1
+
+        # Cancelled: a call waiting for a plain handle's lock, cancelled
+        # from another thread; a new token lets the handle carry on.
+        import threading
+        token = mnemo.CancelToken()
+        w = mnemo.open(path, "pw", shared=True, wait=30.0, cancel=token)
+        plain = mnemo.open(path, "pw")
+        threading.Timer(0.2, token.cancel).start()
+        t = time.time()
+        raises(mnemo.CancelledError, lambda: w.remember("x", "semantic", [1.0, 0.0]))
+        assert time.time() - t < 10
+        assert token.cancelled
+        plain.close()
+        raises(mnemo.CancelledError, lambda: len(w))
+        w.set_cancel(mnemo.CancelToken())
+        assert len(w) == 1
+        w.set_cancel(None)
+        w.close()
+
+        # MaybeStored: commit_deltas commits inside its window; a write
+        # failed after that commit's point is reported as maybe stored.
+        maybe = 0
+        for n in range(60):
+            mnemo._dev_set_writes_until_fail(n)
+            try:
+                s.commit_deltas({"thread_id": "t", "facts": [
+                    {"content": f"fact {n}", "memory_type": "semantic", "vector": [1.0, 0.0]}]})
+                mnemo._dev_set_writes_until_fail(-1)
+                break
+            except mnemo.MaybeStoredError:
+                maybe += 1
+            except mnemo.MnemoError:
+                pass
+            finally:
+                mnemo._dev_set_writes_until_fail(-1)
+        assert maybe > 0, "no failure came back as MaybeStoredError"
+
+        # ReplacedDuringWrite: another file renamed over the path during
+        # the commit (as an older compactor would).
+        other = os.path.join(d, "other.mnemo")
+        import shutil
+        shutil.copy(path, other)
+        mnemo._dev_rename_after_next_shared_commit(other, path)
+        e = raises(mnemo.ReplacedDuringWriteError,
+                   lambda: s.remember("lost", "semantic", [1.0, 0.0]))
+        assert "replaced" in str(e)
+        s.close()
+
+        # Arguments.
+        for bad in (dict(read_only=True), dict(wait=-1.0), dict(wait=float("nan"))):
+            try:
+                mnemo.open(path, "pw", shared=True, **bad)
+                raise AssertionError(f"expected ValueError for {bad}")
+            except ValueError:
+                pass
+        raises(mnemo.MnemoError,
+               lambda: mnemo.open(os.path.join(d, "missing.mnemo"), "pw", shared=True))
+        plain = mnemo.open(path, "pw")
+        try:
+            plain.set_cancel(None)
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
+        plain.close()
+    print("ok  shared: CancelledError, UnsupportedError, MaybeStoredError, "
+          "ReplacedDuringWriteError (12.4)")
+
+
+def test_shared_notices_are_warned_once():
+    import warnings
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 1)
+        # Something that isn't a directory at the sidecar's name.
+        with open(path + ".mnemo-shared", "w") as f:
+            f.write("in the way")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            s = mnemo.open(path, "pw", shared=True)
+        msgs = [str(w.message) for w in caught if issubclass(w.category, UserWarning)]
+        assert len(msgs) == 1 and "sidecar" in msgs[0], msgs
+        assert len(s.notices()) == 1 and "sidecar" in s.notices()[0]
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            s.remember("still works", "semantic", [1.0, 0.0])
+            assert len(s) == 2
+        assert not caught, "the notice is warned once, at open"
+        s.close()
+    print("ok  shared: notices() and one UserWarning each")
+
+
+def test_shared_rekey_session_and_embedder():
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 1)
+        s = mnemo.open(path, "pw", shared=True)
+        s.set_embedder(_fake_embedder(2), name="model-a", dimensions=2, normalize=True)
+        s.remember_text("by text", "semantic")
+        other = mnemo.open(path, "pw", shared=True)
+        # Recorded already: attached without a write.
+        other.set_embedder(_fake_embedder(2), name="model-a", dimensions=2, normalize=True)
+        # The fake embedder can put "by text" on the seed's axis: a tie.
+        hits = other.recall_text("by text", top_k=2)
+        assert "by text" in {h["content"] for h in hits}, hits
+
+        # A rekey through the shared handle updates the passphrase it keeps,
+        # so it follows a compaction under the new one.
+        s.rekey("pw2", fast=True)
+        mnemo.compact_file(path, "pw2")
+        assert len(s) == 2
+
+        sess = s.session("agent-1")
+        sess.add_turn(mnemo.Turn.user("hello", [1.0, 0.0]))
+        assert sess.recall([1.0, 0.0], top_k=5)
+        assert sess.close() == 1
+        assert len(s) == 3
+        s.close()
+        other.close()
+    print("ok  shared: rekey keeps the secret current; sessions; set_embedder")
+
+
+_SHARED_CHILD = r"""
+import sys, mnemo_engine as mnemo
+path, tag, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+db = mnemo.open(path, "pw", shared=True, wait=30.0)
+for i in range(n):
+    db.remember(f"{tag}-{i}", "semantic", [1.0, float(i)])
+    if i % 5 == 0:
+        assert len(db) >= i + 1
+db.close()
+"""
+
+
+def test_two_python_processes_share_a_file():
+    import subprocess
+    import sys
+    with tempfile.TemporaryDirectory() as d:
+        path = _shared_file(d, 0)
+        n = 25
+        procs = [subprocess.Popen([sys.executable, "-c", _SHARED_CHILD, path, tag, str(n)])
+                 for tag in ("p1", "p2")]
+        mine = mnemo.open(path, "pw", shared=True, wait=30.0)
+        for i in range(n):
+            mine.remember(f"parent-{i}", "semantic", [0.5, float(i)])
+        for p in procs:
+            assert p.wait(timeout=120) == 0, "a child process failed"
+        got = {m["content"] for m in mine.memories()}
+        want = {f"{t}-{i}" for t in ("p1", "p2", "parent") for i in range(n)}
+        assert got == want, sorted(want - got)
+        assert mine.verify() == 3 * n
+        mine.close()
+    print("ok  shared: two Python processes and this one write one file")
+
 if __name__ == "__main__":
     print(f"mnemo {mnemo.__version__}")
     test_create_remember_recall()
@@ -1438,4 +1669,10 @@ if __name__ == "__main__":
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()
     test_recall_text_keywords_and_vector_cache_budget()
+    test_shared_handles_see_each_others_writes()
+    test_shared_handle_waits_for_a_plain_one_then_raises_locked()
+    test_shared_mode_exception_types()
+    test_shared_notices_are_warned_once()
+    test_shared_rekey_session_and_embedder()
+    test_two_python_processes_share_a_file()
     print("\nall Python binding tests passed")

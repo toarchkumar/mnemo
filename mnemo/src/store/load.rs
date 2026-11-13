@@ -54,6 +54,35 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result
     })
 }
 
+/// 12.4: take `path`'s exclusive lock through the lock layer for a long
+/// operation `op` (the intent lock, `opts.deadline`, a `lock-info` note).
+/// The sidecar directory is used only if a shared handle has made it, so a
+/// brain nobody opens in shared mode gains no sibling; without it the wait
+/// still has the deadline and the backoff, but no intent lock or note.
+/// The returned [`crate::shared::Held`] removes the note when dropped; drop
+/// it before the file. Where shared mode isn't available (`Unsupported`:
+/// a network or synced filesystem, an old Windows build), one plain try,
+/// as before, and no note.
+pub(super) fn lock_exclusive(
+    path: &Path,
+    op: &str,
+    opts: &crate::SharedOptions,
+) -> Result<(LockedFile, Option<crate::shared::Held>)> {
+    use crate::shared::{BrainLocks, Call, LockKind};
+    let mut locks = match BrainLocks::for_plain(path, opts) {
+        Ok(l) => l,
+        Err(MnemoError::Unsupported(_)) => {
+            return Ok((open_with_lock(path, true, Create::No)?, None));
+        }
+        Err(e) => return Err(e),
+    };
+    let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+    let mut held = locks.acquire(LockKind::Exclusive, &mut call)?;
+    held.announce(op);
+    let file = held.take_file();
+    Ok((file, Some(held)))
+}
+
 /// `path` made absolute against the current directory, without resolving
 /// symlinks (a later check re-resolves them, so it follows the path as it
 /// is then). If the current directory can't be read, the path is kept as

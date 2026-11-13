@@ -1466,7 +1466,11 @@ fn run() -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            // 12.4 (RB-007.4): through the lock layer, so shared handles'
+            // calls can't keep the rekey out, and theirs see "rekey".
+            let mut db =
+                Mnemo::open_exclusive(&path, &pp, "rekey", mnemo_engine::SharedOptions::default())
+                    .map_err(fmt)?;
             // RB-005.4 item 4: REKEY-1 makes an error leave the old passphrase
             // in force, so say so. The one exception (the old header couldn't
             // be written back) says "may open with either secret" itself.
@@ -1554,9 +1558,13 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            // Read the input before taking the lock, then one exclusive hold
+            // through the lock layer (12.4, RB-007.4) for the whole import.
             let text =
                 std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
+            let mut db =
+                Mnemo::open_exclusive(&path, &pp, "import", mnemo_engine::SharedOptions::default())
+                    .map_err(fmt)?;
             let mut count = 0usize;
             for (lineno, line) in text.lines().enumerate() {
                 let line = line.trim();

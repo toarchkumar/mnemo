@@ -33,7 +33,8 @@ use mnemo_core::{
     CacheBudget, CacheFlushPolicy, CommitBatch, CommitReport, Embedder, EmbedderIdentity,
     EssenceOp, EssenceOpKind, EssenceScope as CoreEssenceScope, EssenceSection,
     Filter as CoreFilter, KdfParams, KeyedMemory, Memory, MemoryPatch, MemoryType, Metric,
-    Mnemo as Core, MnemoConfig, RecallRequest, Scope, ThreadTurn, TurnPolicy, Ulid, WriteOutcome,
+    Mnemo as Core, MnemoConfig, RecallRequest, Scope, SharedMnemo, SharedOptions, ThreadTurn,
+    TurnPolicy, Ulid, WriteOutcome,
 };
 
 // --- error / value conversion -------------------------------------------
@@ -124,6 +125,30 @@ mod exc {
         MnemoError,
         "An argument the engine refused."
     );
+    pyo3::create_exception!(
+        mnemo_engine,
+        CancelledError,
+        MnemoError,
+        "A shared-mode call was cancelled while it waited for the file's lock; nothing changed."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        UnsupportedError,
+        MnemoError,
+        "Not supported here: shared mode on a network or synced folder, or an explicit file-wide setting on a shared handle."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        MaybeStoredError,
+        MnemoError,
+        "A shared-mode write failed after its commit point: it may be in the file. Check before retrying."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
+        ReplacedDuringWriteError,
+        MnemoError,
+        "The file was replaced at its path during a shared-mode write; the write isn't in the file now there."
+    );
 }
 
 /// REKEY-1: a rekey that succeeded but couldn't scrub every copy of the
@@ -131,8 +156,8 @@ mod exc {
 /// RB-005.3: the rekey has already happened, so the warning never becomes
 /// the call's failure. Where warnings are errors (`-W error`), the
 /// exception goes to `sys.unraisablehook` and the call returns normally.
-fn warn_rekey_cleanup(py: Python<'_>, core: &Core) {
-    if let Some(left) = core.rekey_cleanup_error() {
+fn warn_rekey_cleanup(py: Python<'_>, left: Option<&str>) {
+    if let Some(left) = left {
         let msg = format!(
             "rekey succeeded, but part of the old key wrap's cleanup failed ({left}); \
              to be sure the old secret opens nothing, compact the file (compact_file)"
@@ -157,6 +182,17 @@ fn _dev_set_writes_until_fail(n: i64) {
     mnemo_core::__failpoints::set_writes_until_fail(n)
 }
 
+/// HOOKS-1 test hook (`dev-hooks`): on this thread's next shared-mode write,
+/// right after its commit, rename `src` over `dest` (as an older compactor
+/// would), so the write raises `ReplacedDuringWriteError`.
+#[cfg(feature = "dev-hooks")]
+#[pyfunction]
+fn _dev_rename_after_next_shared_commit(src: String, dest: String) {
+    mnemo_core::__failpoints::after_next_shared_commit(move || {
+        let _ = std::fs::rename(&src, &dest);
+    })
+}
+
 /// Map a core error onto its Python exception type (the message is the
 /// engine's, unchanged).
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
@@ -177,6 +213,10 @@ fn to_py(e: mnemo_core::MnemoError) -> PyErr {
         E::NotFound(_) => exc::NotFoundError::new_err(msg),
         E::DimensionMismatch { .. } => exc::DimensionMismatchError::new_err(msg),
         E::Invalid(_) => exc::InvalidArgumentError::new_err(msg),
+        E::Cancelled => exc::CancelledError::new_err(msg),
+        E::Unsupported(_) => exc::UnsupportedError::new_err(msg),
+        E::MaybeStored(_) => exc::MaybeStoredError::new_err(msg),
+        E::ReplacedDuringWrite { .. } => exc::ReplacedDuringWriteError::new_err(msg),
         _ => exc::MnemoError::new_err(msg),
     }
 }
@@ -681,6 +721,40 @@ impl Embedder for PyFnEmbedder {
     }
 }
 
+// --- shared mode's cancel token -------------------------------------------
+
+/// Cancels a shared-mode handle's call that is waiting for the file's lock,
+/// from another thread. The call raises `CancelledError` and changes
+/// nothing. A cancel reaches only a call that is waiting; once a call holds
+/// the lock it runs to its end. A cancelled token stays cancelled: give
+/// the handle a new one with `set_cancel` for its later calls.
+#[pyclass]
+#[derive(Clone)]
+struct CancelToken {
+    inner: mnemo_core::CancelToken,
+}
+
+#[pymethods]
+impl CancelToken {
+    #[new]
+    fn new() -> Self {
+        CancelToken {
+            inner: mnemo_core::CancelToken::new(),
+        }
+    }
+
+    /// Cancel every waiting call that holds this token, now and later.
+    fn cancel(&self) {
+        self.inner.cancel()
+    }
+
+    /// Whether `cancel()` has been called.
+    #[getter]
+    fn cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
 // --- the Mnemo class -----------------------------------------------------
 
 /// An open, encrypted Mnemo database.
@@ -692,7 +766,7 @@ struct Mnemo {
     /// the lock stayed held until Python's GC collected the object.
     /// A quick `db.close(); reopen(path)` in the same process raised
     /// `Locked`; only `del db` released the lock. PY-1 fixes that.
-    inner: Option<Core>,
+    inner: Option<Handle>,
     path: String,
     /// Mirror of the current cache flush policy so `cache_put` and
     /// friends know whether to force an eager `flush()` (the historic
@@ -703,23 +777,113 @@ struct Mnemo {
     batched_cache_flush: bool,
 }
 
+/// The engine handle behind a Python `Mnemo`: a plain read-write (or
+/// read-only) handle, or a shared-mode one (12.4, `shared=True`).
+// Both variants are a few KB and close in size; there's one per Python
+// object, so boxing either buys nothing.
+#[allow(clippy::large_enum_variant)]
+enum Handle {
+    Plain(Core),
+    Shared(SharedMnemo),
+}
+
+impl Handle {
+    /// Run `f` as one read: directly on a plain handle, or in one shared
+    /// read window (the shared lock, after catching up). A shared window
+    /// can wait up to its deadline for the lock, so it releases the GIL.
+    fn read<R: Send>(
+        &mut self,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> mnemo_core::Result<R> {
+        match self {
+            Handle::Plain(c) => f(c),
+            Handle::Shared(s) => Python::with_gil(|py| py.allow_threads(|| s.read(f))),
+        }
+    }
+
+    /// Run `f` as one write: directly on a plain handle, or in one shared
+    /// write window, which commits before it returns (GIL released).
+    fn write<R: Send>(
+        &mut self,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> mnemo_core::Result<R> {
+        match self {
+            Handle::Plain(c) => f(c),
+            Handle::Shared(s) => Python::with_gil(|py| py.allow_threads(|| s.write(f))),
+        }
+    }
+
+    fn embedder_arc(&self) -> Option<std::sync::Arc<dyn Embedder>> {
+        match self {
+            Handle::Plain(c) => c.embedder_arc(),
+            Handle::Shared(s) => s.embedder_arc(),
+        }
+    }
+}
+
 impl Mnemo {
-    /// Borrow the Rust core, raising a Python `RuntimeError: database
-    /// is closed` if `close()` or `__exit__` has already released it.
-    /// PY-1: every public method routes through here (or `core_mut`)
-    /// so a post-close call gives a clear error instead of a panic or
-    /// "already borrowed".
-    fn core(&self) -> PyResult<&Core> {
+    /// The engine handle, raising a Python `RuntimeError: database is
+    /// closed` if `close()` or `__exit__` has already released it. PY-1:
+    /// every public method routes through here, so a post-close call gives
+    /// a clear error instead of a panic or "already borrowed".
+    fn handle(&mut self) -> PyResult<&mut Handle> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| PyRuntimeError::new_err("database is closed"))
+    }
+
+    fn handle_ref(&self) -> PyResult<&Handle> {
         self.inner
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("database is closed"))
     }
 
-    /// Mutable counterpart of [`core`].
-    fn core_mut(&mut self) -> PyResult<&mut Core> {
-        self.inner
-            .as_mut()
-            .ok_or_else(|| PyRuntimeError::new_err("database is closed"))
+    fn is_shared(&self) -> bool {
+        matches!(self.inner, Some(Handle::Shared(_)))
+    }
+
+    /// One read (12.4: one engine call per window, so every Python method
+    /// is one `rd` or one `wr`).
+    fn rd<R: Send>(
+        &mut self,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> PyResult<R> {
+        self.handle()?.read(f).map_err(to_py)
+    }
+
+    /// One write.
+    fn wr<R: Send>(
+        &mut self,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> PyResult<R> {
+        self.handle()?.write(f).map_err(to_py)
+    }
+
+    /// [`Mnemo::rd`] with the GIL released (PY-1), for the heavy reads.
+    fn rd_nogil<R: Send>(
+        &mut self,
+        py: Python<'_>,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> PyResult<R> {
+        let h = self.handle()?;
+        py.allow_threads(|| h.read(f)).map_err(to_py)
+    }
+
+    /// [`Mnemo::wr`] with the GIL released.
+    fn wr_nogil<R: Send>(
+        &mut self,
+        py: Python<'_>,
+        f: impl FnOnce(&mut Core) -> mnemo_core::Result<R> + Send,
+    ) -> PyResult<R> {
+        let h = self.handle()?;
+        py.allow_threads(|| h.write(f)).map_err(to_py)
+    }
+
+    /// The registered embedder, or the Python error for none.
+    fn embedder(&self) -> PyResult<std::sync::Arc<dyn Embedder>> {
+        self.handle_ref()?
+            .embedder_arc()
+            .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))
     }
 
     /// Flush the store unless the caller opted into the batched
@@ -735,8 +899,11 @@ impl Mnemo {
             // preceding cache call if the batched thresholds tripped;
             // nothing to do here.
             Ok(())
+        } else if self.is_shared() {
+            // Each shared write window has committed already.
+            Ok(())
         } else {
-            self.core_mut()?.flush().map_err(to_py)
+            self.wr(|db| db.flush())
         }
     }
 }
@@ -794,11 +961,11 @@ impl Mnemo {
         }
         match key {
             None => {
-                let id = self.core_mut()?.remember(memory).map_err(to_py)?;
+                let id = self.wr(|db| db.remember(memory))?;
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = self.core_mut()?.remember_keyed(memory, &k).map_err(to_py)?;
+                let (id, outcome) = self.wr(|db| db.remember_keyed(memory, &k))?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;
@@ -836,7 +1003,11 @@ impl Mnemo {
             identity,
             callback: fn_,
         };
-        self.core_mut()?.set_embedder(embedder).map_err(to_py)
+        match self.handle()? {
+            Handle::Plain(c) => c.set_embedder(embedder).map_err(to_py),
+            // A read window when the file already records this embedder.
+            Handle::Shared(s) => s.set_embedder(embedder).map_err(to_py),
+        }
     }
 
     /// Embed `content` with the registered embedder and `remember` the
@@ -879,9 +1050,7 @@ impl Mnemo {
         // "Already mutably borrowed".
         let embedder = {
             let s = slf.borrow(py);
-            s.core()?
-                .embedder_arc()
-                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?
+            s.embedder()?
         }; // PyRef drops here
         let vector = {
             let mut vs = embedder.embed(&[content.as_str()]).map_err(to_py)?;
@@ -915,11 +1084,11 @@ impl Mnemo {
         let mut s = slf.borrow_mut(py);
         match key {
             None => {
-                let id = s.core_mut()?.remember(memory).map_err(to_py)?;
+                let id = s.wr(|db| db.remember(memory))?;
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = s.core_mut()?.remember_keyed(memory, &k).map_err(to_py)?;
+                let (id, outcome) = s.wr(|db| db.remember_keyed(memory, &k))?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;
@@ -978,7 +1147,7 @@ impl Mnemo {
         } else if let Some(t) = ttl_secs {
             patch.ttl_secs = Some(Some(t));
         }
-        let outcome = self.core_mut()?.update(&ulid, patch).map_err(to_py)?;
+        let outcome = self.wr(|db| db.update(&ulid, patch))?;
         let out = PyDict::new_bound(py);
         out.set_item("id", id.to_string())?;
         out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1009,9 +1178,7 @@ impl Mnemo {
         // the borrow, then take a fresh PyRefMut for the update call.
         let embedder = {
             let s = slf.borrow(py);
-            s.core()?
-                .embedder_arc()
-                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?
+            s.embedder()?
         };
         let vector = {
             let mut vs = embedder.embed(&[new_text.as_str()]).map_err(to_py)?;
@@ -1039,7 +1206,7 @@ impl Mnemo {
             patch.ttl_secs = Some(Some(t));
         }
         let mut s = slf.borrow_mut(py);
-        let outcome = s.core_mut()?.update(&ulid, patch).map_err(to_py)?;
+        let outcome = s.wr(|db| db.update(&ulid, patch))?;
         let out = PyDict::new_bound(py);
         out.set_item("id", id.to_string())?;
         out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1081,7 +1248,7 @@ impl Mnemo {
                 None => KeyScope::private_default(),
             }
         };
-        let chain = self.core_mut()?.history_in(key, scope).map_err(to_py)?;
+        let chain = self.rd(|db| db.history_in(key, scope))?;
         let list = PyList::empty_bound(py);
         for (i, m) in chain.iter().enumerate() {
             let d_obj = memory_to_dict(py, m)?;
@@ -1134,10 +1301,7 @@ impl Mnemo {
                 timestamp,
             });
         }
-        let report = self
-            .core_mut()?
-            .ingest_thread(thread_id, &rust_turns)
-            .map_err(to_py)?;
+        let report = self.wr(|db| db.ingest_thread(thread_id, &rust_turns))?;
         let out = PyDict::new_bound(py);
         out.set_item("added_records", report.added_records)?;
         out.set_item("skipped_existing_turns", report.skipped_existing_turns)?;
@@ -1154,10 +1318,7 @@ impl Mnemo {
     /// `db.ingest_thread(t, db.thread_export(t))` adds nothing.
     #[pyo3(signature = (thread_id))]
     fn thread_export(&mut self, py: Python<'_>, thread_id: &str) -> PyResult<PyObject> {
-        let turns = self
-            .core_mut()?
-            .thread_export_turns(thread_id)
-            .map_err(to_py)?;
+        let turns = self.rd(|db| db.thread_export_turns(thread_id))?;
         let list = PyList::empty_bound(py);
         for t in &turns {
             list.append(json_to_py(py, &t.to_json())?)?;
@@ -1170,7 +1331,7 @@ impl Mnemo {
     /// (or `mnemo compact`) reclaims the space permanently.
     #[pyo3(signature = (thread_id))]
     fn thread_forget(&mut self, thread_id: &str) -> PyResult<usize> {
-        self.core_mut()?.thread_forget(thread_id).map_err(to_py)
+        self.wr(|db| db.thread_forget(thread_id))
     }
 
     /// Phase 12.7b: add an essence section item.
@@ -1198,10 +1359,7 @@ impl Mnemo {
             ));
         }
         let scope = essence_scope_from(thread, project)?;
-        let id = self
-            .core_mut()?
-            .essence_add(scope, section, text, refs)
-            .map_err(to_py)?;
+        let id = self.wr(|db| db.essence_add(scope, section, text, refs))?;
         Ok(id.to_string())
     }
 
@@ -1215,10 +1373,7 @@ impl Mnemo {
         refs: Option<Vec<String>>,
     ) -> PyResult<String> {
         let scope = essence_scope_from(thread, project)?;
-        let id = self
-            .core_mut()?
-            .essence_append_timeline(scope, text, refs)
-            .map_err(to_py)?;
+        let id = self.wr(|db| db.essence_append_timeline(scope, text, refs))?;
         Ok(id.to_string())
     }
 
@@ -1235,10 +1390,7 @@ impl Mnemo {
     ) -> PyResult<PyObject> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
-        let outcome = self
-            .core_mut()?
-            .essence_update(&ulid, text, refs)
-            .map_err(to_py)?;
+        let outcome = self.wr(|db| db.essence_update(&ulid, text, refs))?;
         let out = PyDict::new_bound(py);
         out.set_item("id", id)?;
         out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1251,7 +1403,7 @@ impl Mnemo {
     fn essence_resolve(&mut self, py: Python<'_>, id: &str) -> PyResult<PyObject> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
-        let outcome = self.core_mut()?.essence_resolve(&ulid).map_err(to_py)?;
+        let outcome = self.wr(|db| db.essence_resolve(&ulid))?;
         let out = PyDict::new_bound(py);
         out.set_item("id", id)?;
         out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1262,7 +1414,7 @@ impl Mnemo {
     fn essence_remove(&mut self, id: &str) -> PyResult<()> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
-        self.core_mut()?.essence_remove(&ulid).map_err(to_py)
+        self.wr(|db| db.essence_remove(&ulid))
     }
 
     /// Phase 12.7b: render the essence layer as markdown. Pass
@@ -1276,7 +1428,7 @@ impl Mnemo {
         budget: usize,
     ) -> PyResult<String> {
         let scope = essence_scope_from(thread, project)?;
-        self.core_mut()?.essence(scope, budget).map_err(to_py)
+        self.rd(|db| db.essence(scope, budget))
     }
 
     /// Phase 12.7c: start a new thread that continues from a previous one.
@@ -1286,7 +1438,7 @@ impl Mnemo {
     /// new thread's own essence. Returns the link-record ULID as a string.
     #[pyo3(signature = (new, from_))]
     fn thread_start(&mut self, new: &str, from_: &str) -> PyResult<String> {
-        let id = self.core_mut()?.thread_start(new, from_).map_err(to_py)?;
+        let id = self.wr(|db| db.thread_start(new, from_))?;
         Ok(id.to_string())
     }
 
@@ -1319,7 +1471,7 @@ impl Mnemo {
     #[pyo3(signature = (batch))]
     fn commit_deltas(&mut self, py: Python<'_>, batch: Bound<'_, PyDict>) -> PyResult<PyObject> {
         let parsed = parse_commit_batch(py, &batch)?;
-        let report = self.core_mut()?.commit_deltas(parsed).map_err(to_py)?;
+        let report = self.wr(|db| db.commit_deltas(parsed))?;
         commit_report_to_dict(py, &report)
     }
 
@@ -1367,9 +1519,7 @@ impl Mnemo {
         // pattern as `remember_text`, see the comment there.
         let embedder = {
             let s = slf.borrow(py);
-            s.core()?
-                .embedder_arc()
-                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?
+            s.embedder()?
         }; // PyRef drops here
         let vector = {
             let mut vs = embedder.embed(&[query]).map_err(to_py)?;
@@ -1411,11 +1561,7 @@ impl Mnemo {
         // `memory_to_dict` loop re-enters Python so it stays outside
         // the `allow_threads` region.
         let mut s = slf.borrow_mut(py);
-        let resp = {
-            let core = s.core_mut()?;
-            py.allow_threads(|| core.recall_budgeted(&req))
-                .map_err(to_py)?
-        };
+        let resp = s.rd_nogil(py, |db| db.recall_budgeted(&req))?;
         drop(s);
         let mut out = Vec::with_capacity(resp.hits.len());
         for h in resp.hits {
@@ -1514,11 +1660,7 @@ impl Mnemo {
             req = req.max_bytes(b);
         }
         // PY-1 (R-001.11): same GIL release as `recall_text`.
-        let resp = {
-            let core = self.core_mut()?;
-            py.allow_threads(|| core.recall_budgeted(&req))
-                .map_err(to_py)?
-        };
+        let resp = self.rd_nogil(py, |db| db.recall_budgeted(&req))?;
         let mut out = Vec::with_capacity(resp.hits.len());
         for h in resp.hits {
             let dict = memory_to_dict(py, &h.memory)?;
@@ -1555,11 +1697,7 @@ impl Mnemo {
         top_k: usize,
     ) -> PyResult<Vec<(PyObject, f32)>> {
         // PY-1 (R-001.11): release the GIL around the exact scan.
-        let hits = {
-            let core = self.core_mut()?;
-            py.allow_threads(|| core.search(&query, top_k, Metric::Cosine))
-                .map_err(to_py)?
-        };
+        let hits = self.rd_nogil(py, |db| db.search(&query, top_k, Metric::Cosine))?;
         let mut out = Vec::with_capacity(hits.len());
         for (m, sim) in hits {
             out.push((memory_to_dict(py, &m)?, sim));
@@ -1569,13 +1707,15 @@ impl Mnemo {
 
     /// Fetch one memory by id; raises `RuntimeError` if it does not exist.
     fn get(&mut self, py: Python<'_>, id: &str) -> PyResult<PyObject> {
-        let m = self.core_mut()?.get(&parse_id(id)?).map_err(to_py)?;
+        let id = parse_id(id)?;
+        let m = self.rd(|db| db.get(&id))?;
         memory_to_dict(py, &m)
     }
 
     /// Soft-delete a memory by id.
     fn delete(&mut self, id: &str) -> PyResult<()> {
-        self.core_mut()?.delete(&parse_id(id)?).map_err(to_py)
+        let id = parse_id(id)?;
+        self.wr(|db| db.delete(&id))
     }
 
     /// Enumerate every live (non-deleted, non-expired) memory as a
@@ -1585,23 +1725,23 @@ impl Mnemo {
     /// for a small store, O(n) for a large one.
     fn memories(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
         let mut out = Vec::new();
-        for m in self.core_mut()?.memories().map_err(to_py)? {
+        for m in self.rd(|db| db.memories())? {
             out.push(memory_to_dict(py, &m)?);
         }
         Ok(out)
     }
 
     /// Number of live (non-deleted) memories.
-    fn __len__(&self) -> PyResult<usize> {
-        Ok(self.core()?.len())
+    fn __len__(&mut self) -> PyResult<usize> {
+        self.rd(|db| Ok(db.len()))
     }
 
     /// Embedding dimensionality this database was created with. Also
     /// available via `stats()["dimensions"]`; exposed as its own
     /// method for callers who only need the number and want to skip
     /// the full stats dict.
-    fn dimensions(&self) -> PyResult<usize> {
-        Ok(self.core()?.dimensions())
+    fn dimensions(&mut self) -> PyResult<usize> {
+        self.rd(|db| Ok(db.dimensions()))
     }
 
     /// Persist all pending changes as one atomic transaction.
@@ -1612,9 +1752,14 @@ impl Mnemo {
     /// pre-PY-1 "GIL held for the whole call" shape, a single
     /// background `db.flush()` would stall every other Python thread
     /// for the duration.
+    ///
+    /// On a shared handle (`shared=True`) every write has committed before
+    /// it returned, so this does nothing.
     fn flush(&mut self, py: Python<'_>) -> PyResult<()> {
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.flush()).map_err(to_py)
+        if self.is_shared() {
+            return Ok(());
+        }
+        self.wr_nogil(py, |db| db.flush())
     }
 
     /// Flush pending writes, then release the Rust core — which drops
@@ -1630,13 +1775,19 @@ impl Mnemo {
     /// The core is wrapped in `Option`, and `close` `take()`s it and hands
     /// it to `Core::close`, which (since REFAC-1) consumes it and releases
     /// the lock before returning.
+    ///
+    /// A shared handle holds no lock between calls; closing it drops the
+    /// passphrase it kept (zeroized) and any access statistics no write
+    /// has applied yet.
     fn close(&mut self) -> PyResult<()> {
-        if let Some(core) = self.inner.take() {
+        match self.inner.take() {
             // `Core::close` consumes the core (REFAC-1): it flushes a
             // writable handle (a read-only one has nothing to persist),
             // then drops it, closing the file and releasing the OS
             // advisory lock synchronously.
-            core.close().map_err(to_py)?;
+            Some(Handle::Plain(core)) => core.close().map_err(to_py)?,
+            Some(Handle::Shared(s)) => s.close().map_err(to_py)?,
+            None => {}
         }
         Ok(())
     }
@@ -1647,8 +1798,39 @@ impl Mnemo {
     /// live memory and every live cache entry (FIX-1 R-001.1), which
     /// is O(N) AES-GCM on a potentially-large corpus.
     fn verify(&mut self, py: Python<'_>) -> PyResult<usize> {
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.verify()).map_err(to_py)
+        self.rd_nogil(py, |db| db.verify())
+    }
+
+    /// 12.4: what a shared handle warns about once (a sidecar directory it
+    /// can't use, a synced folder, an allowed network filesystem). Each is
+    /// also raised as a `UserWarning` when the handle opens. Empty for a
+    /// plain handle.
+    fn notices(&self) -> PyResult<Vec<String>> {
+        Ok(match self.handle_ref()? {
+            Handle::Shared(s) => s.notices().to_vec(),
+            Handle::Plain(_) => Vec::new(),
+        })
+    }
+
+    /// Whether this handle was opened with `shared=True`.
+    #[getter]
+    fn shared(&self) -> bool {
+        self.is_shared()
+    }
+
+    /// Give a shared handle a new cancel token for its later calls, or
+    /// `None` for none. Raises `ValueError` on a plain handle.
+    #[pyo3(signature = (token))]
+    fn set_cancel(&mut self, token: Option<CancelToken>) -> PyResult<()> {
+        match self.handle()? {
+            Handle::Shared(s) => {
+                s.set_cancel(token.map(|t| t.inner));
+                Ok(())
+            }
+            Handle::Plain(_) => Err(PyValueError::new_err(
+                "set_cancel is for a shared handle (open(..., shared=True))",
+            )),
+        }
     }
 
     /// Change the passphrase. Cheap: re-derives the KEK and re-wraps
@@ -1679,16 +1861,25 @@ impl Mnemo {
         let kdf = if fast {
             KdfParams::fast()
         } else {
-            self.core()?.kdf_params()
+            self.rd(|db| Ok(db.kdf_params()))?
         };
         // PY-1 (R-001.11): release the GIL — `rekey` runs Argon2id,
         // which on default parameters (`KdfParams::secure`) takes
         // ~50–100 ms. Holding the GIL for that stalls every other
         // Python thread for no reason.
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.rekey(new_passphrase, kdf))
+        let h = self.handle()?;
+        let left = py
+            .allow_threads(|| match h {
+                Handle::Plain(c) => c
+                    .rekey(new_passphrase, kdf)
+                    .map(|_| c.rekey_cleanup_error().map(str::to_owned)),
+                // 12.4: one write window, and the kept secret follows.
+                Handle::Shared(s) => s
+                    .rekey(new_passphrase, kdf)
+                    .map(|_| s.rekey_cleanup_error().map(str::to_owned)),
+            })
             .map_err(to_py)?;
-        warn_rekey_cleanup(py, core);
+        warn_rekey_cleanup(py, left.as_deref());
         Ok(())
     }
 
@@ -1706,10 +1897,18 @@ impl Mnemo {
     /// `sys.unraisablehook` instead, and the call still returns normally.
     fn rekey_with_key(&mut self, py: Python<'_>, key: &[u8]) -> PyResult<()> {
         let key = key_from_bytes(key)?;
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.rekey_with_key(&key))
+        let h = self.handle()?;
+        let left = py
+            .allow_threads(|| match h {
+                Handle::Plain(c) => c
+                    .rekey_with_key(&key)
+                    .map(|_| c.rekey_cleanup_error().map(str::to_owned)),
+                Handle::Shared(s) => s
+                    .rekey_with_key(&key)
+                    .map(|_| s.rekey_cleanup_error().map(str::to_owned)),
+            })
             .map_err(to_py)?;
-        warn_rekey_cleanup(py, core);
+        warn_rekey_cleanup(py, left.as_deref());
         Ok(())
     }
 
@@ -1722,7 +1921,7 @@ impl Mnemo {
     /// matching the shape of `recall`/`get` results.
     fn about(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
         let mut out = Vec::new();
-        for m in self.core_mut()?.about().map_err(to_py)? {
+        for m in self.rd(|db| db.about())? {
             out.push(memory_to_dict(py, &m)?);
         }
         Ok(out)
@@ -1733,7 +1932,7 @@ impl Mnemo {
     /// or `None` when there is none. `mnemo about` and MCP `about` append
     /// it after the manifest; this returns it on its own.
     fn about_essence(&mut self) -> PyResult<Option<String>> {
-        self.core_mut()?.about_essence().map_err(to_py)
+        self.rd(|db| db.about_essence())
     }
 
     /// Insert the canonical scaffold manifest into this database. Mirrors what
@@ -1747,9 +1946,10 @@ impl Mnemo {
         // walked every live memory to build the agent list (fixed in
         // this PR too, but either way this call site never needed
         // more than the dimension field).
-        let dims = self.core_mut()?.dimensions();
-        let manifest = Memory::scaffold_manifest(dims);
-        let id = self.core_mut()?.remember(manifest).map_err(to_py)?;
+        let id = self.wr(|db| {
+            let manifest = Memory::scaffold_manifest(db.dimensions());
+            db.remember(manifest)
+        })?;
         Ok(id.to_string())
     }
 
@@ -1759,10 +1959,7 @@ impl Mnemo {
     /// k-means clustering + PQ codebook training over every live
     /// vector, which is multi-second on 1M-vector corpora.
     fn build_index(&mut self, py: Python<'_>) -> PyResult<()> {
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.build_index())
-            .map(|_| ())
-            .map_err(to_py)
+        self.wr_nogil(py, |db| db.build_index().map(|_| ()))
     }
 
     /// Rebuild the ANN index from scratch using the auto-defaults for
@@ -1782,27 +1979,26 @@ impl Mnemo {
     ///
     /// Releases the GIL during the rebuild, same as `build_index`.
     fn rebuild_index(&mut self, py: Python<'_>) -> PyResult<()> {
-        let core = self.core_mut()?;
-        py.allow_threads(|| core.rebuild_index())
-            .map(|_| ())
-            .map_err(to_py)
+        self.wr_nogil(py, |db| db.rebuild_index().map(|_| ()))
     }
 
     /// Drop the approximate index; recall reverts to exact scan.
     fn drop_index(&mut self) -> PyResult<()> {
-        self.core_mut()?.drop_index();
-        Ok(())
+        self.wr(|db| {
+            db.drop_index();
+            Ok(())
+        })
     }
 
     /// Whether an approximate index is currently loaded.
-    fn has_index(&self) -> PyResult<bool> {
-        Ok(self.core()?.has_index())
+    fn has_index(&mut self) -> PyResult<bool> {
+        self.rd(|db| Ok(db.has_index()))
     }
 
     /// List restorable snapshots — one dict per committed transaction.
-    fn snapshots(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    fn snapshots(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
         let mut out = Vec::new();
-        for s in self.core()?.snapshots() {
+        for s in self.rd(|db| Ok(db.snapshots()))? {
             let d = PyDict::new_bound(py);
             d.set_item("txn_id", s.txn_id)?;
             d.set_item("created_at", s.created_at)?;
@@ -1814,7 +2010,7 @@ impl Mnemo {
 
     /// Restore the database to the snapshot from transaction `txn_id`.
     fn restore_to(&mut self, py: Python<'_>, txn_id: u64) -> PyResult<PyObject> {
-        let info = self.core_mut()?.restore_to(txn_id).map_err(to_py)?;
+        let info = self.wr(|db| db.restore_to(txn_id))?;
         let d = PyDict::new_bound(py);
         d.set_item("txn_id", info.txn_id)?;
         d.set_item("created_at", info.created_at)?;
@@ -1824,7 +2020,7 @@ impl Mnemo {
 
     /// Restore to the latest snapshot committed at or before `unix_secs`.
     fn restore_to_time(&mut self, py: Python<'_>, unix_secs: i64) -> PyResult<PyObject> {
-        let info = self.core_mut()?.restore_to_time(unix_secs).map_err(to_py)?;
+        let info = self.wr(|db| db.restore_to_time(unix_secs))?;
         let d = PyDict::new_bound(py);
         d.set_item("txn_id", info.txn_id)?;
         d.set_item("created_at", info.created_at)?;
@@ -1834,15 +2030,18 @@ impl Mnemo {
 
     /// Bound the page cache to `pages` decrypted pages.
     fn set_cache_capacity(&mut self, pages: usize) -> PyResult<()> {
-        self.core_mut()?.set_cache_capacity(pages);
-        Ok(())
+        // Per handle; a shared handle keeps it across reloads.
+        self.rd(|db| {
+            db.set_cache_capacity(pages);
+            Ok(())
+        })
     }
 
     /// Page-cache occupancy as `(pages_cached, capacity)`. Renamed from
     /// `cache_stats` in v0.4.0 to make room for the result-cache
     /// `cache_stats(namespace)` from Phase 10.1.
-    fn page_cache_stats(&self) -> PyResult<(usize, usize)> {
-        Ok(self.core()?.page_cache_stats())
+    fn page_cache_stats(&mut self) -> PyResult<(usize, usize)> {
+        self.rd(|db| Ok(db.page_cache_stats()))
     }
 
     /// Override the snapshot-manifest retention cap on this open handle.
@@ -1852,8 +2051,11 @@ impl Mnemo {
     /// `MnemoConfig::max_snapshots` (256). See the Rust-side
     /// `Mnemo::set_max_snapshots` docs.
     fn set_max_snapshots(&mut self, max: usize) -> PyResult<()> {
-        self.core_mut()?.set_max_snapshots(max);
-        Ok(())
+        // A file-wide setting: a shared handle refuses it (UnsupportedError).
+        self.rd(|db| {
+            db.set_max_snapshots(max);
+            Ok(())
+        })
     }
 
     /// FMT-9b (v9 files): keep the fp16 vector column in memory while it
@@ -1862,8 +2064,10 @@ impl Mnemo {
     /// memory, slower recall. Applies to this handle only. See the
     /// Rust-side `Mnemo::set_vector_cache_budget` docs.
     fn set_vector_cache_budget(&mut self, bytes: usize) -> PyResult<()> {
-        self.core_mut()?.set_vector_cache_budget(bytes);
-        Ok(())
+        self.rd(|db| {
+            db.set_vector_cache_budget(bytes);
+            Ok(())
+        })
     }
 
     /// FMT-9e: compress v9 thread turns once they're older than `secs`
@@ -1871,13 +2075,15 @@ impl Mnemo {
     /// this handle only. See the Rust-side `Mnemo::set_turn_compress_after`
     /// docs.
     fn set_turn_compress_after(&mut self, secs: u64) -> PyResult<()> {
-        self.core_mut()?.set_turn_compress_after(secs);
-        Ok(())
+        self.rd(|db| {
+            db.set_turn_compress_after(secs);
+            Ok(())
+        })
     }
 
     /// Summary statistics as a dict.
     fn stats(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let s = self.core_mut()?.stats().map_err(to_py)?;
+        let (s, snapshots) = self.rd(|db| Ok((db.stats()?, db.snapshots().len())))?;
         let d = PyDict::new_bound(py);
         d.set_item("memories", s.memories)?;
         d.set_item("deleted", s.deleted)?;
@@ -1893,7 +2099,7 @@ impl Mnemo {
         d.set_item("fsyncs_last_flush", s.fsyncs_last_flush)?;
         d.set_item("format_version", s.format_version)?;
         d.set_item("recall_mode", s.recall_mode.as_str())?;
-        d.set_item("snapshots", self.core_mut()?.snapshots().len())?;
+        d.set_item("snapshots", snapshots)?;
         // INSP-1 (RB-001.25): what's restorable now, not the policy.
         d.set_item("snapshots_retained", s.snapshots_retained)?;
         d.set_item("oldest_restorable_at", s.oldest_restorable_at)?;
@@ -1926,7 +2132,7 @@ impl Mnemo {
     /// fs::copy()`, which left the handle unusable afterwards and
     /// happily truncated the database when `dest == path`.
     fn export_encrypted(&mut self, dest: &str) -> PyResult<()> {
-        self.core_mut()?.export_encrypted(dest).map_err(to_py)
+        self.rd(|db| db.export_encrypted(dest))
     }
 
     /// Filesystem path of this database.
@@ -1957,9 +2163,7 @@ impl Mnemo {
             ttl_secs,
             cost_hint_ms: None,
         };
-        self.core_mut()?
-            .cache_put(namespace, key, &bytes, opts)
-            .map_err(to_py)?;
+        self.wr(|db| db.cache_put(namespace, key, &bytes, opts))?;
         self.maybe_flush_after_cache_write()
     }
 
@@ -1968,7 +2172,7 @@ impl Mnemo {
     /// access_count, ttl_secs}` on hit. `value` is always returned as
     /// `bytes`; decode with `.decode('utf-8')` if you stored text.
     fn cache_get(&mut self, py: Python<'_>, namespace: &str, key: &str) -> PyResult<PyObject> {
-        match self.core_mut()?.cache_get(namespace, key).map_err(to_py)? {
+        match self.rd(|db| db.cache_get(namespace, key))? {
             Some(hit) => {
                 let d = PyDict::new_bound(py);
                 d.set_item("value", pyo3::types::PyBytes::new_bound(py, &hit.value))?;
@@ -1988,9 +2192,7 @@ impl Mnemo {
     /// Tombstone a cache entry. Silently succeeds if the entry does
     /// not exist. Space reclaimed by `compact` (external CLI).
     fn cache_delete(&mut self, namespace: &str, key: &str) -> PyResult<()> {
-        self.core_mut()?
-            .cache_delete(namespace, key)
-            .map_err(to_py)?;
+        self.wr(|db| db.cache_delete(namespace, key))?;
         self.maybe_flush_after_cache_write()
     }
 
@@ -1999,10 +2201,7 @@ impl Mnemo {
     /// Returns the count of newly tombstoned entries.
     #[pyo3(signature = (namespace=None, expired_only=false))]
     fn cache_purge(&mut self, namespace: Option<&str>, expired_only: bool) -> PyResult<usize> {
-        let n = self
-            .core_mut()?
-            .cache_purge(namespace, expired_only)
-            .map_err(to_py)?;
+        let n = self.wr(|db| db.cache_purge(namespace, expired_only))?;
         self.maybe_flush_after_cache_write()?;
         Ok(n)
     }
@@ -2049,7 +2248,10 @@ impl Mnemo {
                 )))
             }
         };
-        self.core_mut()?.set_cache_flush_policy(rust_policy);
+        self.rd(|db| {
+            db.set_cache_flush_policy(rust_policy);
+            Ok(())
+        })?;
         self.batched_cache_flush = batched;
         Ok(())
     }
@@ -2068,22 +2270,24 @@ impl Mnemo {
         max_entries: usize,
         max_bytes: u64,
     ) -> PyResult<()> {
-        self.core_mut()?.set_cache_budget(
-            namespace,
-            CacheBudget {
-                max_entries,
-                max_bytes,
-            },
-        );
-        Ok(())
+        self.rd(|db| {
+            db.set_cache_budget(
+                namespace,
+                CacheBudget {
+                    max_entries,
+                    max_bytes,
+                },
+            );
+            Ok(())
+        })
     }
 
     /// Cache statistics for `namespace` (or the whole cache if
     /// `None`). Returns a dict with `{entries, bytes, hits, misses,
     /// hit_rate, evictions}`.
     #[pyo3(signature = (namespace=None))]
-    fn cache_stats(&self, py: Python<'_>, namespace: Option<&str>) -> PyResult<PyObject> {
-        let s = self.core()?.cache_stats(namespace);
+    fn cache_stats(&mut self, py: Python<'_>, namespace: Option<&str>) -> PyResult<PyObject> {
+        let s = self.rd(|db| Ok(db.cache_stats(namespace)))?;
         let d = PyDict::new_bound(py);
         d.set_item("entries", s.entries)?;
         d.set_item("bytes", s.bytes)?;
@@ -2122,9 +2326,7 @@ impl Mnemo {
             cost_hint_ms: None,
             model,
         };
-        self.core_mut()?
-            .cache_put_semantic(namespace, key, vector, &bytes, opts)
-            .map_err(to_py)?;
+        self.wr(|db| db.cache_put_semantic(namespace, key, vector, &bytes, opts))?;
         self.maybe_flush_after_cache_write()
     }
 
@@ -2143,11 +2345,9 @@ impl Mnemo {
         // PY-1 (R-001.11): release the GIL — semantic cache lookup
         // scans the directory + cosines every candidate; O(entries)
         // and decrypts the body of the winner.
-        let hit = {
-            let core = self.core_mut()?;
-            py.allow_threads(|| core.cache_get_semantic(namespace, &query, threshold, model))
-                .map_err(to_py)?
-        };
+        let hit = self.rd_nogil(py, |db| {
+            db.cache_get_semantic(namespace, &query, threshold, model)
+        })?;
         match hit {
             Some((hit, similarity)) => {
                 let d = PyDict::new_bound(py);
@@ -2189,9 +2389,7 @@ impl Mnemo {
         // pattern as `remember_text` / `recall_text`.
         let embedder = {
             let s = slf.borrow(py);
-            s.core()?
-                .embedder_arc()
-                .ok_or_else(|| PyRuntimeError::new_err("no embedder registered on this handle"))?
+            s.embedder()?
         }; // PyRef drops here
         let identity = embedder.identity();
         let mut vs = embedder.embed(&[text]).map_err(to_py)?;
@@ -2202,11 +2400,9 @@ impl Mnemo {
         // PY-1 (R-001.11): release the GIL around the semantic scan,
         // same as `cache_get_semantic`.
         let mut s = slf.borrow_mut(py);
-        let hit = {
-            let core = s.core_mut()?;
-            py.allow_threads(|| core.cache_get_semantic(namespace, &vector, threshold, &model))
-                .map_err(to_py)?
-        };
+        let hit = s.rd_nogil(py, |db| {
+            db.cache_get_semantic(namespace, &vector, threshold, &model)
+        })?;
         drop(s);
         match hit {
             Some((hit, similarity)) => {
@@ -2269,7 +2465,11 @@ impl Mnemo {
     /// closed` error through `__repr__`.
     fn __repr__(&self) -> String {
         match self.inner.as_ref() {
-            Some(core) => format!("<mnemo.Mnemo path='{}' memories={}>", self.path, core.len()),
+            Some(Handle::Plain(core)) => {
+                format!("<mnemo.Mnemo path='{}' memories={}>", self.path, core.len())
+            }
+            // No window just for a repr.
+            Some(Handle::Shared(_)) => format!("<mnemo.Mnemo path='{}' shared>", self.path),
             None => format!("<mnemo.Mnemo path='{}' closed>", self.path),
         }
     }
@@ -2425,7 +2625,7 @@ impl Session {
         .with_meta("role", serde_json::Value::String(turn.role.clone()));
 
         let mut db = self.db.borrow_mut(py);
-        let id = db.core_mut()?.remember(memory).map_err(to_py)?;
+        let id = db.wr(|core| core.remember(memory))?;
         self.turns.push(id.to_string());
         Ok(id.to_string())
     }
@@ -2448,7 +2648,7 @@ impl Session {
             req = req.types(parsed?);
         }
         let mut db = self.db.borrow_mut(py);
-        let hits = db.core_mut()?.recall(&req).map_err(to_py)?;
+        let hits = db.rd(|core| core.recall(&req))?;
         let mut out = Vec::with_capacity(hits.len());
         for h in hits {
             let dict = memory_to_dict(py, &h.memory)?;
@@ -2465,22 +2665,31 @@ impl Session {
     /// number promoted; the database is flushed before returning.
     fn close(&mut self, py: Python<'_>) -> PyResult<usize> {
         self.ensure_open()?;
+        let ids = self
+            .turns
+            .iter()
+            .map(|t| parse_id(t))
+            .collect::<PyResult<Vec<_>>>()?;
         let mut db = self.db.borrow_mut(py);
-        let mut promoted = 0;
-        for id_str in &self.turns {
-            let id = parse_id(id_str)?;
-            // A turn could have been deleted elsewhere — skip if it is gone.
-            let mut memory = match db.core_mut()?.get(&id) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if memory.memory_type == MemoryType::Working {
-                memory.memory_type = MemoryType::Episodic;
-                db.core_mut()?.remember(memory).map_err(to_py)?;
-                promoted += 1;
+        // One write window for the whole consolidation (12.4: one call,
+        // one window); a plain handle flushes at the end, as before.
+        let promoted = db.wr(|core| {
+            let mut promoted = 0;
+            for id in &ids {
+                // A turn could have been deleted elsewhere — skip if it is gone.
+                let mut memory = match core.get(id) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if memory.memory_type == MemoryType::Working {
+                    memory.memory_type = MemoryType::Episodic;
+                    core.remember(memory)?;
+                    promoted += 1;
+                }
             }
-        }
-        db.core_mut()?.flush().map_err(to_py)?;
+            core.flush()?;
+            Ok(promoted)
+        })?;
         self.open = false;
         Ok(promoted)
     }
@@ -2490,15 +2699,22 @@ impl Session {
     /// removed; the database is flushed before returning.
     fn discard(&mut self, py: Python<'_>) -> PyResult<usize> {
         self.ensure_open()?;
+        let ids = self
+            .turns
+            .iter()
+            .map(|t| parse_id(t))
+            .collect::<PyResult<Vec<_>>>()?;
         let mut db = self.db.borrow_mut(py);
-        let mut removed = 0;
-        for id_str in &self.turns {
-            let id = parse_id(id_str)?;
-            if db.core_mut()?.delete(&id).is_ok() {
-                removed += 1;
+        let removed = db.wr(|core| {
+            let mut removed = 0;
+            for id in &ids {
+                if core.delete(id).is_ok() {
+                    removed += 1;
+                }
             }
-        }
-        db.core_mut()?.flush().map_err(to_py)?;
+            core.flush()?;
+            Ok(removed)
+        })?;
         self.open = false;
         Ok(removed)
     }
@@ -2550,15 +2766,44 @@ impl Session {
 /// recovery or a pending format-version migration — open read-write once
 /// to clear either, then reopen read-only. Cannot be combined with
 /// creation: read-only + non-existent path raises `ValueError`.
+///
+/// `shared=True` opens the file in **shared mode** (12.4): several
+/// processes, sessions and tools can use it at once. The handle takes the
+/// file's lock for each call and holds nothing between calls; every method
+/// is one read or one write, and each write commits before it returns.
+/// `wait` is how long one call may wait for the lock, in seconds, before
+/// `LockedError`. The file must exist (create it with a plain `open`
+/// first) and can't be combined with `read_only`. It's refused on a network
+/// or synced folder unless `allow_network_fs=True`. A shared handle keeps
+/// its passphrase in memory for its whole life (zeroized at close), so it
+/// can follow a compaction. Explicit file-wide settings raise
+/// `UnsupportedError`. What the handle warns about once is raised as a
+/// `UserWarning` at open and kept in `notices()`. `cancel` (a
+/// `CancelToken`) lets another thread cancel a call that is waiting for
+/// the lock.
 #[pyfunction]
-#[pyo3(signature = (path, passphrase, dimensions=None, read_only=false))]
+#[pyo3(signature = (path, passphrase, dimensions=None, read_only=false, *,
+                    shared=false, wait=10.0, allow_network_fs=false, cancel=None))]
+#[allow(clippy::too_many_arguments)]
 fn open(
     py: Python<'_>,
     path: &str,
     passphrase: &str,
     dimensions: Option<usize>,
     read_only: bool,
+    shared: bool,
+    wait: f64,
+    allow_network_fs: bool,
+    cancel: Option<CancelToken>,
 ) -> PyResult<Mnemo> {
+    if shared {
+        let opts = shared_options(read_only, wait, allow_network_fs, cancel)?;
+        let (path_s, pp_s) = (path.to_string(), passphrase.to_string());
+        let s = py
+            .allow_threads(move || Core::open_shared(&path_s, &pp_s, opts))
+            .map_err(to_py)?;
+        return shared_handle(py, path, s);
+    }
     let exists = std::path::Path::new(path).exists();
     // PY-1 (R-001.11): release the GIL around the Argon2id KDF call
     // that `Core::open` / `Core::create` runs through its KEK
@@ -2600,7 +2845,53 @@ fn open(
         Err(e) => return Err(to_py(e)),
     };
     Ok(Mnemo {
-        inner: Some(inner),
+        inner: Some(Handle::Plain(inner)),
+        path: path.to_string(),
+        batched_cache_flush: false,
+    })
+}
+
+/// `SharedOptions` from `open`'s arguments, or `ValueError`.
+fn shared_options(
+    read_only: bool,
+    wait: f64,
+    allow_network_fs: bool,
+    cancel: Option<CancelToken>,
+) -> PyResult<SharedOptions> {
+    if read_only {
+        return Err(PyValueError::new_err(
+            "shared=True can't be combined with read_only=True (a shared handle reads under \
+             the shared lock and writes under the exclusive one, call by call)",
+        ));
+    }
+    if !wait.is_finite() || wait < 0.0 {
+        return Err(PyValueError::new_err(format!(
+            "wait must be a number of seconds, 0 or more (got {wait})"
+        )));
+    }
+    let mut opts = SharedOptions::default();
+    opts.deadline = std::time::Duration::from_secs_f64(wait.min(1e9));
+    opts.allow_network_fs = allow_network_fs;
+    opts.cancel = cancel.map(|t| t.inner);
+    Ok(opts)
+}
+
+/// Wrap a shared handle, raising each of its notices once as a
+/// `UserWarning` (where warnings are errors, the warning goes to
+/// `sys.unraisablehook` and the open still succeeds).
+fn shared_handle(py: Python<'_>, path: &str, s: SharedMnemo) -> PyResult<Mnemo> {
+    for n in s.notices() {
+        if let Err(e) = PyErr::warn_bound(
+            py,
+            &py.get_type_bound::<pyo3::exceptions::PyUserWarning>(),
+            &format!("mnemo shared mode: {n}"),
+            1,
+        ) {
+            e.write_unraisable_bound(py, None);
+        }
+    }
+    Ok(Mnemo {
+        inner: Some(Handle::Shared(s)),
         path: path.to_string(),
         batched_cache_flush: false,
     })
@@ -2619,16 +2910,32 @@ fn key_from_bytes(key: &[u8]) -> PyResult<[u8; 32]> {
 /// OS keychain; it gets no stretching, so opening skips the Argon2id cost.
 /// Files created this way open only with their key (and `rekey` switches
 /// back to a passphrase).
+///
+/// `shared`, `wait` and `allow_network_fs` work as in `open`.
 #[pyfunction]
-#[pyo3(signature = (path, key, dimensions=None, read_only=false))]
+#[pyo3(signature = (path, key, dimensions=None, read_only=false, *,
+                    shared=false, wait=10.0, allow_network_fs=false, cancel=None))]
+#[allow(clippy::too_many_arguments)]
 fn open_with_key(
     py: Python<'_>,
     path: &str,
     key: &[u8],
     dimensions: Option<usize>,
     read_only: bool,
+    shared: bool,
+    wait: f64,
+    allow_network_fs: bool,
+    cancel: Option<CancelToken>,
 ) -> PyResult<Mnemo> {
     let key = key_from_bytes(key)?;
+    if shared {
+        let opts = shared_options(read_only, wait, allow_network_fs, cancel)?;
+        let path_s = path.to_string();
+        let s = py
+            .allow_threads(move || Core::open_shared_with_key(&path_s, &key, opts))
+            .map_err(to_py)?;
+        return shared_handle(py, path, s);
+    }
     let exists = std::path::Path::new(path).exists();
     if read_only && !exists {
         return Err(PyValueError::new_err(
@@ -2657,7 +2964,7 @@ fn open_with_key(
         })
         .map_err(to_py)?;
     Ok(Mnemo {
-        inner: Some(inner),
+        inner: Some(Handle::Plain(inner)),
         path: path.to_string(),
         batched_cache_flush: false,
     })
@@ -2792,7 +3099,21 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "InvalidArgumentError",
         py.get_type_bound::<exc::InvalidArgumentError>(),
     )?;
+    m.add("CancelledError", py.get_type_bound::<exc::CancelledError>())?;
+    m.add(
+        "UnsupportedError",
+        py.get_type_bound::<exc::UnsupportedError>(),
+    )?;
+    m.add(
+        "MaybeStoredError",
+        py.get_type_bound::<exc::MaybeStoredError>(),
+    )?;
+    m.add(
+        "ReplacedDuringWriteError",
+        py.get_type_bound::<exc::ReplacedDuringWriteError>(),
+    )?;
     m.add_class::<Mnemo>()?;
+    m.add_class::<CancelToken>()?;
     m.add_class::<Session>()?;
     m.add_class::<Turn>()?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
@@ -2803,6 +3124,8 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     #[cfg(feature = "dev-hooks")]
     m.add_function(wrap_pyfunction!(_dev_set_writes_until_fail, m)?)?;
+    #[cfg(feature = "dev-hooks")]
+    m.add_function(wrap_pyfunction!(_dev_rename_after_next_shared_commit, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

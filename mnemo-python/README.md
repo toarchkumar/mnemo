@@ -142,7 +142,26 @@ its own agent.
 
 ## API
 
-`mnemo.open(path, passphrase, dimensions=None) -> Mnemo`
+`mnemo.open(path, passphrase, dimensions=None, read_only=False, *, shared=False, wait=10.0, allow_network_fs=False, cancel=None) -> Mnemo`
+
+**Shared mode** (v0.14, `shared=True`): several processes and sessions use
+one file at once. The handle takes the file's lock for each call and holds
+nothing between calls; every method below is one read or one write, and
+each write commits before it returns (`flush()` does nothing). `wait` is how
+long one call may wait for the lock, in seconds, before `LockedError`. The
+file must already exist, and `shared=True` can't be combined with
+`read_only=True`. Network and synced folders are refused unless
+`allow_network_fs=True`. The handle keeps its passphrase in memory until it
+closes. File-wide settings (`set_max_snapshots`, `set_cache_budget`,
+`set_cache_flush_policy`, `set_turn_compress_after`) raise
+`UnsupportedError`. Update every `mnemo-engine` that opens the file first.
+See `docs/shared-mode.md` in the repository.
+
+```python
+db = mnemo.open("team.mnemo", passphrase, shared=True)  # in each process
+db.remember("we ship on Fridays", "semantic", vector)    # committed on return
+db.notices()  # what the handle warns about (also raised as UserWarning at open)
+```
 
 `Mnemo` methods:
 
@@ -182,13 +201,17 @@ its own agent.
 | `stats()` | Summary statistics — includes `fsyncs_last_flush` (count of `sync_all` the most recent `flush()` on this handle issued; `0` on a fresh handle before any flush — Phase 6 instrumentation) and `recall_mode` (`"exact_resident"`: the live facts' vectors fit the vector cache budget and recall scans them in memory; `"exact_paged"`: over the budget, or a v8 file, so recall reads them from the file; `"indexed"`: an IVF+PQ index shortlists). Since v0.13 also `snapshots_retained`, `oldest_restorable_at` (unix seconds, or `None`) and `snapshot_pinned_bytes`: what a restore can reach now, which under churn can be far less than the retention policy |
 | `export_encrypted(dest)` | Copy the (already-encrypted) file elsewhere |
 | `len(db)` | Live memory count |
+| `shared` | `True` for a handle opened with `shared=True` |
+| `notices()` | Shared mode: what the handle warns about once (a sidecar directory it can't use, a synced folder, an allowed network filesystem); each is also raised as a `UserWarning` at open. Empty for a plain handle |
+| `set_cancel(token)` | Shared mode: give the handle a new `CancelToken` (or `None`) for its later calls, after a cancel |
 
 Plus two module-level functions:
 
 | Function | Purpose |
 |---|---|
-| `mnemo.compact_file(path, passphrase)` | Rewrite the file out-of-place, dropping tombstoned and expired memories and reclaiming stale pages. Caller's own handle must be closed first. Returns `{"before": int, "after": int}` |
+| `mnemo.compact_file(path, passphrase)` | Rewrite the file out-of-place, dropping tombstoned and expired memories and reclaiming stale pages. Caller's own plain handle must be closed first; since v0.14 it waits up to 10 s for shared handles' calls. Returns `{"before": int, "after": int}` |
 | `mnemo.compact_file_with_key(path, key)` | The same for a raw-key file (`key`: 32 bytes, as from `generate_key()`), under the same key; converts a v8 file to v9 (since v0.13.1) |
+| `mnemo.CancelToken()` | Shared mode: `token.cancel()` from another thread cancels a call that is waiting for the file's lock (`CancelledError`; nothing changes). Pass it as `open(..., cancel=token)`. A cancelled token stays cancelled |
 | `mnemo.build_info()` | Returns `{"version", "target", "aes_backend", "polyval_backend"}` for the installed wheel. Lets you verify an ARM wheel picked up the hardware AES path — `aes_backend` should read `"armv8 hardware"` on Apple Silicon / Graviton (anything else, like `"armv8 software (constant-time fallback)"`, means the compile missed the fix). PR 11.0, v0.5.1+ |
 
 `Session` methods: `add_turn(turn)`, `recall(query, top_k=10, memory_types=None)`,
@@ -219,6 +242,10 @@ before the engine sees them, are still `ValueError`):
 | `UnsupportedVersionError` | a file from a newer engine | upgrade `mnemo-engine` |
 | `NotAMnemoFileError` | not a `.mnemo` file | check the path |
 | `CorruptError` | a page or the header failed its integrity check: corrupt or tampered | restore from a backup or an export |
+| `CancelledError` | shared mode: the call was cancelled while it waited for the lock; nothing changed | |
+| `UnsupportedError` | shared mode isn't available here (a network or synced folder, an old Windows build), or a file-wide setting on a shared handle | pass `allow_network_fs=True` if you know the lock works there; drop the setting |
+| `MaybeStoredError` | shared mode: a write failed after its commit point; it may be in the file | check whether it's there before retrying |
+| `ReplacedDuringWriteError` | shared mode: another file was renamed over the path during the write (an older `mnemo compact`); the write isn't in the file at the path now | update every `mnemo` that opens the file, then write again |
 | `MnemoError` (only) | I/O, cryptography, key derivation or serialization | the message says which |
 
 ```python

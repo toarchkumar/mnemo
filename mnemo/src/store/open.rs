@@ -366,6 +366,7 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            lock_note: None,
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
@@ -429,6 +430,54 @@ impl Mnemo {
         let path: PathBuf = path.into();
         let file = open_with_lock(&path, /*write=*/ true, Create::No)?;
         Self::load_locked(path, file, secret, allow_old)
+    }
+
+    /// Open read-write through 12.4's lock layer, for a long operation that
+    /// must not run alongside shared handles' calls: an import, a rekey, a
+    /// compaction ([`Mnemo::compact_file`] does this itself).
+    ///
+    /// Unlike [`Mnemo::open`], which tries the lock once and fails with
+    /// [`MnemoError::Locked`], this waits up to `opts.deadline` with writer
+    /// preference (the intent lock), so busy shared readers can't keep it
+    /// out. Once it holds the lock it writes a `lock-info` note naming `op`,
+    /// so a shared caller that times out learns what holds the file. The
+    /// handle keeps the exclusive lock until it's dropped or closed, like
+    /// any read-write handle.
+    ///
+    /// Where shared mode isn't available (a network or synced filesystem
+    /// without `opts.allow_network_fs`, or a Windows build made with Rust
+    /// before 1.85) it opens as [`Mnemo::open`] does: one try, no note.
+    pub fn open_exclusive(
+        path: impl AsRef<Path>,
+        passphrase: &str,
+        op: &str,
+        opts: crate::SharedOptions,
+    ) -> Result<Mnemo> {
+        Self::open_exclusive_secret(path.as_ref(), passphrase.as_bytes(), op, &opts, false)
+    }
+
+    /// [`Mnemo::open_exclusive`] for a raw-key file.
+    pub fn open_exclusive_with_key(
+        path: impl AsRef<Path>,
+        key: &[u8; crypto::KEY_LEN],
+        op: &str,
+        opts: crate::SharedOptions,
+    ) -> Result<Mnemo> {
+        Self::open_exclusive_secret(path.as_ref(), key, op, &opts, false)
+    }
+
+    pub(super) fn open_exclusive_secret(
+        path: &Path,
+        secret: &[u8],
+        op: &str,
+        opts: &crate::SharedOptions,
+        allow_old: bool,
+    ) -> Result<Mnemo> {
+        let path = absolute(path.to_path_buf());
+        let (file, note) = lock_exclusive(&path, op, opts)?;
+        let mut db = Self::load_locked(path, file, secret, allow_old)?;
+        db.lock_note = note;
+        Ok(db)
     }
 
     /// The read-write open's work on a file its caller already holds
@@ -799,6 +848,7 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            lock_note: None,
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
@@ -1068,6 +1118,7 @@ impl Mnemo {
             rekey_cleanup: None,
             access_delta: None,
             commit_point: None,
+            lock_note: None,
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,

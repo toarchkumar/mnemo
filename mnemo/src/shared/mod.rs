@@ -18,6 +18,7 @@ pub use call::CancelToken;
 pub use lock::SharedOptions;
 #[allow(unused_imports)]
 pub(crate) use lock::{BrainLocks, Held, LockKind, WINDOWS_OLD_RENAME};
+pub(crate) use sidecar::pid_alive;
 
 /// Test hooks: not a stable API.
 #[cfg(any(test, feature = "failpoints"))]
