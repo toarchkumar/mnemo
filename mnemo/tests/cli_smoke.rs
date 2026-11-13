@@ -2191,6 +2191,49 @@ fn demo_runs_to_a_clean_exit() {
     assert!(stdout.contains("demo complete."), "{stdout}");
 }
 
+/// RB-005.4 item 4: a rekey that fails says the passphrase wasn't changed,
+/// and it wasn't. A file-size limit at the file's current size makes the
+/// rekey's first write past the end fail with a real `EFBIG` (no
+/// failpoint): `trap '' XFSZ` keeps the signal from killing the process.
+/// `ulimit -f` counts 512- or 1024-byte blocks depending on the shell
+/// (macOS's `sh` uses 1024), so the limit is the size over 1024: at or
+/// below the file's end either way, and the rekey's first write is past it.
+#[cfg(unix)]
+#[test]
+fn a_failed_rekey_says_the_passphrase_was_not_changed() {
+    let (_dir, path, pp, _) = seed_db();
+    let p = path.to_str().unwrap();
+    let blocks = std::fs::metadata(&path).unwrap().len() / 1024;
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "trap '' XFSZ; ulimit -f {blocks} && exec \"$0\" rekey \"$1\""
+        ))
+        .arg(bin())
+        .arg(p)
+        .env("MNEMO_PASSPHRASE", pp)
+        .env("MNEMO_NEW_PASSPHRASE", "second-passphrase")
+        .output()
+        .expect("failed to invoke mnemo binary");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success(),
+        "the rekey should fail past the size limit: {stderr}"
+    );
+    assert!(
+        stderr.contains("the passphrase was not changed"),
+        "{stderr}"
+    );
+    let (status, stdout, stderr) = run_cli(&["info", p], pp);
+    assert!(
+        status.success(),
+        "the old passphrase must still open it: {stderr}"
+    );
+    assert!(stdout.contains("memories:    3"), "{stdout}");
+    let (status, _, _) = run_cli(&["info", p], "second-passphrase");
+    assert!(!status.success(), "the new passphrase must not open it");
+}
+
 #[test]
 fn rekey_notes_the_data_key_and_rotate_rewrites_it() {
     let (_dir, path, pp, _) = seed_db();

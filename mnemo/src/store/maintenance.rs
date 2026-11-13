@@ -275,6 +275,8 @@ impl Mnemo {
             .and_then(|_| self.pager.sync());
         match put_back {
             Ok(()) => err,
+            // `mnemo rekey` looks for "may open with either secret" to leave
+            // out its "the passphrase was not changed": keep the phrase.
             Err(again) => MnemoError::Io(std::io::Error::other(format!(
                 "rekey failed writing the new header ({err}), and the old header \
                  couldn't be written back ({again}): the file may open with either \

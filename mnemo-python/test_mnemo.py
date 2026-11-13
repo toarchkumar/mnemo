@@ -420,6 +420,76 @@ def test_rekey_and_reopen_with_new_passphrase():
     print("ok  rekey + reopen with new passphrase; old is rejected")
 
 
+_REKEY_CLEANUP_UNDER_W_ERROR = r"""
+import sys, warnings
+import mnemo_engine as mnemo
+path = sys.argv[1]
+caught = []
+sys.unraisablehook = lambda u: caught.append(u.exc_type)
+assert warnings.filters[0][0] == "error", warnings.filters[0]
+db = mnemo.open(path, "old-pw", dimensions=2)
+db.remember("survive-rekey", "semantic", [1.0, 0.0])
+db.flush()
+mnemo._dev_set_writes_until_fail(2)
+try:
+    db.rekey("new-pw", fast=True)
+finally:
+    mnemo._dev_set_writes_until_fail(-1)
+db.close()
+assert caught == [RuntimeWarning], caught
+print("returned")
+"""
+
+
+def test_rekey_cleanup_warning_never_fails_the_call():
+    """RB-005.3: a rekey whose cleanup is cut short has still succeeded,
+    so it warns, and under `-W error` the warning goes to
+    `sys.unraisablehook` instead of raising. The failpoint (test wheel
+    only) fails the third write, the first cleanup step after the new
+    header is on disk (`mnemo/tests/rekey_cut.rs`)."""
+    import subprocess
+    import sys
+    import warnings
+    assert hasattr(mnemo, "_dev_set_writes_until_fail"), "build the test wheel with --features dev-hooks"
+    with tempfile.TemporaryDirectory() as d:
+        # As a plain warning.
+        path = os.path.join(d, "w.mnemo")
+        db = mnemo.open(path, "old-pw", dimensions=2)
+        db.remember("survive-rekey", "semantic", [1.0, 0.0])
+        db.flush()
+        mnemo._dev_set_writes_until_fail(2)
+        try:
+            with warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter("always")
+                db.rekey("new-pw", fast=True)
+        finally:
+            mnemo._dev_set_writes_until_fail(-1)
+        db.close()
+        kinds = [w.category for w in seen]
+        assert kinds == [RuntimeWarning], kinds
+        assert "rekey succeeded" in str(seen[0].message), seen[0].message
+
+        # Under `-W error`, in a fresh interpreter.
+        path = os.path.join(d, "e.mnemo")
+        r = subprocess.run(
+            [sys.executable, "-W", "error", "-c", _REKEY_CLEANUP_UNDER_W_ERROR, path],
+            capture_output=True, text=True,
+        )
+        assert r.returncode == 0 and r.stdout.strip() == "returned", (r.returncode, r.stdout, r.stderr)
+
+        # Both rekeys took effect: the new passphrase opens, the old one doesn't.
+        for p in (os.path.join(d, "w.mnemo"), path):
+            try:
+                mnemo.open(p, "old-pw")
+                raise AssertionError("old passphrase should have been rejected after rekey")
+            except mnemo.WrongPassphraseError:
+                pass
+            db2 = mnemo.open(p, "new-pw")
+            assert db2.memories()[0]["content"] == "survive-rekey"
+            db2.close()
+    print("ok  rekey: a cleanup warning never fails the call, even under -W error (RB-005.3)")
+
+
 def _fake_embedder(dims=4):
     """A tiny deterministic in-test embedder: hashes a string onto one
     axis and emits a unit spike there. Deps-free so this test file still
@@ -1343,6 +1413,7 @@ if __name__ == "__main__":
     test_batched_cache_uncommitted_is_a_miss()
     test_cache_budget_evicts_lru()
     test_rekey_and_reopen_with_new_passphrase()
+    test_rekey_cleanup_warning_never_fails_the_call()
     test_set_embedder_and_text_round_trip()
     test_set_embedder_dim_mismatch_rejected()
     test_set_embedder_identity_mismatch_rejected_after_reopen()

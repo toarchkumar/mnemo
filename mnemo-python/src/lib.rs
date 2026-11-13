@@ -126,26 +126,39 @@ mod exc {
     );
 }
 
-/// Map a core error onto its Python exception type (the message is the
-/// engine's, unchanged).
 /// REKEY-1: a rekey that succeeded but couldn't scrub every copy of the
 /// old key wrap says so as a `RuntimeWarning` (the new secret is in force).
-fn warn_rekey_cleanup(py: Python<'_>, core: &Core) -> PyResult<()> {
+/// RB-005.3: the rekey has already happened, so the warning never becomes
+/// the call's failure. Where warnings are errors (`-W error`), the
+/// exception goes to `sys.unraisablehook` and the call returns normally.
+fn warn_rekey_cleanup(py: Python<'_>, core: &Core) {
     if let Some(left) = core.rekey_cleanup_error() {
         let msg = format!(
             "rekey succeeded, but part of the old key wrap's cleanup failed ({left}); \
              to be sure the old secret opens nothing, compact the file (compact_file)"
         );
-        PyErr::warn_bound(
+        if let Err(e) = PyErr::warn_bound(
             py,
             &py.get_type_bound::<pyo3::exceptions::PyRuntimeWarning>(),
             &msg,
             1,
-        )?;
+        ) {
+            e.write_unraisable_bound(py, None);
+        }
     }
-    Ok(())
 }
 
+/// HOOKS-1 test hook, in the test wheel only (`dev-hooks`): fail the
+/// `n`th engine write from now on this thread (`0` is the next one, a
+/// negative value disarms). One-shot, like `mnemo_engine::__failpoints`.
+#[cfg(feature = "dev-hooks")]
+#[pyfunction]
+fn _dev_set_writes_until_fail(n: i64) {
+    mnemo_core::__failpoints::set_writes_until_fail(n)
+}
+
+/// Map a core error onto its Python exception type (the message is the
+/// engine's, unchanged).
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
     use mnemo_core::MnemoError as E;
     let msg = e.to_string();
@@ -1651,8 +1664,10 @@ impl Mnemo {
     /// If it raises, the old secret is still in force, including after later
     /// writes; the one exception is an error that says the file may open with
     /// either secret. If it returns but couldn't scrub every copy of the old
-    /// key wrap, it emits a `RuntimeWarning` saying what was left (the new
-    /// secret is in force either way).
+    /// key wrap, it emits a `RuntimeWarning` saying what was left. A
+    /// `RuntimeWarning` from this call means it succeeded: the new secret is
+    /// in force. Where warnings are errors (`-W error`), the warning goes to
+    /// `sys.unraisablehook` instead, and the call still returns normally.
     #[pyo3(signature = (new_passphrase, fast=false))]
     fn rekey(&mut self, py: Python<'_>, new_passphrase: &str, fast: bool) -> PyResult<()> {
         // FIX-1 R-001.5: `fast=False` now really does "inherit the
@@ -1673,7 +1688,8 @@ impl Mnemo {
         let core = self.core_mut()?;
         py.allow_threads(|| core.rekey(new_passphrase, kdf))
             .map_err(to_py)?;
-        warn_rekey_cleanup(py, core)
+        warn_rekey_cleanup(py, core);
+        Ok(())
     }
 
     /// Switch this database to (or rotate) a raw 256-bit key (32 bytes, e.g.
@@ -1684,14 +1700,17 @@ impl Mnemo {
     /// If it raises, the old secret is still in force, including after later
     /// writes; the one exception is an error that says the file may open with
     /// either secret. If it returns but couldn't scrub every copy of the old
-    /// key wrap, it emits a `RuntimeWarning` saying what was left (the new
-    /// secret is in force either way).
+    /// key wrap, it emits a `RuntimeWarning` saying what was left. A
+    /// `RuntimeWarning` from this call means it succeeded: the new secret is
+    /// in force. Where warnings are errors (`-W error`), the warning goes to
+    /// `sys.unraisablehook` instead, and the call still returns normally.
     fn rekey_with_key(&mut self, py: Python<'_>, key: &[u8]) -> PyResult<()> {
         let key = key_from_bytes(key)?;
         let core = self.core_mut()?;
         py.allow_threads(|| core.rekey_with_key(&key))
             .map_err(to_py)?;
-        warn_rekey_cleanup(py, core)
+        warn_rekey_cleanup(py, core);
+        Ok(())
     }
 
     /// Return the database's self-describing onboarding memories (those tagged
@@ -2782,6 +2801,8 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file_with_key, m)?)?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
+    #[cfg(feature = "dev-hooks")]
+    m.add_function(wrap_pyfunction!(_dev_set_writes_until_fail, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

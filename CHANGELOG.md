@@ -60,6 +60,12 @@ release (RELEASING.md's rule); they stay at 0.13.0.
   scrub the old key wrap no longer fails it, and
   `Mnemo::rekey_cleanup_error` (a CLI warning, a Python `RuntimeWarning`)
   says what was left. A failpoint test covers every write a rekey makes.
+  `mnemo rekey` now ends a failure with "the passphrase was not changed"
+  (the one exception, when the old header couldn't be written back
+  either, says the file may open with either secret). In Python, a
+  `RuntimeWarning` from `rekey` means it succeeded; where warnings are
+  errors (`-W error`), it goes to `sys.unraisablehook` instead of raising,
+  so a rekey that took effect never raises.
 
 ## [0.13.1] — 2026-11-12
 

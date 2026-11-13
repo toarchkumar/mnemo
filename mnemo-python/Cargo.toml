@@ -39,11 +39,13 @@ pyo3 = { version = "=0.22.6", features = ["extension-module", "abi3-py38"] }
 serde_json = "1.0"
 
 [features]
-# HOOKS-1: the engine's `MNEMO_DEV_*` switches, for the test wheel only.
-# `test_mnemo.py` sets `MNEMO_DEV_ANN_MIN_FACTS=0` so small v9 files build
-# an index; CI's test build passes `--features dev-hooks`. The released
-# wheels (release.yml) are built without it and ignore the variable.
-dev-hooks = ["mnemo_core/dev-hooks"]
+# HOOKS-1: the engine's `MNEMO_DEV_*` switches and its write failpoint
+# (`_dev_set_writes_until_fail`), for the test wheel only. `test_mnemo.py`
+# sets `MNEMO_DEV_ANN_MIN_FACTS=0` so small v9 files build an index, and
+# fails a rekey's cleanup on purpose; CI's test build passes
+# `--features dev-hooks`. The released wheels (release.yml) are built
+# without it, so they ignore the variable and have no failpoint.
+dev-hooks = ["mnemo_core/dev-hooks", "mnemo_core/failpoints"]
 
 [profile.release]
 lto = true

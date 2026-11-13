@@ -1467,8 +1467,18 @@ fn run() -> std::result::Result<(), String> {
             let pp = passphrase(&pp)?;
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            // RB-005.4 item 4: REKEY-1 makes an error leave the old passphrase
+            // in force, so say so. The one exception (the old header couldn't
+            // be written back) says "may open with either secret" itself.
             db.rekey(&new, mnemo_engine::KdfParams::secure())
-                .map_err(fmt)?;
+                .map_err(|e| {
+                    let msg = fmt(e);
+                    if msg.contains("may open with either secret") {
+                        msg
+                    } else {
+                        format!("{msg}; the passphrase was not changed")
+                    }
+                })?;
             // REKEY-1: the rekey took effect; part of the old wrap's cleanup
             // didn't. `--rotate` rewrites the file, which covers it.
             let left = db.rekey_cleanup_error().map(str::to_owned);
