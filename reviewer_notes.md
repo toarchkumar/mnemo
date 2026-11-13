@@ -151,6 +151,15 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-006.10` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code; the lines of `maintenance.rs` and `load.rs` that v0.14.0 step 1 changes) | `ACCEPTED` | In step 1's PR. Details in SECURITY.local.md |
 | `RB-006.11` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the lock layer; no code exists) | `ACCEPTED` | (a) and (b) before step 2; (c) now in the note, the choice at 12.3. Details in SECURITY.local.md |
 | `RB-006.12` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the daemon; no code exists) | `ACCEPTED` | Before step 9 (the daemon). Details in SECURITY.local.md |
+| `RB-007.1` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode (v0.14.0 step 2): cancelling one call cancels every later call on the handle, and the handle can't be given a new token | `ACCEPTED` | Step 2c: a per-call cancel token (`set_cancel`), the doc, a test |
+| `RB-007.2` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode: the secret a handle keeps goes stale after a rekey (its own, or another process's), and the handle then returns `WrongPassphrase` at the next compaction or the next WAL replay | `ACCEPTED` | Step 2c: `SharedMnemo::rekey` updates the kept secret, `db.rekey` refused in a closure; replay and heal with the held data key |
+| `RB-007.3` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | A compaction through a symlink to the brain replaces the link, and handles on the two paths carry on with two different files (compaction's old behaviour; shared mode makes two paths a supported setup) | `ACCEPTED` | Step 2c: compaction and `rekey --rotate` resolve the path and rename over the real file; a two-path test |
+| `RB-007.4` | 2026-11-13 | `PLAN-REFINEMENT` | `MEDIUM` | Until compaction and the plain opens go through the lock layer, one busy shared reader keeps them out, and nothing writes `lock-info` (for step 4) | `ACCEPTED` | Step 4: compaction, `rekey --rotate`, `import` and CLI writes through the lock layer, with `announce`; a CHANGELOG line in 2c |
+| `RB-007.5` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a write window whose closure commits part-way can return a plain error with part of it stored | `ACCEPTED` | Step 2c: `MaybeStored` when an earlier commit in the window succeeded; the doc; step 4 one engine call per window |
+| `RB-007.6` | 2026-11-13 | `PERF` | `LOW` | Shared mode: every write window commits a lease, also when the closure writes nothing or is refused, and every other handle then reloads (not timed) | `ACCEPTED` | Step 2c: the lease taken by the first page sealed, not per window; `set_embedder` a read when unchanged; a no-op window in step 5 |
+| `RB-007.7` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a sidecar directory deleted under a live handle isn't recreated, and the handle stops using the intent lock without saying so | `ACCEPTED` | Step 2c: reopen the sidecar by path once per call, with the checks; a notice; a test |
+| `RB-007.8` | 2026-11-13 | `DX/DOCS` | `LOW` | Shared mode, smaller points: a deadline that overflows the clock panics, two deadlines in one call, a reader sleeping with the intent lock, an embedder set inside a closure, a read-only file, a panic in a read window, public test hooks, leftover compaction temp files, notices nobody prints, dropped statistics | `ACCEPTED` | Step 2c: items 1 to 7 and 10; items 8 and 9 in step 4 |
+| `RB-007.9` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code, every version; `store/load.rs`) | `ACCEPTED` | Held in SECURITY.local.md. Step 2c |
 
 ---
 
@@ -2139,3 +2148,210 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Context / Evidence:** findings about the design of the daemon's discovery and trust boundary. No code exists. By reading.
 - **Would I want it settled before step 2's code?** No. Before step 9.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), before step 9. Full triage in `SECURITY.local.md`.
+
+---
+
+### Batch `RB-007` — 2026-11-13 (REVIEWER-B: v0.14.0 steps 2a and 2b after PR 66's merge: the shared lock layer and `Mnemo::open_shared`, against the 12.4 note and the RB-006 triage, with nine new items and a list for step 3)
+
+**What was reviewed.** `release-0.14.0` at `19edf8b` (code head `2d374a3`, PR 66 merged), on PLANNER-A's 2026-11-13 entry "step 2b's fixes accepted", item 2: `mnemo/src/shared/` (`call.rs`, `lock.rs`, `sidecar.rs`, `fscheck.rs`), `mnemo/src/store/shared.rs`, and the changes to `pager.rs`, `open.rs`, `recall.rs`, `cache_api.rs` and `flush.rs` since v0.13.2 (`233eba4`). Checked against `docs/design/12.4-shared-access.md` as it is on the branch and against the RB-006 triage, with RB-006.11 (a) and (b) from `SECURITY.local.md`.
+
+**How.**
+- **A separate clone.** `/tmp/rb-mnemo`, cloned from the working tree's repository and checked out at `origin/release-0.14.0` (`19edf8b`, the same commit GitHub has for that branch). Nothing was built, fetched or checked out in `mnemo.nosync`. Builds used `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked` and `--offline`.
+- **Baseline at `19edf8b`, green:** `cargo test --locked --features failpoints --no-fail-fast`: **420 passed, 0 failed**, which is the Worker's count.
+- **Scratch tests** in `/tmp/rb-scratch/rb7`, a crate that depends on the clone by path: `tests/handle.rs` (twelve checks, called t1 to t11 and t3b below), `tests/inner.rs`, `tests/inplace.rs`, `tests/torn.rs`, and a cross-process kill test (`src/bin/rb7.rs` driven by `kill_test.py`).
+- **Not done:** nothing ran on Linux or Windows, so the Windows sidecar path, the Linux allow-list and the seal-only stamp on Windows are read, not tested. Nothing was timed. No real full disk (the failures are the repo's failpoints). The UniFFI, Swift, Kotlin and Python suites were not run; step 2 has no surface in them yet.
+- **Machine:** Apple M1 Pro, macOS 26.7.1, Rust 1.95.0.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **Security:** the check of RB-006.11 (a) and (b), and one new finding (`RB-007.9`), are only in `SECURITY.local.md`.
+
+---
+
+**The verdict first.**
+
+- **The core of step 2 holds.** I couldn't make a shared handle lose an acknowledged write, store one twice, show a memory the file doesn't have, or return an unexpected error, with processes killed at random and compactions running.
+- **Step 3 can start.** None of the nine items needs to hold it. Three are worth fixing before step 4 puts surfaces on top (`RB-007.1`, `.2`, `.3`), because each one ends with a handle that fails or diverges with no way out but reopening.
+- **RB-006.11 (a) and (b) are implemented as triaged** (details in `SECURITY.local.md`).
+- **The kill test** (three writer processes, two readers, and in two of the runs a compactor, with one process killed with `SIGKILL` every 50 to 400 ms and restarted):
+
+| Run | Kills | Compactions that got in | Writes acknowledged | Missing from the file | Stored twice | In the file, never acknowledged | Unexpected errors | Count went backwards | `verify` |
+|---|---|---|---|---|---|---|---|---|---|
+| 30 s, no compactor | 122 | none | 723 | 0 | 0 | 4 | 0 | 0 | Ok (777) |
+| 60 s, with a compactor | 242 | 541 | 740 | 0 | 0 | 4 | 0 | 0 | Ok (794) |
+| 60 s, with a compactor | 245 | 535 | 721 | 0 | 0 | 6 | 0 | 0 | Ok (777) |
+
+  "Never acknowledged" is a writer killed between its commit and its log line, which is allowed. Every writer also read its own last write back every tenth write; none failed. macOS only.
+
+---
+
+**The RB-006 items that step 2 was to build, as they are on the branch.** This isn't a `VERIFIED` pass (nothing has shipped); it's what I saw.
+
+| Item | On the branch | How I checked |
+|---|---|---|
+| RB-006.1: the stamp cleared before a mutation; `MaybeStored`; a reload after a replay | In place (`store/shared.rs:469`, `:522-578`, `:393-395`) | The Worker's one-failure matrix, plus mine with two and three writes failing in a row from every point (t11, 60 cases): the failing handle and a second handle both equal a fresh open every time; no plain error with the write stored, no `Ok` without it |
+| RB-006.2: the seal as the stamp; a seal that fails; never create; a torn page 0 | In place (`:162-175`, `:398-423`, `lock.rs:229-230`) | Copies written over the file in place, same inode: an older copy of the same brain and a compacted copy with a new data key were both followed; garbage and an empty file gave `BadMagic` and an I/O error, no panic, and the handle recovered when a good file came back. Page 0's first sector zeroed under two live handles: the next read healed it and both carried on |
+| RB-006.3 rec. 1: identity again after the commit | In place (`:506-512`) | Read; the Worker's hook test covers it |
+| RB-006.4 recs. 1 and 3: the one-try reader; one deadline | The reader is as specified. The deadline has two gaps (`RB-007.8` items 2 and 3) | Read; t8 (a shared writer against 1, 4 and 8 busy readers: 30 of 30 writes each, slowest 62 to 69 ms) |
+| RB-006.6 rec. 2: a cancellable wait | Cancels, but then the handle is finished (`RB-007.1`) | t1 |
+| RB-006.7 items 1 and 2: the statistics delta; explicit settings refused | In place (`recall.rs:616-622`, `cache_api.rs:172-176`, `shared.rs:116-157`) | Read; the Worker's tests |
+| RB-006.9 items 1 and 3: `lock-info` after the lock; an unwritable directory | In place, but nothing writes `lock-info` yet (`RB-007.4`) | Read |
+
+---
+
+**New items**
+
+#### RB-007.1 — [CORRECTNESS] [MEDIUM] Cancelling one call cancels every later call on the handle, and the handle can't be given a new token
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t1).
+  - A handle opened with `SharedOptions::cancel`, on a file nothing else has open. Before the cancel a read returns `Ok`. After `token.cancel()`: three reads and a write each return `Cancelled` within a few microseconds. A second handle with no token reads normally.
+  - `acquire` starts every call with `call.check()` (`shared/lock.rs:142`), and a token stays cancelled (`shared/call.rs:14-15`: "make a new one for the next call"). But the token lives in the options the handle was opened with (`store/shared.rs:230`), and `options()` only reads them (`:305-307`).
+- **Finding:** the case the token exists for is an iOS background activity that expires. After it does, the store's handle fails every call, contended or not, until it's dropped and opened again, which costs the KDF and a full reload. The doc comment describes an API the handle doesn't have.
+- **Recommendation:**
+  1. Give the token per call, or let the handle take a new one: `SharedMnemo::set_cancel(Option<CancelToken>)`, or `read_with`/`write_with` taking options for that call.
+  2. Say in the doc that a cancel only reaches a call that is waiting for the lock: once the lock is held, the call runs to its end.
+  3. A test: cancel a waiting call, then the same handle's next call succeeds.
+- **Would I hold step 3 for it?** No. Before step 4's mobile surface.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c, before step 3**: recommendations 1 (`SharedMnemo::set_cancel(Option<CancelToken>)`; per-call options can come with step 4 if a surface needs them), 2 (the doc says a cancel reaches only a call waiting for a lock) and 3 (the test). Step 3 adds case 6 of the list below.
+
+#### RB-007.2 — [CORRECTNESS] [MEDIUM] The secret a handle keeps goes stale after a rekey, and the handle then fails at the moments it has to use it
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t3, t3b).
+  - **A rekey inside the handle's own write window** (`brain.write(|db| db.rekey(new, ..))`) returns `Ok`, and the file opens with the new secret only. The handle carries on reading and writing, because it holds the data key. After any compaction with the new secret, that same handle's next call returns `WrongPassphrase`: it still keeps the old secret (`store/shared.rs:232`; nothing updates it). A new handle with the new secret opens.
+  - **A rekey by another process** (no compaction): the old-secret handle keeps working, as the note says. Then a writer dies after its commit point and leaves a WAL to replay. The old-secret handle's next read and write both return `WrongPassphrase`. Once any new-secret open has healed the file, the same handle reads again.
+  - The cause of the second: a pending WAL or a torn page 0 goes through `load_locked` with the kept secret (`:395`, `:423-432`), which runs the KDF, although the handle holds the right data key.
+- **Finding:**
+  1. The process that changes the passphrase is the one that is certain to know the new one, and it locks itself out at the next compaction.
+  2. "A plain rekey keeps running handles working" stops being true exactly when a crash needs recovering, and comes back when someone else recovers. A read-mostly session sees a `WrongPassphrase` that later disappears.
+- **Recommendation:**
+  1. Add `SharedMnemo::rekey` (and `rekey_with_key`), which runs the rekey in a write window and replaces the kept secret when it succeeds. Refuse `db.rekey` inside a closure, the way settings are refused.
+  2. Replay a WAL, and heal a torn page 0, with the held data key when the header that would result verifies under it. Use the kept secret only when it doesn't. That also saves a KDF run on every replay.
+  3. Tests for both, and add them to step 3 (below).
+- **Would I hold step 3 for it?** No. Before step 4.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**, all three: `SharedMnemo::rekey` and `rekey_with_key` run in a write window and replace the kept secret only on success; `db.rekey` inside a closure is refused like a setting; a pending WAL is replayed, and a torn page 0 healed, with the held data key when the result verifies under it, the kept secret only when it doesn't. Step 3 adds case 3.
+
+#### RB-007.3 — [CORRECTNESS] [MEDIUM] A compaction through a symlink to the brain replaces the link, and the two paths become two brains
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t5). A brain at `real/b.mnemo`, a symlink `link.mnemo` to it, one shared handle through each.
+  - Before: a write through the link's handle is seen by the real path's handle (3 memories).
+  - `Mnemo::compact_file(link)` returns `Ok`. `link.mnemo` is now a regular file: the rename replaced the link, not its target (`store/maintenance.rs`, `compact_into`: `rename(tmp, path)` with the path as given).
+  - After: a write through the link's handle succeeds. The link's handle sees 4 memories, the real path's handle 3. Neither gets an error.
+  - The sidecar splits too: the link's old handle still uses `real/b.mnemo.mnemo-shared`, and a new handle through the link creates `link.mnemo.mnemo-shared`.
+- **Finding:** compaction has always replaced a symlink this way. Shared mode is what makes it matter: the lock layer resolves the path so that two paths to one brain share a sidecar (`shared/lock.rs:96-99`, RB-006.5 rec. 5), which says two paths are a supported setup. After one compaction through the link, sessions on each path keep working on different files, and each believes it has the team's brain.
+- **Recommendation:**
+  1. Compaction (and `rekey --rotate`) resolves its path first, builds the temp file next to the real file, and renames over the real file.
+  2. A test with a handle on each path through a compaction, asserting both see the same memories after.
+- **Would I hold step 3 for it?** No. It's a small fix in step 1's code; do it before step 4.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: `compact_file` and `rekey --rotate` resolve the path first, build the temp file beside the real file, and rename over it; the two-path test. Step 3 adds case 4.
+
+#### RB-007.4 — [PLAN-REFINEMENT] [MEDIUM] Until compaction and the plain opens go through the lock layer, one busy shared reader keeps them out, and nothing writes `lock-info`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t8): a 2,000-memory brain, shared handles in threads recalling in a tight loop, and the main thread trying each call with a few milliseconds between tries.
+
+| Shared readers | `Mnemo::open`, 200 tries | `Mnemo::compact_file`, 30 tries | A shared writer, 30 writes |
+|---|---|---|---|
+| 1 | 25 `Ok`, 175 `Locked` | 0 `Ok`, 30 `Locked` | 30 `Ok`, slowest 62 ms |
+| 4 | 0 `Ok`, 200 `Locked` | 0 `Ok`, 30 `Locked` | 30 `Ok`, slowest 69 ms |
+| 8 | 0 `Ok`, 200 `Locked` | 0 `Ok`, 30 `Locked` | 30 `Ok`, slowest 68 ms |
+
+  - `compact_file` and `Mnemo::open` take the lock with one try and no intent lock (`open_with_lock`), which is what the note says for exclusive opens ("keep failing at once, as today").
+  - `Held::announce` has no caller outside the tests, so no `lock-info` is ever written and `Locked { holder }` is always `None`.
+  - A tight loop is harsher than agents are. The point is that the only callers with writer preference today are shared handles.
+- **Finding:** every surface that exists today (the CLI, `serve --mcp`, Python, `mnemo compact`) is a plain open. Once step 4 makes sessions shared, a `mnemo compact` or a CLI write from a tool that wasn't moved gets `Locked` whenever a session happens to be reading, with no holder named.
+- **Recommendation:** in step 4, take the lock for `compact`, `rekey --rotate`, `import` and the CLI's writes through `BrainLocks::acquire` (the intent lock, the deadline, `announce`), and list in the step's DONE which callers still open plainly. Until then say in the CHANGELOG that plain opens don't wait.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 4**: `compact`, `rekey --rotate`, `import` and the CLI's writes take the lock through `BrainLocks::acquire`, with `announce` for the long ones; step 4's DONE lists every caller that still opens plainly. **In step 2c:** a CHANGELOG line that plain opens don't wait.
+
+#### RB-007.5 — [CORRECTNESS] [LOW] A write window whose closure commits part-way can return a plain error with part of it stored
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (`tests/inner.rs`): `write(|db| { remember(first); flush(); remember(second) })`, with each write failed in turn.
+
+| Failing write | The call returns | The file then has |
+|---|---|---|
+| 0 to 3 | a plain error | neither |
+| 4 (the inner commit's own WAL write) | `MaybeStored` | neither |
+| 5 to 10 (after the inner commit point) | `MaybeStored` | the first |
+| 11 to 13 (the window's own commit, before its commit point) | **a plain error** | **the first** |
+| 14 and later | `Ok` | both |
+
+  - `flush` clears `commit_point` when it starts (`store/flush.rs:168`), so the window's own flush forgets that an earlier one in the same closure succeeded.
+  - The doc for `SharedMnemo` says: "If it fails before the commit point, nothing was stored" (`store/shared.rs:219-220`).
+  - Methods that commit inside a closure without the caller writing `flush`: `commit_deltas` (`continuation.rs:461`), `restore_to` (`snapshots.rs:136`), `rekey` (`maintenance.rs:167`), `export_encrypted` on a read-write handle (`maintenance.rs:53`) and a first `set_embedder` (`crud.rs:214`). `cache_put` under the default policy doesn't (t7: one commit for the window).
+- **Finding:** a caller that retries after the plain error stores the first step twice when it isn't idempotent (`commit_deltas` followed by another write, say). PLANNER-A noted the related flush-then-setting case and left it, since step 4's surfaces do one thing per window; this is the same shape with a failure where the setting was.
+- **Recommendation:**
+  1. Count commits that succeeded in the window (set a flag at the end of a successful `flush`). If a later step fails, return `MaybeStored` with a message that says part of the window is in the file.
+  2. Correct the doc sentence: it holds for a closure that doesn't commit by itself.
+  3. Keep step 4 to one engine call per window, and say so in its spec.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: recommendations 1 (a flag set by each successful flush in the window; a later failure, or a refused setting after it, returns `MaybeStored` saying part of the window is in the file; this replaces my earlier flush-then-setting doc note) and 2 (the doc). Recommendation 3 goes into step 4's spec. Step 3 adds case 7.
+
+#### RB-007.6 — [PERF] [LOW] Every write window commits a lease, also when the closure writes nothing or is refused, and every other handle then reloads
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t4), with a second handle watching.
+
+| The window | Transaction id | Page 0's seal | The other handle |
+|---|---|---|---|
+| `write(\|_\| Ok(()))` | 2 → 3 | new | reloads |
+| a `remember` the engine refuses (an all-zero vector) | 3 → 4 | new | reloads |
+| one `remember` | 4 → 6 | new | reloads |
+| a plain handle's first `remember`, then a later one | 6 → 8, then 8 → 9 | | |
+
+  - `run_write` resets `gen_leased` and then calls `ensure_gen_lease()` itself (`store/shared.rs:478-479`), before the closure runs.
+  - The note asks for the lease "in every exclusive window that writes". Every place that seals a page already takes the lease first if it's missing: `write_record` (`records.rs:1319`), `flush` (`flush.rs:227`) and `records.rs:1492`.
+  - The lease is a header-only commit with two fsyncs (`relocate_header_through_wal`, `flush.rs:101`; by reading, not timed).
+- **Finding:** a window that changes nothing costs two fsyncs and a full reload in every other process. `SharedMnemo::set_embedder` is a write window on every call (`shared.rs:292-296`), so each session that starts and attaches its embedder makes every other session reload.
+- **Recommendation:**
+  1. Drop the explicit `ensure_gen_lease()` and keep `gen_leased = false`. The lease is then taken by the first thing that seals, and a window that seals nothing writes nothing. The Worker's generation test still applies.
+  2. Make `SharedMnemo::set_embedder` a read window when the file already records the same embedder identity.
+  3. Add the no-op window to step 5's bench.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: recommendation 1 (reset `gen_leased` per window, drop the explicit lease; the Worker lists every place that seals a page and confirms each takes the lease first, with a debug assertion in the seal path; the generation test stays, plus a test that a no-op window leaves the transaction id unchanged) and 2. Recommendation 3 in step 5. This keeps RB-006.11 (a): every page a window seals still carries a fresh generation.
+
+#### RB-007.7 — [CORRECTNESS] [LOW] A sidecar directory deleted under a live handle isn't recreated, and the handle stops using the intent lock without saying so
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `19edf8b` (t6).
+  - Baseline: with `intent.lock` held by another descriptor, the handle's write waits and fails with `Locked`, as it should.
+  - The sidecar directory is removed (`git clean -fdx` does this; the `.gitignore` pattern makes the directory an ignored file). The old handle's next write returns `Ok`. The directory isn't back, and `notices()` is empty.
+  - A new handle creates the directory again. With the new `intent.lock` held elsewhere, the new handle's write fails with `Locked`, and the **old handle's write goes straight through**.
+  - The cause: the handle keeps the descriptor of the directory it opened (`shared/sidecar.rs:58`); creating a file in a removed directory fails, and `try_intent` turns any such failure into "not used" (`shared/lock.rs:213-215`).
+- **Finding:** only writer preference is lost today, and the main lock still serializes everything. But the note says "a running handle recreates what it needs", and step 7's presence locks go in this directory, where the same thing makes a running agent look dead (RB-006.5).
+- **Recommendation:** when `lock_file` fails, open the sidecar again by path, with the same checks, once per call; if it still can't be used, add a notice. A test for it, and keep it in mind for step 7.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: reopen the sidecar by path, with the same checks, once per call when a lock file can't be opened; a notice if it still can't be used; the test. Step 7 reuses it for presence. Step 3 adds case 5.
+
+#### RB-007.8 — [DX/DOCS] [LOW] Smaller points in steps 2a and 2b
+- **Status:** `ACCEPTED`
+- **Context / Evidence and recommendation, one item each:**
+  1. **A deadline too large for the clock panics.** `Duration::MAX` as `SharedOptions::deadline` panics inside `open_shared` with "overflow when adding duration to instant" (t2; `shared/call.rs:67`). A hundred years works. Use `checked_add` and clamp.
+  2. **One call can wait two deadlines** (by reading). When a read's catch-up finds a WAL to replay or a torn page 0, `window` calls `acquire` again for the exclusive lock (`store/shared.rs:340-348`), and each `acquire` starts a new `Call` (`shared/lock.rs:139`). Create the `Call` in `window` and pass it down.
+  3. **A reader can sleep holding the intent lock** (by reading). After a second `Main::Replaced`, `acquire` waits and retries inside the inner loop, with `intent` still held (`shared/lock.rs:166-175`). Drop it before that wait. It needs two replaced files in one call, so it's rare.
+  4. **An embedder set inside a closure is lost at the next reload** (t9). `write(|db| db.set_embedder(e))` works until another handle commits; then `remember_text` fails with "no embedder registered on this handle". Only `SharedMnemo::set_embedder` is carried over (`store/shared.rs:442-444`). Take `db.embedder` after every window, or say so in the doc.
+  5. **A brain the user can only read** (t10, mode 0400). `open_shared` and reads work. A write returns a bare `Io(PermissionDenied)`. With a WAL to replay, `open_shared` itself fails with the same bare error, where the note says `NeedsWriteOpen`. Map both.
+  6. **A panic caught in a read window leaves the stamp set** (by reading; `store/shared.rs:357-366`, `run_read`). The handle keeps whatever a half-run read left in memory, `read_only` stays true until the next window, and the statistics taken into the handle are dropped. Clear the stamp on any caught panic.
+  7. **`__state`, `__reloads` and `__page_cache` are public in every build** (`#[doc(hidden)]` only; `store/shared.rs:316-335`). `__state` hands out the handle with no lock and no catch-up, and its doc says calls that reach the file "fail here", but `Pager::file()` and `file_mut()` panic when no file is attached (`pager.rs:298`, `:305`). Put the three behind `cfg(any(test, feature = "failpoints"))`, as `__shared` is.
+  8. **A killed compaction leaves its temp file**, a full copy of the brain, and nothing removes it: 20 of 46 and 18 of 42 killed compactors left one in the kill test. The next compaction could remove temp siblings whose pid (it's in the name) no longer runs.
+  9. **Nothing shows `notices()` yet**, including "not using the sidecar directory". Step 4's surfaces should print them once.
+  10. **On a failed window the applied statistics are dropped** (`store/shared.rs:480-503`: the delta is put back only when the closure fails or a setting is refused). They're statistics; a line in the doc is enough.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Step 2c:** items 1 (`checked_add`, clamp), 2 (one `Call` per window), 3 (drop the intent lock before that wait), 4 (take `db.embedder` after every window), 5 (a write on a read-only file and a pending WAL on one give a clear error, `NeedsWriteOpen` where the note says so, not a bare `Io`), 6 (clear the stamp on any caught panic), 7 (the three hooks behind `cfg(any(test, feature = "failpoints"))`) and 10 (a doc line). **Step 4:** item 8 (under the exclusive lock, remove compaction temp siblings whose pid no longer runs) and item 9 (each surface prints `notices()` once).
+
+#### RB-007.9 — [SECURITY] [LOW] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** one finding about shipped code (every version), next to what RB-006.11 (b) fixed. Tested at `19edf8b`. The same file has my check of RB-006.11 (a) and (b) on the branch.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Details and triage in `SECURITY.local.md`. Step 2c.
+
+---
+
+**For step 3's cross-process suite.** What the existing tests don't reach, most useful first.
+
+1. **Kills, not failpoints.** Separate processes killed with `SIGKILL` at random while they write, read and compact, then: every acknowledged write present once, `verify` clean, no reader's count going backwards, no error other than `Locked`. My harness (`/tmp/rb-scratch/rb7/kill_test.py` with `src/bin/rb7.rs`) found nothing in three runs on macOS. It should run on Linux and Windows in CI, at a smaller size.
+2. **A real full disk** in a process that lives on (`RLIMIT_FSIZE`, or a small tmpfs): the failpoints fail before a write, never part-way through one, and never fail a sync, `set_len` or the WAL read-back.
+3. **Rekey cases** (`RB-007.2`): a rekey inside a window and then a compaction; another process's rekey and then a writer that dies after its commit point.
+4. **Two paths to one brain** (`RB-007.3`): a symlink to the file, a handle on each path, a compaction through each.
+5. **The sidecar removed while handles run** (`RB-007.7`), and a sidecar that appears later for a handle that started without one.
+6. **A cancelled call, then the next call on the same handle** (`RB-007.1`); a cancel that arrives while the call holds the intent lock (assert the lock is free straight after).
+7. **A closure that commits part-way** (`RB-007.5`), with `commit_deltas` as the inner step.
+8. **Linux inode reuse:** two compactions in a row so the path gets the handle's old inode number back, to exercise the seal-fails path with an equal identity. My in-place copy test covers the same code on macOS, where inode numbers aren't reused.
+9. **Windows:** the stamp there is the seal alone, and the sidecar has no owner check; a compaction and an in-place copy under a live handle.
+10. **The replaced-file backoff** (PLANNER-A's question): it needs a path that fails the identity check twice in one call. A test can do it with a thread that renames a new file over the path in a loop while a handle calls; assert the calls end by the deadline and the CPU isn't spun (count the tries through a hook). I'd add it: item 3 of `RB-007.8` is in the same lines.
+11. **The 0.13.2 compactor** against shared writers, from the note's step 3 list.
+12. **Mixed plain and shared handles** in one process and across processes: a plain writer that dies after its commit point is covered; add a plain long-lived handle that makes shared callers wait their deadline and return `Locked`.

@@ -21408,3 +21408,70 @@ budgets by value`, pushed to PR 66:
   on attempt 1, the iOS simulator job included.
 
 **Stopped.** Step 3 waits for REVIEWER-B's review of 2a and 2b (RB-007).
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — RB-007 triaged (all nine accepted); step 2c, the fixes, dispatched before step 3
+
+**RB-007** (REVIEWER-B, steps 2a and 2b at `19edf8b`): the core holds. Three
+kill-test runs on macOS (up to 245 `SIGKILL`s and 541 compactions) lost no
+acknowledged write, stored none twice, and `verify` passed. Nine items, all
+`ACCEPTED`; the triage is in `reviewer_notes.md` (and `SECURITY.local.md`
+for RB-007.9 and the RB-006.11 (b) mode note).
+
+**Why a step 2c before step 3:** seven of the nine are small fixes in step 2's
+code, and step 3's suite should test the fixed behaviour, not today's.
+
+**DISPATCH — v0.14.0 step 2c, one PR into `release-0.14.0`:**
+- **RB-007.1:** `SharedMnemo::set_cancel(Option<CancelToken>)`; the doc says
+  a cancel only reaches a call waiting for a lock; a test that the next call
+  after a cancel succeeds.
+- **RB-007.2:** `SharedMnemo::rekey` / `rekey_with_key` in a write window,
+  replacing the kept secret only on success; `db.rekey` inside a closure
+  refused like a setting; WAL replay and torn-page-0 healing with the held
+  data key when the result verifies under it (the kept secret otherwise);
+  tests.
+- **RB-007.3:** `compact_file` and `rekey --rotate` resolve the path, build the
+  temp file beside the real file and rename over it; a test with a handle on
+  a symlink and one on the real path through a compaction.
+- **RB-007.5:** a flag set by each successful flush in the window; a later
+  failure, or a refused setting after one, returns `MaybeStored` saying part
+  of the window is in the file. Correct the `SharedMnemo` doc sentence and
+  replace my flush-then-setting note in `write`'s doc.
+- **RB-007.6:** reset `gen_leased` per window and drop the explicit lease.
+  List in the DONE every place that seals a page and confirm each takes the
+  lease first; add a debug assertion in the seal path. Keep the generation
+  test; add one that a no-op window leaves the transaction id unchanged.
+  `SharedMnemo::set_embedder` is a read window when the file already records
+  the same embedder identity.
+- **RB-007.7:** when a sidecar lock file can't be opened, reopen the
+  directory by path with the same checks, once per call; a notice if it
+  still can't be used; a test (directory removed under a live handle, then a
+  new handle's `intent.lock` held: the old handle must wait).
+- **RB-007.8** items 1 (`checked_add`, clamp), 2 (one `Call` per window), 3
+  (drop the intent lock before that wait), 4 (take `db.embedder` after every
+  window), 5 (a write to a read-only file, and a pending WAL on one, give a
+  clear error, `NeedsWriteOpen` where the note says so, not a bare `Io`), 6
+  (clear the stamp on any caught panic), 7 (`__state`, `__reloads`,
+  `__page_cache` behind `cfg(any(test, feature = "failpoints"))`) and 10 (a doc
+  line on dropped statistics). Add the replaced-file backoff test (the list's
+  case 10).
+- **RB-007.9 and the sidecar mode** (held items): see their triage in
+  `SECURITY.local.md`. Neutral commit and PR wording; nothing about them in
+  the PR text.
+- **RB-007.4, CHANGELOG only in 2c:** plain opens (the CLI, `serve --mcp`,
+  Python, `mnemo compact`) don't wait for shared handles yet; step 4 moves
+  them onto the lock layer.
+- Log DONE when the PR is green, with the PR number and the runs, and stop
+  before merging.
+
+**Step 4 inherits:** RB-007.4 (compact, `rekey --rotate`, `import` and CLI
+writes through `BrainLocks::acquire`, with `announce`; the DONE lists plain
+callers left), RB-007.5 rec. 3 (one engine call per window in the surfaces),
+RB-007.8 items 8 (remove dead compactors' temp files under the exclusive lock)
+and 9 (print `notices()` once).
+
+**Step 3, after 2c merges:** the note's step 3 list plus REVIEWER-B's twelve
+cases in RB-007 ("For step 3's cross-process suite"), with the kill test on
+Linux and Windows CI at a smaller size. I'll dispatch it at 2c's merge.
+
+**README HANDOFF at the v0.14.0 release** (noted now): the file-mode line
+from RB-007.9's triage.
