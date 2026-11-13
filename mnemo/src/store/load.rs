@@ -83,6 +83,24 @@ pub(super) fn lock_exclusive(
     Ok((file, Some(held)))
 }
 
+/// 12.4: take `path`'s shared lock through the lock layer for a read-only
+/// open: it waits up to `opts.deadline` for a writer to finish, and runs
+/// alongside other readers (a reader holds the intent lock for one try
+/// only). As [`lock_exclusive`], the sidecar is used only if a shared
+/// handle has made it, and where shared mode isn't available, one plain
+/// try.
+pub(super) fn lock_shared(path: &Path, opts: &crate::SharedOptions) -> Result<LockedFile> {
+    use crate::shared::{BrainLocks, Call, LockKind};
+    let mut locks = match BrainLocks::for_plain(path, opts) {
+        Ok(l) => l,
+        Err(MnemoError::Unsupported(_)) => return open_with_lock(path, false, Create::No),
+        Err(e) => return Err(e),
+    };
+    let mut call = Call::new(opts.deadline, opts.cancel.as_ref());
+    let mut held = locks.acquire(LockKind::Shared, &mut call)?;
+    Ok(held.take_file())
+}
+
 /// `path` made absolute against the current directory, without resolving
 /// symlinks (a later check re-resolves them, so it follows the path as it
 /// is then). If the current directory can't be read, the path is kept as

@@ -52,7 +52,8 @@ use serde_json::{json, Map, Value};
 use crate::error::{MnemoError, Result};
 use crate::memory::{Memory, MemoryType, Metric, Scope};
 use crate::result_cache::{CachePutOpts, SemanticCachePutOpts, DEFAULT_SEMANTIC_THRESHOLD};
-use crate::store::{Mnemo, RecallRequest};
+use crate::shared::SharedOptions;
+use crate::store::{Mnemo, RecallRequest, SharedMnemo};
 
 /// MCP protocol version we advertise on `initialize`.
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -152,9 +153,60 @@ pub fn serve_stdio_with_embedder(
     path: &Path,
     embed_spec: Option<(String, String, bool, std::time::Duration)>,
 ) -> Result<()> {
+    serve_stdio_with_options(path, embed_spec, None)
+}
+
+/// [`serve_stdio_with_embedder`], and with `shared` set, in **shared mode**
+/// (12.4, `mnemo serve --mcp --shared`): the server holds no lock between
+/// tool calls, and each call is one read or one write window on the file,
+/// so other servers, the CLI and Python can use the brain meanwhile. The
+/// options' deadline is how long one call waits for the lock.
+pub fn serve_stdio_with_options(
+    path: &Path,
+    embed_spec: Option<(String, String, bool, std::time::Duration)>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    serve_with_streams(path, stdin.lock(), stdout.lock(), embed_spec)
+    serve_with_streams_opts(path, stdin.lock(), stdout.lock(), embed_spec, shared)
+}
+
+/// The server's handle: a plain read-write handle for its whole life, or
+/// a shared-mode one (12.4). One per server, and the variants are close in
+/// size, so neither is boxed.
+#[allow(clippy::large_enum_variant)]
+enum ServerDb {
+    Plain(Mnemo),
+    Shared(SharedMnemo),
+}
+
+impl ServerDb {
+    fn len(&mut self) -> Result<usize> {
+        match self {
+            ServerDb::Plain(db) => Ok(db.len()),
+            ServerDb::Shared(s) => s.read(|db| Ok(db.len())),
+        }
+    }
+}
+
+/// The tools that only read. In shared mode they run in a read window
+/// (the shared lock, alongside other readers); every other tool runs in a
+/// write window. `recall`'s access statistics ride the handle's next
+/// write.
+fn is_read_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "about"
+            | "history"
+            | "thread_export"
+            | "recall"
+            | "list"
+            | "snapshot_list"
+            | "stats"
+            | "cache_get"
+            | "cache_stats"
+            | "cache_get_semantic"
+    )
 }
 
 /// Run the MCP loop against explicit reader/writer streams. Extracted so
@@ -163,8 +215,20 @@ pub fn serve_stdio_with_embedder(
 pub fn serve_with_streams<R: Read, W: Write>(
     path: &Path,
     reader: R,
+    writer: W,
+    embed_spec: Option<(String, String, bool, std::time::Duration)>,
+) -> Result<()> {
+    serve_with_streams_opts(path, reader, writer, embed_spec, None)
+}
+
+/// [`serve_with_streams`], in shared mode when `shared` is set (see
+/// [`serve_stdio_with_options`]).
+pub fn serve_with_streams_opts<R: Read, W: Write>(
+    path: &Path,
+    reader: R,
     mut writer: W,
     embed_spec: Option<(String, String, bool, std::time::Duration)>,
+    shared: Option<SharedOptions>,
 ) -> Result<()> {
     let passphrase = std::env::var(PASSPHRASE_ENV).map_err(|_| {
         MnemoError::Invalid(format!(
@@ -176,21 +240,42 @@ pub fn serve_with_streams<R: Read, W: Write>(
         "mnemo mcp: opening {} (protocol {PROTOCOL_VERSION})",
         path.display()
     );
-    let mut db = Mnemo::open(path, &passphrase)?;
+    let mut db = match shared {
+        None => ServerDb::Plain(Mnemo::open(path, &passphrase)?),
+        Some(opts) => {
+            let s = Mnemo::open_shared(path, &passphrase, opts)?;
+            // The notices once, at start (RB-007.8 item 9).
+            for n in s.notices() {
+                eprintln!("mnemo mcp: note: {n}");
+            }
+            eprintln!(
+                "mnemo mcp: shared mode: each tool call takes the file's lock, \
+                 nothing is held between calls"
+            );
+            ServerDb::Shared(s)
+        }
+    };
     if let Some((cmd, name, normalize, timeout)) = embed_spec {
+        let dimensions = match &mut db {
+            ServerDb::Plain(db) => db.dimensions(),
+            ServerDb::Shared(s) => s.read(|db| Ok(db.dimensions()))?,
+        };
         let identity = crate::EmbedderIdentity {
             name,
-            dimensions: db.dimensions(),
+            dimensions,
             normalize,
         };
         let embedder = crate::EmbedCmd::new(&cmd, identity)?.with_timeout(timeout);
-        db.set_embedder(embedder)?;
+        match &mut db {
+            ServerDb::Plain(db) => db.set_embedder(embedder)?,
+            ServerDb::Shared(s) => s.set_embedder(embedder)?,
+        }
         eprintln!(
             "mnemo mcp: embedder ready (text params accepted, timeout {}s)",
             timeout.as_secs()
         );
     }
-    eprintln!("mnemo mcp: ready ({} live memories)", db.len());
+    eprintln!("mnemo mcp: ready ({} live memories)", db.len()?);
 
     let reader = BufReader::new(reader);
     for line in reader.lines() {
@@ -250,8 +335,12 @@ pub fn serve_with_streams<R: Read, W: Write>(
     // signal survives across sessions.
     // PERF-1 (R-004.3): `close()` also persists the ANN index, which plain
     // flushes now write only every so often.
-    if let Err(e) = db.close() {
-        eprintln!("mnemo mcp: flush on shutdown failed: {e}");
+    // A shared server holds nothing between calls; its last recalls'
+    // statistics went with their read windows (they ride the next write).
+    if let ServerDb::Plain(db) = db {
+        if let Err(e) = db.close() {
+            eprintln!("mnemo mcp: flush on shutdown failed: {e}");
+        }
     }
     eprintln!("mnemo mcp: stdin closed, shutting down");
     Ok(())
@@ -261,7 +350,7 @@ pub fn serve_with_streams<R: Read, W: Write>(
 
 /// Route a request to a method handler. Returns either the `result`
 /// payload for a JSON-RPC success or an [`RpcError`] for a failure.
-fn handle(db: &mut Mnemo, req: &Request) -> std::result::Result<Value, RpcError> {
+fn handle(db: &mut ServerDb, req: &Request) -> std::result::Result<Value, RpcError> {
     if req.jsonrpc != "2.0" {
         return Err(RpcError::new(
             INVALID_REQUEST,
@@ -273,7 +362,10 @@ fn handle(db: &mut Mnemo, req: &Request) -> std::result::Result<Value, RpcError>
         "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tools_list()),
-        "tools/call" => tools_call(db, &req.params),
+        "tools/call" => match db {
+            ServerDb::Plain(db) => tools_call(db, &req.params),
+            ServerDb::Shared(s) => shared_tools_call(s, &req.params),
+        },
         other => Err(RpcError::new(
             METHOD_NOT_FOUND,
             format!("method '{other}' not implemented"),
@@ -682,6 +774,37 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "content": [ { "type": "text", "text": text } ],
         "isError": false,
     }))
+}
+
+/// 12.4: one tool call as one window (RB-007.5 rec. 3: one engine call per
+/// window). A tool's own error aborts a write window, so nothing it did is
+/// committed (unless it committed part of its work itself, which comes
+/// back as `MaybeStored`).
+fn shared_tools_call(s: &mut SharedMnemo, params: &Value) -> std::result::Result<Value, RpcError> {
+    let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let mut tool_err: Option<RpcError> = None;
+    let run = |db: &mut Mnemo, tool_err: &mut Option<RpcError>| match tools_call(db, params) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let msg = e.message.clone();
+            *tool_err = Some(e);
+            Err(MnemoError::Invalid(msg))
+        }
+    };
+    let r = if is_read_tool(name) {
+        s.read(|db| run(db, &mut tool_err))
+    } else {
+        s.write(|db| run(db, &mut tool_err))
+    };
+    match r {
+        Ok(v) => Ok(v),
+        // Part of the window is in the file: say so, whatever the tool said.
+        Err(e @ MnemoError::MaybeStored(_)) => Err(mnemo_err(e)),
+        Err(e) => match tool_err {
+            Some(t) => Err(t),
+            None => Err(mnemo_err(e)),
+        },
+    }
 }
 
 /// Convert a [`MnemoError`] to an [`RpcError`]. Every error becomes an

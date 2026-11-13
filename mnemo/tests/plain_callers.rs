@@ -282,3 +282,39 @@ fn compaction_removes_only_dead_compactors_temp_files() {
     live.kill().unwrap();
     live.wait().unwrap();
 }
+
+/// The cleanup also needs the file to be this user's (Unix): in a shared
+/// directory, another user's file that happens to match the name stays.
+#[cfg(unix)]
+#[test]
+fn compaction_keeps_a_matching_temp_file_another_user_owns() {
+    use std::os::unix::fs::MetadataExt;
+    let dir = tempdir().unwrap();
+    let d = dir.path();
+    let p = brain(d, 1);
+    let me = std::fs::metadata(&p).unwrap().uid();
+    let mut dead = Command::new("true").spawn().unwrap();
+    let dead_pid = dead.id();
+    dead.wait().unwrap();
+    let left = d.join(format!("b.mnemo.compact-{dead_pid}-0-0000abcd.tmp"));
+    std::fs::write(&left, b"a dead compactor's copy").unwrap();
+
+    // Seen as another user's (the test override of the effective uid).
+    mnemo_engine::__failpoints::set_euid_override(Some(me.wrapping_add(1)));
+    Mnemo::compact_file(p.to_str().unwrap(), PW).unwrap();
+    mnemo_engine::__failpoints::set_euid_override(None);
+    assert!(left.exists(), "another user's file is kept");
+    Mnemo::compact_file(p.to_str().unwrap(), PW).unwrap();
+    assert!(!left.exists(), "this user's is removed");
+
+    // Really another user's, where the test can make one (root only).
+    if me != 0 {
+        eprintln!("skipped the chown case: not running as root");
+        return;
+    }
+    let theirs = d.join(format!("b.mnemo.compact-{dead_pid}-1-0000abcd.tmp"));
+    std::fs::write(&theirs, b"someone else's").unwrap();
+    std::os::unix::fs::chown(&theirs, Some(65534), Some(65534)).unwrap();
+    Mnemo::compact_file(p.to_str().unwrap(), PW).unwrap();
+    assert!(theirs.exists(), "a file owned by uid 65534 is kept");
+}

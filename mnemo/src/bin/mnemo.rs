@@ -21,6 +21,13 @@ use mnemo_engine::{
 #[derive(Parser)]
 #[command(name = "mnemo", version, about, long_about = None)]
 struct Cli {
+    /// How long to wait for the brain's lock when another process holds it
+    /// (12.4 shared mode): `10s`, `500ms`, `2m`, or a number of seconds.
+    /// Reads run alongside other readers; writes wait with writer
+    /// preference. A session hook should pass `--wait 2s`.
+    #[arg(long, global = true, value_name = "DURATION", default_value = "10s",
+          value_parser = parse_wait)]
+    wait: std::time::Duration,
     #[command(subcommand)]
     command: Command,
 }
@@ -630,6 +637,17 @@ enum Command {
         /// Prevents a stuck child from freezing the MCP agent.
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
+        /// 12.4 shared mode: hold no lock between tool calls, so other
+        /// servers, the CLI and Python can use the file meanwhile; each tool
+        /// call takes the lock for itself, waiting up to `--wait`. Off by
+        /// default: without it the server holds the file for its whole life,
+        /// as before.
+        #[arg(long)]
+        shared: bool,
+        /// With `--shared`: use shared mode on a network or synced folder
+        /// anyway, where the lock may not reach every process.
+        #[arg(long, requires = "shared")]
+        allow_network_fs: bool,
     },
     /// Result-cache management (Phase 10.1). One `.mnemo` file is
     /// both an agent-memory store AND a durable key/value cache;
@@ -950,19 +968,69 @@ fn unlock(
     }
 }
 
-/// A read-only open with either secret.
+/// How long a command waits for the brain's lock (`--wait`, default 10 s).
+static WAIT: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+
+/// 12.4: the lock layer's options for this command: `--wait` as the
+/// deadline.
+fn wait_opts() -> mnemo_engine::SharedOptions {
+    let mut o = mnemo_engine::SharedOptions::default();
+    if let Some(w) = WAIT.get() {
+        o.deadline = *w;
+    }
+    o
+}
+
+/// `--wait`'s value: `10s`, `500ms`, `2m`, or a bare number of seconds.
+fn parse_wait(s: &str) -> std::result::Result<std::time::Duration, String> {
+    let s = s.trim();
+    let (num, unit) = match s.find(|c: char| c.is_ascii_alphabetic()) {
+        Some(i) => s.split_at(i),
+        None => (s, "s"),
+    };
+    let n: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| format!("not a duration: {s:?} (try 10s, 500ms or 2m)"))?;
+    let secs = match unit.trim() {
+        "ms" => n / 1000.0,
+        "s" => n,
+        "m" => n * 60.0,
+        other => return Err(format!("unknown unit {other:?} in {s:?} (use ms, s or m)")),
+    };
+    if !secs.is_finite() || secs < 0.0 {
+        return Err(format!("not a duration: {s:?}"));
+    }
+    Ok(std::time::Duration::from_secs_f64(secs.min(1e9)))
+}
+
+/// 12.4: a read-only open through the lock layer: it waits up to `--wait`
+/// for a writer instead of failing at once, and runs alongside other
+/// readers.
+fn open_r(path: &str, pp: &str) -> mnemo_engine::Result<Mnemo> {
+    Mnemo::open_read_only_waiting(path, pp, wait_opts())
+}
+
+/// 12.4: a read-write open through the lock layer, for one command's
+/// write: it waits up to `--wait` with writer preference, and names `op`
+/// to a shared caller that times out meanwhile.
+fn open_w(path: &str, pp: &str, op: &str) -> mnemo_engine::Result<Mnemo> {
+    Mnemo::open_exclusive(path, pp, op, wait_opts())
+}
+
+/// A read-only open with either secret (waiting, as [`open_r`]).
 fn open_ro(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
     match s {
-        inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
-        inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+        inspect::Secret::Passphrase(p) => Mnemo::open_read_only_waiting(path, p, wait_opts()),
+        inspect::Secret::Key(k) => Mnemo::open_read_only_waiting_with_key(path, k, wait_opts()),
     }
 }
 
-/// A read-write open with either secret.
-fn open_rw(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
+/// A read-write open with either secret (waiting, as [`open_w`]).
+fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mnemo> {
     match s {
-        inspect::Secret::Passphrase(p) => Mnemo::open(path, p),
-        inspect::Secret::Key(k) => Mnemo::open_with_key(path, k),
+        inspect::Secret::Passphrase(p) => Mnemo::open_exclusive(path, p, op, wait_opts()),
+        inspect::Secret::Key(k) => Mnemo::open_exclusive_with_key(path, k, op, wait_opts()),
     }
 }
 
@@ -1349,6 +1417,7 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 
 fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
+    let _ = WAIT.set(cli.wait);
     match cli.command {
         Command::Init {
             path,
@@ -1468,9 +1537,7 @@ fn run() -> std::result::Result<(), String> {
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             // 12.4 (RB-007.4): through the lock layer, so shared handles'
             // calls can't keep the rekey out, and theirs see "rekey".
-            let mut db =
-                Mnemo::open_exclusive(&path, &pp, "rekey", mnemo_engine::SharedOptions::default())
-                    .map_err(fmt)?;
+            let mut db = Mnemo::open_exclusive(&path, &pp, "rekey", wait_opts()).map_err(fmt)?;
             // RB-005.4 item 4: REKEY-1 makes an error leave the old passphrase
             // in force, so say so. The one exception (the old header couldn't
             // be written back) says "may open with either secret" itself.
@@ -1495,7 +1562,7 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
             if rotate {
-                let r = Mnemo::compact_file(&path, &new).map_err(fmt)?;
+                let r = Mnemo::compact_file_waiting(&path, &new, wait_opts()).map_err(fmt)?;
                 println!(
                     "rekeyed and rotated {path}: a fresh data key, {} memories kept",
                     r.after
@@ -1515,8 +1582,12 @@ fn run() -> std::result::Result<(), String> {
         } => {
             let secret = unlock(&pp, &key_file)?;
             let report = match &secret {
-                inspect::Secret::Passphrase(p) => Mnemo::compact_file(&path, p),
-                inspect::Secret::Key(k) => Mnemo::compact_file_with_key(&path, k),
+                inspect::Secret::Passphrase(p) => {
+                    Mnemo::compact_file_waiting(&path, p, wait_opts())
+                }
+                inspect::Secret::Key(k) => {
+                    Mnemo::compact_file_waiting_with_key(&path, k, wait_opts())
+                }
             }
             .map_err(fmt)?;
             println!(
@@ -1562,9 +1633,7 @@ fn run() -> std::result::Result<(), String> {
             // through the lock layer (12.4, RB-007.4) for the whole import.
             let text =
                 std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
-            let mut db =
-                Mnemo::open_exclusive(&path, &pp, "import", mnemo_engine::SharedOptions::default())
-                    .map_err(fmt)?;
+            let mut db = Mnemo::open_exclusive(&path, &pp, "import", wait_opts()).map_err(fmt)?;
             let mut count = 0usize;
             for (lineno, line) in text.lines().enumerate() {
                 let line = line.trim();
@@ -1600,7 +1669,7 @@ fn run() -> std::result::Result<(), String> {
             let mt = parse_memory_types(&r#type)?
                 .pop()
                 .ok_or_else(|| format!("unknown memory type: {type:?}", r#type = r#type))?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
             let identity = EmbedderIdentity {
                 name: embed_name,
                 dimensions: db.dimensions(),
@@ -1682,7 +1751,7 @@ fn run() -> std::result::Result<(), String> {
             n_rerank,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "index").map_err(fmt)?;
             if drop {
                 db.drop_index();
                 db.flush().map_err(fmt)?;
@@ -1738,7 +1807,7 @@ fn run() -> std::result::Result<(), String> {
             // catalog writes. Safe on a read-only handle.
             let pp = passphrase(&pp)?;
             let q = resolve_query(query, query_file)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let hits = db
                 .search(&q, top_k, mnemo_engine::Metric::Cosine)
                 .map_err(fmt)?;
@@ -1909,7 +1978,7 @@ fn run() -> std::result::Result<(), String> {
             // `get` is a plain catalog lookup + record read — no writes.
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let m = db.get(&ulid).map_err(fmt)?;
             print_memory(&m, format, verbose, vector);
         }
@@ -2131,7 +2200,7 @@ fn run() -> std::result::Result<(), String> {
                     if no_track {
                         return open_ro(path, secret).map(|db| (db, true));
                     }
-                    match open_rw(path, secret) {
+                    match open_rw(path, secret, "recall") {
                         Ok(db) => Ok((db, false)),
                         Err(mnemo_engine::MnemoError::Locked { .. }) => {
                             // R-004.4: open read-only first and print the
@@ -2299,7 +2368,7 @@ fn run() -> std::result::Result<(), String> {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
 
             let mut patch = MemoryPatch::default();
             if let Some(i) = importance {
@@ -2360,7 +2429,7 @@ fn run() -> std::result::Result<(), String> {
         } => {
             use mnemo_engine::KeyScope;
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             // v0.8.1 bugfix: default slot matches keyed remember with
             // the same arguments. No `--shared`, no `--agent` → default
             // agent's private slot.
@@ -2440,7 +2509,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let db = open_r(&path, &pp).map_err(fmt)?;
             let snaps = db.snapshots();
             if snaps.is_empty() {
                 println!("no snapshots yet (nothing has been flushed)");
@@ -2458,7 +2527,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "restore").map_err(fmt)?;
             let info = match (to_txn, to_time) {
                 (Some(txn), _) => db.restore_to(txn).map_err(fmt)?,
                 (None, Some(t)) => db.restore_to_time(t).map_err(fmt)?,
@@ -2476,6 +2545,8 @@ fn run() -> std::result::Result<(), String> {
             embed_name,
             embed_normalize,
             embed_timeout,
+            shared,
+            allow_network_fs,
         } => {
             if !mcp {
                 return Err("serve requires --mcp today (other transports may come later)".into());
@@ -2493,7 +2564,12 @@ fn run() -> std::result::Result<(), String> {
                 )),
                 _ => None,
             };
-            mnemo_engine::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;
+            let shared = shared.then(|| {
+                let mut o = wait_opts();
+                o.allow_network_fs = allow_network_fs;
+                o
+            });
+            mnemo_engine::mcp::serve_stdio_with_options(p, embed_spec, shared).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
     }
@@ -2517,9 +2593,9 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             // the handle is read-only. Use read-write here so the stats
             // update lands durably on the next user-driven flush. A v8
             // file opens read-only (the v8 sunset), so its stats stay.
-            let mut db = match Mnemo::open(&path, &pp) {
+            let mut db = match open_w(&path, &pp, "cache get") {
                 Err(mnemo_engine::MnemoError::FormatTooOld { version: 8 }) => {
-                    Mnemo::open_read_only(&path, &pp).map_err(fmt)?
+                    open_r(&path, &pp).map_err(fmt)?
                 }
                 other => other.map_err(fmt)?,
             };
@@ -2572,7 +2648,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
                 ttl_secs: ttl,
                 cost_hint_ms: None,
             };
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache put").map_err(fmt)?;
             db.cache_put(&ns, &key, &bytes, opts).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("cached {} bytes at ({ns}, {key})", bytes.len());
@@ -2584,7 +2660,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache delete").map_err(fmt)?;
             db.cache_delete(&ns, &key).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("deleted ({ns}, {key}) (space reclaimed on next compact)");
@@ -2596,7 +2672,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             // Read-only handle is fine — stats is a pure scan.
-            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let db = open_r(&path, &pp).map_err(fmt)?;
             let s = db.cache_stats(ns.as_deref());
             let obj = serde_json::json!({
                 "namespace": ns,
@@ -2616,7 +2692,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache purge").map_err(fmt)?;
             let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("purged {n} entr{}", if n == 1 { "y" } else { "ies" });
@@ -2699,7 +2775,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 read_transcript(file, fmt_enum).map_err(fmt)?
             };
 
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "thread ingest").map_err(fmt)?;
             let identity = EmbedderIdentity {
                 name: embed_name,
                 dimensions: db.dimensions(),
@@ -2728,7 +2804,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             // 12.7d: the shared ingest-shape export (seq order, chunks
             // joined), so the JSONL matches Python and MCP `thread_export`
             // and re-ingests cleanly.
@@ -2761,7 +2837,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "thread forget").map_err(fmt)?;
             let n = db.thread_forget(&thread).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!(
@@ -2776,7 +2852,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "thread start").map_err(fmt)?;
             let id = db.thread_start(&new, &from).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!(
@@ -2819,7 +2895,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let out = db.essence(scope, budget).map_err(fmt)?;
             print!("{out}");
             Ok(())
@@ -2843,7 +2919,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
                 return Err("use `mnemo essence append` for timeline entries".into());
             }
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence add").map_err(fmt)?;
             let id = db
                 .essence_add(scope, section, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2861,7 +2937,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence append").map_err(fmt)?;
             let id = db
                 .essence_append_timeline(scope, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2878,7 +2954,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence update").map_err(fmt)?;
             let outcome = db
                 .essence_update(&ulid, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2898,7 +2974,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence resolve").map_err(fmt)?;
             let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             let s = match outcome {
@@ -2916,7 +2992,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence remove").map_err(fmt)?;
             db.essence_remove(&ulid).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("{id}\tremoved");
