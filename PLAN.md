@@ -21809,3 +21809,242 @@ the tree, open the PR, and log DONE as dispatched.
 It shows the mixed-version pair loses nothing in practice; the post-commit
 identity check stays covered by 2b's in-process hook test, and the DONE says
 so. Each "not meaningful" case has its reason, which is what I asked for.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 3, the cross-process suite (PR 68, green, not merged)
+
+**Before the PR:**
+- Coordination sync `686b5c0` on `release-0.14.0`: my 2c DONE, the BLOCKED
+  entry and PLANNER-A's unblock decision.
+- The re-run asked for (`gh run rerun 43458282199 --failed`, attempt 4 of
+  Mobile CI on `e26e376`) finished: `mobile (aarch64-apple-ios)` was **not
+  run** again (cancelled with 0 steps and the runner-acquisition
+  annotation). Per the new rule it doesn't block. The same job did run and
+  pass on PR 68 (below), and it must be green on the release branch's final
+  push before the READY.
+
+**PR 68** (`rel0140-3-cross-process` into `release-0.14.0`), three commits:
+- `1e3a4b1` the suite;
+- `f419715` a CI step that shows the Linux-only cases' output;
+- `eaae65b` the full-disk case at CI size reaching limits every write fits
+  under, plus an assertion that one does.
+
+Merge with **Squash and merge**. Stopped before merging, as dispatched.
+
+**Runs on `eaae65b`, 20 of 20 checks green on attempt 1:** CI 43475999225 and
+Mobile CI 43475999503 (the iOS cross-build and the Swift simulator job
+included). The PR touches a workflow file, so Mobile CI ran on it. Earlier
+heads:
+- `1e3a4b1`: CI 43469331206 green; on Mobile CI 43469331105 only the iOS
+  cross-build was "not run" (0 steps, the same annotation).
+- `f419715`: CI 43473404413 and Mobile CI 43473404429, both green.
+
+**What's in it:**
+- **`mnemo/tests/cross_process.rs`:** 13 tests on macOS and Windows, 15 on
+  Linux.
+  - Child processes are the test binary run again: `xp_child` returns at
+    once unless `MNEMO_XP_ROLE` selects a role, then plays it and exits.
+    No binary is added to the crate.
+  - Children report through files in the test directory: one line per
+    acknowledged write, and unexpected errors in `errors.log`, which every
+    test asserts is empty.
+  - No retries inside tests. A workload loop that meets `Locked` makes its
+    next call, as a caller would.
+- **`mnemo/tests/proptest_store.rs`:** `prop_two_shared_handles_match_the_model`
+  (24 cases; 256 with `MNEMO_STRESS=1`).
+- **`.github/workflows/ci.yml`:** a new job, `old compactor (v0.13.2,
+  linux)`. It installs the released 0.13.2 CLI, caches it with
+  `actions/cache@v6`, runs the old-compactor case, and runs the two
+  Linux-only cases with `--nocapture`.
+- **CI cost:** the new tests add about 15 s to each OS's test step at CI
+  size (well under the 3-minute budget). The new job adds a parallel Linux
+  job.
+
+**The cases, by the dispatch's numbering:**
+1. **Kills:** three writers, two readers and a compactor in child processes,
+   one killed at random every 50 to 400 ms (`Child::kill`: `SIGKILL`, or
+   `TerminateProcess` on Windows) and restarted.
+   - Asserts: every acknowledged write in the file once; nothing stored
+     twice; `verify` clean; no reader's count going down; no error but
+     `Locked`. A writer reads back every tenth write.
+   - **Passes on Linux, macOS and Windows CI** (6 s).
+   - **Locally at full size** (`MNEMO_STRESS=1`, 60 s, macOS): 252 kills,
+     157 compactions, 1,034 writes acknowledged, **0 missing, 0 stored
+     twice, `verify` clean**, no unexpected error. 8 writes are in the file
+     but were never acknowledged (killed between the commit and the log
+     line, which is allowed).
+2. **A real full disk** (Linux): a child started with `SIGXFSZ` ignored (an
+   `sh` trap, so no `unsafe` and no new dependency) sets `RLIMIT_FSIZE`
+   through `rustix`. For 40 limits up to 160 KiB past the file's end (160
+   in 1 KiB steps at full size), four writes run through a handle that
+   lives on; then the limit goes.
+   - Asserts: `Ok` stored; a plain error not stored; the handle equals a
+     fresh open; the next write works; `verify` clean.
+   - **CI:** 38 `Ok`, 94 plain errors, 28 `MaybeStored`, with no violation.
+     The first push's step was too small: 0 `Ok` with limits up to 39 KiB.
+3. **Rekey across processes:**
+   - Another process's rekey; the old-secret handle carries on. A rekey and
+     a compaction under the new secret then make its next calls
+     `WrongPassphrase`, twice: that's the revocation case.
+   - Another process rekeys, a third dies after its commit point under the
+     new secret, and the old-secret handle replays with the held key.
+4. **Two paths to one brain** (Unix): child writers on a symlink and on the
+   real path, and a compactor child going through each in turn. Every
+   write is acknowledged and in the file, the link stays a link, and there
+   is one sidecar.
+5. **The sidecar** (Unix):
+   - Removed five times (moved away, then deleted) under two writer
+     processes: they make it again; every write is stored; no notices.
+   - A handle that started with a file at the sidecar's name, after the
+     name is freed and another process makes the directory: all writes
+     from both are stored; the early handle's notices name the sidecar and
+     the late one's are empty. **The early handle doesn't pick the
+     directory up later** (2c reopens only a sidecar the handle had). That's
+     correct but without writer preference; noted for step 7, which reuses
+     the reopen for presence.
+6. **A cancel while holding the intent lock:** a plain handle in a child
+   holds the file, and a shared writer waits. The test checks that the
+   writer holds the intent lock, then cancels: `Cancelled`, and the intent
+   lock is free straight after.
+7. **`commit_deltas` part-way:** `commit_deltas` and then a `remember`, with
+   each write failed in turn. A plain error never has either in the file;
+   at least one failure says "part of the window"; the handle equals the
+   file after each.
+8. **Linux inode reuse: not forced.** 40 compactions on GitHub's ext4 never
+   gave the path its old inode number back ("inode reuse forced: false" in
+   the new job's output). The test still checks the handle follows the
+   file. The seal-fails-with-equal-identity path is covered by the in-place
+   copy in case 9.
+9. **A live handle** through an older copy written over the file in place,
+   a compacted copy (a new data key) written in place, two compactions in a
+   row, and a deleted file (an `Io(NotFound)` error, nothing created at the
+   path) brought back. **Passes on Windows CI.**
+10. **The 0.13.2 compactor:** three shared writer processes against the
+    released CLI's `mnemo compact` in a loop for 15 s.
+    - **CI:** 57 compactions, 632 writes acknowledged, none lost, 0
+      `ReplacedDuringWrite`.
+    - **Locally:** 47 compactions, 285 acknowledged, none lost, 0
+      reported.
+    - So the mixed-version pair lost nothing in practice. The identity
+      check after the commit stays covered by 2b's in-process hook test
+      (`the_path_is_checked_again_after_the_commit`).
+11. **Mixed:** a plain handle, in this process and then in a child, makes
+    shared reads and writes wait their 300 ms deadline and return `Locked`.
+    After it closes, shared calls work, and a plain open gets in between
+    shared calls.
+12. **The proptest model with a second handle:** two shared handles,
+    remember and delete through either, compactions, and a plain open
+    writing between calls. After every step each handle equals the model;
+    at the end a reopen equals it and `verify` passes.
+13. **The note's crash-injection list:** remember, update and cache_put, each
+    with every write failed in turn, in a child that exits at once or keeps
+    calling.
+    - A handle in the parent, live throughout, equals a fresh open (its
+      memories, a recall's hits and the cache value).
+    - A plain error stored nothing.
+    - The living child's own view equals the file.
+    - 34 child runs at CI size.
+
+The rest of the note's step 3 list already had tests from steps 2a to 2c:
+writer preference against eight readers, the sidecar safety tests, the
+synced-folder rules, FLAKE-1, every wait with a deadline, the cancelled
+wait.
+
+**Undo checks** (each fix undone, then the test re-run):
+- **Caught:**
+  - catch-up disabled, so the handle never reloads (the kill test);
+  - recovery without the held key (case 3);
+  - compaction not resolving the symlink (case 4);
+  - the sidecar reopen disabled (case 5, the removal test);
+  - the partial-window flag on the window's own commit (case 7);
+  - a stamp that ignores the seal (case 9, and the proptest);
+  - `finish_failed_commit` disabled (case 13). That needed the new
+    "a plain error stored nothing" assertion; without it the test passed.
+- **Not meaningful, with the reasons:**
+  - The post-lock identity check, against the kill test: compaction holds
+    the lock through its rename, so the race needs an open and a lock to
+    straddle the rename; `replaced_file.rs` covers it in-process.
+  - Clearing the stamp at the start of a write window: masked, because the
+    lease commit changes the seal before anything is sealed.
+  - The identity check after the commit, against the 0.13.2 compactor: the
+    race never happens (above).
+  - Cases 6 and 11 have no fix to undo.
+  - The Linux-only cases weren't undo-checked: I have no local Linux, and
+    no container runtime is installed.
+
+**Tests:** `cargo test --features failpoints` on macOS: **452 passed, 0
+failed** (438 before). Clippy (`--all-targets --features failpoints,benches
+-- -D warnings`) and fmt are clean.
+
+**Not done:** no new code in the engine (step 3 is tests). `test/project.mnemo`
+not updated: I don't handle passphrases.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 3 accepted (PR 68); step 4, the surfaces, dispatched in two PRs
+
+**Step 3 (PR 68, head eaae65b): ACCEPTED.**
+- Checked on GitHub: 20 of 20 checks green on eaae65b, Mobile CI's iOS
+  cross-build included (so the "not run" job from the 2c merge has now run
+  on this code). Squash and merge.
+- The thirteen cases cover the dispatch's list. The undo checks caught every
+  fix they could, and each "not meaningful" has its reason. Inode reuse
+  couldn't be forced on ext4; case 9's in-place copy covers the same path.
+- **For step 7 (noted):** a handle that started without a sidecar doesn't
+  pick up one made later (2c reopens only a sidecar the handle had). Step 7
+  reuses the reopen for presence, so it must cover that case.
+
+**DISPATCH — v0.14.0 step 4, the surfaces.** After PR 68's merge. Two PRs
+into `release-0.14.0`, each green and reviewed before the next. Rule for
+both (RB-007.5 rec. 3): **one engine call per window**; every surface maps
+each call to one `read` or `write` window.
+
+**4a — the engine's plain callers and Python:**
+- **RB-007.4, engine half:** `compact_file`, `rekey --rotate` and `import`
+  take the lock through `BrainLocks::acquire` (the intent lock, the deadline,
+  `announce("compact")` and so on). A plain exclusive open keeps failing at
+  once, as the note says.
+- **RB-007.8 item 8:** under compaction's exclusive lock, remove the
+  brain's compaction temp siblings whose pid no longer runs (exact name
+  pattern only, same directory, never anything else).
+- **Python:** `mnemo_engine.open(..., shared=True, wait=10.0,
+  allow_network_fs=False)` (and the raw-key form) returns a handle whose
+  methods each run in one window; the same method names as today's handle.
+  Explicit settings raise as in Rust. Map `Cancelled`, `Unsupported`,
+  `MaybeStored` and `ReplacedDuringWrite` to their own Python exception
+  types under `mnemo_engine.MnemoError`. Python tests for each, plus two
+  Python processes sharing a file.
+- `notices()` exposed on the Python handle and emitted once as a Python
+  warning (RB-007.8 item 9, Python half).
+
+**4b — the CLI, `serve --mcp --shared` and `inspect`:**
+- **The CLI:** `--wait <dur>` (default 10 s) on every command that opens a
+  brain. Reads (`info`, `list`, `recall --no-track`, `export`, `verify`) wait
+  and run alongside other readers; writes (`remember`, `update`, `forget`,
+  `import`, `compact`, `rekey`) each take one exclusive window through the
+  lock layer (RB-007.4, CLI half). `Locked` names the holder when
+  `lock-info` has one.
+- **`serve --mcp --shared`:** off by default in v0.14 (step 8 decides the
+  default). Each tool call is one window. Notices to stderr once at start.
+- **`inspect`:** its read-only open waits (bounded backoff) instead of
+  failing; a pending WAL gives the note's `NeedsWriteOpen` message ("any
+  writer's next call recovers it"); it never writes.
+- **Hooks** (`dev-hooks`) pass `--wait 2s`.
+- **The step's DONE lists every caller that still opens plainly**
+  (RB-007.4), with why.
+
+**Docs, across 4a and 4b** (README is mine: put the user-facing text in the
+CHANGELOG and `docs/`, and give me the README lines in the DONE as a
+proposed HANDOFF):
+- how to turn shared mode on, per surface;
+- **the upgrade note** (RB-006.3 rec. 3): update every `mnemo` on the machine
+  (CLIs, wheels in every virtualenv, apps on older bindings) before using
+  `--shared`;
+- the kept secret (a shared handle holds its passphrase in memory for its
+  life); network and synced folders refused, `allow_network_fs`; hard links
+  not covered; overlayfs needs Linux 4.19+; Windows builds need Rust 1.85+;
+  a mapped network drive on Windows may not be detected;
+- the mobile bindings don't have shared mode in v0.14.
+
+**Not in step 4:** the mobile bindings (later, with mobile's opt-in);
+REKEY-2 (next, its own small PR after 4b); step 5's bench.
+
+Log DONE after each PR is green, with the PR number and the runs, and stop
+before merging each.
