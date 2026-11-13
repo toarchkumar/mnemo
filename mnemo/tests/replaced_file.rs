@@ -196,14 +196,17 @@ fn a_refused_create_leaves_the_live_file_intact() {
     let path = dir.path().join("live.mnemo");
     seed(&path, 3);
     let live = Mnemo::open(&path, PW).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    // The size, not the bytes: on Windows the live handle's lock is
+    // mandatory, so reading the file while it's open fails (os error 33).
+    let before = std::fs::metadata(&path).unwrap().len();
+    assert!(before > 0);
 
     let err = Mnemo::create(&path, "other-pw", cfg())
         .err()
         .expect("create must be refused");
     assert!(matches!(err, MnemoError::Locked { .. }), "{err}");
     assert_eq!(
-        std::fs::read(&path).unwrap(),
+        std::fs::metadata(&path).unwrap().len(),
         before,
         "the live file is untouched"
     );
