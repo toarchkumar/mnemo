@@ -1075,15 +1075,29 @@ fn a_cancel_while_holding_the_intent_lock_frees_it() {
     }
     let intent_path =
         __shared::sidecar_path(&std::fs::canonicalize(&p).unwrap()).join(__shared::INTENT);
+    // Wait until the writer holds the intent lock (it does while it waits
+    // for the main lock), capped at 10 s, instead of guessing a time; then
+    // cancel. A probe that gets the lock releases it at once.
     let watcher = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(300));
+        let start = Instant::now();
+        let held_while_waiting = loop {
+            if let Ok(f) = OpenOptions::new().read(true).write(true).open(&intent_path) {
+                if FileExt::try_lock_exclusive(&f).is_err() {
+                    break true;
+                }
+                FileExt::unlock(&f).unwrap();
+            }
+            if start.elapsed() > Duration::from_secs(10) {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        token.cancel();
         let f = OpenOptions::new()
             .read(true)
             .write(true)
             .open(&intent_path)
             .unwrap();
-        let held_while_waiting = FileExt::try_lock_exclusive(&f).is_err();
-        token.cancel();
         (f, held_while_waiting)
     });
     let e = a.write(|db| db.remember(mem("cancelled"))).unwrap_err();
