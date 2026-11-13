@@ -93,6 +93,111 @@ from the 2026-11-13 entries on for the live thread.
 The Planner's working memory lives here and in the WORKLOG, not in
 AGENTS.md. AGENTS.md has only the role rules.
 
+### Handover refresh, 2026-11-13: PLANNER-A moves to tmux (read first)
+
+Written by the PLANNER-A chat session before it handed over to the `planner-a`
+tmux session. Everything below is what that session knew that isn't
+obvious from the WORKLOG.
+
+**How the team runs now** (AGENTS.md, "Running in tmux"):
+- Four sessions in tmux on the user's Mac (an M1 Pro), each with Remote
+  Control: `planner-a` (the user's control center), `worker-a`,
+  `reviewer-b`, `reviewer-a` (called before roadmap phases). PLANNER-B and
+  the backup Worker are retired.
+- Messages are pointers to ledger entries; the ledgers hold the
+  instructions. The user keeps the gates listed in AGENTS.md rule 4.
+- **The user's working style:** plain English, short status, no recaps of
+  steps. Verify claims in the code, on GitHub and on the registries before
+  stating them; search the web before stating product facts. The user
+  decides roadmap order and anything marked "the user decides"; bring
+  those up briefly with a recommendation.
+- **tmux hygiene for the user:** detach (Ctrl-b, then d), never exit, to
+  keep a session alive; `caffeinate -dims` runs in its own window while
+  agents work (a closed lid sleeps the Mac unless a display is attached);
+  `/remote-control` in a session re-links it to the phone; a conversation
+  is saved under the folder it started in, so start every session in
+  `mnemo.nosync`. The old desktop-app threads are archived; don't revive
+  them.
+
+**The repo and the sync history:**
+- The repo is `~/Documents/GitHub/mnemo.nosync`. It was renamed out of iCloud's
+  reach on 2026-11-12, after stale `name 2.ext` copies tripped the Worker
+  twice. The old `~/Documents/GitHub/mnemo` reappeared once as iCloud
+  placeholders and was deleted; if it shows up again, it's stale: touch
+  nothing in it.
+- `test/project.mnemo` is gitignored, v9, and opened read-only by the
+  Planner. Passphrases come only from `test/.env`, read by scripts; no agent
+  types or pastes one. **Open user items:** rebuild `test/.venv` (Python 3.11,
+  `pip install -r test/requirements.txt`, `maturin develop --release` in
+  `mnemo-python`); optionally `chmod 600 test/project.mnemo` (it predates
+  RB-007.9's owner-only default).
+
+**How to check things:**
+- GitHub through its API with `curl` (PRs, check runs, workflow runs, job
+  annotations) works. crates.io and PyPI with `curl`; mnemo-swift with
+  `git ls-remote`; Maven Central can't be reached from the Planner's tools,
+  so accept the Worker's check there.
+- A job cancelled with 0 steps and the runner-acquisition annotation is
+  "not run": it doesn't block a merge, but every job must be green on the
+  release branch's final push before the READY (DECISION 2026-11-13).
+- Review triage: edit the Decision Ledger row and the item's
+  `**Planner Triage:**` and `**Status:**` lines with a small script, never by
+  hand-retyping long text. Security findings stay in `SECURITY.local.md`,
+  with neutral commit and PR wording, until the fix ships.
+
+**Releases** (REL-1, REL-2): one human approval, the `approve-release` job on
+the `release` environment (reviewer `toarchkumar`); the four registry
+environments have no reviewer and hold the secrets. The mobile mode comes
+from `.github/release-mobile` in the tagged commit (`ENABLE_MOBILE_PUBLISH` is
+only an off switch). Mobile publishes at least once per minor version, so
+v0.14.0 publishes mobile. Credentials: Trusted Publishing for crates.io and
+PyPI; the deploy key for mnemo-swift; the Maven Central user token renews by
+2027-11-09 and the GPG key expires before 2028-11-08.
+
+**Where v0.14.0 stands, and the queue to its release** (steps 1, 2a, 2b, 2c,
+3 and 4a merged or accepted on `release-0.14.0`):
+1. **4b:** the CLI (`--wait`), `serve --mcp --shared`, `inspect` waiting,
+   hooks with `--wait 2s`, the owner check in the temp cleanup; its DONE
+   proposes README lines.
+2. **DOGFOOD-0** (below).
+3. **REKEY-2:** RB-005.2 rec. 1, RB-005.3 rec. 2, RB-005.4 item 5 (see the
+   2026-11-12 entries).
+4. **Step 5, the bench** (the note's list, plus RB-007.6's no-op window);
+   then correct the 12.4 note's numbers.
+5. **READY,** with every push job green; **REVIEWER-B's release review**
+   (its cadence: each minor READY, and this release changes locking,
+   encryption handling and the file mode); triage; fixes.
+6. **Release prep HANDOFF** (PLANNER-A): root README (the shared-mode lines
+   from 4a's and 4b's DONEs, the kept-secret line, RB-007.9's file-mode
+   line, the upgrade note), `index.html` (pill, Shipped, Next),
+   `.github/release-mobile` true. Move RB-006.10–.12 and RB-007.9 from
+   `SECURITY.local.md` into PLAN.md once v0.14.0 is published.
+7. **Tag** (Worker) → **the user's approval click** (`NEEDS-USER`) →
+   **VERIFIED** on every registry.
+
+Then the roadmap goes on with 12.3 (a phase start: `NEEDS-USER` for the go,
+and REVIEWER-A before it).
+
+**Carried notes for later 12.4 steps:**
+- Step 7 (presence and claims): the sidecar reopen must also pick up a
+  sidecar made after the handle started (step 3's finding); RB-006.5's
+  rework.
+- Step 8 (shared as the MCP default): decide first whether to gate pre-0.14
+  binaries by format version.
+- Step 9 (the daemon): RB-006.12's trust requirements first.
+- CLEANUP-1 candidates added this week: raise the MSRV to 1.85 (drops the
+  Windows rename fallback and refusal); `GetDriveType` through a small helper
+  outside the `forbid(unsafe_code)` crate.
+
+**DOGFOOD-0, the first step toward HARNESS-DOGFOOD-1.** The user's
+first-success milestone is this project's git Markdown workflow running
+entirely in MNemo. As a start, the facts in this refresh also go into
+`test/project.mnemo` through `test/scripts/project_memory.py remember`
+(one fact per call; the Worker does it, after 4b). After that, a new
+session should try `python test/scripts/project_memory.py recall "<topic>"`
+next to reading this section, and note in its WORKLOG entries where the
+brain helped or fell short. Those notes feed 12.2, 12.3 and 13.x.
+
 **Target market (user decision 2026-11-07):** on-device agents and apps,
 from desktop apps down to tablets, phones and other small devices. Not
 hyperscale enterprise. **Optimise size and speed first.** Every spec
@@ -22048,3 +22153,269 @@ REKEY-2 (next, its own small PR after 4b); step 5's bench.
 
 Log DONE after each PR is green, with the PR number and the runs, and stop
 before merging each.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 4a, long plain operations and Python shared mode (PR 69, green, not merged)
+
+**Before the PR:**
+- PR 68 squash-merged as `e1886fc`; `rel0140-3-cross-process` deleted.
+- Push runs on `e1886fc`: CI 43480955742 and Mobile CI 43480956002, both
+  green on attempt 1 (every job ran, the iOS cross-build included).
+- Coordination sync `c2bce06` (my step 3 DONE and PLANNER-A's step 4
+  dispatch).
+
+**PR 69** (`rel0140-4a-plain-callers-python` into `release-0.14.0`), one commit,
+`0bd953b`. It can merge either way; it has no fix-ups. **Runs on `0bd953b`:**
+CI 43485512379, **14 of 14 checks green** on attempt 1. Mobile CI didn't run
+on the PR: no bindings, `Cargo.toml`, lockfile or workflow change; the Python
+binding isn't one of its paths. It runs on the push at the merge. Stopped
+before merging, as dispatched.
+
+**RB-007.4, the engine half:**
+- **`Mnemo::open_exclusive(path, passphrase, op, SharedOptions)` and
+  `open_exclusive_with_key`** (new public API): the lock through
+  `BrainLocks::acquire` (the intent lock, the deadline), then
+  `announce(op)`.
+  - The `Held` note lives on the handle in a new first field, `lock_note`,
+    so it drops (note removed) before the pager's unlock.
+  - Where `BrainLocks` returns `Unsupported` (a network or synced folder
+    without `allow_network_fs`, a Windows build before Rust 1.85) it falls
+    back to the one plain try, so those callers work as in v0.13.
+- **Callers moved onto it:**
+  - `compact_file_secret` (so `mnemo compact`, `rekey --rotate`'s
+    compaction, and Python's `compact_file` / `compact_file_with_key`),
+    with op "compact";
+  - the CLI's `import` (op "import"; the input is read before the lock);
+  - the CLI's `rekey` (op "rekey"). That's the rekey half of `--rotate`,
+    and plain `rekey` too, since it's one command.
+- **`Mnemo::open` is unchanged** (one try, `Locked` at once), as the note
+  says.
+- **A deviation, so no new sibling file for plain users:** plain long
+  operations go through `BrainLocks::for_plain`, which uses the sidecar
+  directory only if one is already there. Built first with
+  `BrainLocks::new`, compaction created `<brain>.mnemo-shared/` beside every
+  brain it touched, which `replaced_file.rs`'s no-sibling test caught. A
+  shared handle makes the sidecar when it opens, so without one no shared
+  caller exists to queue against. Without it the wait keeps the deadline
+  and backoff but writes no `lock-info` note.
+
+**RB-007.8 item 8:** `remove_dead_compaction_temps`, called under
+compaction's exclusive lock before the temp file is made.
+- It removes only names exactly `<brain's file name>.compact-<digits>-<digits>-<8
+  hex>.tmp`, in the brain's directory, that are regular files (not
+  symlinks or directories), whose pid isn't this process and
+  `pid_alive` says isn't running. Another user's process counts as
+  running.
+- Windows has no safe liveness check, so nothing is removed there (in the
+  CHANGELOG).
+
+**Python** (`mnemo-python/src/lib.rs`):
+- **`open(..., shared=False, wait=10.0, allow_network_fs=False, cancel=None)`**
+  and `open_with_key` likewise (keyword-only, after the existing
+  arguments).
+- **The handle** is now an enum, `Handle::Plain(Core)` or
+  `Handle::Shared(SharedMnemo)`. Every method goes through one `rd` or one
+  `wr`: a closure that runs directly on a plain handle, or in one shared
+  window.
+- **One engine call per window:** each Python method is one window.
+  Multi-step methods are one closure: `Session.close` and `discard`,
+  `insert_default_manifest`, and `stats` (stats plus the snapshot count).
+- **Shared windows release the GIL** (`Python::with_gil` +
+  `allow_threads`), so a call waiting up to its deadline doesn't stall
+  other Python threads. Embedding (`remember_text`, `update_text`,
+  `recall_text`, `cache_get_semantic_text`) happens outside the window,
+  through a new `SharedMnemo::embedder_arc`.
+- **Behaviour differences for a shared handle:**
+  - `flush()` does nothing (every write window has committed);
+  - `close()` drops the handle;
+  - `set_embedder` uses `SharedMnemo::set_embedder` (a read when already
+    recorded);
+  - `rekey` and `rekey_with_key` use `SharedMnemo::rekey` (the kept
+    secret follows), keeping the cleanup warning;
+  - file-wide setters raise `UnsupportedError` through the engine's check;
+  - the per-handle setters (`set_cache_capacity`,
+    `set_vector_cache_budget`) work;
+  - `__repr__` shows `shared` (no window just for a count).
+- **Exceptions:** `CancelledError`, `UnsupportedError`, `MaybeStoredError`,
+  `ReplacedDuringWriteError`, each a subclass of `MnemoError`.
+- **Additions beyond the dispatch:** `CancelToken` (a class), `open(...,
+  cancel=)` and `Mnemo.set_cancel`. Without them `CancelledError` can't
+  happen from Python, and so can't be tested. Also the `shared` getter,
+  and a `dev-hooks` test hook, `_dev_rename_after_next_shared_commit`, for
+  `ReplacedDuringWriteError`.
+- **Notices (RB-007.8 item 9, Python half):** `notices()` on the handle
+  (empty for plain), and each one raised once as a `UserWarning` at open.
+- **Refused:** `shared=True` with `read_only=True`, or a negative or
+  non-finite `wait`, raises `ValueError`. A missing file raises
+  `MnemoError` (shared mode never creates).
+
+**Tests:**
+- **`mnemo/tests/plain_callers.rs`** (new, 5):
+  - compaction waits for a held shared read where `Mnemo::open` gets
+    `Locked`;
+  - `open_exclusive`'s note is read by a shared caller as `Locked {
+    holder: "import since … (pid <ours>, …)" }`, and is gone after close;
+  - four busy shared readers don't keep `open_exclusive` or compaction out;
+  - the CLI's `import`, `compact` and `rekey --rotate` each wait (≥ 1 s)
+    for a 1.5 s shared read and succeed;
+  - only the dead compactor's temp file is removed, with eight lookalikes
+    kept (a live pid, our pid, wrong hex length, a non-digit field, a
+    suffix, `export-`, another brain's, a directory and a symlink, whose
+    target is untouched).
+- **Python** (`test_mnemo.py`, 6 new):
+  - two shared handles (writes seen without a flush, the cache, notices
+    empty, a plain open afterwards);
+  - a plain handle making a shared call wait its 0.3 s and raise
+    `LockedError`;
+  - the four exception types: settings; a cancel from a `threading.Timer`,
+    then a new token; `MaybeStoredError` through `commit_deltas` and the
+    write failpoint; `ReplacedDuringWriteError` through the hook;
+  - the argument errors;
+  - a notice warned once (a file at the sidecar's name);
+  - rekey through a shared handle followed by a compaction under the new
+    passphrase; sessions; an already-recorded embedder;
+  - **two Python child processes and the test process** writing 25 each to
+    one file, all 75 present and `verify` clean.
+- **Results (macOS):**
+  - `cargo test --features failpoints`: **457 passed, 0 failed** (452
+    before). `cargo test -p mnemo-uniffi`: 23 passed.
+  - The whole Python suite passes on a `--features dev-hooks` wheel in a
+    scratch venv.
+  - Clippy (`--all-targets --features failpoints,benches`, `-p
+    mnemo-uniffi`, and `mnemo-python` with and without `dev-hooks`) and
+    fmt are clean.
+- **Undo checks:**
+  - **Caught:**
+    - compaction back to a plain open (the wait test);
+    - no `announce`;
+    - the note leaked;
+    - no temp cleanup;
+    - no pid check;
+    - no regular-file check;
+    - the CLI import back to `Mnemo::open`. This one needed a stronger
+      test: at first the 300 ms read could end before the CLI reached its
+      open, so the test now holds 1.5 s and asserts each command waited;
+    - `BrainLocks::new` instead of `for_plain` (the no-sibling test);
+    - a wheel whose shared windows keep the GIL (the cancel test waits out
+      its deadline and gets `LockedError`).
+  - **Not meaningful:** the busy-readers test against compaction's plain
+    open: a single try sometimes gets in, so it isn't deterministic. The
+    wait test covers that change.
+
+**Plain callers that still open with one try** (RB-007.4; step 4b moves the
+CLI's onto the lock layer):
+- `Mnemo::open` / `open_with_key` / `create`, by design.
+- The CLI's other commands: `remember`, `update`, `forget`, `recall`,
+  `info`, `list`, `export`, `verify`, `init`, `about`; that's 4b.
+- `serve --mcp`, and `inspect`'s read-only open: 4b.
+- Python's plain handle (`shared=False`), by design.
+- The UniFFI `MnemoDb`: mobile, later.
+- `export_rekeyed` and `export_encrypted` work on an open handle, so they
+  take no lock of their own.
+
+**Docs:**
+- **`docs/shared-mode.md`** (new):
+  - turning it on per surface (Rust and Python now, the CLI, MCP and
+    `inspect` in 4b, mobile later);
+  - **the upgrade note** (update every `mnemo` on the machine first);
+  - one engine call per window; the wait; cancelling; notices; the long
+    plain operations;
+  - **the kept secret**; the sidecar; network and synced folders and
+    `allow_network_fs`; **hard links not covered**; **overlayfs needs
+    Linux 4.19+**; **Windows builds need Rust 1.85+**; **a mapped network
+    drive may not be detected**; settings;
+  - **the mobile bindings don't have shared mode in v0.14**;
+  - an errors table, Rust next to Python.
+- `mnemo-python/README.md`: `open`'s signature and a shared-mode paragraph,
+  the new methods and `CancelToken`, and the four exceptions in the errors
+  table.
+- `mnemo/README.md` (the crate's): a shared-mode paragraph in
+  "Concurrency & read-only opens".
+- CHANGELOG `[Unreleased]`: Added (Python shared mode, `open_exclusive`,
+  `embedder_arc`, the doc, plain opens still not waiting) and Changed
+  (compaction waits; the dead temp files).
+
+**Proposed root README HANDOFF lines** (yours to place; the README is yours):
+- Under the features or concurrency text: "**Shared mode** (v0.14): several
+  processes and sessions on one brain. Rust: `Mnemo::open_shared`. Python:
+  `mnemo_engine.open(path, passphrase, shared=True)`. The CLI and
+  `serve --mcp --shared` follow in v0.14's next step. Update every `mnemo`
+  on the machine before you turn it on. See `docs/shared-mode.md`."
+- Next to the security notes: "A shared-mode handle keeps its passphrase in
+  memory for its life (zeroized at close), so it can follow a compaction."
+- (Already noted for the release: RB-007.9's file-mode line.)
+
+**Not done:** `test/project.mnemo` not updated (I don't handle passphrases).
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION — step 4a accepted (PR 69); go on with 4b
+
+**Step 4a (PR 69, head 0bd953b): ACCEPTED.** Merge it (either way; one
+commit).
+- Checked on GitHub: 14 of 14 CI checks green on 0bd953b. Mobile CI runs at
+  the merge push; the push runs on `e1886fc` (PR 68) were green with every
+  job run.
+- Read `remove_dead_compaction_temps` and `dead_temp_pid`: exact pattern,
+  same directory, regular files only, a live or unknown pid kept. Good.
+- **The `for_plain` deviation: accepted.** Plain long operations use the
+  sidecar only when one already exists, so a plain user never gets a new
+  sibling directory; without one, no shared caller exists to queue against.
+  Record it in `docs/shared-mode.md` if it isn't there yet.
+- **The fallback to one plain try** where shared mode is refused (network or
+  synced folders, old Windows builds) keeps v0.13's behaviour there. Good.
+- **The additions beyond the dispatch** (`CancelToken` and `set_cancel` in
+  Python, the `shared` getter, the dev-hooks rename hook): accepted; they're
+  what makes the new exceptions testable.
+- The GIL released during a shared window, with the undo check that proves
+  it: good.
+- **The README lines:** taken as proposed. I'll place them, with RB-007.9's
+  file-mode line, in the release HANDOFF, once 4b's CLI and MCP lines are
+  known.
+
+**One small change, in 4b's PR:** in `remove_dead_compaction_temps`, also
+require on Unix that the file is owned by this user (`metadata().uid()`
+equals the effective uid). A brain in a shared directory shouldn't let
+compaction delete another user's file that happens to match the name.
+Extend the lookalike test with a file of another owner where the test can
+make one (skip as non-root otherwise, and say so).
+
+**Go on with step 4b** as dispatched in my step 4 entry: the CLI (`--wait`,
+reads alongside readers, writes through the lock layer, the holder in
+`Locked`), `serve --mcp --shared`, `inspect` waiting, hooks with `--wait 2s`,
+the docs, and the list of plain callers left. Log DONE when green, with the
+PR number, the runs and the proposed README lines for the CLI and MCP, and
+stop before merging.
+
+### 2026-11-13 — PLANNER-A — DECISION + HANDOFF + DISPATCH — the team moves to tmux with pointer messages; the Planner handover refreshed; DOGFOOD-0 queued
+
+**DECISION (user, 2026-11-13): run the team in tmux, gated.** This replaces
+the same day's "keep the relay setup". PLANNER-A moves from the chat to the
+`planner-a` tmux session, which is the user's control center. Sessions
+send each other only pointers to ledger entries; the instructions stay in
+the ledgers. Automation runs until the plan is done, usage runs out, or a
+blocker needs the user, who is told through `planner-a`. The gates, the hop
+cap and the one-writer rule are in AGENTS.md's new section "Running in tmux:
+messages carry pointers, the ledgers carry instructions".
+
+**HANDOFF (PLANNER-A → Worker), commit with the next coordination sync:**
+- `AGENTS.md`: the new subsection "Running in tmux…", inserted before
+  "`Planner` rules". Suggested message: `docs(agents): sessions in tmux pass
+  pointers to ledger entries; the user's gates`.
+- `PLAN.md`: the new "Handover refresh, 2026-11-13" at the top of "Planner
+  handover", and this entry.
+
+**DISPATCH — DOGFOOD-0, after 4b's merge** (before REKEY-2):
+- If `test/.venv` is missing or stale, rebuild it: Python 3.11,
+  `pip install -r test/requirements.txt`, then `maturin develop --release`
+  in `mnemo-python`. Don't print or type the passphrase; the script reads
+  `test/.env`.
+- Put the facts of the "Handover refresh, 2026-11-13" section into
+  `test/project.mnemo` with `python test/scripts/project_memory.py remember`,
+  one fact per call, about 25 to 40 of them, with fitting types (`semantic`
+  for standing facts, `procedural` for how-tos, `episodic` for dated
+  decisions) and importance. **Nothing from `SECURITY.local.md`,** and no
+  secret values.
+- Check three recalls ("how releases are approved", "where the repo lives
+  and why", "what stops for the user") and paste their top hits in the DONE.
+- **Say in the DONE what worked and what was awkward** (setup steps, the
+  embedder, wording that recalled badly). That's DOGFOOD-0's real output:
+  it feeds 12.2, 12.3 and 13.x.
+- Log DONE and send the pointer.
