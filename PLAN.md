@@ -19626,3 +19626,683 @@ explicit path.
 
 **Next:** the HANDOFF commit (README.md and index.html), the `chore(plan)`
 backup, `ENABLE_MOBILE_PUBLISH=false`, fast-forward `main`, and the tag.
+
+### 2026-11-12 — WORKER — NOTE — RB-003.1 and RB-004.1's recommendation 1 moved here from SECURITY.local.md (SEC-3 and the wording fix shipped in v0.13.1)
+
+Per AGENTS.md and the DISPATCH: SEC-3, the fix for RB-003.1, shipped in
+v0.13.1 (tag `v0.13.1` at 15bc00f; SEC-3 commits 1032e5b and c6ac8ca, PR
+51), and so did RB-004.1's recommendation 1, the wording (4fc4fc1 and
+9fe8074, PR 54). So they move from the gitignored `SECURITY.local.md` into
+this log, verbatim below with the headings demoted. With them go RB-003's
+probe table ("What held up") and RB-004's SEC-3 verification against
+RB-003.1's recommendations.
+
+**What stays in `SECURITY.local.md`:** RB-004.1 itself, with its
+recommendation 2 (SEC-4, the single-use link code, queued for v0.13.2),
+until SEC-4 ships. Line numbers below are as REVIEWER-B wrote them, at
+`afd65b3` (RB-003) and `d350d53` (RB-004).
+
+#### RB-003 (REVIEWER-B, 2026-11-12) — v0.13.0 at READY, unfixed and unreleased
+
+Code pinned at `afd65b3` (`release: v0.13.0`, branch `release-0.13.0`; the branch head `1afdfd7` adds only `.gitignore` and `AGENTS.md`). Nothing here is in a published package yet. Placeholders `RB-003.1` and `RB-003.2` are in `reviewer_notes.md` with titles withheld. Tests ran against a scratch copy made with `git archive afd65b3`, with `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`; the inspector was probed live with the release-profile CLI built from that copy.
+
+##### What held up in the inspector (`mnemo/src/bin/mnemo/inspect.rs`, `inspect.html`)
+
+Probed on a copy of `tests/fixtures/inspect/ios_export.mnemo`; each line is the observed status.
+
+| Probe | Result |
+|---|---|
+| No token; wrong 64-digit token; token only in the URL fragment | 403, 403, 403 |
+| Right token with `Host: evil.example:<port>`; with `Host: 127.0.0.1` (no port) | 403, 403 |
+| Right token with `Host: localhost:<port>` | 200 |
+| Right token, `POST`, `HEAD`, `OPTIONS` (a CORS preflight) | 405, 405, 405 |
+| Right token, `/../../etc/passwd`, `/api/secret` | 404, 404 |
+| A 17 KB header | 431 |
+| Listening sockets of the process (`lsof`) | `127.0.0.1:<port>` only; the LAN address refuses the connection |
+| Response headers | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`; the page adds a CSP with `default-src 'none'`, `connect-src 'self'`, `frame-ancestors 'none'`; no CORS header even with a foreign `Origin` |
+| The process's own argv | the file path only: no token, no passphrase (with `MNEMO_PASSPHRASE`) |
+
+- **The page has no HTML injection path.** Every value from the file goes through `document.createElement`, `setAttribute` on fixed names, or a text node (`inspect.html:108-117`); there is no `innerHTML`, no `href` or `src` built from data, and nothing is linkified.
+- The token is 32 bytes from the engine's key generator, compared in full (`inspect.rs:382-387, 467-473`).
+- The file is opened read-only for the load and closed (`:203-311`), so the server holds no lock between reads.
+- One oddity with no consequence I can find: with two `Host` headers the last one wins (`:450-457`), so `Host: evil.example` followed by `Host: 127.0.0.1:<port>` is accepted. A browser can't send two.
+
+##### RB-003.1 — [SECURITY] [MEDIUM] `mnemo inspect --open` hands the token to another program on its command line, where other local users can read it; and the server keeps the plaintext and the secret for as long as it's left running
+
+- **Status:** `ACCEPTED`
+- **Evidence:**
+  - `mnemo/src/bin/mnemo.rs:1941-1953`: the URL is `http://127.0.0.1:<port>/?t=<token>`, and with `--open` it's passed as an argument to `open` (macOS), `cmd /C start` (Windows) or `xdg-open` (elsewhere) (`inspect.rs:706-722`).
+  - Process arguments are readable by every local user on macOS (`ps`) and on Linux unless `/proc` is mounted with `hidepid`. On macOS the `open` process lives for milliseconds. On Linux `xdg-open` runs the browser with the URL as an argument, and when that starts the browser's first process the URL stays in its command line for as long as the browser runs. I didn't run `--open` here (it would open the user's browser); this is from reading the code and from how those launchers work.
+  - The loopback port is reachable by every local user, so the token is the only thing between another account on the machine and every decrypted memory in the file (`/api/memories`, `/api/thread?turns=1`, `/api/history`).
+  - `mnemo/README.md:902` shows `--open` as the way to start the inspector.
+  - `inspect.rs:358-362`: `State` keeps the `Secret` (the passphrase `String` or the raw key, neither zeroized) and everything read from the file for the life of the process, so that "Reload" works. There's no idle timeout: the server runs until Ctrl-C.
+  - The token also sits in the page URL, so it's in the browser's history (and in history sync) while the server runs.
+- **Finding:** On a single-user laptop none of this is reachable. On a shared machine (a lab workstation, a build box, a family Mac with two accounts logged in), `--open` can give another user the token, and with it a read of the whole file in plaintext for as long as the inspector is left running. The design is sound otherwise; the weak point is the hand-off to the browser.
+- **Recommendation:**
+  1. Don't put the token on a command line. Do what Jupyter does: write a small HTML file with mode 0600 in a private temp directory that redirects to the tokened URL, and pass *that file's* path to the launcher; delete it at exit. About 20 lines.
+  2. Until then, say in the `--open` help text and the README that it's for single-user machines, and show the copy-the-URL form first.
+  3. After the page reads the token, drop it from the address bar (`history.replaceState`) and keep it in `sessionStorage`, so it isn't in history or on a shared screen.
+  4. Hold the passphrase in `Zeroizing`, and add `--idle-timeout` (default something like 30 minutes without a request) so a forgotten inspector doesn't stay a readable plaintext copy.
+  5. Reject a request with more than one `Host` header.
+- **Would I hold the tag for it?** No. It needs a hostile second account and an opt-in flag. I'd take recommendation 2 (two sentences of help and README text) before the tag, because the README currently leads with `--open`, and the rest in v0.13.1.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12).
+  - **Before the v0.13.0 tag:**
+    - recommendation 2, in the `--open` help text and the engine README:
+      `--open` is for single-user machines, and copying the printed URL
+      comes first (the root README's handoff already does this);
+    - recommendation 5: refuse a request with more than one `Host` header,
+      plus a test.
+  - **In v0.13.1 (SEC-3):**
+    - recommendation 1 (a 0600 redirect file instead of the token on a
+      command line);
+    - recommendation 3 (`history.replaceState`, with the token kept in
+      `sessionStorage`);
+    - recommendation 4 (`Zeroizing` for the secret, and `--idle-timeout`,
+      default 30 minutes).
+  - Neutral commit messages until v0.13.1 ships; then move this item into
+    PLAN.md.
+
+
+#### RB-004 (REVIEWER-B, 2026-11-12) — SEC-3 on `release-0.13.1` at `d350d53`, unreleased
+
+Code pinned at `d350d53` (`release: v0.13.1`), scratch copy from `git archive`, `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked`. Probes ran against the release-profile CLI built from that copy, on a copy of `tests/fixtures/inspect/ios_export.mnemo`. The fixture copy was byte-identical after all of them. Placeholder `RB-004.1` is in `reviewer_notes.md` with its title withheld.
+
+##### SEC-3 against RB-003.1's recommendations: what I tested
+
+| RB-003.1 recommendation | What shipped | Result |
+|---|---|---|
+| 1. Keep the token off the launcher's command line | `--open` writes a forwarding page (`inspect.rs:842-876`) and passes its path (`:882-910`) | **Holds.** Run through a stand-in `open` placed first on `PATH` (the real browser was never launched): the launcher's arguments are the page's path only; the directory is 0700 and the page 0600, under `$TMPDIR`; loads of `/` without the token, or with a wrong one, don't remove it; the first load with the token removes the page and its directory within a second; never loaded, it's gone between 58 s and 63 s. |
+| 3. Take the token out of the address bar | `history.replaceState` and `sessionStorage` (`inspect.html:94-104`); `/` is served without the token (`inspect.rs:667-682`) | **Works as code, but the documented benefit is overstated: `RB-004.1` below.** Chrome 157 rendered the fixture (7 memories) from the printed URL and through the forwarding page. Eleven other paths (every `/api/` route, and three that don't exist) are 403 without the token and with a wrong one. `/` with a foreign `Host` is 403. |
+| 4. `Zeroizing`, and `--idle-timeout` | `Secret` holds `Zeroizing` values; a watchdog thread (`inspect.rs:472-487`) | **Holds.** With `5s`: requests every 0.5 s that carry no token or a wrong one (the page, `/api/about`) don't keep it up: exit 0 after 5.6 s, "stopping: no request for 5s (--idle-timeout)", port closed. With `4s`: one request with the token each second kept it up for 9 s, and it exited 4.2 s after the last. Page loads with the token count too. `0` never stops. |
+| 5. Refuse several `Host` headers | `inspect.rs:639` | **Holds:** 400 with two, 400 with none. |
+
+Small things from the same probes, none of them a finding on their own:
+- **`Zeroizing` covers the server's copy and the key-file bytes** (by reading). With `MNEMO_PASSPHRASE` or `--passphrase`, the process's own environment or arguments still hold the passphrase until it exits, and the flag path clones it (`mnemo.rs:919`). The exit follows the wipe at once, so this changes nothing in practice.
+- **The forwarding page is left behind when the server stops before the page loads** (idle exit, or Ctrl-C: both tested). The token in it is dead by then.
+- **A token given twice:** the last `t` wins (`?t=wrong&t=right` is 200, the reverse 403). No consequence.
+- **The real hand-off to a browser has no test anywhere.** The repo's unit test covers the page's content and permissions; my run used a stand-in launcher on macOS. Linux and Windows weren't exercised by anyone (see `RB-004.5` item 5 in `reviewer_notes.md` for one Linux case to check).
+
+
+##### RB-004.1 — [SECURITY] [LOW] The README and the CHANGELOG say the token "isn't in the browser's history". It is.
+
+- **Status:** `ACCEPTED`
+- **Evidence:**
+  - **The claim, in three places:**
+    - `mnemo/README.md:940-942`: "Once the page has loaded, it keeps the token for that tab only and takes it out of the address bar, so it isn't in the browser's history."
+    - `CHANGELOG.md:49-50`, the same sentence.
+    - `mnemo/src/bin/mnemo/inspect.html:94-95`, the comment above the code.
+  - **The test.** Chrome 157.0.8103.51, `--headless=new`, with a new `--user-data-dir` in my scratch folder (not the user's profile). I loaded the printed URL, let the page run, and read the profile's `History` database:
+    - from the printed URL: `http://127.0.0.1:<port>/?t=<TOKEN>`, then `http://127.0.0.1:<port>/`;
+    - through the `--open` forwarding page: `file://…/open.html`, then `http://127.0.0.1:<port>/?t=<TOKEN>`, then `http://127.0.0.1:<port>/`.
+  - The browser records the tokened URL as a visit when it loads, before the page's script runs. `replaceState` then adds the clean URL as a second entry; it doesn't remove the first.
+  - Firefox and Safari weren't tested.
+  - **A second stale sentence in the same paragraph:** `mnemo/README.md:936-937` says "Every request must carry that token". Since SEC-3 the page itself doesn't (tested: `/` is 200 without it). The CHANGELOG has this right ("Every API route still needs it").
+- **Finding:**
+  - What `replaceState` does give is real: the token is off the address bar, out of the tab's back and forward entries, and out of a bookmark, a copied link or a shared screen.
+  - The exposure left is small. The token stops working when the inspector stops (30 minutes idle by default), and the history belongs to the same user.
+  - But the sentence is a security claim and it's wrong in the most common browser. `mnemo/README.md` is the crate's README: once `mnemo-engine 0.13.1` is published, that copy can't be corrected.
+- **Recommendation:**
+  1. **Before the tag, reword it in the three places.** For example: "…and takes it out of the address bar. The browser's history still records the first visit; the token stops working when the inspector stops." In the README, also change "Every request must carry that token" to "Every data request".
+  2. *(Recommendation 2, SEC-4 in v0.13.2, stays in `SECURITY.local.md` until it ships.)*
+- **Would I hold the tag for it?** For recommendation 1 only, and it's wording, not code. If re-cutting the release commit isn't worth it, shipping as it is harms no one's data; the published README would carry one wrong sentence until v0.13.2.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12).
+  - **Recommendation 1, before the tag:** reword the history sentence in
+    `mnemo/README.md`, `CHANGELOG.md` and the `inspect.html` comment (the
+    first visit is recorded; the token stops working when the inspector
+    stops), and change "Every request" to "Every data request". The root
+    README's handoff already drops "one-time link" for "a private link
+    that works only while the inspector runs".
+  - RB-003.1 (SEC-3) ships in v0.13.1 with this wording fix; after the
+    tag, move RB-003.1 and this item's recommendation 1 into PLAN.md. This
+    item stays here until SEC-4 ships.
+
+### 2026-11-12 — WORKER — DONE — v0.13.1 released (the first one-click release, mobile off)
+
+**The tag:** `v0.13.1` (annotated, "MNemo 0.13.1") on 15bc00f, with `main`
+fast-forwarded from f8c86bb to 15bc00f. On top of step 8 (80e592f) are the
+HANDOFF commit 18099f7 (`docs: v0.13.1 README and site (safer opens,
+--key-file, Python errors)`: the Planner's README.md and index.html) and
+the backup 15bc00f (`chore(plan): sync coordination files`). Both are
+docs-only, so `paths-ignore` ran no CI on them. The code gates are on
+80e592f (step 8's DONE).
+
+**The run: Release 43305366410, green on attempt 1.**
+- `ENABLE_MOBILE_PUBLISH` was set to `false` before the tag, and the
+  version check read "mobile: off".
+- Every build passed: the version check, the sdist, 5 CLI and 5 wheels.
+  `mobile (Swift build)` and `mobile (Android build)` were skipped.
+- **The one approval: "approve the release (v0.13.1, mobile false)"**
+  (RB-004.4's name, evaluated on the tag). It waited on the `release`
+  environment only (reviewer `toarchkumar`), and the user approved it once
+  every build was green. Nothing else asked for an approval: crates.io and
+  PyPI ran in their environments with no reviewer.
+- Then Create GitHub Release, attach, crates.io, PyPI, the mobile-off
+  note and the engine gate all passed. The Swift and Android publish and
+  verify jobs were skipped.
+- **After the run finished,** `ENABLE_MOBILE_PUBLISH` was set back to
+  `true` (read back: `true`).
+
+**The registries** (read just now):
+- **crates.io:** `mnemo-engine` max and newest version 0.13.1 ("Published
+  mnemo-engine v0.13.1 at registry `crates-io`").
+- **PyPI:** `mnemo-engine` 0.13.1, 6 files (5 wheels and 1 sdist), with
+  attestations.
+- **Maven Central:** `mnemo-android` `<release>` is still 0.13.0, and
+  `…/mnemo-android/0.13.1/` is 404.
+- **`mnemo-swift`:** the newest tag is still 0.13.0.
+- **The GitHub Release** `v0.13.1` is not a draft or a prerelease, and has
+  11 assets: 5 CLI binaries, 5 wheels and the sdist, all named 0.13.1.
+
+**The Release body carries the mobile note (RB-004.3):** "**Mobile packages
+not published in this release** (latest: Swift 0.13.0, Android 0.13.0)."
+The note job started after attach, so the line survived.
+
+**The credentials used:**
+- **crates.io: Trusted Publishing (OIDC)**, through
+  `rust-lang/crates-io-auth-action`: "Retrieved JWT token successfully",
+  then a short-lived token from `crates.io/api/v1/trusted_publishing/tokens`
+  (`CRATES_TRUSTED_PUBLISHING` is `true`). `CRATES_IO_TOKEN` was not used.
+- **PyPI: Trusted Publishing (OIDC).** The step has no `password` input;
+  `pypa/gh-action-pypi-publish` minted the upload token from the job's OIDC
+  claim in the `pypi` environment, and uploaded with attestations.
+- **The Release, attach and the note:** the run's `GITHUB_TOKEN`.
+- No mobile credentials were used: the Maven signing key, the Central token
+  and `MNEMO_SWIFT_TOKEN` were all skipped.
+
+**Afterwards:**
+- RB-003.1 and RB-004.1's recommendation 1 are moved into the NOTE above.
+  `SECURITY.local.md` now holds only RB-004.1 (open until SEC-4), with
+  pointers to the moved items. The backup of the earlier file is in my
+  scratch folder.
+- `release-0.13.1` is deleted on origin and locally. The local checkout is
+  on `main` at 15bc00f.
+- Not committed: this entry and the NOTE above (PLAN.md), per the rule.
+  `reviewer_notes.md`'s RB-003.1 row still says "Held in SECURITY.local.md";
+  I left it for the Planner or Reviewer, who own that table.
+- The copy search (`.git/` included) prints nothing.
+
+**Next, queued by PLANNER-A:** v0.13.2: REKEY-1 first, then SEC-4, RB-004.4
+rec. 2, and RB-004.5 items 2, 4 and 5. Then the 12.4 design note. Also for
+v0.13.2: the README's "Nothing is written to disk" sentence, which isn't true
+with `--open`.
+
+### 2026-11-12 — PLANNER-A — VERIFIED + DISPATCH — v0.13.1 verified (the first one-click release); v0.13.2 dispatched
+
+**VERIFIED: v0.13.1** (Release 43305366410, green on attempt 1). Checked
+by me:
+- crates.io `mnemo-engine` max_version 0.13.1, published
+  2026-11-12T21:07:18Z;
+- PyPI 0.13.1 with 6 files;
+- `mnemo-swift`'s newest tag is still 0.13.0, as intended;
+- the GitHub Release `v0.13.1` (not a draft) has 11 assets, and its body
+  carries the "Mobile packages not published" line, so RB-004.3's fix
+  worked on its first real run.
+
+The one approval showed "approve the release (v0.13.1, mobile false)",
+and the user clicked it once, after every build was green. Nothing else
+paused. Both engine publishes used Trusted Publishing. REL-2 and REL-1's
+mobile-off path are now proven on a tag. `reviewer_notes.md`'s RB-003.1
+row now carries its title (it's fixed); REVIEWER-B marks it VERIFIED at
+its next pass.
+
+**DISPATCH: v0.13.2.** Work on a `release-0.13.2` branch, one PR per
+step, squash-merging any step that has WIP commits. **Mobile off** (no
+phone-facing change). **REVIEWER-B reviews it at READY:** it touches the
+encryption (rekey) and the release workflow.
+1. **REKEY-1** (RB-004.2, recommendations 1 to 3):
+   - `rekey_secret` keeps a copy of the header fields and `self.kdf` it's
+     about to change, and puts them back when a failure comes before the
+     new page 0 is written. An `Err` then means "still the old secret",
+     even after later writes;
+   - from the page-0 write on, the rekey has taken effect: the old-region
+     cleanup and the scrubs no longer return a plain error. Finish what
+     can be finished, and report the rest without implying the rekey
+     failed (a distinct error, or a report field);
+   - a failpoint test over every cut point, on v9 (and the read path on
+     v8): after `Err`, the old secret opens the file even after another
+     write and a close; after `Ok`, the new one does;
+   - update the step 8 doc sentence to match, in Rust and Python.
+2. **SEC-4** (RB-004.1 recommendation 2, in `SECURITY.local.md`), with
+   neutral commit messages.
+3. **RB-004.4 recommendation 2:** the mobile mode is read from the tagged
+   commit, through one small file the release commit sets, which `version
+   check` validates. `ENABLE_MOBILE_PUBLISH` stays only as an off switch.
+   RELEASING.md drops the flip-and-flip-back steps.
+4. **RB-004.5:**
+   - item 2: a pre-v9 file's torn-header read-only error names `compact`;
+   - item 4: after an idle stop, the inspector page says that it stopped
+     and how to start it again;
+   - item 5: check `--open` with a snap or flatpak browser on Linux, if
+     you can (a CI job or a container is fine). Document it in `--open`'s
+     help if it fails; the printed URL still works.
+5. **The engine README's "Nothing is written to disk"** isn't true with
+   `--open` (it writes a private forwarding page). Reword it, and say what
+   is written and when it's deleted.
+6. **The release commit,** mobile off: CI and Mobile CI green on the PR
+   and the push, then a mobile-off dry run. Log READY (listing the push
+   runs) and stop.
+
+Then the 12.4 design note.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 1: REKEY-1, a failed rekey leaves the old secret in force (RB-004.2, recommendations 1 to 3)
+
+**PR 55 into `release-0.13.2`** (`rel0132-1-rekey`, one commit, 989d8b0).
+It was fast-forwarded in, GitHub marked it merged, and the branch is deleted.
+CI 43312791389 is green (12/12; Mobile CI doesn't run on an engine and Python
+change). `release-0.13.2` was created from `main` at 15bc00f.
+
+**The change** (`rekey_secret`, `mnemo/src/store/maintenance.rs`):
+- It keeps a copy of the header and `self.kdf` before changing them. It
+  runs `relocate_header_through_wal`'s steps itself, so a failure before
+  page 0 can be told from one after it.
+- **A failure before the new page 0 is on disk** (the seal, the WAL commit,
+  the page-0 write or its sync) goes through `undo_rekey`. That puts the
+  header and the KDF back, and zeroes the new WAL region (best effort), so
+  a later torn-header scan can't recover the new wrap. If page 0 may have
+  been written, it also writes the old one back. The error is the
+  original one. If that write-back also fails, the error says the file may
+  open with either secret (the one case left; it needs two I/O failures in
+  a row).
+- **From the page-0 write on, the rekey has taken effect.** The old
+  region's first-frame clear, the region zeroing and the wrap scrub each
+  run even if the one before failed. A failure no longer fails the rekey:
+  it is recorded in the handle, and the new additive
+  `Mnemo::rekey_cleanup_error() -> Option<&str>` returns it (reset by each
+  rekey). The CLI's `mnemo rekey` prints a warning (not with `--rotate`,
+  which rewrites the file), and Python's `rekey` and `rekey_with_key` emit
+  a `RuntimeWarning`.
+- **Docs:** the step 8 sentence is replaced in the Rust docs, both Python
+  docstrings, the Python README row, and a new paragraph in the engine
+  README's security model. The CHANGELOG has a `[Unreleased]` Fixed entry.
+
+**The test** (`tests/rekey_cut.rs`, failpoints):
+- Every write a rekey makes (cut points 0 to 7), for a passphrase and for
+  a raw key, each followed by a drop, a close, or a write and a close.
+- Each case checks that the secret in force opens the file read-write and
+  read-only with the right count, and that the other secret gets
+  `WrongPassphrase`. After an `Err`, a copy with a torn page 0 doesn't
+  recover with the new secret.
+- **Outcomes, the same in all six combinations:** writes 0 and 1 (the WAL
+  commit, page 0) give `Err`; writes 2 and 3 (the old region's clear and
+  zeroing) give `Ok` with cleanup left; 4 on give `Ok`. The wrap scrub
+  has no failpoint, so its error path is covered by reading only.
+- `a_v8_file_refuses_a_rekey_and_is_unchanged`: the v8 read path. A rekey
+  on a read-only v8 handle is `ReadOnly`, writes nothing, and the file
+  still opens.
+- **Checked against the bug:** in a scratch copy with the restore removed,
+  both cut-point tests fail at write 1 (the old secret no longer opens the
+  file).
+
+**Local:**
+- `cargo test --features failpoints` (every suite green) and clippy
+  `-D warnings`.
+- The Python tests through `maturin develop --release --features
+  dev-hooks` (CI's build; without `dev-hooks`, `test_index_and_snapshots`
+  fails as expected). A clean rekey raises no warning under `-W
+  error::RuntimeWarning`.
+
+**Note:** the old `~/Documents/GitHub/mnemo` exists as an empty folder dated
+2026-11-11 19:25 (a leftover from the move). The session's shell sometimes
+starts there. I work only in `mnemo.nosync` with absolute paths, and have
+written nothing there.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 2: SEC-4 (details in SECURITY.local.md's RB-004.1)
+
+**PR 56 into `release-0.13.2`** (`rel0132-2-link`, one commit, 7f29ee4,
+neutral message). It was fast-forwarded in, GitHub marked it merged, and the
+branch is deleted. CI 43314048395 is green (12/12).
+- **The change:**
+  - The printed link is `/?c=<one-time code>` (32 random bytes, like the
+    token). The page removes it from the address bar and exchanges it at
+    `GET /api/session?c=…` for the session token, which it keeps in
+    `sessionStorage` as before.
+  - The server compares the code in equal time and clears it on the first
+    match. A missing or wrong code is 403 and doesn't use it up. The Host
+    check applies, as on every route.
+  - `page_served` (which removes `--open`'s forwarding page) is now set by
+    the exchange.
+  - A prerendered page waits for `prerenderingchange` before exchanging.
+    A used link shows "This link has already been used…".
+  - The CLI prints "the link opens one tab (it works once)". The engine
+    README's paragraph and the CHANGELOG say what it does.
+- **Tests:** `the_printed_link_works_once` (inspect_cli now has 9). The
+  helper exchanges the code for every other test.
+- **Checked in the browser pane** (on a scratch copy of the iOS fixture):
+  - first load: 7 memories, the URL `/`, and a 64-character token stored;
+  - a refresh: still 7;
+  - the same link in a fresh tab: "This link has already been used…", and
+    nothing is stored.
+- **For PLANNER-A (Planner-owned):** the root README says "a private link
+  that works only while the inspector runs". It can now also say the link
+  works once.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 3: the mobile mode is read from the tagged commit (RB-004.4 recommendation 2)
+
+**PR 57 into `release-0.13.2`** (`rel0132-3-mobile-mode`, one commit,
+6c72405). It was fast-forwarded in, GitHub marked it merged, and the branch
+is deleted. CI 43316152471 and Mobile CI 43316152474 are green (18/18).
+- **`.github/release-mobile`:** one line, `true` or `false`, set by the
+  release commit. It says `false` now.
+- **`version check`:**
+  - reads the file (from the tagged commit on a tag), and refuses a
+    missing file or any other value;
+  - prints "the commit says mobile: …" and then "mobile: on|off (<where
+    it came from>)";
+  - on a tag, `ENABLE_MOBILE_PUBLISH=false` overrides a `true` (the off
+    switch); `true` or unset follows the commit;
+  - a dry run keeps its `mobile` input.
+- **RELEASING.md:** the flip-and-flip-back steps and the "Re-run all jobs"
+  warning are gone (the mode no longer changes on a re-run). The variable
+  is described as an off switch. Checklist step 1 sets the file, and the
+  dry-run step says to match it.
+- **Checked:** the shell logic was simulated locally over the file values
+  (`true`, `false`, ` true\n`, `maybe`, missing), both events and the three
+  variable values. All 30 cases came out as intended. YAML parses.
+- **For the tag (unchanged setting):** `ENABLE_MOBILE_PUBLISH` is `true`,
+  which now means "follow the commit". Nothing needs flipping for v0.13.2.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 4: RB-004.5 items 2, 4 and 5
+
+**PR 58 into `release-0.13.2`** (`rel0132-4-small`, one commit, 47be9d2).
+It was fast-forwarded in, GitHub marked it merged, and the branch is
+deleted. CI 43316947935 and Mobile CI 43316947984 are green (18/18).
+- **Item 2:** `open_read_only_secret`'s torn-header branch looks at the
+  recovered page-0 frame. For a pre-v9 file the `NeedsWriteOpen` reason
+  names `mnemo compact` (and `--key-file`), so `needs_write_open_hint` adds
+  no "open read-write once". The new test
+  `a_torn_v8_header_names_compact_and_compact_heals_it` zeroes the v8
+  fixture's magic and checks the message, that nothing is written, and
+  that `compact_file` converts it to v9 with every memory (7 tests in
+  v8_fixture).
+- **Item 4:** `api()` and the code exchange turn a failed `fetch` into
+  "The inspector has stopped (after --idle-timeout without use, or
+  Ctrl-C)… Run `mnemo inspect <file>` again for a new link." Checked in
+  the browser pane with `--idle-timeout 6s`: after the stop, opening
+  Threads shows the message. The page test checks the text is there.
+- **Item 5, probed on GitHub's Ubuntu 24.04 runner** with a throwaway
+  workflow on `exp-open-sandbox` (runs 43313914011, inconclusive: the snap
+  install got HTTP 408; then 43314404638). The branch and its worktree
+  are deleted.
+  - A loopback test server logged which pages redirected to it.
+  - **snap Firefox 160.0-1:** the direct URL and a page under `$HOME`
+    reached it; the page laid out as `--open` writes it (`/tmp/<0700
+    dir>/open.html`, 0600) **did not**.
+  - **flatpak Firefox (flathub stable):** the direct URL reached it; the
+    `/tmp` page didn't, and neither did the `$HOME` and `~/Downloads`
+    controls, so flatpak's result isn't isolated.
+  - **What changed:** `--open`'s help, the engine README, and a one-line
+    note printed on Linux after a successful launch say a snap or flatpak
+    browser can't read `/tmp`, so copy the printed link. The page location
+    is unchanged; writing it under `$HOME` instead would be a design
+    choice for the Planner.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 5: the engine README's "Nothing is written to disk"
+
+**PR 59 into `release-0.13.2`** (`rel0132-5-readme`, one commit, c8fe5de).
+It was fast-forwarded in, GitHub marked it merged, and the branch is
+deleted. It's docs-only, so `paths-ignore` ran no CI.
+- The sentence now says: without `--open`, nothing is written. With it,
+  one forwarding page goes in a new folder under the temp directory
+  (owner-only on macOS and Linux, per `write_redirect`'s modes). It's
+  removed with its folder once its code is exchanged (`page_served`), or
+  after 60 seconds (`open_browser`'s cleanup thread). It can be left
+  behind if the inspector stops first, holding a dead code.
+- A CHANGELOG line.
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 6: the release commit (mobile off)
+
+**PR 60 into `release-0.13.2`** (`rel0132-6-release`, one commit, e7fbb59
+`release: v0.13.2`). It was fast-forwarded in, GitHub marked it merged, and
+the branch is deleted.
+- **Versions:** 0.13.2 in every manifest the version check reads
+  (`mnemo`, `mnemo-uniffi`, `VERSION_NAME`), plus `mnemo-python`'s
+  `Cargo.toml` and `pyproject.toml`, Node, both lockfiles (version lines
+  only) and the samples. The mobile manifests keep the same number, per
+  REL-1.
+- **Mobile off:** `.github/release-mobile` stays `false`, and the Swift and
+  Kotlin install lines (and the `release-check` comment) keep 0.13.0.
+- **CHANGELOG:** `[0.13.2] — 2026-11-12`, cut from `[Unreleased]` with a
+  summary and its compare link.
+- **The gates on e7fbb59:**
+  - PR: CI 43319455555 and Mobile CI 43319455499, green (18/18).
+  - Push: CI 43321915091 and Mobile CI 43321915393, green on attempt 1.
+- **The mobile-off dry run, 43321935230: green on attempt 1, no pause.**
+  - version check: "engine 0.13.2, mnemo-uniffi 0.13.2, mnemo-android
+    0.13.2", "the commit says mobile: false", then "mobile: off (the dry
+    run's `mobile` input)";
+  - attach: 11 files; crates.io: "Uploading mnemo-engine v0.13.2", then
+    "aborting upload due to dry run"; PyPI: 5 wheels and 1 sdist;
+  - the note: "Swift 0.13.0, Android 0.13.0", started after attach;
+  - the Swift and Android jobs were skipped.
+
+### 2026-11-12 — WORKER — READY — v0.13.2 (`release-0.13.2` at e7fbb59), for REVIEWER-B
+
+**What's on the branch:** steps 1 to 6 of the v0.13.2 DISPATCH, each with
+its DONE above:
+1. REKEY-1, 989d8b0, PR 55;
+2. SEC-4, 7f29ee4, PR 56;
+3. the mobile mode from the tagged commit, 6c72405, PR 57;
+4. RB-004.5 items 2, 4 and 5, 47be9d2, PR 58;
+5. the README's disk sentence, c8fe5de, PR 59;
+6. the release commit, e7fbb59, PR 60.
+
+**The gates, PR runs and push runs:**
+
+| Step | Commit | PR runs | Push runs (`release-0.13.2`) |
+|---|---|---|---|
+| 1 REKEY-1 | 989d8b0 | CI 43312791389 green (12/12) | CI 43313991253, Mobile CI 43313991318: green |
+| 2 SEC-4 | 7f29ee4 | CI 43314048395 green (12/12) | CI 43316087149, Mobile CI 43316087331: green |
+| 3 mobile mode | 6c72405 | CI 43316152471, Mobile CI 43316152474: green (18/18) | CI 43319109632, Mobile CI 43319109412: **cancelled** by `cancel-in-progress` when 47be9d2 was pushed a minute later; 47be9d2 contains it |
+| 4 RB-004.5 | 47be9d2 | CI 43316947935, Mobile CI 43316947984: green (18/18) | CI 43319269947, Mobile CI 43319270083: green |
+| 5 README | c8fe5de | none (docs-only, `paths-ignore`) | none (docs-only) |
+| 6 release | e7fbb59 | CI 43319455555, Mobile CI 43319455499: green (18/18) | CI 43321915091, Mobile CI 43321915393: green |
+
+The release dry run, mobile off, on e7fbb59: 43321935230, green, with no
+pause.
+
+**For REVIEWER-B** (it touches the encryption and the release workflow):
+- **step 1:** `rekey_secret` and `undo_rekey` in
+  `mnemo/src/store/maintenance.rs` (where the old secret stops being in
+  force, the write-back, and the double-failure error), the new additive
+  `rekey_cleanup_error`, and `tests/rekey_cut.rs`;
+- **step 2:** `/api/session` in `mnemo/src/bin/mnemo/inspect.rs`, and
+  `session()` in `inspect.html` (the prerender wait, the fallback to the
+  stored token);
+- **step 3:** `version check` in `.github/workflows/release.yml` (the
+  file's validation and the off switch), and RELEASING.md.
+
+**Not done until the tag** (after REVIEWER-B and PLANNER-A accept):
+- **The variable:** nothing to flip. `ENABLE_MOBILE_PUBLISH` is `true`,
+  which now means "follow the commit", and the commit says `false`. The
+  approval should read "approve the release (v0.13.2, mobile false)".
+- **Before the tag:** the coordination-file backup (`chore(plan)`), then
+  fast-forward `main` and tag `v0.13.2`.
+- **After it ships:** move RB-004.1 (SEC-4 fixes recommendation 2) from
+  `SECURITY.local.md` into PLAN.md.
+
+**For PLANNER-A (Planner-owned, not touched):**
+- the root README's "a private link that works only while the inspector
+  runs" can now also say the link works once;
+- whether `--open` should write its page under `$HOME` on Linux, for snap
+  browsers, instead of only documenting it.
+
+**Stopped here.** Nothing is tagged, and `main` is unchanged (15bc00f). The
+copy search (`.git/` included) prints nothing.
+
+### 2026-11-12 — PLANNER-A — REVIEW + HANDOFF — v0.13.2 READY received; REVIEWER-B's scoped pass (RB-005) next; the README and site are staged
+
+**The READY** (`release-0.13.2` at `e7fbb59`): every PR run and push run is
+green. Step 3's push run was cancelled by the next push, and that next push
+(`47be9d2`) contains step 3 and is green. The mobile-off dry run
+43321935230 is green with no pause. I checked all of it through the GitHub
+API. **I accept after REVIEWER-B's pass** (RB-005: steps 1, 2 and 3, as
+the READY lists).
+
+**The Worker's two questions:**
+1. **The root README:** yes, done in the handoff below.
+2. **`--open` on Linux with snap or flatpak browsers: document it, don't
+   relocate.** A snap browser's home access excludes hidden folders, so
+   `~/.cache` wouldn't help, and a visible folder in the user's home would
+   be litter. The printed link works everywhere, and v0.13.2 documents
+   that.
+
+**HANDOFF: commit on `release-0.13.2`, on their own, after REVIEWER-B and
+my acceptance:**
+- `README.md`:
+  - a new "What's new in v0.13.2: a failed passphrase change changes
+    nothing" (REKEY-1; the one-tab link and the stopped page; the
+    torn-header advice; mobile staying at 0.13.0);
+  - the inspector paragraph: "a private link that opens one browser tab
+    (from v0.13.2) and works only while the inspector runs", and the
+    snap and flatpak note on `--open`;
+- `index.html`: the pill and the "current release" line at v0.13.2;
+- **commit message:** `docs: v0.13.2 README and site (rekey failure, one-tab link)`.
+
+### 2026-11-12 — PLANNER-A — REVIEW + DISPATCH — RB-005 triaged; v0.13.2 step 7 (pre-tag fixes, mostly `release.yml`), then the tag
+
+**RB-005, REVIEWER-B's scoped pass:** nothing is held for.
+- **REKEY-1 holds:** across scripted double failures, 120 cut points on a
+  handle with unflushed writes, and a real `EFBIG` with no failpoint, an
+  `Err` left the old secret in force and an `Ok` the new one. There's one
+  silent exception, RB-005.2.
+- **SEC-4 holds,** including 200 connections racing for the one-time
+  code.
+- **The mobile mode can be turned on only by the tagged commit.**
+- **Now VERIFIED:** RB-003.1, .3, .5, .6, .7 and RB-004.3. The published
+  0.13.1 crate is byte-identical to the tag.
+- **Four new items, all ACCEPTED.** The triage lines are in
+  `reviewer_notes.md`, and RB-005.1's details are only in
+  `SECURITY.local.md`.
+
+**Decision: fix the workflow items before the tag, not after.** A tag runs
+the tagged commit's `release.yml`, so this way v0.13.2 never ships
+RB-005.1's pattern or RB-005.4 item 1's regression (an off switch that
+works only spelled exactly `false`). It costs one more dry run.
+
+**DISPATCH: v0.13.2 step 7.** One PR into `release-0.13.2`, with a neutral
+message for the RB-005.1 part.
+1. **`release.yml`:**
+   - **RB-005.1:** the switch passes through `env:` (see
+     `SECURITY.local.md`);
+   - **RB-005.4 item 1:** compare in lower case, and fail `version check`
+     on any value other than `true`, `false` or empty;
+   - **item 2:** a `::warning::` when a dry run's `mobile` input differs
+     from the commit, and the commit's mode written to the summary;
+   - **item 3:** "no re-run can turn it on", in RELEASING.md, the
+     CHANGELOG and the comment;
+   - **item 7:** a line in RELEASING.md that a skipped approval job shows
+     its raw name in a dry run.
+2. **RB-005.3, recommendation 1:** in Python, a failure to issue the
+   cleanup warning never becomes the call's failure (`write_unraisable`,
+   then return normally). Add a test under `-W error`, and a docstring
+   line saying what a `RuntimeWarning` from `rekey` means (the new secret
+   is in force).
+3. **RB-005.4 item 4:** on an error, `mnemo rekey` says "the passphrase
+   was not changed". Use "may open with either secret" for the double
+   failure. **Item 6:** the doc comment goes back to `to_py`.
+4. **The gates:**
+   - CI and Mobile CI green on the PR and on the push;
+   - a mobile-off dry run;
+   - one dry run with `ENABLE_MOBILE_PUBLISH` set to an invalid value
+     (say `False`), showing that `version check` fails, after which you
+     set it back to `true`. Tell the user before you change the variable.
+
+**The root README:** my staged handoff drops "always" (RB-005.4 item 8).
+The HANDOFF commit is the one in my earlier entry today.
+
+**The tag, in order:**
+1. step 7, then the HANDOFF, then the `chore(plan)` backup;
+2. fast-forward `main`, and tag `v0.13.2`;
+3. the user approves "approve the release (v0.13.2, mobile false)" once
+   every build is green;
+4. DONE, with the registries (crates.io and PyPI at 0.13.2, mobile still
+   at 0.13.0) and the Release's mobile note;
+5. move RB-004.1 (fixed by SEC-4) and RB-005.1 from `SECURITY.local.md`
+   into PLAN.md, and delete the merged branch.
+
+**Next engine release: REKEY-2:**
+- RB-005.2, recommendation 1;
+- RB-005.3, recommendation 2 (`rekey_cleanup_error()` in Python);
+- RB-005.4 item 5 (a failpoint that can fail a set of writes, with the
+  write-back-failure, either-secret and failed-zeroing tests).
+
+**After the v0.13.2 VERIFIED: the 12.4 design note.**
+
+### 2026-11-12 — WORKER — DONE — v0.13.2 step 7: the pre-tag fixes (RB-005.1, RB-005.3 rec. 1, RB-005.4 items 1 to 4, 6 and 7)
+
+**PR 61 into `release-0.13.2`** (`rel0132-7-pretag`, two commits, no WIP),
+fast-forwarded in (`release-0.13.2` at db0d56d). GitHub marked it merged,
+and the branch is deleted.
+- **ccea529 `ci(release)`** (neutral message for RB-005.1): in `version
+  check`, `ENABLE_MOBILE_PUBLISH` reaches the script as `MOBILE_OFF_SWITCH`
+  through `env:`, never as text (RB-005.1). It's compared in lower case,
+  and any value but `true`, `false` or unset fails the check, on a dry run
+  too (item 1). A dry run whose `mobile` input differs from
+  `.github/release-mobile` prints a `::warning::` (also in the summary), and
+  every run writes "The commit says mobile: ..." to the summary (item 2).
+  "No re-run can turn it on" in RELEASING.md, the CHANGELOG and the comment
+  (item 3). RELEASING.md says a dry run shows the skipped approval job's
+  name unevaluated (item 7).
+  - **Simulated first** (the step's script out of the YAML, run with
+    `bash -eo pipefail`, 22 cases): with the file `true`, the variable
+    unset, empty, `true` or `TRUE` gives on; `false`, `False` or `FALSE`
+    gives off; ` false`, `0`, `off`, `no`, `"`, `$(touch pwned)`, backticks
+    and quote-closing text all fail the check, and nothing ran. With the
+    file `false`, every valid value gives off. Dry runs: the input wins,
+    with the warning when it differs, and shell text in the variable fails
+    the check there too.
+- **db0d56d `fix(rekey)`:**
+  - **RB-005.3 rec. 1:** `warn_rekey_cleanup` no longer returns the
+    warning's error. If `warn_bound` fails (warnings are errors), the
+    exception goes to `write_unraisable_bound`, and `rekey` and
+    `rekey_with_key` return `Ok`. Both docstrings and the Python README row
+    say a `RuntimeWarning` means the call succeeded and the new secret is in
+    force.
+  - **The test** (`test_rekey_cleanup_warning_never_fails_the_call`): the
+    test wheel's `dev-hooks` now also turns on the engine's `failpoints`,
+    and adds `_dev_set_writes_until_fail` (not in released wheels; CI's
+    HOOKS-1 check still covers mnemo-python's default build). With write 2
+    failed (the first cleanup step, `rekey_cut.rs`'s
+    `OkWithCleanupLeft`), the plain call gives exactly one
+    `RuntimeWarning` with "rekey succeeded". Under `python -W error` in a
+    fresh interpreter, the call returns, `sys.unraisablehook` gets the
+    `RuntimeWarning`, and the new passphrase opens both files (the old one
+    gets `WrongPassphraseError`). **Against the old code** (HEAD's
+    `lib.rs` plus the hook), the `-W error` half fails with the
+    `RuntimeWarning` raised. The whole Python suite also passes under
+    `-W error`.
+  - **Item 4:** a failed `mnemo rekey` ends with "; the passphrase was not
+    changed", unless the message says "may open with either secret" (the
+    double failure); a comment at that message in `maintenance.rs` says to
+    keep the phrase. New `cli_smoke` test (unix): a file-size limit at the
+    file's end makes the rekey fail with a real EFBIG ("error: io error:
+    File too large (os error 27); the passphrase was not changed"); the old
+    passphrase still opens it with 3 memories, the new one doesn't.
+    `ulimit -f` counts 1024-byte blocks in macOS's `sh` and 512 in dash, so
+    the limit is the size over 1024, at or below the end either way.
+  - **Item 6:** the `to_py` doc comment is back on `to_py`.
+- **Local:** `cargo test --features failpoints` (all pass), clippy
+  `-D warnings` on the engine (with failpoints) and on mnemo-python (with
+  and without `dev-hooks`), `cargo fmt --check`, the Python suite.
+- **The gates on db0d56d:**
+  - PR: CI 43335978940 and Mobile CI 43335979063, green on attempt 1.
+  - Push: CI 43337876952 and Mobile CI 43337877380, green on attempt 1.
+- **The mobile-off dry run, 43337923539: green on attempt 1, no pause.**
+  - version check: `MOBILE_OFF_SWITCH: true` in the step's env, "engine
+    0.13.2, mnemo-uniffi 0.13.2, mnemo-android 0.13.2", "the commit says
+    mobile: false", "mobile: off (the dry run's `mobile` input)";
+  - attach: "11 files would be attached"; crates.io: 59 files packaged,
+    "aborting upload due to dry run"; PyPI: "5 wheels and 1 sdist";
+  - the note: "Swift 0.13.0, Android 0.13.0"; the Swift and Android jobs
+    and the approval (its raw name) were skipped.
+- **The invalid-switch dry run, 43339762477: failed at `version check`, as
+  intended.** I told the user first, then set `ENABLE_MOBILE_PUBLISH` to
+  `off`, not `False`, because after item 1 `False` is a valid way to say
+  off and would have passed. The log: `MOBILE_OFF_SWITCH: off`, the
+  version line, "the commit says mobile: false", then "##[error]the
+  ENABLE_MOBILE_PUBLISH variable must be true, false or unset". Every other
+  job was skipped. **The variable is back to `true`** (read back with
+  `gh variable get`).
+- **Copy search:** nothing.
+- **Next:** the HANDOFF commit (README.md, index.html), the `chore(plan)`
+  backup, fast-forward `main`, tag `v0.13.2`.

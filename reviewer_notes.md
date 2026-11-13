@@ -122,19 +122,23 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `R-006.1` | 2026-11-10 | `PRODUCT` | `HIGH` | Post-`INSP-1` sequencing: pull the Local Multi-Agent Harness stack (`12.4 + 12.3 + 12.2 + 13a`) ahead of `PERF-2`, splitting Phase 13 into Local Coordination (`13a`) vs Multi-Party Crypto (`13b`) | `ACCEPTED` | Order changed (harness stack ahead of PERF-2; 13a/13b); 12.4 design note first |
 | `R-006.2` | 2026-11-10 | `PRODUCT` | `HIGH` | Personal-harness edge over Git (`CLAUDE.md`/`PLAN.md`/`Beads`): `git worktree` resolution, zero-embedder BM25 mode, `mnemo harness init` (Claude Code + Cursor), deterministic `--git` projection, and `--personal` brain mount | `ACCEPTED` | Folded into 12.2–12.5 |
 | `R-006.3` | 2026-11-10 | `PLAN-REFINEMENT` | `HIGH` | Double-Run Dogfood Cutover (`HARNESS-DOGFOOD-1`): 2-PR dual-run orchestrating `Planner`/`Worker`/`Reviewer` through `test/project.mnemo` alongside `PLAN.md` to prove zero drift before retiring manual `WORKLOG` relay | `ACCEPTED` | HARNESS-DOGFOOD-1, with the parity checklist; private brain kept separate |
-| `RB-003.1` | 2026-11-12 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` until the fix ships (`mnemo inspect`, new in v0.13) | `ACCEPTED` | Before the tag: the docs part, plus the duplicate-`Host` refusal; the rest in v0.13.1. Details in SECURITY.local.md |
+| `RB-003.1` | 2026-11-12 | `SECURITY` | `MEDIUM` | `mnemo inspect --open` passed the token on a command line, and the server kept the secret and plaintext with no idle stop (fixed in v0.13.1 as SEC-3; the write-up is now in PLAN.md's WORKLOG) | `VERIFIED` | Fixed in v0.13.1 (SEC-3); REVIEWER-B marks it VERIFIED at its next pass; verified in RB-005 (v0.13.1) |
 | `RB-003.2` | 2026-11-12 | `SECURITY` | `LOW` | `mnemo export -o` wrote the plaintext into an existing file without tightening its permissions (fixed in v0.13.0, `6767b7a`; the write-up is now in PLAN.md's WORKLOG) | `VERIFIED` | Fixed in v0.13.0 (`6767b7a`); verified in RB-004 at `d350d53` |
-| `RB-003.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | A v8 file that crashed mid-commit gets two errors that point at each other (`compact` does fix it); a refused read-write open, even with a wrong passphrase, still replays the WAL into the file | `ACCEPTED` | Rec. 1 before the tag; rec. 2 (key before replay; refuse old formats before any write) in v0.13.1 |
+| `RB-003.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | A v8 file that crashed mid-commit gets two errors that point at each other (`compact` does fix it); a refused read-write open, even with a wrong passphrase, still replays the WAL into the file | `VERIFIED` | Rec. 1 before the tag; rec. 2 (key before replay; refuse old formats before any write) in v0.13.1; verified in RB-005 (v0.13.1) |
 | `RB-003.4` | 2026-11-12 | `DX/DOCS` | `LOW` | The published crate doubles to 1.2 MB because the test fixtures ship in it, and the tests it ships don't compile from it; decide before the tag, since a published version can't change | `VERIFIED` | Option 1 before the tag: exclude tests, benches and the fixture generators from the crate; fixtures README; verified in RB-004 (the published 0.13.0 crate is 349,137 bytes) |
-| `RB-003.5` | 2026-11-12 | `PLAN-REFINEMENT` | `MEDIUM` | The engine half of `release.yml` never runs before a tag, so each change to it (this time nine bumped actions) is first tried on the real one; and a failed wheel leg still lets crates.io publish | `ACCEPTED` | Before v0.13.1 or the next release.yml bump: dry-run the engine builds; publishes wait for every build. For this tag the user holds approval until every build is green |
-| `RB-003.6` | 2026-11-12 | `DX/DOCS` | `LOW` | `--key-file` exists only on `inspect`: raw-key files can't be exported or converted from the CLI, and `FormatTooOld`'s advice doesn't work for a raw-key v8 file | `ACCEPTED` | v0.13.1: --key-file on export and compact; FormatTooOld names compact_file_with_key |
-| `RB-003.7` | 2026-11-12 | `PERF` | `LOW` | The inspector clones every matching memory per request before paging and keeps the file in memory several times over (by reading; not measured) | `ACCEPTED` | v0.13.1 fixes; a PERF-2 cell for load time and peak memory at 10K and 100K |
+| `RB-003.5` | 2026-11-12 | `PLAN-REFINEMENT` | `MEDIUM` | The engine half of `release.yml` never runs before a tag, so each change to it (this time nine bumped actions) is first tried on the real one; and a failed wheel leg still lets crates.io publish | `VERIFIED` | Before v0.13.1 or the next release.yml bump: dry-run the engine builds; publishes wait for every build. For this tag the user holds approval until every build is green; verified in RB-005 (v0.13.1) |
+| `RB-003.6` | 2026-11-12 | `DX/DOCS` | `LOW` | `--key-file` exists only on `inspect`: raw-key files can't be exported or converted from the CLI, and `FormatTooOld`'s advice doesn't work for a raw-key v8 file | `VERIFIED` | v0.13.1: --key-file on export and compact; FormatTooOld names compact_file_with_key; verified in RB-005 (v0.13.1) |
+| `RB-003.7` | 2026-11-12 | `PERF` | `LOW` | The inspector clones every matching memory per request before paging and keeps the file in memory several times over (by reading; not measured) | `VERIFIED` | v0.13.1 fixes; a PERF-2 cell for load time and peak memory at 10K and 100K; verified in RB-005 (v0.13.1), the fix only |
 | `RB-003.8` | 2026-11-12 | `DX/DOCS` | `LOW` | Small things: the CHANGELOG date, the "only its own lines" claim for keyed writes, Python's single `RuntimeError`, two edges of the mobile-off note | `ACCEPTED` | 1 and 2 before the tag; 3 docs before the tag, subclasses in v0.13.1; 4 with REL-2 |
 | `RB-004.1` | 2026-11-12 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (`mnemo inspect`, SEC-3's documentation) | `ACCEPTED` | Before the tag: the wording in three places. Details in SECURITY.local.md |
 | `RB-004.2` | 2026-11-12 | `CORRECTNESS` | `MEDIUM` | A rekey that returns an error can still change the secret: the handle keeps the new key wrap, and the next flush commits it (older than v0.13.1; the in-place `rekey`, not the phone stores) | `ACCEPTED` | v0.13.2, first item (REKEY-1); the documentation sentence before the tag |
-| `RB-004.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | REL-2 runs the mobile-off note at the same moment as the asset attach, and both rewrite the Release body: the note can be lost with every job green | `ACCEPTED` | Before the tag: `attach` in the note job's `needs` |
+| `RB-004.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | REL-2 runs the mobile-off note at the same moment as the asset attach, and both rewrite the Release body: the note can be lost with every job green | `VERIFIED` | Before the tag: `attach` in the note job's `needs`; verified in RB-005 (v0.13.1) |
 | `RB-004.4` | 2026-11-12 | `PLAN-REFINEMENT` | `LOW` | The one release approval doesn't show the version or the mobile mode, and the mode is a repository variable flipped by hand around each tag | `ACCEPTED` | Rec. 1 and 3 before the tag; rec. 2 in v0.13.2 |
 | `RB-004.5` | 2026-11-12 | `DX/DOCS` | `LOW` | Small things: a comment in `open.rs`, the torn-header advice for v8 files, `--idle-timeout` overflow, the page's text after an idle stop, `--open` with sandboxed Linux browsers, the root README, the T9a flake | `ACCEPTED` | 1, 3 and 7 (FLAKE-3) before the tag; 6 is the Planner's; 2, 4 and 5 in v0.13.2 |
+| `RB-005.1` | 2026-11-12 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (`release.yml`, the mode lines in `version check`) | `ACCEPTED` | Before the tag, with RB-005.4 items 1 to 3. Details in SECURITY.local.md |
+| `RB-005.2` | 2026-11-12 | `CORRECTNESS` | `LOW` | When a failed rekey also fails to zero its new WAL region, the error doesn't say so, and a later damaged header lets the new secret recover the file (two I/O failures in a row, then a damaged header) | `ACCEPTED` | Next engine release, as REKEY-2, with RB-005.4 item 5 |
+| `RB-005.3` | 2026-11-12 | `CORRECTNESS` | `LOW` | Python: where warnings are errors, a rekey that succeeded raises, against the docstring's "if it raises, the old secret is still in force" (by reading) | `ACCEPTED` | Before the tag: recommendation 1 and the docstring |
+| `RB-005.4` | 2026-11-12 | `DX/DOCS` | `LOW` | Small things: the off switch's spelling, a dry run whose `mobile` input differs from the file, "no re-run can change it", `mnemo rekey`'s failure message, what `rekey_cut.rs` can't reach, a moved doc comment, a skipped job's raw name, "always" in the root README | `ACCEPTED` | 1 to 4 and 6 before the tag; 5 with REKEY-2; 7 won't fix; 8 done in the README handoff |
 
 ---
 
@@ -1425,7 +1429,7 @@ The three checks PLANNER-A asked for all pass; details next.
 **New items**
 
 #### RB-003.1 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1)
 - **Context / Evidence:** One finding about `mnemo inspect`, new in v0.13 and not yet released, written up in the gitignored `SECURITY.local.md` with what was tested and what held up. Not a hold for the tag; one part of its recommendation is two sentences of documentation worth taking before it.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). Before the tag: the documentation part and one small hardening; the rest in v0.13.1. Full triage in `SECURITY.local.md`.
 
@@ -1435,7 +1439,7 @@ The three checks PLANNER-A asked for all pass; details next.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), fixed before the tag. Full triage in `SECURITY.local.md`.
 
 #### RB-003.3 — [CORRECTNESS] [LOW] A v8 file that crashed mid-commit gets two errors that point at each other; and a refused read-write open still writes to the file
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1)
 - **Context / Evidence:** tested at `afd65b3` with the release CLI.
   - **The fixture:** a v8 passphrase file written by the published `mnemo-engine 0.12.3` (a scratch crate on crates.io's 0.12.3 with `failpoints`), 10 memories checkpointed and 5 committed in the WAL but not checkpointed. That's what a kill between the commit and the checkpoint leaves under v0.12.
   - **Every read command** (`about`, `list`, `export --git`, `verify`) fails with: "read-only open blocked: pending WAL recovery — open read-write once to fix".
@@ -1466,7 +1470,7 @@ The three checks PLANNER-A asked for all pass; details next.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **option 1, before the tag:** `exclude` the test, bench and fixture-generator files from `mnemo-engine`'s package, plus a `tests/fixtures/README.md` (synthetic data, throwaway secrets). Check `cargo package --list` and `cargo publish --dry-run --locked`, and that the PyPI sdist no longer carries the fixtures either. Report the new `.crate` size.
 
 #### RB-003.5 — [PLAN-REFINEMENT] [MEDIUM] The engine half of the release workflow never runs before a tag, so every change to it is first tried on the real one
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1)
 - **Context / Evidence:**
   - `release.yml` at `afd65b3`: on `workflow_dispatch`, `create-release`, `build-cli` (5 legs), `build-wheels` (5 legs), `build-sdist`, `attach`, `publish-pypi` and `publish-crates` are skipped (`:60` and the jobs that need it). The dry runs I've read show those as `skipped` (42901448023 for v0.12.1: 7 jobs skipped, 5 run; the READY says the same of 43138424847).
   - This release is the first tag since `eb6c8e0` bumped nine actions by a major version or more. Check 3 lists what will run for the first time on the v0.13.0 tag.
@@ -1481,7 +1485,7 @@ The three checks PLANNER-A asked for all pass; details next.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), as **REL-2**, before v0.13.1 or the next Dependabot bump of `release.yml`, whichever is first: recommendations 1 and 2 (the dry run builds the CLI, wheels and sdist and rehearses `attach`; both publish jobs need every build). 3 is accepted as read. **For the v0.13.0 tag itself:** the user approves `crates-io` and `pypi` only once every CLI, wheel and sdist job is green, which gives recommendation 2's protection by hand.
 
 #### RB-003.6 — [DX/DOCS] [LOW] `--key-file` exists only on `inspect`, so a raw-key file can't be exported or converted from the CLI, and `FormatTooOld`'s advice doesn't work for one
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1)
 - **Context / Evidence:**
   - `mnemo/src/bin/mnemo.rs:333-348`: `inspect` takes `--key-file`. `export`, `compact`, `list`, `about` and `recall` don't (checked from each command's `--help`).
   - `mnemo/src/error.rs` (`FormatTooOld`): "run `mnemo compact <file>` to convert it to v9". For `tests/fixtures/v8/v8_key.mnemo`, a raw-key v8 file, that command asks for a passphrase. The library call exists (`Mnemo::compact_file_with_key`), and the fixture tests use it.
@@ -1490,7 +1494,7 @@ The three checks PLANNER-A asked for all pass; details next.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12) → v0.13.1: `--key-file` on `export` and `compact` (and the other read commands where it's cheap), and `FormatTooOld`'s message names the raw-key route. The v0.13.0 README points raw-key users at `compact_file_with_key` until then.
 
 #### RB-003.7 — [PERF] [LOW] The inspector clones every matching memory on each request before it pages, and holds the whole file in memory two or three times
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1, the fix only)
 - **Context / Evidence:** by reading at `afd65b3`; not measured (no benchmarks this pass).
   - `mnemo/src/bin/mnemo/inspect.rs:625-639`: `/api/memories` builds `hits` by cloning each matching memory's JSON value, then applies `skip(offset).take(limit)`. The page asks for 200.
   - `:232-346`: one load keeps `db.memories()` (with vectors) until it has built a JSON value per memory, a `KeywordIndex` over every content, and each thread's turns as JSON.
@@ -1628,7 +1632,7 @@ The three checks PLANNER-A asked for all pass; details next.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Before the tag:** recommendation 4, one sentence in `rekey`'s Rust and Python docs (after an error, close the handle without writing, and try both secrets). **v0.13.2, first item, as REKEY-1:** recommendations 1 to 3 (restore the header fields on a failure before page 0 is written; after it, report the old-region cleanup without a plain error; a failpoint test over every cut point).
 
 #### RB-004.3 — [CORRECTNESS] [LOW] REL-2 made the mobile-off note run at the same moment as the asset attach, and both rewrite the Release's body: the note can be lost with every job green
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-005, v0.13.1)
 - **Context / Evidence:** by reading at `d350d53`, with the dry run's step times; not reproduced (it needs a real Release).
   - **The graph changed.** At `v0.13.0`, `mobile-skipped-note` needed `mobile-prepare`, which needed `attach`, so the note ran after the assets were attached. At `d350d53` it needs `[mobile-prepare, create-release]` (`release.yml:585`) and `attach` needs `create-release` too (`:304`), so both start when the Release is created.
   - **Both write the body.** On an existing release, `softprops/action-gh-release` v3.0.4 reads the release and then updates it with a `body`: the text it read, or that text plus the note when `append_body` is set (`src/github.ts:664-716`, the existing-release branch). `attach` passes only `files`, so it writes back the body it read.
@@ -1666,3 +1670,172 @@ The three checks PLANNER-A asked for all pass; details next.
   6. **The root README** (Planner-owned; the Worker flagged the first two): `--open` "only on a machine where you're the only user" (`README.md:126-127`) and `--key-file` "planned for v0.13.1" (`:138`) are out of date, and "behind a one-time link" (`:120`) was never accurate: the link works until the inspector stops.
   7. **The red Mobile CI run on `d350d53`** (43279893187, attempt 1) is `t9aAnEmbedderThatCallsCacheGetReturnsAtOnce`, at `StoreHardeningTests.swift:38`: `#expect(Date().timeIntervalSince(start) < 2)` took 2.514 s. The line after it, `embedder.timedOut == false`, passed, so the behaviour held and only the wall-clock bound was missed. No Swift source changed in v0.13.1. The re-run (attempt 2) passed. For FLAKE-3: `timedOut` is the real signal (the embedder gives up at 3 s), so drop the 2 s bound or raise it to that.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Before the tag:** item 1 (the `open.rs` comment, plus the rekey test's comment), item 3 (`checked_mul`, refusing an overflow), item 7 (FLAKE-3, as the Worker proposed). **Item 6:** the root README handoff fixes it. **v0.13.2:** item 2 (the torn-header read-only message names `compact` on a pre-v9 file), item 4 (the page's text after an idle stop), and item 5 (check `--open` with a snap or flatpak browser on Linux, and document it if it fails).
+
+### Batch `RB-005` — 2026-11-12 (REVIEWER-B: the scoped v0.13.2 review before the tag: REKEY-1, SEC-4 and the mobile mode from the tagged commit, a verification sweep of what v0.13.1 shipped, and four new items)
+
+**What was reviewed.** `release-0.13.2` at `e7fbb59` (`release: v0.13.2`) against `v0.13.1` (`15bc00f`): 6 commits, 26 files, +721 / −117 lines. The scope is the three areas the WORKER READY names: step 1 (REKEY-1 in `mnemo/src/store/maintenance.rs`, with `tests/rekey_cut.rs`), step 2 (SEC-4 in `inspect.rs` and `inspect.html`) and step 3 (the mobile mode in `release.yml`, `.github/release-mobile` and RELEASING.md). Step 4 I tested in passing (the torn-header advice) or read (the stopped page, the `--open` note). Nothing is tagged.
+
+**How.**
+- **Pinned.** Every build and test ran on a scratch copy made with `git archive e7fbb59`, with `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`. Scratch crates depend on that copy by path.
+- **A second scratch copy has two added test hooks** (41 lines in `pager.rs` and `lib.rs`, nothing else): a scripted set of failing writes, and a header write that reaches the file and then reports failure. The repo's failpoint fires once, so it can't make two writes in a row fail. The code under review is unchanged in that copy.
+- **No benchmarks, nothing timed.**
+- **Machine:** Apple M1 Pro, macOS 26.7.1, Rust 1.95.0.
+- **Baseline at `e7fbb59`, green:** `cargo test --locked --features failpoints --no-fail-fast`: **380 passed, 0 failed** (375 at `d350d53`, plus the five new tests). The `mnemo-uniffi`, Swift, Kotlin and Python suites were not run here.
+- **GitHub, read-only:** the variables, the five environments, the v0.13.1 tag run, the dry run and the push runs on `e7fbb59` were read through the API. The published `mnemo-engine 0.13.1` crate was fetched into an empty scratch folder and compared with the tag; nothing in it was run.
+- **One browser check** used Chrome 157 headless with new profiles in my scratch folder, never the user's own.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **The unfixed security finding** from this pass (`RB-005.1`) is only in `SECURITY.local.md`, with the SEC-4 probe table.
+
+---
+
+**The verdict first.**
+
+- **I wouldn't hold the tag for anything here.** The three areas do what the READY says, and each of the four new items is LOW.
+- **REKEY-1 holds.** In every case I could construct, a plain `Err` left the old secret opening the file, straight away and after a later write and a close. `Ok` always left the new one. Exactly one secret opened the file in all of them.
+- **SEC-4 holds.** The code worked once in every probe, including 200 connections racing for it, and in Chrome.
+- **The mobile mode can't be turned on by anything but the tagged commit.** The variable can only turn it off.
+- **For the person who pushes the tag and approves it:**
+  1. `ENABLE_MOBILE_PUBLISH` is `true` (read from the API). From this release that means "follow the commit", and the commit says `false`, so there's nothing to flip.
+  2. The run pauses once. The pending approval should read **"approve the release (v0.13.2, mobile false)"**. If it says anything else, don't approve.
+  3. This tag is the first real run of the new mode lines on a tag. The dry run exercised the file check, not the tag branch. If they fail, `version check` fails and nothing builds or publishes.
+
+---
+
+**Area 1: REKEY-1 (`rekey_secret`, `undo_rekey`, `rekey_cleanup_error`). It's right, with one gap that needs two failures and then a damaged header (`RB-005.2`).**
+
+- **As read** (`mnemo/src/store/maintenance.rs:149-296`):
+  - The header and the KDF are copied (`:176-177`) before anything changes. The three steps that can fail before the new secret is in force (the seal, the WAL commit at `:209`, the page-0 write and its sync at `:213-216`) each go through `undo_rekey`, which puts both back first (`:261-262`).
+  - **Where the new secret takes effect:** when page 0's write and its sync have both succeeded (`:213-220`). A write that lands with a failed sync is undone by writing the old page 0 back (`:266-275`).
+  - **After that point nothing returns `Err`.** The three cleanup steps each run whatever the one before did (`:230-239`), and what failed is kept for `rekey_cleanup_error` (`:240`, `:292`).
+  - **The double failure:** if the write-back fails too, the error says the file may open with either secret (`:278-281`).
+- **`tests/rekey_cut.rs` does what its header says**, on a clean handle, with the one-shot failpoint. Its limits are in `RB-005.4` item 5. I did not repeat the Worker's check with the restore removed; my RB-004 test showed the old behaviour at `d350d53`.
+- **Scripted failures** (scratch crate `rb5s`, a 3-memory passphrase file; each row run three ways: drop, close, or one more write and a close). "Old" and "new" say which secret then opens the file; the other one got `WrongPassphrase` every time.
+
+| What fails | `rekey` returns | After a drop or a close | After one more write and a close | A copy of the file with page 0 damaged |
+|---|---|---|---|---|
+| the WAL commit | the I/O error | old | old | old recovers it, new doesn't |
+| the WAL commit, then zeroing the new region | the I/O error | old | old | the same |
+| page 0 (not written; or written, sync failed) | the I/O error | old | old | the same |
+| page 0, then zeroing the new region | the I/O error, nothing more | old | old | **both recover it**, until the next write (`RB-005.2`) |
+| page 0 not written, then the write-back | "may open with either secret" | old | old | old only |
+| page 0 written, then the write-back | "may open with either secret" | **new** | old | old only |
+| page 0 written, zeroing and the write-back | "may open with either secret" | **new** | old | both, until the next write |
+| after page 0: the old region's first frame, its zeroing, or both | `Ok`, with a cleanup report naming each | new | new | new only |
+
+  - The two "new" cells are the documented exception, and the error text matches what the file does.
+  - In the last row the old secret recovers nothing even when both region steps fail, because the third step (overwriting other copies of the old wrap, which has no failpoint) had already broken the old frame.
+- **A handle with unflushed writes** (scratch crate `rb5`, the repo's own failpoint, 40 cut points, three ways each). The Worker's test rekeys a clean handle, so the flush inside the rekey writes nothing there. With one unflushed memory: writes 0 to 10 (the flush's own, then the commit and page 0) give `Err`, 11 and 12 give `Ok` with cleanup left, the rest `Ok`. In all 120 runs the right secret opened the file with the right count, the other was refused, and a damaged-header copy didn't recover with the other.
+- **A real I/O error, no failpoint.** `RLIMIT_FSIZE` makes the write of the new WAL region fail with `EFBIG` after `k` bytes of it:
+
+| `k` (bytes of the new region that reach the file) | `rekey` | Old secret | After raising the limit, one write and a close |
+|---|---|---|---|
+| 0, 1, 28, 29, 4096, 8191, 8192, 8249 | `Err`: "File too large (os error 27)" | opens, 3 memories | old opens with 4; new refused; a damaged-header copy doesn't recover with the new |
+| 8250 (the whole commit) and 20000 | `Ok` | refused | new opens with 4 |
+
+- **The CLI under the same limit** (release build of `e7fbb59`): `mnemo rekey` and `rekey --rotate` exit 1 with "error: io error: File too large (os error 27)". The old passphrase still opens the file and the new one doesn't. (`RB-005.4` item 4: the message doesn't say which passphrase is in force.)
+- **Who reports the cleanup.** The CLI prints a warning (not with `--rotate`, which rewrites the file anyway). Python emits a `RuntimeWarning`: `RB-005.3`. The Swift and Kotlin stores don't call the in-place rekey.
+
+**Area 2: SEC-4 (`/api/session`, `session()`). The code can't be used twice.**
+
+- **As read** (`inspect.rs:692-714`): the code sits in a mutex. One request takes the lock, compares in equal time, and clears the slot before the lock is released, so two requests can't both pass. The `Host` and method checks come first. Every response carries `Cache-Control: no-store`, so a browser can't replay the exchange from its cache.
+- **Live probes** (release CLI of `e7fbb59`, a copy of the iOS fixture): wrong codes, another `Host`, `POST` and `HEAD` are refused without using the code up; the first right request gets the token; the next 101 get 403; with 64 and then 200 connections released together, exactly one got a token each time. The table is in `SECURITY.local.md`, with RB-004.1's details.
+- **In Chrome 157** (headless, new profiles): the first load shows the fixture's 7 memories; the same link again, in that profile and in another, shows "This link has already been used"; the profile's history holds the link with its spent code, and no token.
+- **By reading only:** the prerender wait (`inspect.html:109-111`). Firefox and Safari weren't tested, and `--open` ran through a stand-in launcher, not a real browser (the Worker checked it in the browser pane).
+- **The docs match:** the engine README and the CHANGELOG say the link works once, that a refresh keeps working and that another tab needs a new link. All three are what I saw.
+
+**Area 3: the mobile mode from the tagged commit (`release.yml:563-596`, `.github/release-mobile`, RELEASING.md). Nothing but the commit can turn mobile on.**
+
+- **The job graph is the one I simulated in RB-004, plus that batch's two fixes.** Parsed with a YAML reader and compared job by job: from `d350d53` to `e7fbb59` the differences are `approve-release`'s name, `attach` in `mobile-skipped-note`'s `needs`, the `mobile` input's description, and the script of `version check`. No `needs`, `if`, `environment` or `permissions` changed in v0.13.2.
+- **The mode lines, run in real bash** as GitHub runs them (`bash -eo pipefail`), with the `${{ }}` expressions substituted as text:
+
+| On a tag | Result |
+|---|---|
+| file `true`, `false` (with or without a newline, spaces or CRLF) | on, off |
+| file `TRUE`, `True`, `yes`, `1`, `true` then `false`, `false # off`, a BOM, empty, missing | `version check` fails; nothing builds |
+| file `false`, any value of the variable | off |
+| file `true`, variable `true` or unset | on |
+| file `true`, variable `false` | off, and the log says the switch did it |
+| file `true`, variable `False`, `FALSE`, ` false`, `0`, `off`, `no` | **on** (`RB-005.4` item 1) |
+| shell text in the file | not run (the value is quoted); `version check` fails |
+| shell text in the variable | `RB-005.1` |
+
+  - A dry run follows its `mobile` input and still refuses a bad file. It doesn't say when the input and the file differ (`RB-005.4` item 2).
+- **`version check` checks out the tagged commit** (the default ref, the whole tree) before it reads the file, has `contents: read` and no environment or secrets.
+- **Settings, read through the API:** unchanged since RB-004. `release` has the one reviewer and takes `v*` tags only; the four registry environments have no reviewer. `ENABLE_MOBILE_PUBLISH` is `true`.
+- **Runs on `e7fbb59`:** CI 43321915091 and Mobile CI 43321915393 are green on attempt 1 (60 check runs: 52 passed, 8 skipped). The dry run 43321935230 is green with no pause: `version check` printed the commit's mode, the mobile jobs were skipped, attach and both publishes ran their rehearsal steps, and the note started after attach finished.
+- **RELEASING.md** matches the workflow, with two sentences that say slightly more than it does (`RB-005.4` items 2 and 3).
+
+---
+
+**Earlier items after this pass**
+
+Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (353,564 bytes; its SHA-256 matches crates.io's) records commit `15bc00f`, the tag's, and each of its 59 files is byte-identical to the tag's copy apart from the two Cargo rewrites (`Cargo.toml`, `Cargo.lock`). PyPI has 0.13.1 with 6 files.
+
+| Item | What I checked | Result |
+|---|---|---|
+| RB-003.1 | SEC-3 as shipped: the code I probed at `d350d53`, plus the step 8 changes (read). Re-probed on the `e7fbb59` build: the idle stop ignores requests without a secret, two `Host` headers get 400, `--open` passes only a 0600 page in a 0700 folder | **`VERIFIED`** (v0.13.1) |
+| RB-003.3 | Rec. 1 shipped in v0.13.0, rec. 2 in v0.13.1; `open.rs` in the published crate is the tag's; its three tests pass at `e7fbb59` | **`VERIFIED`** (v0.13.1) |
+| RB-003.5 | The v0.13.1 tag run 43305366410: the last of the 11 builds finished at 21:02:37, the one approval was at 21:06:36, and all three publishes started after it. The dry run on `e7fbb59` built and rehearsed the engine half | **`VERIFIED`** (v0.13.1) |
+| RB-003.6 | CLI built at `e7fbb59` (these commands are unchanged since v0.13.1): `export --key-file` and `compact --key-file` work on the v8 raw-key fixture; `FormatTooOld` names `mnemo compact` with `--key-file` in the published crate | **`VERIFIED`** (v0.13.1) |
+| RB-003.7 | The paging fix as read at `d350d53`, shipped unchanged. Not measured; the PERF-2 cell in the triage is still to come | **`VERIFIED`** (v0.13.1), the fix only |
+| RB-004.3 | The tag run: `attach` finished at 21:07:07 and the note job started at 21:07:10. The Release has 11 assets and the "Mobile packages not published" line | **`VERIFIED`** (v0.13.1) |
+| RB-004.1 | Rec. 1 (the wording) is in the published crate README. Rec. 2 is SEC-4: confirmed at `e7fbb59`, area 2 | Stays `ACCEPTED` until v0.13.2 ships |
+| RB-004.2 | Rec. 4 (the doc sentence) shipped in v0.13.1. Recs. 1 to 3 are REKEY-1: confirmed at `e7fbb59`, area 1 | Stays `ACCEPTED` until v0.13.2 ships |
+| RB-004.4 | Recs. 1 and 3 shipped: the tag run's approval was named "approve the release (v0.13.1, mobile false)". Rec. 2: confirmed at `e7fbb59`, area 3 | Stays `ACCEPTED` until v0.13.2 ships |
+| RB-004.5 | Items 1 and 3 shipped (read; the overflowing `--idle-timeout` is now refused). Item 7 shipped (FLAKE-3; Mobile CI is green on `e7fbb59`, not otherwise re-checked). At `e7fbb59`: item 2 tested (a damaged v8 header names `compact`, writes nothing, and `compact --key-file` heals it to v9 with all 3 memories); item 4 read; item 5 is documented, and I didn't repeat the Worker's Linux probe | Stays `ACCEPTED` until v0.13.2 ships |
+| RB-003.8 | Not in this pass | Unchanged |
+
+---
+
+**New items**
+
+#### RB-005.1 — [SECURITY] [LOW] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** One finding about the new mode lines in `release.yml`'s `version check`, not yet released, written up in the gitignored `SECURITY.local.md` with the test. It needs rights that only the repository's owner has today. The fix is three lines.
+- **Would I hold the tag for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **before the tag:** the variable goes through `env:`, together with RB-005.4 items 1 to 3, then a dry run. The tag runs the tagged commit's workflow, so fixing it now means v0.13.2 never ships the pattern. Full triage in `SECURITY.local.md`.
+
+#### RB-005.2 — [CORRECTNESS] [LOW] When a failed rekey also fails to zero its new WAL region, the error doesn't say so, and a later damaged header lets the new secret recover the file
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested at `e7fbb59` with the scripted hook (scratch test `rb5s/tests/scripted.rs`).
+  - **The code.** `undo_rekey` zeroes the new region with `let _ = wal::scrub_region(..)` (`mnemo/src/store/maintenance.rs:263-265`) and returns the original error. By then that region can hold a committed copy of page 0 with the data key wrapped under the new secret: always when the failure was at page 0, and possibly when the commit's own write or sync failed partway.
+  - **The test.** Page 0's write fails, then the zeroing fails, then the write-back (or nothing, if page 0 wasn't touched) succeeds. `rekey` returns the page-0 error and nothing else. The old secret opens the file and the new one gets `WrongPassphrase`, as documented. But a copy with a damaged page 0 opens with **either** secret: the torn-header scan finds the leftover commit and accepts it for the new one. That lasted through a drop and a close. After one more write and a close it was gone, because the write reused that part of the file. I don't know that every later write does.
+- **Finding:**
+  - The claim "an error means the old secret is still in force, for this handle and for the file" has a second exception besides the documented one, and this one is silent. The error text gives the caller no reason to think the new secret is anywhere in the file.
+  - It takes two I/O failures in a row and then a damaged header, and the secret that gains anything is the caller's own new one. So it's as rare as the documented double failure, and it matters for the same reason: a caller told "the old secret is in force" may discard the new one, or may have reasons not to want it to work.
+  - If the damaged-header recovery does pick the leftover commit, it restores the header from the time of the failed rekey, not the latest one. I didn't test what that does to writes made since.
+- **Recommendation:**
+  1. Don't discard the zeroing's result. If it fails, return the same kind of message as the double failure: the old secret is in force, a copy of the new key wrap may be left in the file, and a later write or `compact` clears it.
+  2. Or remember the region in the handle and zero it at the next flush, and say so in the error.
+  3. A test for it needs a failpoint that can fail two writes in a row (see `RB-005.4` item 5).
+- **Would I hold the tag for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12) → **REKEY-2**, in the next engine release: recommendation 1 (a failed zeroing gets the "a copy of the new key wrap may be left" message), plus the multi-write failpoint from RB-005.4 item 5, so the repo keeps tests for the write-back failure, the "either secret" message and this case.
+
+#### RB-005.3 — [CORRECTNESS] [LOW] Python: where warnings are errors, a rekey that succeeded raises
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** by reading at `e7fbb59`; not run (no Python build here).
+  - `mnemo-python/src/lib.rs:133-147`: `warn_rekey_cleanup` returns the result of `PyErr::warn_bound(..)?`. Python turns a warning into an exception when the filter says so (`-W error`, `PYTHONWARNINGS=error`, pytest's `filterwarnings = error`), and `warn_bound` then returns that exception.
+  - `:1674-1676` and `:1692-1694`: `rekey` and `rekey_with_key` return it, after the engine's rekey has already succeeded.
+  - The docstrings (`:1651-1655`, `:1684-1688`) and the Python README row say: "If it raises, the old secret is still in force".
+  - The Worker's check ("a clean rekey raises no warning under `-W error::RuntimeWarning`") covers the clean case only.
+- **Finding:** in such a process, a rekey whose cleanup was cut short raises `RuntimeWarning` with the new secret in force. A caller that follows the docstring keeps the old secret, and at its next start the file doesn't open. It needs an I/O failure in the cleanup and warnings set to errors, so it's rare. The message does say "rekey succeeded", for whoever reads it.
+- **Recommendation:** one of:
+  1. don't let the warning's failure become the call's: if `warn_bound` returns an error, drop it (or pass it to `write_unraisable`) and return normally;
+  2. expose `rekey_cleanup_error()` on the Python handle, as Rust has it, and keep the warning as a convenience;
+  3. at least add the case to the docstrings.
+- **Would I hold the tag for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12), **before the tag:** recommendation 1 (a failure to issue the warning never becomes the call's failure: pass it to `write_unraisable`, and return normally), with a test under `-W error`, and the docstring says what a `RuntimeWarning` means. Recommendation 2 (`rekey_cleanup_error()` on the Python handle) with REKEY-2.
+
+#### RB-005.4 — [DX/DOCS] [LOW] Small things in the v0.13.2 changes
+- **Status:** `ACCEPTED`
+- **Context / Evidence and recommendation, one item each:**
+  1. **The off switch only works spelled exactly `false`** (`release.yml:580`, tested in bash). With the commit saying `true`, a variable set to `False`, `FALSE`, `0`, `off` or `false` with a space leaves mobile on, and nothing in the log says the variable was ignored. Until v0.13.1 it failed the other way: anything but `true` meant off. Compare in lower case, and fail `version check` on any value other than `true`, `false` or empty. Fix it with `RB-005.1`, in the same lines.
+  2. **A dry run doesn't notice that its `mobile` input differs from the file**, and RELEASING.md's step 5 says the dry run's summary prints what the commit says (`RELEASING.md:111`). It's printed in `version check`'s log (`release.yml:576`), not in the summary. A dry run with the default input (`true`) against a commit that says `false` rehearses a release the tag won't make. Print a `::warning::` when they differ, and write the commit's mode to the summary.
+  3. **"No re-run can change it"** (`RELEASING.md:52`, the CHANGELOG, the comment at `release.yml:566-567`) is true for turning mobile on. "Re-run all jobs" does read the off switch again, so with a commit that says `true`, setting the variable to `false` between attempts turns mobile off mid-release. Say "no re-run can turn it on".
+  4. **`mnemo rekey`'s failure message doesn't say which passphrase is in force.** Under a real write error it prints only "error: io error: File too large (os error 27)". REKEY-1 makes the answer certain, so say it: "the passphrase was not changed".
+  5. **What `tests/rekey_cut.rs` can't reach.** The failpoint fires once, so no test runs the write-back's failure, the "either secret" message, or a failed zeroing in `undo_rekey` (`RB-005.2`); the third cleanup step has no failpoint; and the handle is always clean when `rekey` is called. My runs of those cases are in area 1. A failpoint that takes a set of write numbers would let the repo keep them.
+  6. **A doc comment moved onto the wrong function** (`mnemo-python/src/lib.rs:129-133`): "Map a core error onto its Python exception type" now heads `warn_rekey_cleanup`; it belongs to `to_py` at `:149`.
+  7. **In a dry run, the skipped approval job shows its raw name** ("approve the release (v${{ needs.mobile-prepare.outputs.version }}, …)" in run 43321935230). GitHub doesn't evaluate a skipped job's name. Cosmetic.
+  8. **The root README handoff** (Planner-owned, staged in the working tree): "Now an error **always** means the old secret still opens the file." The engine README states the one exception. Drop "always", or leave it as a headline.
+- **Would I hold the tag for it?** No. Items 1 to 3 belong with the next change to `release.yml`, which needs its own dry run.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-12). **Before the tag:** items 1 to 3 (with RB-005.1), item 4 (`mnemo rekey` says "the passphrase was not changed" on an error) and item 6 (the doc comment). **With REKEY-2:** item 5. **Item 7:** won't fix, since GitHub doesn't evaluate a skipped job's name; a line in RELEASING.md is enough. **Item 8:** done; the root README drops "always" and points at the exception.
