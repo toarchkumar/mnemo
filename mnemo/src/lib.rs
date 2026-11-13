@@ -325,6 +325,24 @@ pub mod __failpoints {
         SHARED_REPLACED.with(|c| c.set(n));
     }
 
+    thread_local! {
+        static EUID_OVERRIDE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Make this thread's file-owner checks (the dead compaction temp
+    /// files' cleanup) compare against `uid` instead of the effective uid,
+    /// so a test can see a file as another user's without root. `None`
+    /// restores the real check.
+    pub fn set_euid_override(uid: Option<u32>) {
+        EUID_OVERRIDE.with(|c| c.set(uid));
+    }
+
+    // Read by the Unix owner check only.
+    #[cfg(unix)]
+    pub(crate) fn euid_override() -> Option<u32> {
+        EUID_OVERRIDE.with(|c| c.get())
+    }
+
     pub(crate) fn take_shared_replaced() -> bool {
         SHARED_REPLACED.with(|c| {
             let n = c.get();

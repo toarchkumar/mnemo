@@ -168,12 +168,21 @@ fn child_opts() -> SharedOptions {
 }
 
 /// Open a shared handle, trying again while the file is busy (an open's
-/// first read can meet `Locked` like any call).
-fn open_child(path: &Path, secret: &str) -> Result<SharedMnemo, String> {
+/// first read can meet `Locked` like any call). `None` when the child was
+/// told to stop while it waited: `Locked` is the allowed outcome, and a
+/// stopped child has nothing left to do, so the role ends cleanly (exit 0)
+/// without writing. Each open that waited out its deadline is counted in
+/// `open_locked.log`.
+fn open_child(path: &Path, secret: &str) -> Result<Option<SharedMnemo>, String> {
     loop {
         match Mnemo::open_shared(path, secret, child_opts()) {
-            Ok(s) => return Ok(s),
-            Err(MnemoError::Locked { .. }) if !stopped() => continue,
+            Ok(s) => return Ok(Some(s)),
+            Err(MnemoError::Locked { .. }) => {
+                append(&work_dir(), "open_locked.log", &var_or("XP_ID", "-"));
+                if stopped() {
+                    return Ok(None);
+                }
+            }
             Err(e) => return Err(format!("open_shared: {e}")),
         }
     }
@@ -208,7 +217,9 @@ fn role_writer() -> RoleResult {
     let allow_replaced = std::env::var("XP_ALLOW_REPLACED").is_ok();
     std::fs::create_dir_all(dir.join("acks")).unwrap();
     std::fs::create_dir_all(dir.join("replaced")).unwrap();
-    let mut s = open_child(&path, &var_or("XP_SECRET", PW))?;
+    let Some(mut s) = open_child(&path, &var_or("XP_SECRET", PW))? else {
+        return Ok(0);
+    };
     let mut n = 0usize;
     let mut acked = 0usize;
     while !stopped() && count.map_or(true, |c| acked < c) {
@@ -246,7 +257,9 @@ fn role_writer() -> RoleResult {
 /// Counts the memories in a loop; the count must never go down.
 fn role_reader() -> RoleResult {
     let path = PathBuf::from(var("XP_PATH"));
-    let mut s = open_child(&path, PW)?;
+    let Some(mut s) = open_child(&path, PW)? else {
+        return Ok(0);
+    };
     let mut last = 0usize;
     while !stopped() {
         match s.read(|db| Ok(db.len())) {
@@ -331,7 +344,11 @@ fn role_die_after_commit() -> RoleResult {
 fn role_crash_op() -> RoleResult {
     let dir = work_dir();
     let path = PathBuf::from(var("XP_PATH"));
-    let mut s = open_child(&path, PW)?;
+    // No stop file in this role's test, so `None` can't happen; the rule is
+    // the same as the others'.
+    let Some(mut s) = open_child(&path, PW)? else {
+        return Ok(0);
+    };
     let op = var("XP_OP");
     let target: Option<Ulid> = std::env::var("XP_TARGET").ok().map(|t| t.parse().unwrap());
     set_writes_until_fail(var("XP_N").parse().unwrap());
@@ -681,13 +698,18 @@ fn kills_lose_no_acknowledged_write() {
     }
     no_errors(d);
     let (acked, unacked) = check_acks(d, &p, PW);
-    let compactions = std::fs::read_to_string(d.join("compactions.log"))
-        .unwrap_or_default()
-        .lines()
-        .count();
+    let count_lines = |name: &str| {
+        std::fs::read_to_string(d.join(name))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let compactions = count_lines("compactions.log");
+    let open_locked = count_lines("open_locked.log");
     eprintln!(
         "kill test: {run_for:?}, {kills} kills, {compactions} compactions, {acked} writes \
-         acknowledged, {unacked} in the file but never acknowledged"
+         acknowledged, {unacked} in the file but never acknowledged, {open_locked} child \
+         opens waited out their 2 s deadline"
     );
     assert!(acked > 0, "no write was acknowledged");
 }
@@ -875,6 +897,28 @@ fn two_paths_to_one_brain_across_processes() {
 
 // --- 5. The sidecar removed under running processes -------------------------
 
+/// Delete `dir`, which live children may still be creating names in: retry
+/// only on `DirectoryNotEmpty` (a name created mid-delete), at most 50
+/// times 10 ms apart, and panic once that's used up. `NotFound` is done.
+#[cfg(unix)]
+fn remove_dir_racing_children(dir: &Path) {
+    let mut last = None;
+    for _ in 0..50 {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            // `ErrorKind::DirectoryNotEmpty` needs Rust 1.83 (the MSRV is
+            // 1.75), so the errno.
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOTEMPTY.raw_os_error()) => {
+                last = Some(e);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("deleting {}: {e}", dir.display()),
+        }
+    }
+    panic!("deleting {} after 50 tries: {last:?}", dir.display());
+}
+
 #[cfg(unix)]
 #[test]
 fn the_sidecar_removed_while_two_processes_write() {
@@ -896,12 +940,17 @@ fn the_sidecar_removed_while_two_processes_write() {
     let rounds = if stress() { 30 } else { 5 };
     for i in 0..rounds {
         std::thread::sleep(Duration::from_millis(150));
-        // Moved away first, so the removal can't race a child creating a
-        // file in it; the children's descriptors then name a removed
-        // directory.
+        // Moved away, then deleted. The children keep a descriptor on the
+        // moved directory and, until a lock file can't be opened there, go
+        // on creating `intent.lock` and lock-info's temp name in it (as
+        // built: they reopen by path only then). A name created between
+        // `remove_dir_all`'s listing and its `rmdir` gives ENOTEMPTY, so
+        // the delete, this test's own action, is retried on that error
+        // alone, at most 50 times 10 ms apart; running out fails the test.
+        // No assertion or engine call is retried.
         let gone = d.join(format!("gone{i}"));
         if std::fs::rename(&side, &gone).is_ok() {
-            std::fs::remove_dir_all(&gone).unwrap();
+            remove_dir_racing_children(&gone);
         }
     }
     std::thread::sleep(Duration::from_millis(300));

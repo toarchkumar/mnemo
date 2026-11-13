@@ -45,6 +45,20 @@ would leak into shell history and process listings). Tools exposed:
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`. Every mutation flushes before returning.
 
+The server holds the file's lock for its whole life by default, so a second
+server or a CLI write on the same file gets `Locked`. **`--shared`** (v0.14,
+12.4 shared mode) holds nothing between tool calls instead: each call takes
+the lock for itself (a read runs alongside other readers, a write waits with
+writer preference) for up to `--wait` (default 10 s), so several servers,
+the CLI and Python can use one brain. What the server warns about (a sidecar
+directory it can't use, a synced folder) goes to stderr once at start.
+Update every `mnemo` on the machine before you turn it on; see
+`docs/shared-mode.md`.
+
+```sh
+MNEMO_PASSPHRASE=... mnemo serve --mcp --shared team.mnemo
+```
+
 #### Text-in via `--embed-cmd` (Phase 3)
 
 `remember`, `recall`, `cache_put_semantic`, and `cache_get_semantic`
@@ -795,6 +809,16 @@ cargo run --bin mnemo -- <command>
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |
+
+**`--wait <duration>`** (v0.14, 12.4), on every command: how long to wait
+for the file's lock when another process holds it (`10s` by default;
+`500ms`, `2m`, or a number of seconds). Reads (`info`, `list`, `get`,
+`search`, `history`, `export`, `verify`, `recall --no-track`, `inspect`,
+...) run alongside other readers. Writes (`remember`, `update`, `forget`,
+`import`, `compact`, `rekey`, and the other commands that change the file)
+take the lock with writer preference and leave a note naming the command
+while they hold it. When the wait runs out, the error names what holds the
+file if it left a note. A session hook should pass `--wait 2s`.
 
 ### Self-describing databases
 

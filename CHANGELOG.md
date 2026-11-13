@@ -94,11 +94,34 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **`SharedMnemo::embedder_arc`**, so a binding can embed outside a window.
 - **`docs/shared-mode.md`**: how to turn shared mode on, per surface; the
   upgrade note; what it costs and assumes.
-- **Plain opens still don't wait for shared handles.** `Mnemo::open`,
-  `serve --mcp` and the CLI's other commands try the lock once, as before,
-  so while a shared handle holds it for a call they get `MnemoError::Locked`.
-  The CLI, `serve --mcp --shared` and `inspect` move onto the lock layer in
-  step 4b of v0.14.0.
+- **The CLI waits for the brain's lock: `--wait <duration>`** on every
+  command (default `10s`; `500ms`, `2m`, or seconds).
+  - Reads (`info`, `list`, `get`, `search`, `history`, `snapshots`,
+    `export`, `verify`, `about`, `recall --no-track`, `cache get`/`stats`,
+    `thread export`, `essence render`) take the shared lock through the
+    lock layer and run alongside other readers.
+  - Writes (`remember`, `update`, `forget`, `import`, `compact`, `rekey`,
+    `index`, `restore`, the `cache`, `thread` and `essence` writes, and
+    `recall` with tracking) take the exclusive lock with writer preference,
+    and leave a note naming the command.
+  - A wait that runs out gives `Locked` with what holds the file ("held by
+    import since 12:01:05 UTC (pid 4242, mnemo)") when it left a note.
+  - Before, every command tried the lock once and failed at once.
+- **`mnemo serve --mcp --shared`** (and `--allow-network-fs`): the server
+  holds no lock between tool calls; each call is one read or one write
+  window, waiting up to `--wait`. A tool's error aborts its window. Its
+  notices go to stderr once at start. Off by default in v0.14 (without it
+  the server holds the file for its life, as before). Library:
+  `mcp::serve_stdio_with_options` and `serve_with_streams_opts`.
+- **`mnemo inspect` waits** up to `--wait` for a writer. A pending WAL or a
+  torn header (which it can't recover, since it never writes) is explained:
+  any writer's next call recovers it.
+- **`Mnemo::open_read_only_waiting`** (and `_with_key`): a read-only open
+  through the lock layer. **`Mnemo::compact_file_waiting`** (and
+  `_with_key`): compaction with `SharedOptions`.
+- **Plain opens still don't wait:** `Mnemo::open`, `open_read_only`,
+  `create`, and `serve --mcp` without `--shared` try the lock once, as
+  before.
 - **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
   mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
   the compiler's version. The released binaries and wheels are built with
@@ -116,7 +139,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
     brain nobody opens in shared mode gains no sibling.
   - A compaction also removes the temp files that killed compactions of the
     same brain left (`<brain>.compact-<pid>-<n>-<hex>.tmp` whose process no
-    longer runs, regular files in the brain's directory only; Unix only).
+    longer runs, regular files in the brain's directory that this user owns;
+    Unix only).
 
 - **`MnemoError` is `#[non_exhaustive]`, and so is its `Locked` variant**:
   a `match` on it needs a catch-all arm, and a `Locked` pattern needs `..`.

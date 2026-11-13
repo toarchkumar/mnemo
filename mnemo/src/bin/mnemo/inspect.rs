@@ -153,9 +153,17 @@ fn now() -> i64 {
 /// The open error a person can act on.
 fn open_error(e: MnemoError) -> String {
     match e {
-        MnemoError::Locked { .. } => {
-            "a writer has this file open; close it or try again".to_string()
-        }
+        // 12.4: the open waited `--wait` first; the error names the holder
+        // when it left a note.
+        MnemoError::Locked { holder, .. } => match holder {
+            Some(h) => format!("a writer has this file open ({h}); try again later"),
+            None => "a writer has this file open; close it or try again".to_string(),
+        },
+        // The inspector never writes, so it can't finish a crashed write.
+        MnemoError::NeedsWriteOpen { .. } => "the file has a write to finish (a pending WAL or \
+             a torn header) and the inspector never writes; any writer's next call recovers it \
+             (a shared handle's next call, or any mnemo write command), then try again"
+            .to_string(),
         other => other.to_string(),
     }
 }
@@ -210,11 +218,12 @@ fn memory_json(m: &Memory) -> Value {
     Value::Object(r)
 }
 
-/// Open `path` read-only, read everything, and close it.
+/// Open `path` read-only, read everything, and close it. The open waits
+/// up to `--wait` for a writer (12.4), alongside other readers.
 pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
     let mut db = match secret {
-        Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
-        Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+        Secret::Passphrase(p) => Mnemo::open_read_only_waiting(path, p, crate::wait_opts()),
+        Secret::Key(k) => Mnemo::open_read_only_waiting_with_key(path, k, crate::wait_opts()),
     }
     .map_err(open_error)?;
     let e = |e: MnemoError| e.to_string();

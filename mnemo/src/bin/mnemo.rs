@@ -21,6 +21,13 @@ use mnemo_engine::{
 #[derive(Parser)]
 #[command(name = "mnemo", version, about, long_about = None)]
 struct Cli {
+    /// How long to wait for the brain's lock when another process holds it
+    /// (12.4 shared mode): `10s`, `500ms`, `2m`, or a number of seconds.
+    /// Reads run alongside other readers; writes wait with writer
+    /// preference. A session hook should pass `--wait 2s`.
+    #[arg(long, global = true, value_name = "DURATION", default_value = "10s",
+          value_parser = parse_wait)]
+    wait: std::time::Duration,
     #[command(subcommand)]
     command: Command,
 }
@@ -630,6 +637,17 @@ enum Command {
         /// Prevents a stuck child from freezing the MCP agent.
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
+        /// 12.4 shared mode: hold no lock between tool calls, so other
+        /// servers, the CLI and Python can use the file meanwhile; each tool
+        /// call takes the lock for itself, waiting up to `--wait`. Off by
+        /// default: without it the server holds the file for its whole life,
+        /// as before.
+        #[arg(long)]
+        shared: bool,
+        /// With `--shared`: use shared mode on a network or synced folder
+        /// anyway, where the lock may not reach every process.
+        #[arg(long, requires = "shared")]
+        allow_network_fs: bool,
     },
     /// Result-cache management (Phase 10.1). One `.mnemo` file is
     /// both an agent-memory store AND a durable key/value cache;
@@ -950,19 +968,111 @@ fn unlock(
     }
 }
 
-/// A read-only open with either secret.
+/// How long a command waits for the brain's lock (`--wait`, default 10 s).
+static WAIT: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+
+/// 12.4: the lock layer's options for this command: `--wait` as the
+/// deadline.
+fn wait_opts() -> mnemo_engine::SharedOptions {
+    let mut o = mnemo_engine::SharedOptions::default();
+    if let Some(w) = WAIT.get() {
+        o.deadline = *w;
+    }
+    o
+}
+
+/// `--wait`'s value: `10s`, `500ms`, `2m`, or a bare number of seconds.
+fn parse_wait(s: &str) -> std::result::Result<std::time::Duration, String> {
+    let s = s.trim();
+    let (num, unit) = match s.find(|c: char| c.is_ascii_alphabetic()) {
+        Some(i) => s.split_at(i),
+        None => (s, "s"),
+    };
+    let n: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| format!("not a duration: {s:?} (try 10s, 500ms or 2m)"))?;
+    let secs = match unit.trim() {
+        "ms" => n / 1000.0,
+        "s" => n,
+        "m" => n * 60.0,
+        other => return Err(format!("unknown unit {other:?} in {s:?} (use ms, s or m)")),
+    };
+    if !secs.is_finite() || secs < 0.0 {
+        return Err(format!("not a duration: {s:?}"));
+    }
+    Ok(std::time::Duration::from_secs_f64(secs.min(1e9)))
+}
+
+/// 12.4: a read-only open through the lock layer: it waits up to `--wait`
+/// for a writer instead of failing at once, and runs alongside other
+/// readers.
+fn open_r(path: &str, pp: &str) -> mnemo_engine::Result<Mnemo> {
+    Mnemo::open_read_only_waiting(path, pp, wait_opts())
+}
+
+/// 12.4: a read-write open through the lock layer, for one command's
+/// write: it waits up to `--wait` with writer preference, and names `op`
+/// to a shared caller that times out meanwhile.
+fn open_w(path: &str, pp: &str, op: &str) -> mnemo_engine::Result<Mnemo> {
+    Mnemo::open_exclusive(path, pp, op, wait_opts())
+}
+
+/// A started embedder and the vectors it made.
+type Embedded = (mnemo_engine::EmbedCmd, Vec<Vec<f32>>);
+
+/// 12.4 (slow work first, unlocked): start the embedder and embed `texts`
+/// before the brain's lock is taken, so a slow embedder never keeps other
+/// sessions waiting. The identity's width comes from the file's header (no
+/// key, no lock); when that can't be read (a torn header), `None`, and the
+/// caller embeds after its write open, as before.
+fn embed_first(
+    path: &str,
+    cmd: &str,
+    name: &str,
+    normalize: bool,
+    timeout: u64,
+    texts: &[&str],
+) -> std::result::Result<Option<Embedded>, String> {
+    use mnemo_engine::Embedder;
+    let Ok(dimensions) = Mnemo::peek_dimensions(path) else {
+        return Ok(None);
+    };
+    let embedder = new_embedder(cmd, name, normalize, timeout, dimensions)?;
+    let vectors = embedder.embed(texts).map_err(fmt)?;
+    Ok(Some((embedder, vectors)))
+}
+
+fn new_embedder(
+    cmd: &str,
+    name: &str,
+    normalize: bool,
+    timeout: u64,
+    dimensions: usize,
+) -> std::result::Result<mnemo_engine::EmbedCmd, String> {
+    let identity = mnemo_engine::EmbedderIdentity {
+        name: name.to_string(),
+        dimensions,
+        normalize,
+    };
+    Ok(mnemo_engine::EmbedCmd::new(cmd, identity)
+        .map_err(fmt)?
+        .with_timeout(std::time::Duration::from_secs(timeout)))
+}
+
+/// A read-only open with either secret (waiting, as [`open_r`]).
 fn open_ro(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
     match s {
-        inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
-        inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+        inspect::Secret::Passphrase(p) => Mnemo::open_read_only_waiting(path, p, wait_opts()),
+        inspect::Secret::Key(k) => Mnemo::open_read_only_waiting_with_key(path, k, wait_opts()),
     }
 }
 
-/// A read-write open with either secret.
-fn open_rw(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
+/// A read-write open with either secret (waiting, as [`open_w`]).
+fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mnemo> {
     match s {
-        inspect::Secret::Passphrase(p) => Mnemo::open(path, p),
-        inspect::Secret::Key(k) => Mnemo::open_with_key(path, k),
+        inspect::Secret::Passphrase(p) => Mnemo::open_exclusive(path, p, op, wait_opts()),
+        inspect::Secret::Key(k) => Mnemo::open_exclusive_with_key(path, k, op, wait_opts()),
     }
 }
 
@@ -1349,6 +1459,7 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 
 fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
+    let _ = WAIT.set(cli.wait);
     match cli.command {
         Command::Init {
             path,
@@ -1468,9 +1579,7 @@ fn run() -> std::result::Result<(), String> {
             let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
             // 12.4 (RB-007.4): through the lock layer, so shared handles'
             // calls can't keep the rekey out, and theirs see "rekey".
-            let mut db =
-                Mnemo::open_exclusive(&path, &pp, "rekey", mnemo_engine::SharedOptions::default())
-                    .map_err(fmt)?;
+            let mut db = Mnemo::open_exclusive(&path, &pp, "rekey", wait_opts()).map_err(fmt)?;
             // RB-005.4 item 4: REKEY-1 makes an error leave the old passphrase
             // in force, so say so. The one exception (the old header couldn't
             // be written back) says "may open with either secret" itself.
@@ -1495,7 +1604,7 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
             if rotate {
-                let r = Mnemo::compact_file(&path, &new).map_err(fmt)?;
+                let r = Mnemo::compact_file_waiting(&path, &new, wait_opts()).map_err(fmt)?;
                 println!(
                     "rekeyed and rotated {path}: a fresh data key, {} memories kept",
                     r.after
@@ -1515,8 +1624,12 @@ fn run() -> std::result::Result<(), String> {
         } => {
             let secret = unlock(&pp, &key_file)?;
             let report = match &secret {
-                inspect::Secret::Passphrase(p) => Mnemo::compact_file(&path, p),
-                inspect::Secret::Key(k) => Mnemo::compact_file_with_key(&path, k),
+                inspect::Secret::Passphrase(p) => {
+                    Mnemo::compact_file_waiting(&path, p, wait_opts())
+                }
+                inspect::Secret::Key(k) => {
+                    Mnemo::compact_file_waiting_with_key(&path, k, wait_opts())
+                }
             }
             .map_err(fmt)?;
             println!(
@@ -1562,9 +1675,7 @@ fn run() -> std::result::Result<(), String> {
             // through the lock layer (12.4, RB-007.4) for the whole import.
             let text =
                 std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
-            let mut db =
-                Mnemo::open_exclusive(&path, &pp, "import", mnemo_engine::SharedOptions::default())
-                    .map_err(fmt)?;
+            let mut db = Mnemo::open_exclusive(&path, &pp, "import", wait_opts()).map_err(fmt)?;
             let mut count = 0usize;
             for (lineno, line) in text.lines().enumerate() {
                 let line = line.trim();
@@ -1600,29 +1711,49 @@ fn run() -> std::result::Result<(), String> {
             let mt = parse_memory_types(&r#type)?
                 .pop()
                 .ok_or_else(|| format!("unknown memory type: {type:?}", r#type = r#type))?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            let identity = EmbedderIdentity {
-                name: embed_name,
-                dimensions: db.dimensions(),
-                normalize: embed_normalize,
-            };
-            let embedder = EmbedCmd::new(&embed_cmd, identity)
-                .map_err(fmt)?
-                .with_timeout(std::time::Duration::from_secs(embed_timeout));
-            db.set_embedder(embedder).map_err(fmt)?;
-            // Embed via the registered embedder in a short-lived
-            // borrow so the subsequent `remember` can take `&mut db`.
-            // We don't call `remember_text` directly because its
-            // Rust-core signature is (content, type); here we also
-            // want importance / agent / metadata on the record.
-            let vector = {
-                let embedder_ref = db
-                    .embedder()
-                    .ok_or_else(|| "no embedder registered".to_string())?;
-                let mut vectors = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
-                vectors
-                    .pop()
-                    .ok_or_else(|| "embedder returned no vector".to_string())?
+            // 12.4: embed first, then take the write lock (the embedder can
+            // take seconds; other sessions shouldn't wait behind it). The
+            // identity check and the width check still run under the lock,
+            // before anything is written.
+            let (mut db, vector) = match embed_first(
+                &path,
+                &embed_cmd,
+                &embed_name,
+                embed_normalize,
+                embed_timeout,
+                &[text.as_str()],
+            )? {
+                Some((embedder, mut vectors)) => {
+                    let vector = vectors
+                        .pop()
+                        .ok_or_else(|| "embedder returned no vector".to_string())?;
+                    let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    (db, vector)
+                }
+                // The header couldn't be read: the old order.
+                None => {
+                    let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
+                    let identity = EmbedderIdentity {
+                        name: embed_name,
+                        dimensions: db.dimensions(),
+                        normalize: embed_normalize,
+                    };
+                    let embedder = EmbedCmd::new(&embed_cmd, identity)
+                        .map_err(fmt)?
+                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                    db.set_embedder(embedder).map_err(fmt)?;
+                    let vector = {
+                        let embedder_ref = db
+                            .embedder()
+                            .ok_or_else(|| "no embedder registered".to_string())?;
+                        let mut vectors = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
+                        vectors
+                            .pop()
+                            .ok_or_else(|| "embedder returned no vector".to_string())?
+                    };
+                    (db, vector)
+                }
             };
             let mut memory = Memory::new(text, mt, vector);
             if let Some(i) = importance {
@@ -1682,7 +1813,7 @@ fn run() -> std::result::Result<(), String> {
             n_rerank,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "index").map_err(fmt)?;
             if drop {
                 db.drop_index();
                 db.flush().map_err(fmt)?;
@@ -1738,7 +1869,7 @@ fn run() -> std::result::Result<(), String> {
             // catalog writes. Safe on a read-only handle.
             let pp = passphrase(&pp)?;
             let q = resolve_query(query, query_file)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let hits = db
                 .search(&q, top_k, mnemo_engine::Metric::Cosine)
                 .map_err(fmt)?;
@@ -1909,7 +2040,7 @@ fn run() -> std::result::Result<(), String> {
             // `get` is a plain catalog lookup + record read — no writes.
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let m = db.get(&ulid).map_err(fmt)?;
             print_memory(&m, format, verbose, vector);
         }
@@ -2131,14 +2262,21 @@ fn run() -> std::result::Result<(), String> {
                     if no_track {
                         return open_ro(path, secret).map(|db| (db, true));
                     }
-                    match open_rw(path, secret) {
+                    match open_rw(path, secret, "recall") {
                         Ok(db) => Ok((db, false)),
                         Err(mnemo_engine::MnemoError::Locked { .. }) => {
                             // R-004.4: open read-only first and print the
                             // notice only if that worked. An exclusive
                             // holder blocks the read-only open too, and
                             // then the `Locked` error is the whole story.
-                            let db = open_ro(path, secret)?;
+                            // One try (12.4): the write open already
+                            // waited `--wait`, and a holder that kept it
+                            // out almost always keeps a read out too, so a
+                            // second full wait would double the delay.
+                            let db = match secret {
+                                inspect::Secret::Passphrase(p) => Mnemo::open_read_only(path, p),
+                                inspect::Secret::Key(k) => Mnemo::open_read_only_with_key(path, k),
+                            }?;
                             eprintln!(
                                 "mnemo: another process holds the lock on {path}; \
                                  running recall read-only with --no-track"
@@ -2299,7 +2437,6 @@ fn run() -> std::result::Result<(), String> {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
 
             let mut patch = MemoryPatch::default();
             if let Some(i) = importance {
@@ -2319,7 +2456,7 @@ fn run() -> std::result::Result<(), String> {
                 patch.ttl_secs = Some(Some(ttl));
             }
 
-            let outcome = match text {
+            let (mut db, outcome) = match text {
                 Some(t) => {
                     let ecmd = embed_cmd.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
@@ -2327,18 +2464,54 @@ fn run() -> std::result::Result<(), String> {
                     let ename = embed_name.ok_or_else(|| {
                         "--text requires --embed-cmd and --embed-name".to_string()
                     })?;
-                    let identity = EmbedderIdentity {
-                        name: ename,
-                        dimensions: db.dimensions(),
-                        normalize: embed_normalize,
-                    };
-                    let embedder = EmbedCmd::new(&ecmd, identity)
-                        .map_err(fmt)?
-                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
-                    db.set_embedder(embedder).map_err(fmt)?;
-                    db.update_text(&ulid, &t, patch).map_err(fmt)?
+                    // 12.4: embed first, then take the write lock.
+                    match embed_first(
+                        &path,
+                        &ecmd,
+                        &ename,
+                        embed_normalize,
+                        embed_timeout,
+                        &[t.as_str()],
+                    )? {
+                        Some((embedder, mut vectors)) => {
+                            let vector = vectors.pop().ok_or_else(|| {
+                                "embedder returned no vector for the input text".to_string()
+                            })?;
+                            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                            db.set_embedder(embedder).map_err(fmt)?;
+                            // As `update_text` does, with the vector already made.
+                            if vector.len() != db.dimensions() {
+                                return Err(fmt(mnemo_engine::MnemoError::DimensionMismatch {
+                                    expected: db.dimensions(),
+                                    got: vector.len(),
+                                }));
+                            }
+                            patch.content = Some(t);
+                            patch.vector = Some(vector);
+                            let outcome = db.update(&ulid, patch).map_err(fmt)?;
+                            (db, outcome)
+                        }
+                        None => {
+                            let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                            let identity = EmbedderIdentity {
+                                name: ename,
+                                dimensions: db.dimensions(),
+                                normalize: embed_normalize,
+                            };
+                            let embedder = EmbedCmd::new(&ecmd, identity)
+                                .map_err(fmt)?
+                                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                            db.set_embedder(embedder).map_err(fmt)?;
+                            let outcome = db.update_text(&ulid, &t, patch).map_err(fmt)?;
+                            (db, outcome)
+                        }
+                    }
                 }
-                None => db.update(&ulid, patch).map_err(fmt)?,
+                None => {
+                    let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
+                    let outcome = db.update(&ulid, patch).map_err(fmt)?;
+                    (db, outcome)
+                }
             };
             db.flush().map_err(fmt)?;
             let outcome_str = match outcome {
@@ -2360,7 +2533,7 @@ fn run() -> std::result::Result<(), String> {
         } => {
             use mnemo_engine::KeyScope;
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             // v0.8.1 bugfix: default slot matches keyed remember with
             // the same arguments. No `--shared`, no `--agent` → default
             // agent's private slot.
@@ -2440,7 +2613,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let db = open_r(&path, &pp).map_err(fmt)?;
             let snaps = db.snapshots();
             if snaps.is_empty() {
                 println!("no snapshots yet (nothing has been flushed)");
@@ -2458,7 +2631,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "restore").map_err(fmt)?;
             let info = match (to_txn, to_time) {
                 (Some(txn), _) => db.restore_to(txn).map_err(fmt)?,
                 (None, Some(t)) => db.restore_to_time(t).map_err(fmt)?,
@@ -2476,6 +2649,8 @@ fn run() -> std::result::Result<(), String> {
             embed_name,
             embed_normalize,
             embed_timeout,
+            shared,
+            allow_network_fs,
         } => {
             if !mcp {
                 return Err("serve requires --mcp today (other transports may come later)".into());
@@ -2493,7 +2668,12 @@ fn run() -> std::result::Result<(), String> {
                 )),
                 _ => None,
             };
-            mnemo_engine::mcp::serve_stdio_with_embedder(p, embed_spec).map_err(fmt)?;
+            let shared = shared.then(|| {
+                let mut o = wait_opts();
+                o.allow_network_fs = allow_network_fs;
+                o
+            });
+            mnemo_engine::mcp::serve_stdio_with_options(p, embed_spec, shared).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
     }
@@ -2517,9 +2697,9 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             // the handle is read-only. Use read-write here so the stats
             // update lands durably on the next user-driven flush. A v8
             // file opens read-only (the v8 sunset), so its stats stay.
-            let mut db = match Mnemo::open(&path, &pp) {
+            let mut db = match open_w(&path, &pp, "cache get") {
                 Err(mnemo_engine::MnemoError::FormatTooOld { version: 8 }) => {
-                    Mnemo::open_read_only(&path, &pp).map_err(fmt)?
+                    open_r(&path, &pp).map_err(fmt)?
                 }
                 other => other.map_err(fmt)?,
             };
@@ -2572,7 +2752,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
                 ttl_secs: ttl,
                 cost_hint_ms: None,
             };
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache put").map_err(fmt)?;
             db.cache_put(&ns, &key, &bytes, opts).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("cached {} bytes at ({ns}, {key})", bytes.len());
@@ -2584,7 +2764,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache delete").map_err(fmt)?;
             db.cache_delete(&ns, &key).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("deleted ({ns}, {key}) (space reclaimed on next compact)");
@@ -2596,7 +2776,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             // Read-only handle is fine — stats is a pure scan.
-            let db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let db = open_r(&path, &pp).map_err(fmt)?;
             let s = db.cache_stats(ns.as_deref());
             let obj = serde_json::json!({
                 "namespace": ns,
@@ -2616,7 +2796,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "cache purge").map_err(fmt)?;
             let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("purged {n} entr{}", if n == 1 { "y" } else { "ies" });
@@ -2668,7 +2848,7 @@ fn fmt(e: mnemo_engine::MnemoError) -> String {
 /// into its own function because the three subcommands share nothing
 /// with the top-level dispatch beyond passphrase resolution.
 fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
-    use mnemo_engine::{read_transcript, EmbedCmd, EmbedderIdentity, TranscriptFormat};
+    use mnemo_engine::{read_transcript, TranscriptFormat};
     use std::io::{Read, Write};
     match cmd {
         ThreadCmd::Ingest {
@@ -2699,17 +2879,65 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 read_transcript(file, fmt_enum).map_err(fmt)?
             };
 
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
-            let identity = EmbedderIdentity {
-                name: embed_name,
-                dimensions: db.dimensions(),
-                normalize: embed_normalize,
+            // 12.4: plan under a short read (which turns are new, and the
+            // chunk texts), embed them with no lock held, then write the
+            // vectors under the write lock. If another process ingested in
+            // between, the plan is made again under the lock and only the
+            // texts that weren't embedded yet are embedded there.
+            let (texts, dimensions) = {
+                let mut db = open_r(&path, &pp).map_err(fmt)?;
+                (
+                    db.ingest_thread_texts(&thread, &turns).map_err(fmt)?,
+                    db.dimensions(),
+                )
             };
-            let embedder = EmbedCmd::new(&embed_cmd, identity)
-                .map_err(fmt)?
-                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+            let embedder = new_embedder(
+                &embed_cmd,
+                &embed_name,
+                embed_normalize,
+                embed_timeout,
+                dimensions,
+            )?;
+            let pre: Vec<Vec<f32>> = if texts.is_empty() {
+                Vec::new()
+            } else {
+                use mnemo_engine::Embedder;
+                let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+                embedder.embed(&refs).map_err(fmt)?
+            };
+            let mut db = open_w(&path, &pp, "thread ingest").map_err(fmt)?;
             db.set_embedder(embedder).map_err(fmt)?;
-            let report = db.ingest_thread(&thread, &turns).map_err(fmt)?;
+            let now = db.ingest_thread_texts(&thread, &turns).map_err(fmt)?;
+            let report = if now == texts {
+                db.ingest_thread_with_vectors(&thread, &turns, &pre)
+                    .map_err(fmt)?
+            } else {
+                let mut have: std::collections::HashMap<&str, &Vec<f32>> =
+                    texts.iter().map(String::as_str).zip(pre.iter()).collect();
+                let missing: Vec<&str> = now
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|t| !have.contains_key(t))
+                    .collect();
+                let extra = if missing.is_empty() {
+                    Vec::new()
+                } else {
+                    db.embedder()
+                        .ok_or_else(|| "no embedder registered".to_string())?
+                        .embed(&missing)
+                        .map_err(fmt)?
+                };
+                for (t, v) in missing.iter().zip(extra.iter()) {
+                    have.insert(t, v);
+                }
+                let vectors = now
+                    .iter()
+                    .map(|t| have.get(t.as_str()).map(|v| (*v).clone()))
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| "embedder returned too few vectors".to_string())?;
+                db.ingest_thread_with_vectors(&thread, &turns, &vectors)
+                    .map_err(fmt)?
+            };
             db.flush().map_err(fmt)?;
             println!(
                 "thread {thread}: added {added} record(s) ({chunked} chunked, {truncated} truncated); \
@@ -2728,7 +2956,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             // 12.7d: the shared ingest-shape export (seq order, chunks
             // joined), so the JSONL matches Python and MCP `thread_export`
             // and re-ingests cleanly.
@@ -2761,7 +2989,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "thread forget").map_err(fmt)?;
             let n = db.thread_forget(&thread).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!(
@@ -2776,7 +3004,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = passphrase(&pp)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "thread start").map_err(fmt)?;
             let id = db.thread_start(&new, &from).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!(
@@ -2819,7 +3047,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open_read_only(&path, &pp).map_err(fmt)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
             let out = db.essence(scope, budget).map_err(fmt)?;
             print!("{out}");
             Ok(())
@@ -2843,7 +3071,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
                 return Err("use `mnemo essence append` for timeline entries".into());
             }
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence add").map_err(fmt)?;
             let id = db
                 .essence_add(scope, section, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2861,7 +3089,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let scope = resolve_scope(thread, project)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence append").map_err(fmt)?;
             let id = db
                 .essence_append_timeline(scope, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2878,7 +3106,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence update").map_err(fmt)?;
             let outcome = db
                 .essence_update(&ulid, &text, parse_refs(refs))
                 .map_err(fmt)?;
@@ -2898,7 +3126,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence resolve").map_err(fmt)?;
             let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             let s = match outcome {
@@ -2916,7 +3144,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
         } => {
             let pp = passphrase(&pp)?;
             let ulid = parse_ulid(&id)?;
-            let mut db = Mnemo::open(&path, &pp).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "essence remove").map_err(fmt)?;
             db.essence_remove(&ulid).map_err(fmt)?;
             db.flush().map_err(fmt)?;
             println!("{id}\tremoved");

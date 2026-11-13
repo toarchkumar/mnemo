@@ -727,18 +727,44 @@ impl Mnemo {
     /// converted: the only read-write open that accepts one (the v8
     /// sunset, v0.13). It keeps every live memory.
     pub fn compact_file(path: &str, passphrase: &str) -> Result<CompactReport> {
-        Self::compact_file_secret(path, passphrase.as_bytes(), 0)
+        Self::compact_file_secret(
+            path,
+            passphrase.as_bytes(),
+            0,
+            &crate::SharedOptions::default(),
+        )
     }
 
     /// PERF-1 step 7: [`Mnemo::compact_file`] for a raw-key database.
     pub fn compact_file_with_key(path: &str, key: &[u8; crypto::KEY_LEN]) -> Result<CompactReport> {
-        Self::compact_file_secret(path, key, 0)
+        Self::compact_file_secret(path, key, 0, &crate::SharedOptions::default())
+    }
+
+    /// [`Mnemo::compact_file`] with the lock layer's options: how long to
+    /// wait for the file's lock (`opts.deadline`; `compact_file` waits 10 s),
+    /// a cancel, and `allow_network_fs`. `mnemo compact --wait` uses it.
+    pub fn compact_file_waiting(
+        path: &str,
+        passphrase: &str,
+        opts: crate::SharedOptions,
+    ) -> Result<CompactReport> {
+        Self::compact_file_secret(path, passphrase.as_bytes(), 0, &opts)
+    }
+
+    /// [`Mnemo::compact_file_waiting`] for a raw-key database.
+    pub fn compact_file_waiting_with_key(
+        path: &str,
+        key: &[u8; crypto::KEY_LEN],
+        opts: crate::SharedOptions,
+    ) -> Result<CompactReport> {
+        Self::compact_file_secret(path, key, 0, &opts)
     }
 
     pub(super) fn compact_file_secret(
         path: &str,
         secret: &[u8],
         format_version: u16,
+        opts: &crate::SharedOptions,
     ) -> Result<CompactReport> {
         // RB-007.3: compact the file the path names, through any symlink,
         // and rename over that file, so a link stays a link and every path
@@ -748,13 +774,7 @@ impl Mnemo {
         // RB-007.4: through the lock layer, so shared handles' busy reads
         // can't keep it out, and a shared caller that times out reads
         // "compact" in the lock-info note.
-        let old = Mnemo::open_exclusive_secret(
-            &real,
-            secret,
-            "compact",
-            &crate::SharedOptions::default(),
-            true,
-        )?;
+        let old = Mnemo::open_exclusive_secret(&real, secret, "compact", opts, true)?;
         // RB-007.8 item 8: with the exclusive lock held no compaction of
         // this file is running, so temp files left by dead ones can go.
         remove_dead_compaction_temps(&real);
@@ -968,7 +988,9 @@ pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usi
 /// when their process died: in `brain`'s directory, regular files named
 /// exactly `<brain's name>.compact-<pid>-<n>-<8 hex digits>.tmp` (the
 /// pattern [`temp_sibling`] makes) whose pid isn't this process and no
-/// longer runs. Nothing else is touched. Best effort; returns how many went.
+/// longer runs, and, on Unix, that this user owns: in a shared directory
+/// another user's file of the same name is left alone. Nothing else is
+/// touched. Best effort; returns how many went.
 ///
 /// Call it only with `brain`'s exclusive lock held: a live compaction holds
 /// that lock for as long as its temp file exists. Off Unix no process
@@ -991,12 +1013,34 @@ pub(crate) fn remove_dead_compaction_temps(brain: &Path) -> usize {
             continue;
         }
         let path = entry.path();
-        let regular = std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file());
-        if regular && std::fs::remove_file(&path).is_ok() {
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.file_type().is_file() || !owned_by_us(&meta) {
+            continue;
+        }
+        if std::fs::remove_file(&path).is_ok() {
             removed += 1;
         }
     }
     removed
+}
+
+/// Whether this process's user owns the file (Unix). Elsewhere, true: the
+/// caller removes nothing off Unix anyway.
+#[cfg(unix)]
+fn owned_by_us(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    #[cfg(any(test, feature = "failpoints"))]
+    if let Some(uid) = crate::__failpoints::euid_override() {
+        return meta.uid() == uid;
+    }
+    meta.uid() == rustix::process::geteuid().as_raw()
+}
+
+#[cfg(not(unix))]
+fn owned_by_us(_meta: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// The pid in a compaction temp name `<prefix><pid>-<n>-<8 hex>.tmp`, if the

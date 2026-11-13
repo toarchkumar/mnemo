@@ -911,6 +911,18 @@ impl Mnemo {
         Self::open_read_only_secret(path, key)
     }
 
+    /// The embedding width the file at `path` records, read from its header
+    /// (page 0 is sealed, not encrypted): no key, no lock, no KDF. A caller
+    /// that embeds before it takes the lock uses it to build its embedder's
+    /// identity (12.4: slow work first, unlocked). A torn header is an
+    /// error here (a read-write open heals it).
+    pub fn peek_dimensions(path: impl AsRef<std::path::Path>) -> Result<usize> {
+        let mut file = File::open(path.as_ref())?;
+        let mut hbuf = [0u8; PAGE_SIZE];
+        file.read_exact(&mut hbuf)?;
+        Ok(Header::from_page(&hbuf)?.dimensions as usize)
+    }
+
     /// Whether `key` opens the raw-key file at `path`, decided from its
     /// header alone: no catalog load, no lock, microseconds. `Ok(false)` is
     /// "not this key". Unlike a read-only open, it answers for a file that
@@ -955,8 +967,50 @@ impl Mnemo {
 
     pub(super) fn open_read_only_secret(path: impl Into<PathBuf>, secret: &[u8]) -> Result<Mnemo> {
         let path: PathBuf = path.into();
-        let mut file = open_with_lock(&path, /*write=*/ false, Create::No)?;
+        let file = open_with_lock(&path, /*write=*/ false, Create::No)?;
+        Self::read_only_from_locked(path, file, secret)
+    }
 
+    /// [`Mnemo::open_read_only`] through 12.4's lock layer: it waits up to
+    /// `opts.deadline` for a writer (a plain handle, a shared write, a
+    /// compaction) instead of failing at once with `Locked`, and runs
+    /// alongside other readers. The handle then holds the shared lock for
+    /// its life, as any read-only handle does; close it promptly. A `Locked`
+    /// after the wait names what holds the file when it left a note.
+    ///
+    /// Like `open_read_only`, it never recovers anything: a pending WAL or
+    /// a torn header gives [`MnemoError::NeedsWriteOpen`]. Where shared
+    /// mode isn't available it tries once, as `open_read_only` does.
+    pub fn open_read_only_waiting(
+        path: impl AsRef<Path>,
+        passphrase: &str,
+        opts: crate::SharedOptions,
+    ) -> Result<Mnemo> {
+        Self::open_read_only_waiting_secret(path.as_ref(), passphrase.as_bytes(), &opts)
+    }
+
+    /// [`Mnemo::open_read_only_waiting`] for a raw-key file.
+    pub fn open_read_only_waiting_with_key(
+        path: impl AsRef<Path>,
+        key: &[u8; crypto::KEY_LEN],
+        opts: crate::SharedOptions,
+    ) -> Result<Mnemo> {
+        Self::open_read_only_waiting_secret(path.as_ref(), key, &opts)
+    }
+
+    fn open_read_only_waiting_secret(
+        path: &Path,
+        secret: &[u8],
+        opts: &crate::SharedOptions,
+    ) -> Result<Mnemo> {
+        let path = absolute(path.to_path_buf());
+        let file = lock_shared(&path, opts)?;
+        Self::read_only_from_locked(path, file, secret)
+    }
+
+    /// The read-only open's work on a file its caller holds the shared lock
+    /// on.
+    fn read_only_from_locked(path: PathBuf, mut file: LockedFile, secret: &[u8]) -> Result<Mnemo> {
         let mut hbuf = [0u8; PAGE_SIZE];
         file.seek(SeekFrom::Start(0))?;
         file.read_exact(&mut hbuf)?;
