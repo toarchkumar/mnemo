@@ -112,6 +112,24 @@ The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 
+## What's new in v0.13.2: a failed passphrase change changes nothing
+
+- **A failed `rekey` leaves the old passphrase or key in force.** Before,
+  a passphrase change that failed partway (on a full disk, say) could
+  still switch the file to the new secret at the next save. Now an error
+  means the old secret still opens the file (the engine README covers the
+  one rare exception). Once the change has
+  taken effect, a problem tidying up afterwards is reported as a warning,
+  not as a failure.
+- **`mnemo inspect`'s printed link opens one tab.** The page trades it for
+  a private session on first load, so a copy of the link in your browser's
+  history opens nothing. A refresh keeps working; another tab needs a new
+  link. After the inspector stops, the page says so and how to restart it.
+- **Clearer advice for damaged old files:** a v8 file with a damaged
+  header now points straight at `mnemo compact`, which repairs and
+  upgrades it.
+- The iOS and Android packages are unchanged and stay at 0.13.0.
+
 ## What's new in v0.13.1: safer opens, raw-key files from the CLI
 
 - **A wrong passphrase never changes the file.** Opening a file that has
@@ -135,14 +153,15 @@ The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
 - **`mnemo inspect`: a read-only view of a memory file in your browser.**
   Browse and search memories, follow the history of a keyed fact, read a
   thread's essence and turns, and check restore points and stats. It runs
-  only on your own machine, behind a private link that works only while
-  the inspector runs, and never changes the file or blocks an agent that's
-  writing to it.
+  only on your own machine, behind a private link that opens one browser
+  tab (from v0.13.2) and works only while the inspector runs. It never
+  changes the file or blocks an agent that's writing to it.
   ```sh
   mnemo inspect agent.mnemo                  # prints a link; open it in your browser
   mnemo inspect app.mnemo --key-file app.key # a raw-key file (what create_with_key writes)
   ```
-  Copy the printed link into your browser, or add `--open` to launch it.
+  Copy the printed link into your browser, or add `--open` to launch it
+  (on Linux with a snap or flatpak browser, copy the link instead).
   The inspector stops on its own after 30 minutes without use
   (`--idle-timeout`).
 - **`mnemo export`: a readable copy of a file,** as Markdown or JSON Lines.
