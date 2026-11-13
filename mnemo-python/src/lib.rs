@@ -1812,6 +1812,19 @@ impl Mnemo {
         })
     }
 
+    /// After a successful `rekey` or `rekey_with_key`, what couldn't be
+    /// scrubbed of the old key wrap, or `None` if it all was (RB-005.3).
+    /// The rekey took effect either way; to be sure the old secret opens
+    /// nothing, compact the file. The `RuntimeWarning` the rekey raises says
+    /// the same; this is for code that runs with warnings filtered. Each
+    /// rekey resets it.
+    fn rekey_cleanup_error(&self) -> PyResult<Option<String>> {
+        Ok(match self.handle_ref()? {
+            Handle::Plain(c) => c.rekey_cleanup_error().map(str::to_owned),
+            Handle::Shared(s) => s.rekey_cleanup_error().map(str::to_owned),
+        })
+    }
+
     /// Whether this handle was opened with `shared=True`.
     #[getter]
     fn shared(&self) -> bool {

@@ -953,8 +953,35 @@ fn the_sidecar_removed_while_two_processes_write() {
             remove_dir_racing_children(&gone);
         }
     }
-    std::thread::sleep(Duration::from_millis(300));
-    // The children made it again at their next calls.
+    // The children make it again at their next calls. Wait until each has
+    // acknowledged two more writes: the first may come from a call that
+    // started before the removal, but the second's call started after the
+    // first's acknowledgement, so after the removal. Capped at 10 s, so a
+    // child that stops making progress still fails the test.
+    let removed_at = Instant::now();
+    let acks = |id: &str| {
+        std::fs::read_to_string(d.join("acks").join(id))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let (a0, b0) = (acks("a"), acks("b"));
+    while acks("a") < a0 + 2 || acks("b") < b0 + 2 {
+        assert!(
+            removed_at.elapsed() < Duration::from_secs(10),
+            "the children didn't make progress after the last removal: a {} -> {}, b {} -> {}; {}",
+            a0,
+            acks("a"),
+            b0,
+            acks("b"),
+            child_logs(d)
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    eprintln!(
+        "sidecar removal: two writes per child {:?} after the last removal",
+        removed_at.elapsed()
+    );
     assert!(side.is_dir(), "the sidecar wasn't made again");
     stop(d);
     wait_ok(w1, d);

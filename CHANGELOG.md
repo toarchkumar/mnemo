@@ -158,6 +158,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **A rekey that fails reports a failed cleanup** (RB-005.2). When a rekey
+  failed and zeroing its new WAL region failed too, the zeroing's error was
+  dropped. The error now says so: the old secret is still in force, but a
+  copy of the new key wrap may be left in the file until a later write or
+  `mnemo compact` clears it. This applies to `Mnemo::rekey`,
+  `SharedMnemo::rekey` and `mnemo rekey`.
+- **Python: `Mnemo.rekey_cleanup_error()`** (RB-005.3), on plain and shared
+  handles, as in Rust. It gives the same report as the rekey's
+  `RuntimeWarning`, for code that filters warnings.
+
 - **A compaction through a symlink replaces the file it names, not the
   link.** `compact_file` (and so `mnemo compact` and `mnemo rekey --rotate`)
   renamed the compacted copy over the path as given, so a symlink to the

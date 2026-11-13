@@ -205,3 +205,139 @@ fn a_v8_file_refuses_a_rekey_and_is_unchanged() {
     assert_eq!(std::fs::read(&path).unwrap(), before);
     assert!(Mnemo::open_read_only_with_key(&path, &key).is_ok());
 }
+
+// --- REKEY-2 (RB-005.2, RB-005.4 item 5): failures inside the undo --------
+
+/// A 3-memory file, flushed, and the number of the write that puts the new
+/// page 0 on disk: failing it is the last cut that leaves the old secret.
+#[cfg(feature = "failpoints")]
+fn page0_write(dir: &Path, s: Secret) -> u64 {
+    for n in 0..16 {
+        let probe = dir.join(format!("probe-{s:?}-{n}.mnemo"));
+        let mut db = create(&probe, s);
+        for i in 0..3 {
+            db.remember(mem(i)).unwrap();
+        }
+        db.flush().unwrap();
+        mnemo_engine::__failpoints::set_writes_until_fail(n);
+        let r = rekey(&mut db, s);
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
+        if r.is_ok() {
+            assert!(n >= 1);
+            return (n - 1) as u64;
+        }
+    }
+    panic!("no cut let the rekey succeed");
+}
+
+#[cfg(feature = "failpoints")]
+fn fresh(dir: &Path, s: Secret, name: &str) -> (std::path::PathBuf, Mnemo) {
+    let path = dir.join(name);
+    let mut db = create(&path, s);
+    for i in 0..3 {
+        db.remember(mem(i)).unwrap();
+    }
+    db.flush().unwrap();
+    (path, db)
+}
+
+/// Page 0's write fails, then the zeroing of the new region fails, then the
+/// old page 0 is written back. The old secret is in force, and the error
+/// says a copy of the new key wrap may be left until a later write clears
+/// it, which it does.
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_failed_zeroing_in_the_undo_is_reported() {
+    let dir = tempdir().unwrap();
+    for s in [Secret::Passphrase, Secret::Key] {
+        let p = page0_write(dir.path(), s);
+        let (path, mut db) = fresh(dir.path(), s, &format!("zeroing-{s:?}.mnemo"));
+        // p: the new page 0; p + 1: the zeroing; p + 2: the write-back.
+        mnemo_engine::__failpoints::set_writes_failing(&[p, p + 1]);
+        let e = rekey(&mut db, s).unwrap_err();
+        mnemo_engine::__failpoints::set_writes_failing(&[]);
+        let msg = e.to_string();
+        assert!(
+            msg.contains("zeroing the new key wrap's copy failed"),
+            "{s:?}: {msg}"
+        );
+        assert!(
+            msg.contains("the old secret is still in force"),
+            "{s:?}: {msg}"
+        );
+        assert!(!msg.contains("may open with either secret"), "{s:?}: {msg}");
+        // The copy is really there: a torn header taken now lets the new
+        // secret recover the new page 0. The handle is dropped first (it
+        // writes nothing on drop): Windows won't let another handle read a
+        // locked file.
+        drop(db);
+        let early = dir.path().join(format!("zeroing-{s:?}-early.mnemo"));
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[..16].fill(0);
+        std::fs::write(&early, &bytes).unwrap();
+        assert!(open(&early, s, true).is_ok(), "{s:?}: no copy was left");
+        let mut db = open(&path, s, false).unwrap();
+        db.remember(mem(3)).unwrap();
+        db.close().unwrap();
+        assert_eq!(open(&path, s, false).unwrap().len(), 4, "{s:?}");
+        assert!(matches!(
+            open(&path, s, true),
+            Err(MnemoError::WrongPassphrase)
+        ));
+        // After the later write, a torn header gives the new secret
+        // nothing to recover with.
+        let torn = dir.path().join(format!("zeroing-{s:?}-torn.mnemo"));
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[..16].fill(0);
+        std::fs::write(&torn, &bytes).unwrap();
+        assert!(open(&torn, s, true).is_err(), "{s:?}: the copy was left");
+    }
+}
+
+/// Page 0's write fails and the zeroing works, but writing the old page 0
+/// back fails too: the file may open with either secret, and the message
+/// says so (the CLI keys on the phrase).
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_failed_write_back_says_the_file_may_open_with_either_secret() {
+    let dir = tempdir().unwrap();
+    for s in [Secret::Passphrase, Secret::Key] {
+        let p = page0_write(dir.path(), s);
+        let (path, mut db) = fresh(dir.path(), s, &format!("writeback-{s:?}.mnemo"));
+        mnemo_engine::__failpoints::set_writes_failing(&[p, p + 2]);
+        let e = rekey(&mut db, s).unwrap_err();
+        mnemo_engine::__failpoints::set_writes_failing(&[]);
+        let msg = e.to_string();
+        assert!(msg.contains("may open with either secret"), "{s:?}: {msg}");
+        assert!(!msg.contains("zeroing"), "{s:?}: {msg}");
+        drop(db);
+        let old = open(&path, s, false).is_ok();
+        let new = open(&path, s, true).is_ok();
+        assert!(old || new, "{s:?}: neither secret opens the file");
+    }
+}
+
+/// The failed zeroing through `SharedMnemo::rekey`: the same message, and
+/// the handle keeps the old secret (a compaction under it is followed).
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_failed_zeroing_through_a_shared_handle_keeps_the_old_secret() {
+    if mnemo_engine::__shared::WINDOWS_OLD_RENAME {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let p = page0_write(dir.path(), Secret::Passphrase);
+    let (path, db) = fresh(dir.path(), Secret::Passphrase, "shared.mnemo");
+    db.close().unwrap();
+    let mut s = Mnemo::open_shared(&path, OLD_PW, mnemo_engine::SharedOptions::default()).unwrap();
+    mnemo_engine::__failpoints::set_writes_failing(&[p, p + 1]);
+    let e = s.rekey(NEW_PW, KdfParams::fast()).unwrap_err();
+    mnemo_engine::__failpoints::set_writes_failing(&[]);
+    assert!(
+        e.to_string()
+            .contains("zeroing the new key wrap's copy failed"),
+        "{e}"
+    );
+    Mnemo::compact_file(path.to_str().unwrap(), OLD_PW).unwrap();
+    assert_eq!(s.read(|db| Ok(db.len())).unwrap(), 3);
+}
