@@ -211,6 +211,35 @@ jobs:
         # (Phase 1.3) to see the crash-injection hook.
         run: cargo test --features failpoints --test integration --test cli_smoke --test proptest_store
 
+  # --- 12.4 (v0.14.0 step 2a): Windows at the MSRV. std::fs::rename can't
+  #     replace an open file on Windows before Rust 1.85 (1.75 to 1.84 refuse
+  #     with os error 5; probed 2026-11-13), so compaction falls back to
+  #     closing the old file first, and shared mode refuses to start. The
+  #     stable matrix above never builds with such a compiler; this job keeps
+  #     both behaviours tested.
+  windows-msrv:
+    name: windows-msrv (rust 1.75)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@1.75
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: windows-msrv-1.75
+
+      - name: cargo test (the compaction fallback and the shared-mode refusal)
+        working-directory: mnemo
+        shell: bash
+        run: |
+          rustc --version
+          cargo test --locked -p mnemo-engine --features failpoints --test replaced_file --test shared_lock
+
   # --- Python bindings: build via maturin + run mnemo-python test_mnemo
   python:
     name: python bindings (linux)
