@@ -85,6 +85,7 @@ mod threads;
 use crud::*;
 use essence::*;
 use load::*;
+pub(crate) use load::{is_file_at, is_lock_conflict};
 pub(crate) use records::plain_record;
 use records::*;
 

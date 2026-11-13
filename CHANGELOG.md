@@ -8,6 +8,37 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **The lock layer for 12.4's shared mode** (v0.14.0 step 2a; the design is
+  `docs/design/12.4-shared-access.md`). Nothing calls it yet:
+  `Mnemo::open_shared` (step 2b) builds on it, and the surfaces come in step
+  4. What it does:
+  - one deadline and a cancel for every call (`SharedOptions::deadline`,
+    default 10 s; `CancelToken`), with jittered backoff;
+  - writer preference through an intent lock, so busy readers can't starve a
+    writer;
+  - a sidecar directory next to the brain, `<brain>.mnemo-shared/` (matched
+    by the `.gitignore` pattern `*.mnemo-shared/`). It's created and checked
+    before use, and if it can't be used, each call takes the main lock alone;
+  - a note from a long operation, so a caller that times out learns what
+    holds the file;
+  - refusal of network filesystems and, on macOS, synced folders, unless
+    `allow_network_fs` is set. On Linux the check is an allow-list.
+- **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
+  mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
+  the compiler's version. The released binaries and wheels are built with
+  stable. A new `windows-msrv` CI job (Rust 1.75) tests this and step 1's
+  compaction fallback.
+
+### Changed
+
+- **`MnemoError::Locked` has a `holder` field** (`Option<String>`), naming
+  what holds the file when it left a note. A pattern that lists only `path`
+  needs `..`. Two new variants: `MnemoError::Cancelled` and
+  `MnemoError::Unsupported`. The Swift and Kotlin bindings report both as
+  `Io`, with the engine's message.
+
 ### Fixed
 
 - **A write racing a compaction is no longer lost.** `compact_file` (and so

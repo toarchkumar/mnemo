@@ -98,8 +98,14 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             E::Io(err) => MnemoError::Io {
                 message: err.to_string(),
             },
-            E::Locked { path } => MnemoError::Locked {
+            E::Locked { path, .. } => MnemoError::Locked {
                 path: path.display().to_string(),
+            },
+            // 12.4 step 2a. The mobile shared mode arrives with mobile's
+            // opt-in; until then these come only from the Rust API. `Io`
+            // keeps the engine's message without a new binding variant.
+            other @ (E::Cancelled | E::Unsupported(_)) => MnemoError::Io {
+                message: other.to_string(),
             },
             // v0.14.0 step 1: the file at the handle's path was replaced, and
             // nothing was written. `Io` with the engine's message, which says

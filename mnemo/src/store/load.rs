@@ -87,7 +87,7 @@ impl Mnemo {
 
 /// Does `path` still name the file `file` has open? `false` when the path
 /// names another file, or none (it was removed or renamed away).
-pub(super) fn is_file_at(file: &File, path: &Path) -> Result<bool> {
+pub(crate) fn is_file_at(file: &File, path: &Path) -> Result<bool> {
     let open = same_file::Handle::from_file(file.try_clone()?)?;
     match same_file::Handle::from_path(path) {
         Ok(at_path) => Ok(at_path == open),
@@ -142,6 +142,7 @@ fn open_and_lock_once(path: &Path, write: bool, create: Create) -> Result<Locked
         Ok(()) => Ok(LockedFile::new(file)),
         Err(e) if is_lock_conflict(&e) => Err(MnemoError::Locked {
             path: path.to_path_buf(),
+            holder: None,
         }),
         Err(e) => Err(MnemoError::Io(e)),
     }
@@ -214,7 +215,7 @@ pub(super) fn is_name_taken(e: &MnemoError) -> bool {
 /// [`std::io::ErrorKind`] carries no portable "resource-locked" variant
 /// as of Rust 1.75 — Windows surfaces `ERROR_LOCK_VIOLATION` /
 /// `ERROR_SHARING_VIOLATION` as `Uncategorized`.
-pub(super) fn is_lock_conflict(e: &std::io::Error) -> bool {
+pub(crate) fn is_lock_conflict(e: &std::io::Error) -> bool {
     if e.kind() == std::io::ErrorKind::WouldBlock {
         return true;
     }

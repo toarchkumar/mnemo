@@ -75,11 +75,33 @@ pub enum MnemoError {
     /// conflicting OS file lock on the target `.mnemo` file. Write handles
     /// take an exclusive lock; read-only handles take a shared lock. Two
     /// writers or a writer + reader will collide.
-    #[error("file already locked by another handle: {path}")]
+    ///
+    /// A shared-mode call that waits out its deadline also returns this, with
+    /// `holder` naming the long operation that holds the file when one said
+    /// so (12.4: "compact since 12:01 (pid 4242, mnemo)").
+    #[error(
+        "file already locked by another handle: {path}{}",
+        holder_suffix(holder)
+    )]
     Locked {
         /// The path whose lock was requested and refused.
         path: std::path::PathBuf,
+        /// What holds the file, when the holder left a note: a shared-mode
+        /// long operation (compaction, an index build, an import) writes one.
+        holder: Option<String>,
     },
+
+    /// A shared-mode call was cancelled from another thread (an iOS
+    /// background activity's expiry handler, say) while it waited for the
+    /// file's lock. It released every lock it held and changed nothing.
+    #[error("cancelled while waiting for the file's lock; nothing was changed")]
+    Cancelled,
+
+    /// This build or this location can't do what was asked: shared mode on a
+    /// network or synced filesystem (without `allow_network_fs`), or on a
+    /// Windows build made with Rust before 1.85. The message says which.
+    #[error("not supported: {0}")]
+    Unsupported(String),
 
     /// The file at this handle's path is no longer the file the handle
     /// opened: something renamed another file over it (a compaction in
@@ -163,5 +185,12 @@ pub(crate) fn needs_write_open_hint(reason: &str) -> &'static str {
         ""
     } else {
         " — open read-write once to fix"
+    }
+}
+
+fn holder_suffix(holder: &Option<String>) -> String {
+    match holder {
+        Some(h) => format!(" (held by {h})"),
+        None => String::new(),
     }
 }

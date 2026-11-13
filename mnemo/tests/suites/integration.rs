@@ -1673,7 +1673,7 @@ fn two_writers_on_same_file_collide_with_locked() {
     // Second read-write open in the same process (different FD): the
     // exclusive-lock request must fail cleanly with `Locked`, not hang.
     match Mnemo::open(&path, "pw") {
-        Err(MnemoError::Locked { path: p }) => {
+        Err(MnemoError::Locked { path: p, .. }) => {
             assert_eq!(p, path, "Locked error should carry the requested path");
         }
         Err(other) => panic!("expected MnemoError::Locked, got {other:?}"),
@@ -1705,7 +1705,7 @@ fn writer_blocks_read_only_open_on_all_platforms() {
     // `Mnemo` doesn't implement `Debug`, so we can't `{other:?}` an
     // Ok(Mnemo). Pattern-match to a stringified Err instead.
     match Mnemo::open_read_only(&path, "pw") {
-        Err(MnemoError::Locked { path: p }) => assert_eq!(p, path),
+        Err(MnemoError::Locked { path: p, .. }) => assert_eq!(p, path),
         Err(other) => panic!("expected Locked while writer is alive, got {other:?}"),
         Ok(_) => panic!("read-only open must not succeed while writer holds exclusive"),
     }

@@ -460,6 +460,7 @@ dependencies = [
  "rmp",
  "rmp-serde",
  "rpassword",
+ "rustix",
  "same-file",
  "serde",
  "serde_json",

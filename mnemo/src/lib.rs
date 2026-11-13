@@ -63,6 +63,7 @@ mod memory;
 mod pager;
 mod result_cache;
 mod session;
+mod shared;
 mod store;
 mod text;
 mod transcript;
@@ -93,6 +94,7 @@ pub use result_cache::{
     DEFAULT_SEMANTIC_THRESHOLD,
 };
 pub use session::{Role, Session, Turn};
+pub use shared::{CancelToken, SharedOptions};
 #[doc(hidden)]
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
@@ -276,6 +278,80 @@ pub mod __failpoints {
 
     pub(crate) fn take_next_temp_name() -> Option<std::path::PathBuf> {
         NEXT_TEMP_NAME.with(|n| n.borrow_mut().take())
+    }
+}
+
+/// 12.4 step 2a: the shared lock layer, reached directly by its tests
+/// (`tests/shared_lock.rs`) until `Mnemo::open_shared` (step 2b) wraps it.
+/// Compiled in under `cfg(test)` and the `failpoints` feature only.
+///
+/// **Not part of the stable public API.**
+#[cfg(any(test, feature = "failpoints"))]
+#[doc(hidden)]
+pub mod __shared {
+    use std::path::{Path, PathBuf};
+
+    use crate::shared::{BrainLocks, Held, LockKind};
+    use crate::{Result, SharedOptions};
+
+    /// The sidecar directory's suffix and its two file names.
+    pub const SUFFIX: &str = crate::shared::testing::SUFFIX;
+    pub const INTENT: &str = crate::shared::testing::INTENT;
+    pub const LOCK_INFO: &str = crate::shared::testing::LOCK_INFO;
+
+    /// Whether this build refuses shared mode (Windows, Rust before 1.85).
+    pub const WINDOWS_OLD_RENAME: bool = crate::shared::WINDOWS_OLD_RENAME;
+
+    /// `<brain>.mnemo-shared` for a resolved brain path.
+    pub fn sidecar_path(brain: &Path) -> PathBuf {
+        crate::shared::testing::sidecar_path(brain)
+    }
+
+    /// The macOS synced-folder rule, as a pure function.
+    pub fn classify_synced(path: &Path, home: &Path) -> Option<String> {
+        crate::shared::testing::classify_synced(path, home)
+    }
+
+    /// Whether a Linux `statfs` magic number is allowed.
+    pub fn linux_fs_allowed(magic: u32) -> bool {
+        crate::shared::testing::linux_fs_allowed(magic)
+    }
+
+    /// The lock layer for one brain.
+    #[derive(Debug)]
+    pub struct Locks(BrainLocks);
+
+    impl Locks {
+        pub fn new(path: &Path, opts: &SharedOptions) -> Result<Self> {
+            BrainLocks::new(path, opts).map(Locks)
+        }
+        pub fn shared(&self, opts: &SharedOptions) -> Result<Lock> {
+            self.0.acquire(LockKind::Shared, opts).map(Lock)
+        }
+        pub fn exclusive(&self, opts: &SharedOptions) -> Result<Lock> {
+            self.0.acquire(LockKind::Exclusive, opts).map(Lock)
+        }
+        pub fn has_sidecar(&self) -> bool {
+            self.0.has_sidecar()
+        }
+        pub fn sidecar_path(&self) -> Option<PathBuf> {
+            self.0.sidecar_path().map(Path::to_path_buf)
+        }
+        pub fn notices(&self) -> Vec<String> {
+            self.0.notices().to_vec()
+        }
+    }
+
+    /// One call's main lock; dropping it unlocks.
+    pub struct Lock(Held);
+
+    impl Lock {
+        pub fn announce(&mut self, op: &str) {
+            self.0.announce(op)
+        }
+        pub fn file(&self) -> &std::fs::File {
+            self.0.file()
+        }
     }
 }
 
