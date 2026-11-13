@@ -21475,3 +21475,337 @@ Linux and Windows CI at a smaller size. I'll dispatch it at 2c's merge.
 
 **README HANDOFF at the v0.14.0 release** (noted now): the file-mode line
 from RB-007.9's triage.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 2c, the RB-007 fixes (PR 67, green, not merged)
+
+**PR 67** (`rel0140-2c-fixes` into `release-0.14.0`): `36814e9` (the fixes)
+and `f325771` (a Unix-only import in the new test file that failed clippy on
+Windows). Two commits, the second a fix-up, so it merges with **Squash and
+merge**. Stopped before merging, as dispatched. Coordination sync before the
+work: `f0011b0`.
+
+**Runs on `f325771`:** CI 43454337256, **13 of 13 checks green** on attempt 1
+(rust on ubuntu, macos and windows, `windows-msrv (rust 1.75)`, msrv, python,
+cargo-deny, compat, the five fuzz-smoke targets). Mobile CI didn't run on the
+PR: it touches none of its paths (no bindings, `Cargo.toml`, lockfile or
+workflow change). It runs on the push to `release-0.14.0` at the merge. The
+first run (CI 43453862456 on `36814e9`) failed `rust (windows-latest)` on that
+import and was superseded.
+
+**Tests.** `cargo test --features failpoints`: **438 passed, 0 failed** on
+macOS (420 before; 18 new in `mnemo/tests/shared_fixes.rs`).
+`cargo test -p mnemo-uniffi`: 23 passed. Clippy is clean three ways:
+`--all-targets --features failpoints,benches`, `-p mnemo-uniffi`, and the
+library and binaries with no features. `cargo fmt --check` is clean, and
+`mnemo-python` builds. **Each new test was checked against its fix undone:**
+all 18 checks fail without their fix. Two tests passed on the undone code at
+first:
+- `set_embedder` as a read: a write window that writes nothing already
+  commits nothing, so the test now has a reader hold the file.
+- The intent-lock-free check: it counted free polls from before the call
+  started, so it now starts polling once the call has begun.
+
+**By item:**
+- **RB-007.1:** `SharedMnemo::set_cancel(Option<CancelToken>)`; `options()`
+  shows the current token. The docs on `CancelToken`, `SharedMnemo` and
+  `set_cancel` say a cancel reaches only a call waiting for a lock. Test:
+  a wait is cancelled; the token stays cancelled; with a new token, and
+  then with none, the handle reads and writes.
+- **RB-007.2:**
+  - `SharedMnemo::rekey`, `rekey_with_key` and `rekey_cleanup_error`. The
+    kept secret is replaced once the rekey itself returns `Ok`, since its
+    new page 0 is then on disk.
+  - The rekey window holds back the statistics delta, so its only commit is
+    the rekey's and its errors are the rekey's own.
+  - `db.rekey` or `rekey_with_key` inside a closure returns `Unsupported`,
+    through a `shared` flag on the handle's state; `SharedMnemo::rekey`
+    calls the unchecked body.
+  - Recovery with the held key: `load_locked_with(.., held_dek, ..)`. The
+    torn-header scan accepts a candidate whose seal verifies under the held
+    data key, and a pending WAL is replayed with it when the target header
+    verifies. Both require the header to be v9: `validate_seal` passes any
+    header older than v7, which has no seal.
+  - Tests: a rekey through the handle, then a compaction under the new
+    secret, which the handle follows (passphrase and raw key); the refusal;
+    another process's rekey, then a writer dying after its commit point (the
+    old-secret handle replays); another process's rekey, then a zeroed first
+    sector (the old-secret handle heals).
+- **RB-007.3:** `compact_file_secret` canonicalizes the path, opens the real
+  file, builds the temp file beside it and renames over it. `rekey --rotate`
+  is a rekey and then `compact_file`, so it's covered. Test (Unix): handles
+  on a symlink and on the real path, compactions through each and a
+  rekey-then-compact through the link. The link stays a link, both handles
+  see the same memories, and there is no second sidecar.
+- **RB-007.5:** a `window_committed` flag, set at the end of every
+  committing `flush` and cleared when a write window starts.
+  - A closure error after it, a refused setting after it ("the setting
+    wasn't applied"), or a failure of the window's own commit before its
+    commit point all return `MaybeStored`, "…part of the window was stored".
+  - The `SharedMnemo` doc sentence is corrected; `write`'s
+    flush-then-setting note is replaced; a "one engine call per window"
+    line is added.
+  - Tests: remember, flush, remember, with each write failed in turn (a
+    plain error never has either memory in the file; 60 cases); a setting
+    after a flush.
+- **RB-007.6:** `run_write` resets `gen_leased` and no longer calls
+  `ensure_gen_lease`. **Every place that seals a page, each taking the lease
+  first:**
+  1. `write_record` (`records.rs`) calls `ensure_gen_lease`, then
+     `write_gen`.
+  2. `put`'s packed path (`records.rs`) calls `ensure_gen_lease`, then
+     `write_gen`. The record is sealed later by `pack_records` in `flush`.
+  3. `flush` (`flush.rs`) calls `ensure_gen_lease` before every sealing
+     step: `settle_cold_turns` (`write_gen`), `pack_records` and
+     `pack_vectors` (`write_gen`, then `pager.write_page`), `pager.flush()`
+     (encrypts the staged pages under their generations), and step 3's
+     control-plane runs (`seal_run` / `seal_run_at`; the generation now
+     comes from `write_gen()`, equal to `txn_id`).
+  4. `__crash_partial_flush_for_testing` (dev-hooks only) leases first.
+  5. These don't seal data pages under a generation: the header-only
+     commits (the lease itself, `rekey`, a WAL relocation) seal page 0
+     with the header seal, and the v4 migration in `open.rs` writes
+     generation 0 (pre-v9).
+
+  **Debug assertions:** in `write_gen` and in `seal_run_at` (no v9
+  generation before the lease). They never fired across the 438 tests,
+  proptests included. The generation test is kept. New test: an empty window
+  and a refused write leave the transaction id unchanged and give another
+  handle nothing to reload, and one `remember` moves it by two (the lease and
+  the commit). `SharedMnemo::set_embedder` is a read window when
+  `embedder_would_record` says the file already records it; the new test has
+  it succeed while a reader holds the file. Hook: `__transaction_id`
+  (dev-hooks).
+- **RB-007.7:** in `try_intent`, when `lock_file` fails, the directory is
+  opened again by path (`sidecar::open`, every check), once per call
+  (`Call::sidecar_reopened`). A notice, given once, if it still can't be
+  used. `BrainLocks::acquire` now takes `&mut self` (the `__shared::Locks`
+  test hook too). Tests:
+  - the directory removed; a new handle recreates it and holds
+    `intent.lock`; the old handle's write waits and fails `Locked`, then
+    goes through once the lock is free;
+  - a file at the directory's name: one notice, and the main lock alone.
+- **RB-007.8:**
+  1. The deadline is clamped to 100 years, with `checked_add`. Test with
+     `Duration::MAX`.
+  2. One `Call` per window, created in `SharedMnemo::window` and passed to
+     every `acquire`. `Call` owns a clone of the token. Test: an intent
+     holder for 300 ms, then a shared holder, against a read that must
+     replay. It fails `Locked` inside one 500 ms deadline, not 800 ms.
+  3. The intent lock is dropped before the replaced-file backoff. The outer
+     loop takes it again.
+  4. `window` takes `db.embedder` after every window. Test: an embedder set
+     inside a closure, then a reload by another handle's commit, then
+     `remember_text`.
+  5. A write window on a file the process can't write gets
+     `Io(PermissionDenied)`, "…isn't writable by this process…; reads still
+     work". A read that has to heal such a file gets `NeedsWriteOpen`.
+     Test (Unix, skipped as root).
+  6. Any caught panic clears the stamp. Test: a read window panics, and the
+     next call reloads.
+  7. `__state`, `__reloads` and `__page_cache` are behind
+     `cfg(any(test, feature = "failpoints"))`. `__state`'s doc now says a
+     call that reaches the file panics.
+  10. The doc line on dropped statistics.
+
+  **The replaced-file backoff test** (case 10) uses new failpoints hooks,
+  `set_shared_replaced(n)` and `shared_main_tries()`. Checked:
+  - replaced once: two tries, no wait;
+  - replaced always: `Locked` at the 400 ms deadline after a bounded
+    number of tries (15 or 16 locally);
+  - the intent lock is free while the caller backs off.
+- **RB-007.9 and the sidecar mode:** done as triaged in `SECURITY.local.md`,
+  neutral wording in the commit and nothing in the PR text. Tests for both.
+  The CHANGELOG has a neutral "Changed" line. The README line is the
+  Planner's HANDOFF at the release.
+- **RB-007.4:** a CHANGELOG line under Added: plain opens don't wait for
+  shared handles yet; step 4 moves them onto the lock layer.
+
+**Also:**
+- The export temp file is created the same way as a new brain (an export is
+  a new brain file).
+- The 12.4 note's lease sentence now says the lease comes "before the first
+  page it seals" and that a window that seals nothing commits nothing.
+- CHANGELOG `[Unreleased]` has the step 2b bullets updated (the lease,
+  `MaybeStored`), new bullets for `rekey`, `set_cancel` and the smaller
+  fixes, and a Fixed entry for compaction through a symlink.
+
+**Not done or not tested:**
+- Windows has no mode handling: the owner-only creation and the mode copy
+  are Unix only.
+- The symlink, read-only-file and mode tests are Unix only.
+- The rekey window could surface `MaybeStored` only if a test made the
+  rekey's own commit fail after its commit point; that isn't tested.
+- `test/project.mnemo` not updated: I don't handle passphrases.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 2c accepted (PR 67); step 3 dispatched; the relay setup kept
+
+**Step 2c (PR 67, head f325771): ACCEPTED.**
+- Checked on GitHub: 13 of 13 CI checks green on f325771. Mobile CI didn't
+  run on the PR (no paths it watches); it must be green on the push run at
+  the merge.
+- Read the held-key recovery (`load_locked_with`, `sealed_under`): a
+  candidate header or a WAL target is trusted with the held data key only
+  when it's v9 and its seal verifies under that key, otherwise the kept
+  secret and the KDF, as triaged. Read the file-mode change: created 0600
+  through `OpenOptions::mode`, the old mode copied onto compaction's new
+  file. As triaged.
+- The DONE's list of sealing sites, each taking the lease first, with debug
+  assertions that never fired across 438 tests, answers RB-007.6's
+  condition, and RB-006.11 (a) still holds.
+- All 18 new tests were checked against their fix undone. Good practice;
+  keep it for step 3.
+- **Merge:** squash and merge is fine here (a fix-up commit).
+- The untested rekey-`MaybeStored` path is accepted for now; step 3 may add
+  it if cheap.
+
+**DECISION (user, 2026-11-13): keep the relay setup.** PLANNER-A stays in
+this chat and the user relays dispatches. A Planner session in tmux using
+Claude Code's cross-session messaging (gated: messages only point at
+PLAN.md entries, the user approves phases, releases, off-cycle reviews and
+AGENTS.md changes, a hop cap on fix rounds) was weighed and set aside for
+now. It can be switched on later without repo changes.
+
+**DISPATCH — v0.14.0 step 3, the cross-process test suite.** After PR 67's
+merge (push runs green), one PR into `release-0.14.0`.
+- **Child processes:** the test binary re-runs itself with an env var
+  selecting a child role (`std::env::current_exe()`), so the published
+  crate gains no binary.
+- **The cases** (REVIEWER-B's list in RB-007, "For step 3's cross-process
+  suite", plus the note's step 3 list):
+  1. **Kills:** writers, readers and a compactor in separate processes, one
+     killed at random (`SIGKILL`; `TerminateProcess` on Windows) and
+     restarted. Assert: every acknowledged write present once; `verify`
+     clean; no reader's count going backwards; no error but `Locked`.
+  2. **A real full disk** in a process that lives on: `RLIMIT_FSIZE` on Linux
+     (ignore `SIGXFSZ`), asserting the same as the failpoint matrix.
+  3. **Rekey across processes:** another process's rekey, then a compaction
+     under the new secret, then the old-secret handle's next call
+     (`WrongPassphrase`, the revocation case); and the 2c cases where they
+     differ across processes.
+  4. **Two paths to one brain** across processes, with compactions through
+     each.
+  5. **The sidecar removed** while handles in two processes run, and one
+     that appears later for a handle that started without it.
+  6. **A cancel** that arrives while the call holds the intent lock: the lock
+     is free straight after.
+  7. **A closure that commits part-way** with `commit_deltas` as the inner
+     step.
+  8. **Linux inode reuse,** if it can be forced (two compactions in a row).
+     If it can't, say so in the DONE.
+  9. **Windows:** a compaction and an in-place copy under a live handle.
+  10. **The 0.13.2 compactor** against shared writers, in its own Linux CI
+      job, with the released 0.13.2 CLI (`cargo install mnemo-engine@0.13.2
+      --locked`, cached). Assert no silent loss: every lost write is
+      reported (`ReplacedDuringWrite`), never `Ok`.
+  11. **Mixed plain and shared handles:** a plain long-lived handle makes
+      shared callers wait their deadline and get `Locked`, in-process and
+      across processes.
+  12. **The proptest model with a second handle** (the note's list).
+- **CI budget:** under about three extra minutes per OS at CI size. Full
+  sizes behind `MNEMO_STRESS=1` for local runs; give the local result for
+  the kill test at full size in the DONE.
+- **No retries inside tests.** An intermittent failure is a bug until shown
+  otherwise; if one turns up, stop and log it.
+- Check each new test against a deliberately broken build where that's
+  meaningful, as in 2c.
+- Log DONE when the PR is green, with the PR number and the runs, and stop
+  before merging.
+
+### 2026-11-13 — WORKER — BLOCKED — Mobile CI on the PR 67 merge never ran its iOS cross-build (no macOS runner); step 3 built, not committed
+
+**The merge is done.** PR 67 was squash-merged as `e26e376` on
+`release-0.14.0`, and `rel0140-2c-fixes` is deleted.
+
+**Push runs on `e26e376`:**
+- **CI 43458282351: success.**
+- **Mobile CI 43458282199: failure, from runner capacity, not from code.**
+  - The jobs `msrv-uniffi`, `kotlin` and both Android cross-builds passed
+    on attempt 1.
+  - On attempt 1, `swift (macos-latest, iOS simulator)` and `mobile
+    (aarch64-apple-ios)` were cancelled after 15 minutes without starting.
+  - I re-ran the failed jobs twice. `swift` passed on attempt 2.
+    `mobile (aarch64-apple-ios)` was cancelled again on attempts 2 and 3
+    (job 132025653173 on attempt 3), with 0 steps run each time.
+  - The annotations, every time: "The job was not acquired by Runner of type
+    hosted even after multiple attempts", and "Due to capacity constraints,
+    jobs targeting macOS arm64 runners may experience longer queue times."
+  - The same job passed on the 2b merge push (Mobile CI 43382373681), and
+    2c touches no mobile path.
+- The dispatch has Mobile CI green before the coordination sync, so I stopped
+  there. **Not done:** the PLAN.md sync commit (my 2c DONE and this entry are
+  uncommitted in PLAN.md), and the step 3 branch, commits and PR.
+
+**Step 3 is built in the working tree, uncommitted** (on `release-0.14.0`;
+a patch copy is in my scratchpad):
+- `mnemo/tests/cross_process.rs` (new, 13 tests): child processes are the
+  test binary run again (`xp_child`, selected by `MNEMO_XP_ROLE`).
+- A two-handle property added to `mnemo/tests/proptest_store.rs`.
+- A new CI job, `old compactor (v0.13.2, linux)`, in
+  `.github/workflows/ci.yml`. It installs the 0.13.2 CLI and caches it with
+  `actions/cache@v6`.
+
+**Local results (macOS), for the DONE once unblocked:**
+- `cargo test --features failpoints`: **452 passed, 0 failed** (438 before).
+  Clippy (`--all-targets --features failpoints,benches`) and fmt are clean.
+  The cross-process file takes about 9 s at CI size.
+- **Kill test at full size** (`MNEMO_STRESS=1`, 60 s): 252 kills, 157
+  compactions, 1,034 writes acknowledged, **none missing, none stored twice,
+  `verify` clean**, no error but `Locked`. 8 writes are in the file but were
+  never acknowledged (killed between the commit and the log line, which is
+  allowed). At CI size (6 s): 28 kills, 20 compactions, 48 acknowledged.
+- **The 0.13.2 compactor** (installed locally): 47 compactions, 285 writes
+  acknowledged, none lost, and **0 `ReplacedDuringWrite`**. The race never
+  happened: 0.13.2 unlocks and renames microseconds apart, and a shared
+  writer that finds the lock busy closes its descriptor and backs off. So
+  removing the identity check after the commit isn't caught by this test;
+  the in-process hook test from 2b covers that check.
+- **Each test against its fix undone:** caught for the held key, compaction
+  through a symlink, the sidecar reopen, the partial-commit flag (the
+  window's own commit), a stamp that ignores the seal (the live-handle test
+  and the proptest), the kill test with catch-up disabled, and the crash
+  test with `finish_failed_commit` disabled. Not meaningful, with the
+  reasons:
+  - The post-lock identity check can't be caught by the kill test, because
+    compaction holds the lock through its rename (`replaced_file.rs` covers
+    it).
+  - Clearing the stamp at the start of a write window is masked, because
+    the lease commit changes the seal before any page is changed.
+  - The cancel test has no fix to undo.
+- **Linux-only cases not run locally:** the full disk (`RLIMIT_FSIZE`, with
+  `SIGXFSZ` ignored by an `sh` trap) and inode reuse. They run on CI.
+
+**To unblock:** re-run the cancelled job once macOS arm64 runners are
+available: `gh run rerun 43458282199 --failed`, or "Re-run failed jobs" on
+the run's page. Or tell me to treat the capacity cancellation as passing,
+since the job never ran. Then I'll commit the sync, branch, and open the
+step 3 PR.
+
+### 2026-11-13 — PLANNER-A — DECISION — unblocked: a runner-capacity cancellation isn't a failure; go on with step 3
+
+**Checked on GitHub:** Mobile CI 43458282199 on `e26e376`, attempt 3: five
+jobs green (`swift` included on attempt 2); `mobile (aarch64-apple-ios)`
+cancelled each time with 0 steps run and the "not acquired by Runner"
+annotation. CI 43458282351 green. Step 2c touches no mobile path, and the
+same job passed on the 2b merge push.
+
+**DECISION (rule from now on):** a job cancelled because no runner picked it
+up (0 steps, the runner-acquisition annotation) is **"not run"**, not a
+pass and not a failure.
+- It doesn't block a merge into a release branch or the steps after it.
+  Re-run it once when convenient; log it in the next DONE.
+- **Every job must be green on the release branch's final push before the
+  READY.** A "not run" job there is re-run until it runs. The release
+  workflow builds every target again before anything publishes, so nothing
+  ships unbuilt.
+- A job that started and failed is a failure, whatever the cause, until
+  shown otherwise.
+
+**Go on:** commit the coordination sync (your 2c DONE, the BLOCKED and this
+entry), re-run the failed job once (`gh run rerun 43458282199 --failed`), and
+without waiting for it, branch step 3 from `release-0.14.0` with the work in
+the tree, open the PR, and log DONE as dispatched.
+
+**On step 3's local results, read ahead:** the 0.13.2 compactor job stays.
+It shows the mixed-version pair loses nothing in practice; the post-commit
+identity check stays covered by 2b's in-process hook test, and the DONE says
+so. Each "not meaningful" case has its reason, which is what I asked for.
