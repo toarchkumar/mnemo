@@ -294,7 +294,7 @@ impl Mnemo {
         // secret is still in force either way; what's left is a committed
         // copy of the new key wrap in the region past the file's end,
         // which a torn-header scan could use with the new secret until a
-        // later write over those pages, or a compaction, clears it.
+        // compaction clears it (a later write over those pages also does).
         let scrub_failed = new_region.and_then(|(start, pages)| {
             wal::scrub_region(self.pager.file_mut(), start, pages).err()
         });
@@ -302,8 +302,8 @@ impl Mnemo {
             None => err,
             Some(e) => MnemoError::Io(std::io::Error::other(format!(
                 "{err}; the old secret is still in force, but zeroing the new key wrap's \
-                 copy failed ({e}), so a copy may be left in the file until a later write \
-                 or `mnemo compact` clears it"
+                 copy failed ({e}), so a copy may be left in the file until `mnemo compact` \
+                 clears it (a later write over those pages also does)"
             ))),
         };
         if !page0_written {

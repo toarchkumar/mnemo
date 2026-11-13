@@ -161,8 +161,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **A rekey that fails reports a failed cleanup** (RB-005.2). When a rekey
   failed and zeroing its new WAL region failed too, the zeroing's error was
   dropped. The error now says so: the old secret is still in force, but a
-  copy of the new key wrap may be left in the file until a later write or
-  `mnemo compact` clears it. This applies to `Mnemo::rekey`,
+  copy of the new key wrap may be left in the file until `mnemo compact`
+  clears it (a later write over those pages also does). This applies to `Mnemo::rekey`,
   `SharedMnemo::rekey` and `mnemo rekey`.
 - **Python: `Mnemo.rekey_cleanup_error()`** (RB-005.3), on plain and shared
   handles, as in Rust. It gives the same report as the rekey's
