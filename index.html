@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.13.2</span>
+        <span class="pill"><span class="dot"></span>v0.14.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · iOS · Android · CLI · MCP</span>
       </div>
@@ -474,7 +474,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
       <div class="card">
         <div class="icon"><svg><use href="#i-users"/></svg></div>
         <h3>Safe to share</h3>
-        <p>One writer, many readers, enforced with OS file locks. A second writer is turned away instead of corrupting the file.</p>
+        <p>One writer, many readers, enforced with OS file locks. Shared mode lets several agents and tools take turns on one file, each catching up on what the others wrote.</p>
       </div>
     </div>
   </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.13.2. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.14.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -729,8 +729,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.13</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.14</span></h3>
         <ul>
+          <li>Several agents on one file: shared mode for Rust, Python, the CLI and the MCP server, with commands that wait for a busy file instead of failing</li>
           <li>A memory inspector: open a file in your browser and see what your agents remember, with search and the history of each fact; plus a readable, git-friendly export</li>
           <li>iOS and Android packages: a Swift package and an Android library, keys in the Keychain or Keystore, and files that close safely when an app goes to the background</li>
           <li>A compact file format: files about 6× smaller, saves that write only what changed, and old conversation turns compressed</li>
@@ -756,7 +757,7 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Several agents and tools sharing one memory file at once, across git worktrees</li>
+          <li>Sharing one file, continued: writers that always get their turn, catching up on only what changed, and sharing on by default for the MCP server</li>
           <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>), working before any embedding model is configured, with the key kept in the system keychain</li>
           <li>Agents coordinating on one machine: messages, tasks and claims between them</li>
         </ul>

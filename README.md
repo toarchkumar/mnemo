@@ -22,7 +22,8 @@ copy the file and the memory comes with it.
   use the file as tools.
 - **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM; commits
   go through a write-ahead log; recent commits are kept as restorable
-  snapshots; OS file locks allow one writer and many readers.
+  snapshots; OS file locks allow one writer and many readers, and shared
+  mode (v0.14) lets several processes and agents use one file in turn.
 
 Site: **https://toarchkumar.github.io/mnemo/**
 
@@ -34,16 +35,16 @@ cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
 cargo install mnemo-engine        # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0; current 0.13.0):
+iOS and Android (from v0.12.0; current 0.14.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.13.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.14.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.13.0")
+implementation("io.github.toarchkumar:mnemo-android:0.14.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -111,6 +112,53 @@ MCP (for example, Claude Desktop's `claude_desktop_config.json`):
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.14.0: several agents on one file
+
+- **Shared mode: several processes and sessions on one brain.** Each call
+  takes the file's lock only for as long as it runs, then lets go, so more
+  than one agent, the CLI and your own code can use the file in turn. Each
+  call first catches up with what the others wrote.
+  - Rust: `Mnemo::open_shared`.
+  - Python: `mnemo_engine.open(path, passphrase, shared=True)`.
+  - MCP: `mnemo serve --mcp --shared <file>`.
+
+  It's off by default. Update every `mnemo` on the machine before you turn
+  it on: an older build's compaction lets go of the lock before it
+  replaces the file, and a write in that moment can be lost. See
+  [`docs/shared-mode.md`](docs/shared-mode.md).
+- **The CLI waits for a busy file.** Every command takes
+  `--wait <duration>` (default 10 s) instead of failing at once. A
+  command that times out names what holds the file when the holder left
+  a note, as writers and long operations do. A session hook that
+  only reads can pass `--wait 2s`; a hook that saves should keep the
+  default.
+- **Compaction waits for the lock too** (up to 10 s) instead of failing
+  at once. A plain handle holds the file for its whole life, so close it
+  first. On Unix, compaction also removes temp files left by one that
+  died.
+- **New files are readable only by you** (mode 0600 on Unix). Existing
+  files keep their mode: `chmod 600 <file>` tightens one.
+- **A handle no longer follows a file that's moved,** and it never writes
+  to a file that was replaced at its path. A save is refused with an error
+  that says which happened, and nothing is written. Python raises
+  `ReplacedError`.
+- **A shared handle keeps its passphrase in memory for its life,** so it
+  can follow another process's compaction. It's wiped when the handle
+  closes. A plain handle is unchanged.
+- **A failed passphrase change reports a failed cleanup** instead of
+  hiding it.
+- The iOS and Android packages move to 0.14.0 with the engine's fixes
+  (owner-only files, the moved-file check). Shared mode for them comes
+  later.
+
+**Upgrading from 0.13.x:**
+- Plain opens behave as before: `Locked` at once if another handle holds
+  the file.
+- Rust's `MnemoError` and its `Locked` variant are now `#[non_exhaustive]`.
+  `Locked` has a `holder` field, and there are new variants, so an
+  exhaustive match needs a wildcard arm.
+- See the [changelog](CHANGELOG.md) for everything else.
 
 ## What's new in v0.13.2: a failed passphrase change changes nothing
 
@@ -531,6 +579,20 @@ in Rust. Each re-clusters the index with the new defaults.
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
+- **Shared mode has limits under heavy use.**
+  - A writer waits while other processes read. With many processes
+    reading with no pause, a save can wait out its deadline and fail
+    with `Locked`. Nothing is lost, and calling again is safe. A fix that
+    gives a waiting writer its turn comes before shared mode becomes the
+    MCP server's default.
+  - A compaction holds the file for its whole length: about 175 s at
+    100K memories.
+  - After another process writes, the next call reloads the file's
+    header and index and starts with an empty page cache. Catching up on
+    only what changed is planned.
+
+  See "How busy a file can get" in
+  [`docs/shared-mode.md`](docs/shared-mode.md).
 - **v8 files are read-only from v0.13** and don't get the v0.11
   improvements (smaller files, keyword search, compression) until you run
   `mnemo compact`. See "Upgrading to v0.11.0".
