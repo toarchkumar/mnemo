@@ -2411,6 +2411,7 @@ impl FakeEmbedder {
                 name: name.into(),
                 dimensions: dims,
                 normalize,
+                ..Default::default()
             },
         }
     }
@@ -2560,6 +2561,7 @@ fn zero_vector_embedder_remember_text_rejected() {
             name: "zero".into(),
             dimensions: 4,
             normalize: false,
+            ..Default::default()
         },
     })
     .unwrap();

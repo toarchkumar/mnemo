@@ -13,6 +13,13 @@
 //! ### Protocol
 //! - **Input (one per line):** a JSON-encoded string. Newlines inside
 //!   the string are escaped as `\n` by JSON, so framing is unambiguous.
+//! - **With a query convention** (12.3 step 4, v0.15: `--embed-query
+//!   <convention>`, [`EmbedderIdentity::query_convention`] not empty), each
+//!   input line is instead a JSON object saying which side the text is:
+//!   `{"kind":"query","text":"…"}` for a recall, `{"kind":"document","text":"…"}`
+//!   for everything stored. One child serves both sides for the handle's
+//!   whole life, so the side travels with each request. Without a
+//!   convention the protocol is unchanged.
 //! - **Output (one per line):** a JSON array of floats, in the same
 //!   order as the inputs.
 //! - The child **must `flush()` stdout after each line** or the next
@@ -277,12 +284,44 @@ impl EmbedCmd {
     }
 }
 
+/// Which side of the protocol a request is (12.3 step 4).
+#[derive(Clone, Copy)]
+enum Side {
+    Document,
+    Query,
+}
+
 impl Embedder for EmbedCmd {
     fn identity(&self) -> EmbedderIdentity {
         self.identity.clone()
     }
 
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        self.run(texts, Side::Document)
+    }
+
+    fn embed_query(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        self.run(texts, Side::Query)
+    }
+}
+
+impl EmbedCmd {
+    /// One request line: a JSON string, or, with a query convention, an
+    /// object naming the side.
+    fn request_line(&self, text: &str, side: Side) -> Result<String> {
+        let r = if self.identity.query_convention.is_empty() {
+            serde_json::to_string(text)
+        } else {
+            let kind = match side {
+                Side::Document => "document",
+                Side::Query => "query",
+            };
+            serde_json::to_string(&serde_json::json!({ "kind": kind, "text": text }))
+        };
+        r.map_err(|e| MnemoError::Invalid(format!("could not encode embed-cmd input: {e}")))
+    }
+
+    fn run(&self, texts: &[&str], side: Side) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -373,9 +412,7 @@ impl Embedder for EmbedCmd {
         {
             let st = slot.as_mut().expect("ensure_child above");
             for t in texts {
-                let line = serde_json::to_string(t).map_err(|e| {
-                    MnemoError::Invalid(format!("could not encode embed-cmd input: {e}"))
-                })?;
+                let line = self.request_line(t, side)?;
                 if let Err(e) = writeln!(st.stdin, "{line}") {
                     return Err(self.fail_and_restart(
                         &mut slot,

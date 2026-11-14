@@ -192,19 +192,24 @@ pub enum MnemoError {
     /// width or `normalize` flag is refused, because mixing two models'
     /// vectors in one file silently breaks recall. Use the original
     /// embedder, or create a new store for the new model.
+    ///
+    /// Since v0.15 the identity includes the query convention
+    /// ([`crate::EmbedderIdentity::query_convention`]), and `mnemo reembed`
+    /// moves a file to a new embedder.
     #[error(
-        "embedder identity mismatch: this file's vectors come from embedder \
-         (name={:?}, dimensions={}, normalize={}), but the embedder given is \
-         (name={:?}, dimensions={}, normalize={}). Open the file with its \
-         original embedder, or create a new store for the new model.",
-        stored.name, stored.dimensions, stored.normalize,
-        given.name, given.dimensions, given.normalize
+        "embedder identity mismatch: this file's vectors come from embedder {}, \
+         but the embedder given is {}. Open the file with its original embedder, \
+         create a new store for the new model, or move this file to it with \
+         `mnemo reembed`.",
+        stored.describe(),
+        given.describe()
     )]
     EmbedderMismatch {
-        /// The identity the file records.
-        stored: crate::embed::EmbedderIdentity,
+        /// The identity the file records (boxed since v0.15, which added
+        /// `query_convention`, to keep the error small).
+        stored: Box<crate::embed::EmbedderIdentity>,
         /// The identity of the embedder that was passed.
-        given: crate::embed::EmbedderIdentity,
+        given: Box<crate::embed::EmbedderIdentity>,
     },
 }
 

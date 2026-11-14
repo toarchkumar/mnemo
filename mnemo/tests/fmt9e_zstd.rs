@@ -24,6 +24,7 @@ impl Embedder for LenEmbedder {
             name: "len".into(),
             dimensions: DIMS,
             normalize: false,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

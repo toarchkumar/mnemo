@@ -27,6 +27,39 @@ impl Mnemo {
         )
     }
 
+    /// **Not a stable API.** TOK-1: from now on this handle splits the
+    /// documents it writes with tokenizer 1 and writes unmarked keyword
+    /// segments, as every build before v0.15 does, so a test can make the
+    /// mixed index an older build leaves without one. It stays on through
+    /// later commits on this handle.
+    #[doc(hidden)]
+    pub fn __write_keywords_like_an_older_build_for_testing(&mut self) {
+        self.bm25.like_older_build = true;
+    }
+
+    /// **Not a stable API.** TOK-1 (check 3): from now on this handle
+    /// writes keyword segments without their mark, but still with the
+    /// file's tokenizer, so a test can compare scores with and without it.
+    #[doc(hidden)]
+    pub fn __write_keyword_segments_without_the_mark_for_testing(&mut self) {
+        self.bm25.unmarked = true;
+    }
+
+    /// **Not a stable API.** The raw BM25 scores of the live documents that
+    /// match `query` (k1 1.2, b 0.75), by memory id, sorted by id: recall
+    /// divides them by the best one, which would hide a shift in N, avgdl
+    /// or a document's length.
+    #[doc(hidden)]
+    pub fn __bm25_scores_for_testing(&mut self, query: &str) -> Result<Vec<(Ulid, f32)>> {
+        let scores = self.bm25_scores(query, 1.2, 0.75)?;
+        let mut out: Vec<(Ulid, f32)> = scores
+            .into_iter()
+            .map(|(row, s)| (Ulid(self.catalog[row].id), s))
+            .collect();
+        out.sort_by_key(|(id, _)| *id);
+        Ok(out)
+    }
+
     /// **Not a stable API.** The file's on-disk format version.
     /// Writes `m` as a record already in a file would be copied: no
     /// zero-vector check (the dimension check stays). For the zero-vector

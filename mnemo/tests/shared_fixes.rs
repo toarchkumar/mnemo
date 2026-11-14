@@ -125,6 +125,7 @@ impl Embedder for Fixed {
             name: "fixed-test".into(),
             dimensions: 2,
             normalize: false,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {

@@ -192,8 +192,10 @@ impl Mnemo {
         // match non-fact kinds skips the ANN, which doesn't hold them.
         // FMT-9d: keyword matches, normalised by the best one.
         self.kw = None;
-        if let Some(text) = &req.keywords {
-            let scores = self.bm25_scores(text, req.bm25_k1, req.bm25_b)?;
+        // 12.3 step 4: a recall by text uses its text when no keywords
+        // were given (hybrid by default); empty keywords opt out.
+        if let Some(text) = req.keywords_for(self.is_v9()).map(str::to_string) {
+            let scores = self.bm25_scores(&text, req.bm25_k1, req.bm25_b)?;
             let max = scores.values().copied().fold(0.0f32, f32::max);
             if max > 0.0 {
                 self.kw = Some(
@@ -273,7 +275,7 @@ impl Mnemo {
         if req.query.is_empty() {
             (kw, kw)
         } else {
-            (sim + req.keyword_weight * kw, sim)
+            (sim + req.effective_keyword_weight() * kw, sim)
         }
     }
 
@@ -509,7 +511,12 @@ impl Mnemo {
     pub fn recall_budgeted(&mut self, req: &RecallRequest) -> Result<RecallResponse> {
         // FMT-9d: keyword recall needs a v9 file's BM25 index; a
         // keyword-only request has no vector.
-        if req.keywords.is_some() && !self.is_v9() {
+        if req
+            .keywords
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty())
+            && !self.is_v9()
+        {
             return Err(MnemoError::Invalid(
                 "keyword recall (keywords) needs a v9 file; run `mnemo compact` to upgrade".into(),
             ));

@@ -50,6 +50,7 @@ impl CannedEmbedder {
                 name: "bench-canned-embedder".into(),
                 dimensions: vector.len(),
                 normalize: true,
+                ..Default::default()
             },
             vector,
         }

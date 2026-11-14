@@ -402,5 +402,14 @@
       "area": "conventions",
       "topic": "mcp-install"
     }
+  },
+  {
+    "content": "RETRIEVAL (v0.15, 12.3 step 4): a recall by text is hybrid by default: the text is also matched by keyword (BM25) at weight 0.25 (DEFAULT_TEXT_KEYWORD_WEIGHT; explicit keywords replace it at 0.5; keywords=\"\" / --no-keywords is vector-only). Embedder::embed_query (default: embed) embeds every recall by text; EmbedderIdentity.query_convention names how queries differ and is part of the identity (stored only when non-empty); --embed-query <conv> makes --embed-cmd requests {\"kind\":\"query\"|\"document\",\"text\":...}; Python set_embedder(query_fn=, query_convention=). Keyword tokenizer 2 (TOK-1) also indexes parts (nosync finds mnemo.nosync, icloud finds iCloud's; no digit-only parts; each distinct term counted once per whitespace run): new and compacted files use it, older files keep tokenizer 1 until compact/reembed. The BM25 manifest byte stays 1 because v0.12-v0.14 refuse to open any other; each segment carries a mark term instead (\\0mnemo.tokenizer.2 or .mixed, posting doc 0), which older builds' writes and merges drop, so v0.15 reports V1/V2/Mixed (info, verify, stats). mnemo reembed / Mnemo::reembed_file re-embeds every live memory as a compaction (same salt, temp + rename under the lock; width can change; manifests and thread links keep their sentinel vectors). tests/tok1_compat.rs runs against the v0.14.0 CLI (MNEMO_V0_14_0_BIN, CI job compat (v0.14.0)).",
+    "memory_type": "semantic",
+    "importance": 0.7,
+    "metadata": {
+      "area": "conventions",
+      "topic": "retrieval"
+    }
   }
 ]

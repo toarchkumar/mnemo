@@ -20,6 +20,7 @@ crate, and the PyPI sdist follows it.
 | `v8/v8_key.mnemo` | a small raw-key v8 file (3 memories) | `v8/generator` | the key in `v8/v8_key.key` (64 hex digits) |
 | `v8/v8_zero_vectors.mnemo` | a v8 file with a legacy all-zero-vector manifest and memory | `examples/gen_v8_zero_vector_fixture.rs` (v0.13 step 2a, the last engine that wrote v8) | `v8-fixture-passphrase` |
 | `v8/v8_pending_wal.mnemo` | a v8 file left mid-commit: 10 memories checkpointed, 5 more committed in the WAL but not checkpointed | `v8/generator` (`pending-wal`) | `v8-fixture-passphrase` |
+| `tok1/v0_14_0_tokenizer_1.mnemo` | a keyword index written entirely by tokenizer 1: an empty file made by the current engine (throwaway fast KDF parameters), into which the published v0.14.0 CLI imported 4 memories (dotted names, a possessive, `std::fs::rename`) | `tests/tok1_compat.rs`'s ignored `write_the_tok1_fixture`, with `MNEMO_V0_14_0_BIN` set to the v0.14.0 CLI | the passphrase `tok1-fixture-passphrase` |
 | `inspect/ios_export.mnemo` | a passphrase export built through the mobile binding's calls in the iOS sample's order: notes, a keyed fact, a thread with essence | the uniffi test `write_the_inspect_fixture` | the passphrase `inspect-fixture-passphrase` |
 
 To regenerate the v8 files, run the generator crate (it has its own

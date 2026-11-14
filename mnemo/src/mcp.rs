@@ -165,9 +165,51 @@ pub fn serve_stdio_with_options(
     embed_spec: Option<(String, String, bool, std::time::Duration)>,
     shared: Option<SharedOptions>,
 ) -> Result<()> {
+    serve_stdio_with_spec(path, embed_spec.map(EmbedSpec::from), shared)
+}
+
+/// The server's `--embed-cmd` embedder (12.3 step 4, v0.15): the tuple the
+/// other `serve_*` functions take, plus the query convention.
+#[derive(Clone, Debug)]
+pub struct EmbedSpec {
+    /// The command ([`crate::EmbedCmd::new`]).
+    pub command: String,
+    /// The identity's name.
+    pub name: String,
+    /// The identity's `normalize`.
+    pub normalize: bool,
+    /// The per-request timeout.
+    pub timeout: std::time::Duration,
+    /// [`crate::EmbedderIdentity::query_convention`]: empty when queries
+    /// are embedded like documents. When set, the command gets each request
+    /// as `{"kind": …, "text": …}` (see [`crate::EmbedCmd`]).
+    pub query_convention: String,
+}
+
+impl From<(String, String, bool, std::time::Duration)> for EmbedSpec {
+    fn from(
+        (command, name, normalize, timeout): (String, String, bool, std::time::Duration),
+    ) -> Self {
+        EmbedSpec {
+            command,
+            name,
+            normalize,
+            timeout,
+            query_convention: String::new(),
+        }
+    }
+}
+
+/// [`serve_stdio_with_options`] with an [`EmbedSpec`], so the embedder can
+/// have a query convention (`mnemo serve --mcp --embed-query`).
+pub fn serve_stdio_with_spec(
+    path: &Path,
+    embed_spec: Option<EmbedSpec>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    serve_with_streams_opts(path, stdin.lock(), stdout.lock(), embed_spec, shared)
+    serve_with_streams_spec(path, stdin.lock(), stdout.lock(), embed_spec, shared)
 }
 
 /// The server's handle: a plain read-write handle for its whole life, or
@@ -225,8 +267,25 @@ pub fn serve_with_streams<R: Read, W: Write>(
 pub fn serve_with_streams_opts<R: Read, W: Write>(
     path: &Path,
     reader: R,
-    mut writer: W,
+    writer: W,
     embed_spec: Option<(String, String, bool, std::time::Duration)>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
+    serve_with_streams_spec(
+        path,
+        reader,
+        writer,
+        embed_spec.map(EmbedSpec::from),
+        shared,
+    )
+}
+
+/// [`serve_with_streams_opts`] with an [`EmbedSpec`].
+pub fn serve_with_streams_spec<R: Read, W: Write>(
+    path: &Path,
+    reader: R,
+    mut writer: W,
+    embed_spec: Option<EmbedSpec>,
     shared: Option<SharedOptions>,
 ) -> Result<()> {
     use crate::keys::{Resolution, Secret};
@@ -281,7 +340,14 @@ pub fn serve_with_streams_opts<R: Read, W: Write>(
             ServerDb::Shared(s)
         }
     };
-    if let Some((cmd, name, normalize, timeout)) = embed_spec {
+    if let Some(EmbedSpec {
+        command: cmd,
+        name,
+        normalize,
+        timeout,
+        query_convention,
+    }) = embed_spec
+    {
         let dimensions = match &mut db {
             ServerDb::Plain(db) => db.dimensions(),
             ServerDb::Shared(s) => s.read(|db| Ok(db.dimensions()))?,
@@ -290,6 +356,7 @@ pub fn serve_with_streams_opts<R: Read, W: Write>(
             name,
             dimensions,
             normalize,
+            query_convention,
         };
         let embedder = crate::EmbedCmd::new(&cmd, identity)?.with_timeout(timeout);
         match &mut db {
@@ -611,12 +678,12 @@ fn tools_list() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). FMT-9d (v9 files): put identifiers or exact terms from the request (a version like v0.9.0, a PR number, a function name) in `keywords` to add keyword matching; do not paste the question there. `keywords` alone (no `query`/`text`) is keyword-only recall.",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). Keyword matching (v9 files): a recall by `text` also matches the text's words (hybrid by default, since v0.15); put identifiers the text doesn't contain (a version like v0.9.0, a PR number, a function name) in `keywords`, which then replace the text for keyword matching, or pass `keywords: \"\"` for vector-only recall. Parts of dotted names and possessives match too (`nosync` finds `mnemo.nosync`). `keywords` alone (no `query`/`text`) is keyword-only recall.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": { "type": "array", "items": { "type": "number" }, "description": "Explicit query vector; mutually exclusive with `text`." },
-                        "keywords": { "type": "string", "description": "Identifiers or exact terms to match (a version, a PR number, a function name). Not the question. Needs a v9 file." },
+                        "keywords": { "type": "string", "description": "Identifiers or exact terms to match (a version, a PR number, a function name). With `text`, they replace the text for keyword matching; \"\" turns keyword matching off. Needs a v9 file." },
                         "text": { "type": "string", "description": "Query text; embedded by the server's registered embedder. Mutually exclusive with `query`." },
                         "top_k": { "type": "integer", "default": 10 },
                         "types": { "type": "array", "items": { "type": "string" } },
@@ -864,13 +931,28 @@ fn embed_text_via_server(
             ),
         )
     })?;
-    let mut vs = embedder.embed(&[text]).map_err(mnemo_err)?;
+    let mut vs = embed_for_tool(embedder, tool, text)?;
     vs.pop().ok_or_else(|| {
         RpcError::new(
             INTERNAL_ERROR,
             format!("{tool}: embedder returned no vector for the input text"),
         )
     })
+}
+
+/// 12.3 step 4: `recall` embeds its text as a query; everything else
+/// (`remember`, and both semantic-cache tools, whose two sides hold the
+/// same kind of text) as a document.
+fn embed_for_tool(
+    embedder: &dyn crate::Embedder,
+    tool: &str,
+    text: &str,
+) -> std::result::Result<Vec<Vec<f32>>, RpcError> {
+    if tool == "recall" {
+        embedder.embed_query(&[text]).map_err(mnemo_err)
+    } else {
+        embedder.embed(&[text]).map_err(mnemo_err)
+    }
 }
 
 thread_local! {
@@ -924,7 +1006,7 @@ fn pre_embed(s: &SharedMnemo, params: &Value) -> std::result::Result<(), RpcErro
     let Some(embedder) = s.embedder_arc() else {
         return Ok(());
     };
-    let mut vs = embedder.embed(&[text]).map_err(mnemo_err)?;
+    let mut vs = embed_for_tool(embedder.as_ref(), name, text)?;
     let v = vs.pop().ok_or_else(|| {
         RpcError::new(
             INTERNAL_ERROR,
@@ -1706,6 +1788,11 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
             .as_str()
             .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'keywords' must be a string"))?;
         req = req.keywords(k);
+    }
+    // 12.3 step 4: a recall by `text` is hybrid by default; `keywords: ""`
+    // opts out.
+    if let Some(t) = args.get("text").and_then(Value::as_str) {
+        req = req.text(t);
     }
     if let Some(types) = args.get("types").and_then(|v| v.as_array()) {
         let parsed: Vec<MemoryType> = types

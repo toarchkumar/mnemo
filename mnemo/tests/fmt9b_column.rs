@@ -470,6 +470,7 @@ impl Embedder for AxisEmbedder {
             name: "axis".into(),
             dimensions: DIMS,
             normalize: false,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

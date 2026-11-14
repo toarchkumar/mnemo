@@ -384,6 +384,45 @@ jobs:
           a_real_full_disk_in_a_process_that_lives_on
           a_reused_inode_number_is_caught_by_the_seal --nocapture
 
+  # TOK-1 (v0.15, 12.3 step 4): a tokenizer 2 file against the published
+  # v0.14.0 CLI. It must open, recall, verify and take writes there (the
+  # BM25 manifest byte stays 1); what v0.14.0 writes makes the index mixed,
+  # and its compaction leaves tokenizer 1, which v0.15 then reports and heals.
+  compat-v0-14-0:
+    name: compat (v0.14.0, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: compat-v0-14-0
+
+      - name: Cache the v0.14.0 CLI
+        id: v0_14_0
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/v0_14_0
+          key: mnemo-cli-0.14.0-${{ runner.os }}
+
+      - name: Install the v0.14.0 CLI
+        if: steps.v0_14_0.outputs.cache-hit != 'true'
+        # Its own published lockfile; see the compat job.
+        env:
+          RUSTFLAGS: ""
+        run: cargo install mnemo-engine --version =0.14.0 --locked --root "$RUNNER_TEMP/v0_14_0"
+
+      - name: cargo test (TOK-1 against v0.14.0)
+        working-directory: mnemo
+        run: >-
+          MNEMO_V0_14_0_BIN="$RUNNER_TEMP/v0_14_0/bin/mnemo"
+          cargo test --features failpoints --test tok1_compat -- --nocapture
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the
