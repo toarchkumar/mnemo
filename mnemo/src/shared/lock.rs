@@ -155,9 +155,10 @@ impl BrainLocks {
     /// Take the main lock for one call, within the call's deadline, unless
     /// cancelled. Writers queue on the intent lock: a writer holds it
     /// exclusively while it waits for the main lock, so new readers queue
-    /// behind it. A writer still gets in, but readers looping back to back
-    /// slow it (`docs/shared-mode.md`, "How busy a file can get"; LOCK-2 is
-    /// the planned fix).
+    /// behind it. But readers already waiting go first, so readers looping
+    /// back to back slow a writer, and enough of them can keep it out past
+    /// its deadline (`Locked`; `docs/shared-mode.md`, "How busy a file can
+    /// get"; LOCK-2 is the planned fix).
     ///
     /// A reader takes the intent lock shared and tries the main lock. When
     /// the main lock is free or held shared, it gets in (RB-006.4 rec. 1).

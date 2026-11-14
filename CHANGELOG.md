@@ -16,8 +16,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   4. What it does:
   - one deadline and a cancel for every call (`SharedOptions::deadline`,
     default 10 s; `CancelToken`), with jittered backoff;
-  - writer preference through an intent lock, so busy readers can't starve a
-    writer;
+  - writer preference through an intent lock (step 5 superseded it:
+    readers waiting for a writer now keep their place, under Changed);
   - a sidecar directory next to the brain, `<brain>.mnemo-shared/` (matched
     by the `.gitignore` pattern `*.mnemo-shared/`). It's created and checked
     before use, and if it can't be used, each call takes the main lock alone;
@@ -122,6 +122,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **Plain opens still don't wait:** `Mnemo::open`, `open_read_only`,
   `create`, and `serve --mcp` without `--shared` try the lock once, as
   before.
+- **`Mnemo::peek_dimensions`**: the embedding width a file records, read
+  from its header with no key, no lock and no KDF, so a caller can build its
+  embedder's identity before it takes the lock.
+- **Python: `ReplacedError`**, a subclass of `MnemoError`, for
+  `MnemoError::Replaced` (a file renamed over the path, or a brain moved or
+  removed). Its `shared` attribute is `True` in a shared-mode write, where
+  nothing was written and calling again is safe.
 - **Windows builds made with Rust before 1.85 refuse shared mode** ("shared
   mode on Windows needs a build with Rust 1.85 or later"); `build.rs` reads
   the compiler's version. The released binaries and wheels are built with
@@ -154,15 +161,28 @@ Pre-1.0, the minor component carries the breaking-change signal.
   brain, a compaction's new file and an export. Compaction (and so
   `mnemo rekey --rotate`) gives the new file the old file's mode, so a brain
   made group-readable on purpose stays so; an existing file's mode is never
-  changed.
+  changed. Existing brains keep their mode; `chmod 600 <brain>` tightens
+  one.
 - **Shared mode: readers waiting for a writer keep their place** (v0.14.0
   step 5). A reader that finds a writer committing now keeps the intent lock
   while it waits, so the next writer queues behind it. Before, a writer
   committing back to back kept readers out for seconds at a time (a p99 wait
   of 4 to 8.5 s in the bench). Readers now wait under 1 ms at the 99th
-  percentile; the cost moves to a writer against readers looping back to
-  back, which slows to under one commit a second but still commits within
-  its deadline. `docs/shared-mode.md` has the measured limits.
+  percentile. The cost moves to a writer against readers looping back to
+  back: it slows to under one commit a second, and with enough processes
+  reading with no pause it can wait out its deadline and fail with `Locked`
+  (16 reader processes on cheap reads: 6 of 7 writes at 10 s). Nothing is
+  lost, and calling again is safe. A planned change (LOCK-2) gives a writer
+  that has waited the next turn. `docs/shared-mode.md` has the measured
+  limits.
+- **A handle no longer follows a brain that's moved.** A brain moved or
+  removed under a live handle fails the handle's later commits with
+  `MnemoError::Replaced` (its `missing` field set), and the message says
+  the file was moved or removed and the handle's path no longer names it.
+  Nothing is written; `try_close` hands the handle back, and once the file
+  is back at its path the handle commits. In v0.13.2 the commits went on
+  through the open descriptor. A plain handle that can't check its path at
+  all (access to the path lost) still commits, as before.
 
 ### Fixed
 
@@ -202,8 +222,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   (another program moved a file over it, say). Each commit and `rekey`
   checks the file's identity (`dev`/`ino`, or the volume serial number and
   file index on Windows), and returns the new `MnemoError::Replaced`
-  without writing anything; reopen the path to use the new file. The
-  Swift and Kotlin bindings report it as `Io`, with the same message.
+  without writing anything; reopen the path to use the new file. Python
+  raises `ReplacedError`; the Swift and Kotlin bindings report it as `Io`,
+  with the same message.
   In a shared-mode write window (`shared: true`; an older build's
   compaction renamed over the path just before the commit), the message
   says nothing was written and the next call follows the new file, which
