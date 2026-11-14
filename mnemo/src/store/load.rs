@@ -44,6 +44,7 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result
             // a compaction; something else is moving files here.
             return Err(MnemoError::Replaced {
                 path: path.to_path_buf(),
+                shared: false,
             });
         }
         // Replaced between our open and our lock: unlock (on drop) and open
@@ -51,6 +52,7 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result
     }
     Err(MnemoError::Replaced {
         path: path.to_path_buf(),
+        shared: false,
     })
 }
 
@@ -127,6 +129,7 @@ impl Mnemo {
         } else {
             Err(MnemoError::Replaced {
                 path: self.path.clone(),
+                shared: false,
             })
         }
     }

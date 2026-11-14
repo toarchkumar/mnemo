@@ -619,7 +619,7 @@ impl SharedMnemo {
         let delta = std::mem::take(&mut self.delta);
         db.apply_access_delta(&delta);
         let before = FileSettings::of(db);
-        let r = f(db);
+        let r = f(db).map_err(in_shared_window);
         let db = self.db.as_mut().expect("loaded by the window");
         let r = match r {
             Ok(r) => r,
@@ -644,7 +644,9 @@ impl SharedMnemo {
             return Err(settings_refused());
         }
         let committed_before = db.window_committed;
-        if let Err(e) = db.flush() {
+        #[cfg(any(test, feature = "failpoints"))]
+        crate::__failpoints::run_before_shared_commit();
+        if let Err(e) = db.flush().map_err(in_shared_window) {
             match self.finish_failed_commit(e) {
                 Ok(()) => {}
                 Err(e @ MnemoError::MaybeStored(_)) => return Err(e),
@@ -726,5 +728,18 @@ impl SharedMnemo {
                 "{e}; reading the file back failed: {e2}"
             ))),
         }
+    }
+}
+
+/// A commit's pre-write identity check (`Mnemo::ensure_not_replaced`) inside
+/// a write window: the rename came after the window's own identity check
+/// (protocol step 4), from something renaming without the lock (an older
+/// build's compaction). Nothing was written, and the stamp is already
+/// cleared, so the next call follows the new file: say that instead of the
+/// plain handle's "reopen it".
+fn in_shared_window(e: MnemoError) -> MnemoError {
+    match e {
+        MnemoError::Replaced { path, .. } => MnemoError::Replaced { path, shared: true },
+        e => e,
     }
 }

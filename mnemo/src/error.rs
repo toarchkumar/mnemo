@@ -131,14 +131,19 @@ pub enum MnemoError {
     /// opened: something renamed another file over it (a compaction in
     /// another process, or another program). Writing would go to the
     /// replaced file and be lost, so the handle refuses, and writes nothing.
-    /// Reopen the path to use the file that's there now.
-    #[error(
-        "the file at {path} was replaced after this handle opened it (by a \
-         compaction, or by another program); nothing was written. Reopen it"
-    )]
+    /// A plain handle: reopen the path to use the file that's there now. A
+    /// shared handle (`shared`): the rename came between the window's
+    /// identity check and its commit (an older build's compaction renames
+    /// without its lock); calling again is safe, and the next call follows
+    /// the new file.
+    #[error("{}", replaced_message(path, *shared))]
+    #[non_exhaustive]
     Replaced {
         /// The path that now names a different file.
         path: std::path::PathBuf,
+        /// Raised in a shared-mode write window, where the next call
+        /// follows the new file by itself.
+        shared: bool,
     },
 
     /// A mutation was attempted on a handle opened via
@@ -216,5 +221,21 @@ fn holder_suffix(holder: &Option<String>) -> String {
     match holder {
         Some(h) => format!(" (held by {h})"),
         None => String::new(),
+    }
+}
+
+fn replaced_message(path: &std::path::Path, shared: bool) -> String {
+    let path = path.display();
+    if shared {
+        format!(
+            "the file at {path} was replaced (by an older build's compaction, or by another \
+             program) before this write; nothing was written, and the next call follows the \
+             new file"
+        )
+    } else {
+        format!(
+            "the file at {path} was replaced after this handle opened it (by a compaction, or \
+             by another program); nothing was written. Reopen it"
+        )
     }
 }

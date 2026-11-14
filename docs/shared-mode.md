@@ -155,4 +155,5 @@ compaction). Compact, or rekey with `--rotate`, when no agent is working.
 | `Unsupported` | `UnsupportedError` | shared mode isn't available here (a network or synced folder, an old Windows build), or a file-wide setting on a shared handle |
 | `MaybeStored` | `MaybeStoredError` | a write failed after its commit point (or after an earlier commit in the same window): it may be in the file; check before retrying |
 | `ReplacedDuringWrite` | `ReplacedDuringWriteError` | something (an older compactor) renamed another file over the path during the write; the write isn't in the file now at the path |
+| `Replaced { shared: true }` | `MnemoError` | something (an older compactor) renamed another file over the path just before the write's commit; nothing was written, so calling again is safe, and the next call follows the new file |
 | `NeedsWriteOpen` | `NeedsWriteOpenError` | a read had to recover the file (a pending WAL, a torn header) and this process can't write it |

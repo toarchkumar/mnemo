@@ -208,7 +208,9 @@ fn run_role(role: &str) -> RoleResult {
 /// Writes `<id>-<n>` until the stop file appears (or `XP_COUNT` writes are
 /// acknowledged), logging each acknowledged one to `acks/<id>`. Every tenth
 /// write is read back. Only `Locked` is expected; with `XP_ALLOW_REPLACED`,
-/// `ReplacedDuringWrite` is counted in `replaced/<id>`, never acknowledged.
+/// `ReplacedDuringWrite` is counted in `replaced/<id>` and `Replaced` (a
+/// rename before the commit: nothing written) in `refused/<id>`, neither
+/// ever acknowledged.
 fn role_writer() -> RoleResult {
     let dir = work_dir();
     let id = var("XP_ID");
@@ -217,6 +219,7 @@ fn role_writer() -> RoleResult {
     let allow_replaced = std::env::var("XP_ALLOW_REPLACED").is_ok();
     std::fs::create_dir_all(dir.join("acks")).unwrap();
     std::fs::create_dir_all(dir.join("replaced")).unwrap();
+    std::fs::create_dir_all(dir.join("refused")).unwrap();
     let Some(mut s) = open_child(&path, &var_or("XP_SECRET", PW))? else {
         return Ok(0);
     };
@@ -244,6 +247,9 @@ fn role_writer() -> RoleResult {
             Err(MnemoError::Locked { .. }) => {}
             Err(MnemoError::ReplacedDuringWrite { .. }) if allow_replaced => {
                 append(&dir.join("replaced"), &id, &content);
+            }
+            Err(MnemoError::Replaced { .. }) if allow_replaced => {
+                append(&dir.join("refused"), &id, &content);
             }
             Err(e) => return Err(format!("writing {content}: {e}")),
         }
@@ -1263,8 +1269,10 @@ fn a_live_handle_through_copies_compactions_and_a_deleted_file() {
 
 /// The released 0.13.2 CLI's `mnemo compact` releases the lock before its
 /// rename. Against shared writers, every write it loses must be reported
-/// (`ReplacedDuringWrite`), never acknowledged. Needs `MNEMO_V0_13_2_BIN`
-/// (its own CI job); skipped without it.
+/// (`ReplacedDuringWrite`), never acknowledged. A rename that lands before a
+/// window's commit is refused (`Replaced`: nothing written), also never
+/// acknowledged. Needs `MNEMO_V0_13_2_BIN` (its own CI job); skipped
+/// without it.
 #[test]
 fn the_0_13_2_compactor_never_loses_an_acknowledged_write() {
     let Ok(bin) = std::env::var("MNEMO_V0_13_2_BIN") else {
@@ -1320,9 +1328,11 @@ fn the_0_13_2_compactor_never_loses_an_acknowledged_write() {
     no_errors(d);
     let (acked, _) = check_acks(d, &p, PW);
     let reported = lines_in(d, "replaced").len();
+    let refused = lines_in(d, "refused").len();
     eprintln!(
         "0.13.2 compactor: {compactions} compactions ({busy} found the file busy), {acked} \
-         writes acknowledged, {reported} reported as ReplacedDuringWrite"
+         writes acknowledged, {reported} reported as ReplacedDuringWrite, {refused} refused \
+         as Replaced (nothing written)"
     );
     assert!(compactions > 0 && acked > 0);
 }

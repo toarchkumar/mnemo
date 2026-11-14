@@ -292,6 +292,22 @@ pub mod __failpoints {
     thread_local! {
         static AFTER_SHARED_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
             const { std::cell::RefCell::new(None) };
+        static BEFORE_SHARED_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Run `f` once, inside this thread's next shared-mode write, after the
+    /// window's closure and before the window's commit (so after the
+    /// window's identity check, 12.4 protocol step 4). Lets a test rename a
+    /// file over the path the way an older build's compaction can.
+    pub fn before_next_shared_commit(f: impl FnOnce() + 'static) {
+        BEFORE_SHARED_COMMIT.with(|c| *c.borrow_mut() = Some(Box::new(f)));
+    }
+
+    pub(crate) fn run_before_shared_commit() {
+        if let Some(f) = BEFORE_SHARED_COMMIT.with(|c| c.borrow_mut().take()) {
+            f();
+        }
     }
 
     /// Run `f` once, inside this thread's next shared-mode write, after its

@@ -204,6 +204,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
   file index on Windows), and returns the new `MnemoError::Replaced`
   without writing anything; reopen the path to use the new file. The
   Swift and Kotlin bindings report it as `Io`, with the same message.
+  In a shared-mode write window (`shared: true`; an older build's
+  compaction renamed over the path just before the commit), the message
+  says nothing was written and the next call follows the new file, which
+  it does: no reopen.
 - **A refused `create` no longer empties the file it was refused.**
   `Mnemo::create` truncated the path before it tried the lock, so creating
   over a file another handle had open destroyed it, then returned `Locked`.

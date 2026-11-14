@@ -7,7 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use mnemo_engine::__failpoints::{
-    after_next_shared_commit, set_writes_until_fail, set_writes_until_fail_n,
+    after_next_shared_commit, before_next_shared_commit, set_writes_until_fail,
+    set_writes_until_fail_n,
 };
 
 use mnemo_engine::{
@@ -394,6 +395,41 @@ fn the_path_is_checked_again_after_the_commit() {
     assert!(e.to_string().contains("replaced during the write"), "{e}");
     // The handle follows the file now at the path.
     assert_eq!(in_handle(&mut a), vec!["the other file"]);
+}
+
+/// A rename over the path after the window's identity check and before its
+/// commit (an older build's compaction renames without its lock): the
+/// commit's own check refuses with `Replaced`, nothing is written, and the
+/// message says the next call follows the new file, which it does.
+#[test]
+fn a_rename_before_the_commit_is_refused_and_the_next_call_follows() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let other = dir.path().join("other.mnemo");
+    {
+        let mut db = Mnemo::create(&other, PW, cfg()).unwrap();
+        db.remember(mem("the other file")).unwrap();
+        db.close().unwrap();
+    }
+    let Some(mut a) = shared(&p) else { return };
+    let (from, to) = (other.clone(), p.clone());
+    before_next_shared_commit(move || std::fs::rename(&from, &to).unwrap());
+    let e = remember(&mut a, "never written").unwrap_err();
+    assert!(matches!(e, MnemoError::Replaced { .. }), "{e}");
+    let msg = e.to_string();
+    assert!(
+        msg.contains("nothing was written") && msg.contains("the next call follows the new file"),
+        "{msg}"
+    );
+    assert!(
+        !msg.contains("Reopen"),
+        "a shared handle needn't reopen: {msg}"
+    );
+    assert_eq!(on_disk(&p), vec!["the other file"]);
+    // The handle follows the file now at the path, and writes to it.
+    assert_eq!(in_handle(&mut a), vec!["the other file"]);
+    remember(&mut a, "after the rename").unwrap();
+    assert_eq!(on_disk(&p), vec!["after the rename", "the other file"]);
 }
 
 // --- What only this handle writes --------------------------------------
