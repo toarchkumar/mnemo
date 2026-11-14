@@ -108,39 +108,11 @@ jobs:
       # (`MNEMO_TEST_OS_KEYCHAIN`); Linux has no Secret Service on a session
       # bus, so there it checks the "no keychain" path. The chain's tests
       # run again with the feature on.
-      # Step 5a (MSRV-2): the CLI as it was on `keyring` 3.6.3 (`824ff51`, the
-      # last commit before the move to the `keyring` 4 stores), so
-      # keychain_os.rs checks that an entry it wrote reads under 4.x. macOS
-      # only; cached by commit.
-      - name: Cache the keyring 3.6.3 CLI (macOS)
-        if: runner.os == 'macOS'
-        id: kr3
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/kr3
-          key: mnemo-cli-824ff51-keychain-${{ runner.os }}
-
-      - name: Build the keyring 3.6.3 CLI (macOS)
-        if: runner.os == 'macOS' && steps.kr3.outputs.cache-hit != 'true'
-        run: |
-          git fetch --depth 1 origin 824ff51215f0844dd8bd476f75036a86b23025f0
-          git worktree add "$RUNNER_TEMP/kr3src" 824ff51215f0844dd8bd476f75036a86b23025f0
-          cargo build --release --locked --features keychain --bin mnemo \
-            --manifest-path "$RUNNER_TEMP/kr3src/mnemo/Cargo.toml" \
-            --target-dir "$RUNNER_TEMP/kr3target"
-          mkdir -p "$RUNNER_TEMP/kr3/bin"
-          cp "$RUNNER_TEMP/kr3target/release/mnemo" "$RUNNER_TEMP/kr3/bin/"
-
       - name: cargo test (the OS keychain)
         working-directory: mnemo
-        shell: bash
         env:
           MNEMO_TEST_OS_KEYCHAIN: "1"
-        run: |
-          if [ "$RUNNER_OS" = macOS ]; then
-            export MNEMO_KEYRING3_BIN="$RUNNER_TEMP/kr3/bin/mnemo"
-          fi
-          cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
+        run: cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
 
       - name: cargo clippy
         working-directory: mnemo

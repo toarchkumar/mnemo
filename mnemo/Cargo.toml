@@ -206,6 +206,15 @@ proptest = "=1.5.0"
 # them.
 mnemo-engine = { path = ".", features = ["dev-hooks"] }
 
+# Step 5a (MSRV-2): `keyring` 3.6.3, which the keychain used before the
+# `keyring` 4 stores, for `tests/keychain_os.rs` only: one test binary
+# writes an entry through it and reads it back through the new store, so
+# macOS never asks a second binary for access. Never in a release build.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+[target.'cfg(windows)'.dev-dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+
 [[bench]]
 name = "write"
 harness = false

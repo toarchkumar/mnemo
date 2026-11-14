@@ -19,6 +19,10 @@
 //! Markdown (PLAN.md, CHANGELOG.md, READMEs): English prose dense with
 //! identifiers, like an agent's memory. No transcripts are read.
 
+// As in lib.rs (step 5a): the constant-size `chunks_exact` loops stay.
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
