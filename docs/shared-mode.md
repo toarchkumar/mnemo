@@ -46,8 +46,11 @@ in the file.
 **The wait.** One call waits at most its deadline for the lock (`SharedOptions::deadline`,
 default 10 s; Python's `wait`, in seconds) and then fails with `Locked`.
 When a long operation holds the file, the error names it ("compact since
-12:01:05 UTC (pid 4242, mnemo)"). Writers have preference: busy readers
-can't keep a writer out.
+12:01:05 UTC (pid 4242, mnemo)"). **Readers come first:** reads are what an
+agent waits on, so a read that finds a writer committing waits only for
+that commit, and the next writer queues behind it. A waiting writer still
+keeps new readers from cutting in, so busy readers slow a writer down but
+don't lock it out. "How busy a file can get" has the numbers.
 
 **Cancelling.** A `CancelToken` (`SharedOptions::cancel`, Python's
 `cancel=`) cancels a call that is *waiting* for the lock, from another
@@ -80,6 +83,34 @@ no writer preference to queue on (no shared caller exists) and no note.
 A compaction also removes the temp files that compactions killed part-way
 left beside the brain: `<brain>.compact-<pid>-…​.tmp` files whose process no
 longer runs and that this user owns, on Unix only.
+
+## How busy a file can get
+
+Measured in v0.14.0's bench on an M1 Pro at 10K memories, with every
+process looping as fast as it can (`shared_v0_14_0` in
+`test/scripts/perf_v0.5.0.json`):
+- **A call costs about 0.05 ms** when nobody else wrote since this handle's
+  last call. After another process's commit, the next call reloads: about
+  5 ms at 10K, 34 ms at 100K.
+- **A shared write** takes about 24 ms (5 fsyncs), against about 15 ms for a
+  plain write and flush. Several writers together make 15 to 20 commits a
+  second per file.
+- **Reads wait under 1 ms** at the 99th percentile in every mix measured,
+  against one to eight writers.
+- **A writer against readers looping back to back** slows to under one
+  commit a second, with a 99th percentile of 2.9 s at 10K (5.5 s at 100K).
+  It still commits within the 10 s default deadline.
+- **Eight writers at once:** the slowest 1 % of writes wait about 2.5 s.
+
+Agents write a few times a minute and read on demand, so these are limits,
+not the usual load. A planned change (LOCK-2, before shared mode becomes the
+default for `serve --mcp`) gives a writer that has waited about 2 s the next
+turn, so readers can't push a save toward its deadline.
+
+**A compaction holds the file for its whole length.** It took about 0.2 s
+at 10K and about 175 s at 100K on the same machine, and every call that
+waits longer than its deadline meanwhile fails with `Locked` (naming the
+compaction). Compact, or rekey with `--rotate`, when no agent is working.
 
 ## What shared mode costs and assumes
 

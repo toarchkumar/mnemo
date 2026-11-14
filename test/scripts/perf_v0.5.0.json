@@ -5833,5 +5833,2559 @@
       "stats_first_p95_ms": 12.04
     },
     "reading": "the mobile stats() no longer pays a pass of record decrypts on each fresh handle (RB-002.3 measured 12.32 ms at 10K for the old path)"
+  },
+  "shared_v0_14_0": {
+    "remeasured": "2026-11-13",
+    "what": "v0.14.0 step 5: the 12.4 shared-mode bench (mnemo/examples/shared_bench.rs). Corpus: benches/corpus.rs (384 dims, clustered vectors, IVF+PQ index, fast KDF), a fresh copy per cell. Cells 1-4 in one process (a second handle stands in for another process in cell 4); cells 5-8 with child processes (the same binary run again), each mix run 8 s (cell 8: 20 s). Latencies in ms; p99 is nearest-rank.",
+    "machine": "Apple M1 Pro (8 cores, 16 GB), macOS 26.7.1, on AC power, caffeinate -dims during the runs",
+    "build": "release (cargo run --release --example shared_bench; the example's dev-hooks build, no failpoints)",
+    "background": "not idle: macOS daemons busy throughout (fileproviderd 80-100% CPU, spotlightknowledged up to 85%, mediaanalysisd ~50%, an iOS Simulator's pairedsyncd ~70% at the start); load average 2.6-6.6. REVIEWER-B idle.",
+    "repetitions": "before the fairness change: cell 1: 2000 (1000 at 100K); cells 2 and 3: 200 (100 at 100K); cell 4: 60 (30 at 100K), RSS 3 fresh processes; cells 5-7: one 8 s run per mix and shape; cell 8: one 20 s run. After it: cells 5, 6 and 8 three times (median_of_3, with each run kept), cell 7 once",
+    "runs": {
+      "before_fairness": "the first run, with the step 2a rule: a reader takes the intent lock shared for one try at the main lock and lets it go whether or not it got in",
+      "after_fairness": "the same cells after the step 5 change: a reader that finds a writer holding the main lock keeps the intent lock shared while it waits, so the next writer queues behind it (load average 2.8-4.8; fileproviderd ~100% CPU throughout)"
+    },
+    "cells_1_to_4": {
+      "1000": {
+        "1_per_call_check": {
+          "plain_get": {
+            "max_ms": 0.016,
+            "mean_ms": 0.001,
+            "n": 2000,
+            "p50_ms": 0.001,
+            "p99_ms": 0.008
+          },
+          "shared_empty_read_window": {
+            "max_ms": 0.126,
+            "mean_ms": 0.049,
+            "n": 2000,
+            "p50_ms": 0.048,
+            "p99_ms": 0.057
+          },
+          "shared_get_in_read_window": {
+            "max_ms": 0.11,
+            "mean_ms": 0.051,
+            "n": 2000,
+            "p50_ms": 0.05,
+            "p99_ms": 0.063
+          }
+        },
+        "2_3_write_and_noop": {
+          "plain_remember_and_flush": {
+            "max_ms": 22.518,
+            "mean_ms": 14.978,
+            "n": 200,
+            "p50_ms": 14.935,
+            "p99_ms": 20.991
+          },
+          "plain_remember_fsyncs_mean": 3.115,
+          "shared_remember_fsyncs_mean": 5.11,
+          "shared_remember_window": {
+            "max_ms": 36.959,
+            "mean_ms": 23.695,
+            "n": 200,
+            "p50_ms": 23.869,
+            "p99_ms": 31.882
+          }
+        },
+        "4_reload_and_rss": {
+          "reload_read_after_another_commit": {
+            "max_ms": 3.465,
+            "mean_ms": 2.046,
+            "n": 60,
+            "p50_ms": 2.352,
+            "p99_ms": 3.465
+          },
+          "rss_per_shared_handle_mb_median": 1.609,
+          "rss_samples": [
+            {
+              "rss_after_kb": 3360,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 3360,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 3360,
+              "rss_before_kb": 1712
+            }
+          ]
+        },
+        "3_noop_windows_separated": {
+          "next_read_after_a_refused_write": {
+            "max_ms": 1.022,
+            "mean_ms": 0.55,
+            "n": 200,
+            "p50_ms": 0.506,
+            "p99_ms": 0.886
+          },
+          "noop_empty_write_window": {
+            "max_ms": 0.399,
+            "mean_ms": 0.157,
+            "n": 200,
+            "p50_ms": 0.143,
+            "p99_ms": 0.353
+          },
+          "noop_fsyncs_total": 0,
+          "noop_refused_write": {
+            "max_ms": 0.171,
+            "mean_ms": 0.062,
+            "n": 200,
+            "p50_ms": 0.055,
+            "p99_ms": 0.133
+          },
+          "noop_transaction_id_unchanged": true,
+          "plain_remember_and_flush": {
+            "max_ms": 24.401,
+            "mean_ms": 13.734,
+            "n": 200,
+            "p50_ms": 13.632,
+            "p99_ms": 22.02
+          },
+          "plain_remember_fsyncs_mean": 3.115,
+          "shared_remember_fsyncs_mean": 5.11,
+          "shared_remember_window": {
+            "max_ms": 37.437,
+            "mean_ms": 24.646,
+            "n": 200,
+            "p50_ms": 23.956,
+            "p99_ms": 34.807
+          }
+        }
+      },
+      "10000": {
+        "1_per_call_check": {
+          "plain_get": {
+            "max_ms": 0.016,
+            "mean_ms": 0.001,
+            "n": 2000,
+            "p50_ms": 0.001,
+            "p99_ms": 0.008
+          },
+          "shared_empty_read_window": {
+            "max_ms": 0.085,
+            "mean_ms": 0.048,
+            "n": 2000,
+            "p50_ms": 0.048,
+            "p99_ms": 0.054
+          },
+          "shared_get_in_read_window": {
+            "max_ms": 0.097,
+            "mean_ms": 0.049,
+            "n": 2000,
+            "p50_ms": 0.049,
+            "p99_ms": 0.057
+          }
+        },
+        "2_3_write_and_noop": {
+          "plain_remember_and_flush": {
+            "max_ms": 32.669,
+            "mean_ms": 14.895,
+            "n": 200,
+            "p50_ms": 14.654,
+            "p99_ms": 26.23
+          },
+          "plain_remember_fsyncs_mean": 3.025,
+          "shared_remember_fsyncs_mean": 5.015,
+          "shared_remember_window": {
+            "max_ms": 34.538,
+            "mean_ms": 23.928,
+            "n": 200,
+            "p50_ms": 23.894,
+            "p99_ms": 32.38
+          }
+        },
+        "4_reload_and_rss": {
+          "reload_read_after_another_commit": {
+            "max_ms": 7.167,
+            "mean_ms": 5.287,
+            "n": 60,
+            "p50_ms": 5.196,
+            "p99_ms": 7.167
+          },
+          "rss_per_shared_handle_mb_median": 4.688,
+          "rss_samples": [
+            {
+              "rss_after_kb": 6512,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 6512,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 6544,
+              "rss_before_kb": 1712
+            }
+          ]
+        },
+        "3_noop_windows_separated": {
+          "next_read_after_a_refused_write": {
+            "max_ms": 5.889,
+            "mean_ms": 3.071,
+            "n": 200,
+            "p50_ms": 2.992,
+            "p99_ms": 4.476
+          },
+          "noop_empty_write_window": {
+            "max_ms": 0.805,
+            "mean_ms": 0.155,
+            "n": 200,
+            "p50_ms": 0.135,
+            "p99_ms": 0.48
+          },
+          "noop_fsyncs_total": 0,
+          "noop_refused_write": {
+            "max_ms": 0.146,
+            "mean_ms": 0.063,
+            "n": 200,
+            "p50_ms": 0.057,
+            "p99_ms": 0.121
+          },
+          "noop_transaction_id_unchanged": true,
+          "plain_remember_and_flush": {
+            "max_ms": 34.647,
+            "mean_ms": 15.679,
+            "n": 200,
+            "p50_ms": 15.049,
+            "p99_ms": 25.288
+          },
+          "plain_remember_fsyncs_mean": 3.025,
+          "shared_remember_fsyncs_mean": 5.015,
+          "shared_remember_window": {
+            "max_ms": 36.93,
+            "mean_ms": 22.885,
+            "n": 200,
+            "p50_ms": 22.957,
+            "p99_ms": 33.254
+          }
+        }
+      },
+      "100000": {
+        "1_per_call_check": {
+          "plain_get": {
+            "max_ms": 0.024,
+            "mean_ms": 0.001,
+            "n": 1000,
+            "p50_ms": 0.001,
+            "p99_ms": 0.009
+          },
+          "shared_empty_read_window": {
+            "max_ms": 0.108,
+            "mean_ms": 0.049,
+            "n": 1000,
+            "p50_ms": 0.048,
+            "p99_ms": 0.06
+          },
+          "shared_get_in_read_window": {
+            "max_ms": 0.184,
+            "mean_ms": 0.05,
+            "n": 1000,
+            "p50_ms": 0.049,
+            "p99_ms": 0.062
+          }
+        },
+        "2_3_write_and_noop": {
+          "plain_remember_and_flush": {
+            "max_ms": 63.949,
+            "mean_ms": 17.966,
+            "n": 100,
+            "p50_ms": 16.991,
+            "p99_ms": 38.037
+          },
+          "plain_remember_fsyncs_mean": 3.04,
+          "shared_remember_fsyncs_mean": 5.04,
+          "shared_remember_window": {
+            "max_ms": 76.874,
+            "mean_ms": 28.551,
+            "n": 100,
+            "p50_ms": 27.035,
+            "p99_ms": 47.447
+          }
+        },
+        "4_reload_and_rss": {
+          "reload_read_after_another_commit": {
+            "max_ms": 35.06,
+            "mean_ms": 34.032,
+            "n": 30,
+            "p50_ms": 34.056,
+            "p99_ms": 35.06
+          },
+          "rss_per_shared_handle_mb_median": 17.797,
+          "rss_samples": [
+            {
+              "rss_after_kb": 19888,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 19952,
+              "rss_before_kb": 1712
+            },
+            {
+              "rss_after_kb": 19936,
+              "rss_before_kb": 1712
+            }
+          ]
+        },
+        "3_noop_windows_separated": {
+          "next_read_after_a_refused_write": {
+            "max_ms": 43.687,
+            "mean_ms": 32.448,
+            "n": 100,
+            "p50_ms": 31.798,
+            "p99_ms": 36.492
+          },
+          "noop_empty_write_window": {
+            "max_ms": 0.2,
+            "mean_ms": 0.144,
+            "n": 100,
+            "p50_ms": 0.137,
+            "p99_ms": 0.185
+          },
+          "noop_fsyncs_total": 0,
+          "noop_refused_write": {
+            "max_ms": 0.173,
+            "mean_ms": 0.136,
+            "n": 100,
+            "p50_ms": 0.132,
+            "p99_ms": 0.172
+          },
+          "noop_transaction_id_unchanged": true,
+          "plain_remember_and_flush": {
+            "max_ms": 45.245,
+            "mean_ms": 17.912,
+            "n": 100,
+            "p50_ms": 17.015,
+            "p99_ms": 44.146
+          },
+          "plain_remember_fsyncs_mean": 3.04,
+          "shared_remember_fsyncs_mean": 5.04,
+          "shared_remember_window": {
+            "max_ms": 56.961,
+            "mean_ms": 28.58,
+            "n": 100,
+            "p50_ms": 28.805,
+            "p99_ms": 52.253
+          }
+        }
+      }
+    },
+    "cells_5_to_8_before_fairness": {
+      "10000": {
+        "5_doubling_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 4085.159,
+              "mean_ms": 1342.419,
+              "n": 6,
+              "p50_ms": 775.529,
+              "p99_ms": 4085.159
+            },
+            "locked": 0,
+            "per_sec": 0.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 42.489,
+              "mean_ms": 24.423,
+              "n": 328,
+              "p50_ms": 23.962,
+              "p99_ms": 40.767
+            },
+            "locked": 0,
+            "per_sec": 41.0
+          }
+        },
+        "5_doubling_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 6877.72,
+              "mean_ms": 1.722,
+              "n": 32727,
+              "p50_ms": 0.21,
+              "p99_ms": 1.007
+            },
+            "locked": 0,
+            "per_sec": 4090.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1208.375,
+              "mean_ms": 28.517,
+              "n": 281,
+              "p50_ms": 23.926,
+              "p99_ms": 40.189
+            },
+            "locked": 0,
+            "per_sec": 35.125
+          }
+        },
+        "5_doubling_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 188.998,
+              "mean_ms": 104.967,
+              "n": 154,
+              "p50_ms": 102.108,
+              "p99_ms": 166.266
+            },
+            "locked": 0,
+            "per_sec": 19.25
+          }
+        },
+        "5_doubling_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 4043.114,
+              "mean_ms": 423.4,
+              "n": 158,
+              "p50_ms": 171.937,
+              "p99_ms": 2538.692
+            },
+            "locked": 0,
+            "per_sec": 19.75
+          }
+        },
+        "5_young_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 3303.402,
+              "mean_ms": 1007.592,
+              "n": 8,
+              "p50_ms": 0.207,
+              "p99_ms": 3303.402
+            },
+            "locked": 0,
+            "per_sec": 1.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 36.614,
+              "mean_ms": 22.201,
+              "n": 361,
+              "p50_ms": 21.101,
+              "p99_ms": 33.449
+            },
+            "locked": 0,
+            "per_sec": 45.125
+          }
+        },
+        "5_young_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 6786.742,
+              "mean_ms": 1.515,
+              "n": 37232,
+              "p50_ms": 0.209,
+              "p99_ms": 0.905
+            },
+            "locked": 0,
+            "per_sec": 4654.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1317.822,
+              "mean_ms": 28.992,
+              "n": 277,
+              "p50_ms": 23.878,
+              "p99_ms": 36.076
+            },
+            "locked": 0,
+            "per_sec": 34.625
+          }
+        },
+        "5_young_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 175.19,
+              "mean_ms": 89.967,
+              "n": 179,
+              "p50_ms": 83.177,
+              "p99_ms": 169.195
+            },
+            "locked": 0,
+            "per_sec": 22.375
+          }
+        },
+        "5_young_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 4277.857,
+              "mean_ms": 360.305,
+              "n": 182,
+              "p50_ms": 89.007,
+              "p99_ms": 3545.554
+            },
+            "locked": 0,
+            "per_sec": 22.75
+          }
+        },
+        "6_doubling_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8189.142,
+              "mean_ms": 5455.727,
+              "n": 3,
+              "p50_ms": 8176.771,
+              "p99_ms": 8189.142
+            },
+            "locked": 0,
+            "per_sec": 0.375
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1473.436,
+              "mean_ms": 224.243,
+              "n": 144,
+              "p50_ms": 116.063,
+              "p99_ms": 1020.65
+            },
+            "locked": 0,
+            "per_sec": 18.0
+          }
+        },
+        "6_doubling_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8526.808,
+              "mean_ms": 8515.707,
+              "n": 2,
+              "p50_ms": 8504.606,
+              "p99_ms": 8526.808
+            },
+            "locked": 0,
+            "per_sec": 0.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 4241.744,
+              "mean_ms": 393.252,
+              "n": 168,
+              "p50_ms": 108.944,
+              "p99_ms": 3959.23
+            },
+            "locked": 0,
+            "per_sec": 21.0
+          }
+        },
+        "6_young_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8218.796,
+              "mean_ms": 8208.497,
+              "n": 2,
+              "p50_ms": 8198.199,
+              "p99_ms": 8218.796
+            },
+            "locked": 0,
+            "per_sec": 0.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2867.1,
+              "mean_ms": 166.175,
+              "n": 195,
+              "p50_ms": 80.67,
+              "p99_ms": 2246.874
+            },
+            "locked": 0,
+            "per_sec": 24.375
+          }
+        },
+        "6_young_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8419.426,
+              "mean_ms": 8418.75,
+              "n": 2,
+              "p50_ms": 8418.074,
+              "p99_ms": 8419.426
+            },
+            "locked": 0,
+            "per_sec": 0.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 5114.975,
+              "mean_ms": 346.406,
+              "n": 189,
+              "p50_ms": 84.018,
+              "p99_ms": 4928.853
+            },
+            "locked": 0,
+            "per_sec": 23.625
+          }
+        },
+        "8_open_wait_under_compaction": {
+          "compactions_per_sec": 2.3,
+          "opener": {
+            "latency": {
+              "n": 0
+            },
+            "locked": 2,
+            "per_sec": 0.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1570.04,
+              "mean_ms": 222.263,
+              "n": 272,
+              "p50_ms": 147.448,
+              "p99_ms": 1036.892
+            },
+            "locked": 0,
+            "per_sec": 13.6
+          }
+        }
+      },
+      "100000": {
+        "5_doubling_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 3610.613,
+              "mean_ms": 814.024,
+              "n": 10,
+              "p50_ms": 236.542,
+              "p99_ms": 3610.613
+            },
+            "locked": 0,
+            "per_sec": 1.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 93.83,
+              "mean_ms": 31.017,
+              "n": 260,
+              "p50_ms": 29.984,
+              "p99_ms": 91.722
+            },
+            "locked": 0,
+            "per_sec": 32.5
+          }
+        },
+        "5_doubling_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 6838.222,
+              "mean_ms": 1.6,
+              "n": 35342,
+              "p50_ms": 0.215,
+              "p99_ms": 0.844
+            },
+            "locked": 0,
+            "per_sec": 4417.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1281.451,
+              "mean_ms": 35.74,
+              "n": 224,
+              "p50_ms": 27.983,
+              "p99_ms": 98.634
+            },
+            "locked": 0,
+            "per_sec": 28.0
+          }
+        },
+        "5_doubling_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 215.977,
+              "mean_ms": 162.34,
+              "n": 100,
+              "p50_ms": 167.319,
+              "p99_ms": 212.566
+            },
+            "locked": 0,
+            "per_sec": 12.5
+          }
+        },
+        "5_doubling_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 3749.08,
+              "mean_ms": 680.955,
+              "n": 98,
+              "p50_ms": 389.311,
+              "p99_ms": 3749.08
+            },
+            "locked": 0,
+            "per_sec": 12.25
+          }
+        },
+        "5_young_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 4982.906,
+              "mean_ms": 2697.95,
+              "n": 3,
+              "p50_ms": 2830.621,
+              "p99_ms": 4982.906
+            },
+            "locked": 0,
+            "per_sec": 0.375
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 116.132,
+              "mean_ms": 31.525,
+              "n": 254,
+              "p50_ms": 30.791,
+              "p99_ms": 73.656
+            },
+            "locked": 0,
+            "per_sec": 31.75
+          }
+        },
+        "5_young_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 5134.897,
+              "mean_ms": 1.217,
+              "n": 46574,
+              "p50_ms": 0.211,
+              "p99_ms": 1.002
+            },
+            "locked": 0,
+            "per_sec": 5821.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1681.916,
+              "mean_ms": 38.399,
+              "n": 209,
+              "p50_ms": 27.961,
+              "p99_ms": 107.999
+            },
+            "locked": 0,
+            "per_sec": 26.125
+          }
+        },
+        "5_young_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 214.931,
+              "mean_ms": 160.28,
+              "n": 101,
+              "p50_ms": 151.158,
+              "p99_ms": 209.399
+            },
+            "locked": 0,
+            "per_sec": 12.625
+          }
+        },
+        "5_young_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 4422.81,
+              "mean_ms": 670.718,
+              "n": 99,
+              "p50_ms": 192.296,
+              "p99_ms": 4422.81
+            },
+            "locked": 0,
+            "per_sec": 12.375
+          }
+        },
+        "6_doubling_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8332.972,
+              "mean_ms": 8329.861,
+              "n": 2,
+              "p50_ms": 8326.75,
+              "p99_ms": 8332.972
+            },
+            "locked": 0,
+            "per_sec": 0.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2478.8,
+              "mean_ms": 354.504,
+              "n": 92,
+              "p50_ms": 192.957,
+              "p99_ms": 2478.8
+            },
+            "locked": 0,
+            "per_sec": 11.5
+          }
+        },
+        "6_doubling_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8800.365,
+              "mean_ms": 8796.998,
+              "n": 2,
+              "p50_ms": 8793.63,
+              "p99_ms": 8800.365
+            },
+            "locked": 0,
+            "per_sec": 0.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3115.926,
+              "mean_ms": 723.354,
+              "n": 93,
+              "p50_ms": 519.624,
+              "p99_ms": 3115.926
+            },
+            "locked": 0,
+            "per_sec": 11.625
+          }
+        },
+        "6_young_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8317.907,
+              "mean_ms": 437.84,
+              "n": 38,
+              "p50_ms": 0.17,
+              "p99_ms": 8317.907
+            },
+            "locked": 0,
+            "per_sec": 4.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3386.042,
+              "mean_ms": 346.649,
+              "n": 94,
+              "p50_ms": 187.234,
+              "p99_ms": 3386.042
+            },
+            "locked": 0,
+            "per_sec": 11.75
+          }
+        },
+        "6_young_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 8755.575,
+              "mean_ms": 5822.296,
+              "n": 3,
+              "p50_ms": 8710.079,
+              "p99_ms": 8755.575
+            },
+            "locked": 0,
+            "per_sec": 0.375
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 5591.55,
+              "mean_ms": 669.292,
+              "n": 100,
+              "p50_ms": 193.421,
+              "p99_ms": 4898.974
+            },
+            "locked": 0,
+            "per_sec": 12.5
+          }
+        },
+        "8_open_wait_under_compaction": {
+          "compactions_per_sec": 0.05,
+          "opener": {
+            "latency": {
+              "n": 0
+            },
+            "locked": 2,
+            "per_sec": 0.0
+          },
+          "writer": {
+            "latency": {
+              "n": 0
+            },
+            "locked": 6,
+            "per_sec": 0.0
+          }
+        }
+      }
+    },
+    "cells_5_6_8_after_fairness": {
+      "median_of_3": {
+        "10000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "per_sec": 4930.75,
+              "locked_total": 0,
+              "n_total": 127257,
+              "p50_ms": 0.052,
+              "p99_ms": 0.106,
+              "max_ms": 122.624
+            },
+            "writer": {
+              "per_sec": 16.375,
+              "locked_total": 0,
+              "n_total": 382,
+              "p50_ms": 53.014,
+              "p99_ms": 273.279,
+              "max_ms": 293.278
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "per_sec": 27733.125,
+              "locked_total": 0,
+              "n_total": 668995,
+              "p50_ms": 0.219,
+              "p99_ms": 0.737,
+              "max_ms": 90.021
+            },
+            "writer": {
+              "per_sec": 0.625,
+              "locked_total": 0,
+              "n_total": 12,
+              "p50_ms": 1592.496,
+              "p99_ms": 2939.642,
+              "max_ms": 2939.642
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "per_sec": 19.0,
+              "locked_total": 0,
+              "n_total": 454,
+              "p50_ms": 101.956,
+              "p99_ms": 167.182,
+              "max_ms": 171.118
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "per_sec": 19.5,
+              "locked_total": 0,
+              "n_total": 476,
+              "p50_ms": 158.592,
+              "p99_ms": 2477.0,
+              "max_ms": 3125.519
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "per_sec": 6310.875,
+              "locked_total": 0,
+              "n_total": 164246,
+              "p50_ms": 0.06,
+              "p99_ms": 0.127,
+              "max_ms": 700.067
+            },
+            "writer": {
+              "per_sec": 15.0,
+              "locked_total": 0,
+              "n_total": 378,
+              "p50_ms": 128.858,
+              "p99_ms": 1358.859,
+              "max_ms": 1624.322
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "per_sec": 1722.125,
+              "locked_total": 0,
+              "n_total": 51602,
+              "p50_ms": 0.061,
+              "p99_ms": 0.168,
+              "max_ms": 1234.24
+            },
+            "writer": {
+              "per_sec": 18.125,
+              "locked_total": 0,
+              "n_total": 434,
+              "p50_ms": 253.065,
+              "p99_ms": 1905.894,
+              "max_ms": 2162.139
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "per_sec": 2.35,
+              "locked_total": 0,
+              "n_total": 140,
+              "p50_ms": 212.827,
+              "p99_ms": 1216.24,
+              "max_ms": 1216.24
+            },
+            "opener": {
+              "per_sec": 7.25,
+              "locked_total": 0,
+              "n_total": 430,
+              "p50_ms": 6.475,
+              "p99_ms": 1023.167,
+              "max_ms": 1304.279
+            },
+            "writer": {
+              "per_sec": 11.05,
+              "locked_total": 0,
+              "n_total": 690,
+              "p50_ms": 148.753,
+              "p99_ms": 1380.409,
+              "max_ms": 1705.057
+            }
+          }
+        },
+        "100000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "per_sec": 15.375,
+              "locked_total": 0,
+              "n_total": 457,
+              "p50_ms": 71.391,
+              "p99_ms": 170.197,
+              "max_ms": 178.432
+            },
+            "writer": {
+              "per_sec": 11.125,
+              "locked_total": 0,
+              "n_total": 267,
+              "p50_ms": 91.886,
+              "p99_ms": 161.195,
+              "max_ms": 161.195
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "per_sec": 26885.125,
+              "locked_total": 0,
+              "n_total": 641170,
+              "p50_ms": 0.209,
+              "p99_ms": 0.872,
+              "max_ms": 169.378
+            },
+            "writer": {
+              "per_sec": 0.875,
+              "locked_total": 0,
+              "n_total": 20,
+              "p50_ms": 177.113,
+              "p99_ms": 5523.282,
+              "max_ms": 5523.282
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "per_sec": 12.375,
+              "locked_total": 0,
+              "n_total": 295,
+              "p50_ms": 168.336,
+              "p99_ms": 218.399,
+              "max_ms": 218.399
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "per_sec": 12.125,
+              "locked_total": 0,
+              "n_total": 290,
+              "p50_ms": 440.209,
+              "p99_ms": 3604.454,
+              "max_ms": 3604.454
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "per_sec": 838.125,
+              "locked_total": 0,
+              "n_total": 25465,
+              "p50_ms": 0.058,
+              "p99_ms": 77.303,
+              "max_ms": 639.417
+            },
+            "writer": {
+              "per_sec": 9.125,
+              "locked_total": 0,
+              "n_total": 219,
+              "p50_ms": 301.657,
+              "p99_ms": 2336.671,
+              "max_ms": 2336.671
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "per_sec": 119.375,
+              "locked_total": 0,
+              "n_total": 2870,
+              "p50_ms": 0.052,
+              "p99_ms": 540.212,
+              "max_ms": 975.022
+            },
+            "writer": {
+              "per_sec": 10.25,
+              "locked_total": 0,
+              "n_total": 246,
+              "p50_ms": 517.667,
+              "p99_ms": 4167.422,
+              "max_ms": 4167.422
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "per_sec": 0.05,
+              "locked_total": 0,
+              "n_total": 3,
+              "p50_ms": 174878.29,
+              "p99_ms": 174878.29,
+              "max_ms": 174878.29
+            },
+            "opener": {
+              "per_sec": 0.0,
+              "locked_total": 6,
+              "n_total": 0,
+              "p50_ms": null,
+              "p99_ms": null,
+              "max_ms": null
+            },
+            "writer": {
+              "per_sec": 0.05,
+              "locked_total": 18,
+              "n_total": 2,
+              "p50_ms": 62.605,
+              "p99_ms": 62.605,
+              "max_ms": 62.605
+            }
+          }
+        }
+      },
+      "note": "median_of_3: per role, the median of the three runs' per_sec, p50, p99 and max; locked_total and n_total summed over the runs",
+      "run1": {
+        "10000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 127.783,
+                "mean_ms": 0.204,
+                "n": 39406,
+                "p50_ms": 0.052,
+                "p99_ms": 0.103
+              },
+              "locked": 0,
+              "per_sec": 4925.75
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 293.278,
+                "mean_ms": 61.185,
+                "n": 131,
+                "p50_ms": 53.85,
+                "p99_ms": 273.279
+              },
+              "locked": 0,
+              "per_sec": 16.375
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 43.129,
+                "mean_ms": 0.248,
+                "n": 225527,
+                "p50_ms": 0.219,
+                "p99_ms": 0.737
+              },
+              "locked": 0,
+              "per_sec": 28190.875
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 7643.126,
+                "mean_ms": 4014.925,
+                "n": 2,
+                "p50_ms": 386.724,
+                "p99_ms": 7643.126
+              },
+              "locked": 0,
+              "per_sec": 0.25
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 158.125,
+                "mean_ms": 106.552,
+                "n": 152,
+                "p50_ms": 101.956,
+                "p99_ms": 157.707
+              },
+              "locked": 0,
+              "per_sec": 19.0
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 3330.947,
+                "mean_ms": 421.308,
+                "n": 156,
+                "p50_ms": 161.505,
+                "p99_ms": 2477.0
+              },
+              "locked": 0,
+              "per_sec": 19.5
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 700.067,
+                "mean_ms": 0.401,
+                "n": 39929,
+                "p50_ms": 0.064,
+                "p99_ms": 0.137
+              },
+              "locked": 0,
+              "per_sec": 4991.125
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1624.322,
+                "mean_ms": 231.962,
+                "n": 140,
+                "p50_ms": 120.889,
+                "p99_ms": 1358.859
+              },
+              "locked": 0,
+              "per_sec": 17.5
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 1131.848,
+                "mean_ms": 0.642,
+                "n": 25939,
+                "p50_ms": 0.06,
+                "p99_ms": 0.131
+              },
+              "locked": 0,
+              "per_sec": 3242.375
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 3010.426,
+                "mean_ms": 454.602,
+                "n": 145,
+                "p50_ms": 207.078,
+                "p99_ms": 2351.726
+              },
+              "locked": 0,
+              "per_sec": 18.125
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 1216.24,
+                "mean_ms": 288.206,
+                "n": 51,
+                "p50_ms": 174.881,
+                "p99_ms": 1216.24
+              },
+              "locked": 0,
+              "per_sec": 2.55
+            },
+            "opener": {
+              "latency": {
+                "max_ms": 1016.075,
+                "mean_ms": 139.101,
+                "n": 145,
+                "p50_ms": 6.048,
+                "p99_ms": 927.495
+              },
+              "locked": 0,
+              "per_sec": 7.25
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1705.057,
+                "mean_ms": 273.603,
+                "n": 221,
+                "p50_ms": 163.935,
+                "p99_ms": 1380.409
+              },
+              "locked": 0,
+              "per_sec": 11.05
+            }
+          }
+        },
+        "100000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 174.813,
+                "mean_ms": 35.036,
+                "n": 230,
+                "p50_ms": 0.055,
+                "p99_ms": 165.773
+              },
+              "locked": 0,
+              "per_sec": 28.75
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 149.543,
+                "mean_ms": 90.841,
+                "n": 89,
+                "p50_ms": 91.886,
+                "p99_ms": 149.543
+              },
+              "locked": 0,
+              "per_sec": 11.125
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 169.378,
+                "mean_ms": 0.26,
+                "n": 215081,
+                "p50_ms": 0.202,
+                "p99_ms": 0.969
+              },
+              "locked": 0,
+              "per_sec": 26885.125
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 4955.427,
+                "mean_ms": 1158.092,
+                "n": 7,
+                "p50_ms": 693.999,
+                "p99_ms": 4955.427
+              },
+              "locked": 0,
+              "per_sec": 0.875
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 213.126,
+                "mean_ms": 163.584,
+                "n": 99,
+                "p50_ms": 168.336,
+                "p99_ms": 213.126
+              },
+              "locked": 0,
+              "per_sec": 12.375
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 2957.891,
+                "mean_ms": 713.166,
+                "n": 94,
+                "p50_ms": 463.968,
+                "p99_ms": 2957.891
+              },
+              "locked": 0,
+              "per_sec": 11.75
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 489.873,
+                "mean_ms": 3.831,
+                "n": 4240,
+                "p50_ms": 0.059,
+                "p99_ms": 148.63
+              },
+              "locked": 0,
+              "per_sec": 530.0
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 2336.671,
+                "mean_ms": 477.384,
+                "n": 69,
+                "p50_ms": 355.982,
+                "p99_ms": 2336.671
+              },
+              "locked": 0,
+              "per_sec": 8.625
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 857.147,
+                "mean_ms": 17.365,
+                "n": 955,
+                "p50_ms": 0.052,
+                "p99_ms": 491.291
+              },
+              "locked": 0,
+              "per_sec": 119.375
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 3727.724,
+                "mean_ms": 822.675,
+                "n": 82,
+                "p50_ms": 514.045,
+                "p99_ms": 3727.724
+              },
+              "locked": 0,
+              "per_sec": 10.25
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 175186.983,
+                "mean_ms": 175186.983,
+                "n": 1,
+                "p50_ms": 175186.983,
+                "p99_ms": 175186.983
+              },
+              "locked": 0,
+              "per_sec": 0.05
+            },
+            "opener": {
+              "latency": {
+                "n": 0
+              },
+              "locked": 2,
+              "per_sec": 0.0
+            },
+            "writer": {
+              "latency": {
+                "n": 0
+              },
+              "locked": 6,
+              "per_sec": 0.0
+            }
+          }
+        }
+      },
+      "run2": {
+        "10000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 86.355,
+                "mean_ms": 0.165,
+                "n": 48405,
+                "p50_ms": 0.051,
+                "p99_ms": 0.106
+              },
+              "locked": 0,
+              "per_sec": 6050.625
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 320.455,
+                "mean_ms": 69.191,
+                "n": 116,
+                "p50_ms": 53.014,
+                "p99_ms": 315.476
+              },
+              "locked": 0,
+              "per_sec": 14.5
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 128.606,
+                "mean_ms": 0.252,
+                "n": 221865,
+                "p50_ms": 0.211,
+                "p99_ms": 0.848
+              },
+              "locked": 0,
+              "per_sec": 27733.125
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 2891.462,
+                "mean_ms": 1610.89,
+                "n": 5,
+                "p50_ms": 1592.496,
+                "p99_ms": 2891.462
+              },
+              "locked": 0,
+              "per_sec": 0.625
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 171.118,
+                "mean_ms": 112.501,
+                "n": 143,
+                "p50_ms": 106.143,
+                "p99_ms": 170.002
+              },
+              "locked": 0,
+              "per_sec": 17.875
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 3125.519,
+                "mean_ms": 422.345,
+                "n": 156,
+                "p50_ms": 158.592,
+                "p99_ms": 3105.743
+              },
+              "locked": 0,
+              "per_sec": 19.5
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 966.555,
+                "mean_ms": 0.32,
+                "n": 50487,
+                "p50_ms": 0.06,
+                "p99_ms": 0.127
+              },
+              "locked": 0,
+              "per_sec": 6310.875
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 2512.122,
+                "mean_ms": 271.375,
+                "n": 120,
+                "p50_ms": 128.858,
+                "p99_ms": 1707.741
+              },
+              "locked": 0,
+              "per_sec": 15.0
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 1234.24,
+                "mean_ms": 1.194,
+                "n": 13777,
+                "p50_ms": 0.061,
+                "p99_ms": 0.168
+              },
+              "locked": 0,
+              "per_sec": 1722.125
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1964.297,
+                "mean_ms": 457.409,
+                "n": 144,
+                "p50_ms": 304.081,
+                "p99_ms": 1874.296
+              },
+              "locked": 0,
+              "per_sec": 18.0
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 1385.651,
+                "mean_ms": 377.046,
+                "n": 42,
+                "p50_ms": 241.396,
+                "p99_ms": 1385.651
+              },
+              "locked": 0,
+              "per_sec": 2.1
+            },
+            "opener": {
+              "latency": {
+                "max_ms": 1798.156,
+                "mean_ms": 146.041,
+                "n": 137,
+                "p50_ms": 6.475,
+                "p99_ms": 1397.282
+              },
+              "locked": 0,
+              "per_sec": 6.85
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1534.038,
+                "mean_ms": 242.708,
+                "n": 249,
+                "p50_ms": 133.98,
+                "p99_ms": 1046.841
+              },
+              "locked": 0,
+              "per_sec": 12.45
+            }
+          }
+        },
+        "100000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 178.432,
+                "mean_ms": 77.006,
+                "n": 104,
+                "p50_ms": 91.332,
+                "p99_ms": 177.456
+              },
+              "locked": 0,
+              "per_sec": 13.0
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 161.195,
+                "mean_ms": 89.374,
+                "n": 90,
+                "p50_ms": 92.07,
+                "p99_ms": 161.195
+              },
+              "locked": 0,
+              "per_sec": 11.25
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 188.052,
+                "mean_ms": 0.257,
+                "n": 217781,
+                "p50_ms": 0.209,
+                "p99_ms": 0.872
+              },
+              "locked": 0,
+              "per_sec": 27222.625
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 6652.496,
+                "mean_ms": 1608.259,
+                "n": 5,
+                "p50_ms": 177.113,
+                "p99_ms": 6652.496
+              },
+              "locked": 0,
+              "per_sec": 0.625
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 218.399,
+                "mean_ms": 169.758,
+                "n": 95,
+                "p50_ms": 173.408,
+                "p99_ms": 218.399
+              },
+              "locked": 0,
+              "per_sec": 11.875
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 3604.454,
+                "mean_ms": 689.088,
+                "n": 97,
+                "p50_ms": 440.209,
+                "p99_ms": 3604.454
+              },
+              "locked": 0,
+              "per_sec": 12.125
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 639.417,
+                "mean_ms": 1.102,
+                "n": 14520,
+                "p50_ms": 0.058,
+                "p99_ms": 0.084
+              },
+              "locked": 0,
+              "per_sec": 1815.0
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 3179.944,
+                "mean_ms": 450.213,
+                "n": 73,
+                "p50_ms": 182.63,
+                "p99_ms": 3179.944
+              },
+              "locked": 0,
+              "per_sec": 9.125
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 975.022,
+                "mean_ms": 21.889,
+                "n": 743,
+                "p50_ms": 0.053,
+                "p99_ms": 779.627
+              },
+              "locked": 0,
+              "per_sec": 92.875
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 4167.422,
+                "mean_ms": 835.955,
+                "n": 81,
+                "p50_ms": 517.667,
+                "p99_ms": 4167.422
+              },
+              "locked": 0,
+              "per_sec": 10.125
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 174759.552,
+                "mean_ms": 174759.552,
+                "n": 1,
+                "p50_ms": 174759.552,
+                "p99_ms": 174759.552
+              },
+              "locked": 0,
+              "per_sec": 0.05
+            },
+            "opener": {
+              "latency": {
+                "n": 0
+              },
+              "locked": 2,
+              "per_sec": 0.0
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 63.195,
+                "mean_ms": 63.195,
+                "n": 1,
+                "p50_ms": 63.195,
+                "p99_ms": 63.195
+              },
+              "locked": 6,
+              "per_sec": 0.05
+            }
+          }
+        }
+      },
+      "run3": {
+        "10000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 122.624,
+                "mean_ms": 0.204,
+                "n": 39446,
+                "p50_ms": 0.052,
+                "p99_ms": 0.119
+              },
+              "locked": 0,
+              "per_sec": 4930.75
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 283.55,
+                "mean_ms": 59.341,
+                "n": 135,
+                "p50_ms": 50.035,
+                "p99_ms": 204.171
+              },
+              "locked": 0,
+              "per_sec": 16.875
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 90.021,
+                "mean_ms": 0.253,
+                "n": 221603,
+                "p50_ms": 0.221,
+                "p99_ms": 0.707
+              },
+              "locked": 0,
+              "per_sec": 27700.375
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 2939.642,
+                "mean_ms": 1609.11,
+                "n": 5,
+                "p50_ms": 1950.073,
+                "p99_ms": 2939.642
+              },
+              "locked": 0,
+              "per_sec": 0.625
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 212.114,
+                "mean_ms": 101.696,
+                "n": 159,
+                "p50_ms": 101.075,
+                "p99_ms": 167.182
+              },
+              "locked": 0,
+              "per_sec": 19.875
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 2899.238,
+                "mean_ms": 402.758,
+                "n": 164,
+                "p50_ms": 112.894,
+                "p99_ms": 2192.331
+              },
+              "locked": 0,
+              "per_sec": 20.5
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 571.304,
+                "mean_ms": 0.217,
+                "n": 73830,
+                "p50_ms": 0.06,
+                "p99_ms": 0.124
+              },
+              "locked": 0,
+              "per_sec": 9228.75
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1544.9,
+                "mean_ms": 274.348,
+                "n": 118,
+                "p50_ms": 133.127,
+                "p99_ms": 1167.107
+              },
+              "locked": 0,
+              "per_sec": 14.75
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 1570.063,
+                "mean_ms": 1.37,
+                "n": 11886,
+                "p50_ms": 0.063,
+                "p99_ms": 0.17
+              },
+              "locked": 0,
+              "per_sec": 1485.75
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 2162.139,
+                "mean_ms": 456.467,
+                "n": 145,
+                "p50_ms": 253.065,
+                "p99_ms": 1905.894
+              },
+              "locked": 0,
+              "per_sec": 18.125
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 952.397,
+                "mean_ms": 320.025,
+                "n": 47,
+                "p50_ms": 212.827,
+                "p99_ms": 952.397
+              },
+              "locked": 0,
+              "per_sec": 2.35
+            },
+            "opener": {
+              "latency": {
+                "max_ms": 1304.279,
+                "mean_ms": 136.228,
+                "n": 148,
+                "p50_ms": 7.165,
+                "p99_ms": 1023.167
+              },
+              "locked": 0,
+              "per_sec": 7.4
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1934.138,
+                "mean_ms": 273.62,
+                "n": 220,
+                "p50_ms": 148.753,
+                "p99_ms": 1586.285
+              },
+              "locked": 0,
+              "per_sec": 11.0
+            }
+          }
+        },
+        "100000": {
+          "5_doubling_1w_1r": {
+            "reader": {
+              "latency": {
+                "max_ms": 195.804,
+                "mean_ms": 65.174,
+                "n": 123,
+                "p50_ms": 71.391,
+                "p99_ms": 170.197
+              },
+              "locked": 0,
+              "per_sec": 15.375
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 179.24,
+                "mean_ms": 91.827,
+                "n": 88,
+                "p50_ms": 88.461,
+                "p99_ms": 179.24
+              },
+              "locked": 0,
+              "per_sec": 11.0
+            }
+          },
+          "5_doubling_1w_7r": {
+            "reader": {
+              "latency": {
+                "max_ms": 166.94,
+                "mean_ms": 0.269,
+                "n": 208308,
+                "p50_ms": 0.216,
+                "p99_ms": 0.775
+              },
+              "locked": 0,
+              "per_sec": 26038.5
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 5523.282,
+                "mean_ms": 1007.255,
+                "n": 8,
+                "p50_ms": 143.857,
+                "p99_ms": 5523.282
+              },
+              "locked": 0,
+              "per_sec": 1.0
+            }
+          },
+          "5_doubling_2w": {
+            "writer": {
+              "latency": {
+                "max_ms": 227.172,
+                "mean_ms": 159.507,
+                "n": 101,
+                "p50_ms": 163.879,
+                "p99_ms": 219.766
+              },
+              "locked": 0,
+              "per_sec": 12.625
+            }
+          },
+          "5_doubling_8w": {
+            "writer": {
+              "latency": {
+                "max_ms": 3867.476,
+                "mean_ms": 671.435,
+                "n": 99,
+                "p50_ms": 307.918,
+                "p99_ms": 3867.476
+              },
+              "locked": 0,
+              "per_sec": 12.375
+            }
+          },
+          "6_doubling_4w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 955.493,
+                "mean_ms": 2.424,
+                "n": 6705,
+                "p50_ms": 0.053,
+                "p99_ms": 77.303
+              },
+              "locked": 0,
+              "per_sec": 838.125
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 1701.625,
+                "mean_ms": 429.506,
+                "n": 77,
+                "p50_ms": 301.657,
+                "p99_ms": 1701.625
+              },
+              "locked": 0,
+              "per_sec": 9.625
+            }
+          },
+          "6_doubling_8w_2r": {
+            "reader": {
+              "latency": {
+                "max_ms": 994.423,
+                "mean_ms": 13.901,
+                "n": 1172,
+                "p50_ms": 0.051,
+                "p99_ms": 540.212
+              },
+              "locked": 0,
+              "per_sec": 146.5
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 4476.028,
+                "mean_ms": 817.52,
+                "n": 83,
+                "p50_ms": 581.289,
+                "p99_ms": 4476.028
+              },
+              "locked": 0,
+              "per_sec": 10.375
+            }
+          },
+          "8_open_wait_under_compaction": {
+            "compactor": {
+              "latency": {
+                "max_ms": 174878.29,
+                "mean_ms": 174878.29,
+                "n": 1,
+                "p50_ms": 174878.29,
+                "p99_ms": 174878.29
+              },
+              "locked": 0,
+              "per_sec": 0.05
+            },
+            "opener": {
+              "latency": {
+                "n": 0
+              },
+              "locked": 2,
+              "per_sec": 0.0
+            },
+            "writer": {
+              "latency": {
+                "max_ms": 62.014,
+                "mean_ms": 62.014,
+                "n": 1,
+                "p50_ms": 62.014,
+                "p99_ms": 62.014
+              },
+              "locked": 6,
+              "per_sec": 0.05
+            }
+          }
+        }
+      }
+    },
+    "cell_7_after_fairness": {
+      "10000": {
+        "5_doubling_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 110.815,
+              "mean_ms": 0.19,
+              "n": 42231,
+              "p50_ms": 0.052,
+              "p99_ms": 0.108
+            },
+            "locked": 0,
+            "per_sec": 5278.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 245.359,
+              "mean_ms": 61.545,
+              "n": 131,
+              "p50_ms": 52.225,
+              "p99_ms": 236.889
+            },
+            "locked": 0,
+            "per_sec": 16.375
+          }
+        },
+        "5_doubling_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 47.899,
+              "mean_ms": 0.253,
+              "n": 221431,
+              "p50_ms": 0.22,
+              "p99_ms": 0.731
+            },
+            "locked": 0,
+            "per_sec": 27678.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3155.178,
+              "mean_ms": 1609.936,
+              "n": 5,
+              "p50_ms": 1270.685,
+              "p99_ms": 3155.178
+            },
+            "locked": 0,
+            "per_sec": 0.625
+          }
+        },
+        "5_doubling_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 177.156,
+              "mean_ms": 112.618,
+              "n": 143,
+              "p50_ms": 104.991,
+              "p99_ms": 169.629
+            },
+            "locked": 0,
+            "per_sec": 17.875
+          }
+        },
+        "5_doubling_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 2222.102,
+              "mean_ms": 432.733,
+              "n": 151,
+              "p50_ms": 208.101,
+              "p99_ms": 2220.72
+            },
+            "locked": 0,
+            "per_sec": 18.875
+          }
+        },
+        "5_young_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 65.225,
+              "mean_ms": 33.686,
+              "n": 238,
+              "p50_ms": 36.587,
+              "p99_ms": 60.583
+            },
+            "locked": 0,
+            "per_sec": 29.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 60.43,
+              "mean_ms": 36.226,
+              "n": 221,
+              "p50_ms": 36.036,
+              "p99_ms": 55.009
+            },
+            "locked": 0,
+            "per_sec": 27.625
+          }
+        },
+        "5_young_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 43.644,
+              "mean_ms": 0.256,
+              "n": 218580,
+              "p50_ms": 0.222,
+              "p99_ms": 0.729
+            },
+            "locked": 0,
+            "per_sec": 27322.5
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3266.62,
+              "mean_ms": 1003.469,
+              "n": 8,
+              "p50_ms": 35.992,
+              "p99_ms": 3266.62
+            },
+            "locked": 0,
+            "per_sec": 1.0
+          }
+        },
+        "5_young_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 130.958,
+              "mean_ms": 88.842,
+              "n": 181,
+              "p50_ms": 83.994,
+              "p99_ms": 129.02
+            },
+            "locked": 0,
+            "per_sec": 22.625
+          }
+        },
+        "5_young_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 5038.036,
+              "mean_ms": 368.955,
+              "n": 178,
+              "p50_ms": 91.057,
+              "p99_ms": 3456.98
+            },
+            "locked": 0,
+            "per_sec": 22.25
+          }
+        },
+        "6_doubling_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 594.471,
+              "mean_ms": 0.202,
+              "n": 80247,
+              "p50_ms": 0.059,
+              "p99_ms": 0.112
+            },
+            "locked": 0,
+            "per_sec": 10030.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1611.795,
+              "mean_ms": 280.806,
+              "n": 115,
+              "p50_ms": 184.041,
+              "p99_ms": 1492.829
+            },
+            "locked": 0,
+            "per_sec": 14.375
+          }
+        },
+        "6_doubling_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1111.344,
+              "mean_ms": 1.796,
+              "n": 8923,
+              "p50_ms": 0.069,
+              "p99_ms": 0.23
+            },
+            "locked": 0,
+            "per_sec": 1115.375
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2847.442,
+              "mean_ms": 444.373,
+              "n": 149,
+              "p50_ms": 226.449,
+              "p99_ms": 2457.637
+            },
+            "locked": 0,
+            "per_sec": 18.625
+          }
+        },
+        "6_young_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 989.638,
+              "mean_ms": 0.937,
+              "n": 17462,
+              "p50_ms": 0.062,
+              "p99_ms": 0.21
+            },
+            "locked": 0,
+            "per_sec": 2182.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2420.258,
+              "mean_ms": 173.859,
+              "n": 187,
+              "p50_ms": 72.967,
+              "p99_ms": 1489.966
+            },
+            "locked": 0,
+            "per_sec": 23.375
+          }
+        },
+        "6_young_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1873.416,
+              "mean_ms": 2.368,
+              "n": 7128,
+              "p50_ms": 0.074,
+              "p99_ms": 0.24
+            },
+            "locked": 0,
+            "per_sec": 891.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3513.623,
+              "mean_ms": 368.081,
+              "n": 178,
+              "p50_ms": 83.969,
+              "p99_ms": 3141.49
+            },
+            "locked": 0,
+            "per_sec": 22.25
+          }
+        }
+      },
+      "100000": {
+        "5_doubling_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 178.622,
+              "mean_ms": 102.87,
+              "n": 78,
+              "p50_ms": 99.256,
+              "p99_ms": 178.622
+            },
+            "locked": 0,
+            "per_sec": 9.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 189.292,
+              "mean_ms": 90.401,
+              "n": 89,
+              "p50_ms": 89.995,
+              "p99_ms": 189.292
+            },
+            "locked": 0,
+            "per_sec": 11.125
+          }
+        },
+        "5_doubling_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 133.871,
+              "mean_ms": 0.258,
+              "n": 217005,
+              "p50_ms": 0.222,
+              "p99_ms": 0.729
+            },
+            "locked": 0,
+            "per_sec": 27125.625
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 4355.688,
+              "mean_ms": 2009.653,
+              "n": 4,
+              "p50_ms": 79.94,
+              "p99_ms": 4355.688
+            },
+            "locked": 0,
+            "per_sec": 0.5
+          }
+        },
+        "5_doubling_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 235.926,
+              "mean_ms": 171.55,
+              "n": 94,
+              "p50_ms": 176.105,
+              "p99_ms": 235.926
+            },
+            "locked": 0,
+            "per_sec": 11.75
+          }
+        },
+        "5_doubling_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 3375.543,
+              "mean_ms": 699.273,
+              "n": 95,
+              "p50_ms": 513.715,
+              "p99_ms": 3375.543
+            },
+            "locked": 0,
+            "per_sec": 11.875
+          }
+        },
+        "5_young_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 130.996,
+              "mean_ms": 81.905,
+              "n": 98,
+              "p50_ms": 80.106,
+              "p99_ms": 130.996
+            },
+            "locked": 0,
+            "per_sec": 12.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 113.742,
+              "mean_ms": 80.664,
+              "n": 100,
+              "p50_ms": 75.851,
+              "p99_ms": 112.289
+            },
+            "locked": 0,
+            "per_sec": 12.5
+          }
+        },
+        "5_young_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 179.858,
+              "mean_ms": 0.277,
+              "n": 202466,
+              "p50_ms": 0.218,
+              "p99_ms": 0.762
+            },
+            "locked": 0,
+            "per_sec": 25308.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3847.735,
+              "mean_ms": 803.43,
+              "n": 10,
+              "p50_ms": 376.957,
+              "p99_ms": 3847.735
+            },
+            "locked": 0,
+            "per_sec": 1.25
+          }
+        },
+        "5_young_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 236.969,
+              "mean_ms": 166.778,
+              "n": 97,
+              "p50_ms": 166.789,
+              "p99_ms": 236.969
+            },
+            "locked": 0,
+            "per_sec": 12.125
+          }
+        },
+        "5_young_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 5727.37,
+              "mean_ms": 652.61,
+              "n": 103,
+              "p50_ms": 186.639,
+              "p99_ms": 5434.362
+            },
+            "locked": 0,
+            "per_sec": 12.875
+          }
+        },
+        "6_doubling_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 948.65,
+              "mean_ms": 0.987,
+              "n": 16403,
+              "p50_ms": 0.059,
+              "p99_ms": 0.109
+            },
+            "locked": 0,
+            "per_sec": 2050.375
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1911.69,
+              "mean_ms": 432.608,
+              "n": 76,
+              "p50_ms": 256.109,
+              "p99_ms": 1911.69
+            },
+            "locked": 0,
+            "per_sec": 9.5
+          }
+        },
+        "6_doubling_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1170.82,
+              "mean_ms": 26.4,
+              "n": 608,
+              "p50_ms": 0.053,
+              "p99_ms": 560.471
+            },
+            "locked": 0,
+            "per_sec": 76.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 5079.617,
+              "mean_ms": 780.527,
+              "n": 86,
+              "p50_ms": 578.323,
+              "p99_ms": 5079.617
+            },
+            "locked": 0,
+            "per_sec": 10.75
+          }
+        },
+        "6_young_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1464.878,
+              "mean_ms": 181.989,
+              "n": 88,
+              "p50_ms": 99.984,
+              "p99_ms": 1464.878
+            },
+            "locked": 0,
+            "per_sec": 11.0
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 3041.638,
+              "mean_ms": 373.272,
+              "n": 88,
+              "p50_ms": 160.25,
+              "p99_ms": 3041.638
+            },
+            "locked": 0,
+            "per_sec": 11.0
+          }
+        },
+        "6_young_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1765.105,
+              "mean_ms": 126.388,
+              "n": 135,
+              "p50_ms": 0.054,
+              "p99_ms": 1745.071
+            },
+            "locked": 0,
+            "per_sec": 16.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 5797.382,
+              "mean_ms": 703.357,
+              "n": 95,
+              "p50_ms": 189.37,
+              "p99_ms": 5797.382
+            },
+            "locked": 0,
+            "per_sec": 11.875
+          }
+        }
+      }
+    },
+    "reading": "Readers no longer starve: after the change a reader against a continuous writer waits p99 0.11 ms at 10K (4085 ms before), and readers among 4 or 8 writers 0.13-0.17 ms (8.2-8.5 s before). The cost lands on a writer against readers looping back to back: 1 writer with 7 readers commits 0.63/s (35/s before), p99 2.9 s at 10K and 5.5 s at 100K, within the 10 s deadline, no Locked. 8 writers' p99 stays about 2.5 s at 10K either way. Cell 7: the young backoff doesn't meet its adoption rule, so the doubling backoff stays. Cell 8: at 10K opens complete under a compaction every ~100 ms (p99 about 1.0 s); at 100K one compaction takes about 175 s and holds the file, so opens and writes in it time out with Locked. The planned fix for the writer side is LOCK-2 (a writer waiting over about 2 s goes next)."
   }
 }
