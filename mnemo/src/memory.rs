@@ -1023,7 +1023,7 @@ fn term_matches(term: &FilterTerm, metadata: &Map<String, Value>) -> bool {
         FilterTerm::Range { key, min, max } => metadata
             .get(key)
             .and_then(|v| v.as_f64())
-            .is_some_and(|n| min.map_or(true, |m_| n >= m_) && max.map_or(true, |m_| n <= m_)),
+            .is_some_and(|n| min.is_none_or(|m_| n >= m_) && max.is_none_or(|m_| n <= m_)),
     }
 }
 

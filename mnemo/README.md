@@ -1076,10 +1076,8 @@ how a raw-key v8 file becomes v9.
 - **The `keychain` cargo feature** (v0.15) is the OS keychain: the macOS
   login keychain, Windows Credential Manager, or Secret Service on Linux
   (through libdbus, built from source). It's off for the library and on in
-  the released CLI binaries and wheels. It uses `keyring` 3.6.3 with a few
-  crates held in `Cargo.lock` for Rust 1.75, so **building it from source
-  on a compiler older than 1.85 needs `--locked`** (`cargo install
-  mnemo-engine --features keychain --locked`).
+  the released CLI binaries and wheels. It uses the `keyring` 4 family
+  (`keyring-core` and one store crate per platform).
 - **Windows:** while another process holds a brain open with a plain
   (long-lived) handle, its lock covers the whole file, so neither page 0
   nor the write-ahead log can be read for the salt, and a command can't
@@ -1190,8 +1188,10 @@ cargo test            # 66 integration + 26 CLI smoke + proptest state machine +
 cargo run --example quickstart
 ```
 
-Minimum supported Rust version: **1.75**. All dependency versions are pinned
-exactly for reproducibility.
+Minimum supported Rust version: **1.92** (since v0.15; 1.75 before), set by
+the built-in embedder's ONNX Runtime binding. The released CLI binaries and
+wheels are built with stable, so this only matters when you build from
+source. All dependency versions are pinned exactly for reproducibility.
 
 ## Performance
 

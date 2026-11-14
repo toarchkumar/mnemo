@@ -336,7 +336,7 @@ fn locks_never_outlive_their_call_while_children_spawn() {
     while i < 200 || spawned.load(Ordering::Relaxed) < 200 {
         assert!(i < 1_000_000, "the spawner made no progress");
         i += 1;
-        let held = if i % 2 == 0 {
+        let held = if i.is_multiple_of(2) {
             l.exclusive(&opts(5000)).unwrap()
         } else {
             l.shared(&opts(5000)).unwrap()

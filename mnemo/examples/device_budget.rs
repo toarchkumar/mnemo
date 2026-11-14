@@ -383,7 +383,12 @@ impl Embedder for Canned {
 fn turn(i: usize) -> ThreadTurn {
     ThreadTurn {
         turn_id: format!("turn-{i:06}"),
-        role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+        role: if i.is_multiple_of(2) {
+            "user"
+        } else {
+            "assistant"
+        }
+        .into(),
         content: text_for(i),
         timestamp: None,
     }

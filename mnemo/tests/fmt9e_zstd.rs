@@ -57,7 +57,12 @@ fn prose(i: usize, len: usize) -> String {
 fn turn(i: usize, content: String) -> ThreadTurn {
     ThreadTurn {
         turn_id: format!("t{i}"),
-        role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+        role: if i.is_multiple_of(2) {
+            "user"
+        } else {
+            "assistant"
+        }
+        .into(),
         content,
         timestamp: Some(1_700_000_000 + i as i64),
     }

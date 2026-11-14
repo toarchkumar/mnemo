@@ -108,11 +108,39 @@ jobs:
       # (`MNEMO_TEST_OS_KEYCHAIN`); Linux has no Secret Service on a session
       # bus, so there it checks the "no keychain" path. The chain's tests
       # run again with the feature on.
+      # Step 5a (MSRV-2): the CLI as it was on `keyring` 3.6.3 (`824ff51`, the
+      # last commit before the move to the `keyring` 4 stores), so
+      # keychain_os.rs checks that an entry it wrote reads under 4.x. macOS
+      # only; cached by commit.
+      - name: Cache the keyring 3.6.3 CLI (macOS)
+        if: runner.os == 'macOS'
+        id: kr3
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/kr3
+          key: mnemo-cli-824ff51-keychain-${{ runner.os }}
+
+      - name: Build the keyring 3.6.3 CLI (macOS)
+        if: runner.os == 'macOS' && steps.kr3.outputs.cache-hit != 'true'
+        run: |
+          git fetch --depth 1 origin 824ff51215f0844dd8bd476f75036a86b23025f0
+          git worktree add "$RUNNER_TEMP/kr3src" 824ff51215f0844dd8bd476f75036a86b23025f0
+          cargo build --release --locked --features keychain --bin mnemo \
+            --manifest-path "$RUNNER_TEMP/kr3src/mnemo/Cargo.toml" \
+            --target-dir "$RUNNER_TEMP/kr3target"
+          mkdir -p "$RUNNER_TEMP/kr3/bin"
+          cp "$RUNNER_TEMP/kr3target/release/mnemo" "$RUNNER_TEMP/kr3/bin/"
+
       - name: cargo test (the OS keychain)
         working-directory: mnemo
+        shell: bash
         env:
           MNEMO_TEST_OS_KEYCHAIN: "1"
-        run: cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            export MNEMO_KEYRING3_BIN="$RUNNER_TEMP/kr3/bin/mnemo"
+          fi
+          cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
 
       - name: cargo clippy
         working-directory: mnemo
@@ -186,23 +214,24 @@ jobs:
           (cd ../mnemo-python && check)
 
   # --- MSRV check: ensure the codebase still builds against the floor
-  #     declared in Cargo.toml (`rust-version = "1.75"`). Linux-only to
+  #     declared in Cargo.toml (`rust-version = "1.92"`, since v0.15 step 5a,
+  #     MSRV-2: `fastembed`'s `ort` needs it). Linux-only to
   #     keep job count down; toolchain drift across platforms is rare and
   #     would surface on the stable matrix above first.
   msrv:
-    name: msrv (rust 1.75, linux)
+    name: msrv (rust 1.92, linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.75
-        uses: dtolnay/rust-toolchain@1.75
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@1.92
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: msrv-1.75
+          key: msrv-1.92
 
       - name: cargo build
         working-directory: mnemo
@@ -213,10 +242,10 @@ jobs:
         # MSRV to 1.81. Benches aren't part of the shipped crate, so
         # their MSRV is pinned by whatever `rustc` the maintainer uses
         # to run them, not by this gate.
-        # 12.3: `--locked --features keychain`, so a lifted pin (the crates
-        # held in Cargo.lock for the keychain; see mnemo/Cargo.toml) fails
-        # here, and the vendored libdbus is compiled at the MSRV.
-        run: cargo build --locked --lib --bins --tests --features failpoints,keychain
+        # 12.3: `--locked --features keychain`, so the keychain stores and
+        # the vendored libdbus are compiled at the MSRV; step 5a adds
+        # `embed-fastembed` (`ort`, whose 1.92 sets the MSRV).
+        run: cargo build --locked --lib --bins --tests --features failpoints,keychain,embed-fastembed
 
       - name: cargo test (lib + integration only)
         working-directory: mnemo
@@ -228,33 +257,30 @@ jobs:
 
   # --- 12.4 (v0.14.0 step 2a): Windows at the MSRV. std::fs::rename can't
   #     replace an open file on Windows before Rust 1.85 (1.75 to 1.84 refuse
-  #     with os error 5; probed 2026-11-13), so compaction falls back to
-  #     closing the old file first, and shared mode refuses to start. The
-  #     stable matrix above never builds with such a compiler; this job keeps
-  #     both behaviours tested.
+  #     with os error 5; probed 2026-11-13), so a build with such a compiler
+  #     falls back to closing the old file first, and shared mode refuses to
+  #     start. Since step 5a the MSRV is 1.92, so no supported compiler takes
+  #     that path: this job builds the keychain and runs the rename and lock
+  #     tests at the MSRV, on the normal path.
   windows-msrv:
-    name: windows-msrv (rust 1.75)
+    name: windows-msrv (rust 1.92)
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.75
-        uses: dtolnay/rust-toolchain@1.75
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@1.92
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: windows-msrv-1.75
+          key: windows-msrv-1.92
 
-      - name: cargo test (the compaction fallback and the shared-mode refusal)
+      - name: cargo test (the rename and lock tests at the MSRV)
         working-directory: mnemo
         shell: bash
-        env:
-          # The refusal test then requires the refusal (a build.rs that
-          # missed the old compiler fails instead of skipping).
-          MNEMO_EXPECT_SHARED_REFUSAL: "1"
         run: |
           rustc --version
           cargo test --locked -p mnemo-engine --features failpoints,keychain --test replaced_file --test shared_lock

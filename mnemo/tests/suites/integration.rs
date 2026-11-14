@@ -1190,7 +1190,7 @@ fn nonce_unique_after_crashed_data_flush() {
 
     // Snapshot every encrypted page's (nonce, ciphertext) after Phase 1.
     let snap1 = read_bytes(&path);
-    assert!(snap1.len() % PAGE_SIZE == 0, "file must be page-aligned");
+    assert!(snap1.len().is_multiple_of(PAGE_SIZE), "file must be page-aligned");
     let page_count = snap1.len() / PAGE_SIZE;
     let mut phase1: HashMap<u64, [u8; 12]> = HashMap::new();
     for page_no in 1..page_count as u64 {
