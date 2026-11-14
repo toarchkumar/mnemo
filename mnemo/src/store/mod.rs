@@ -960,11 +960,14 @@ pub struct CompactReport {
 /// What [`Mnemo::reembed_file`] did (12.3 step 4, v0.15).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReembedReport {
-    /// Live memories embedded again (expired ones are dropped, as by
-    /// compaction).
+    /// Live memories embedded again: facts, superseded versions, essence
+    /// items and thread turns (expired ones are dropped, as by compaction).
     pub memories: usize,
     /// Manifests kept on the sentinel vector (resized to the new width).
     pub manifests: usize,
+    /// Thread links (`_mnemo.kind = "thread_link"`) kept on the sentinel
+    /// vector (resized to the new width), R-008.3.
+    pub thread_links: usize,
     /// Result-cache entries copied (the engine's own aren't counted).
     pub cache_entries: usize,
     /// Semantic cache entries dropped because their vector has the old

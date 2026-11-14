@@ -271,6 +271,10 @@ pub(super) struct Bm25State {
     /// unmarked segments), whatever the index holds.
     #[cfg(feature = "dev-hooks")]
     pub(super) like_older_build: bool,
+    /// TOK-1, tests only: write segments without their mark, keeping the
+    /// tokenizer (to check that the mark doesn't move any score).
+    #[cfg(feature = "dev-hooks")]
+    pub(super) unmarked: bool,
 }
 
 /// FMT-9d: a manifest's segment runs and their document counts.
@@ -739,7 +743,12 @@ impl Mnemo {
         let written: u64 = self.bm25.manifest.seg_docs.iter().map(|&d| d as u64).sum();
         let live_docs = self.bm25.stats.as_ref().map_or(0, |s| s.docs.len()) as u64;
         let mostly_dead = !segs.is_empty() && written > 64 && live_docs * 2 < written;
-        let pending_tokens = self.bm25.pending_tokens.unwrap_or(text::SegmentTokens::V1);
+        #[allow(unused_mut)]
+        let mut pending_tokens = self.bm25.pending_tokens.unwrap_or(text::SegmentTokens::V1);
+        #[cfg(feature = "dev-hooks")]
+        if self.bm25.unmarked {
+            pending_tokens = text::SegmentTokens::V1;
+        }
         if segs.len() < BM25_MAX_SEGMENTS && !mostly_dead {
             return Ok(Some((
                 text::build_segment(&self.bm25.pending, pending_tokens)?,

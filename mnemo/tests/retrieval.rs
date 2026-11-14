@@ -588,3 +588,123 @@ fn an_interrupted_reembed_leaves_the_file_as_it_was() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
+
+/// An embedder that records every text it's sent.
+struct Recording {
+    inner: Hashing,
+    seen: std::sync::Mutex<Vec<String>>,
+}
+
+impl Embedder for Recording {
+    fn identity(&self) -> EmbedderIdentity {
+        self.inner.identity()
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        self.seen
+            .lock()
+            .unwrap()
+            .extend(texts.iter().map(|t| t.to_string()));
+        self.inner.embed(texts)
+    }
+}
+
+/// R-008.3: a thread link keeps its sentinel vector through a reembed at a
+/// new width, isn't sent to the embedder, and the continuation it records
+/// still works.
+#[test]
+fn reembed_keeps_a_thread_links_sentinel_and_its_continuation() {
+    let dir = tempdir().unwrap();
+    let p = reembed_source(dir.path(), 2);
+    let link = {
+        let mut db = Mnemo::open(&p, PASS).unwrap();
+        db.set_embedder(hashing("old-model", 4)).unwrap();
+        db.essence_add(
+            mnemo_engine::EssenceScope::Thread("t1".into()),
+            mnemo_engine::EssenceSection::Open,
+            "fix the flaky valve test",
+            None,
+        )
+        .unwrap();
+        let link = db.thread_start("t2", "t1").unwrap();
+        db.flush().unwrap();
+        link
+    };
+    let new = Recording {
+        inner: hashing("new-model", 8),
+        seen: Default::default(),
+    };
+    let report = Mnemo::reembed_file(p.to_str().unwrap(), PASS, &new).unwrap();
+    assert_eq!(report.thread_links, 1);
+    assert_eq!(report.manifests, 1);
+    // Two facts and the essence item were embedded; the link wasn't.
+    assert_eq!(report.memories, 3);
+    let seen = new.seen.lock().unwrap().clone();
+    assert!(
+        seen.iter().all(|t| !t.starts_with("thread link:")),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|t| t == "fix the flaky valve test"),
+        "{seen:?}"
+    );
+
+    let mut db = Mnemo::open(&p, PASS).unwrap();
+    let m = db.get(&link).unwrap();
+    let s = 1.0 / (8f32).sqrt();
+    assert_eq!(m.vector.len(), 8);
+    assert!(
+        m.vector.iter().all(|x| (x - s).abs() < 1e-3),
+        "{:?}",
+        m.vector
+    );
+    let essence = db
+        .essence(mnemo_engine::EssenceScope::Thread("t2".into()), 4096)
+        .unwrap();
+    assert!(essence.contains("fix the flaky valve test"), "{essence}");
+}
+
+/// Check 3: the segment mark is score-neutral. The same documents, with
+/// their segments marked and with the mark left out, give identical raw
+/// BM25 scores for a query of whole words (N, avgdl and every document's
+/// length are the rows', and no query term is the mark).
+#[test]
+fn the_segment_mark_changes_no_score() {
+    let texts = [
+        "tea, not coffee, before the release",
+        "the release needs one approval",
+        "coffee at the release party, mnemo.nosync",
+        "nothing about drinks",
+    ];
+    let scores = |unmarked: bool| {
+        let dir = tempdir().unwrap();
+        let p = dir.path().join("m.mnemo");
+        let mut db = Mnemo::create(&p, PASS, cfg(4)).unwrap();
+        if unmarked {
+            db.__write_keyword_segments_without_the_mark_for_testing();
+        }
+        // One commit, so every document is split with tokenizer 2 in both
+        // files (an unmarked segment would make later ones tokenizer 1).
+        let mut ids = Vec::new();
+        for (i, t) in texts.iter().enumerate() {
+            ids.push(db.remember(mem(t, vec![1.0, i as f32, 0.0, 0.0])).unwrap());
+        }
+        db.flush().unwrap();
+        drop(db);
+        let mut db = Mnemo::open(&p, PASS).unwrap();
+        let want = if unmarked {
+            KeywordTokenizer::V1
+        } else {
+            KeywordTokenizer::V2
+        };
+        assert_eq!(db.stats().unwrap().keyword_tokenizer, Some(want));
+        let s = db.__bm25_scores_for_testing("release coffee tea").unwrap();
+        // Report by position, since the two files' ids differ.
+        s.into_iter()
+            .map(|(id, x)| (ids.iter().position(|i| *i == id).unwrap(), x))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let marked = scores(false);
+    let plain = scores(true);
+    assert_eq!(marked.len(), 3, "{marked:?}");
+    assert_eq!(marked, plain);
+}

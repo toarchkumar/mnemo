@@ -89,11 +89,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
   compaction with new vectors: under the exclusive lock, into a temp copy
   with the same salt, renamed over the file, so an interrupted run leaves
   the file as it was. The width can change (`--embed-dims`), and
-  `--embed-query` sets the new convention.
+  `--embed-query` sets the new convention. Facts, superseded versions,
+  essence items and thread turns are embedded; a manifest and thread links
+  keep their sentinel vector.
 - **Keyword tokenizer 2 (TOK-1).** The keyword index also indexes the parts
   of a token: `nosync` finds `mnemo.nosync`, `icloud` finds `iCloud's`,
   `bytes` finds `max_bytes` (split on `.`, `/`, `_`, `-` and `::`, plus a
-  possessive's stem; parts that are only digits are left out). New files
+  possessive's stem; parts that are only digits are left out; each
+  distinct term counts once per whitespace run). New files
   use it; an existing file keeps tokenizer 1 until a compaction or
   `reembed` rebuilds its index. `Stats::keyword_tokenizer` and
   `VerifyReport::keyword_tokenizer` (`KeywordTokenizer`: `V1`, `V2` or

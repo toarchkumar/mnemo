@@ -2248,6 +2248,11 @@ fn run() -> std::result::Result<(), String> {
                 "re-embedded {path}: {} memories, {from} -> {} ({} dimensions)",
                 report.memories, report.to.name, report.to.dimensions
             );
+            println!(
+                "  (facts, superseded versions, essence and thread turns; {} manifest and {} \
+                 thread links kept on their sentinel vector)",
+                report.manifests, report.thread_links
+            );
             if report.cache_dropped > 0 {
                 println!(
                     "  {} semantic cache entries dropped (their vectors have the old width)",

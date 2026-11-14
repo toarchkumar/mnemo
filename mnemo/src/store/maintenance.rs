@@ -976,8 +976,10 @@ impl Mnemo {
     /// identities or mixed vectors.
     ///
     /// - Every live memory is embedded with [`Embedder::embed`] (the
-    ///   document side), in batches of 64, except a manifest, which keeps
-    ///   the sentinel vector at the new width.
+    ///   document side), in batches of 64: facts, superseded versions (so
+    ///   history reads stay consistent), essence items and thread turns.
+    ///   A manifest and a thread link (`_mnemo.kind = "thread_link"`) keep
+    ///   their sentinel vector, at the new width, and aren't embedded.
     /// - The new identity is recorded in the `_mnemo.embedder` entry and in
     ///   the manifest's `metadata.embedder`.
     /// - The result cache is copied as compaction copies it; a semantic
@@ -1106,13 +1108,20 @@ impl Mnemo {
             .filter(|m| !m.is_expired(now))
             .collect();
         let mut manifests = 0;
+        let mut thread_links = 0;
         for m in live.iter_mut() {
             if embed::read_identity_from_metadata(&m.metadata).is_some() {
                 embed::write_identity_into_metadata(&mut m.metadata, &to);
             }
         }
+        // R-008.3: a manifest and a thread link carry a sentinel vector, not
+        // an embedding of their text.
+        let is_link = |m: &Memory| {
+            m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str())
+                == Some(MNEMO_META_KIND_THREAD_LINK)
+        };
         let to_embed: Vec<usize> = (0..live.len())
-            .filter(|&i| !is_manifest(&live[i]))
+            .filter(|&i| !is_manifest(&live[i]) && !is_link(&live[i]))
             .collect();
         for chunk in to_embed.chunks(BATCH) {
             let texts: Vec<&str> = chunk.iter().map(|&i| live[i].content.as_str()).collect();
@@ -1145,6 +1154,9 @@ impl Mnemo {
             if is_manifest(&m) {
                 m.vector = Memory::scaffold_manifest(dims).vector;
                 manifests += 1;
+            } else if is_link(&m) {
+                m.vector = new.sentinel_vector();
+                thread_links += 1;
             }
             new.put_existing(m)?;
         }
@@ -1176,8 +1188,9 @@ impl Mnemo {
         }
         new.record_identity(&to)?;
         Ok(ReembedReport {
-            memories: memories - manifests,
+            memories: memories - manifests - thread_links,
             manifests,
+            thread_links,
             cache_entries,
             cache_dropped,
             from,

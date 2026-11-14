@@ -137,16 +137,46 @@ impl KeywordTokenizer {
 const MAX_TOKEN_BYTES: usize = 64;
 
 /// The tokens of `text` under tokenizer `tok`, with repeats.
+///
+/// Tokenizer 2 (R-008.2) works per whitespace run: the run's UAX #29 words,
+/// its compound, and the parts of each, with **each distinct term counted
+/// once per run**. A term in two runs counts twice. (Tokenizer 1 can emit a
+/// dotted name twice, once as a UAX #29 word and once as the compound; it
+/// stays as released, since existing indexes depend on it.)
 pub(crate) fn tokenize_with(tok: Tokenizer, text: &str) -> Vec<String> {
-    let mut out = tokenize(text);
-    if tok == Tokenizer::V2 {
-        let whole = out.len();
-        for i in 0..whole {
-            let parts = token_parts(&out[i]);
-            out.extend(parts);
+    match tok {
+        Tokenizer::V1 => tokenize(text),
+        Tokenizer::V2 => {
+            let mut out = Vec::new();
+            for run in text.split_whitespace() {
+                let mut terms: Vec<String> = run
+                    .unicode_words()
+                    .map(|w| w.to_lowercase())
+                    .filter(|w| w.len() <= MAX_TOKEN_BYTES)
+                    .collect();
+                terms.extend(compound(run));
+                let whole = terms.len();
+                for i in 0..whole {
+                    let parts = token_parts(&terms[i]);
+                    terms.extend(parts);
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                out.extend(terms.into_iter().filter(|t| seen.insert(t.clone())));
+            }
+            out
         }
     }
-    out
+}
+
+/// FMT-9d: a whitespace run's compound token: the run with its leading and
+/// trailing punctuation stripped, when it still has punctuation inside.
+fn compound(run: &str) -> Option<String> {
+    let t = run.trim_matches(|c: char| !c.is_alphanumeric());
+    if t.len() < 2 || t.len() > MAX_TOKEN_BYTES {
+        return None;
+    }
+    (t.chars().any(|c| !c.is_alphanumeric()) && t.chars().any(|c| c.is_alphanumeric()))
+        .then(|| t.to_lowercase())
 }
 
 /// TOK-1: the parts of one tokenizer 1 token: a possessive's stem, and the
@@ -192,15 +222,7 @@ pub(crate) fn tokenize(text: &str) -> Vec<String> {
         .map(|w| w.to_lowercase())
         .filter(|w| w.len() <= MAX_TOKEN_BYTES)
         .collect();
-    for run in text.split_whitespace() {
-        let t = run.trim_matches(|c: char| !c.is_alphanumeric());
-        if t.len() < 2 || t.len() > MAX_TOKEN_BYTES {
-            continue;
-        }
-        if t.chars().any(|c| !c.is_alphanumeric()) && t.chars().any(|c| c.is_alphanumeric()) {
-            out.push(t.to_lowercase());
-        }
-    }
+    out.extend(text.split_whitespace().filter_map(compound));
     out
 }
 
@@ -483,6 +505,49 @@ mod tests {
             tokenize_with(Tokenizer::V2, "plain words"),
             tokenize_with(Tokenizer::V1, "plain words")
         );
+    }
+
+    /// R-008.2 (REVIEWER-A's case): tokenizer 2 counts each term once per
+    /// whitespace run; a term in two runs counts twice.
+    #[test]
+    fn tokenizer_2_counts_a_term_once_per_run() {
+        let (tfs, len) = term_freqs(
+            Tokenizer::V2,
+            "mnemo.nosync key-file open_shared Mnemo::open iCloud's",
+        );
+        let tf = |t: &str| tfs.iter().find(|(x, _)| x == t).map(|(_, n)| *n);
+        for (term, n) in &tfs {
+            let want = if term == "mnemo" || term == "open" {
+                2
+            } else {
+                1
+            };
+            assert_eq!(*n, want, "{term}: {tfs:?}");
+        }
+        for t in [
+            "mnemo.nosync",
+            "nosync",
+            "key-file",
+            "key",
+            "file",
+            "open_shared",
+            "shared",
+            "mnemo::open",
+            "icloud's",
+            "icloud",
+        ] {
+            assert_eq!(tf(t), Some(1), "{t}: {tfs:?}");
+        }
+        assert_eq!(tf("mnemo"), Some(2));
+        assert_eq!(tf("open"), Some(2));
+        // The length counts the distinct terms of each run.
+        assert_eq!(
+            len as usize,
+            tfs.iter().map(|(_, n)| *n as usize).sum::<usize>()
+        );
+        // Tokenizer 1 is unchanged: the dotted name twice, as in v0.14.0.
+        let (v1, _) = term_freqs(Tokenizer::V1, "mnemo.nosync");
+        assert_eq!(v1, vec![("mnemo.nosync".to_string(), 2)]);
     }
 
     #[test]
