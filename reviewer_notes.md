@@ -151,15 +151,18 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-006.10` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code; the lines of `maintenance.rs` and `load.rs` that v0.14.0 step 1 changes) | `ACCEPTED` | In step 1's PR. Details in SECURITY.local.md |
 | `RB-006.11` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the lock layer; no code exists) | `ACCEPTED` | (a) and (b) before step 2; (c) now in the note, the choice at 12.3. Details in SECURITY.local.md |
 | `RB-006.12` | 2026-11-13 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (the 12.4 design of the daemon; no code exists) | `ACCEPTED` | Before step 9 (the daemon). Details in SECURITY.local.md |
-| `RB-007.1` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode (v0.14.0 step 2): cancelling one call cancels every later call on the handle, and the handle can't be given a new token | `ACCEPTED` | Step 2c: a per-call cancel token (`set_cancel`), the doc, a test |
-| `RB-007.2` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode: the secret a handle keeps goes stale after a rekey (its own, or another process's), and the handle then returns `WrongPassphrase` at the next compaction or the next WAL replay | `ACCEPTED` | Step 2c: `SharedMnemo::rekey` updates the kept secret, `db.rekey` refused in a closure; replay and heal with the held data key |
-| `RB-007.3` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | A compaction through a symlink to the brain replaces the link, and handles on the two paths carry on with two different files (compaction's old behaviour; shared mode makes two paths a supported setup) | `ACCEPTED` | Step 2c: compaction and `rekey --rotate` resolve the path and rename over the real file; a two-path test |
-| `RB-007.4` | 2026-11-13 | `PLAN-REFINEMENT` | `MEDIUM` | Until compaction and the plain opens go through the lock layer, one busy shared reader keeps them out, and nothing writes `lock-info` (for step 4) | `ACCEPTED` | Step 4: compaction, `rekey --rotate`, `import` and CLI writes through the lock layer, with `announce`; a CHANGELOG line in 2c |
-| `RB-007.5` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a write window whose closure commits part-way can return a plain error with part of it stored | `ACCEPTED` | Step 2c: `MaybeStored` when an earlier commit in the window succeeded; the doc; step 4 one engine call per window |
-| `RB-007.6` | 2026-11-13 | `PERF` | `LOW` | Shared mode: every write window commits a lease, also when the closure writes nothing or is refused, and every other handle then reloads (not timed) | `ACCEPTED` | Step 2c: the lease taken by the first page sealed, not per window; `set_embedder` a read when unchanged; a no-op window in step 5 |
-| `RB-007.7` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a sidecar directory deleted under a live handle isn't recreated, and the handle stops using the intent lock without saying so | `ACCEPTED` | Step 2c: reopen the sidecar by path once per call, with the checks; a notice; a test |
-| `RB-007.8` | 2026-11-13 | `DX/DOCS` | `LOW` | Shared mode, smaller points: a deadline that overflows the clock panics, two deadlines in one call, a reader sleeping with the intent lock, an embedder set inside a closure, a read-only file, a panic in a read window, public test hooks, leftover compaction temp files, notices nobody prints, dropped statistics | `ACCEPTED` | Step 2c: items 1 to 7 and 10; items 8 and 9 in step 4 |
-| `RB-007.9` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code, every version; `store/load.rs`) | `ACCEPTED` | Held in SECURITY.local.md. Step 2c |
+| `RB-007.1` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode (v0.14.0 step 2): cancelling one call cancels every later call on the handle, and the handle can't be given a new token | `VERIFIED` | Step 2c: a per-call cancel token (`set_cancel`), the doc, a test; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.2` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode: the secret a handle keeps goes stale after a rekey (its own, or another process's), and the handle then returns `WrongPassphrase` at the next compaction or the next WAL replay | `VERIFIED` | Step 2c: `SharedMnemo::rekey` updates the kept secret, `db.rekey` refused in a closure; replay and heal with the held data key; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.3` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | A compaction through a symlink to the brain replaces the link, and handles on the two paths carry on with two different files (compaction's old behaviour; shared mode makes two paths a supported setup) | `VERIFIED` | Step 2c: compaction and `rekey --rotate` resolve the path and rename over the real file; a two-path test; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.4` | 2026-11-13 | `PLAN-REFINEMENT` | `MEDIUM` | Until compaction and the plain opens go through the lock layer, one busy shared reader keeps them out, and nothing writes `lock-info` (for step 4) | `VERIFIED` | Step 4: compaction, `rekey --rotate`, `import` and CLI writes through the lock layer, with `announce`; a CHANGELOG line in 2c; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.5` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a write window whose closure commits part-way can return a plain error with part of it stored | `VERIFIED` | Step 2c: `MaybeStored` when an earlier commit in the window succeeded; the doc; step 4 one engine call per window; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.6` | 2026-11-13 | `PERF` | `LOW` | Shared mode: every write window commits a lease, also when the closure writes nothing or is refused, and every other handle then reloads (not timed) | `VERIFIED` | Step 2c: the lease taken by the first page sealed, not per window; `set_embedder` a read when unchanged; a no-op window in step 5; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.7` | 2026-11-13 | `CORRECTNESS` | `LOW` | Shared mode: a sidecar directory deleted under a live handle isn't recreated, and the handle stops using the intent lock without saying so | `VERIFIED` | Step 2c: reopen the sidecar by path once per call, with the checks; a notice; a test; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.8` | 2026-11-13 | `DX/DOCS` | `LOW` | Shared mode, smaller points: a deadline that overflows the clock panics, two deadlines in one call, a reader sleeping with the intent lock, an embedder set inside a closure, a read-only file, a panic in a read window, public test hooks, leftover compaction temp files, notices nobody prints, dropped statistics | `VERIFIED` | Step 2c: items 1 to 7 and 10; items 8 and 9 in step 4; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-007.9` | 2026-11-13 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` until the fix ships (shipped code, every version; `store/load.rs`) | `VERIFIED` | Held in SECURITY.local.md. Step 2c; verified in RB-008 at `a3c0aae` (release-0.14.0, before the tag) |
+| `RB-008.1` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode at READY: readers first can lock a writer out (16 reader processes on cheap reads: 6 of 7 writes `Locked` at 10 s), and seven places in the release say it can't | `ACCEPTED` | v0.14.0 before the tag (rel0140-rb008): the seven places and the hook advice corrected; LOCK-2 (before step 8) gets the 8- and 16-reader cheap-read cells, "no `Locked`" as its target, and rec. 4 as its first design to try |
+| `RB-008.2` | 2026-11-13 | `CORRECTNESS` | `LOW` | A brain moved or deleted under a live plain handle now fails every commit; the message says "replaced… Reopen it", and the CHANGELOG describes only a file moved over the path | `ACCEPTED` | v0.14.0 before the tag (rel0140-rb008): a "moved or removed" message, `stat` against `fstat` on Unix, a plain handle that cannot check the path commits as in v0.13.2, and a CHANGELOG line |
+| `RB-008.3` | 2026-11-13 | `DX/DOCS` | `LOW` | Smaller points at READY: `peek_dimensions` missing from the CHANGELOG, Python can't catch `Replaced`, the MCP server never gets a finished commit, `cache_stats` after a reload, a plain long operation with no sidecar yet, the note's stale status line | `ACCEPTED` | Items 1, 2, 4 (doc line) and 6 before the tag (rel0140-rb008); item 3 DEFERRED to step 6; item 4 carry-over to step 6; item 5 DEFERRED to LOCK-2 |
 
 ---
 
@@ -2200,7 +2203,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 **New items**
 
 #### RB-007.1 — [CORRECTNESS] [MEDIUM] Cancelling one call cancels every later call on the handle, and the handle can't be given a new token
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t1).
   - A handle opened with `SharedOptions::cancel`, on a file nothing else has open. Before the cancel a read returns `Ok`. After `token.cancel()`: three reads and a write each return `Cancelled` within a few microseconds. A second handle with no token reads normally.
   - `acquire` starts every call with `call.check()` (`shared/lock.rs:142`), and a token stays cancelled (`shared/call.rs:14-15`: "make a new one for the next call"). But the token lives in the options the handle was opened with (`store/shared.rs:230`), and `options()` only reads them (`:305-307`).
@@ -2213,7 +2216,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c, before step 3**: recommendations 1 (`SharedMnemo::set_cancel(Option<CancelToken>)`; per-call options can come with step 4 if a surface needs them), 2 (the doc says a cancel reaches only a call waiting for a lock) and 3 (the test). Step 3 adds case 6 of the list below.
 
 #### RB-007.2 — [CORRECTNESS] [MEDIUM] The secret a handle keeps goes stale after a rekey, and the handle then fails at the moments it has to use it
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t3, t3b).
   - **A rekey inside the handle's own write window** (`brain.write(|db| db.rekey(new, ..))`) returns `Ok`, and the file opens with the new secret only. The handle carries on reading and writing, because it holds the data key. After any compaction with the new secret, that same handle's next call returns `WrongPassphrase`: it still keeps the old secret (`store/shared.rs:232`; nothing updates it). A new handle with the new secret opens.
   - **A rekey by another process** (no compaction): the old-secret handle keeps working, as the note says. Then a writer dies after its commit point and leaves a WAL to replay. The old-secret handle's next read and write both return `WrongPassphrase`. Once any new-secret open has healed the file, the same handle reads again.
@@ -2229,7 +2232,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**, all three: `SharedMnemo::rekey` and `rekey_with_key` run in a write window and replace the kept secret only on success; `db.rekey` inside a closure is refused like a setting; a pending WAL is replayed, and a torn page 0 healed, with the held data key when the result verifies under it, the kept secret only when it doesn't. Step 3 adds case 3.
 
 #### RB-007.3 — [CORRECTNESS] [MEDIUM] A compaction through a symlink to the brain replaces the link, and the two paths become two brains
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t5). A brain at `real/b.mnemo`, a symlink `link.mnemo` to it, one shared handle through each.
   - Before: a write through the link's handle is seen by the real path's handle (3 memories).
   - `Mnemo::compact_file(link)` returns `Ok`. `link.mnemo` is now a regular file: the rename replaced the link, not its target (`store/maintenance.rs`, `compact_into`: `rename(tmp, path)` with the path as given).
@@ -2243,7 +2246,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: `compact_file` and `rekey --rotate` resolve the path first, build the temp file beside the real file, and rename over it; the two-path test. Step 3 adds case 4.
 
 #### RB-007.4 — [PLAN-REFINEMENT] [MEDIUM] Until compaction and the plain opens go through the lock layer, one busy shared reader keeps them out, and nothing writes `lock-info`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t8): a 2,000-memory brain, shared handles in threads recalling in a tight loop, and the main thread trying each call with a few milliseconds between tries.
 
 | Shared readers | `Mnemo::open`, 200 tries | `Mnemo::compact_file`, 30 tries | A shared writer, 30 writes |
@@ -2261,7 +2264,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 4**: `compact`, `rekey --rotate`, `import` and the CLI's writes take the lock through `BrainLocks::acquire`, with `announce` for the long ones; step 4's DONE lists every caller that still opens plainly. **In step 2c:** a CHANGELOG line that plain opens don't wait.
 
 #### RB-007.5 — [CORRECTNESS] [LOW] A write window whose closure commits part-way can return a plain error with part of it stored
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (`tests/inner.rs`): `write(|db| { remember(first); flush(); remember(second) })`, with each write failed in turn.
 
 | Failing write | The call returns | The file then has |
@@ -2284,7 +2287,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: recommendations 1 (a flag set by each successful flush in the window; a later failure, or a refused setting after it, returns `MaybeStored` saying part of the window is in the file; this replaces my earlier flush-then-setting doc note) and 2 (the doc). Recommendation 3 goes into step 4's spec. Step 3 adds case 7.
 
 #### RB-007.6 — [PERF] [LOW] Every write window commits a lease, also when the closure writes nothing or is refused, and every other handle then reloads
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t4), with a second handle watching.
 
 | The window | Transaction id | Page 0's seal | The other handle |
@@ -2306,7 +2309,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: recommendation 1 (reset `gen_leased` per window, drop the explicit lease; the Worker lists every place that seals a page and confirms each takes the lease first, with a debug assertion in the seal path; the generation test stays, plus a test that a no-op window leaves the transaction id unchanged) and 2. Recommendation 3 in step 5. This keeps RB-006.11 (a): every page a window seals still carries a fresh generation.
 
 #### RB-007.7 — [CORRECTNESS] [LOW] A sidecar directory deleted under a live handle isn't recreated, and the handle stops using the intent lock without saying so
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** tested at `19edf8b` (t6).
   - Baseline: with `intent.lock` held by another descriptor, the handle's write waits and fails with `Locked`, as it should.
   - The sidecar directory is removed (`git clean -fdx` does this; the `.gitignore` pattern makes the directory an ignored file). The old handle's next write returns `Ok`. The directory isn't back, and `notices()` is empty.
@@ -2318,7 +2321,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**: reopen the sidecar by path, with the same checks, once per call when a lock file can't be opened; a notice if it still can't be used; the test. Step 7 reuses it for presence. Step 3 adds case 5.
 
 #### RB-007.8 — [DX/DOCS] [LOW] Smaller points in steps 2a and 2b
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence and recommendation, one item each:**
   1. **A deadline too large for the clock panics.** `Duration::MAX` as `SharedOptions::deadline` panics inside `open_shared` with "overflow when adding duration to instant" (t2; `shared/call.rs:67`). A hundred years works. Use `checked_add` and clamp.
   2. **One call can wait two deadlines** (by reading). When a read's catch-up finds a WAL to replay or a torn page 0, `window` calls `acquire` again for the exclusive lock (`store/shared.rs:340-348`), and each `acquire` starts a new `Call` (`shared/lock.rs:139`). Create the `Call` in `window` and pass it down.
@@ -2334,7 +2337,7 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). **Step 2c:** items 1 (`checked_add`, clamp), 2 (one `Call` per window), 3 (drop the intent lock before that wait), 4 (take `db.embedder` after every window), 5 (a write on a read-only file and a pending WAL on one give a clear error, `NeedsWriteOpen` where the note says so, not a bare `Io`), 6 (clear the stamp on any caught panic), 7 (the three hooks behind `cfg(any(test, feature = "failpoints"))`) and 10 (a doc line). **Step 4:** item 8 (under the exclusive lock, remove compaction temp siblings whose pid no longer runs) and item 9 (each surface prints `notices()` once).
 
 #### RB-007.9 — [SECURITY] [LOW] Held in `SECURITY.local.md`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
 - **Context / Evidence:** one finding about shipped code (every version), next to what RB-006.11 (b) fixed. Tested at `19edf8b`. The same file has my check of RB-006.11 (a) and (b) on the branch.
 - **Would I hold step 3 for it?** No.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Details and triage in `SECURITY.local.md`. Step 2c.
@@ -2355,3 +2358,170 @@ Shipped in v0.13.1, so marked now. The published `mnemo-engine 0.13.1` crate (35
 10. **The replaced-file backoff** (PLANNER-A's question): it needs a path that fails the identity check twice in one call. A test can do it with a thread that renames a new file over the path in a loop while a handle calls; assert the calls end by the deadline and the CPU isn't spun (count the tries through a hook). I'd add it: item 3 of `RB-007.8` is in the same lines.
 11. **The 0.13.2 compactor** against shared writers, from the note's step 3 list.
 12. **Mixed plain and shared handles** in one process and across processes: a plain writer that dies after its commit point is covered; add a plain long-lived handle that makes shared callers wait their deadline and return `Locked`.
+
+---
+
+### Batch `RB-008` — 2026-11-13 (REVIEWER-B: the v0.14.0 release review at READY: everything since RB-007, the three questions in PLANNER-A's entry, the RB-007 items checked, and three new items)
+
+**What was reviewed.** `release-0.14.0` at `a3c0aae` (last code commit `5c9e4d1`), against v0.13.2, on PLANNER-A's 2026-11-13 entry "v0.14.0 READY accepted; REVIEWER-B's release review (RB-008) is called". RB-007 covered steps 2a and 2b at `19edf8b`; this pass covers the 23 commits since: step 2c, step 3's cross-process suite and the old-compactor job, steps 4a and 4b, REKEY-2, step 5's readers first, the READY fixes, the Python binding's shared mode and the `ci.yml` changes. It's the scheduled review at a minor release's READY (`Reviewer` rule 4).
+
+**How.**
+- **My own clone,** `/tmp/rb-mnemo`, fetched and checked out at `origin/release-0.14.0` (`a3c0aae`, the same commit GitHub has). Nothing was built, fetched or checked out in `mnemo.nosync`. Builds used `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked` and `--offline`.
+- **Baseline at `a3c0aae`, green:** `cargo test --locked --features failpoints --no-fail-fast`: **471 passed, 0 failed**, which is the Worker's count.
+- **My RB-007 scratch tests again,** unchanged, against the new head (`/tmp/rb-scratch/rb7`), then new ones for this pass (`tests/rb8.rs`), a writer-against-readers timing (`starve.py`), and the cross-process kill test from RB-007.
+- **By reading:** `shared/lock.rs`, `shared/call.rs`, `store/shared.rs`, the diffs to `open.rs`, `load.rs`, `maintenance.rs`, `crud.rs`, `flush.rs`, `records.rs`, `error.rs` and `mcp.rs`, the CLI's openers, the Python binding's window helpers and error mapping, `ci.yml`, `docs/shared-mode.md`, the 12.4 note's changed sections and the CHANGELOG's `[Unreleased]`.
+- **Timed, briefly:** the writer-against-readers runs (about four minutes in all). The Worker has no PR open.
+- **Not done:** nothing ran on Linux or Windows. The Python binding was read, not built or run. The CLI and `serve --mcp --shared` were read, not driven; their tests (`cli_shared.rs`, the MCP cases) pass in my baseline. I didn't run `shared_bench` or repeat step 5's cells. The UniFFI, Swift and Kotlin suites were not run.
+- **Machine:** Apple M1 Pro (10 cores), macOS 26.7.1, Rust 1.95.0.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **Security:** no new security finding. `SECURITY.local.md` has my check of RB-007.9 and one line for the release text.
+
+---
+
+**The verdict first.**
+
+- **I'd hold the tag for one thing, and it's wording:** the docs say busy readers can slow a writer but can't lock it out. They can (`RB-008.1`). No code has to change before the tag.
+- **The engine side holds.** No lost write, no doubled write and no unexpected error in three more kill runs with compactions, and every RB-007 item is fixed as triaged.
+- **The three questions, in short:**
+  1. **Readers first can lock a writer out, for as long as the readers keep looping.** Sixteen reader processes on cheap reads: 6 of 7 writes failed with `Locked` at the full 10 s. With heavier reads the same writer is slowed, not stopped. Nothing but LOCK-2 is needed in code; the docs need correcting before the tag.
+  2. **No path I could find reaches a lost or doubled write** that isn't reported as what it is.
+  3. **One plain-caller change isn't in the CHANGELOG:** a brain moved or deleted under a live plain handle now fails every commit (`RB-008.2`).
+
+---
+
+**Question 1: can readers first starve a writer forever, or only slow it?**
+
+One shared writer against reader processes reading back to back with no pause (`starve.py`; a 2,000-memory brain; each write is one `remember` in a write window; "wait" is the whole call, lock wait plus commit). "Cheap" is `read(|db| Ok(db.len()))`; "recall" is a top-5 recall.
+
+| Readers | Read | Deadline | Writes in | `Locked` | The call: median, p90, max | Over 2 s |
+|---|---|---|---|---|---|---|
+| 0 | | 10 s | 12 of 12 | 0 | 27 ms, 29 ms, 30 ms | 0 |
+| 1 | cheap | 10 s | 12 of 12 | 0 | 53 ms, 90 ms, 130 ms | 0 |
+| 2 | cheap | 10 s | 12 of 12 | 0 | 107 ms, 301 ms, 490 ms | 0 |
+| 4 | cheap | 10 s | 12 of 12 | 0 | 133 ms, 322 ms, 385 ms | 0 |
+| 8 | cheap | 10 s | 12 of 12 | 0 | 3.2 s, 6.3 s, 6.9 s | 7 |
+| **16** | **cheap** | **10 s** | **1 of 7** | **6** | 1.4 s (the one that got in) | |
+| 4 | recall | 10 s | 12 of 12 | 0 | 189 ms, 336 ms, 459 ms | 0 |
+| 8 | recall | 10 s | 12 of 12 | 0 | 380 ms, 549 ms, 1.07 s | 0 |
+| 16 | recall | 10 s | 12 of 12 | 0 | 1.8 s, 5.5 s, 7.3 s | 5 |
+| 4 | cheap | 2 s | 12 of 12 | 0 | 364 ms, 987 ms, 1.08 s | |
+| 8 | cheap | 2 s | 9 of 12 | 3 | 884 ms, 1.9 s, 1.9 s | |
+| 8 | recall | 2 s | 12 of 12 | 0 | 163 ms, 357 ms, 626 ms | |
+
+Sixteen spinning processes are more than this machine's ten cores, so read the rows as shape, not as numbers.
+
+- **Why, by reading** (`shared/lock.rs:174-233`). A writer must take the intent lock exclusively, which needs an instant when no reader holds it shared. Every reader holds it shared in every call, from its try of the intent lock until it has the main lock (`:178-196`). A writer can't show that it's waiting until it holds that lock, so nothing makes a reader stand back. The cheaper the read, the larger the share of each call spent holding the intent lock, and the fewer the gaps.
+- **Forever or only slow?** Each try is independent, so there's no bound. While enough readers keep looping, each write call has the same small chance, and most fail. It ends when the readers pause.
+- **How likely.** Not with agents: they read on demand and write a few times a minute. It takes a loop that reads with no pause from many processes at once. The Worker's cells used recall-sized reads and seven readers, which is why they showed a slow writer and not a locked-out one.
+- **Before the tag:** correct the wording (`RB-008.1`). **Before step 8:** LOCK-2, as planned, with cheap-read cells at 8 and 16 readers in its bench.
+
+---
+
+**Question 2: does any path reach a lost or doubled write?**
+
+| Path | What I checked | Result |
+|---|---|---|
+| Kills at random | The RB-007 kill test again on `a3c0aae`: three writers, two readers and a compactor as processes, one killed with `SIGKILL` every 50 to 400 ms | Three runs (60 s, 60 s, and 45 s without the compactor): 683 kills, 463 compactions, 2,326 writes acknowledged. None missing, none stored twice, 14 in the file but never acknowledged (a writer killed between its commit and its log line), no unexpected error, no reader's count going backwards, `verify` clean each time. macOS only |
+| `MaybeStored` | Every write of a commit failed in turn, and two and three in a row (60 cases): no plain error with the write stored, no `Ok` without it, and the failing handle and a second handle always equal a fresh open. A closure that commits part-way: the three cases that returned a plain error in RB-007 now return `MaybeStored` | Reported as what it is. A caller that retries after `MaybeStored` without checking can store twice; that's the error's meaning, and the docs say "check before retrying" |
+| `ReplacedDuringWrite` | Read (`store/shared.rs:659-665`); the Worker's hook test and the old-compactor job (318 writes acknowledged, none lost) | The write went to the replaced file and isn't in the file at the path, so a retry doesn't double it |
+| `Replaced { shared: true }` | Read (`:622`, `:649`, `:740-745`). The identity check runs at the start of `flush`, before the commit's first write to the live file. With the lease now taken by the first page sealed, a `remember` in the closure can commit a lease to the file before that check; if the file was replaced, the lease lands in the dead file | Nothing is written to the file at the path. Safe to call again, as the message says |
+| A cancel mid-window | A writer cancelled while it waited behind a reader returned `Cancelled` after 160 ms and stored nothing; another writer got in as soon as the reader finished, so the cancelled call left no lock. `set_cancel(None)` then makes the handle usable again | A cancel is only checked while waiting for a lock (`shared/call.rs:119-124`, `:134-162`), never between a window's writes |
+| A panic in a window | A write closure that commits and then panics: the panic reaches the caller, the lock is released, the committed part is in the file, and the handle's next read reloads and shows it | A caller that catches the panic and retries can double the committed part. That's a bug in the closure, and a panic tells it nothing was promised |
+
+---
+
+**Question 3: does any plain caller behave differently from v0.13.2 in a way the CHANGELOG doesn't say?**
+
+One does (`RB-008.2`). The rest of what I compared is stated:
+
+| Plain caller | Changed? | In the CHANGELOG |
+|---|---|---|
+| `Mnemo::open`, `open_read_only`, `create` while another handle holds the file | No: `Locked` at once (95 µs in my run), now with `holder: None` | Yes ("Plain opens still don't wait"; the `holder` field) |
+| `compact_file` while a plain handle holds the file | Yes: waits its deadline (700 ms asked, 704 ms taken), then `Locked`; no sidecar is made | Yes |
+| `compact_file` through a symlink | Yes: the link stays a link | Yes |
+| `compact_file` and temp files | Yes: a dead compaction's temp is removed. Look-alike names, this process's own temp and a symlink under a temp's name were all left alone in my test | Yes |
+| New files' mode | Yes: 0600; a 0644 brain stays 0644 through a compaction | Yes |
+| The CLI | Yes: every command waits up to `--wait` (10 s) where it failed at once; `--wait 0` is one try (by reading `parse_wait`). The two open helpers map one to one onto the waiting opens (read-only stays read-only, read-write stays read-write; by reading) | Yes |
+| `serve --mcp` without `--shared` | No (by reading: `ServerDb::Plain` runs the same `tools_call`) | Yes |
+| A failed rekey's message | Yes (REKEY-2) | Yes |
+| Errors as types | `MnemoError` and `Locked` are `#[non_exhaustive]`; five new variants | Yes |
+| **A brain moved or deleted under a live handle** | **Yes: every later commit returns `Replaced`** | **Only "replaced at its path (another program moved a file over it, say)"** |
+| Public functions | None removed (compared by name across `mnemo/src`), and I saw no changed signature in `mcp.rs`, `open.rs`, `maintenance.rs` or `pager.rs` | Of the new ones, only `Mnemo::peek_dimensions` is missing (`RB-008.3` item 1) |
+
+---
+
+**The RB-007 items, checked at `a3c0aae`.** All nine are in as triaged. I've marked them `VERIFIED (a3c0aae)` in the ledger and on each item, as the entry asks; the release isn't tagged yet, so that's "confirmed on the release branch".
+
+| Item | What I saw |
+|---|---|
+| RB-007.1 | `SharedMnemo::set_cancel` (`store/shared.rs:379-381`). After a cancel a read returns `Cancelled`; after `set_cancel(None)` a read and a write succeed. The doc says a cancel reaches only a waiting call |
+| RB-007.2 | `db.rekey` in a closure returns `Unsupported` and changes nothing. `SharedMnemo::rekey` followed by a compaction with the new secret: the handle that rekeyed reads and writes. After another process's rekey, a WAL left by a writer that died is replayed with the held data key (read `Ok`, write `Ok`, where RB-007 got `WrongPassphrase`) |
+| RB-007.3 | A compaction through the link leaves it a link; handles on both paths see the same 4 memories; one sidecar, beside the real file |
+| RB-007.4 | `compact_file`: 30 of 30 got in against 1, 4 and 8 busy shared readers (0 of 30 before). `open_exclusive("import")` is named to a caller that times out ("held by import since 03:34:38 UTC (pid …)"), and the note is gone when it closes. The CHANGELOG says plain opens don't wait, and they don't (0 of 200 against 4 readers) |
+| RB-007.5 | The closure that commits part-way: failing writes 11 to 13 now return `MaybeStored` (a plain error before). The doc sentence is corrected |
+| RB-007.6 | A window that writes nothing, and one whose closure is refused: transaction id unchanged, seal unchanged, the other handle doesn't reload. One `remember` still moves the id by two. The debug assertions are in `write_gen` and `seal_run_at` |
+| RB-007.7 | The deleted sidecar is made again at the old handle's next call, and that handle then waits on the new intent lock |
+| RB-007.8 | Items 1 (a `Duration::MAX` deadline opens), 2 (one `Call` per window, by reading), 3 (the intent lock dropped before that wait, by reading), 4 (an embedder set in a closure survives a reload), 5 (a pending WAL on a read-only file gives `NeedsWriteOpen`; a write gives a `PermissionDenied` that says why), 6 (the stamp cleared on a caught panic, by reading), 7 (the three hooks are failpoints-only), 8 (a dead compaction's temp is removed; the kill runs left none behind, against 20 and 18 in RB-007), 9 (the MCP server prints notices; Python raises them as warnings, by reading) and 10 (the doc line) |
+| RB-007.9 | In `SECURITY.local.md` |
+
+**Also seen, no item:**
+- Step 3's suite covers the twelve cases from RB-007's list (`tests/cross_process.rs`, 15 tests).
+- Against busy readers a shared writer's slowest write in my RB-007 test went from 62 to 69 ms to 203 to 349 ms. That's readers first, as decided.
+- `serve --mcp --shared` embeds a tool's text before it takes the lock (`mcp.rs`, `pre_embed`), and none of the ten read tools commits (by reading).
+
+---
+
+**New items**
+
+#### RB-008.1 — [CORRECTNESS] [MEDIUM] Readers first can lock a writer out, and seven places in the release say it can't
+- **Status:** `OPEN`
+- **Context / Evidence:** the table under Question 1, at `a3c0aae`. The places:
+  - `docs/shared-mode.md:52-53`: "busy readers slow a writer down but don't lock it out";
+  - `docs/shared-mode.md:100-102`: "It still commits within the 10 s default deadline";
+  - `CHANGELOG.md:19` (step 2a's line, in the same `[Unreleased]`): "so busy readers can't starve a writer";
+  - `CHANGELOG.md:163-165`: "but still commits within its deadline";
+  - `docs/design/12.4-shared-access.md:245` and `:270-271`: "still commits well within its deadline", "It still commits within the 10 s deadline";
+  - `mnemo/src/shared/lock.rs:158`: "A writer still gets in".
+  - The hook advice (`--wait 2s`) is given for every hook. A hook that writes had 3 of 12 writes fail at 2 s against eight cheap readers.
+- **Finding:** the measured claim is true of the mixes that were measured (seven readers, recall-sized reads). As a general statement it's wrong, and it's the sentence a user will rely on when a save fails. The limit should be stated as one: enough processes reading with no pause can keep every write waiting until its deadline.
+- **Recommendation:**
+  1. Before the tag, change those lines to say what was measured and where it stops: a writer is slowed by back-to-back readers, and with many of them on cheap reads it can wait out its deadline and get `Locked` (16 reader processes: 6 of 7 writes at 10 s). Drop step 2a's "can't starve a writer" line or mark it superseded by step 5.
+  2. Say in the hook advice that `--wait 2s` is for a hook that reads; a hook that saves should keep the default.
+  3. LOCK-2's bench gets cheap-read cells with 8 and 16 readers, and its target is "no `Locked`" there.
+  4. A shape for LOCK-2 to consider, on paper first: a writer that has waited about 2 s takes a second lock file exclusively, and every reader tries that file shared, without waiting, before the intent lock, and backs off while it's held. That's step 2a's writer preference on a second file, switched on only after the wait, so readers keep their place until then. It differs from the newcomer rule the Worker tried: only writers ever hold the file, so readers can't hold each other back with it.
+- **Would I hold the tag for it?** For recommendation 1 and 2, yes: they're a few sentences, and they're in what ships. Not for code.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13). Recs 1 and 2 go in before the tag, in `rel0140-rb008`, with `docs/shared-mode.md:32`'s "writes with writer preference" too, and with `test/scripts/project_memory.py`'s shared writes moved from `wait=2.0` to the default. Recs 3 and 4 go to LOCK-2 (before step 8, and before shared mode becomes the default for `serve --mcp`): the cheap-read cells at 8 and 16 readers, "no `Locked`" as the target, and the second-lock-file shape as the first design to try on paper. No code change to the lock before the tag: a locked-out write fails loudly as `Locked` and loses nothing, and the load that causes it isn't an agent's.
+
+#### RB-008.2 — [CORRECTNESS] [LOW] A brain moved or deleted under a live plain handle now fails every commit; the message says "replaced… Reopen it", and the CHANGELOG describes only a file moved over the path
+- **Status:** `OPEN`
+- **Context / Evidence:** tested at `a3c0aae` (`rb7/tests/rb8.rs`): a plain `Mnemo::open` handle, one committed write, then the file is changed under it, then one more write.
+
+| What happened to the file | `flush` | `close` | Where the write went |
+|---|---|---|---|
+| renamed to another name in the same directory | `Replaced` | `Replaced` | nowhere: the moved file has 3 memories, not 4 |
+| removed | `Replaced` | `Replaced` | nowhere |
+| replaced by a copy of itself | `Replaced` | `Replaced` | nowhere (the intended case) |
+
+  - The message in all three: "the file at … was replaced after this handle opened it (by a compaction, or by another program); nothing was written. Reopen it". For a file that was renamed away, nothing replaced it, and reopening the path finds no file.
+  - In v0.13.2 a commit wrote through the open descriptor, so a brain renamed under a running server kept receiving its writes (by reading v0.13.2's `flush`, which has no such check).
+  - `close` on such a handle returns the error and drops the handle, so its unflushed writes go with it; `try_close` gives it back.
+  - The check itself (`is_file_at`, `store/load.rs`) duplicates the descriptor and opens the path, on every commit. By reading: a process at its descriptor limit, or one that kept a descriptor after losing access to the path (a sandboxed app once its access to a user-chosen file ends), can no longer commit.
+- **Finding:** refusing to write to a file that's no longer at the path is the right call for shared mode, and for a deleted file it's better than v0.13.2, which wrote to a file nobody could reach. But for a plain handle whose brain was simply moved, it's a behaviour change that the CHANGELOG doesn't name: the entry says "replaced at its path (another program moved a file over it, say)". A user who tidies a folder while a session runs loses that session's later saves, with a message that points at the wrong cause.
+- **Recommendation:**
+  1. Tell the two cases apart: when nothing is at the path, say the file was moved or removed, and that the handle's path no longer names it.
+  2. A CHANGELOG line under Changed: a handle no longer follows a brain that is moved, and a moved or deleted brain fails the handle's later commits.
+  3. On Unix, compare `fstat` on the descriptor with `stat` on the path, which needs no new descriptor.
+- **Would I hold the tag for it?** No. Recommendation 2 is one line and could go in with `RB-008.1`'s wording.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), before the tag in `rel0140-rb008`. (1) When nothing is at the path, the message says the file was moved or removed and that the handle's path no longer names it (both modes). (2) A CHANGELOG line under Changed. (3) On Unix, compare `fstat` of the descriptor with `stat` of the path (no new descriptor); Windows keeps `same_file`. (4) A plain handle whose path check fails with anything other than not-found (permission, descriptor limit) commits as v0.13.2 did, because it holds the lock for its whole life and nothing it can't see can compact over it; a shared handle still returns the error. A plain handle on a moved or removed file keeps refusing: `try_close` hands the handle back, and the message now names the cause.
+
+#### RB-008.3 — [DX/DOCS] [LOW] Smaller points at READY
+- **Status:** `OPEN`
+- **Context / Evidence and recommendation, one item each:**
+  1. **`Mnemo::peek_dimensions` is new and public and isn't in the CHANGELOG** (`store/open.rs`; it reads the width from the header with no key and no lock). Add it under Added.
+  2. **Python can't catch `Replaced`.** Both kinds raise the base `MnemoError` (`mnemo-python/src/lib.rs:198-222`). The shared one is the only error whose advice is "call again", and Python code can tell it apart only by its text. Give it a class.
+  3. **In `serve --mcp --shared`, a failure after the commit point is never finished by the handle** (by reading). Each mutating tool flushes for itself, so the failure comes back from the closure, and a closure's error with a commit point set returns `MaybeStored` and leaves the WAL for the next call (`store/shared.rs:628-631`). Only the window's own commit is finished and returned as `Ok` (`:649-656`). So the property "the handle finishes the commit itself" never applies to the MCP server. Either drop the tools' own flushes in shared mode (the window commits), or finish the commit for a closure's error too.
+  4. **`cache_stats` in shared mode counts since the last reload** (by reading): the hit and miss counters are per handle and start again whenever another process's commit makes the handle rebuild. Carry them over in `install`, or say so.
+  5. **A long plain operation that starts waiting before any shared handle exists has no intent lock** (by reading; `shared/lock.rs:116-130`, `for_plain`). It looks for the sidecar once. If shared readers start while it waits, it polls the main lock alone, and busy readers can keep it out until its deadline. Look for the sidecar again on each wait, or accept it.
+  6. **The 12.4 note's first status bullet** still says no 12.4 code exists, as the Worker's step 5 DONE noted.
+- **Would I hold the tag for it?** No. Items 1 and 6 are edits to make with the release text.
+- **Planner Triage:** `ACCEPTED` in part (PLANNER-A, 2026-11-13). Before the tag, in `rel0140-rb008`: item 1 (the CHANGELOG line); item 2 (a Python `ReplacedError`, a subclass of `MnemoError`, for both kinds, with a `shared` attribute, in the binding's README and `docs/shared-mode.md`'s table); item 4 as a doc line ("counts since the handle's last reload"); item 6 (the note's status line). Item 3 `DEFERRED` to step 6 (incremental catch-up reworks the window's commit; today a failure after the commit point is reported as `MaybeStored`, which is true). Item 4's carry-over in `install` goes to step 6 too. Item 5 `DEFERRED` to LOCK-2, which reworks how a waiting writer is seen.

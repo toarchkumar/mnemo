@@ -24292,3 +24292,564 @@ green push on `release-0.14.0`, the sync, and READY.
 goes through the PR's CI first), merge, every job green on the branch's
 push, the coordination sync, and READY. Neither is a fix round (the hop cap
 counts review rounds).
+
+### 2026-11-13 — WORKER — READY — v0.14.0: 12.4 shared mode steps 1 to 5 on `release-0.14.0` (every job green; no version bump, no tag)
+
+**Where it stands**
+- `release-0.14.0` head: `a3c0aae` (`chore(plan): sync coordination files`).
+  The last code commit is `5c9e4d1`.
+- PR 74 (`rel0140-ready-fixes`: `025f8d8` and `5c9e4d1`) was green in its
+  own CI (43538032763, 14/14). It was fast-forwarded onto the branch, and
+  the branch is deleted, both locally and remotely.
+- Push runs on `5c9e4d1`:
+  - CI 43539067113: success, 14/14;
+  - Mobile CI 43539066848: success, 6/6.
+  
+  Every job ran its steps, so none is "not run". The sync push (`a3c0aae`,
+  PLAN.md only) started no run, as expected.
+- The old-compactor job, on this push: 147 compactions (161 found the file
+  busy), 318 writes acknowledged, 0 reported as `ReplacedDuringWrite`, 0
+  refused as `Replaced` (nothing written).
+- Versions are unchanged, and there is no tag. That waits for REVIEWER-B's
+  release review, the triage, any fixes, and the release HANDOFF.
+
+**Both fixes from the DECISION above**
+1. `a_writer_gets_in_against_eight_busy_readers`:
+   - it asserts every write gets in with no `Locked`, and the worst wait
+     under 5 s;
+   - it prints the median and the worst under `--nocapture`;
+   - the 12.4 note's test line now says "under 5 s since step 5 … LOCK-2
+     restores a tight bound".
+2. `Replaced` in a shared window:
+   - It keeps its variant, with a new field, `Replaced { path, shared }`.
+     It is `#[non_exhaustive]`.
+   - Shared message: "… was replaced (by an older build's compaction, or
+     by another program) before this write; nothing was written, and the
+     next call follows the new file". It has no "Reopen it". The plain
+     message is unchanged.
+   - The stamp: confirmed already cleared. `run_write` clears it at its
+     start and sets it only after a successful commit, so the next call
+     reloads.
+   - `docs/shared-mode.md`'s error table has a row for
+     `Replaced { shared: true }` (Python: `MnemoError`).
+   - The cross-process writer child counts `Replaced` as refused, never
+     acknowledged, and the job prints both counts.
+   - New failpoint: `__failpoints::before_next_shared_commit`, in
+     failpoints builds only. The new test
+     `a_rename_before_the_commit_is_refused_and_the_next_call_follows`
+     fails with the mapping undone (checked).
+- **For your carried list:** add "restore this test's 1 s bound" to
+  LOCK-2's entry.
+
+**Test counts**
+- Local, macOS, `cargo test --features failpoints` at `5c9e4d1`: 471
+  passed, 0 failed.
+- `mnemo-uniffi`: 23 passed, 1 ignored (the fixture writer).
+- CI: PR 73 15/15, PR 74 14/14, and the push runs above.
+- Windows: step 5's bench cell 8 (3 writers, a compactor, an opener)
+  passed with the counts in step 5's DONE.
+
+**CHANGELOG `[Unreleased]`, in full**
+- **Added:**
+  - the lock layer for 12.4 (step 2a);
+  - `Mnemo::open_shared` and `open_shared_with_key` (step 2b);
+  - Python shared mode (`shared=True`, `wait=`, `allow_network_fs=`);
+  - `Mnemo::open_exclusive` and `_with_key`;
+  - `SharedMnemo::embedder_arc`;
+  - `docs/shared-mode.md`;
+  - the CLI's `--wait <duration>` on every command;
+  - `mnemo serve --mcp --shared` (with `--allow-network-fs`);
+  - `mnemo inspect` waits and explains a recovery it can't do;
+  - `Mnemo::open_read_only_waiting` and `_with_key`;
+  - plain opens still don't wait;
+  - Windows builds made with Rust before 1.85 refuse shared mode.
+- **Changed:**
+  - compaction waits for shared callers instead of failing at once;
+  - `MnemoError` and its `Locked` variant are `#[non_exhaustive]`;
+  - `Locked` gained a `holder` field, and there are new variants
+    (`Cancelled`, `Unsupported`, `MaybeStored`, `ReplacedDuringWrite`,
+    `NeedsWriteOpen`);
+  - new brain files are created 0600 on Unix;
+  - shared mode: readers waiting for a writer keep their place (step 5).
+- **Fixed:**
+  - a failed rekey reports its cleanup failure (RB-005.2);
+  - Python's `rekey_cleanup_error()` (RB-005.3);
+  - a compaction through a symlink replaces the target;
+  - a write racing a compaction is no longer lost;
+  - a handle refuses to write to a file replaced at its path (now with the
+    shared-window message);
+  - a refused `create` no longer empties the file;
+  - compaction's and the exports' temp files are always new files.
+
+**Plain callers left (they take the lock once, or don't use shared mode)**
+- `Mnemo::open`, `open_with_key`, `open_read_only`, `open_read_only_with_key`;
+- `create` and `create_with_key`, and the CLI's `init` and `demo`;
+- `serve --mcp` without `--shared`;
+- Python's plain handle (`shared=False`, the default);
+- UniFFI's `MnemoDb` (Swift and Kotlin);
+- `key_opens`;
+- `export_encrypted` and `export_rekeyed`.
+
+**Known open**
+- **LOCK-2:** the writer safety valve. It comes before shared mode becomes
+  the default for `serve --mcp`, and it restores this test's 1 s bound.
+- **PERF-2:** the compaction at 100K took about 175 s, holding the file
+  throughout.
+- **Measured limits, documented in "How busy a file can get":**
+  - eight writers: p99 about 2.5 s;
+  - a writer against back-to-back readers: under 1 commit a second, p99
+    2.9 s at 10K and 5.5 s at 100K.
+- **A refused write still reloads in full** on the next call. Step 6
+  (incremental catch-up) addresses that.
+- **The Swift and Kotlin bindings** report the new error variants as `Io`.
+  Shared mode for Swift and Kotlin comes later.
+- `test/project.mnemo` hasn't been updated with this release's facts.
+- **Held items:** as tracked in SECURITY.local.md.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — v0.14.0 READY accepted; REVIEWER-B's release review (RB-008) is called
+
+**READY checked:**
+- `release-0.14.0` head `a3c0aae`; the last code commit is `5c9e4d1`.
+- Push runs on `5c9e4d1`, job by job: CI 43539067113 14/14 success, and
+  Mobile CI 43539066848 6/6 success. No job is "not run".
+- `025f8d8` read: `Replaced { path, shared }` is `#[non_exhaustive]` and
+  new in this release (v0.13.2 has no `Replaced`), so the new field breaks
+  nothing published. `in_shared_window` maps both the closure's error and
+  the commit's flush error. The failpoint runs only in failpoints builds.
+  The docs table row and the CHANGELOG line are as asked.
+- The 5 s bound and the printed median and worst: as asked.
+- **ACCEPTED.** LOCK-2's carried entry now also restores this test's 1 s
+  bound.
+
+**REVIEWER-B: the v0.14.0 release review, batch `RB-008`** (scheduled at a
+minor's READY; AGENTS.md `Reviewer` rule 4):
+- **Target:** `release-0.14.0` at `a3c0aae`, against v0.13.2. RB-007
+  covered steps 2a and 2b at `19edf8b`. This pass covers everything since:
+  - step 2c (the RB-007 fixes);
+  - step 3 (`tests/cross_process.rs`, the old-compactor CI job);
+  - step 4a and 4b: compaction, `rekey --rotate`, `import` and the CLI
+    through the lock layer; `--wait`; `serve --mcp --shared` in `mcp.rs`;
+    `open_read_only_waiting`; `remove_dead_compaction_temps`;
+  - REKEY-2 (`undo_rekey`'s scrub note);
+  - step 5: readers first in `shared/lock.rs` `acquire`, and the bench;
+  - the READY fixes (`025f8d8`, `5c9e4d1`);
+  - the Python binding's shared mode (`mnemo-python/src/lib.rs`);
+  - the `ci.yml` changes.
+- **Check against:**
+  - `docs/design/12.4-shared-access.md` and `docs/shared-mode.md`: does
+    the code do what they say, and is the error table complete?
+  - the CHANGELOG's `[Unreleased]`: is every public API change and break
+    listed (the `#[non_exhaustive]` changes, `Locked { holder }`, the new
+    variants, 0600 files)?
+  - the RB-007 triage: are its nine items shipped as accepted? Mark them
+    `VERIFIED` where confirmed.
+- **Questions I want answered:**
+  1. Can readers first starve a writer forever, or only slow it? Is
+     anything other than LOCK-2 needed before the tag?
+  2. Does any path reach a lost or doubled write: `MaybeStored`,
+     `ReplacedDuringWrite`, `Replaced { shared }`, cancel mid-window, or a
+     panic in a window?
+  3. Does any plain (non-shared) caller behave differently from v0.13.2
+     in a way the CHANGELOG doesn't say?
+- **Rules:**
+  - build and test with `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`;
+  - the Worker has no PR open, so benchmarks are allowed, but keep them
+    short;
+  - put security findings only in `SECURITY.local.md`, as before;
+  - when done, send `REVIEW DONE: RB-008` to planner-a.
+
+**The Worker:** nothing to do. Hold until I triage RB-008. The release
+HANDOFF (root README, `index.html`, `.github/release-mobile`) and the
+version bump come after the triage.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — RB-008 triaged; one fix PR before the tag (`rel0140-rb008`): the lock-out wording, a moved brain's message and check, Python's `ReplacedError`, release-text lines
+
+**RB-008** (REVIEWER-B, `a3c0aae`):
+- **What holds:** no lost or doubled write in three kill runs (683 kills,
+  463 compactions, 2,326 writes acknowledged). All nine RB-007 items are
+  `VERIFIED`. No new security finding.
+- **Triage:** `reviewer_notes.md`, the ledger and each item.
+  - RB-008.1 `ACCEPTED`: docs before the tag, code in LOCK-2.
+  - RB-008.2 `ACCEPTED` before the tag.
+  - RB-008.3: items 1, 2, 4 (a doc line) and 6 before the tag; items 3
+    and 4's carry-over `DEFERRED` to step 6; item 5 to LOCK-2.
+
+**Dispatch: one PR into `release-0.14.0`, branch `rel0140-rb008`**
+
+1. **Readers can lock a writer out; say so (RB-008.1, recs 1 and 2).**
+   Rewrite each of these to what was measured and where it stops:
+   - `docs/shared-mode.md:52-53`, `:100-102`, and `:32`'s "writes with
+     writer preference";
+   - `CHANGELOG.md:19` (step 2a's "can't starve a writer": drop it, or say
+     step 5 superseded it) and `:163-165`;
+   - `docs/design/12.4-shared-access.md:245` and `:270-271`;
+   - `mnemo/src/shared/lock.rs:158`'s comment.
+
+   The meaning everywhere: back-to-back readers slow a writer, and with
+   many processes reading with no pause (REVIEWER-B: 16 processes on
+   cheap reads, 6 of 7 writes `Locked` at 10 s) a write can wait out its
+   deadline and fail with `Locked`. Nothing is lost, the caller can call
+   again, and LOCK-2 fixes it.
+
+   The hook advice: `--wait 2s` is for a hook that only reads; a hook that
+   saves keeps the default. `test/scripts/project_memory.py`'s shared
+   writes go from `wait=2.0` to the default (its comment and docstring
+   too).
+2. **A moved or removed brain (RB-008.2).**
+   - **The message:** when nothing is at the path, `Replaced` says the
+     file was moved or removed and the handle's path no longer names it,
+     in both modes. Keep "replaced" for a different file at the path. If
+     that needs a field, add it to the `#[non_exhaustive]` variant.
+   - **The check:** on Unix, compare `fstat` of the open descriptor with
+     `stat` of the path (device and inode), with no new descriptor.
+     Windows keeps `same_file`.
+   - **A plain handle whose path check fails with an error other than
+     not-found** (permission, the descriptor limit) commits as v0.13.2
+     did. It holds the lock for its whole life, so nothing it can't see
+     can compact over it. A shared handle still returns the error.
+   - **Tests:** renamed away, removed, and replaced by a copy (each
+     message), and a failing path check for a plain handle (a failpoint if
+     there's no cheap real way).
+   - **The CHANGELOG, under Changed:** a handle no longer follows a brain
+     that's moved; a moved or removed brain fails the handle's later
+     commits, and `try_close` hands the handle back.
+3. **Python `ReplacedError` (RB-008.3 item 2).** A subclass of
+   `MnemoError` for both kinds, with a `shared` attribute. Add it to the
+   binding's README, `docs/shared-mode.md`'s error table and a
+   `test_mnemo.py` case.
+4. **Release-text lines:**
+   - CHANGELOG Added: `Mnemo::peek_dimensions` (item 1).
+   - `docs/shared-mode.md`: `cache_stats` in shared mode counts since the
+     handle's last reload (item 4).
+   - The 12.4 note's first status bullet: steps 1 to 5 shipped in v0.14.0
+     (item 6).
+   - The CHANGELOG's 0600 line: add "existing brains keep their mode;
+     `chmod 600 <brain>` tightens one" (REVIEWER-B's line in
+     `SECURITY.local.md`).
+   - Neutral wording in commits and the PR.
+
+**Then:** green PR CI, merge, every job green on the branch's push, then
+DONE with the runs, and stop. My next steps:
+- the release HANDOFF (root README, `index.html`, `.github/release-mobile`);
+- the version bump and coordination sync, dispatched to you;
+- the tag, then the user's approval click.
+
+**Carried to LOCK-2 (before step 8, and before shared mode becomes the
+default for `serve --mcp`):**
+- restore the writer test's 1 s bound;
+- cheap-read cells at 8 and 16 readers, with "no `Locked`" as the target;
+- RB-008.1 rec 4 (a second lock file that a writer takes after about 2 s
+  of waiting) as the first design to try on paper;
+- RB-008.3 item 5 (`for_plain` looks for the sidecar again on each wait).
+
+**Carried to step 6:**
+- RB-008.3 item 3 (the MCP server's own flushes in shared mode);
+- item 4's `cache_stats` carried across a reload.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 RB-008 fixes (PR 75, `rel0140-rb008`): a moved brain's message and check, Python `ReplacedError`, the lock-out wording, release-text lines
+
+**Where it stands**
+- PR 75 was squash-merged into `release-0.14.0` as `c0270ab`, and the
+  branch is deleted. The branch head is `c0270ab`.
+- PR 75's CI:
+  - The first run, at `eb7dc0b`, failed both Windows jobs. The cause was in
+    my new test, not in the engine: it read the moved brain while a handle
+    still held its lock. On Windows that lock is a mandatory byte-range
+    lock, so the read fails (os error 33).
+  - Two test-only fix-ups: `48307f8` compares the file's length there, and
+    `e7fee5e` makes the copy before the handle opens.
+  - The re-run, at `e7fee5e` (CI 43554698191), passed 14/14. The three new
+    tests ran on windows-latest, and the moved-brain test on windows-msrv.
+- Push runs on `c0270ab`:
+  - CI 43555505200: success, 14/14;
+  - Mobile CI 43555505416: success, 6/6.
+  
+  Every job ran its steps, so none is "not run".
+- The old-compactor job: 115 compactions (196 found the file busy), 302
+  writes acknowledged, 0 `ReplacedDuringWrite`, 0 refused as `Replaced`.
+- Versions are unchanged, and there is no tag.
+
+**What changed, against the dispatch**
+1. **The lock-out wording (RB-008.1).** Rewritten to what was measured and
+   where it stops: back-to-back readers slow a writer, and with many
+   processes reading with no pause (16 on cheap reads: 6 of 7 writes
+   `Locked` at 10 s) a write can wait out its deadline. Nothing is lost,
+   calling again is safe, and LOCK-2 is the fix.
+   - `docs/shared-mode.md`: the CLI row (`:32`), "The wait" (`:52-53`),
+     "How busy a file can get" (`:100-102`), and the LOCK-2 line.
+   - `CHANGELOG.md`: step 2a's line is marked superseded by step 5, and
+     step 5's Changed line is rewritten.
+   - `docs/design/12.4-shared-access.md` `:245` and `:270-271`.
+   - `mnemo/src/shared/lock.rs`'s `acquire` comment.
+   - **The hook advice:** `--wait 2s` is for a hook that only reads, and a
+     hook that saves keeps the default. The same advice was in three more
+     places, and all of them now say it: the CLI's `--wait` help
+     (`src/bin/mnemo.rs`), `mnemo/README.md`, and the 12.4 note (`:654`,
+     `:1040`).
+   - `test/scripts/project_memory.py`: the shared writes use the default
+     wait. `WRITE_WAIT_SECS` is gone, and the docstring is updated.
+2. **A moved or removed brain (RB-008.2).**
+   - `MnemoError::Replaced` has a new field, `missing`.
+     - When nothing is at the path, the message is "the file at … was moved
+       or removed after this handle opened it, and this handle's path no
+       longer names it; nothing was written. Move it back, or open it where
+       it is now", in both modes.
+     - "Replaced" stays for another file at the path.
+     - The shared window's mapping keeps `missing`.
+   - **The check** (`store/load.rs`, `file_at`): on Unix, the device and
+     inode from `fstat` of the open descriptor against `stat` of the path,
+     with no new descriptor. Windows keeps `same_file`.
+   - **A plain handle whose check fails with an error other than
+     not-found** commits, as in v0.13.2. A shared handle returns the
+     error.
+   - **The tests:**
+     - In `replaced_file.rs`: renamed away (`try_close` hands the handle
+       back, and once the file is moved back the handle commits), removed
+       (Unix only: on Windows a removed open file can stay pending at its
+       path), and replaced by a copy (the "replaced … Reopen" message).
+     - In `shared_handle.rs`: a move before a shared commit, and a failing
+       path check for a plain and a shared handle. That one uses a new
+       failpoint, `__failpoints::set_path_check_failures` /
+       `path_check_failures_left`.
+     - Each test fails with its change undone (checked, three ways).
+   - **CHANGELOG, under Changed:** a handle no longer follows a brain
+     that's moved.
+3. **Python `ReplacedError` (RB-008.3 item 2).**
+   - A subclass of `MnemoError` for both kinds, with `shared` set on the
+     instance.
+   - A dev-hooks hook, `_dev_rename_before_next_shared_commit`.
+   - `test_mnemo.py` covers the shared kind (`shared is True`, and the
+     call works again) and the plain kind (`shared is False`, "Reopen").
+   - Documented in the binding's README error table and in
+     `docs/shared-mode.md`'s table. The table also has a
+     `Replaced { missing: true }` row.
+4. **Release-text lines:**
+   - CHANGELOG Added: `Mnemo::peek_dimensions`, and Python's
+     `ReplacedError`.
+   - `docs/shared-mode.md`: `cache_stats` counts since the handle's last
+     reload.
+   - The 0600 line: "Existing brains keep their mode; `chmod 600 <brain>`
+     tightens one".
+   - **Item 6 needed no edit:** the 12.4 note's first status bullet has
+     said "Implementation steps 1 to 5 shipped in v0.14.0" since `968aa3a`.
+
+**Deviations**
+- I didn't give `ReplacedError` a `missing` attribute, because the dispatch
+  names only `shared`. Python callers tell the two kinds apart by the
+  message. It's a small addition if you want it.
+
+**Test counts (local, macOS)**
+- `cargo test --features failpoints`: 474 passed, 0 failed (471 plus the 3
+  new tests).
+- `mnemo-uniffi`: 23 passed, 1 ignored.
+- `test_mnemo.py`, on a dev-hooks wheel in a scratch virtualenv: all
+  passed.
+- fmt and clippy are clean: the core with `failpoints,benches`, uniffi, and
+  the Python crate with `dev-hooks`.
+
+**Carried, as in your entry:** nothing new. `test/project.mnemo` hasn't
+been updated (nothing written to it).
+
+### 2026-11-13 — PLANNER-A — REVIEW + HANDOFF + DISPATCH — RB-008 fixes accepted (PR 75); the README and site are staged; the v0.14.0 release commit, the dry run, then the tag
+
+**PR 75: ACCEPTED.**
+- `release-0.14.0` is at `c0270ab`. Push runs: CI 43555505200 14/14 and
+  Mobile CI 43555505416 6/6.
+- I read `file_at` and `ensure_not_replaced`:
+  - on Unix, `fstat` of the descriptor against `stat` of the path;
+  - a plain handle commits when its path check errors;
+  - a shared handle returns the error;
+  - `missing` comes from `AtPath::Nothing`.
+- `std::fs::metadata` follows a symlink, so a brain opened through a link
+  still matches. As asked.
+- **The deviation (no `missing` attribute on `ReplacedError`):** accepted
+  for v0.14.0. Python can tell the two kinds apart by the message. It's
+  noted for 12.2's Python pass.
+- Item 6 had been done already: right.
+
+**HANDOFF: commit these on `release-0.14.0` on their own, in step 3
+below:**
+- `README.md`:
+  - the top bullet's shared-mode clause;
+  - the iOS and Android install lines at 0.14.0;
+  - a new "What's new in v0.14.0: several agents on one file", which has
+    shared mode for Rust, Python and MCP, `--wait`, compaction waiting,
+    0600 with the `chmod` line, the moved and replaced file, the kept
+    secret, REKEY-2, mobile at 0.14.0, and "Upgrading from 0.13.x";
+  - a "Shared mode has limits under heavy use" item in Known limitations.
+- `index.html`: the pill and the "current release" line at v0.14.0; the
+  "Safe to share" card; Shipped (v0.4 – v0.14, a new first item); and
+  Next's first item.
+- **Commit message:** `docs: v0.14.0 README and site (shared mode)`.
+- **Check my text against the code before you commit.** If a line is
+  wrong, say so in your DONE and leave both files uncommitted. Don't edit
+  them: they're mine.
+
+**Dispatch: the release, in order** (RELEASING.md "Before the tag")
+1. **The release commit,** one PR into `release-0.14.0`
+   (`rel0140-release`):
+   - every manifest and lockfile at 0.14.0, as RELEASING.md step 1 lists;
+   - **`.github/release-mobile` `true`:** a minor release publishes mobile
+     (RELEASING.md's rule 3), and the engine's 0600 and moved-file
+     changes reach phones;
+   - `CHANGELOG.md`: cut `[Unreleased]` into `[0.14.0] - <the date you
+     tag>`, with a short summary and the compare link;
+   - the Swift and Kotlin package READMEs' install lines at 0.14.0.
+
+   Get green CI and Mobile CI on the PR, merge it, and check every job on
+   the push.
+2. **The dry run** on `release-0.14.0` with `mobile=true`. Every job must
+   be green. If a credential has expired or Maven Central refuses, log
+   BLOCKED: credentials are the user's.
+3. **The HANDOFF commit** above, then `chore(plan): sync coordination
+   files`.
+4. **Fast-forward `main` to `release-0.14.0`, and tag `v0.14.0`**
+   (annotated, "MNemo 0.14.0").
+5. When the run is waiting at "approve the release (v0.14.0, mobile
+   true)" with every build before it green, **log DONE and stop.** The
+   approval is the user's click: I'll show it as NEEDS-USER.
+6. **After the user approves:**
+   - check all four registries, as in RELEASING.md "After the tag";
+   - log DONE with what each shows;
+   - delete the merged release branch.
+
+   Then I log VERIFIED and move RB-006.10–.12 and RB-007.9 from
+   `SECURITY.local.md` into PLAN.md.
+
+**Also before the tag:** update `test/project.mnemo` with this release's
+durable facts, if `test/.env` is there:
+- shared mode and its limits;
+- readers first and LOCK-2;
+- `ReplacedError`;
+- the hook `--wait` rule.
+
+Use the script's shared writes. If you skip it, say so.
+
+**After v0.14.0:** 12.3 is a phase start. It needs the user's go, and
+REVIEWER-A goes first. LOCK-2 and the other carried items stay as listed
+in my RB-008 entry.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 release steps 1 and 2: the release commit (PR 76) and the dry run are green; stopped before step 3, because two README lines disagree with the code
+
+**Step 1: the release commit**
+- PR 76 (`e08c7fb`, `release: v0.14.0`) was fast-forwarded onto
+  `release-0.14.0`, and the branch is deleted. The branch head is
+  `e08c7fb`.
+- **What it changes:**
+  - every manifest and lockfile is at 0.14.0: the engine, Python
+    (`Cargo.toml`, `pyproject.toml`, the lockfile), Node, `mnemo-uniffi`,
+    Kotlin's `VERSION_NAME`, and both samples;
+  - `.github/release-mobile` is `true`;
+  - CHANGELOG: `[Unreleased]` is cut into `[0.14.0] — 2026-11-13`, with
+    a summary paragraph and the compare link. It uses the em dash, like
+    the earlier headings;
+  - the Swift and Kotlin package READMEs' install lines name 0.14.0.
+- PR 76's checks: 20/20 (CI 14, Mobile CI 6).
+- Push runs on `e08c7fb`:
+  - CI 43558996575: success, 14/14;
+  - Mobile CI 43558996553: success, 6/6.
+  
+  Every job ran its steps.
+
+**Step 2: the dry run** (Release 43560009140, `release-0.14.0` at
+`e08c7fb`, `mobile=true`): success.
+- `version check`: "engine 0.14.0, mnemo-uniffi 0.14.0, mnemo-android
+  0.14.0", and "the commit says mobile: true".
+- The 5 CLI builds, 5 wheels and the sdist all passed. `attach engine
+  assets` counted 11 files, and PyPI "would get 5 wheels and 1 sdist".
+  `publish to crates.io` packaged and verified `mnemo-engine v0.14.0`.
+- Mobile: these all succeeded, so no credential has expired and Central
+  accepted the upload:
+  - the Swift build;
+  - `Push to mnemo-swift`;
+  - the Swift verify published;
+  - the Android build;
+  - the signed `publishToMavenLocal`;
+  - "Maven Central (dry run, validated then dropped)".
+- Skipped, as on every dry run: Create GitHub Release, the approval, the
+  engine gate, and the no-mobile release note.
+
+**Step 3 not done: two lines of the README HANDOFF disagree with the
+code.** As your entry says, I left `README.md` and `index.html`
+uncommitted and unedited. I haven't made the coordination sync, fast-
+forwarded `main`, or tagged.
+1. **`README.md:134-135`, "Compaction waits too, instead of failing while
+   another handle is open".**
+   - `compact_file` takes the lock through `lock_exclusive` with
+     `SharedOptions::default()`'s deadline, 10 s (`shared/lock.rs:48`).
+   - A plain handle, or `serve --mcp` without `--shared`, holds the file
+     for its whole life. So a compaction then waits 10 s and still fails
+     with `Locked`.
+   - The CHANGELOG has it as "waits for shared callers instead of failing
+     at once".
+   - **Suggested:** "Compaction waits for the lock (up to 10 s) instead of
+     failing at once".
+2. **`README.md:127`, "an older build's compaction doesn't wait for the
+   lock".**
+   - That isn't the hazard. An older `mnemo compact` releases the lock
+     before it renames the compacted file over the brain
+     (`docs/shared-mode.md:16-19`). That's how a write can be lost
+     (`ReplacedDuringWrite`).
+   - **Suggested:** "an older build's compaction lets go of the lock
+     before it replaces the file".
+- **Smaller, your call:**
+  - `:131`: a command that times out names what holds the file only when
+    the holder left a note. Writers and long operations leave one; readers
+    don't.
+  - `:135`: the dead temp-file cleanup is Unix only.
+  - `:586`: "reloads the whole file" overstates it. A reload re-reads the
+    header and the control plane and clears the page cache (about 5 ms at
+    10K); the docs say "the next call reloads".
+- `index.html` checks out against the code: the pill, the current-release
+  line, the "Safe to share" card, Shipped and Next.
+
+**Also before the tag: `test/project.mnemo` is updated.**
+- `test/.venv` had the 0.13.2 engine, which has no shared mode, so I
+  rebuilt the tree into it (`maturin develop --release`, 0.14.0, no
+  dev-hooks).
+- Then four memories, through the script's shared writes:
+  - shared mode in v0.14.0 (semantic, `01M7C5ZXYMYZNWCMBX182QDRQR`);
+  - its limits: readers first, LOCK-2, PERF-2 (semantic,
+    `01M7C603184662HB2WWAJC76VK`);
+  - `Replaced` and `ReplacedError` (semantic,
+    `01M7C607PDGMNQ7AZMY11N3ZRB`);
+  - the hook `--wait` rule (procedural, `01M7C60CE6AZA1RFDW0YG312QD`).
+
+**Waiting on:** your corrected README and a pointer. Then I do steps 3
+and 4: the HANDOFF commit, the sync, `main` fast-forwarded, and the tag.
+After that I stop at the approval.
+
+### 2026-11-13 — PLANNER-A — REVIEW + HANDOFF — release steps 1 and 2 accepted; the README corrected as you found; go on with steps 3 to 5
+
+**Steps 1 and 2: ACCEPTED.**
+- PR 76 (`e08c7fb`) is green, with its push runs: CI 43558996575 14/14,
+  Mobile CI 43558996553 6/6.
+- The dry run 43560009140 succeeded with mobile true, including Central's
+  validation.
+- `test/project.mnemo` is updated, with four memories.
+
+**The README, corrected (all five points taken):**
+1. **Compaction:** "waits for the lock too (up to 10 s) instead of
+   failing at once. A plain handle holds the file for its whole life, so
+   close it first."
+2. **The older build:** it "lets go of the lock before it replaces the
+   file, and a write in that moment can be lost". This matches
+   `docs/shared-mode.md:16-19`.
+3. **A timed-out command** names the holder "when the holder left a note,
+   as writers and long operations do".
+4. **The temp-file cleanup:** "On Unix" (`maintenance.rs:1009-1010`).
+5. **The reload:** "the file's header and index … an empty page cache".
+   It no longer says "the whole file".
+
+`index.html` is unchanged.
+
+**The HANDOFF stands as in my previous entry,** with this text:
+- `README.md` and `index.html`;
+- commit message `docs: v0.14.0 README and site (shared mode)`.
+
+Then do steps 3 to 5 of that entry:
+- the HANDOFF commit;
+- the `chore(plan)` sync;
+- fast-forward `main`;
+- tag `v0.14.0`;
+- stop at the approval with DONE.
