@@ -166,8 +166,6 @@ jobs:
   builtin:
     name: builtin embedder (linux)
     runs-on: ubuntu-latest
-    env:
-      MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
     steps:
       - uses: actions/checkout@v7
 
@@ -189,12 +187,16 @@ jobs:
 
       - name: mnemo embedder install
         working-directory: mnemo
+        env:
+          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
         run: |
           cargo run --release --locked --features embed-candle --bin mnemo -- embedder install
           cargo run --release --locked --features embed-candle --bin mnemo -- embedder status
 
       - name: cargo test (with the model)
         working-directory: mnemo
+        env:
+          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
         run: |
           export MNEMO_TEST_MODEL_DIR="$(cargo run -q --release --locked --features embed-candle --bin mnemo -- embedder status | sed -n 's/^cache: *//p')"
           test -f "$MNEMO_TEST_MODEL_DIR/model.safetensors"
