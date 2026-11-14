@@ -22,6 +22,18 @@ fn mnemo(args: &[&str]) -> (bool, String, String) {
     )
 }
 
+/// 12.3: a key file must be this user's with no access for group or others,
+/// and git checks files out 0644, so a test sets the mode first.
+fn owner_only(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 fn hex(key: &[u8]) -> String {
     key.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -56,8 +68,10 @@ fn raw_key_file() -> (TempDir, PathBuf, PathBuf, PathBuf) {
     db.close().unwrap();
     let hex_path = dir.path().join("app.key");
     std::fs::write(&hex_path, hex(&key) + "\n").unwrap();
+    owner_only(&hex_path);
     let raw_path = dir.path().join("app.raw");
     std::fs::write(&raw_path, key).unwrap();
+    owner_only(&raw_path);
     (dir, path, hex_path, raw_path)
 }
 
@@ -100,13 +114,15 @@ fn the_read_commands_take_a_key_file() {
     // A wrong key, a malformed key file, and a key file with a passphrase.
     let wrong = dir.path().join("wrong.key");
     std::fs::write(&wrong, hex(&Mnemo::generate_key())).unwrap();
+    owner_only(&wrong);
     let (ok, _, err) = mnemo(&["info", p, "--key-file", wrong.to_str().unwrap()]);
     assert!(!ok && err.contains("wrong passphrase"), "{err}");
     let bad = dir.path().join("bad.key");
     std::fs::write(&bad, "not a key").unwrap();
+    owner_only(&bad);
     let (ok, _, err) = mnemo(&["list", p, "--key-file", bad.to_str().unwrap()]);
     assert!(
-        !ok && err.contains("32 raw bytes or 64 hex digits"),
+        !ok && err.contains("32 raw bytes, 64 hex digits or a recovery code"),
         "{err}"
     );
     let (ok, _, err) = mnemo(&[
@@ -127,7 +143,10 @@ fn compact_takes_a_key_file_and_converts_a_raw_key_v8_file() {
     let path = dir.path().join("k.mnemo");
     std::fs::copy(fixtures.join("v8_key.mnemo"), &path).unwrap();
     let p = path.to_str().unwrap();
-    let key = fixtures.join("v8_key.key");
+    // The fixture is checked out 0644; a copy gets the mode a key file needs.
+    let key = dir.path().join("v8_key.key");
+    std::fs::copy(fixtures.join("v8_key.key"), &key).unwrap();
+    owner_only(&key);
     let k = key.to_str().unwrap();
 
     // The refusal names the raw-key route.

@@ -78,7 +78,13 @@ impl Mnemo {
         passphrase: &str,
         opts: SharedOptions,
     ) -> Result<SharedMnemo> {
-        SharedMnemo::open(path.as_ref(), passphrase.as_bytes(), opts)
+        let mut s = SharedMnemo::open(path.as_ref(), passphrase.as_bytes(), opts)?;
+        // 12.3 (the keys note, section 1, rule 7).
+        let kdf = s.read(|db| Ok(db.kdf_params()))?;
+        if let Some(n) = super::open::passphrase_floor_notice(&s.path, kdf) {
+            s.locks.notice(n);
+        }
+        Ok(s)
     }
 
     /// [`Mnemo::open_shared`] for a raw-key file.
@@ -338,13 +344,13 @@ impl SharedMnemo {
     /// afterwards. An error leaves the old secret in force and kept, unless
     /// it says the file may open with either.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
-        self.rekey_secret(new_passphrase.as_bytes(), kdf)
+        self.rekey_secret(new_passphrase.as_bytes(), SecretKind::Passphrase, kdf)
     }
 
     /// [`SharedMnemo::rekey`] to a raw 256-bit key (as
     /// [`Mnemo::rekey_with_key`]).
     pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
-        self.rekey_secret(new_key, KdfParams::raw_key())
+        self.rekey_secret(new_key, SecretKind::Key, KdfParams::raw_key())
     }
 
     /// After a successful [`SharedMnemo::rekey`], what couldn't be scrubbed
@@ -353,14 +359,14 @@ impl SharedMnemo {
         self.rekey_cleanup.as_deref()
     }
 
-    fn rekey_secret(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
+    fn rekey_secret(&mut self, secret: &[u8], kind: SecretKind, kdf: KdfParams) -> Result<()> {
         // The rekey window applies no statistics, so its only commit is the
         // rekey's and its errors are the rekey's own; the next write applies
         // them.
         let held_back = std::mem::take(&mut self.delta);
         let mut in_force = None;
         let r = self.write(|db| {
-            db.rekey_unchecked(secret, kdf)?;
+            db.rekey_unchecked(secret, kind, kdf, None)?;
             in_force = Some(db.rekey_cleanup.clone());
             Ok(())
         });

@@ -185,7 +185,7 @@ impl Mnemo {
         passphrase: &str,
         config: MnemoConfig,
     ) -> Result<Mnemo> {
-        Self::create_secret(path, passphrase.as_bytes(), config)
+        Self::create_secret(path, passphrase.as_bytes(), SecretKind::Passphrase, config)
     }
 
     /// PERF-1 step 7 (R-004.5): create a database unlocked by a **raw
@@ -205,7 +205,7 @@ impl Mnemo {
             kdf: KdfParams::raw_key(),
             ..config
         };
-        Self::create_secret(path, key, config)
+        Self::create_secret(path, key, SecretKind::Key, config)
     }
 
     /// A fresh random 256-bit key for [`Mnemo::create_with_key`], from the
@@ -218,27 +218,38 @@ impl Mnemo {
     pub(super) fn create_secret(
         path: impl Into<PathBuf>,
         secret: &[u8],
+        kind: SecretKind,
         config: MnemoConfig,
     ) -> Result<Mnemo> {
-        Self::create_secret_as(path.into(), secret, config, Create::Truncate)
+        Self::create_secret_as(path.into(), secret, kind, config, Create::Truncate, None)
     }
 
     /// [`Mnemo::create_secret`] for a temp file: `Create::New` refuses a
     /// name that already exists (a symlink included), with `AlreadyExists`.
+    /// `salt` is the salt to keep (a compaction's, 12.3's salt rule), or
+    /// `None` for a fresh one.
     pub(super) fn create_secret_new(
         path: &Path,
         secret: &[u8],
+        kind: SecretKind,
         config: MnemoConfig,
+        salt: Option<[u8; crypto::SALT_LEN]>,
     ) -> Result<Mnemo> {
-        Self::create_secret_as(path.to_path_buf(), secret, config, Create::New)
+        Self::create_secret_as(path.to_path_buf(), secret, kind, config, Create::New, salt)
     }
 
-    fn create_secret_as(
+    /// Where every create meets. 12.3: a passphrase with raw-key parameters
+    /// is refused here, before anything touches the disk (the keys note,
+    /// section 1, rule 2).
+    pub(super) fn create_secret_as(
         path: PathBuf,
         secret: &[u8],
+        kind: SecretKind,
         config: MnemoConfig,
         create: Create,
+        salt: Option<[u8; crypto::SALT_LEN]>,
     ) -> Result<Mnemo> {
+        crypto::check_kdf_for(kind, config.kdf)?;
         if config.dimensions == 0 {
             return Err(MnemoError::Invalid("dimensions must be > 0".into()));
         }
@@ -258,7 +269,7 @@ impl Mnemo {
         // Exclusive lock covers the write path; second writer sees `Locked`.
         let file = open_with_lock(&path, /*write=*/ true, create)?;
 
-        let salt = crypto::random_salt();
+        let salt = salt.unwrap_or_else(crypto::random_salt);
         let dek = crypto::random_dek();
         let kek = crypto::derive_kek(secret, &salt, config.kdf)?;
         let dek_nonce = crypto::random_nonce();
@@ -367,6 +378,7 @@ impl Mnemo {
             access_delta: None,
             commit_point: None,
             lock_note: None,
+            notices: Vec::new(),
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
@@ -405,7 +417,7 @@ impl Mnemo {
     /// [`Mnemo::open_read_only`]), prefer that entry point — it takes a
     /// shared lock and coexists with other readers.
     pub fn open(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
-        Self::open_secret(path, passphrase.as_bytes())
+        Self::open_secret(path, passphrase.as_bytes()).map(passphrase_opened)
     }
 
     /// PERF-1 step 7: open a database created by [`Mnemo::create_with_key`]
@@ -454,6 +466,7 @@ impl Mnemo {
         opts: crate::SharedOptions,
     ) -> Result<Mnemo> {
         Self::open_exclusive_secret(path.as_ref(), passphrase.as_bytes(), op, &opts, false)
+            .map(passphrase_opened)
     }
 
     /// [`Mnemo::open_exclusive`] for a raw-key file.
@@ -849,6 +862,7 @@ impl Mnemo {
             access_delta: None,
             commit_point: None,
             lock_note: None,
+            notices: Vec::new(),
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
@@ -900,7 +914,7 @@ impl Mnemo {
     /// migrates in place), close the handle cleanly, and reopen
     /// read-only. This is documented in the README's Durability section.
     pub fn open_read_only(path: impl Into<PathBuf>, passphrase: &str) -> Result<Mnemo> {
-        Self::open_read_only_secret(path, passphrase.as_bytes())
+        Self::open_read_only_secret(path, passphrase.as_bytes()).map(passphrase_opened)
     }
 
     /// PERF-1 step 7: [`Mnemo::open_read_only`] for a raw-key database.
@@ -987,6 +1001,7 @@ impl Mnemo {
         opts: crate::SharedOptions,
     ) -> Result<Mnemo> {
         Self::open_read_only_waiting_secret(path.as_ref(), passphrase.as_bytes(), &opts)
+            .map(passphrase_opened)
     }
 
     /// [`Mnemo::open_read_only_waiting`] for a raw-key file.
@@ -1173,6 +1188,7 @@ impl Mnemo {
             access_delta: None,
             commit_point: None,
             lock_note: None,
+            notices: Vec::new(),
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
@@ -1227,6 +1243,27 @@ impl Mnemo {
         self.snapshot_cap_explicit = true;
     }
 
+    /// 12.3: the salt in this handle's header, which names its keychain
+    /// entry (the keys note, section 4).
+    pub(crate) fn header_salt(&self) -> [u8; crypto::SALT_LEN] {
+        self.header.salt
+    }
+
+    /// 12.3: the salt in page 0 as it is on disk now, read through this
+    /// handle's own file (a second open would fail against Windows' lock).
+    /// After a failed rekey it tells which salt is in force.
+    pub(crate) fn disk_salt(&mut self) -> Result<[u8; crypto::SALT_LEN]> {
+        let page = self.pager.read_raw(0)?;
+        Ok(Header::from_page(&page)?.salt)
+    }
+
+    /// 12.3: what this handle has to tell its owner, once each: today, that
+    /// a passphrase opened a file whose KDF parameters are the raw-key kind
+    /// (the keys note, section 1, rule 7), with the fix. Empty otherwise.
+    pub fn notices(&self) -> &[String] {
+        &self.notices
+    }
+
     /// Embedding dimensionality this database expects.
     pub fn dimensions(&self) -> usize {
         self.dimensions
@@ -1243,4 +1280,27 @@ impl Mnemo {
     }
 
     // --- internal page/record helpers -------------------------------------
+}
+
+/// 12.3 (the keys note, section 1, rule 7): the notice for a file a
+/// passphrase opened whose KDF parameters are the raw-key kind, if it is one.
+pub(crate) fn passphrase_floor_notice(path: &Path, kdf: KdfParams) -> Option<String> {
+    kdf.below_passphrase_floor().then(|| {
+        format!(
+            "{} is protected by a passphrase on raw-key KDF parameters ({} KiB, {} pass), \
+             which makes each guess of it cheap; `mnemo rekey` or `mnemo compact` raises \
+             the parameters",
+            path.display(),
+            kdf.m_cost,
+            kdf.t_cost
+        )
+    })
+}
+
+/// A handle a passphrase just opened, with [`passphrase_floor_notice`] added.
+fn passphrase_opened(mut db: Mnemo) -> Mnemo {
+    if let Some(n) = passphrase_floor_notice(&db.path, db.kdf) {
+        db.notices.push(n);
+    }
+    db
 }

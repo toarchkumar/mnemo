@@ -299,7 +299,7 @@ impl BrainLocks {
     }
 
     /// Add `text` to the notices, once.
-    fn notice(&mut self, text: String) {
+    pub(crate) fn notice(&mut self, text: String) {
         if !self.notices.contains(&text) {
             self.notices.push(text);
         }

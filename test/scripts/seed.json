@@ -375,5 +375,14 @@
       "area": "conventions",
       "topic": "embedder-identity"
     }
+  },
+  {
+    "content": "KEY SOURCES (v0.15, 12.3 step 1; docs/design/12.3-keys.md): with no --passphrase or --key-file, every CLI command finds the brain's secret by the file's kind, read from page 0 without the key: raw-key KDF parameters (m_cost below KdfParams::fast's 512 KiB) mean a key, anything else a passphrase. A key comes from the first present of MNEMO_KEY (64 hex digits or a recovery code), MNEMO_KEY_FILE (owner-only, mode 0600 or 0400), MNEMO_KEY_COMMAND (run without a shell; 60 s in the CLI, 10 s in the MCP server), then the key store entry named by the file's salt; a passphrase from MNEMO_PASSPHRASE, then the prompt. A source of the other kind is skipped and named; within a kind there's no fall-through (a wrong source fails and names itself). `mnemo init` with no passphrase source generates a key into the key store; `--ask-passphrase` restores the old prompt. A compaction keeps the salt, so the entry survives `mnemo compact` and `rekey --rotate`. Recovery codes (MN1- and 13 groups of 5 Crockford Base32, each with a GF(32) check) are shown only to a person at a terminal, never under CLAUDECODE. Tests must clear MNEMO_* and CLAUDECODE from the child's environment.",
+    "memory_type": "procedural",
+    "importance": 0.8,
+    "metadata": {
+      "area": "conventions",
+      "topic": "key-sources"
+    }
   }
 ]

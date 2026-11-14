@@ -3,6 +3,30 @@
 use super::*;
 
 impl Mnemo {
+    /// **Not a stable API.** 12.3: create a file protected by a passphrase on
+    /// raw-key KDF parameters, which the public paths refuse, so a test can
+    /// check what an open, `info`, `verify` and a compaction do with one.
+    #[doc(hidden)]
+    pub fn __create_passphrase_below_floor_for_testing(
+        path: impl Into<PathBuf>,
+        passphrase: &str,
+        config: MnemoConfig,
+    ) -> Result<Mnemo> {
+        let config = MnemoConfig {
+            kdf: KdfParams::raw_key(),
+            ..config
+        };
+        // Handed over as a key, so the floor check lets it through.
+        Self::create_secret_as(
+            path.into(),
+            passphrase.as_bytes(),
+            SecretKind::Key,
+            config,
+            Create::Truncate,
+            None,
+        )
+    }
+
     /// **Not a stable API.** The file's on-disk format version.
     /// Writes `m` as a record already in a file would be copied: no
     /// zero-vector check (the dimension check stays). For the zero-vector

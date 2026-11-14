@@ -615,9 +615,18 @@ fn a_raw_key_file_unlocks_and_a_v8_file_opens() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("k.mnemo");
     std::fs::copy(fixtures.join("v8_key.mnemo"), &path).unwrap();
+    // 12.3: the fixture is checked out 0644; a copy gets the mode a key file
+    // needs.
+    let key = dir.path().join("v8_key.key");
+    std::fs::copy(fixtures.join("v8_key.key"), &key).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let mut child = Command::new(env!("CARGO_BIN_EXE_mnemo"))
         .args(["inspect", path.to_str().unwrap(), "--key-file"])
-        .arg(fixtures.join("v8_key.key"))
+        .arg(&key)
         .env_remove("MNEMO_PASSPHRASE")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

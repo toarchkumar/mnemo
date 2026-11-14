@@ -1830,14 +1830,15 @@ impl Mnemo {
         self.rd_nogil(py, |db| db.verify())
     }
 
-    /// 12.4: what a shared handle warns about once (a sidecar directory it
-    /// can't use, a synced folder, an allowed network filesystem). Each is
-    /// also raised as a `UserWarning` when the handle opens. Empty for a
-    /// plain handle.
+    /// What the handle warns about once: for a shared handle (12.4), a
+    /// sidecar directory it can't use, a synced folder, an allowed network
+    /// filesystem; for any handle (12.3), a passphrase on raw-key KDF
+    /// parameters, with the fix. Each is also raised as a `UserWarning`
+    /// when the handle opens.
     fn notices(&self) -> PyResult<Vec<String>> {
         Ok(match self.handle_ref()? {
             Handle::Shared(s) => s.notices().to_vec(),
-            Handle::Plain(_) => Vec::new(),
+            Handle::Plain(c) => c.notices().to_vec(),
         })
     }
 
@@ -1881,9 +1882,10 @@ impl Mnemo {
     /// before rotating.
     ///
     /// `fast=True` uses `KdfParams::fast()` — the cheap Argon2 params
-    /// intended for tests only. Production callers should leave it
-    /// `False` so the new KEK inherits the same protection level as
-    /// the file's original creation-time parameters.
+    /// intended for tests only, never for a real passphrase. Production
+    /// callers leave it `False`: the new passphrase then keeps the file's
+    /// parameters, and never gets less than the full ones
+    /// (`KdfParams::secure()`), even on a file made with a key.
     ///
     /// If it raises, the old secret is still in force, including after later
     /// writes; the one exception is an error that says the file may open with
@@ -1900,10 +1902,11 @@ impl Mnemo {
         // the file's actual params, so a file created with stronger
         // (or weaker) KDF cost silently reset to the engine defaults
         // on every rekey.
+        // 12.3 (the keys note, section 1, rule 1): never below `secure()`.
         let kdf = if fast {
             KdfParams::fast()
         } else {
-            self.rd(|db| Ok(db.kdf_params()))?
+            self.rd(|db| Ok(db.kdf_params()))?.for_passphrase()
         };
         // PY-1 (R-001.11): release the GIL — `rekey` runs Argon2id,
         // which on default parameters (`KdfParams::secure`) takes
@@ -2886,6 +2889,18 @@ fn open(
         }
         Err(e) => return Err(to_py(e)),
     };
+    // 12.3 (the keys note, section 1, rule 7): a passphrase on raw-key KDF
+    // parameters is said once, as for a shared handle's notices.
+    for n in inner.notices() {
+        if let Err(e) = PyErr::warn_bound(
+            py,
+            &py.get_type_bound::<pyo3::exceptions::PyUserWarning>(),
+            &format!("mnemo: {n}"),
+            1,
+        ) {
+            e.write_unraisable_bound(py, None);
+        }
+    }
     Ok(Mnemo {
         inner: Some(Handle::Plain(inner)),
         path: path.to_string(),

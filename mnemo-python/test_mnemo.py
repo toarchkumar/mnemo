@@ -751,6 +751,43 @@ def test_compact_file_with_key():
     print("ok  mnemo.compact_file_with_key(path, key)")
 
 
+def test_rekey_to_a_passphrase_gets_full_kdf_parameters():
+    """12.3 (the keys note, section 1, rule 1): a rekey to a passphrase never
+    keeps the raw-key parameters of a file made with a key, on a plain or a
+    shared handle. The header's memory cost is at bytes 74..78."""
+    import struct
+
+    def m_cost(path):
+        with open(path, "rb") as f:
+            return struct.unpack_from("<I", f.read(128), 74)[0]
+
+    key = mnemo.generate_key()
+    with tempfile.TemporaryDirectory() as d:
+        plain = os.path.join(d, "plain.mnemo")
+        db = mnemo.open_with_key(plain, key, dimensions=2)
+        db.remember("kept", "semantic", [1.0, 0.0])
+        assert m_cost(plain) < 512, m_cost(plain)
+        db.rekey("a passphrase a person chose")
+        db.close()
+        del db
+        assert m_cost(plain) >= 19456, m_cost(plain)
+        db = mnemo.open(plain, "a passphrase a person chose")
+        assert len(db) == 1 and db.notices() == []
+        db.close()
+        del db
+
+        shared = os.path.join(d, "shared.mnemo")
+        db = mnemo.open_with_key(shared, key, dimensions=2)
+        db.close()
+        del db
+        s = mnemo.open_with_key(shared, key, shared=True)
+        s.rekey("another passphrase")
+        s.close()
+        del s
+        assert m_cost(shared) >= 19456, m_cost(shared)
+    print("ok  rekey to a passphrase gets full KDF parameters (plain and shared)")
+
+
 def test_exception_types():
     """v0.13.1 (RB-003.8 item 3): each engine error has its own type, all
     under `mnemo.MnemoError`, which is a `RuntimeError`."""
@@ -1698,6 +1735,7 @@ if __name__ == "__main__":
     test_remember_rejects_zero_vector()
     test_compact_file_module_fn()
     test_compact_file_with_key()
+    test_rekey_to_a_passphrase_gets_full_kdf_parameters()
     test_exception_types()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()

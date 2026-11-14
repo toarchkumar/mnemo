@@ -45,35 +45,15 @@ const MAX_PAGE: usize = 1000;
 /// The longest request head read, in bytes.
 const MAX_HEAD: usize = 16 * 1024;
 
-/// What unlocks the file.
+/// What unlocks the file (12.3: the engine's, from `mnemo_engine::keys`).
 /// Both are wiped from memory when dropped.
-pub enum Secret {
-    /// A passphrase (the prompt, `MNEMO_PASSPHRASE` or `--passphrase`).
-    Passphrase(Zeroizing<String>),
-    /// A raw 32-byte key (`--key-file`).
-    Key(Zeroizing<[u8; 32]>),
-}
+pub use mnemo_engine::keys::Secret;
 
-/// A raw key from `--key-file`: 32 bytes as they are, or 64 hex digits.
+/// A raw key from `--key-file`: 32 bytes as they are, 64 hex digits, or a
+/// recovery code. 12.3: on Unix the file must be this user's, with no access
+/// for group or others (`mnemo_engine::keys::read_key_file`).
 pub fn read_key_file(path: &str) -> Result<Zeroizing<[u8; 32]>, String> {
-    let bytes = Zeroizing::new(std::fs::read(path).map_err(|e| format!("reading {path}: {e}"))?);
-    if bytes.len() == 32 {
-        let mut k = Zeroizing::new([0u8; 32]);
-        k.copy_from_slice(&bytes);
-        return Ok(k);
-    }
-    let hex = String::from_utf8_lossy(&bytes);
-    let hex = hex.trim();
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!(
-            "{path}: a key file holds 32 raw bytes or 64 hex digits"
-        ));
-    }
-    let mut k = Zeroizing::new([0u8; 32]);
-    for (i, byte) in k.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("checked hex");
-    }
-    Ok(k)
+    mnemo_engine::keys::read_key_file(path).map_err(|e| e.to_string())
 }
 
 /// One version of a keyed fact, oldest first in its chain.

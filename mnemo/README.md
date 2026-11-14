@@ -792,7 +792,8 @@ cargo run --bin mnemo -- <command>
 
 | Command   | Purpose                                              |
 |-----------|------------------------------------------------------|
-| `init`    | Create a new encrypted database (auto-adds scaffold manifest) |
+| `init`    | Create a new encrypted database (auto-adds scaffold manifest). Since v0.15, with no passphrase source it generates a key and keeps it in the key store; `--ask-passphrase` asks for a passphrase instead, `--key-file <PATH>` writes the generated key to a new 0600 file |
+| `recovery-code` | Show a brain's recovery code from the key store, only to a person at a terminal (v0.15) |
 | `info`    | Print statistics (including ANN index shape)         |
 | `about`   | Self-describing briefing — print onboarding memories |
 | `import`  | Bulk-load memories from a JSON Lines file            |
@@ -804,7 +805,7 @@ cargo run --bin mnemo -- <command>
 | `search`  | Exact nearest-neighbour search (similarity only)     |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
-| `rekey`   | Re-encrypt the data key under a new passphrase; `--rotate` also rewrites the file under a fresh data key (revokes the old passphrase) |
+| `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
@@ -930,6 +931,59 @@ phone libraries keep) open with `--key-file <path>` instead, on `info`,
 (since v0.13.1). The file holds the 32-byte key, raw or as 64 hex digits;
 it can't be combined with `--passphrase`. `mnemo compact --key-file` is
 how a raw-key v8 file becomes v9.
+
+**Generated keys and the key sources (v0.15, 12.3; `docs/design/12.3-keys.md`).**
+
+- **`mnemo init <file>`** with no passphrase source makes a random 256-bit
+  key, protects the file with the raw-key KDF parameters (an open costs
+  microseconds), and keeps the key in the key store, found by the file's
+  salt. A compaction keeps the salt, so `mnemo compact` and
+  `mnemo rekey --rotate` keep the entry working.
+  - `--ask-passphrase` asks for a passphrase instead (what `init` did
+    before v0.15), and `MNEMO_PASSPHRASE` or `--passphrase` still work.
+  - `--key-file <PATH>` writes the generated key to a new file, mode 0600.
+  - With no key store, `init` without a passphrase fails and creates
+    nothing. It never writes a key to a file you didn't name.
+- **The recovery code** is the key written for a person: `MN1-` and
+  thirteen groups of five Crockford Base32 characters, each group with a
+  check character, so a typo is reported by group. Case, spaces and
+  hyphens don't matter.
+  - `mnemo recovery-code <file>` shows it again from the key store.
+  - It's shown only when stdout and stdin are terminals, no agent harness
+    is driving the command (`CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
+    are checked), and the controlling terminal opens. It appears there
+    after you press Enter, on the alternate screen, and is cleared when
+    you press Enter again. Piped or under an agent, nothing from which the
+    key could be rebuilt is printed.
+- **Where a command finds the secret**, with no `--passphrase` or
+  `--key-file`: it reads the file's KDF parameters first (no key needed),
+  then takes the first source of the file's kind.
+  - **For a key:** `MNEMO_KEY` (64 hex digits or a recovery code), then
+    `MNEMO_KEY_FILE`, then `MNEMO_KEY_COMMAND` (a command that prints the
+    key, run without a shell, 60 s at most), then the key store.
+  - **For a passphrase:** `MNEMO_PASSPHRASE`, then the prompt at a
+    terminal.
+  - A source of the other kind is skipped and named, so a
+    `MNEMO_PASSPHRASE` left over from v0.14 doesn't block a key brain.
+    Within a kind nothing is tried in turn: a wrong source fails and says
+    which it was. `mnemo info` prints the source it used.
+- **Key files** (for `--key-file` and `MNEMO_KEY_FILE`) must be regular
+  files owned by you, with no access for group or others (mode 0600 or
+  0400) on Unix, as `ssh` asks of a private key. Anything else is refused,
+  naming `chmod 600 <path>`. In CI and containers, prefer `MNEMO_KEY` from
+  the platform's secret store.
+- **Passphrase KDF parameters have a floor.** The engine refuses a
+  passphrase with raw-key parameters on every create and rekey, a rekey to
+  a passphrase always gets at least `KdfParams::secure()`, and a file below
+  the floor is reported when a passphrase opens it (`notices()`, `mnemo
+  info`, `mnemo verify`). `mnemo rekey` or `mnemo compact` raises it.
+- **What the key store protects:** it keeps the key out of config files,
+  dotfile repositories, backups, screen shares, shell history and other
+  users' reach. It doesn't keep it from programs running as you, and
+  `mnemo recovery-code` can be run by any of them; the display rule keeps
+  the code out of an agent's transcript by accident, not by force.
+- **This release's key store** is a test store only (`dev-hooks` builds);
+  the OS keychain arrives in the next step of 12.3, with `mnemo unlock`.
 
 For real applications, prefer the library API and supply the passphrase
 in-process.

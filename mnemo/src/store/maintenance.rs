@@ -146,7 +146,7 @@ impl Mnemo {
     /// afterwards is hygiene; if part of it fails, the rekey still succeeds
     /// and [`Mnemo::rekey_cleanup_error`] says what was left.
     pub fn rekey(&mut self, new_passphrase: &str, kdf: KdfParams) -> Result<()> {
-        self.rekey_secret(new_passphrase.as_bytes(), kdf)
+        self.rekey_secret(new_passphrase.as_bytes(), SecretKind::Passphrase, kdf)
     }
 
     /// PERF-1 step 7: switch to (or rotate) a raw 256-bit key, recording
@@ -156,10 +156,15 @@ impl Mnemo {
     ///
     /// Errors and the cleanup report work as in [`Mnemo::rekey`].
     pub fn rekey_with_key(&mut self, new_key: &[u8; crypto::KEY_LEN]) -> Result<()> {
-        self.rekey_secret(new_key, KdfParams::raw_key())
+        self.rekey_secret(new_key, SecretKind::Key, KdfParams::raw_key())
     }
 
-    pub(super) fn rekey_secret(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
+    pub(super) fn rekey_secret(
+        &mut self,
+        secret: &[u8],
+        kind: SecretKind,
+        kdf: KdfParams,
+    ) -> Result<()> {
         if self.shared {
             // RB-007.2: the shared handle would keep the old secret, and
             // fail at the next compaction or recovery.
@@ -169,14 +174,43 @@ impl Mnemo {
                     .into(),
             ));
         }
-        self.rekey_unchecked(secret, kdf)
+        self.rekey_unchecked(secret, kind, kdf, None)
     }
 
-    /// The rekey itself; [`SharedMnemo::rekey`] calls it in its window.
-    pub(super) fn rekey_unchecked(&mut self, secret: &[u8], kdf: KdfParams) -> Result<()> {
+    /// 12.3 (the keys note, section 4): [`Mnemo::rekey`] or
+    /// [`Mnemo::rekey_with_key`], with `before_commit` run once the new salt
+    /// is drawn and before anything is written, so a caller can store the new
+    /// secret under that salt first. An error from it stops the rekey with
+    /// nothing changed. Used by [`crate::keys::rekey_stored`].
+    pub(crate) fn rekey_staged(
+        &mut self,
+        secret: &[u8],
+        kind: SecretKind,
+        kdf: KdfParams,
+        before_commit: &mut crypto::SaltHook<'_>,
+    ) -> Result<()> {
+        if self.shared {
+            return Err(MnemoError::Unsupported(
+                "a staged rekey runs on a plain handle only".into(),
+            ));
+        }
+        self.rekey_unchecked(secret, kind, kdf, Some(before_commit))
+    }
+
+    /// The rekey itself; [`SharedMnemo::rekey`] calls it in its window. 12.3:
+    /// where every rekey meets, so a passphrase with raw-key parameters is
+    /// refused here (the keys note, section 1, rule 2).
+    pub(super) fn rekey_unchecked(
+        &mut self,
+        secret: &[u8],
+        kind: SecretKind,
+        kdf: KdfParams,
+        before_commit: Option<&mut crypto::SaltHook<'_>>,
+    ) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        crypto::check_kdf_for(kind, kdf)?;
         self.rekey_cleanup = None;
         self.flush()?;
         // v0.14.0 step 1: `flush` checks only when it has something to
@@ -191,6 +225,11 @@ impl Mnemo {
         }
         let mut wrapped_dek = [0u8; WRAPPED_DEK_LEN];
         wrapped_dek.copy_from_slice(&wrapped);
+        // 12.3: the caller stores the new secret under `new_salt` before
+        // anything is written.
+        if let Some(hook) = before_commit {
+            hook(&new_salt)?;
+        }
 
         // SEC-2: the old header's key wrap (salt, DEK nonce, wrapped DEK, as
         // laid out at header bytes 86..162), to scrub once the new header
@@ -322,10 +361,16 @@ impl Mnemo {
             // out its "the passphrase was not changed": keep the phrase.
             Err(again) => MnemoError::Io(std::io::Error::other(format!(
                 "rekey failed writing the new header ({err}), and the old header \
-                 couldn't be written back ({again}): the file may open with either \
-                 secret; close it without writing and try both"
+                 couldn't be written back ({again}): the file {EITHER_SECRET}; close it \
+                 without writing and try both"
             ))),
         }
+    }
+
+    /// 12.3: whether `e` is REKEY-1's one exception, the error that says the
+    /// file may open with either secret. Kept beside the message it reads.
+    pub(crate) fn rekey_left_either_secret(e: &MnemoError) -> bool {
+        e.to_string().contains(EITHER_SECRET)
     }
 
     /// REKEY-1 (RB-004.2): after a successful [`Mnemo::rekey`] or
@@ -352,7 +397,12 @@ impl Mnemo {
         passphrase: &str,
         kdf: KdfParams,
     ) -> Result<CompactReport> {
-        self.export_rekeyed_secret(dest.as_ref(), passphrase.as_bytes(), kdf)
+        self.export_rekeyed_secret(
+            dest.as_ref(),
+            passphrase.as_bytes(),
+            SecretKind::Passphrase,
+            kdf,
+        )
     }
 
     /// [`Mnemo::export_rekeyed`] protected by a raw 256-bit key (no KDF).
@@ -361,15 +411,17 @@ impl Mnemo {
         dest: impl AsRef<Path>,
         key: &[u8; crypto::KEY_LEN],
     ) -> Result<CompactReport> {
-        self.export_rekeyed_secret(dest.as_ref(), key, KdfParams::raw_key())
+        self.export_rekeyed_secret(dest.as_ref(), key, SecretKind::Key, KdfParams::raw_key())
     }
 
     pub(super) fn export_rekeyed_secret(
         &mut self,
         dest: &Path,
         secret: &[u8],
+        kind: SecretKind,
         kdf: KdfParams,
     ) -> Result<CompactReport> {
+        crypto::check_kdf_for(kind, kdf)?;
         if paths_refer_to_same_file(&self.path, dest).unwrap_or(false) {
             return Err(MnemoError::Invalid(format!(
                 "export_rekeyed refuses to overwrite the open database at {}",
@@ -391,7 +443,7 @@ impl Mnemo {
             store_float_vectors: self.float_vectors(),
             ..Default::default()
         };
-        let (tmp, mut new) = create_temp(dest, "export", secret, config)?;
+        let (tmp, mut new) = create_temp(dest, "export", secret, kind, config, None)?;
         let result = (|| {
             let report = self.copy_live_into(&mut new)?;
             new.flush()?;
@@ -743,6 +795,7 @@ impl Mnemo {
         Self::compact_file_secret(
             path,
             passphrase.as_bytes(),
+            SecretKind::Passphrase,
             0,
             &crate::SharedOptions::default(),
         )
@@ -750,7 +803,13 @@ impl Mnemo {
 
     /// PERF-1 step 7: [`Mnemo::compact_file`] for a raw-key database.
     pub fn compact_file_with_key(path: &str, key: &[u8; crypto::KEY_LEN]) -> Result<CompactReport> {
-        Self::compact_file_secret(path, key, 0, &crate::SharedOptions::default())
+        Self::compact_file_secret(
+            path,
+            key,
+            SecretKind::Key,
+            0,
+            &crate::SharedOptions::default(),
+        )
     }
 
     /// [`Mnemo::compact_file`] with the lock layer's options: how long to
@@ -761,7 +820,13 @@ impl Mnemo {
         passphrase: &str,
         opts: crate::SharedOptions,
     ) -> Result<CompactReport> {
-        Self::compact_file_secret(path, passphrase.as_bytes(), 0, &opts)
+        Self::compact_file_secret(
+            path,
+            passphrase.as_bytes(),
+            SecretKind::Passphrase,
+            0,
+            &opts,
+        )
     }
 
     /// [`Mnemo::compact_file_waiting`] for a raw-key database.
@@ -770,12 +835,13 @@ impl Mnemo {
         key: &[u8; crypto::KEY_LEN],
         opts: crate::SharedOptions,
     ) -> Result<CompactReport> {
-        Self::compact_file_secret(path, key, 0, &opts)
+        Self::compact_file_secret(path, key, SecretKind::Key, 0, &opts)
     }
 
     pub(super) fn compact_file_secret(
         path: &str,
         secret: &[u8],
+        kind: SecretKind,
         format_version: u16,
         opts: &crate::SharedOptions,
     ) -> Result<CompactReport> {
@@ -792,7 +858,16 @@ impl Mnemo {
         // this file is running, so temp files left by dead ones can go.
         remove_dead_compaction_temps(&real);
         let dims = old.dimensions;
-        let kdf = old.kdf;
+        // 12.3 (the keys note, section 1, rule 6): never lower the
+        // parameters, and raise a passphrase file that's below the floor.
+        let kdf = if kind == SecretKind::Passphrase && old.kdf.below_passphrase_floor() {
+            old.kdf.for_passphrase()
+        } else {
+            old.kdf
+        };
+        // 12.3 (the salt rule): the new file keeps the salt, so whatever
+        // found the secret for the old file (a keychain entry) finds it.
+        let salt = old.header.salt;
         let config = MnemoConfig {
             dimensions: dims,
             kdf,
@@ -804,7 +879,7 @@ impl Mnemo {
             ..Default::default()
         };
         // v0.14.0 step 1: a new file under a name no other compaction shares.
-        let (tmp, new) = create_temp(&real, "compact", secret, config)?;
+        let (tmp, new) = create_temp(&real, "compact", secret, kind, config, Some(salt))?;
         // Created owner-only; it keeps the old file's mode.
         if let Err(e) = copy_mode(old.pager.file(), new.pager.file()) {
             drop(new);
@@ -1009,10 +1084,16 @@ pub(super) fn scrub_bytes(file: &mut std::fs::File, needle: &[u8]) -> Result<usi
 /// that lock for as long as its temp file exists. Off Unix no process
 /// check is available, so nothing is removed.
 pub(crate) fn remove_dead_compaction_temps(brain: &Path) -> usize {
+    remove_dead_temps(brain, "compact")
+}
+
+/// [`remove_dead_compaction_temps`] for the temps of another operation
+/// (`what`, as [`temp_sibling`] names them): 12.3's `init` uses "init".
+pub(crate) fn remove_dead_temps(brain: &Path, what: &str) -> usize {
     let (Some(dir), Some(name)) = (brain.parent(), brain.file_name()) else {
         return 0;
     };
-    let prefix = format!("{}.compact-", name.to_string_lossy());
+    let prefix = format!("{}.{what}-", name.to_string_lossy());
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -1070,19 +1151,25 @@ fn dead_temp_pid(name: &str, prefix: &str) -> Option<u32> {
     pid.parse().ok()
 }
 
+/// The phrase REKEY-1's one exception carries; `mnemo rekey` and
+/// [`crate::keys::rekey_stored`] look for it.
+const EITHER_SECRET: &str = "may open with either secret";
+
 /// A new, locked temp file next to `dest` (`Create::New`, so nothing already
 /// at the name, a symlink included, is ever written through), under a fresh
 /// name for each attempt while names are taken. RB-006.10.
-fn create_temp(
+pub(crate) fn create_temp(
     dest: &Path,
     what: &str,
     secret: &[u8],
+    kind: SecretKind,
     config: MnemoConfig,
+    salt: Option<[u8; crypto::SALT_LEN]>,
 ) -> Result<(PathBuf, Mnemo)> {
     let mut attempt = 0;
     loop {
         let tmp = temp_sibling(dest, what);
-        match Mnemo::create_secret_new(&tmp, secret, config) {
+        match Mnemo::create_secret_new(&tmp, secret, kind, config, salt) {
             Ok(new) => return Ok((tmp, new)),
             Err(e) if is_name_taken(&e) && attempt + 1 < TEMP_NAME_ATTEMPTS => attempt += 1,
             Err(e) => return Err(e),

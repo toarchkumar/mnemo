@@ -93,6 +93,69 @@ impl Default for KdfParams {
     }
 }
 
+/// 12.3 (the keys note, section 1): the memory cost below which parameters
+/// are the raw-key kind. [`KdfParams::raw_key`] is below it, and
+/// [`KdfParams::fast`] sits exactly on it, so the tests' parameters stay
+/// allowed with a passphrase.
+const PASSPHRASE_FLOOR_M_COST: u32 = 512;
+
+impl KdfParams {
+    /// 12.3: the parameters a passphrase gets when a file had `self`: for
+    /// each cost, the larger of `self`'s and [`KdfParams::secure`]'s. Every
+    /// surface that rekeys to a passphrase uses it, so a passphrase never
+    /// lands on weaker parameters than a file already had, nor below
+    /// `secure()`.
+    pub fn for_passphrase(self) -> Self {
+        let s = Self::secure();
+        Self {
+            m_cost: self.m_cost.max(s.m_cost),
+            t_cost: self.t_cost.max(s.t_cost),
+            p_cost: self.p_cost.max(s.p_cost),
+        }
+    }
+
+    /// 12.3: whether these are raw-key parameters, too light for a human
+    /// passphrase ([`KdfParams::raw_key`] is; [`KdfParams::fast`] isn't).
+    /// The engine refuses a passphrase with them, and a file a passphrase
+    /// opens with them is reported.
+    pub fn below_passphrase_floor(&self) -> bool {
+        self.m_cost < PASSPHRASE_FLOOR_M_COST
+    }
+
+    /// 12.3: at or above the floor but below [`KdfParams::secure`]'s memory
+    /// cost: test-grade parameters, such as [`KdfParams::fast`].
+    pub fn is_test_grade(&self) -> bool {
+        !self.below_passphrase_floor() && self.m_cost < Self::secure().m_cost
+    }
+}
+
+/// 12.3: a rekey's hook, given the new salt before anything is written.
+pub(crate) type SaltHook<'a> = dyn FnMut(&[u8; SALT_LEN]) -> Result<()> + 'a;
+
+/// 12.3: what kind of secret a caller handed the engine. A passphrase is a
+/// person's; a key is a uniformly random 256-bit value a machine made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecretKind {
+    /// A passphrase a person chose.
+    Passphrase,
+    /// A raw 256-bit key.
+    Key,
+}
+
+/// 12.3 (the keys note, section 1, rule 2): refuse a passphrase with
+/// raw-key parameters. Called where every create and rekey path meets.
+pub(crate) fn check_kdf_for(kind: SecretKind, kdf: KdfParams) -> Result<()> {
+    if kind == SecretKind::Passphrase && kdf.below_passphrase_floor() {
+        return Err(MnemoError::Invalid(format!(
+            "these KDF parameters ({} KiB, {} pass) are for a raw 256-bit key, not a \
+             passphrase; use create_with_key or rekey_with_key for a key, or \
+             KdfParams::secure() for a passphrase",
+            kdf.m_cost, kdf.t_cost
+        )));
+    }
+    Ok(())
+}
+
 /// Derive the key-encryption-key (KEK) from a passphrase using Argon2id.
 pub fn derive_kek(
     passphrase: &[u8],
