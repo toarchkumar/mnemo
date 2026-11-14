@@ -54,6 +54,7 @@ impl CancelToken {
 
 /// One call's deadline, its cancel token, and the backoff between tries.
 pub(crate) struct Call {
+    started: Instant,
     deadline: Instant,
     cancel: Option<CancelToken>,
     sleep: Duration,
@@ -67,6 +68,33 @@ pub(crate) struct Call {
 const FIRST_SLEEP: Duration = Duration::from_millis(1);
 const LONGEST_SLEEP: Duration = Duration::from_millis(50);
 
+/// Step 5's alternative shape ("short sleeps while a wait is young"): 1 to
+/// 2 ms sleeps for the first `YOUNG_FOR` of a wait, then doubling from
+/// `YOUNG_THEN`. Selected for benchmarking only, through
+/// `MNEMO_DEV_BACKOFF=young` in a `dev-hooks` build.
+const YOUNG_FOR: Duration = Duration::from_millis(15);
+const YOUNG_THEN: Duration = Duration::from_millis(2);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Doubling,
+    Young,
+}
+
+#[cfg(feature = "dev-hooks")]
+fn backoff_shape() -> Shape {
+    static SHAPE: std::sync::OnceLock<Shape> = std::sync::OnceLock::new();
+    *SHAPE.get_or_init(|| match std::env::var("MNEMO_DEV_BACKOFF").as_deref() {
+        Ok("young") => Shape::Young,
+        _ => Shape::Doubling,
+    })
+}
+
+#[cfg(not(feature = "dev-hooks"))]
+fn backoff_shape() -> Shape {
+    Shape::Doubling
+}
+
 /// The latest deadline a call gets: a longer one (`Duration::MAX`, say) is
 /// clamped to it rather than overflowing the clock.
 const LONGEST_DEADLINE: Duration = Duration::from_secs(100 * 365 * 24 * 3600);
@@ -79,6 +107,7 @@ impl Call {
             .or_else(|| now.checked_add(Duration::from_secs(24 * 3600)))
             .unwrap_or(now);
         Call {
+            started: now,
             deadline,
             cancel: cancel.cloned(),
             sleep: FIRST_SLEEP,
@@ -108,10 +137,17 @@ impl Call {
         if now >= self.deadline {
             return Ok(false);
         }
+        let young = backoff_shape() == Shape::Young && now - self.started < YOUNG_FOR;
         let jittered = {
             use rand::Rng;
-            let ms = self.sleep.as_secs_f64() * 1000.0;
-            Duration::from_secs_f64(rand::thread_rng().gen_range(ms / 2.0..=ms) / 1000.0)
+            // Step 5's alternative: 1 to 2 ms sleeps while the wait is young.
+            let (lo, hi) = if young {
+                (1.0, 2.0)
+            } else {
+                let ms = self.sleep.as_secs_f64() * 1000.0;
+                (ms / 2.0, ms)
+            };
+            Duration::from_secs_f64(rand::thread_rng().gen_range(lo..=hi) / 1000.0)
         };
         let d = jittered.min(self.deadline - now);
         let cancelled = match &self.cancel {
@@ -123,6 +159,10 @@ impl Call {
         };
         if cancelled {
             return Err(MnemoError::Cancelled);
+        }
+        if young {
+            self.sleep = YOUNG_THEN;
+            return Ok(Instant::now() < self.deadline);
         }
         self.sleep = (self.sleep * 2).min(LONGEST_SLEEP);
         Ok(Instant::now() < self.deadline)

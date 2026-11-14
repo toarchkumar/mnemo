@@ -242,6 +242,15 @@ const fn polyval_backend_name() -> &'static str {
     }
 }
 
+/// **Not a stable API** (`dev-hooks` builds only): how many `sync_all`
+/// calls this thread has made, for step 5's bench to count a write's
+/// fsyncs.
+#[cfg(feature = "dev-hooks")]
+#[doc(hidden)]
+pub fn __fsync_count() -> u64 {
+    fsync_count()
+}
+
 /// Test-only crash-injection surface used by the Phase 1.3 proptest
 /// (`mnemo/tests/proptest_store.rs`). Compiled in under `cfg(test)`
 /// and the `failpoints` feature only; absent from release builds.
