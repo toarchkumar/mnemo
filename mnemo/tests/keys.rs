@@ -469,8 +469,9 @@ fn a_read_back_that_doesnt_match_stops_before_the_commit() {
     let store = MemStore::default();
     store.corrupt_reads.set(true);
     let new = Secret::Key(Zeroizing::new(Mnemo::generate_key()));
-    let mut db = Mnemo::open_with_key(&p, &key).unwrap();
+    // Read before the open: Windows' lock refuses a second reader.
     let s0 = salt(&p);
+    let mut db = Mnemo::open_with_key(&p, &key).unwrap();
     let e = keys::rekey_stored(&mut db, &new, &store, "b", &mut || Ok(())).unwrap_err();
     assert!(e.to_string().contains("didn't give back"), "{e}");
     drop(db);
