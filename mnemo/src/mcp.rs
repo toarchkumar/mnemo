@@ -520,7 +520,8 @@ fn tools_list() -> Value {
                         "ttl_secs": { "type": "integer" },
                         "shared": { "type": "boolean" },
                         "metadata": { "type": "object" },
-                        "key": { "type": "string", "description": "Phase 12.1 upsert slot name. A later `remember` with the same `key` + agent scope supersedes the prior record; an identical re-write is a no-op. Use this for any fact that replaces an earlier one." }
+                        "key": { "type": "string", "description": "Phase 12.1 upsert slot name. A later `remember` with the same `key` + agent scope supersedes the prior record; an identical re-write is a no-op. Use this for any fact that replaces an earlier one." },
+                        "supersedes": { "type": "string", "description": "With `key` only (v0.15): the id of a memory written without a key, which this write adopts as the key's first version and supersedes. It stops showing in recall and stays in the key's history. Use it to put an old unkeyed fact under a key." }
                     },
                     "additionalProperties": false
                 }
@@ -1122,20 +1123,44 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
     // (supersede / no-op / add); otherwise keep the pre-12.1
     // single-id return shape (now carrying `outcome: "inserted"` so
     // callers can distinguish it from the keyed outcomes).
+    // v0.15 (12.3 step 5b): `supersedes` names a memory written without a
+    // key, which the keyed write adopts as its first version.
+    let supersedes = match args.get("supersedes") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let s = v.as_str().ok_or_else(|| {
+                RpcError::new(INVALID_PARAMS, "remember: 'supersedes' must be a memory id")
+            })?;
+            Some(crate::Ulid::from_string(s).map_err(|_| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("remember: 'supersedes' is not a memory id: {s}"),
+                )
+            })?)
+        }
+    };
     match args.get("key").and_then(|v| v.as_str()) {
+        None if supersedes.is_some() => Err(RpcError::new(
+            INVALID_PARAMS,
+            "remember: 'supersedes' needs 'key'",
+        )),
         None => {
             let id = db.remember(mem).map_err(mnemo_err)?;
             db.flush().map_err(mnemo_err)?;
             Ok(json!({ "id": id.to_string(), "outcome": "inserted" }).to_string())
         }
         Some(k) => {
-            let (id, outcome) = db.remember_keyed(mem, k).map_err(mnemo_err)?;
+            let (id, outcome) = match &supersedes {
+                Some(old) => db.remember_keyed_superseding(mem, k, old),
+                None => db.remember_keyed(mem, k),
+            }
+            .map_err(mnemo_err)?;
             db.flush().map_err(mnemo_err)?;
             let outcome_str = match outcome {
                 crate::WriteOutcome::Added => "added",
                 crate::WriteOutcome::Superseded => "superseded",
                 crate::WriteOutcome::Unchanged => "unchanged",
-                crate::WriteOutcome::Updated => "superseded",
+                crate::WriteOutcome::Updated => "updated",
             };
             Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
         }

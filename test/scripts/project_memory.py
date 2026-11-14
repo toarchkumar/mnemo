@@ -216,6 +216,10 @@ def cmd_remember(args: argparse.Namespace) -> None:
         importance=args.importance,
         metadata=json.loads(args.metadata) if args.metadata else None,
         key=args.key,
+        # v0.15 (12.3 step 5b): adopt an unkeyed memory as the key's first
+        # version and supersede it; only passed when given, so an older
+        # wheel without the argument still takes plain writes.
+        **({"supersedes": args.supersedes} if args.supersedes else {}),
     )
     db.flush()
     db.close()
@@ -435,6 +439,15 @@ def main() -> None:
             "Phase 12.1 upsert slot. A later `remember --key K` with new "
             "content supersedes the prior record; an identical re-write is "
             "a no-op. Omit for a plain insert."
+        ),
+    )
+    p_rem.add_argument(
+        "--supersedes",
+        metavar="ID",
+        help=(
+            "v0.15, with --key: the id of a memory written without a key. "
+            "This write adopts it as the key's first version and supersedes "
+            "it, so it stops showing in recall but stays in `history --key`."
         ),
     )
     p_rem.set_defaults(func=lambda a: cmd_remember_file(a) if a.from_file else cmd_remember(a))

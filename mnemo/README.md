@@ -895,6 +895,25 @@ When the wait runs out, the error names what holds the file if it left a
 note. A hook that only reads should pass `--wait 2s`; a hook that
 saves keeps the default.
 
+### Keyed facts: superseding instead of duplicating
+
+A fact that replaces an earlier one goes under a key: `mnemo remember
+--key fact.msrv ...` (`Mnemo::remember_keyed` in Rust, `remember(...,
+key=...)` in Python, `key` on the MCP `remember` tool). A later write under
+the same key supersedes the live record: the old one stops showing in
+recall and `about` but stays in `mnemo history --key fact.msrv`, and an
+identical write is a no-op.
+
+**A fact written without a key** can be put under one (v0.15): `mnemo
+remember --key fact.msrv --supersedes <id> ...`
+(`Mnemo::remember_keyed_superseding`, `supersedes=` in Python,
+`supersedes` on the MCP tool). The old memory becomes the key's first
+version and is superseded by the new one. When the new content matches it,
+it just takes the key (`updated`). It's refused for a memory that's
+deleted, already superseded or already keyed, for an engine record
+(threads, essence, the manifest), for another agent's or another scope's
+memory, and when the key already has a live record.
+
 ### Self-describing databases
 
 A `.mnemo` file should be able to introduce itself. The single-file philosophy
