@@ -209,7 +209,7 @@ fn a_writer_gets_in_against_eight_busy_readers() {
 }
 
 #[test]
-fn a_reader_holds_the_intent_lock_for_one_try_only() {
+fn readers_waiting_for_a_writer_keep_the_intent_lock() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
     let Some(mut a) = locks(&p, &opts(1000)) else {
@@ -227,8 +227,11 @@ fn a_reader_holds_the_intent_lock_for_one_try_only() {
         })
         .collect();
     std::thread::sleep(Duration::from_millis(100));
-    // While the readers wait for the main lock, the intent lock is free
-    // most of the time, so a second writer could queue.
+    // Step 5: while the readers wait for the writer's main lock they keep
+    // the intent lock shared, so a second writer can't queue ahead of them
+    // (before step 5 they let it go after one try and starved behind
+    // writers). The busy-readers test above still shows a writer gets in
+    // against readers that hold only the main lock.
     let mut free_samples = 0;
     for _ in 0..50 {
         if free(&intent) {
@@ -237,8 +240,8 @@ fn a_reader_holds_the_intent_lock_for_one_try_only() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        free_samples > 25,
-        "the intent lock was free {free_samples} times of 50"
+        free_samples < 5,
+        "the intent lock was free {free_samples} times of 50 while readers waited"
     );
     drop(held);
     for r in readers {
@@ -522,4 +525,51 @@ mod unix {
         let f = tempfile::NamedTempFile::new().unwrap();
         f.as_file().metadata().unwrap().uid() == 0
     }
+}
+
+/// Step 5: a reader isn't starved by a writer that takes the lock back to
+/// back. While a writer holds the main lock, a waiting reader keeps the
+/// intent lock shared, so the writer's next call queues behind it.
+#[test]
+fn a_reader_gets_in_against_a_writer_looping_back_to_back() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path());
+    if locks(&p, &opts(1000)).is_none() {
+        return;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let (p, stop) = (p.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let mut w = Locks::new(&p, &opts(10_000)).unwrap();
+            let mut n = 0u32;
+            while !stop.load(Ordering::Relaxed) {
+                let held = w.exclusive(&opts(10_000)).unwrap();
+                // A commit's worth of holding.
+                std::thread::sleep(Duration::from_millis(5));
+                drop(held);
+                n += 1;
+            }
+            n
+        })
+    };
+    std::thread::sleep(Duration::from_millis(50));
+    let mut r = Locks::new(&p, &opts(2000)).unwrap();
+    let start = Instant::now();
+    let mut reads = 0u32;
+    while start.elapsed() < Duration::from_secs(2) {
+        let held = r
+            .shared(&opts(2000))
+            .expect("a reader waits at most its deadline");
+        drop(held);
+        reads += 1;
+    }
+    stop.store(true, Ordering::Relaxed);
+    let writes = writer.join().unwrap();
+    eprintln!("{reads} reads and {writes} writes in 2 s");
+    assert!(reads >= 20, "the reader was starved: {reads} reads in 2 s");
+    assert!(
+        writes >= 20,
+        "the writer was starved: {writes} writes in 2 s"
+    );
 }

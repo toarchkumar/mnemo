@@ -153,9 +153,18 @@ impl BrainLocks {
     }
 
     /// Take the main lock for one call, within the call's deadline, unless
-    /// cancelled. Writers queue on the intent lock; a reader takes the
-    /// intent lock shared for one try at the main lock and releases it
-    /// whether or not it got in.
+    /// cancelled. Writers queue on the intent lock: a writer holds it
+    /// exclusively while it waits for the main lock, so new readers queue
+    /// behind it and busy readers can't starve it.
+    ///
+    /// A reader takes the intent lock shared and tries the main lock. When
+    /// the main lock is free or held shared, it gets in (RB-006.4 rec. 1).
+    /// When the main lock is held exclusively (a shared try fails only
+    /// then), the reader **keeps** the intent lock shared while it waits
+    /// for that writer (since step 5): the next writer can't take the intent
+    /// lock and queues behind the waiting readers, which get in together
+    /// when the commit ends. Writers and batches of readers alternate, so a
+    /// writer committing back to back can't starve readers either.
     ///
     /// One [`Call`] covers every lock a shared handle's window takes, so a
     /// read that has to take the exclusive lock to heal the file still
@@ -206,11 +215,14 @@ impl BrainLocks {
                     }
                     Main::Busy => {}
                 }
-                if kind == LockKind::Shared || intent.is_none() {
+                if intent.is_none() {
                     break;
                 }
                 // A writer keeps the intent lock while it waits, so new
-                // readers queue behind it.
+                // readers queue behind it. A reader keeps it too, shared,
+                // while a writer holds the main lock (the only time its
+                // shared try fails), so the next writer queues behind it
+                // (step 5; before, readers let it go and starved).
                 self.wait(call)?;
             }
             drop(intent);

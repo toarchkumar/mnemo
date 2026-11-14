@@ -155,6 +155,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `mnemo rekey --rotate`) gives the new file the old file's mode, so a brain
   made group-readable on purpose stays so; an existing file's mode is never
   changed.
+- **Shared mode: readers waiting for a writer keep their place** (v0.14.0
+  step 5). A reader that finds a writer committing now keeps the intent lock
+  while it waits, so the next writer queues behind it. Before, a writer
+  committing back to back kept readers out for seconds at a time (a p99 wait
+  of 4 to 8.5 s in the bench). Readers now wait under 1 ms at the 99th
+  percentile; the cost moves to a writer against readers looping back to
+  back, which slows to under one commit a second but still commits within
+  its deadline. `docs/shared-mode.md` has the measured limits.
 
 ### Fixed
 
