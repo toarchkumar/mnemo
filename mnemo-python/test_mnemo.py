@@ -1574,6 +1574,41 @@ def test_query_fn_and_hybrid_recall_text():
     print("ok  query_fn + query_convention + hybrid recall_text (v0.15)")
 
 
+def test_remember_supersedes_a_named_memory():
+    """v0.15 (12.3 step 5b): `remember(..., key=, supersedes=)` puts an
+    unkeyed memory under the key as its first version and supersedes it."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "t.mnemo"), "pw", dimensions=4)
+        old = db.remember("Rust MSRV is 1.75", "semantic", [1.0, 0.5, 0.0, 0.0])
+        try:
+            db.remember("x", "semantic", [1.0, 0.0, 0.0, 0.0], supersedes=old)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("supersedes= without key= should raise ValueError")
+        r = db.remember("The MSRV is 1.92", "semantic", [0.5, 1.0, 0.0, 0.0],
+                        key="fact.msrv", supersedes=old)
+        assert r["outcome"] == "superseded", r
+        hist = [m["content"] for m in db.history("fact.msrv")]
+        assert hist == ["The MSRV is 1.92", "Rust MSRV is 1.75"], hist
+        hits = db.recall([], keywords="MSRV", track_access=False)
+        assert [h["content"] for h in hits] == ["The MSRV is 1.92"], hits
+        # The text path, and matching content adopts the old record as is.
+        db.set_embedder(lambda texts: [[1.0, 0.25, 0.0, 0.0] for _ in texts],
+                        name="flat", dimensions=4)
+        old2 = db.remember_text("format v9", "semantic")
+        r = db.remember_text("format v9", "semantic", key="fact.format", supersedes=old2)
+        assert r == {"id": old2, "outcome": "updated"}, r
+        try:
+            db.remember_text("again", "semantic", key="fact.other", supersedes=old)
+        except RuntimeError as e:
+            assert "already superseded" in str(e), e
+        else:
+            raise AssertionError("an already superseded memory should be refused")
+        db.close()
+    print("ok  remember(key=, supersedes=) adopts a named memory (v0.15)")
+
+
 # --- 12.4 shared mode (v0.14.0 step 4a) --------------------------------------
 
 def _shared_file(d, n=0):
@@ -1874,6 +1909,7 @@ if __name__ == "__main__":
     test_turn_compression_knob_on_v9()
     test_recall_text_keywords_and_vector_cache_budget()
     test_query_fn_and_hybrid_recall_text()
+    test_remember_supersedes_a_named_memory()
     test_shared_handles_see_each_others_writes()
     test_shared_handle_waits_for_a_plain_one_then_raises_locked()
     test_shared_mode_exception_types()

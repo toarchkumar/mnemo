@@ -270,3 +270,37 @@ fn write_the_tok1_fixture() {
         Some(KeywordTokenizer::V1)
     );
 }
+
+/// 12.3 step 5b: a file holding a record adopted by
+/// `remember_keyed_superseding` reads under v0.14.0: the old record is out
+/// of recall, and the key's history lists both.
+#[test]
+fn an_adopted_record_reads_under_v0_14_0() {
+    let Some(bin) = old_bin() else { return };
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("adopted.mnemo");
+    {
+        let mut db = Mnemo::create(&p, PASS, cfg()).unwrap();
+        let old = db.remember(mem("the brain is on format v8", 0)).unwrap();
+        db.remember_keyed_superseding(mem("the brain is on format v9", 1), "fact.format", &old)
+            .unwrap();
+        db.flush().unwrap();
+    }
+    let ps = p.to_str().unwrap();
+    let out = run_old(
+        &bin,
+        PASS,
+        &["recall", ps, "--keywords", "brain format", "--no-track"],
+    );
+    assert!(out.contains("format v9"), "{out}");
+    assert!(
+        !out.contains("format v8"),
+        "the adopted record showed in v0.14.0's recall: {out}"
+    );
+    let out = run_old(&bin, PASS, &["history", ps, "--key", "fact.format"]);
+    assert!(
+        out.contains("format v9") && out.contains("format v8"),
+        "{out}"
+    );
+    run_old(&bin, PASS, &["verify", ps]);
+}

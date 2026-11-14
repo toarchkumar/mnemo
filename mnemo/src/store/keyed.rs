@@ -133,6 +133,164 @@ impl Mnemo {
         Ok((new_id, WriteOutcome::Added))
     }
 
+    /// 12.3 step 5b (v0.15): a keyed write that **adopts a named, unkeyed
+    /// memory as the key's first version, then supersedes it**. Use it to
+    /// put a fact that was written without a key under one, so the old
+    /// version stops showing in recall without being deleted.
+    ///
+    /// The old record (`supersedes`) takes the key (`_mnemo.key`) and is
+    /// marked `_mnemo.superseded_by` and `_mnemo.invalid_at`; the new record
+    /// gets `_mnemo.supersedes = <old id>`. [`Mnemo::history`] then lists the
+    /// old record as the oldest version, and recall and `about` leave it out,
+    /// as for any superseded record. No format change: these are the keyed
+    /// path's own `_mnemo.*` keys, which older builds carry through.
+    ///
+    /// **When the new content matches the old record's** user-visible fields
+    /// (the identical-write rule of [`Mnemo::remember_keyed`]), no new record
+    /// is written: the old one takes the key and becomes the slot's live
+    /// record, and the outcome is [`WriteOutcome::Updated`] with its id.
+    ///
+    /// Refused with [`MnemoError::Invalid`] when the old id doesn't exist or
+    /// is deleted; is already superseded; already has a key (use the plain
+    /// keyed write); is an engine record (any `_mnemo.kind`, or the
+    /// manifest); isn't in the key's slot scope (the same agent's Private
+    /// memory for a Private write, a Shared one for a Shared write); or when
+    /// the slot already has a live record. [`MnemoError::ReadOnly`] on a
+    /// read-only handle.
+    pub fn remember_keyed_superseding(
+        &mut self,
+        mut memory: Memory,
+        key: &str,
+        supersedes: &Ulid,
+    ) -> Result<(Ulid, WriteOutcome)> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if key.is_empty() {
+            return Err(MnemoError::Invalid(
+                "remember_keyed_superseding: 'key' must not be empty".into(),
+            ));
+        }
+        if let Some(k) = memory
+            .metadata
+            .keys()
+            .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
+        {
+            return Err(super::crud::reserved_key_error(k));
+        }
+        self.ensure_key_caches()?;
+        let slot = Self::key_slot_for(&memory, key);
+        if self
+            .key_index
+            .as_ref()
+            .is_some_and(|k| k.contains_key(&slot))
+        {
+            return Err(MnemoError::Invalid(format!(
+                "supersedes: key {key:?} already has a live record; a named memory can only \
+                 become a key's first version (use the plain keyed write)"
+            )));
+        }
+        let bad = |why: &str| MnemoError::Invalid(format!("supersedes {supersedes}: {why}"));
+        let old_idx = self
+            .index
+            .get(supersedes.0, &self.catalog)
+            .ok_or_else(|| bad("no such memory"))?;
+        let old_entry = self.catalog[old_idx].clone();
+        if old_entry.deleted {
+            return Err(bad("the memory is deleted"));
+        }
+        let mut old = self.read_memory(&old_entry)?;
+        if old.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)
+            || self
+                .superseded
+                .as_ref()
+                .is_some_and(|s| s.contains(&supersedes.0))
+        {
+            return Err(bad("it is already superseded"));
+        }
+        if old.metadata.contains_key(MNEMO_META_KEY) {
+            return Err(bad(
+                "it already has a key; use the plain keyed write with that key",
+            ));
+        }
+        if old.metadata.contains_key(MNEMO_META_KIND) || is_manifest(&old) {
+            return Err(bad(
+                "it is an engine record (a thread, essence or the manifest)",
+            ));
+        }
+        if Self::key_slot_for(&old, key) != slot {
+            return Err(bad(
+                "it isn't in this key's scope (a Private write takes this agent's Private \
+                 memory, a Shared write a Shared one)",
+            ));
+        }
+        memory
+            .metadata
+            .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
+        old.metadata
+            .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
+        if Self::is_identical_keyed_write(&memory, &old) {
+            // Adopt the old record as the slot's live record.
+            self.put(old)?;
+            if let Some(k) = self.key_index.as_mut() {
+                k.insert(slot, supersedes.0);
+            }
+            return Ok((*supersedes, WriteOutcome::Updated));
+        }
+        let now = memory::now_secs();
+        memory.id = Ulid::nil();
+        memory.metadata.insert(
+            MNEMO_META_SUPERSEDES.into(),
+            Value::String(supersedes.to_string()),
+        );
+        let new_id = self.put(memory)?;
+        old.metadata.insert(
+            MNEMO_META_SUPERSEDED_BY.into(),
+            Value::String(new_id.to_string()),
+        );
+        old.metadata
+            .insert(MNEMO_META_INVALID_AT.into(), Value::Number(now.into()));
+        self.put(old)?;
+        if let Some(k) = self.key_index.as_mut() {
+            k.insert(slot, new_id.0);
+        }
+        if let Some(s) = self.superseded.as_mut() {
+            s.insert(supersedes.0);
+        }
+        Ok((new_id, WriteOutcome::Superseded))
+    }
+
+    /// [`Mnemo::remember_keyed_superseding`] with `content` embedded by the
+    /// registered embedder (the document side).
+    pub fn remember_keyed_text_superseding(
+        &mut self,
+        content: &str,
+        memory_type: MemoryType,
+        key: &str,
+        supersedes: &Ulid,
+    ) -> Result<(Ulid, WriteOutcome)> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let embedder = self.embedder.as_ref().ok_or_else(|| {
+            MnemoError::Invalid(
+                "no embedder registered on this handle; call set_embedder first".into(),
+            )
+        })?;
+        let mut vectors = embedder.embed(&[content])?;
+        let vector = vectors.pop().ok_or_else(|| {
+            MnemoError::Invalid("embedder returned no vector for the input text".into())
+        })?;
+        if vector.len() != self.dimensions {
+            return Err(MnemoError::DimensionMismatch {
+                expected: self.dimensions,
+                got: vector.len(),
+            });
+        }
+        let memory = Memory::new(content.to_string(), memory_type, vector);
+        self.remember_keyed_superseding(memory, key, supersedes)
+    }
+
     /// Text-side keyed write: embed `content` through the registered
     /// embedder, then [`Mnemo::remember_keyed`]. Same returns.
     pub fn remember_keyed_text(

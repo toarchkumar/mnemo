@@ -83,6 +83,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
     neither. One-argument callables work as before.
   - `mcp::EmbedSpec` and `serve_stdio_with_spec` / `serve_with_streams_spec`
     carry the convention to the MCP server; the tuple functions still work.
+- **A keyed write that supersedes a named memory (12.3 step 5b):**
+  `Mnemo::remember_keyed_superseding` (and `remember_keyed_text_superseding`),
+  `mnemo remember --key K --supersedes <id>`, Python's `supersedes=` on
+  `remember` and `remember_text`, and `supersedes` on the MCP `remember`
+  tool. A memory written without a key becomes the key's first version and
+  is superseded: out of recall, in `history`. Refused for a deleted,
+  superseded, keyed or engine record, another scope's memory, or a key that
+  already has a live record. No format change: v0.14 reads such a file,
+  with the old record out of its recall too.
 - **`mnemo reembed <file> --embed-cmd … --embed-name …`** and
   `Mnemo::reembed_file` (with `_with_key` and `_waiting`): embed every live
   memory again with a new embedder and record its identity. It's a

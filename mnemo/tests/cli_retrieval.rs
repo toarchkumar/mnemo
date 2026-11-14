@@ -397,3 +397,117 @@ fn the_mcp_recall_tool_queries_with_the_query_side_and_is_hybrid_by_default() {
         .collect();
     assert_eq!(kinds, vec!["document", "query", "query"]);
 }
+
+/// 12.3 step 5b: `mnemo remember --key K --supersedes <id>` puts an unkeyed
+/// memory under the key as its first version.
+#[test]
+fn remember_supersedes_a_named_memory() {
+    let env = setup();
+    let b = env.brain.to_str().unwrap();
+    let old = {
+        let mut db = Mnemo::open(&env.brain, PASS).unwrap();
+        let id = db
+            .remember(mnemo_engine::Memory::new(
+                "Rust MSRV is 1.75".to_string(),
+                mnemo_engine::MemoryType::Semantic,
+                vec![1.0, 0.5, 0.0, 0.0],
+            ))
+            .unwrap();
+        db.close().unwrap();
+        id.to_string()
+    };
+    let cmd = embed_cmd(&env, 4);
+    let out = ok(&mnemo(&[
+        "remember",
+        b,
+        "--text",
+        "The MSRV is 1.92",
+        "--key",
+        "fact.msrv",
+        "--supersedes",
+        &old,
+        "--embed-cmd",
+        &cmd,
+        "--embed-name",
+        "fake",
+    ]));
+    assert!(out.trim_end().ends_with("\tsuperseded"), "{out}");
+    let hist = ok(&mnemo(&[
+        "history",
+        b,
+        "--key",
+        "fact.msrv",
+        "--format",
+        "json",
+    ]));
+    assert!(
+        hist.contains("The MSRV is 1.92") && hist.contains("Rust MSRV is 1.75"),
+        "{hist}"
+    );
+    // A second try: the old one is already superseded, and the slot is live.
+    let out = mnemo(&[
+        "remember",
+        b,
+        "--text",
+        "again",
+        "--key",
+        "fact.other",
+        "--supersedes",
+        &old,
+        "--embed-cmd",
+        &cmd,
+        "--embed-name",
+        "fake",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already superseded"));
+    // --supersedes needs --key.
+    let out = mnemo(&[
+        "remember",
+        b,
+        "--text",
+        "x",
+        "--supersedes",
+        &old,
+        "--embed-cmd",
+        &cmd,
+        "--embed-name",
+        "fake",
+    ]);
+    assert!(!out.status.success());
+}
+
+/// The MCP `remember` tool takes `supersedes` with `key`.
+#[test]
+fn the_mcp_remember_tool_supersedes_a_named_memory() {
+    let env = setup();
+    let old = {
+        let mut db = Mnemo::open(&env.brain, PASS).unwrap();
+        let id = db
+            .remember(mnemo_engine::Memory::new(
+                "format v8".to_string(),
+                mnemo_engine::MemoryType::Semantic,
+                vec![1.0, 0.5, 0.0, 0.0],
+            ))
+            .unwrap();
+        db.close().unwrap();
+        id.to_string()
+    };
+    let r = mcp(
+        &env,
+        &[(
+            2,
+            "remember",
+            serde_json::json!({"content": "format v9", "memory_type": "semantic", "text": "format v9", "key": "fact.format", "supersedes": old}),
+        )],
+    );
+    assert_eq!(r[0]["outcome"], "superseded", "{}", r[0]);
+    let mut db = Mnemo::open_read_only(&env.brain, PASS).unwrap();
+    let h: Vec<String> = db
+        .history("fact.format", None)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.content)
+        .collect();
+    assert_eq!(h, ["format v9", "format v8"]);
+}

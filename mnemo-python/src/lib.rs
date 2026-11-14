@@ -710,6 +710,19 @@ fn memory_to_dict(py: Python<'_>, m: &Memory) -> PyResult<PyObject> {
     Ok(d.into_any().unbind())
 }
 
+/// v0.15 (12.3 step 5b): `supersedes=` needs `key=`, and is a memory id.
+fn parse_supersedes(key: &Option<String>, supersedes: Option<String>) -> PyResult<Option<Ulid>> {
+    match (key, supersedes) {
+        (_, None) => Ok(None),
+        (None, Some(_)) => Err(pyo3::exceptions::PyValueError::new_err(
+            "supersedes= needs key=: it puts a memory written without a key under one",
+        )),
+        (Some(_), Some(id)) => Ulid::from_string(&id).map(Some).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("supersedes: not a memory id: {e}"))
+        }),
+    }
+}
+
 // --- Embedder bridge (Phase 3 PR 10a) -----------------------------------
 
 /// Wraps a Python callable `fn(texts: list[str]) -> list[list[float]]`
@@ -959,9 +972,15 @@ impl Mnemo {
     /// `"added"`, `"superseded"`, `"unchanged"`. Without `key` the
     /// return value is still just the ULID string for backward
     /// compatibility.
+    ///
+    /// `supersedes` (v0.15, with `key` only): the id of an existing memory
+    /// written without a key, which this write adopts as the key's first
+    /// version and supersedes (it stops showing in recall but stays in
+    /// `history(key)`). If the new content matches it, no new record is
+    /// written: it takes the key, and the outcome is `"updated"`.
     #[pyo3(signature = (content, memory_type, vector, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None, key=None))]
+                        shared=false, metadata=None, key=None, supersedes=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember(
         &mut self,
@@ -976,6 +995,7 @@ impl Mnemo {
         shared: bool,
         metadata: Option<Bound<'_, PyDict>>,
         key: Option<String>,
+        supersedes: Option<String>,
     ) -> PyResult<PyObject> {
         let mut memory = Memory::new(content, parse_type(memory_type)?, vector);
         if let Some(a) = agent_id {
@@ -1000,13 +1020,17 @@ impl Mnemo {
                     .insert(k.extract::<String>()?, py_to_json(&v)?);
             }
         }
+        let supersedes = parse_supersedes(&key, supersedes)?;
         match key {
             None => {
                 let id = self.wr(|db| db.remember(memory))?;
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = self.wr(|db| db.remember_keyed(memory, &k))?;
+                let (id, outcome) = self.wr(|db| match &supersedes {
+                    Some(old) => db.remember_keyed_superseding(memory, &k, old),
+                    None => db.remember_keyed(memory, &k),
+                })?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;
@@ -1087,7 +1111,7 @@ impl Mnemo {
     /// vector width, or if the callback raised a Python exception.
     #[pyo3(signature = (content, memory_type, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None, key=None))]
+                        shared=false, metadata=None, key=None, supersedes=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember_text(
         slf: Py<Self>,
@@ -1101,6 +1125,7 @@ impl Mnemo {
         shared: bool,
         metadata: Option<Bound<'_, PyDict>>,
         key: Option<String>,
+        supersedes: Option<String>,
     ) -> PyResult<PyObject> {
         let mt = parse_type(memory_type)?;
         // PY-1 (R-001.11): take `slf: Py<Self>` instead of `&mut self` so
@@ -1147,6 +1172,7 @@ impl Mnemo {
                     .insert(k.extract::<String>()?, py_to_json(&v)?);
             }
         }
+        let supersedes = parse_supersedes(&key, supersedes)?;
         let mut s = slf.borrow_mut(py);
         match key {
             None => {
@@ -1154,7 +1180,10 @@ impl Mnemo {
                 Ok(id.to_string().into_py(py))
             }
             Some(k) => {
-                let (id, outcome) = s.wr(|db| db.remember_keyed(memory, &k))?;
+                let (id, outcome) = s.wr(|db| match &supersedes {
+                    Some(old) => db.remember_keyed_superseding(memory, &k, old),
+                    None => db.remember_keyed(memory, &k),
+                })?;
                 let out = PyDict::new_bound(py);
                 out.set_item("id", id.to_string())?;
                 out.set_item("outcome", write_outcome_str(outcome))?;

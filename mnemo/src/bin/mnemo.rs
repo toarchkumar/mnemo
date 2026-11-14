@@ -271,6 +271,12 @@ enum Command {
         /// plus one of `added`/`superseded`/`unchanged` on stdout.
         #[arg(long)]
         key: Option<String>,
+        /// v0.15 (with `--key`): the id of a memory written without a key,
+        /// which this write adopts as the key's first version and
+        /// supersedes: it stops showing in recall but stays in `mnemo
+        /// history --key`. Matching content adopts it as is (`updated`).
+        #[arg(long, requires = "key", value_name = "ID")]
+        supersedes: Option<String>,
         /// Embedder command. Shell-style quoted but **not** executed
         /// via a shell — e.g. `"python3 embedder.py"` or `"my-embed
         /// --model=foo"`. Protocol: child reads one JSON string per
@@ -2320,6 +2326,7 @@ fn run() -> std::result::Result<(), String> {
             agent,
             metadata,
             key,
+            supersedes,
             embed_cmd,
             embed_name,
             embed_normalize,
@@ -2413,16 +2420,22 @@ fn run() -> std::result::Result<(), String> {
                     println!("{id}");
                 }
                 Some(k) => {
-                    let (id, outcome) = db.remember_keyed(memory, &k).map_err(fmt)?;
+                    let (id, outcome) = match &supersedes {
+                        Some(old) => {
+                            let old = parse_ulid(old)?;
+                            db.remember_keyed_superseding(memory, &k, &old)
+                        }
+                        None => db.remember_keyed(memory, &k),
+                    }
+                    .map_err(fmt)?;
                     db.flush().map_err(fmt)?;
                     let outcome_str = match outcome {
                         mnemo_engine::WriteOutcome::Added => "added",
                         mnemo_engine::WriteOutcome::Superseded => "superseded",
                         mnemo_engine::WriteOutcome::Unchanged => "unchanged",
-                        // `Updated` isn't reachable on a keyed remember —
-                        // that's the `mnemo update` path. Treat it as
-                        // `superseded` so the enum match stays total.
-                        mnemo_engine::WriteOutcome::Updated => "superseded",
+                        // `Updated`: `--supersedes` adopted a memory with the
+                        // same content as the slot's live record.
+                        mnemo_engine::WriteOutcome::Updated => "updated",
                     };
                     println!("{id}\t{outcome_str}");
                 }

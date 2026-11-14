@@ -411,5 +411,14 @@
       "area": "conventions",
       "topic": "retrieval"
     }
+  },
+  {
+    "content": "SUPERSEDE A NAMED MEMORY (v0.15, 12.3 step 5b): a fact written without a key can be put under one so its old version stops showing in recall: mnemo remember --key K --supersedes <old id> (Rust remember_keyed_superseding, Python remember(..., key=, supersedes=), MCP remember's supersedes, project_memory.py remember --key K --supersedes ID). The old record takes _mnemo.key and is marked _mnemo.superseded_by and _mnemo.invalid_at; the new one gets _mnemo.supersedes, so history(K) lists the old one as the first version. Identical content adopts the old record as the live one (outcome updated). Refused for deleted, already superseded, already keyed, engine records (any _mnemo.kind, the manifest), another agent's or scope's memory, or a key with a live record. Write every durable fact under a key from the start (DOGFOOD-0 rule 3), so a later write supersedes it.",
+    "memory_type": "procedural",
+    "importance": 0.7,
+    "metadata": {
+      "area": "conventions",
+      "topic": "supersede"
+    }
   }
 ]
