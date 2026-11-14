@@ -8,6 +8,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-13
+
+Shared mode (12.4, steps 1 to 5): several processes, sessions and tools on
+one brain. `Mnemo::open_shared` in Rust, `shared=True` in Python and
+`mnemo serve --mcp --shared` take the lock for each call and hold nothing
+between calls; every CLI command waits for the lock (`--wait`), and so
+does compaction. Readers come first, and busy readers can hold a write past
+its deadline (`docs/shared-mode.md`, "How busy a file can get"). A write
+racing a compaction is no longer lost, a handle refuses to write to a file
+that was replaced, moved or removed at its path, and new brain files are
+created 0600. `MnemoError` is `#[non_exhaustive]`. The Swift and Android
+packages publish with this release, at 0.14.0 (shared mode isn't in them
+yet).
+
 ### Added
 
 - **The lock layer for 12.4's shared mode** (v0.14.0 step 2a; the design is
@@ -3798,7 +3812,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/toarchkumar/mnemo/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/toarchkumar/mnemo/compare/v0.12.3...v0.13.0
