@@ -329,6 +329,15 @@ impl BrainLocks {
             call.hurry();
             *valve = self.take_valve(call);
         }
+        // A reader past the threshold hurries too (LOCK-2 round 3): it has
+        // stopped deferring to the valve and queues on the intent lock, and
+        // with the doubling backoff (up to 50 ms) it almost never found the
+        // gap between hurried writers there (the macOS runner's 8-writer
+        // test). Once it holds the intent lock it keeps it, shared, until it
+        // gets the main lock (the inner loop), so readers come first again.
+        if kind == LockKind::Shared && !valve_off() && call.waited() >= valve_after() {
+            call.hurry();
+        }
         if call.back_off()? {
             Ok(())
         } else {
