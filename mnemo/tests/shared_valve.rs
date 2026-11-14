@@ -340,7 +340,7 @@ fn eight_writers_handing_on_the_valve_dont_starve_readers() {
     );
     // What LOCK-2 guarantees here is that reads get through and none waits
     // without bound, not a rate: with eight writers saving back to back on
-    // a slow machine a read can wait about 1.5 s (12.4 design note,
+    // a slow machine a read can wait up to about 2 s (12.4 design note,
     // "LOCK-2", the measurements). 5 s still catches starvation.
     assert!(n >= 3, "readers starved: {n} reads in 4 s");
     assert!(

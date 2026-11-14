@@ -114,7 +114,7 @@ process looping as fast as it can (`shared_v0_14_0` in
   v0.14: under 1 ms), because a reader holds back for waiting writers for up
   to 500 ms itself before it queues.
   With many writers saving back to back on a slow machine, a read can wait
-  about 1.5 s.
+  up to about 2 s.
 - **Mixing versions:** a v0.14 reader doesn't know the valve, so against
   v0.14 readers a write is only as bounded as in v0.14. Upgrade every tool
   that uses the file shared.
