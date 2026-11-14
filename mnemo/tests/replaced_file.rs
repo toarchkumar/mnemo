@@ -263,12 +263,14 @@ fn a_moved_or_removed_brain_says_so_and_a_copy_says_replaced() {
     back.close().unwrap();
     assert_eq!(count(&path), 3, "moved back, the handle's write commits");
 
-    // Replaced by a copy of itself: another file is at the path.
+    // Replaced by a copy of itself: another file is at the path. (The copy
+    // is made before the handle opens: on Windows a locked file can't be
+    // read.)
+    let copy = dir.path().join("copy.mnemo");
+    std::fs::copy(&path, &copy).unwrap();
     let mut db = Mnemo::open(&path, PW).unwrap();
     db.remember(Memory::new("lost", MemoryType::Semantic, vec![1.0, 0.0]))
         .unwrap();
-    let copy = dir.path().join("copy.mnemo");
-    std::fs::copy(&path, &copy).unwrap();
     if let Err(e) = std::fs::rename(&copy, &path) {
         if is_rename_refused(&MnemoError::Io(e)) {
             eprintln!("skipped: this toolchain's rename can't replace an open file");
