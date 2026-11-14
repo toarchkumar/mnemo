@@ -88,6 +88,7 @@ use essence::*;
 use load::*;
 pub(crate) use load::{is_file_at, is_lock_conflict};
 pub(crate) use maintenance::{create_temp, remove_dead_temps};
+pub(crate) use open::wal_header_salts;
 pub(crate) use records::plain_record;
 use records::*;
 pub use shared::SharedMnemo;

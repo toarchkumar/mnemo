@@ -103,6 +103,17 @@ jobs:
         working-directory: mnemo
         run: cargo test --features failpoints
 
+      # 12.3 step 2: the OS keychain (`keychain`). The round trip writes to
+      # the runner's own keychain, so it runs only here
+      # (`MNEMO_TEST_OS_KEYCHAIN`); Linux has no Secret Service on a session
+      # bus, so there it checks the "no keychain" path. The chain's tests
+      # run again with the feature on.
+      - name: cargo test (the OS keychain)
+        working-directory: mnemo
+        env:
+          MNEMO_TEST_OS_KEYCHAIN: "1"
+        run: cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
+
       - name: cargo clippy
         working-directory: mnemo
         # `benches` feature pulls criterion (and its rayon / half /
@@ -110,7 +121,7 @@ jobs:
         # MSRV to 1.80+; built here on stable so the Phase 6 benches
         # are compile-checked and linted on every PR. Mirrors what
         # `cargo bench --no-run --features benches` would check.
-        run: cargo clippy --all-targets --features failpoints,benches -- -D warnings
+        run: cargo clippy --all-targets --features failpoints,benches,keychain -- -D warnings
 
       # MOBILE-1a: the UniFFI binding crate (a non-default workspace member,
       # so the two steps above don't build it).
@@ -151,7 +162,8 @@ jobs:
         working-directory: mnemo
         # `--workspace`: every member (the engine, mnemo-node, mnemo-uniffi),
         # not only the root package.
-        run: cargo deny --workspace check
+        # 12.3: with the `keychain` feature, so its optional crates are checked.
+        run: cargo deny --workspace --features keychain check
 
       # HOOKS-1: the release builds (the CLI, mnemo-uniffi for the phones,
       # the Python wheel, mnemo-node) must resolve the engine without
@@ -201,7 +213,10 @@ jobs:
         # MSRV to 1.81. Benches aren't part of the shipped crate, so
         # their MSRV is pinned by whatever `rustc` the maintainer uses
         # to run them, not by this gate.
-        run: cargo build --lib --bins --tests --features failpoints
+        # 12.3: `--locked --features keychain`, so a lifted pin (the crates
+        # held in Cargo.lock for the keychain; see mnemo/Cargo.toml) fails
+        # here, and the vendored libdbus is compiled at the MSRV.
+        run: cargo build --locked --lib --bins --tests --features failpoints,keychain
 
       - name: cargo test (lib + integration only)
         working-directory: mnemo
@@ -242,7 +257,7 @@ jobs:
           MNEMO_EXPECT_SHARED_REFUSAL: "1"
         run: |
           rustc --version
-          cargo test --locked -p mnemo-engine --features failpoints --test replaced_file --test shared_lock
+          cargo test --locked -p mnemo-engine --features failpoints,keychain --test replaced_file --test shared_lock
 
   # --- Python bindings: build via maturin + run mnemo-python test_mnemo
   python:

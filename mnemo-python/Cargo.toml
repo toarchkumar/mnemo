@@ -46,6 +46,9 @@ serde_json = "1.0"
 # `--features dev-hooks`. The released wheels (release.yml) are built
 # without it, so they ignore the variable and have no failpoint.
 dev-hooks = ["mnemo_core/dev-hooks", "mnemo_core/failpoints"]
+# 12.3 step 2: the OS keychain, for `mnemo.open(path)` with no passphrase.
+# The released wheels (release.yml) turn it on.
+keychain = ["mnemo_core/keychain"]
 
 [profile.release]
 lto = true

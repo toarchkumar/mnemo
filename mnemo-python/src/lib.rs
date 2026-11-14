@@ -2800,10 +2800,13 @@ impl Session {
 ///
 /// `dimensions` is required only when creating; it is ignored for an existing
 /// file (the stored dimensionality wins).
-/// Open an existing database, or create one if `path` does not yet exist.
 ///
-/// `dimensions` is required only when creating; it is ignored for an existing
-/// file (the stored dimensionality wins).
+/// `passphrase=None` (12.3, v0.15) opens an existing file through the
+/// key-source chain, picked by the file's kind: `MNEMO_KEY`,
+/// `MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND` or the OS keychain for a key;
+/// `MNEMO_PASSPHRASE` or the keychain for a passphrase. It never prompts, and
+/// raises `ValueError` for a missing file (create one with `mnemo init`) or
+/// when no source has a secret. Works with `read_only` and `shared`.
 ///
 /// `read_only=True` opens the file with a shared OS lock and blocks every
 /// mutating call (raises `RuntimeError: operation requires a read-write
@@ -2827,13 +2830,13 @@ impl Session {
 /// `CancelToken`) lets another thread cancel a call that is waiting for
 /// the lock.
 #[pyfunction]
-#[pyo3(signature = (path, passphrase, dimensions=None, read_only=false, *,
+#[pyo3(signature = (path, passphrase=None, dimensions=None, read_only=false, *,
                     shared=false, wait=10.0, allow_network_fs=false, cancel=None))]
 #[allow(clippy::too_many_arguments)]
 fn open(
     py: Python<'_>,
     path: &str,
-    passphrase: &str,
+    passphrase: Option<&str>,
     dimensions: Option<usize>,
     read_only: bool,
     shared: bool,
@@ -2841,6 +2844,10 @@ fn open(
     allow_network_fs: bool,
     cancel: Option<CancelToken>,
 ) -> PyResult<Mnemo> {
+    // 12.3 step 2: no passphrase means the key-source chain.
+    let Some(passphrase) = passphrase else {
+        return open_through_chain(py, path, read_only, shared, wait, allow_network_fs, cancel);
+    };
     if shared {
         let opts = shared_options(read_only, wait, allow_network_fs, cancel)?;
         let (path_s, pp_s) = (path.to_string(), passphrase.to_string());
@@ -2900,6 +2907,89 @@ fn open(
         ) {
             e.write_unraisable_bound(py, None);
         }
+    }
+    Ok(Mnemo {
+        inner: Some(Handle::Plain(inner)),
+        path: path.to_string(),
+        batched_cache_flush: false,
+    })
+}
+
+/// Raise `msg` as a `UserWarning` (where warnings are errors, it goes to
+/// `sys.unraisablehook` and the call goes on).
+fn warn_user(py: Python<'_>, msg: &str) {
+    if let Err(e) = PyErr::warn_bound(
+        py,
+        &py.get_type_bound::<pyo3::exceptions::PyUserWarning>(),
+        msg,
+        1,
+    ) {
+        e.write_unraisable_bound(py, None);
+    }
+}
+
+/// 12.3 step 2: `open(path)` with no passphrase. The secret comes from the
+/// key-source chain, by the file's kind (`MNEMO_KEY`, `MNEMO_KEY_FILE`,
+/// `MNEMO_KEY_COMMAND` or the keychain for a key; `MNEMO_PASSPHRASE` or the
+/// keychain for a passphrase), never a prompt. The file must exist:
+/// creating with a generated key is `mnemo init`'s, where the recovery code
+/// can be shown safely.
+#[allow(clippy::too_many_arguments)]
+fn open_through_chain(
+    py: Python<'_>,
+    path: &str,
+    read_only: bool,
+    shared: bool,
+    wait: f64,
+    allow_network_fs: bool,
+    cancel: Option<CancelToken>,
+) -> PyResult<Mnemo> {
+    use mnemo_core::keys::{self, Resolution, Secret};
+    if !std::path::Path::new(path).exists() {
+        return Err(PyValueError::new_err(format!(
+            "{path} doesn't exist: create it with `mnemo init {path}` (a generated key, kept in \
+             the keychain), or pass a passphrase to create it here"
+        )));
+    }
+    let store = keys::default_store();
+    let found = match keys::resolve(path, store.as_deref(), keys::CLI_COMMAND_TIMEOUT)
+        .map_err(to_py)?
+    {
+        Resolution::Found(f) => f,
+        Resolution::NoSource { .. } => {
+            return Err(PyValueError::new_err(format!(
+                "no secret for {path}: pass a passphrase, set MNEMO_PASSPHRASE, MNEMO_KEY, \
+                 MNEMO_KEY_FILE or MNEMO_KEY_COMMAND, or keep its key in the keychain \
+                 (`mnemo init`, `mnemo unlock`)"
+            )))
+        }
+    };
+    for n in &found.notes {
+        warn_user(py, &format!("mnemo: {n}"));
+    }
+    let secret = found.secret;
+    if shared {
+        let opts = shared_options(read_only, wait, allow_network_fs, cancel)?;
+        let path_s = path.to_string();
+        let s = py
+            .allow_threads(move || match &secret {
+                Secret::Passphrase(p) => Core::open_shared(&path_s, p, opts),
+                Secret::Key(k) => Core::open_shared_with_key(&path_s, k, opts),
+            })
+            .map_err(to_py)?;
+        return shared_handle(py, path, s);
+    }
+    let path_s = path.to_string();
+    let inner = py
+        .allow_threads(move || match (&secret, read_only) {
+            (Secret::Passphrase(p), false) => Core::open(&path_s, p),
+            (Secret::Passphrase(p), true) => Core::open_read_only(&path_s, p),
+            (Secret::Key(k), false) => Core::open_with_key(&path_s, k),
+            (Secret::Key(k), true) => Core::open_read_only_with_key(&path_s, k),
+        })
+        .map_err(to_py)?;
+    for n in inner.notices() {
+        warn_user(py, &format!("mnemo: {n}"));
     }
     Ok(Mnemo {
         inner: Some(Handle::Plain(inner)),

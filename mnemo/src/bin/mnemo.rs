@@ -40,6 +40,24 @@ enum Command {
     /// By default a starter "scaffold" manifest memory is inserted so the
     /// new file is self-describing from birth (visible via `mnemo about`).
     /// Pass `--no-manifest` to skip it for an entirely empty file.
+    ///
+    /// With no passphrase source (`--passphrase`, `MNEMO_PASSPHRASE`,
+    /// `--ask-passphrase`), `init` generates a random 256-bit key and keeps
+    /// it in the OS keychain, so every tool opens the brain with nothing
+    /// typed. Its recovery code is shown once, at a terminal a person is at
+    /// (`mnemo recovery-code` shows it again). A generated-key `init`
+    /// refuses a path that already exists. With no keychain, it fails and
+    /// creates nothing: use `--ask-passphrase` or `--key-file`.
+    ///
+    /// What the keychain protects: it keeps the key out of config files,
+    /// dotfile repositories, backups, screen shares and shell history, and
+    /// away from other users of the machine. It doesn't keep it from
+    /// programs running as you: any of them can read the keychain entry or
+    /// run `mnemo recovery-code`. The recovery code is shown only to a
+    /// person at a terminal, so it doesn't land in an agent's transcript by
+    /// accident, but that isn't a barrier against a program that sets out
+    /// to read it. "The key no longer sits in plain text" is the whole
+    /// claim.
     Init {
         /// Path to the new `.mnemo` file.
         path: String,
@@ -61,6 +79,15 @@ enum Command {
         /// of keeping it in the keychain.
         #[arg(long, value_name = "PATH")]
         key_file: Option<String>,
+    },
+    /// Keep a brain's key in this machine's keychain, from its recovery code.
+    ///
+    /// The code is read from a prompt (no echo) at a terminal, or from stdin
+    /// (`... | mnemo unlock <file>`), never from the command line. A typo is
+    /// named by group; a code that doesn't open the file isn't stored.
+    Unlock {
+        /// Path to the `.mnemo` file.
+        path: String,
     },
     /// Show a brain's recovery code, from the key store.
     ///
@@ -94,6 +121,13 @@ enum Command {
     /// later writes. Use `--rotate` to revoke (after a suspected passphrase
     /// leak, say). Rotation can't erase old ciphertext that flash storage
     /// still holds in blocks it hasn't reused.
+    ///
+    /// `--new-key` keeps the new key in the keychain before the rekey
+    /// commits, and shows its recovery code first, at a terminal. No OS
+    /// keychain promises its write is on disk when it returns, so when the
+    /// code can't be shown (not a terminal, or an agent harness), `--new-key`
+    /// refuses unless `--new-key-file` also writes the key to a new file:
+    /// otherwise a power cut could leave the key nowhere.
     Rekey {
         /// Path to the `.mnemo` file.
         path: String,
@@ -113,6 +147,10 @@ enum Command {
         /// Also keep a new passphrase in the key store.
         #[arg(long, conflicts_with = "new_key")]
         store: bool,
+        /// With `--new-key`, also write the new key to this new file (mode
+        /// 0600).
+        #[arg(long, value_name = "PATH", requires = "new_key")]
+        new_key_file: Option<String>,
         /// Also rotate the data key: rekey, then compact, which rewrites the
         /// file under a fresh data key. The old passphrase then opens no
         /// copy of the file made from now on, and no earlier copy opens with
@@ -1617,15 +1655,21 @@ fn run() -> std::result::Result<(), String> {
                 format!("encrypted with a generated key, written to {kf} (mode 0600)")
             } else {
                 // 12.3: a generated key, kept in the key store.
-                let Some(store) = keys::default_store() else {
-                    return Err(format!(
-                        "no keychain is available here, so `mnemo init` can't keep a generated \
-                         key, and nothing was created. To protect {path} with a passphrase, as \
-                         v0.14 did: `mnemo init --ask-passphrase {path}` (or set \
+                let no_keychain = |why: String| {
+                    format!(
+                        "no keychain is available here{why}, so `mnemo init` can't keep a \
+                         generated key, and nothing was created. To protect {path} with a \
+                         passphrase, as v0.14 did: `mnemo init --ask-passphrase {path}` (or set \
                          MNEMO_PASSPHRASE). To write a generated key to a new file (mode 0600): \
                          `mnemo init --key-file <PATH> {path}`"
-                    ));
+                    )
                 };
+                let Some(store) = keys::default_store() else {
+                    return Err(no_keychain(String::new()));
+                };
+                store
+                    .check_available()
+                    .map_err(|e| no_keychain(format!(" ({e})")))?;
                 let label = path.clone();
                 let mut persist = |salt: &[u8; 16], key: &[u8; 32]| {
                     let entry = keys::StoredSecret::Key(zeroize::Zeroizing::new(*key));
@@ -1650,6 +1694,62 @@ fn run() -> std::result::Result<(), String> {
                 println!("  → run `mnemo about {path}` to view it");
                 println!("  → replace it with one that records your embedder and conventions");
             }
+        }
+        Command::Unlock { path } => {
+            use mnemo_engine::keys::{self, StoredSecret};
+            let nowhere = "there's nowhere to keep the key, so set MNEMO_KEY to the recovery \
+                           code, or use --key-file";
+            let store = keys::default_store()
+                .ok_or_else(|| format!("no keychain is available here; {nowhere}"))?;
+            store
+                .check_available()
+                .map_err(|e| format!("{e}; {nowhere}"))?;
+            let info = keys::file_info(&path).map_err(fmt)?;
+            // 12.3 (the keys note, section 5): from a prompt at a terminal,
+            // or from stdin; never from the command line.
+            let typed =
+                zeroize::Zeroizing::new(if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                    rpassword::prompt_password("Recovery code: ")
+                        .map_err(|e| format!("reading the recovery code: {e}"))?
+                } else {
+                    let mut line = String::new();
+                    std::io::Read::read_to_string(
+                        &mut std::io::Read::take(std::io::stdin(), 256),
+                        &mut line,
+                    )
+                    .map_err(|e| format!("reading the recovery code: {e}"))?;
+                    line.lines().next().unwrap_or("").to_string()
+                });
+            let key = keys::recovery::parse(&typed).map_err(|e| e.to_string())?;
+            if !info.kdf.below_passphrase_floor() {
+                return Err(format!(
+                    "{path} is protected by a passphrase, not a key, so a recovery code can't \
+                     open it; nothing was stored"
+                ));
+            }
+            if !Mnemo::key_opens(&path, &key).map_err(fmt)? {
+                return Err(format!(
+                    "that recovery code is well formed but doesn't open {path}; nothing was \
+                     stored"
+                ));
+            }
+            match store.get(&info.salt).map_err(fmt)? {
+                Some(StoredSecret::Key(k)) if *k == *key => {
+                    println!(
+                        "{path} is already unlocked on this machine ({})",
+                        store.describe()
+                    );
+                    return Ok(());
+                }
+                Some(_) => eprintln!(
+                    "note: {} had another entry for {path}, which doesn't open it; replacing it",
+                    store.describe()
+                ),
+                None => {}
+            }
+            keys::store_and_check(&*store, &info.salt, &StoredSecret::Key(key), &path)
+                .map_err(fmt)?;
+            println!("unlocked {path}: its key is in {}", store.describe());
         }
         Command::RecoveryCode { path } => {
             use mnemo_engine::keys::{self, StoredSecret};
@@ -1773,6 +1873,7 @@ fn run() -> std::result::Result<(), String> {
             new_passphrase: new,
             new_key,
             store: keep,
+            new_key_file,
             rotate,
         } => {
             use mnemo_engine::keys::{self, Secret};
@@ -1809,19 +1910,50 @@ fn run() -> std::result::Result<(), String> {
                 let Some(store) = keys::default_store() else {
                     return Err(
                         "--new-key and --store keep the new secret in a keychain, and none \
-                                is available here; nothing was changed"
+                         is available here; nothing was changed"
                             .into(),
                     );
                 };
+                store
+                    .check_available()
+                    .map_err(|e| format!("{e}; nothing was changed"))?;
+                // 12.3 (the keys note, section 4): no OS keychain promises its
+                // write is on disk when it returns, so a new key must also be
+                // shown or written to a file before the commit.
+                let refused = keys::display::refusal_reason();
+                if new_key && !store.durable() && refused.is_some() && new_key_file.is_none() {
+                    return Err(format!(
+                        "{} doesn't promise its write is on disk before the rekey commits, and \
+                         the new key's recovery code can't be shown here ({}); a power cut \
+                         could leave the key nowhere. Run it at a terminal of your own, or add \
+                         --new-key-file <PATH> to write the key to a new file too. Nothing was \
+                         changed",
+                        store.describe(),
+                        refused.unwrap_or_default()
+                    ));
+                }
+                if let Some(f) = &new_key_file {
+                    if std::fs::symlink_metadata(f).is_ok() {
+                        return Err(format!("{f} already exists; nothing was changed"));
+                    }
+                }
                 let mut before_commit = || -> Result<()> {
                     if let Secret::Key(k) = &new {
                         show_recovery_code(&path, k);
+                        if let Some(f) = &new_key_file {
+                            keys::write_new_key_file(f, k)?;
+                        }
                     }
                     Ok(())
                 };
                 match keys::rekey_stored(&mut db, &new, &*store, &path, &mut before_commit) {
                     Ok(note) => stored_note = Some(note),
                     Err(e) => {
+                        if e.new_secret_dropped {
+                            if let Some(f) = &new_key_file {
+                                let _ = std::fs::remove_file(f);
+                            }
+                        }
                         return Err(format!("{}; {}", not_changed(fmt(e.error)), e.entries));
                     }
                 }
@@ -2901,8 +3033,9 @@ fn run() -> std::result::Result<(), String> {
             if !mcp {
                 return Err("serve requires --mcp today (other transports may come later)".into());
             }
-            // The MCP server pulls `MNEMO_PASSPHRASE` itself — passing
-            // `passphrase()` here would open a TTY prompt and break the
+            // The MCP server finds its secret itself, through the key-source
+            // chain with no prompt (12.3) — passing `passphrase()` here would
+            // open a TTY prompt and break the
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let p = std::path::Path::new(&path);
             let embed_spec = match (embed_cmd, embed_name) {
@@ -3092,7 +3225,7 @@ fn fmt(e: mnemo_engine::MnemoError) -> String {
     if matches!(e, mnemo_engine::MnemoError::WrongPassphrase) {
         if let Some((src, next)) = SOURCE.get() {
             return match next {
-                Some(n) => format!("{e} (the secret came from {src}; {n} is also set, and is used once {src} isn't)"),
+                Some(n) => format!("{e} (the secret came from {src}; without it, {n} comes next)"),
                 None => format!("{e} (the secret came from {src})"),
             };
         }

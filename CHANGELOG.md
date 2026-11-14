@@ -34,8 +34,26 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - `mnemo_engine::keys`: the recovery code, the key-store trait, the chain,
   and the generated-key and stored-rekey orders. `KdfParams::for_passphrase`,
   `below_passphrase_floor` and `is_test_grade`; `Mnemo::notices`.
-- The key store in this release is a test store (`dev-hooks` builds only).
-  The OS keychain and `mnemo unlock` come next.
+- **The OS keychain (12.3 step 2)** as the key store: the macOS login
+  keychain, Windows Credential Manager, or Secret Service on Linux. It's the
+  `keychain` cargo feature (off for the library), through `keyring` 3.6.3:
+  `keyring` 4 needs Rust 1.85 or later. A few crates are held in
+  `Cargo.lock` for the 1.75 MSRV, so building the feature from source on an
+  older compiler needs `--locked`. On Linux, libdbus is built from source.
+- **`mnemo unlock <file>`** keeps a brain's key in this machine's keychain,
+  from its recovery code (a prompt with no echo, or stdin; never an
+  argument). A typo is named by group, a code that doesn't open the file
+  isn't stored, and a stale entry is replaced.
+- **Python: `mnemo.open(path)` with no passphrase** opens an existing file
+  through the key-source chain (plain, `read_only` and `shared`).
+- **The MCP server's chain.** `serve --mcp` finds its secret the same way
+  (the key command gets 10 s there), logs where it came from to stderr,
+  never the secret, and never prompts.
+- **`rekey --new-key-file <PATH>`** writes the new key to a new 0600 file
+  too. No OS keychain promises a durable write, so `--new-key` refuses when
+  its code can't be shown unless this is given.
+- When page 0 doesn't parse, the chain finds the brain's keychain entry
+  through the salts in the write-ahead log's header frames.
 
 ### Changed
 
@@ -50,6 +68,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **Key files must be owned by you with mode 0600 or 0400** on Unix
   (`--key-file` and `MNEMO_KEY_FILE`); anything else is refused, naming
   `chmod 600 <path>`.
+- **The released CLI binaries and wheels are built with the `keychain`
+  feature.**
+- **The chain looks the keychain up last, and only when it's needed:**
+  with `MNEMO_KEY` set it's never touched, and a keychain that can't be
+  used here (no Secret Service, no access) is skipped.
+- **`mnemo init` with a generated key refuses an existing path;** `init`
+  with a passphrase still creates over one, as before.
 - **Passphrase KDF parameters now have a floor,** and `mnemo info` reports
   a file below it, which `mnemo rekey` or `mnemo compact` fixes. A rekey
   to a passphrase gets at least `KdfParams::secure()` on every surface,
