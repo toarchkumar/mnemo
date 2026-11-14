@@ -153,7 +153,7 @@ compaction). Compact, or rekey with `--rotate`, when no agent is working.
   own lock still does).
 - **Windows builds need Rust 1.85 or later.** An older compiler's
   `std::fs::rename` can't replace an open file, so those builds refuse
-  shared mode (`Unsupported`). Since v0.15 the engine needs Rust 1.92
+  shared mode (`Unsupported`). Since v0.15 the engine needs Rust 1.94
   anyway, so no supported build does; the released binaries and wheels are
   built with stable.
 - **Settings that act on the whole file** (snapshot retention, cache

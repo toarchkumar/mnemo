@@ -64,12 +64,13 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, build-wheels, build-sdist, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, build-wheels, check-wheel-arm, build-sdist, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
       && needs.build-cli.result == 'success'
       && needs.build-wheels.result == 'success'
+      && needs.check-wheel-arm.result == 'success'
       && needs.build-sdist.result == 'success'
       && (needs.mobile-prepare.outputs.mobile != 'true'
           || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
@@ -219,6 +220,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             manylinux: auto
+            # 12.3 step 5: ring (the model download's TLS) assembles ARMv8
+            # code that needs `__ARM_ARCH`, which the manylinux2014 aarch64
+            # cross gcc doesn't define. Every aarch64 target is ARMv8. Passed
+            # into maturin's container for this target only; the wheel keeps
+            # manylinux2014. `check-wheel-arm` runs it on real aarch64.
+            docker_options: -e CFLAGS_aarch64_unknown_linux_gnu=-D__ARM_ARCH=8
           - target: x86_64-apple-darwin
             os: macos-latest
             manylinux: "off"
@@ -252,6 +259,7 @@ jobs:
           # since step 5, the built-in embedder (`embed-candle`).
           args: --release --out dist --features keychain,embed-candle
           working-directory: mnemo-python
+          docker-options: ${{ matrix.docker_options || '' }}
           # No `rustflags:` input: this version of the action doesn't take
           # one (it warned "Unexpected input(s) 'rustflags'"). The job-level
           # `env.RUSTFLAGS` reaches the aarch64 manylinux container anyway:
@@ -264,6 +272,57 @@ jobs:
         with:
           name: wheel-${{ matrix.target }}
           path: mnemo-python/dist/*
+
+  # --- 12.3 step 5: the aarch64 Linux wheel on real aarch64. It's
+  #     cross-built (with the `__ARM_ARCH` define above), so install it on an
+  #     arm runner and fetch the built-in embedder's model through it (ring's
+  #     TLS, the SHA-256 checks), then one remember and recall. A release
+  #     waits for it (`approve-release`).
+  check-wheel-arm:
+    name: wheel check (aarch64 linux, the built-in embedder)
+    needs: build-wheels
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - name: Set up Python
+        timeout-minutes: 10
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.10"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: wheel-aarch64-unknown-linux-gnu
+          path: wheel
+
+      - name: Install the wheel, fetch the model, remember and recall
+        timeout-minutes: 10
+        env:
+          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
+        run: |
+          set -euo pipefail
+          uname -m
+          pip install wheel/*.whl
+          python - <<'PY'
+          import os, tempfile
+          import mnemo_engine as mnemo
+          info = mnemo.builtin_embedder_info()
+          assert info["available"], info
+          print("installed into", mnemo.install_builtin_embedder())
+          assert mnemo.builtin_embedder_info()["installed"]
+          with tempfile.TemporaryDirectory() as d:
+              db = mnemo.open(os.path.join(d, "arm.mnemo"), "arm-check", dimensions=384)
+              db.use_builtin_embedder()
+              db.remember_text("snapshot_list returns every snapshot, newest first", "semantic")
+              db.remember_text("The release needs one approval click", "semantic")
+              hits = db.recall_text("what does `snapshot_list` return", top_k=1, track_access=False)
+              assert hits[0]["content"].startswith("snapshot_list"), hits
+              hits = db.recall_text("who approves a release", top_k=1, track_access=False)
+              assert "approval" in hits[0]["content"], hits
+              db.close()
+          print("ok: the aarch64 wheel fetched, checked and used the built-in embedder")
+          PY
 
   # --- Build the Python source distribution (sdist) once. `pip install
   #     mnemo-engine` on a platform we don't ship a wheel for (e.g. a

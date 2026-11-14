@@ -1266,8 +1266,8 @@ cargo test            # 66 integration + 26 CLI smoke + proptest state machine +
 cargo run --example quickstart
 ```
 
-Minimum supported Rust version: **1.92** (since v0.15; 1.75 before), set by
-the built-in embedder's ONNX Runtime binding. The released CLI binaries and
+Minimum supported Rust version: **1.94** (since v0.15; 1.75 before), set by
+the built-in embedder's candle-core (its x86_64 code needs 1.94). The released CLI binaries and
 wheels are built with stable, so this only matters when you build from
 source. All dependency versions are pinned exactly for reproducibility.
 

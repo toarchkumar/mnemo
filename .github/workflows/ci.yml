@@ -242,24 +242,25 @@ jobs:
           (cd ../mnemo-python && check)
 
   # --- MSRV check: ensure the codebase still builds against the floor
-  #     declared in Cargo.toml (`rust-version = "1.92"`, since v0.15 step 5a,
-  #     MSRV-2; the built-in embedder on candle builds at it). Linux-only to
+  #     declared in Cargo.toml (`rust-version = "1.94"`, since v0.15 step 5:
+  #     candle-core's x86_64 code needs it; 1.92 from step 5a). It builds the
+  #     built-in embedder (`embed-candle`) on x86_64, where 1.93 fails. Linux-only to
   #     keep job count down; toolchain drift across platforms is rare and
   #     would surface on the stable matrix above first.
   msrv:
-    name: msrv (rust 1.92, linux)
+    name: msrv (rust 1.94, linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.92
-        uses: dtolnay/rust-toolchain@1.92
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: msrv-1.92
+          key: msrv-1.94
 
       - name: cargo build
         working-directory: mnemo
@@ -287,24 +288,24 @@ jobs:
   #     replace an open file on Windows before Rust 1.85 (1.75 to 1.84 refuse
   #     with os error 5; probed 2026-11-13), so a build with such a compiler
   #     falls back to closing the old file first, and shared mode refuses to
-  #     start. Since step 5a the MSRV is 1.92, so no supported compiler takes
+  #     start. Since v0.15 the MSRV is 1.94, so no supported compiler takes
   #     that path: this job builds the keychain and runs the rename and lock
   #     tests at the MSRV, on the normal path.
   windows-msrv:
-    name: windows-msrv (rust 1.92)
+    name: windows-msrv (rust 1.94)
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.92
-        uses: dtolnay/rust-toolchain@1.92
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: windows-msrv-1.92
+          key: windows-msrv-1.94
 
       - name: cargo test (the rename and lock tests at the MSRV)
         working-directory: mnemo

@@ -154,11 +154,12 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - `mnemo recall --text` without an embedder, which was already keyword-only
   on a v9 file, now says why on stderr.
 
-- **Building from source needs Rust 1.92 or later** (was 1.75; 12.3 step
-  5a, MSRV-2), first for ONNX Runtime's `ort`. The built-in embedder runs
-  on candle instead (step 5), and the floor stays. The released
-  CLI binaries and wheels are built with stable and are unaffected. The
-  UniFFI binding's floor moves from 1.82 to 1.92 with it.
+- **Building from source needs Rust 1.94 or later** (was 1.75; 12.3
+  steps 5a and 5). The built-in embedder's candle-core calls
+  `__cpuid_count` outside `unsafe` on x86_64, which Rust 1.93 and older
+  reject. The released CLI binaries and wheels are built with stable and
+  are unaffected. The UniFFI binding's floor moves from 1.82 to 1.94 with
+  it.
 - **The `keychain` feature uses the `keyring` 4 family** (`keyring-core`
   1.0.1 with `apple-native-keyring-store`, `windows-native-keyring-store`
   and `dbus-secret-service-keyring-store`) in place of `keyring` 3.6.3.

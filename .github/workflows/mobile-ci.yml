@@ -131,22 +131,22 @@ jobs:
 
   # --- MOBILE-1a: the UniFFI binding crate on its own declared minimum Rust
   #     (`rust-version` in mnemo/bindings/uniffi/Cargo.toml, the engine's
-  #     1.92 since v0.15 step 5a). The engine's MSRV job never builds it:
+  #     1.94 since v0.15 step 5). The engine's MSRV job never builds it:
   #     it's a non-default workspace member.
   msrv-uniffi:
-    name: msrv-uniffi (rust 1.92, linux)
+    name: msrv-uniffi (rust 1.94, linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.92
-        uses: dtolnay/rust-toolchain@1.92
+      - name: Install Rust 1.94
+        uses: dtolnay/rust-toolchain@1.94
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: msrv-uniffi-1.92
+          key: msrv-uniffi-1.94
 
       - name: cargo test -p mnemo-uniffi
         working-directory: mnemo

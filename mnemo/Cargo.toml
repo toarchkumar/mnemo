@@ -12,7 +12,7 @@
 name = "mnemo-engine"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.94"
 # `benches/corpus.rs` is a shared helper module pulled into real benches
 # via `#[path = "corpus.rs"] mod corpus;`, not a bench target. Disable
 # auto-discovery so cargo doesn't try to build it as its own bench
@@ -86,7 +86,7 @@ serde = { version = "=1.0.210", features = ["derive"] }
 serde_json = { version = "=1.0.128", features = ["raw_value"] }
 rmp-serde = "=1.3.0"
 # Pin the transitive `rmp` crate. It was pinned because 0.8.15+ is edition
-# 2024, which the old MSRV (1.75) couldn't parse; since step 5a (MSRV 1.92)
+# 2024, which the old MSRV (1.75) couldn't parse; since v0.15 (MSRV 1.94)
 # that reason is gone, and the pin stays because `rmp` encodes the file's
 # records (lifting it is its own change, with the format tests).
 rmp = "=0.8.14"
@@ -181,7 +181,7 @@ rustix = { version = "=0.38.44", default-features = false, features = ["std", "f
 
 # 12.3 step 2: the OS keychain behind the `keychain` feature (off for the
 # library; on for the release CLI binaries and wheels). Since step 5a
-# (MSRV-2, Rust 1.92): the `keyring` 4 family, as `keyring-core` and one
+# (MSRV-2; Rust 1.94 since step 5): the `keyring` 4 family, as `keyring-core` and one
 # store crate per platform, which is what `keyring` 4 itself advises for an
 # application that picks its stores (the `keyring` crate's own `v1` mode
 # would pull the async zbus store on Linux). The stores name entries as
@@ -203,7 +203,7 @@ dbus-secret-service-keyring-store = { version = "=1.0.1", optional = true, featu
 [dev-dependencies]
 tempfile = "=3.10.1"
 # Property-based testing (Phase 1.3). Pinned exactly; `=1.5.0`'s MSRV
-# is Rust 1.65, well under our 1.92 floor. Kept as a dev-dep only —
+# is Rust 1.65, well under our 1.94 floor. Kept as a dev-dep only —
 # it does not appear in the shipped library dependency set.
 proptest = "=1.5.0"
 # HOOKS-1: the crate's own tests, benches and examples get the hidden test
@@ -307,7 +307,7 @@ codegen-units = 1
 # at the repo root and by `RUSTFLAGS` in CI + release workflows). rustc
 # doesn't know those cfg names on its own, so without this declaration
 # `-D warnings` would trip on `unexpected_cfgs` and break every build.
-# Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.92.
+# Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.94.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(aes_armv8)',
