@@ -66,21 +66,25 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-13, after v0.13.2)
+## Status (2026-11-14, after v0.14.0)
 
-**Published:** v0.13.2, after v0.13.0 (the inspector, `export --git`, the v8
-sunset, HOOKS-1) and v0.13.1, on crates.io, PyPI, Maven Central
-(`io.github.toarchkumar:mnemo-android`) and SPM (`toarchkumar/mnemo-swift`);
-PLANNER-A VERIFIED. A release takes one human approval (REL-2's
-`approve-release` job); the mobile mode comes from `.github/release-mobile`
-in the tagged commit. No long-lived tokens except the Maven Central user
-token (renew by 2027-11-09). **In progress:** v0.14.0 on `release-0.14.0`:
-12.4 shared access, steps 1 to 5 (step 1 done, PR 63; the design note
-revised after RB-006 and signed off, PR 64), plus REKEY-2. **Then:** 12.3 →
-12.2 (`mnemo onboard`, GUIDE-1) → Phase 13a (with 13.1b delivery) →
-HARNESS-DOGFOOD-1 (the first-success milestone: this project's git Markdown
-workflow runs entirely in MNemo) → PERF-2 → Phase 13b → 14 → 15 (see
-"Authoritative execution order"). CLEANUP-1 is marked, not scheduled.
+**Published:** v0.14.0 (12.4 shared access, steps 1 to 5: `open_shared`,
+Python `shared=True`, the CLI's `--wait`, `serve --mcp --shared`, readers
+first; plus REKEY-2 and the RB-007/RB-008 fixes) on crates.io, PyPI, Maven
+Central (`io.github.toarchkumar:mnemo-android`) and SPM
+(`toarchkumar/mnemo-swift`), mobile included; PLANNER-A VERIFIED
+2026-11-14. The site deploys again (`.nojekyll`, `dfd56d9`). A release
+takes one human approval (REL-2's `approve-release` job); the mobile mode
+comes from `.github/release-mobile` in the tagged commit. No long-lived
+tokens except the Maven Central user token (renew by 2027-11-09).
+**Next:** 12.3, a phase start, waiting on the user's go (REVIEWER-A
+first). **Then:** 12.2 (`mnemo onboard`, GUIDE-1) → Phase 13a (with 13.1b
+delivery) → HARNESS-DOGFOOD-1 (the first-success milestone: this
+project's git Markdown workflow runs entirely in MNemo) → PERF-2 → Phase
+13b → 14 → 15 (see "Authoritative execution order"). **12.4's later
+steps:** LOCK-2 (the writer safety valve) before step 8; step 6
+(incremental catch-up), step 7 (presence and claims). CLEANUP-1 is marked,
+not scheduled.
 **The team:** PLANNER-A, the Worker, REVIEWER-A and REVIEWER-B; the
 Reviewers come in at milestones (AGENTS.md `Reviewer` rule 4). **The repo
 lives at** `~/Documents/GitHub/mnemo.nosync` (out of iCloud sync).
@@ -24853,3 +24857,329 @@ Then do steps 3 to 5 of that entry:
 - fast-forward `main`;
 - tag `v0.14.0`;
 - stop at the approval with DONE.
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 release steps 3 to 5: README and site committed, coordination synced, `main` fast-forwarded, `v0.14.0` tagged; the release run waits at the approval
+
+**Commits on `release-0.14.0`, then `main`**
+- `11f45ea` `docs: v0.14.0 README and site (shared mode)`: `README.md` and
+  `index.html`, your HANDOFF. I checked your corrected text against the
+  code first, and all five points are in.
+- `f18cb17` `chore(plan): sync coordination files`: `PLAN.md` and
+  `reviewer_notes.md`.
+- Both pushes were docs-only, so they started no CI, as the
+  `paths-ignore` lists say. The last code commit, `e08c7fb`, was green on
+  all 20 jobs.
+- `main` was fast-forwarded `c86fdde..f18cb17`. Its push ran:
+  - CI 43561320047: success, 14/14;
+  - Mobile CI 43561320105: success, 6/6.
+- Tag `v0.14.0`: annotated, "MNemo 0.14.0", on `f18cb17`.
+
+**The release run: 43561321997** (tag push, `f18cb17`). It is `waiting`
+at **"approve the release (v0.14.0, mobile true)"**.
+- Every job before it succeeded:
+  - the version check;
+  - the 5 CLI builds and 5 wheels;
+  - the sdist;
+  - the Swift build and the Android build.
+- **The approval is the user's click** (the `release` environment). I
+  have not approved it, and I won't.
+- After the approval, I'll check all four registries (RELEASING.md "After
+  the tag"), log DONE with what each shows, and delete the merged release
+  branch.
+
+**Found on the way: the site hasn't deployed since 2026-11-12.** This is
+older than this release, and not a release gate.
+- "pages build and deployment" on `main` failed again on this push
+  (43561320268). Jekyll stops at `RELEASING.md` line 26: "Liquid syntax
+  error: Variable '{{' was not properly terminated". That line quotes the
+  approval job's raw name, `approve the release (v${{ needs.mobile-
+  prepare...`, which `ccea529` (2026-11-12) added.
+- Every Pages build since has failed: `233eba4` (v0.13.2), `9fc260b`,
+  `c86fdde`, `f18cb17`. The last success was `15bc00f`.
+- The live site still shows **v0.13.1**, so neither the v0.13.2 nor the
+  v0.14.0 `index.html` has reached it.
+- **Two ways to fix it, your call:**
+  - wrap the line in `{% raw %}…{% endraw %}` in `RELEASING.md`;
+  - leave the repository's Markdown out of the Pages build, with a
+    `_config.yml` `exclude:` (or the Pages source set to `index.html`
+    only). Jekyll also renders `PLAN.md` and `AGENTS.md` as pages today.
+- Either is a commit on `main` after the release. Tell me which.
+
+### 2026-11-13 — PLANNER-A — NEEDS-USER + DECISION — approve the v0.14.0 release (run 43561321997); the site gets a `.nojekyll`
+
+**Checked:**
+- `v0.14.0`, `main` and `release-0.14.0` are all at `f18cb17`.
+- `main`'s push runs (CI 43561320047, Mobile CI 43561320105) are green.
+- Release run 43561321997 is `waiting` at "approve the release (v0.14.0,
+  mobile true)".
+
+**NEEDS-USER:** the user approves the release on GitHub: run 43561321997,
+"Review deployments", then the `release` environment.
+
+**DECISION, the site:** add an empty `.nojekyll` at the repository root.
+- `index.html` uses no Liquid and no front matter. Pages then serves the
+  files as they are, and no Markdown file goes through Jekyll again.
+- One commit on `main` after the registries check:
+  `chore(site): serve the site without Jekyll (.nojekyll)`.
+- Then confirm "pages build and deployment" succeeds and the live site
+  shows v0.14.0. Report both in your DONE.
+
+**The Worker, after the approval:** as in step 6 (the four registries,
+DONE, delete the merged release branch), then the `.nojekyll` commit.
+
+### 2026-11-14 — WORKER — DONE — v0.14.0 released: four registries checked, the release branch deleted, the site deploys again (`.nojekyll`, `dfd56d9`)
+
+**The release run (43561321997)** completed `success` after the user's
+approval. Every job passed: the version check, the sdist, 5 wheels, 5
+CLIs, the Swift and Android builds, the approval, the GitHub Release,
+crates.io, PyPI, the engine assets, the gate, the Swift publish, the
+Android publish, and the Swift verify. "mobile (skipped, release note)"
+was skipped, as it should be with mobile true.
+
+**The four registries (2026-11-14 06:46 UTC):**
+- crates.io: `mnemo-engine` max_version 0.14.0.
+- PyPI: `mnemo-engine` 0.14.0, 6 files (5 wheels and the sdist).
+- `toarchkumar/mnemo-swift`: tag `0.14.0` at `897de92`. "mobile (Swift
+  verify published)" succeeded.
+- Maven Central: deployment `8be1b450-b3e6-4f02-81bb-751451c8496c`
+  validated and published. `maven-metadata.xml` lists 0.14.0 as latest and
+  release, and the `.pom`, `.aar` and `.module` under
+  `io/github/toarchkumar/mnemo-android/0.14.0/` return 200. The bare
+  directory URL still returned a cached 404 at the check; the search index
+  can lag about an hour.
+- The GitHub Release `v0.14.0` is published (not a draft), with 13 assets.
+
+**The release branch:** `release-0.14.0` was at `f18cb17`, the same commit
+as `main` and the tag. Deleted locally and on `origin`. (Local `main` was
+44 commits behind `origin/main` with nothing of its own; fast-forwarded
+with `git fetch origin main:main`.)
+
+**The site:** `dfd56d9` `chore(site): serve the site without Jekyll
+(.nojekyll)`, an empty `.nojekyll` at the root, staged by path and pushed
+to `main`.
+- "pages build and deployment" 43568023585 succeeded (the one before it,
+  43561320268 on `f18cb17`, had failed on the Liquid `{{`).
+- The live site https://toarchkumar.github.io/mnemo/ shows v0.14.0
+  (last-modified 2026-11-14 06:47:49 GMT).
+- CI 43568024020 14/14 and Mobile CI 43568023967 6/6 are green on
+  `dfd56d9`.
+
+**Project memory:** `01M7CDR88K85H7TFGSD4VJW0QR` (the release and the site
+fix).
+
+**Left uncommitted:** `PLAN.md` (this entry and the entries since
+`f18cb17`), for the next backup sync.
+
+### 2026-11-14 — PLANNER-A — VERIFIED + DISPATCH — v0.14.0 is published everywhere; the security notes that shipped move into PLAN.md; 12.3 waits for the user's go
+
+**VERIFIED v0.14.0**, checked myself at about 06:50 UTC:
+- release run 43561321997: `success`;
+- crates.io `mnemo-engine` max_version 0.14.0;
+- PyPI 0.14.0;
+- `toarchkumar/mnemo-swift` newest tag `0.14.0`;
+- Maven Central `mnemo-android/0.14.0/` 200;
+- `release-0.14.0` gone from `origin`;
+- the live site's pill shows v0.14.0.
+
+The Worker's DONE matches.
+
+**Status** above is refreshed (after v0.14.0). That's my section.
+
+**Dispatch: the security notes** (AGENTS.md: they move to PLAN.md once
+the fix ships). From `SECURITY.local.md` into a new WORKLOG entry, as for
+RB-004.1 and RB-005:
+- **move:**
+  - RB-006.10 (the planted temp symlink; fixed in v0.14.0);
+  - RB-006.11 (a), (b) and (c) (the lease, the sidecar trusted by name,
+    the kept secret, which is now in the README);
+  - RB-007.9 (the umask, with RB-008's line on existing brains, which the
+    README and CHANGELOG now carry);
+  - RB-007's and RB-008's check tables for them;
+- **keep RB-006.12 where it is:** the daemon's design has no code, so
+  it's unfixed. It moves when the daemon ships with its fixes;
+- leave a "moved to PLAN.md (2026-11-14, Worker)" stub, as the earlier
+  ones have;
+- then `chore(plan): sync coordination files` and push. It's
+  docs-only, so no CI runs.
+
+Log DONE.
+
+**Next (NEEDS-USER):** 12.3 is a phase start (zero-setup embedding, `mcp
+install`, keychain keys). It needs the user's go. On the go, I call
+REVIEWER-A's scheduled pre-phase pass first, then write 12.3's spec.
+
+### 2026-11-14 — WORKER — NOTE — RB-006.10, RB-006.11 and RB-007.9 moved here from SECURITY.local.md (their fixes shipped in v0.14.0)
+
+Per AGENTS.md and the DISPATCH "v0.14.0 is published everywhere; the
+security notes that shipped move into PLAN.md": v0.14.0 shipped (tag
+`v0.14.0` on `f18cb17`). It carries RB-006.10's fix (exclusive temp files,
+step 1 and step 2), RB-006.11 (a) and (b) (the lease in every write window,
+the checked sidecar, step 2), RB-006.11 (c)'s sentence (the kept secret, in
+the note and the docs), and RB-007.9's fix (owner-only new files, PR 67,
+`36814e9`), with RB-008's line on existing brains in the README and the
+CHANGELOG. So these move from the gitignored `SECURITY.local.md` into this
+log, verbatim below with the headings demoted: RB-006's batch header,
+RB-006.10, RB-006.11 with its triage, RB-007's check table and notes,
+RB-007.9 with its triage and the Worker's note, and RB-008's pass. Line
+numbers are as REVIEWER-B wrote them, at `233eba4` (RB-006), `19edf8b`
+(RB-007) and `a3c0aae` (RB-008).
+
+**RB-006.12 stays in `SECURITY.local.md`:** it's about the daemon's design
+(step 9), which has no code yet, so it's unfixed. It moves when the daemon
+ships with its fixes. Its section is left out below.
+
+#### RB-006 (REVIEWER-B, 2026-11-13) — the 12.4 shared-access design note, and one finding in shipped code
+
+Reviewed: `docs/design/12.4-shared-access.md` at `9fc260b`, against the engine on `main` at `233eba4` (v0.13.2). The rest of the batch is in `reviewer_notes.md`.
+
+- **`RB-006.10` is about shipped code** (v0.13.2 and earlier). It needs someone else to be able to create a name in the brain's directory. Step 1's commit (`35ab403`, not released) already makes it impractical.
+- **`RB-006.11` and `RB-006.12` are about a design.** No code exists, so nothing can be attacked today. They're here because the brief says security findings go only in this file, and because two of them describe how to break a property the engine documents.
+
+##### RB-006.10 — [SECURITY] [LOW] Compaction and export write through a symlink planted at their fixed temp name
+
+- **Status:** `ACCEPTED`
+- **Where:** `mnemo/src/store/maintenance.rs:724-746` (`{path}.compact-tmp`, created by `create_secret` → `open_with_lock(.., create = true)`, `load.rs:22-25`: create and truncate, following symlinks) and `maintenance.rs:65-75` with `load.rs:76-80` (`{dest}.export-tmp`, the same options).
+- **Tested** at `233eba4` (`rb6/tests/tmp_name.rs`), with a symlink at the temp name pointing at another file the same user owns:
+
+| Call | Result | The other file | The path afterwards |
+|---|---|---|---|
+| `Mnemo::compact_file(brain)` | `Ok` | overwritten: 122,880 bytes starting `MNEM` (the compacted brain) | the brain's path is now **a symlink to the other file**; it still opens, with 3 memories |
+| `export_encrypted(dest)` | `Ok` | overwritten the same way | `dest` is now a symlink to the other file |
+
+- **What it takes.** Someone who can create a name in the brain's directory (or the export's), and can't already do worse:
+  - another local user, where the brain is in a sticky or shared directory (they can create names there but can't touch the user's files);
+  - a repository that carries a symlink at `<brain>.compact-tmp`, for a project that keeps its brain at a path inside the working tree. A default brain under the common git directory isn't reachable that way.
+
+  The victim then runs `mnemo compact`, `mnemo rekey --rotate` or an export. The attacker picks which of the victim's files is destroyed. They don't control what's written (it's the brain's header and ciphertext). The brain's path ends up as a symlink, so later writes to the brain go to that file too.
+- **Step 1 (`35ab403`), by reading only, not tested:** the temp name becomes `<dest>.<what>-<pid>-<n>-<nanoseconds>.tmp`, which an attacker can't predict in practice. It's still opened with `create(true)` and no exclusive flag, and `is_file_at` follows a symlink at the path, so a correctly guessed name would still be written through.
+- **Recommendation:**
+  1. Create both temp files with `create_new(true)` (`O_EXCL`), which refuses any existing name, a symlink included. With step 1's unique names a collision is then an error to retry under a new name, never a write through someone else's file.
+  2. Add the test: a symlink at the temp name (for the old fixed name, and for whatever name the code is about to use, by making the name generator injectable in the test) leaves its target byte-identical.
+  3. 12.4 adds fixed names next to the brain (`X.mnemo-shared/`, `intent.lock`, `lock-info`). `RB-006.11` (b) is the same issue for those.
+- **Would I hold anything for it?** No release. It belongs in step 1's PR, which is open on these lines now.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **in v0.14.0 step 1's PR**, which is open on these lines: both temp files (compaction and export) are created with `create_new(true)` (`O_EXCL`), a collision retries under a new name, and a test plants a symlink at the temp name and asserts the other file is untouched and the call fails or retries cleanly. Neutral commit message. Move into PLAN.md after v0.14.0 ships.
+
+##### RB-006.11 — [SECURITY] [MEDIUM] The lock layer's design: the generation lease assumes one writer session at a time; the sidecar directory is trusted by name; a shared handle keeps its secret
+
+- **Status:** `ACCEPTED`
+
+###### (a) The generation lease is taken once per handle, and its argument needs sessions that don't interleave
+
+- **The code** (`mnemo/src/store/records.rs:1292-1314`). A v9 page's generation is the id of the transaction that writes it, `wal_seq + 1` (`records.rs:533-539`). Before a handle seals its first page it commits a header-only transaction that raises `wal_seq` (`ensure_gen_lease`), then sets `gen_leased` for the rest of the handle's life (`:1312`). The comment gives the reason: a session that crashes before committing leaves pages (orphan data pages, or uncommitted WAL frames) sealed under an id "the next session would hand out again, for the same pages (allocation is deterministic). An attacker holding a copy of the crashed file could then swap an orphan back in under a matching generation." Burning one id per session makes "every id this session uses … above every id any earlier session used".
+- **Why it stops holding in shared mode.** "Earlier session" assumes one session ends before the next begins, which the lifetime lock guarantees today. Shared handles interleave:
+  1. Handles C and P are both long-lived and both took their lease long ago.
+  2. P takes the exclusive lock at `wal_seq = M`, writes its data pages straight to their home pages under generation `M + 1` (`flush.rs:240`, before the WAL commit at `:568`), and dies, or gets an I/O error (`RB-006.1`). The header still says `M`.
+  3. C's next write catches up to `M`. Its `gen_leased` is already true, so it takes no lease. It allocates the same pages (same free list, same `next_page`) and seals different contents under `(page, M + 1)`, and commits.
+  4. Anyone with a copy of the file from step 2 and write access to the file can put P's page back. Its tag is valid for `(page, M + 1)`, which is what C's catalog row expects.
+- **Impact.** The rollback protection v9's page AAD exists for (`pager.rs:233-245`) no longer covers pages written by a writer that failed before its commit. The attacker needs a copy of the file taken at the right moment and write access to it (a synced folder, a backup, a shared disk), and what they can restore is a record a legitimate writer sealed but never committed, in place of the one that was. It's narrow. It's also exactly the case the engine's own comment says it rules out.
+- **Not in the note.** The crash table's row "a writer, before its WAL commit: nothing was committed; the stamp check sees no change" is true and is the problem: nothing tells the next writer.
+- **Recommendation:** one of these, decided before step 2:
+  1. **Take the lease in every exclusive write window** (reset `gen_leased` when the lock is released). It costs one header-only commit per write: two more fsyncs (`flush.rs:107-115`), so a write goes from 3 fsyncs to 5. Not timed. The note's "about 16 ms" and its commit rate change with it.
+  2. Skip the lease when the handle can prove nobody else held the exclusive lock since its own last commit. I don't see how it can: a writer that fails before its commit leaves no trace, which is the point. If a cheap durable mark exists (a byte outside page 0 written before the first data page), it's the same cost as the lease.
+  3. Put something per-writer into the generation (a format change, through the format-version policy).
+  4. Accept it and write it down in the threat model, with the narrowing above.
+- I'd take 1 for the first version and measure it in step 5's bench.
+
+###### (b) The sidecar directory is trusted because of its name
+
+- **The design.** `X.mnemo-shared/` is created 0700 next to the brain if missing, and holds `intent.lock`, `lock-info` and `presence/*.lock`. The note says "a running handle recreates what it needs".
+- **Finding.** Where someone else can create names in the brain's directory (the two cases in `RB-006.10`), they can be there first:
+  1. **As a directory they own.** They hold `intent.lock` exclusively and every shared call on the brain waits its full deadline and fails. They hold or remove presence files, so agents look alive or dead as they choose; with "a dead holder's claim lapses at once" that releases other agents' claims.
+  2. **As a symlink**, or with a symlink inside it. The engine then creates its lock files wherever the link points, and writes the `lock-info` line (the operation, pid, start time and tool) into whatever `lock-info` names. Opened with create-and-truncate, that overwrites a file of the attacker's choosing, as in `RB-006.10`, but on every long operation rather than only on a compaction.
+- **Recommendation**, for step 2's code:
+  1. Create the directory with `mkdir` (never "create if missing, else use"), and on finding one, check with `lstat` that it's a real directory owned by the caller with no group or other access. If it isn't, don't use it: take the main lock alone and say so once.
+  2. Open every file in it with `O_NOFOLLOW`, and create with `O_EXCL` where the file is new. Open relative to the directory's descriptor (`openat`) so the check and the use are the same directory.
+  3. Write `lock-info` to a new exclusive temp name and rename it into place, or make it a file that's only ever appended to and never truncated.
+  4. Tests for each: a foreign-owned directory, a symlinked directory, and a symlink at each fixed name.
+
+###### (c) A shared handle keeps its secret for its whole life
+
+- **The design.** A shared handle keeps "its secret (zeroized on drop), the unwrapped data key, and the KDF parameters". Today's handle keeps the data key and drops the secret once the file is open (the `Mnemo` struct has no field for it, `store/mod.rs`).
+- **Finding.** This is needed: every compaction makes a new data key (`RB-006.2`), so without the secret every `mnemo compact` would end every session. But it's a change in what a long-lived process holds, and the note states it without marking it. A passphrase is worth more to an attacker than a data key: it survives a rotation, and people reuse them. It now sits in an MCP server's memory for hours.
+- **Recommendation:**
+  1. Say it in the note's trust-boundary text and in the docs.
+  2. Prefer fetching the secret again when it's needed (from the keychain once 12.3 ships, or from whatever supplied it) over keeping it. Keep it only where there's nothing to ask.
+  3. For a raw-key file the kept secret is the key itself, which changes nothing.
+
+- **Would I want it settled before step 2's code?** (a) and (b), yes. (c) is a sentence now and a choice at 12.3.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13).
+  - **(a), before step 2:** recommendation 1. The lease is taken in every exclusive write window (`gen_leased` resets when the lock is released). Measure the cost in step 5's bench (3 to 5 fsyncs a write) and correct the note's numbers. If step 5 finds it too slow, recommendation 2 (a cheaper durable mark) is the place to look, with a written argument, not 4.
+  - **(b), before step 2:** all four recommendations: `mkdir` and an `lstat` ownership-and-mode check; `O_NOFOLLOW` and `openat` relative to the directory; `lock-info` written by temp name and rename; the three tests.
+  - **(c):** now, a sentence in the note's trust-boundary text and in the docs. At 12.3, prefer fetching the secret again from the keychain over keeping it.
+  - These stay here until v0.14.0 ships.
+
+
+#### RB-007 (REVIEWER-B, 2026-11-13) — steps 2a and 2b on `release-0.14.0` at `19edf8b` (unreleased): RB-006.10 and RB-006.11 (a), (b) as built, and RB-007.9
+
+Reviewed in a separate clone (`/tmp/rb-mnemo`). The rest of the batch is in `reviewer_notes.md`.
+
+##### RB-006.10 and RB-006.11 (a), (b) on the branch
+
+Nothing here changes a status: v0.14.0 hasn't shipped, so they stay `ACCEPTED`.
+
+| Item | What the triage asked | On the branch | How I checked |
+|---|---|---|---|
+| RB-006.10 | Both temp files created with `create_new`, a retry on a collision, a planted-symlink test | `open_and_lock_once` uses `create_new(true)` for `Create::New` (`store/load.rs:124`); the export temp does the same (`store/maintenance.rs:71`); the test hook `set_next_temp_name` plants the name | By reading. I didn't run my RB-006 test again; the Worker's is in `tests/replaced_file.rs`, which passes in my baseline |
+| RB-006.11 (a) | The lease in every exclusive write window; `gen_leased` reset when the lock goes | `run_write` sets `gen_leased = false` and commits a lease before the closure runs (`store/shared.rs:478-479`). A reload builds a new handle, which also starts unleased | Read, and t4: one `remember` in a shared window moves the transaction id by two (the lease, then the commit); a window that writes nothing still moves it by one. The Worker's generation test can't fail today, as its DONE says; I found no interleaving that reuses a generation: a window that dies after sealing pages leaves the header at its lease, and the next writer's lease is above it |
+| RB-006.11 (b) rec. 1 | `mkdir`, then a check that it's a real directory, the caller's, mode 0700; otherwise don't use it | `mkdir` 0700; opened with `O_DIRECTORY`, `O_NOFOLLOW` and `O_CLOEXEC`; `fstat` on that descriptor for type, owner and `mode & 077` (`shared/sidecar.rs:120-168`). A failure gives a notice and the main lock alone | Read; the Worker's tests (a symlinked directory, a 0755 directory, an unwritable parent) pass in my baseline |
+| (b) rec. 2 | `O_NOFOLLOW`, `O_EXCL` for new files, `openat` | `lock_file` and `create_new` use `openat` on the directory's descriptor with `O_NOFOLLOW` and `O_CREAT, O_EXCL`; an existing file is opened `O_NOFOLLOW` and `O_NONBLOCK` and must be a regular file of this user's (`:170-217`) | Read |
+| (b) rec. 3 | `lock-info` by temp name and rename | `write_lock_info` creates `lock-info.<pid>-<n>.tmp` exclusively and renames it with `renameat` (`:85-104`); a reader takes at most 512 bytes, one line, and drops control characters before showing it (`lock.rs:371-375`) | Read |
+| (b) rec. 4 | The three tests | `tests/shared_lock.rs`: the symlinked directory, the directory open to others, a symlink at each fixed name | They pass. A directory owned by another user isn't tested (it needs a second user), as the Worker's DONE says |
+
+**What I'd still note about (b), none of it a hole:**
+- **A handle keeps the directory's descriptor for its whole life.** If the directory is deleted and made again, the old handle uses neither (RB-007.7 in `reviewer_notes.md`). It loses writer preference; it never follows a name it didn't check.
+- **Whoever can make the sidecar unusable turns writer preference off for that brain** (create it first as their own directory, or as a symlink). The handle then takes the main lock alone and says so in `notices()`, which nothing prints yet. They gain nothing unless they can also open the brain to hold its lock, which is `RB-007.9`.
+- **A umask that clears owner bits** (0277, say) makes a directory the checks accept and nothing can be created in. Each call then silently skips the intent lock. Check after `mkdir` that the mode is exactly 0700, and `fchmod` it if not.
+- **Windows:** no owner or mode check, as documented. A junction or a symlink is refused; a directory another user made in a shared folder is used.
+
+##### RB-007.9 — [SECURITY] [LOW] A brain is created with the process's umask, so on most machines other local users can read the file and can hold its lock
+
+- **Status:** `VERIFIED` (RB-008, `a3c0aae` on release-0.14.0, before the tag)
+- **Where:** `open_and_lock_once` (`mnemo/src/store/load.rs`): `OpenOptions` with `create` or `create_new` and no mode, for `Mnemo::create` and for compaction's new file. Every version.
+- **Tested** at `19edf8b` (`rb7/tests/inplace.rs`): a new brain has mode **0644** under the usual umask 022. The inspector's page file and the git export already ask for 0600 (`bin/mnemo/inspect.rs:896`, `bin/mnemo/export.rs:125`), and shared mode's sidecar is 0700; the brain itself is the one left open.
+- **What another local user gets**, where they can reach the path (a home directory that is 0755, a shared project folder, `/tmp`). By reading; I have no second user to run it as:
+  1. **The ciphertext and the header**, to copy. Page 0 holds the salt, the KDF parameters and the wrapped data key in the clear, so a copy is enough to guess a passphrase offline, at Argon2id's cost per guess. A raw-key file gives nothing to guess.
+  2. **The lock.** `flock` needs only an open descriptor, and a read-only one will do. Holding it shared blocks every writer; holding it exclusive blocks everyone. Each shared call then waits its deadline and fails with `Locked`, with no holder named.
+  3. In shared mode, the 0700 sidecar keeps them out of the intent lock, and (2) makes that beside the point.
+- **Impact:** low. The contents stay encrypted, and it needs a local account and a reachable path. It matters more for 12.x's team and project brains, which live in directories people share on purpose, and where a group-readable brain may even be wanted.
+- **Recommendation:**
+  1. Create brains (and compaction's replacement, which should keep the old file's mode and owner rather than reset it) with mode 0600 on Unix.
+  2. Leave an existing file's mode alone, so a brain someone made group-readable on purpose stays that way; `compact` copies the mode across.
+  3. A line in the README's security section: file permissions are the user's, and 0600 is the default from v0.14.
+  4. A test for the created mode and for compaction keeping a mode.
+- **Would I hold step 3 for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-13), **step 2c**, all four: new brains and compaction's new file are created 0600 on Unix; compaction (and `rekey --rotate`) gives the new file the old file's mode, so a brain made group-readable on purpose stays so; an existing file's mode is never changed; tests for both. The README line goes in at the v0.14.0 release (PLANNER-A HANDOFF). Neutral commit and PR wording ("create new brain files owner-only; compaction keeps the mode"). **Also from the RB-006.11 (b) notes above, step 2c:** after `mkdir`, check the sidecar's mode is exactly 0700 and `fchmod` it if a umask cleared owner bits.
+
+- **Worker, 2026-11-13 (step 2c, PR 67, `36814e9`):** RB-007.9 and the sidecar mode are done as triaged.
+  - A new brain, a compaction's new file and an export's temp file are opened with mode 0600 on Unix (`owner_only` in `store/load.rs`, applied only when the file is created).
+  - Compaction then gives its new file the old file's permissions (`copy_mode`, an fchmod through the open handle), so `rekey --rotate` keeps the mode too.
+  - `Mnemo::create` over an existing file leaves its mode alone.
+  - After its checks, the sidecar directory is given 0700 with `fchmod` when its owner bits aren't all set.
+  - Tests in `tests/shared_fixes.rs`: a new brain is 0600; a 0640 brain stays 0640 through a compaction; an export is 0600; an existing 0644 file is unchanged by `create`; a 0500 sidecar becomes 0700 and is used. Each fails with its fix undone.
+  - Not done: the owner isn't copied (it needs privileges), and Windows is unchanged.
+
+---
+
+#### RB-008 (REVIEWER-B, 2026-11-13) — the v0.14.0 release review on `release-0.14.0` at `a3c0aae` (not tagged): RB-007.9 as built, and one line for the release text
+
+No new security finding in this pass. The rest of the batch is in `reviewer_notes.md`.
+
+##### RB-007.9 on the branch
+
+Marked `VERIFIED (a3c0aae)` above and in the ledger. It stays in this file until v0.14.0 ships.
+
+| What the triage asked | On the branch | How I checked |
+|---|---|---|
+| New brains, compaction's new file and exports created 0600 | `owner_only` sets mode 0600 on every creating open (`store/load.rs`, `open_and_lock_once`; the export temp in `store/maintenance.rs`) | Tested: a new brain is 0600 under umask 022 (0644 at `19edf8b`) |
+| Compaction keeps the old file's mode; an existing file's mode is never changed | `copy_mode` right after the temp file is created (`compact_file_secret`) | Tested: a 0644 brain is 0644 after a compaction. The Worker's tests cover 0640 and an export |
+| The sidecar gets 0700 when a umask cleared owner bits | `fchmod` on the checked descriptor (`shared/sidecar.rs`) | By reading |
+| The README line | Not yet: it's in the release HANDOFF | |
+
+**One line the release text should carry.** Every brain made before v0.14 is 0644 under the usual umask, and nothing in v0.14 changes that: compaction keeps the old mode by design. So the exposure RB-007.9 describes stays for every existing brain until its owner runs `chmod 600` on it. The README's security line and the CHANGELOG entry say new files are owner-only; add that existing brains keep their mode and how to tighten one. This isn't a new finding, only the part of RB-007.9 that the code change can't reach.
+
+##### Also checked in this pass, nothing found
+
+- **`remove_dead_compaction_temps`** (`store/maintenance.rs`). It removes only regular files in the brain's own directory, owned by this user, named exactly `<brain>.compact-<pid>-<n>-<8 hex>.tmp`, whose pid isn't this process and isn't running, and only while the brain's exclusive lock is held. Tested: a dead compaction's temp went; this process's own temp, five look-alike names (a `.bak` suffix, the old fixed `.compact-tmp`, a nine-digit hex field, another brain's prefix, an export temp) and a symlink carrying a temp's name all stayed, and the symlink's target was untouched.
+- **Recovery with the held data key** (`store/open.rs`, `sealed_under`, `load_locked_with`). A pending WAL or a torn-header candidate is accepted without the KDF only when the header it leads to is v9 and its seal verifies under the key the handle already holds. A header sealed under that key was written by someone who had it, so this gives the handle nothing it didn't have. Anything else still goes through the secret.
+- **The `lock-info` note from plain long operations** (`lock_exclusive`, `Held::announce`). The operation name comes from the caller, has control characters removed and is cut at 64 characters before it's written or shown; it's written by temp name and rename in the checked sidecar, and it's gone when the handle closes (tested with `open_exclusive("import")`).
+- **`peek_dimensions`** reads only the header's width, which is in the clear in page 0 already.
