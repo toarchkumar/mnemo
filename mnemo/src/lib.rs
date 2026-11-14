@@ -57,6 +57,7 @@ mod error;
 mod format;
 mod freelist;
 mod index;
+pub mod keys;
 mod keyslot;
 pub mod mcp;
 mod memory;
@@ -70,7 +71,7 @@ mod transcript;
 mod veccol;
 mod wal;
 
-pub use crypto::KdfParams;
+pub use crypto::{KdfParams, SecretKind};
 pub use embed::{Embedder, EmbedderIdentity};
 pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};
 pub use error::{MnemoError, Result};

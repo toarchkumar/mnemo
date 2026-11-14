@@ -8,6 +8,53 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **Generated keys (12.3).** `mnemo init` with no passphrase source makes a
+  random 256-bit key, protects the file with the raw-key KDF parameters,
+  and keeps the key in the key store, found by the file's salt.
+  `init --key-file <PATH>` writes it to a new 0600 file instead. The brain
+  takes its name only once its key is kept.
+- **Recovery codes.** `MN1-` and thirteen groups of five Crockford Base32
+  characters, each with a check character, so a typo is reported by
+  group. `mnemo recovery-code <file>` shows a brain's code from the key
+  store, only to a person at a terminal: stdout and stdin are terminals,
+  no agent harness marker is set, and the code appears on the controlling
+  terminal after a key press, on the alternate screen.
+- **`mnemo rekey --new-key`** rekeys to a new generated key, keeps it in
+  the key store under the new salt before the commit, and shows its code
+  before the commit. `--store` keeps a new passphrase there too. The old
+  entry stays, for copies of the file made before.
+- **The key sources.** With no `--passphrase` or `--key-file`, a command
+  reads the file's KDF parameters and takes the first source of its kind:
+  `MNEMO_KEY`, `MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND`, then the key store for
+  a key; `MNEMO_PASSPHRASE`, then the prompt, for a passphrase. A source of
+  the other kind is skipped and named. `mnemo info` prints the source.
+  `MNEMO_KEY` and key files also take a recovery code.
+- `mnemo_engine::keys`: the recovery code, the key-store trait, the chain,
+  and the generated-key and stored-rekey orders. `KdfParams::for_passphrase`,
+  `below_passphrase_floor` and `is_test_grade`; `Mnemo::notices`.
+- The key store in this release is a test store (`dev-hooks` builds only).
+  The OS keychain and `mnemo unlock` come next.
+
+### Changed
+
+- **`mnemo init` with no passphrase source generates a key** instead of
+  prompting. `--ask-passphrase` asks for a passphrase as before, and
+  `MNEMO_PASSPHRASE` and `--passphrase` work as they did. With no key
+  store, it fails, leads with `--ask-passphrase`, and creates nothing.
+- **A compaction keeps the file's salt** (and its KDF parameters), so
+  whatever found the secret for the old file finds it for the new one.
+  `mnemo compact` and `mnemo rekey --rotate` keep a key-store entry
+  working. The data key is still new.
+- **Key files must be owned by you with mode 0600 or 0400** on Unix
+  (`--key-file` and `MNEMO_KEY_FILE`); anything else is refused, naming
+  `chmod 600 <path>`.
+- **Passphrase KDF parameters now have a floor,** and `mnemo info` reports
+  a file below it, which `mnemo rekey` or `mnemo compact` fixes. A rekey
+  to a passphrase gets at least `KdfParams::secure()` on every surface,
+  Python's `rekey` included.
+
 ## [0.14.0] — 2026-11-13
 
 Shared mode (12.4, steps 1 to 5): several processes, sessions and tools on

@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use ulid::Ulid;
 
-use crate::crypto::{self, KdfParams};
+use crate::crypto::{self, KdfParams, SecretKind};
 use crate::embed::{self, Embedder};
 use crate::error::{MnemoError, Result};
 use crate::format::{
@@ -87,6 +87,7 @@ use crud::*;
 use essence::*;
 use load::*;
 pub(crate) use load::{is_file_at, is_lock_conflict};
+pub(crate) use maintenance::{create_temp, remove_dead_temps};
 pub(crate) use records::plain_record;
 use records::*;
 pub use shared::SharedMnemo;
@@ -905,6 +906,9 @@ pub struct Mnemo {
     /// `lock-info` line, removed when the handle drops. Declared first so
     /// it drops before `pager`, whose file's unlock comes after it.
     lock_note: Option<crate::shared::Held>,
+    /// 12.3: what this handle has to tell its owner once, such as a
+    /// passphrase on raw-key KDF parameters ([`Mnemo::notices`]).
+    notices: Vec<String>,
     pager: Pager,
     header: Header,
     catalog: Vec<CatalogEntry>,

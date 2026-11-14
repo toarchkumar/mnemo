@@ -49,9 +49,27 @@ enum Command {
         /// Skip the auto-generated scaffold manifest (create an empty file).
         #[arg(long)]
         no_manifest: bool,
-        /// Passphrase (else `MNEMO_PASSPHRASE`).
-        #[arg(long)]
+        /// Passphrase (else `MNEMO_PASSPHRASE`, or `--ask-passphrase`).
+        /// With none of the three, `init` generates a key instead.
+        #[arg(long, conflicts_with_all = ["ask_passphrase", "key_file"])]
         passphrase: Option<String>,
+        /// Ask for a passphrase twice, without echo, instead of generating
+        /// a key (what `init` did before v0.15).
+        #[arg(long, conflicts_with = "key_file")]
+        ask_passphrase: bool,
+        /// Generate a key and write it to this new file (mode 0600), instead
+        /// of keeping it in the keychain.
+        #[arg(long, value_name = "PATH")]
+        key_file: Option<String>,
+    },
+    /// Show a brain's recovery code, from the key store.
+    ///
+    /// It's shown only to a person at a terminal: stdout and stdin must be
+    /// terminals, no agent harness may be driving it, and the code appears
+    /// on the controlling terminal after you press Enter, then is cleared.
+    RecoveryCode {
+        /// Path to the `.mnemo` file.
+        path: String,
     },
     /// Print database statistics.
     Info {
@@ -79,11 +97,22 @@ enum Command {
     Rekey {
         /// Path to the `.mnemo` file.
         path: String,
+        /// Unlock with a raw key (32 bytes, 64 hex digits or a recovery
+        /// code) instead of a passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
         /// The new passphrase. Omit to be prompted twice without echo.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "new_key")]
         new_passphrase: Option<String>,
+        /// Generate a new key instead of a new passphrase, keep it in the
+        /// key store, and show its recovery code (at a terminal).
+        #[arg(long)]
+        new_key: bool,
+        /// Also keep a new passphrase in the key store.
+        #[arg(long, conflicts_with = "new_key")]
+        store: bool,
         /// Also rotate the data key: rekey, then compact, which rewrites the
         /// file under a fresh data key. The old passphrase then opens no
         /// copy of the file made from now on, and no earlier copy opens with
@@ -954,21 +983,6 @@ fn passphrase(arg: &Option<String>) -> std::result::Result<String, String> {
         .map_err(|e| format!("failed to read passphrase: {e}"))
 }
 
-/// RB-003.6: what unlocks the file: the raw key from `--key-file` when it's
-/// given, else the passphrase (`--passphrase`, `MNEMO_PASSPHRASE` or the
-/// prompt).
-fn unlock(
-    pp: &Option<String>,
-    key_file: &Option<String>,
-) -> std::result::Result<inspect::Secret, String> {
-    match key_file {
-        Some(k) => Ok(inspect::Secret::Key(inspect::read_key_file(k)?)),
-        None => Ok(inspect::Secret::Passphrase(zeroize::Zeroizing::new(
-            passphrase(pp)?,
-        ))),
-    }
-}
-
 /// How long a command waits for the brain's lock (`--wait`, default 10 s).
 static WAIT: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
 
@@ -1008,15 +1022,15 @@ fn parse_wait(s: &str) -> std::result::Result<std::time::Duration, String> {
 /// 12.4: a read-only open through the lock layer: it waits up to `--wait`
 /// for a writer instead of failing at once, and runs alongside other
 /// readers.
-fn open_r(path: &str, pp: &str) -> mnemo_engine::Result<Mnemo> {
-    Mnemo::open_read_only_waiting(path, pp, wait_opts())
+fn open_r(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
+    open_ro(path, s)
 }
 
 /// 12.4: a read-write open through the lock layer, for one command's
 /// write: it waits up to `--wait` with writer preference, and names `op`
 /// to a shared caller that times out meanwhile.
-fn open_w(path: &str, pp: &str, op: &str) -> mnemo_engine::Result<Mnemo> {
-    Mnemo::open_exclusive(path, pp, op, wait_opts())
+fn open_w(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mnemo> {
+    open_rw(path, s, op)
 }
 
 /// A started embedder and the vectors it made.
@@ -1067,6 +1081,74 @@ fn open_ro(path: &str, s: &inspect::Secret) -> mnemo_engine::Result<Mnemo> {
         inspect::Secret::Passphrase(p) => Mnemo::open_read_only_waiting(path, p, wait_opts()),
         inspect::Secret::Key(k) => Mnemo::open_read_only_waiting_with_key(path, k, wait_opts()),
     }
+    .map(warn_notices)
+}
+
+/// 12.3: say what the handle has to tell its owner (a passphrase on raw-key
+/// KDF parameters), once, on stderr.
+fn warn_notices(db: Mnemo) -> Mnemo {
+    for n in db.notices() {
+        eprintln!("warning: {n}");
+    }
+    db
+}
+
+/// 12.3: where this command's secret came from, and the next source of the
+/// same kind that's present, for `info` and for a wrong secret's error.
+static SOURCE: std::sync::OnceLock<(String, Option<String>)> = std::sync::OnceLock::new();
+
+/// 12.3 (the keys note, section 6): the secret for the existing brain at
+/// `path`. A flag names its source outright. Otherwise the chain picks by
+/// the file's kind: `MNEMO_KEY`, `MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND` or
+/// the key store for a key; `MNEMO_PASSPHRASE` or the key store for a
+/// passphrase, then the prompt at a terminal.
+fn secret_for(
+    path: &str,
+    pp: &Option<String>,
+    key_file: &Option<String>,
+) -> std::result::Result<inspect::Secret, String> {
+    use mnemo_engine::keys::{self, Resolution, SecretKind};
+    if let Some(k) = key_file {
+        let _ = SOURCE.set((format!("--key-file ({k})"), None));
+        return Ok(inspect::Secret::Key(inspect::read_key_file(k)?));
+    }
+    if pp.is_some() {
+        let _ = SOURCE.set(("--passphrase".into(), None));
+        return Ok(inspect::Secret::Passphrase(zeroize::Zeroizing::new(
+            passphrase(pp)?,
+        )));
+    }
+    let store = keys::default_store();
+    match keys::resolve(path, store.as_deref(), keys::CLI_COMMAND_TIMEOUT).map_err(fmt)? {
+        Resolution::Found(r) => {
+            for n in &r.notes {
+                eprintln!("note: {n}");
+            }
+            let _ = SOURCE.set((r.source.to_string(), r.next.map(|s| s.to_string())));
+            Ok(r.secret)
+        }
+        Resolution::NoSource { kind, notes } => {
+            for n in &notes {
+                eprintln!("note: {n}");
+            }
+            match kind {
+                SecretKind::Passphrase => {
+                    let p = passphrase(&None)?;
+                    let _ = SOURCE.set(("the prompt".into(), None));
+                    Ok(inspect::Secret::Passphrase(zeroize::Zeroizing::new(p)))
+                }
+                SecretKind::Key => Err(format!(
+                    "no key for {path}: it uses a key, and none of MNEMO_KEY, MNEMO_KEY_FILE, \
+                     MNEMO_KEY_COMMAND or {} has one; pass --key-file, or --passphrase if it \
+                     was given a passphrase",
+                    store
+                        .as_deref()
+                        .map(|s| s.describe())
+                        .unwrap_or_else(|| "a key store (none in this build yet)".into())
+                )),
+            }
+        }
+    }
 }
 
 /// A read-write open with either secret (waiting, as [`open_w`]).
@@ -1075,6 +1157,7 @@ fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mn
         inspect::Secret::Passphrase(p) => Mnemo::open_exclusive(path, p, op, wait_opts()),
         inspect::Secret::Key(k) => Mnemo::open_exclusive_with_key(path, k, op, wait_opts()),
     }
+    .map(warn_notices)
 }
 
 /// Like [`passphrase`] but for *new* passphrases on `init` / `rekey`:
@@ -1095,6 +1178,12 @@ fn new_passphrase(arg: &Option<String>, env_var: &str) -> std::result::Result<St
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         return Err(format!("no passphrase: pass the flag or set {env_var}"));
     }
+    prompt_new_passphrase()
+}
+
+/// Ask for a new passphrase twice, without echo (`init --ask-passphrase`,
+/// and `new_passphrase` at a terminal).
+fn prompt_new_passphrase() -> std::result::Result<String, String> {
     let first = rpassword::prompt_password("New passphrase: ")
         .map_err(|e| format!("failed to read passphrase: {e}"))?;
     let second = rpassword::prompt_password("Confirm passphrase: ")
@@ -1103,6 +1192,26 @@ fn new_passphrase(arg: &Option<String>, env_var: &str) -> std::result::Result<St
         return Err("passphrases do not match".to_string());
     }
     Ok(first)
+}
+
+/// 12.3 (the keys note, section 7): show a new key's recovery code under the
+/// display rule, or say why it wasn't shown and how to see it later.
+fn show_recovery_code(path: &str, key: &[u8; 32]) {
+    use mnemo_engine::keys;
+    match keys::display::refusal_reason() {
+        None => {
+            if let Err(e) = keys::display::show(&keys::recovery::encode(key)) {
+                eprintln!(
+                    "note: the recovery code couldn't be shown ({e}); run `mnemo recovery-code \
+                     {path}` in a terminal of your own"
+                );
+            }
+        }
+        Some(why) => eprintln!(
+            "note: {} ({why})",
+            keys::display::REFUSAL.replace("<file>", path)
+        ),
+    }
 }
 
 /// Resolve a query vector from CLI input, accepting exactly one of:
@@ -1467,33 +1576,113 @@ fn run() -> std::result::Result<(), String> {
             dimensions,
             no_manifest,
             passphrase: pp,
+            ask_passphrase,
+            key_file,
         } => {
-            // Init wraps `new_passphrase` because the passphrase chosen
-            // here is irrecoverable — typoing it makes the file
-            // unopenable. The double-prompt catches typos at the interactive
-            // path; flag and env-var paths trust the caller (they already
-            // know what they typed).
-            let pp = new_passphrase(&pp, "MNEMO_PASSPHRASE")?;
+            use mnemo_engine::keys;
             let cfg = MnemoConfig {
                 dimensions,
                 ..Default::default()
             };
-            let mut db = Mnemo::create(&path, &pp, cfg).map_err(fmt)?;
-            if !no_manifest {
-                let manifest = Memory::scaffold_manifest(dimensions);
-                db.remember(manifest).map_err(fmt)?;
-                db.flush().map_err(fmt)?;
-            }
-            db.close().map_err(fmt)?;
-            if no_manifest {
-                println!("created {path} ({dimensions} dimensions, encrypted, no manifest)");
+            let mut write_manifest = |db: &mut Mnemo| -> Result<()> {
+                if !no_manifest {
+                    db.remember(Memory::scaffold_manifest(dimensions))?;
+                    db.flush()?;
+                }
+                Ok(())
+            };
+            let env_pp = std::env::var("MNEMO_PASSPHRASE").is_ok_and(|v| !v.is_empty());
+            let how = if pp.is_some() || ask_passphrase || env_pp {
+                // A passphrase, as before v0.15. The double prompt catches
+                // a typo, which would make the file unopenable; the flag and
+                // the env var trust the caller.
+                let pp = if ask_passphrase {
+                    prompt_new_passphrase()?
+                } else {
+                    new_passphrase(&pp, "MNEMO_PASSPHRASE")?
+                };
+                let mut db = Mnemo::create(&path, &pp, cfg).map_err(fmt)?;
+                write_manifest(&mut db).map_err(fmt)?;
+                db.close().map_err(fmt)?;
+                "encrypted with a passphrase".to_string()
+            } else if let Some(kf) = &key_file {
+                // 12.3: a generated key, in a new file the user named.
+                if std::fs::symlink_metadata(kf).is_ok() {
+                    return Err(format!("{kf} already exists; nothing was created"));
+                }
+                let mut persist =
+                    |_salt: &[u8; 16], key: &[u8; 32]| keys::write_new_key_file(kf, key);
+                keys::create_generated(&path, cfg, &mut write_manifest, &mut persist)
+                    .map_err(fmt)?;
+                format!("encrypted with a generated key, written to {kf} (mode 0600)")
             } else {
+                // 12.3: a generated key, kept in the key store.
+                let Some(store) = keys::default_store() else {
+                    return Err(format!(
+                        "no keychain is available here, so `mnemo init` can't keep a generated \
+                         key, and nothing was created. To protect {path} with a passphrase, as \
+                         v0.14 did: `mnemo init --ask-passphrase {path}` (or set \
+                         MNEMO_PASSPHRASE). To write a generated key to a new file (mode 0600): \
+                         `mnemo init --key-file <PATH> {path}`"
+                    ));
+                };
+                let label = path.clone();
+                let mut persist = |salt: &[u8; 16], key: &[u8; 32]| {
+                    let entry = keys::StoredSecret::Key(zeroize::Zeroizing::new(*key));
+                    keys::store_and_check(&*store, salt, &entry, &label)
+                };
+                let key = keys::create_generated(&path, cfg, &mut write_manifest, &mut persist)
+                    .map_err(fmt)?;
                 println!(
-                    "created {path} ({dimensions} dimensions, encrypted) with scaffold manifest"
+                    "created {path} ({dimensions} dimensions), encrypted with a generated key"
                 );
+                println!("  → the key is in {}", store.describe());
+                show_recovery_code(&path, &key);
+                if !no_manifest {
+                    println!("  → run `mnemo about {path}` to view its scaffold manifest");
+                }
+                return Ok(());
+            };
+            if no_manifest {
+                println!("created {path} ({dimensions} dimensions, {how}, no manifest)");
+            } else {
+                println!("created {path} ({dimensions} dimensions, {how}) with scaffold manifest");
                 println!("  → run `mnemo about {path}` to view it");
                 println!("  → replace it with one that records your embedder and conventions");
             }
+        }
+        Command::RecoveryCode { path } => {
+            use mnemo_engine::keys::{self, StoredSecret};
+            let store = keys::default_store().ok_or_else(|| {
+                "no keychain is available here, so there's no stored key to show".to_string()
+            })?;
+            let info = keys::file_info(&path).map_err(fmt)?;
+            let entry = store
+                .get(&info.salt)
+                .map_err(fmt)?
+                .ok_or_else(|| format!("{} has no entry for {path}", store.describe()))?;
+            let key = match entry {
+                StoredSecret::Key(k) => k,
+                StoredSecret::Passphrase(_) => {
+                    return Err(format!(
+                        "{path} uses a passphrase; there's no recovery code"
+                    ))
+                }
+            };
+            if !Mnemo::key_opens(&path, &key).map_err(fmt)? {
+                return Err(format!(
+                    "the key {} holds for {path} doesn't open it, so its code isn't shown",
+                    store.describe()
+                ));
+            }
+            if let Some(why) = keys::display::refusal_reason() {
+                return Err(format!(
+                    "{} ({why})",
+                    keys::display::REFUSAL.replace("<file>", &path)
+                ));
+            }
+            keys::display::show(&keys::recovery::encode(&key))
+                .map_err(|e| format!("showing the recovery code: {e}"))?;
         }
         Command::Info {
             path,
@@ -1508,10 +1697,17 @@ fn run() -> std::result::Result<(), String> {
             println!("mnemo:       v{} ({})", bi.version, bi.target);
             println!("aes:         {}", bi.aes_backend);
             println!("polyval:     {}", bi.polyval_backend);
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let s = db.stats().map_err(fmt)?;
             println!("path:        {path}");
+            // 12.3: where the secret came from, and the KDF's grade.
+            if let Some((src, _)) = SOURCE.get() {
+                println!("key source:  {src}");
+            }
+            if let Some(note) = mnemo_engine::keys::kdf_grade_note(db.kdf_params(), secret.kind()) {
+                println!("kdf:         {note}");
+            }
             println!("format:      v{}", s.format_version);
             if let Some(hint) = upgrade_hint(&path, s.format_version) {
                 println!("             {hint}");
@@ -1572,40 +1768,89 @@ fn run() -> std::result::Result<(), String> {
         }
         Command::Rekey {
             path,
+            key_file,
             passphrase: pp,
             new_passphrase: new,
+            new_key,
+            store: keep,
             rotate,
         } => {
-            let pp = passphrase(&pp)?;
-            let new = new_passphrase(&new, "MNEMO_NEW_PASSPHRASE")?;
+            use mnemo_engine::keys::{self, Secret};
+            let old = secret_for(&path, &pp, &key_file)?;
+            let new: Secret = if new_key {
+                Secret::Key(zeroize::Zeroizing::new(Mnemo::generate_key()))
+            } else {
+                Secret::Passphrase(zeroize::Zeroizing::new(new_passphrase(
+                    &new,
+                    "MNEMO_NEW_PASSPHRASE",
+                )?))
+            };
             // 12.4 (RB-007.4): through the lock layer, so shared handles'
             // calls can't keep the rekey out, and theirs see "rekey".
-            let mut db = Mnemo::open_exclusive(&path, &pp, "rekey", wait_opts()).map_err(fmt)?;
-            // RB-005.4 item 4: REKEY-1 makes an error leave the old passphrase
-            // in force, so say so. The one exception (the old header couldn't
+            let mut db = open_rw(&path, &old, "rekey").map_err(fmt)?;
+            // RB-005.4 item 4: REKEY-1 makes an error leave the old secret in
+            // force, so say so. The one exception (the old header couldn't
             // be written back) says "may open with either secret" itself.
-            db.rekey(&new, mnemo_engine::KdfParams::secure())
-                .map_err(|e| {
-                    let msg = fmt(e);
-                    if msg.contains("may open with either secret") {
-                        msg
-                    } else {
-                        format!("{msg}; the passphrase was not changed")
+            let old_word = match old.kind() {
+                keys::SecretKind::Passphrase => "passphrase",
+                keys::SecretKind::Key => "key",
+            };
+            let not_changed = |msg: String| {
+                if msg.contains("may open with either secret") {
+                    msg
+                } else {
+                    format!("{msg}; the {old_word} was not changed")
+                }
+            };
+            let mut stored_note = None;
+            if new_key || keep {
+                // 12.3 (the keys note, section 4): the new secret goes into
+                // the key store before the commit.
+                let Some(store) = keys::default_store() else {
+                    return Err(
+                        "--new-key and --store keep the new secret in a keychain, and none \
+                                is available here; nothing was changed"
+                            .into(),
+                    );
+                };
+                let mut before_commit = || -> Result<()> {
+                    if let Secret::Key(k) = &new {
+                        show_recovery_code(&path, k);
                     }
-                })?;
+                    Ok(())
+                };
+                match keys::rekey_stored(&mut db, &new, &*store, &path, &mut before_commit) {
+                    Ok(note) => stored_note = Some(note),
+                    Err(e) => {
+                        return Err(format!("{}; {}", not_changed(fmt(e.error)), e.entries));
+                    }
+                }
+            } else if let Secret::Passphrase(p) = &new {
+                // 12.3 (the keys note, section 1, rule 1): never below
+                // `secure()`, nor below what the file had.
+                let kdf = db.kdf_params().for_passphrase();
+                db.rekey(p, kdf).map_err(|e| not_changed(fmt(e)))?;
+            }
             // REKEY-1: the rekey took effect; part of the old wrap's cleanup
             // didn't. `--rotate` rewrites the file, which covers it.
             let left = db.rekey_cleanup_error().map(str::to_owned);
             db.close().map_err(fmt)?;
             if let (Some(left), false) = (&left, rotate) {
                 eprintln!(
-                    "warning: the new passphrase is in force, but part of the old key \
+                    "warning: the new secret is in force, but part of the old key \
                      wrap's cleanup failed ({left}); run `mnemo rekey --rotate` to be sure \
-                     the old passphrase opens nothing"
+                     the old secret opens nothing"
                 );
             }
+            if let Some(note) = stored_note {
+                println!("  → {note}");
+            }
             if rotate {
-                let r = Mnemo::compact_file_waiting(&path, &new, wait_opts()).map_err(fmt)?;
+                let r = match &new {
+                    Secret::Passphrase(p) => Mnemo::compact_file_waiting(&path, p, wait_opts()),
+                    Secret::Key(k) => Mnemo::compact_file_waiting_with_key(&path, k, wait_opts()),
+                }
+                .map_err(fmt)?;
                 println!(
                     "rekeyed and rotated {path}: a fresh data key, {} memories kept",
                     r.after
@@ -1613,8 +1858,8 @@ fn run() -> std::result::Result<(), String> {
             } else {
                 println!("rekeyed {path}");
                 println!(
-                    "note: the data key is unchanged; after a passphrase leak, run \
-                     `mnemo rekey --rotate` to revoke the old one"
+                    "note: the data key is unchanged; after a leak, run \
+                     `mnemo rekey --rotate` to revoke the old secret"
                 );
             }
         }
@@ -1623,7 +1868,7 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let report = match &secret {
                 inspect::Secret::Passphrase(p) => {
                     Mnemo::compact_file_waiting(&path, p, wait_opts())
@@ -1650,7 +1895,7 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let report = db.verify_report().map_err(fmt)?;
             println!(
@@ -1671,12 +1916,12 @@ fn run() -> std::result::Result<(), String> {
             file,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             // Read the input before taking the lock, then one exclusive hold
             // through the lock layer (12.4, RB-007.4) for the whole import.
             let text =
                 std::fs::read_to_string(&file).map_err(|e| format!("cannot read {file}: {e}"))?;
-            let mut db = Mnemo::open_exclusive(&path, &pp, "import", wait_opts()).map_err(fmt)?;
+            let mut db = open_w(&path, &pp, "import").map_err(fmt)?;
             let mut count = 0usize;
             for (lineno, line) in text.lines().enumerate() {
                 let line = line.trim();
@@ -1708,7 +1953,7 @@ fn run() -> std::result::Result<(), String> {
             // the Phase-3 bits we add here to avoid Rust 1.75's
             // redundant-import warning (which `-D warnings` makes fatal).
             use mnemo_engine::{EmbedCmd, EmbedderIdentity};
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mt = parse_memory_types(&r#type)?
                 .pop()
                 .ok_or_else(|| format!("unknown memory type: {type:?}", r#type = r#type))?;
@@ -1813,7 +2058,7 @@ fn run() -> std::result::Result<(), String> {
             n_probe,
             n_rerank,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "index").map_err(fmt)?;
             if drop {
                 db.drop_index();
@@ -1868,7 +2113,7 @@ fn run() -> std::result::Result<(), String> {
         } => {
             // Search is a pure catalog scan — no access-tracking, no
             // catalog writes. Safe on a read-only handle.
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let q = resolve_query(query, query_file)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             let hits = db
@@ -1888,7 +2133,7 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
@@ -2039,7 +2284,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             // `get` is a plain catalog lookup + record read — no writes.
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             let m = db.get(&ulid).map_err(fmt)?;
@@ -2057,7 +2302,7 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let types = match r#type {
                 Some(s) => Some(parse_memory_types(&s)?),
                 None => None,
@@ -2118,7 +2363,7 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let types = match r#type {
                 Some(s) => Some(parse_memory_types(&s)?),
                 None => None,
@@ -2171,7 +2416,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let idle = inspect::parse_idle(&idle_timeout)?;
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             let loaded = inspect::load(&path, &secret)?;
             let listener = inspect::bind(port).map_err(|e| format!("binding 127.0.0.1: {e}"))?;
             let port = listener
@@ -2234,7 +2479,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity};
-            let secret = unlock(&pp, &key_file)?;
+            let secret = secret_for(&path, &pp, &key_file)?;
             if query.is_none() && query_file.is_none() && text.is_none() && keywords.is_none() {
                 return Err(
                     "recall requires one of --query / --query-file / --text / --keywords".into(),
@@ -2436,7 +2681,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
 
             let mut patch = MemoryPatch::default();
@@ -2533,7 +2778,7 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             use mnemo_engine::KeyScope;
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             // v0.8.1 bugfix: default slot matches keyed remember with
             // the same arguments. No `--shared`, no `--agent` → default
@@ -2613,7 +2858,7 @@ fn run() -> std::result::Result<(), String> {
             path,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let db = open_r(&path, &pp).map_err(fmt)?;
             let snaps = db.snapshots();
             if snaps.is_empty() {
@@ -2631,7 +2876,7 @@ fn run() -> std::result::Result<(), String> {
             to_time,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "restore").map_err(fmt)?;
             let info = match (to_txn, to_time) {
                 (Some(txn), _) => db.restore_to(txn).map_err(fmt)?,
@@ -2693,7 +2938,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             key,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             // Get on a cache is a mutation (bumps access stats) unless
             // the handle is read-only. Use read-write here so the stats
             // update lands durably on the next user-driven flush. A v8
@@ -2737,7 +2982,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             ttl,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let bytes = match (value, file) {
                 (Some(v), None) => v.into_bytes(),
                 (None, Some(f)) => std::fs::read(&f).map_err(|e| format!("read {f}: {e}"))?,
@@ -2764,7 +3009,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             key,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "cache delete").map_err(fmt)?;
             db.cache_delete(&ns, &key).map_err(fmt)?;
             db.flush().map_err(fmt)?;
@@ -2775,7 +3020,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             ns,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             // Read-only handle is fine — stats is a pure scan.
             let db = open_r(&path, &pp).map_err(fmt)?;
             let s = db.cache_stats(ns.as_deref());
@@ -2796,7 +3041,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             expired,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "cache purge").map_err(fmt)?;
             let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
             db.flush().map_err(fmt)?;
@@ -2842,6 +3087,16 @@ fn memory_from_json(line: &str) -> std::result::Result<Memory, String> {
 }
 
 fn fmt(e: mnemo_engine::MnemoError) -> String {
+    // 12.3: a wrong secret names where it came from, and the next source of
+    // the same kind that's present (no fall-through).
+    if matches!(e, mnemo_engine::MnemoError::WrongPassphrase) {
+        if let Some((src, next)) = SOURCE.get() {
+            return match next {
+                Some(n) => format!("{e} (the secret came from {src}; {n} is also set, and is used once {src} isn't)"),
+                None => format!("{e} (the secret came from {src})"),
+            };
+        }
+    }
     e.to_string()
 }
 
@@ -2863,7 +3118,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             embed_timeout,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let fmt_enum = TranscriptFormat::parse(&format).ok_or_else(|| {
                 format!("unknown --format '{format}' (want 'jsonl' or 'claude-code-jsonl')")
             })?;
@@ -2956,7 +3211,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             output,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             // 12.7d: the shared ingest-shape export (seq order, chunks
             // joined), so the JSONL matches Python and MCP `thread_export`
@@ -2989,7 +3244,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             thread,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "thread forget").map_err(fmt)?;
             let n = db.thread_forget(&thread).map_err(fmt)?;
             db.flush().map_err(fmt)?;
@@ -3004,7 +3259,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             from,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "thread start").map_err(fmt)?;
             let id = db.thread_start(&new, &from).map_err(fmt)?;
             db.flush().map_err(fmt)?;
@@ -3046,7 +3301,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             budget,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let scope = resolve_scope(thread, project)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             let out = db.essence(scope, budget).map_err(fmt)?;
@@ -3062,7 +3317,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             refs,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let section = EssenceSection::parse(&section).ok_or_else(|| {
                 format!(
                     "unknown section '{section}' (want intent, conventions, decisions, state, open, next, lessons)"
@@ -3088,7 +3343,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             refs,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let scope = resolve_scope(thread, project)?;
             let mut db = open_w(&path, &pp, "essence append").map_err(fmt)?;
             let id = db
@@ -3105,7 +3360,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             refs,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence update").map_err(fmt)?;
             let outcome = db
@@ -3125,7 +3380,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             id,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence resolve").map_err(fmt)?;
             let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
@@ -3143,7 +3398,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             id,
             passphrase: pp,
         } => {
-            let pp = passphrase(&pp)?;
+            let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence remove").map_err(fmt)?;
             db.essence_remove(&ulid).map_err(fmt)?;
