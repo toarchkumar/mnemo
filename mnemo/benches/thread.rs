@@ -39,6 +39,7 @@ impl Embedder for CannedEmbedder {
             name: "bench-canned-embedder".into(),
             dimensions: self.vector.len(),
             normalize: true,
+            ..Default::default()
         }
     }
 
