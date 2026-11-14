@@ -1225,6 +1225,7 @@ fn embed_cmd_recovers_after_junk_reply_with_correct_vector() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()
@@ -1256,6 +1257,7 @@ fn embed_cmd_recovers_after_double_reply_with_correct_vector() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()
@@ -1312,6 +1314,7 @@ fn embed_cmd_rejects_all_zero_vector_and_respawns() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()
@@ -1346,6 +1349,7 @@ fn embed_cmd_rejects_non_finite_vector_and_respawns() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()
@@ -1368,6 +1372,7 @@ fn embed_cmd_detects_stdout_banner_before_requests() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()
@@ -1408,6 +1413,7 @@ fn embed_cmd_two_thousand_text_batch_does_not_deadlock() {
         name: "fake-4d".into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     };
     let em = EmbedCmd::new(&ecmd, identity)
         .unwrap()

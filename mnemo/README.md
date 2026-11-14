@@ -186,6 +186,15 @@ Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desk
 Omit `--embed-cmd`/`--embed-name` to keep the pre-Phase-3
 embedder-agnostic behavior (`vector`/`query` only).
 
+**Models that embed queries differently** (v0.15, 12.3 step 4): add
+`--embed-query <convention>`, a short name for the difference (an
+instruction prefix, say `bge-query-instruction`). Each request line is then
+a JSON object that says its side, `{"kind":"query","text":"…"}` for a
+recall and `{"kind":"document","text":"…"}` for everything stored, so one
+child can embed both. The convention is part of the file's embedder
+identity: a file embedded one way refuses an embedder that queries another
+way, and `mnemo reembed` moves a file to a new embedder.
+
 #### CLI text path
 
 The same `--embed-cmd` + `--embed-name` pair works on the one-shot
@@ -204,6 +213,16 @@ mnemo recall agent.mnemo --text "what drink?" --top-k 5 \
 ```
 
 `--text` is mutually exclusive with `--query`/`--query-file`.
+
+**A recall by text is hybrid by default** (v0.15, on a v9 file): the text
+is also matched by keyword (BM25, weight 0.25), so a question that names
+`mnemo.nosync` or `v0.9.0` finds the memory that does. `--keywords` replaces
+the text for that score (weight 0.5): give it identifiers the question
+doesn't contain. `--no-keywords` (or `--keywords ""`) is vector-only recall.
+The keyword index matches whole words and, since v0.15's tokenizer 2, their
+parts: `nosync` finds `mnemo.nosync`, `icloud` finds `iCloud's`. A file
+written before v0.15 keeps tokenizer 1 (whole words) until `mnemo compact`
+rebuilds its index; `mnemo info` shows which (`keywords:`).
 
 The server holds an exclusive write lock on the file for its lifetime
 (see [Concurrency](#concurrency--read-only-opens)), so two MCP servers
@@ -855,7 +874,8 @@ cargo run --bin mnemo -- <command>
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
-| `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again |
+| `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |
+| `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |

@@ -393,6 +393,7 @@ impl MnemoDb {
             name: id.name,
             dimensions: id.dimensions as usize,
             normalize: id.normalize,
+            ..Default::default()
         };
         let adapter = EngineEmbedder {
             inner: embedder.clone(),

@@ -75,22 +75,28 @@ fn the_index_survives_reopen_and_follows_deletes_and_rewrites() {
     let b = db.remember(mem("release v0.10.0 is planned", 1)).unwrap();
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(top(&mut db, "v0.9.0"), vec![a]);
+    // TOK-1: tokenizer 2 also indexes `v0`, so the other version is a
+    // weaker match; the exact one comes first.
+    assert_eq!(top(&mut db, "v0.9.0")[0], a);
     db.delete(&a).unwrap();
     assert!(
-        top(&mut db, "v0.9.0").is_empty(),
+        !top(&mut db, "v0.9.0").contains(&a),
         "a deleted doc is gone at once"
     );
     // An overwrite indexes the new text and drops the old.
     let mut m = db.get(&b).unwrap();
     m.content = "release v0.11.0 is planned".into();
     db.remember(m).unwrap();
-    assert!(top(&mut db, "v0.10.0").is_empty());
     assert_eq!(top(&mut db, "v0.11.0"), vec![b]);
+    assert_eq!(
+        top(&mut db, "v0.10.0"),
+        vec![b],
+        "only through the part `v0`"
+    );
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(top(&mut db, "v0.11.0"), vec![b]);
-    assert!(top(&mut db, "v0.9.0").is_empty());
+    assert!(!top(&mut db, "v0.9.0").contains(&a));
     assert_eq!(db.verify().unwrap(), 1);
 }
 

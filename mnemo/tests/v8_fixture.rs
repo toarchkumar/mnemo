@@ -192,6 +192,7 @@ fn compaction_converts_it_to_v9_with_everything() {
                 name: self.0.into(),
                 dimensions: 8,
                 normalize: true,
+                ..Default::default()
             }
         }
         fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

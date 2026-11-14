@@ -173,6 +173,45 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Embed every live memory again with a new embedder, and record its
+    /// identity (12.3 step 4).
+    ///
+    /// A compaction with new vectors: it holds the file's exclusive lock
+    /// (waiting `--wait`, like `compact`) for the whole run, embedding
+    /// included, writes a temp copy with the same salt and renames it over
+    /// the file. An interrupted run leaves the old file whole, so the file
+    /// never has two identities or mixed vectors. It also rebuilds the
+    /// keyword index with the current tokenizer, and drops snapshot history
+    /// as compaction does.
+    Reembed {
+        /// Path to the `.mnemo` file.
+        path: String,
+        /// The new embedder's command (the `remember --embed-cmd` protocol).
+        #[arg(long)]
+        embed_cmd: String,
+        /// The new embedder's identity name.
+        #[arg(long)]
+        embed_name: String,
+        /// Whether the new embedder returns unit-normalized vectors.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        embed_normalize: bool,
+        /// The new embedder's query convention, if it embeds queries
+        /// differently (see `remember --embed-query`).
+        #[arg(long)]
+        embed_query: Option<String>,
+        /// The new embedder's width, when it differs from the file's.
+        #[arg(long)]
+        embed_dims: Option<usize>,
+        /// Per-request timeout for the embedder (seconds; default 60).
+        #[arg(long, default_value_t = 60)]
+        embed_timeout: u64,
+        /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
+        /// passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
     /// Decrypt and re-verify every live record.
     Verify {
         /// Path to the `.mnemo` file.
@@ -250,6 +289,13 @@ enum Command {
         /// embedders that return raw dot-space vectors).
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// 12.3 step 4: the embedder embeds queries differently from
+        /// documents, under this convention name (recorded in the file's
+        /// embedder identity, which must match). The command then gets each
+        /// request as `{"kind":"query"|"document","text":…}` instead of a
+        /// JSON string.
+        #[arg(long)]
+        embed_query: Option<String>,
         /// Per-request timeout for the embedder (seconds; default 60).
         /// A silent-but-alive child trips this deadline deterministically
         /// (PR 10b.2). A short timeout bounds CLI/MCP latency when the
@@ -483,11 +529,17 @@ enum Command {
         #[arg(long, conflicts_with_all = ["query", "query_file"])]
         text: Option<String>,
         /// FMT-9d (v9 files): identifiers or exact terms to match (a
-        /// version, a PR number, a function name), not the question. Added
-        /// to vector recall as a BM25 term (hybrid recall); on its own it
-        /// is keyword-only recall.
+        /// version, a PR number, a function name). Added to vector recall
+        /// as a BM25 term (hybrid recall); on its own it is keyword-only
+        /// recall. Since v0.15 `--text` is matched by keyword too, so give
+        /// this only for identifiers the text doesn't contain; it replaces
+        /// the text for the keyword score.
         #[arg(long)]
         keywords: Option<String>,
+        /// 12.3 step 4: don't match `--text` by keyword (vector-only
+        /// recall). Same as `--keywords ""`.
+        #[arg(long, conflicts_with = "keywords")]
+        no_keywords: bool,
         #[arg(long, default_value_t = 10)]
         top_k: usize,
         /// Output format.
@@ -552,6 +604,13 @@ enum Command {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// 12.3 step 4: the embedder embeds queries differently from
+        /// documents, under this convention name (recorded in the file's
+        /// embedder identity, which must match). The command then gets each
+        /// request as `{"kind":"query"|"document","text":…}` instead of a
+        /// JSON string.
+        #[arg(long, requires = "embed_cmd")]
+        embed_query: Option<String>,
         /// Per-request timeout for the embedder (seconds; default 60).
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
@@ -607,6 +666,13 @@ enum Command {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// 12.3 step 4: the embedder embeds queries differently from
+        /// documents, under this convention name (recorded in the file's
+        /// embedder identity, which must match). The command then gets each
+        /// request as `{"kind":"query"|"document","text":…}` instead of a
+        /// JSON string.
+        #[arg(long, requires = "embed_cmd")]
+        embed_query: Option<String>,
         /// Per-request embedder timeout in seconds.
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
@@ -712,6 +778,13 @@ enum Command {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// 12.3 step 4: the embedder embeds queries differently from
+        /// documents, under this convention name (recorded in the file's
+        /// embedder identity, which must match). The command then gets each
+        /// request as `{"kind":"query"|"document","text":…}` instead of a
+        /// JSON string.
+        #[arg(long, requires = "embed_cmd")]
+        embed_query: Option<String>,
         /// Per-request timeout for the embedder (seconds; default 60).
         /// Prevents a stuck child from freezing the MCP agent.
         #[arg(long, default_value_t = 60)]
@@ -799,6 +872,13 @@ enum ThreadCmd {
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
+        /// 12.3 step 4: the embedder embeds queries differently from
+        /// documents, under this convention name (recorded in the file's
+        /// embedder identity, which must match). The command then gets each
+        /// request as `{"kind":"query"|"document","text":…}` instead of a
+        /// JSON string.
+        #[arg(long)]
+        embed_query: Option<String>,
         /// Per-request embedder timeout in seconds.
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
@@ -1033,6 +1113,21 @@ enum CacheOp {
 /// When `--passphrase` is used the passphrase ends up in shell history and
 /// process listings; we warn once to stderr to make that obvious.
 /// FMT-9f: the hint `info` and `about` print for a v8 file.
+/// TOK-1: what to say about a keyword index that isn't tokenizer 2.
+fn tokenizer_note(path: &str, k: mnemo_engine::KeywordTokenizer) -> Option<String> {
+    match k {
+        mnemo_engine::KeywordTokenizer::V2 => None,
+        mnemo_engine::KeywordTokenizer::V1 => Some(format!(
+            "keywords match whole words as written; `mnemo compact {path}` rebuilds the \
+             index so parts of dotted names and possessives match too"
+        )),
+        mnemo_engine::KeywordTokenizer::Mixed => Some(format!(
+            "a build before v0.15 wrote to the keyword index, so parts of words match only \
+             some memories; `mnemo compact {path}` rebuilds it"
+        )),
+    }
+}
+
 fn upgrade_hint(path: &str, format_version: u16) -> Option<String> {
     (format_version < 9).then(|| {
         format!(
@@ -1129,13 +1224,14 @@ fn embed_first(
     name: &str,
     normalize: bool,
     timeout: u64,
+    query: &str,
     texts: &[&str],
 ) -> std::result::Result<Option<Embedded>, String> {
     use mnemo_engine::Embedder;
     let Ok(dimensions) = Mnemo::peek_dimensions(path) else {
         return Ok(None);
     };
-    let embedder = new_embedder(cmd, name, normalize, timeout, dimensions)?;
+    let embedder = new_embedder(cmd, name, normalize, timeout, query, dimensions)?;
     let vectors = embedder.embed(texts).map_err(fmt)?;
     Ok(Some((embedder, vectors)))
 }
@@ -1145,12 +1241,14 @@ fn new_embedder(
     name: &str,
     normalize: bool,
     timeout: u64,
+    query: &str,
     dimensions: usize,
 ) -> std::result::Result<mnemo_engine::EmbedCmd, String> {
     let identity = mnemo_engine::EmbedderIdentity {
         name: name.to_string(),
         dimensions,
         normalize,
+        query_convention: query.to_string(),
     };
     Ok(mnemo_engine::EmbedCmd::new(cmd, identity)
         .map_err(fmt)?
@@ -1904,6 +2002,12 @@ fn run() -> std::result::Result<(), String> {
                 s.wal_pages * 8
             );
             println!("recall:      {}", s.recall_mode.as_str());
+            if let Some(k) = s.keyword_tokenizer {
+                println!("keywords:    tokenizer {}", k.as_str());
+                if let Some(note) = tokenizer_note(&path, k) {
+                    println!("             {note}");
+                }
+            }
             println!("created at:  {}", s.created_at);
             println!("agents:      {}", s.agents.join(", "));
             // INSP-1 (RB-001.25): what a restore can reach right now.
@@ -2103,6 +2207,54 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
+        Command::Reembed {
+            path,
+            embed_cmd,
+            embed_name,
+            embed_normalize,
+            embed_query,
+            embed_dims,
+            embed_timeout,
+            key_file,
+            passphrase: pp,
+        } => {
+            let secret = secret_for(&path, &pp, &key_file)?;
+            let dims = match embed_dims {
+                Some(d) => d,
+                None => Mnemo::peek_dimensions(&path).map_err(fmt)?,
+            };
+            let embedder = new_embedder(
+                &embed_cmd,
+                &embed_name,
+                embed_normalize,
+                embed_timeout,
+                embed_query.as_deref().unwrap_or_default(),
+                dims,
+            )?;
+            let report = match &secret {
+                inspect::Secret::Passphrase(p) => {
+                    Mnemo::reembed_file_waiting(&path, p, &embedder, wait_opts())
+                }
+                inspect::Secret::Key(k) => {
+                    Mnemo::reembed_file_waiting_with_key(&path, k, &embedder, wait_opts())
+                }
+            }
+            .map_err(fmt)?;
+            let from = report
+                .from
+                .as_ref()
+                .map_or_else(|| "no recorded embedder".to_string(), |i| i.name.clone());
+            println!(
+                "re-embedded {path}: {} memories, {from} -> {} ({} dimensions)",
+                report.memories, report.to.name, report.to.dimensions
+            );
+            if report.cache_dropped > 0 {
+                println!(
+                    "  {} semantic cache entries dropped (their vectors have the old width)",
+                    report.cache_dropped
+                );
+            }
+        }
         Command::Verify {
             path,
             key_file,
@@ -2122,6 +2274,13 @@ fn run() -> std::result::Result<(), String> {
                      carries them and gives a legacy manifest the sentinel vector.",
                     report.zero_vector_memories
                 );
+            }
+            if let Some(note) = report
+                .keyword_tokenizer
+                .filter(|k| *k == mnemo_engine::KeywordTokenizer::Mixed)
+                .and_then(|k| tokenizer_note(&path, k))
+            {
+                eprintln!("note: {note}");
             }
         }
         Command::Import {
@@ -2159,6 +2318,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_query,
             embed_timeout,
             passphrase: pp,
         } => {
@@ -2180,6 +2340,7 @@ fn run() -> std::result::Result<(), String> {
                 &embed_name,
                 embed_normalize,
                 embed_timeout,
+                embed_query.as_deref().unwrap_or_default(),
                 &[text.as_str()],
             )? {
                 Some((embedder, mut vectors)) => {
@@ -2197,6 +2358,7 @@ fn run() -> std::result::Result<(), String> {
                         name: embed_name,
                         dimensions: db.dimensions(),
                         normalize: embed_normalize,
+                        query_convention: embed_query.clone().unwrap_or_default(),
                     };
                     let embedder = EmbedCmd::new(&embed_cmd, identity)
                         .map_err(fmt)?
@@ -2673,6 +2835,7 @@ fn run() -> std::result::Result<(), String> {
             query_file,
             text,
             keywords,
+            no_keywords,
             top_k,
             format,
             r#type,
@@ -2687,6 +2850,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_query,
             embed_timeout,
             key_file,
             passphrase: pp,
@@ -2762,8 +2926,22 @@ fn run() -> std::result::Result<(), String> {
             // defer the open until after we've built `req`.
             // FMT-9d: `--keywords` adds a BM25 term; `--text` without an
             // embedder is keyword-only on v9.
-            let mut keyword: Option<String> = keywords;
+            // 12.3 step 4: `--no-keywords` is `--keywords ""`, vector only.
+            let mut keyword: Option<String> = if no_keywords {
+                Some(String::new())
+            } else {
+                keywords
+            };
+            // The query text, for keyword matching (hybrid by default).
+            let mut query_text: Option<String> = None;
             let (q, mut db_opt, mut effective_no_track) = match text {
+                Some(_) if embed_cmd.is_none() && no_keywords => {
+                    return Err(
+                        "--no-keywords with --text needs --embed-cmd and --embed-name \
+                                (without an embedder, --text is matched by keyword only)"
+                            .to_string(),
+                    );
+                }
                 Some(text) if embed_cmd.is_none() => {
                     // No embedder: keyword-only recall, which needs v9.
                     let (db, effective_no_track) =
@@ -2791,6 +2969,7 @@ fn run() -> std::result::Result<(), String> {
                         name: ename,
                         dimensions: db.dimensions(),
                         normalize: embed_normalize,
+                        query_convention: embed_query.clone().unwrap_or_default(),
                     };
                     let embedder = EmbedCmd::new(&ecmd, identity)
                         .map_err(fmt)?
@@ -2800,10 +2979,12 @@ fn run() -> std::result::Result<(), String> {
                         let embedder_ref = db
                             .embedder()
                             .ok_or_else(|| "embedder vanished after set_embedder".to_string())?;
-                        let mut vs = embedder_ref.embed(&[text.as_str()]).map_err(fmt)?;
+                        // 12.3 step 4: the query side.
+                        let mut vs = embedder_ref.embed_query(&[text.as_str()]).map_err(fmt)?;
                         vs.pop()
                             .ok_or_else(|| "embedder returned no vector".to_string())?
                     };
+                    query_text = Some(text);
                     (vector, Some(db), effective_no_track)
                 }
                 None if query.is_none() && query_file.is_none() => (Vec::new(), None, no_track),
@@ -2814,6 +2995,9 @@ fn run() -> std::result::Result<(), String> {
             let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
             if let Some(k) = keyword {
                 req = req.keywords(k);
+            }
+            if let Some(t) = query_text {
+                req = req.text(t);
             }
             if let Some(s) = r#type {
                 req = req.types(parse_memory_types(&s)?);
@@ -2890,6 +3074,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_query,
             embed_timeout,
             passphrase: pp,
         } => {
@@ -2930,6 +3115,7 @@ fn run() -> std::result::Result<(), String> {
                         &ename,
                         embed_normalize,
                         embed_timeout,
+                        embed_query.as_deref().unwrap_or_default(),
                         &[t.as_str()],
                     )? {
                         Some((embedder, mut vectors)) => {
@@ -2956,6 +3142,7 @@ fn run() -> std::result::Result<(), String> {
                                 name: ename,
                                 dimensions: db.dimensions(),
                                 normalize: embed_normalize,
+                                query_convention: embed_query.clone().unwrap_or_default(),
                             };
                             let embedder = EmbedCmd::new(&ecmd, identity)
                                 .map_err(fmt)?
@@ -3107,6 +3294,7 @@ fn run() -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_query,
             embed_timeout,
             shared,
             allow_network_fs,
@@ -3121,12 +3309,13 @@ fn run() -> std::result::Result<(), String> {
             let resolved = serve_path(&path)?;
             let p = resolved.as_path();
             let embed_spec = match (embed_cmd, embed_name) {
-                (Some(c), Some(n)) => Some((
-                    c,
-                    n,
-                    embed_normalize,
-                    std::time::Duration::from_secs(embed_timeout),
-                )),
+                (Some(c), Some(n)) => Some(mnemo_engine::mcp::EmbedSpec {
+                    command: c,
+                    name: n,
+                    normalize: embed_normalize,
+                    timeout: std::time::Duration::from_secs(embed_timeout),
+                    query_convention: embed_query.unwrap_or_default(),
+                }),
                 _ => None,
             };
             let shared = shared.then(|| {
@@ -3134,7 +3323,7 @@ fn run() -> std::result::Result<(), String> {
                 o.allow_network_fs = allow_network_fs;
                 o
             });
-            mnemo_engine::mcp::serve_stdio_with_options(p, embed_spec, shared).map_err(fmt)?;
+            mnemo_engine::mcp::serve_stdio_with_spec(p, embed_spec, shared).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
         Command::Mcp {
@@ -3348,6 +3537,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             embed_cmd,
             embed_name,
             embed_normalize,
+            embed_query,
             embed_timeout,
             passphrase: pp,
         } => {
@@ -3385,6 +3575,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 &embed_name,
                 embed_normalize,
                 embed_timeout,
+                embed_query.as_deref().unwrap_or_default(),
                 dimensions,
             )?;
             let pre: Vec<Vec<f32>> = if texts.is_empty() {

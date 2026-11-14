@@ -148,6 +148,7 @@ impl Embedder for Words {
             name: "inspect-test-words".into(),
             dimensions: 4,
             normalize: false,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

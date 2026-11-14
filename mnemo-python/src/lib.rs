@@ -725,6 +725,27 @@ fn memory_to_dict(py: Python<'_>, m: &Memory) -> PyResult<PyObject> {
 struct PyFnEmbedder {
     identity: EmbedderIdentity,
     callback: Py<PyAny>,
+    /// 12.3 step 4: the query-side callable, when queries are embedded
+    /// differently (`set_embedder(query_fn=…)`).
+    query_callback: Option<Py<PyAny>>,
+}
+
+/// Call a Python embedder callable with a list of strs.
+fn call_py_embedder(callback: &Py<PyAny>, texts: &[&str]) -> mnemo_core::Result<Vec<Vec<f32>>> {
+    Python::with_gil(|py| {
+        // Pass a Python list of strs; keeps the common
+        // `sentence-transformers` / OpenAI shape natural.
+        let arg = pyo3::types::PyList::new_bound(py, texts);
+        let out = callback.call1(py, (arg,)).map_err(|e| {
+            mnemo_core::MnemoError::Invalid(format!("embedder callback raised: {e}"))
+        })?;
+        let vecs: Vec<Vec<f32>> = out.extract(py).map_err(|e| {
+            mnemo_core::MnemoError::Invalid(format!(
+                "embedder must return list[list[float]]; got {e}"
+            ))
+        })?;
+        Ok(vecs)
+    })
 }
 
 impl Embedder for PyFnEmbedder {
@@ -733,20 +754,11 @@ impl Embedder for PyFnEmbedder {
     }
 
     fn embed(&self, texts: &[&str]) -> mnemo_core::Result<Vec<Vec<f32>>> {
-        Python::with_gil(|py| {
-            // Pass a Python list of strs; keeps the common
-            // `sentence-transformers` / OpenAI shape natural.
-            let arg = pyo3::types::PyList::new_bound(py, texts);
-            let out = self.callback.call1(py, (arg,)).map_err(|e| {
-                mnemo_core::MnemoError::Invalid(format!("embedder callback raised: {e}"))
-            })?;
-            let vecs: Vec<Vec<f32>> = out.extract(py).map_err(|e| {
-                mnemo_core::MnemoError::Invalid(format!(
-                    "embedder must return list[list[float]]; got {e}"
-                ))
-            })?;
-            Ok(vecs)
-        })
+        call_py_embedder(&self.callback, texts)
+    }
+
+    fn embed_query(&self, texts: &[&str]) -> mnemo_core::Result<Vec<Vec<f32>>> {
+        call_py_embedder(self.query_callback.as_ref().unwrap_or(&self.callback), texts)
     }
 }
 
@@ -1012,25 +1024,50 @@ impl Mnemo {
     /// the scaffold manifest too when there is one) and checks them on
     /// every later one, so a subsequent open catches an embedder swap.
     ///
+    /// `query_fn` and `query_convention` (12.3 step 4, v0.15): for a model
+    /// that embeds queries differently from documents. `query_fn` has
+    /// `fn_`'s shape and embeds the query of every `recall_text`;
+    /// `query_convention` names the difference (`"bge-query-instruction"`,
+    /// say) and is part of the identity, so a file embedded one way refuses
+    /// an embedder that queries another way. Pass both or neither
+    /// (`ValueError` otherwise). Without them, queries go through `fn_` as
+    /// before.
+    ///
     /// Raises `RuntimeError` on dimension mismatch
     /// (`dimensions != db.dimensions()`) or on an identity mismatch
     /// with the identity the file records.
-    #[pyo3(signature = (fn_, *, name, dimensions, normalize=true))]
+    #[pyo3(signature = (fn_, *, name, dimensions, normalize=true, query_fn=None,
+                        query_convention=None))]
     fn set_embedder(
         &mut self,
         fn_: Py<PyAny>,
         name: String,
         dimensions: usize,
         normalize: bool,
+        query_fn: Option<Py<PyAny>>,
+        query_convention: Option<String>,
     ) -> PyResult<()> {
+        let query_convention = match (&query_fn, query_convention) {
+            (Some(_), Some(c)) if !c.is_empty() => c,
+            (None, None) => String::new(),
+            (None, Some(c)) if c.is_empty() => String::new(),
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "pass query_fn and query_convention together (a non-empty \
+                     convention names how query_fn differs from fn_), or neither",
+                ))
+            }
+        };
         let identity = EmbedderIdentity {
             name,
             dimensions,
             normalize,
+            query_convention,
         };
         let embedder = PyFnEmbedder {
             identity,
             callback: fn_,
+            query_callback: query_fn,
         };
         match self.handle()? {
             Handle::Plain(c) => c.set_embedder(embedder).map_err(to_py),
@@ -1519,10 +1556,13 @@ impl Mnemo {
     /// unindexed recall scans every live memory exactly.
     ///
     /// `keywords` / `keyword_weight` (FMT-9d, v9 files): as in `recall`.
-    /// Identifiers or exact terms to match (a version, a PR number, a
-    /// function name), not the question: the embedded `query` covers its
-    /// meaning, and the keywords' BM25 score is added with weight
-    /// `keyword_weight` (default 0.5).
+    /// **Since v0.15 the recall is hybrid by default:** with `keywords`
+    /// `None`, `query` itself is also matched by BM25 and added with weight
+    /// `keyword_weight` (default 0.25 for the query's own words, 0.5 for
+    /// keywords given; a `keyword_weight` passed sets both). Keywords given (identifiers the
+    /// question doesn't contain) replace the query for that score, and
+    /// `keywords=""` opts out (vector only). The query is embedded with
+    /// `query_fn` when `set_embedder` was given one.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
@@ -1551,19 +1591,21 @@ impl Mnemo {
             s.embedder()?
         }; // PyRef drops here
         let vector = {
-            let mut vs = embedder.embed(&[query]).map_err(to_py)?;
+            // 12.3 step 4: the query side.
+            let mut vs = embedder.embed_query(&[query]).map_err(to_py)?;
             vs.pop().ok_or_else(|| {
                 PyRuntimeError::new_err("embedder returned no vector for the query text")
             })?
         };
         let mut req = RecallRequest::new(vector)
+            .text(query)
             .top_k(top_k)
             .track_access(track_access);
         if let Some(t) = keywords {
             req = req.keywords(t);
         }
         if let Some(w) = keyword_weight {
-            req = req.keyword_weight(w);
+            req = req.keyword_weight(w).text_keyword_weight(w);
         }
         if let Some(types) = memory_types {
             let parsed: PyResult<Vec<MemoryType>> = types.iter().map(|t| parse_type(t)).collect();
@@ -2144,6 +2186,8 @@ impl Mnemo {
         d.set_item("fsyncs_last_flush", s.fsyncs_last_flush)?;
         d.set_item("format_version", s.format_version)?;
         d.set_item("recall_mode", s.recall_mode.as_str())?;
+        // TOK-1 (v0.15): "1", "2" or "mixed"; None on v8.
+        d.set_item("keyword_tokenizer", s.keyword_tokenizer.map(|k| k.as_str()))?;
         d.set_item("snapshots", snapshots)?;
         // INSP-1 (RB-001.25): what's restorable now, not the policy.
         d.set_item("snapshots_retained", s.snapshots_retained)?;

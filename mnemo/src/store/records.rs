@@ -264,6 +264,13 @@ pub(super) struct Bm25State {
     pub(super) stats: Option<DocStats>,
     /// Documents in the segment the current flush is merging.
     pub(super) merged_docs: u32,
+    /// TOK-1: the tokenizers the pending documents were split with (`None`
+    /// with none pending), so their segment carries the right mark.
+    pub(super) pending_tokens: Option<text::SegmentTokens>,
+    /// TOK-1, tests only: write as a build before v0.15 does (tokenizer 1,
+    /// unmarked segments), whatever the index holds.
+    #[cfg(feature = "dev-hooks")]
+    pub(super) like_older_build: bool,
 }
 
 /// FMT-9d: a manifest's segment runs and their document counts.
@@ -633,6 +640,32 @@ impl Mnemo {
         Ok(())
     }
 
+    /// TOK-1: the state of the keyword index: tokenizer 1, 2 or mixed,
+    /// from the segments' marks and the pending documents. `None` on v8.
+    pub(crate) fn keyword_tokenizer(&mut self) -> Result<Option<text::KeywordTokenizer>> {
+        if !self.is_v9() {
+            return Ok(None);
+        }
+        self.ensure_bm25_dicts()?;
+        let dicts = self.bm25.dicts.as_ref().expect("loaded above");
+        let marks = dicts
+            .iter()
+            .map(|d| text::SegmentTokens::from_first_term(d.first().map(|e| e.term.as_str())))
+            .chain(self.bm25.pending_tokens);
+        Ok(Some(text::KeywordTokenizer::of(marks)))
+    }
+
+    /// TOK-1: the tokenizer a new document or a query uses here.
+    pub(super) fn bm25_tokenizer(&mut self) -> Result<text::Tokenizer> {
+        #[cfg(feature = "dev-hooks")]
+        if self.bm25.like_older_build {
+            return Ok(text::Tokenizer::V1);
+        }
+        Ok(self
+            .keyword_tokenizer()?
+            .map_or(text::Tokenizer::V1, |k| k.tokenizer()))
+    }
+
     /// FMT-9d: BM25 scores of the live keyword-indexed rows that match
     /// `query`: catalog row → score. Empty on v8 (no keyword index).
     pub(super) fn bm25_scores(
@@ -646,7 +679,9 @@ impl Mnemo {
             return Ok(scores);
         }
         self.ensure_bm25()?;
-        let terms: std::collections::BTreeSet<String> = text::tokenize(query).into_iter().collect();
+        let tok = self.bm25_tokenizer()?;
+        let terms: std::collections::BTreeSet<String> =
+            text::tokenize_with(tok, query).into_iter().collect();
         let segs: Vec<RunPtr> = self
             .bm25
             .manifest
@@ -704,8 +739,12 @@ impl Mnemo {
         let written: u64 = self.bm25.manifest.seg_docs.iter().map(|&d| d as u64).sum();
         let live_docs = self.bm25.stats.as_ref().map_or(0, |s| s.docs.len()) as u64;
         let mostly_dead = !segs.is_empty() && written > 64 && live_docs * 2 < written;
+        let pending_tokens = self.bm25.pending_tokens.unwrap_or(text::SegmentTokens::V1);
         if segs.len() < BM25_MAX_SEGMENTS && !mostly_dead {
-            return Ok(Some((text::build_segment(&self.bm25.pending)?, None)));
+            return Ok(Some((
+                text::build_segment(&self.bm25.pending, pending_tokens)?,
+                None,
+            )));
         }
         let small: u64 = segs.iter().skip(1).map(|p| p.len).sum();
         let from = if mostly_dead || small * 10 > segs[0].len {
@@ -724,11 +763,16 @@ impl Mnemo {
             .collect();
         let mut by_doc: std::collections::BTreeMap<u32, Vec<(String, u8)>> =
             std::collections::BTreeMap::new();
+        // TOK-1: the merged segment is tokenizer 2 only if every part was.
+        let mut marks: Vec<text::SegmentTokens> = vec![pending_tokens];
         for seg in &segs[from..] {
             let bytes = read_run_bytes(&mut self.pager, seg.start, seg.pages, seg.len, seg.gen)?;
             let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
             let dict: Vec<text::DictEntry> = rmp_serde::from_slice(&bytes[4..4 + n])
                 .map_err(|e| MnemoError::Serialize(e.to_string()))?;
+            marks.push(text::SegmentTokens::from_first_term(
+                dict.first().map(|e| e.term.as_str()),
+            ));
             let post = &bytes[4 + n..];
             for e in dict {
                 let range = e.off as usize..(e.off + e.len) as usize;
@@ -749,7 +793,8 @@ impl Mnemo {
         }
         let docs: Vec<(u32, Vec<(String, u8)>)> = by_doc.into_iter().collect();
         self.bm25.merged_docs = docs.len() as u32;
-        Ok(Some((text::build_segment(&docs)?, Some(from))))
+        let tokens = text::SegmentTokens::combine(marks).expect("the pending part is there");
+        Ok(Some((text::build_segment(&docs, tokens)?, Some(from))))
     }
 
     /// FMT-9c.3: the generation the persisted index is current to: its
@@ -1508,7 +1553,16 @@ impl Mnemo {
         let mut tags = v9.then(|| row_tags(&m));
         if let Some(r) = tags.as_mut() {
             if bm25_kind(r.kind) {
-                let (terms, len) = text::term_freqs(&m.content);
+                // TOK-1: the file's tokenizer, so the index stays one kind.
+                let tok = self.bm25_tokenizer()?;
+                let (terms, len) = text::term_freqs(tok, &m.content);
+                let as_segment = match tok {
+                    text::Tokenizer::V1 => text::SegmentTokens::V1,
+                    text::Tokenizer::V2 => text::SegmentTokens::V2,
+                };
+                self.bm25.pending_tokens = text::SegmentTokens::combine(
+                    self.bm25.pending_tokens.into_iter().chain([as_segment]),
+                );
                 r.doc = self.bm25.manifest.next_doc;
                 r.doc_len = len;
                 self.bm25.manifest.next_doc += 1;

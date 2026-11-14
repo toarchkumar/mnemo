@@ -631,6 +631,7 @@ impl Mnemo {
             self.bm25.manifest.segments = segs;
             self.bm25.manifest.seg_docs = seg_docs;
             self.bm25.pending.clear();
+            self.bm25.pending_tokens = None;
         }
         if persist_index {
             self.index_rebase = false;

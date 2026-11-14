@@ -1525,6 +1525,55 @@ def test_recall_text_keywords_and_vector_cache_budget():
     print("ok  recall_text keywords + set_vector_cache_budget (v0.11)")
 
 
+def test_query_fn_and_hybrid_recall_text():
+    """v0.15 (12.3 step 4): `set_embedder(query_fn=, query_convention=)`
+    embeds `recall_text`'s query with the query side, the convention is part
+    of the identity, and `recall_text` is hybrid by default (`keywords=""`
+    opts out)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "t.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.remember("doc-side", "semantic", [1.0, 0.0, 0.0, 0.0])
+        db.remember("query-side", "semantic", [0.0, 1.0, 0.0, 0.0])
+        doc = lambda texts: [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+        query = lambda texts: [[0.0, 1.0, 0.0, 0.0] for _ in texts]
+        for bad in ({"query_fn": query}, {"query_convention": "q1"}):
+            try:
+                db.set_embedder(doc, name="m", dimensions=4, **bad)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"{bad} should raise ValueError")
+        db.set_embedder(doc, name="m", dimensions=4, query_fn=query,
+                        query_convention="q1")
+        hits = db.recall_text("anything", top_k=1, keywords="")
+        assert hits[0]["content"] == "query-side", hits
+        db.close()
+        # The convention is recorded: the same model without it is refused.
+        db = mnemo.open(path, "pw")
+        try:
+            db.set_embedder(doc, name="m", dimensions=4)
+        except RuntimeError as e:
+            assert "query_convention" in str(e), e
+        else:
+            raise AssertionError("a different query convention should be refused")
+        db.close()
+
+        path = os.path.join(d, "h.mnemo")
+        db = mnemo.open(path, "pw", dimensions=4)
+        db.set_embedder(lambda texts: [[1.0, 0.5, 0.25, 0.125] for _ in texts],
+                        name="flat-4d", dimensions=4, normalize=False)
+        db.remember_text("the deploy key is in mnemo.nosync", "semantic")
+        db.remember_text("the user likes tea", "semantic")
+        assert db.stats()["keyword_tokenizer"] == "2"
+        hybrid = db.recall_text("where is nosync", top_k=2)
+        plain = db.recall_text("where is nosync", top_k=2, keywords="")
+        assert hybrid[0]["content"].endswith("mnemo.nosync"), hybrid
+        assert hybrid[0]["score"] > plain[0]["score"], (hybrid, plain)
+        db.close()
+    print("ok  query_fn + query_convention + hybrid recall_text (v0.15)")
+
+
 # --- 12.4 shared mode (v0.14.0 step 4a) --------------------------------------
 
 def _shared_file(d, n=0):
@@ -1824,6 +1873,7 @@ if __name__ == "__main__":
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()
     test_recall_text_keywords_and_vector_cache_budget()
+    test_query_fn_and_hybrid_recall_text()
     test_shared_handles_see_each_others_writes()
     test_shared_handle_waits_for_a_plain_one_then_raises_locked()
     test_shared_mode_exception_types()

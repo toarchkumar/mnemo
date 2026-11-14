@@ -764,6 +764,7 @@ impl Embedder for SeedEmbedder {
             name: "seed-4d".into(),
             dimensions: DIMS,
             normalize: false,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

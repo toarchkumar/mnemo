@@ -140,8 +140,8 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             },
             E::Invalid(message) => MnemoError::Invalid { message },
             E::EmbedderMismatch { stored, given } => MnemoError::EmbedderMismatch {
-                stored: identity(stored),
-                given: identity(given),
+                stored: identity(*stored),
+                given: identity(*given),
             },
             other @ E::FormatTooOld { .. } => {
                 let message = other.to_string();

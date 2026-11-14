@@ -26,6 +26,7 @@ fn fake(name: &str) -> Fake {
         name: name.into(),
         dimensions: 4,
         normalize: true,
+        ..Default::default()
     })
 }
 

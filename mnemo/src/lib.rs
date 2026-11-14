@@ -101,11 +101,12 @@ pub use shared::{CancelToken, SharedOptions};
 pub use store::BudgetReport;
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
-    RecallResult, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,
-    DEFAULT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS, DEFAULT_VECTOR_CACHE_BUDGET,
-    INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS, V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
+    RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,
+    DEFAULT_KEYWORD_WEIGHT, DEFAULT_TEXT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS,
+    DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
+    V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };
-pub use text::KeywordIndex;
+pub use text::{KeywordIndex, KeywordTokenizer};
 pub use transcript::{read_transcript, TranscriptFormat};
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.

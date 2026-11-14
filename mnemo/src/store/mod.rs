@@ -128,6 +128,15 @@ pub const INDEX_PERSIST_EVERY_CHANGES: usize = 1_000;
 /// (`relevance = similarity + ε · bm25 / max bm25`).
 pub const DEFAULT_KEYWORD_WEIGHT: f32 = 0.5;
 
+/// 12.3 step 4 (v0.15): default weight of the BM25 score when it comes from
+/// a recall's own text (hybrid by default, no keywords given). Lower than
+/// [`DEFAULT_KEYWORD_WEIGHT`] because a question's common words ("how",
+/// "the") match unrelated memories: on this project's brain at 0.5 a memory
+/// with similarity 0.18 came second on "how releases are approved"; at 0.25
+/// the right fact led all three DOGFOOD-0 questions with no such intruder
+/// (`docs/design/12.3-retrieval.md`, section 5).
+pub const DEFAULT_TEXT_KEYWORD_WEIGHT: f32 = 0.25;
+
 /// FMT-9b: default [`Mnemo::set_vector_cache_budget`]: the fp16 vector
 /// column stays resident while it fits (100K × 384 dims is about 77 MB) and
 /// is read through the page cache above it. PLANNER-A, 2026-11-07.
@@ -499,17 +508,31 @@ pub struct RecallRequest {
     /// hit was dropped by this budget, `false` otherwise.
     pub max_bytes: Option<usize>,
     /// FMT-9d (Phase 2, v9 files): **identifiers or exact terms to match**
-    /// (a version, a PR number, a function name) for hybrid recall. Don't
-    /// paste the question: the vector covers its meaning, and its common
-    /// words would match the wrong records. BM25 scores, divided by this
-    /// query's best, are added to each candidate's similarity with weight
-    /// [`RecallRequest::keyword_weight`] before the usual scoring. With an
-    /// empty `query` vector ([`RecallRequest::keywords_only`]), recall is
-    /// keyword-only. `None` (the default) is plain vector recall.
+    /// (a version, a PR number, a function name) for hybrid recall. BM25
+    /// scores, divided by this query's best, are added to each candidate's
+    /// similarity with weight [`RecallRequest::keyword_weight`] before the
+    /// usual scoring. With an empty `query` vector
+    /// ([`RecallRequest::keywords_only`]), recall is keyword-only.
+    ///
+    /// **Since v0.15 (12.3 step 4), a recall by text is hybrid by default:**
+    /// with `keywords` `None`, the request's [`RecallRequest::text`] is
+    /// used for BM25, so give keywords only for identifiers the question
+    /// doesn't contain. Keywords given replace the text. **Empty keywords
+    /// (`.keywords("")`) opt out:** vector-only recall. `None` on a request
+    /// with no text is plain vector recall.
     pub keywords: Option<String>,
+    /// 12.3 step 4 (v0.15): the query text a recall by text was built from
+    /// ([`RecallRequest::from_text`] sets it). With `keywords` `None` it's
+    /// also scored with BM25 on a v9 file (hybrid by default); a v8 file,
+    /// which has no keyword index, ignores it.
+    pub text: Option<String>,
     /// FMT-9d: weight ε of the normalised BM25 score in hybrid recall
-    /// (default [`DEFAULT_KEYWORD_WEIGHT`]).
+    /// (default [`DEFAULT_KEYWORD_WEIGHT`]), for keywords given.
     pub keyword_weight: f32,
+    /// 12.3 step 4 (v0.15): the weight when BM25 scores the request's
+    /// [`RecallRequest::text`] (no keywords given); default
+    /// [`DEFAULT_TEXT_KEYWORD_WEIGHT`].
+    pub text_keyword_weight: f32,
     /// FMT-9d: BM25 term-frequency saturation `k1` (default 1.2).
     pub bm25_k1: f32,
     /// FMT-9d: BM25 length normalisation `b` (default 0.75).
@@ -532,7 +555,9 @@ impl RecallRequest {
             filter: Filter::default(),
             max_bytes: None,
             keywords: None,
+            text: None,
             keyword_weight: DEFAULT_KEYWORD_WEIGHT,
+            text_keyword_weight: DEFAULT_TEXT_KEYWORD_WEIGHT,
             bm25_k1: 1.2,
             bm25_b: 0.75,
         }
@@ -546,11 +571,39 @@ impl RecallRequest {
     }
 
     /// FMT-9d (v9 files): add identifiers or exact terms to match (hybrid
-    /// recall). Pass identifiers, not the question. See the `keywords`
-    /// field.
+    /// recall). They replace the request's text for BM25; `""` opts out of
+    /// keyword scoring. See the `keywords` field.
     pub fn keywords(mut self, text: impl Into<String>) -> Self {
         self.keywords = Some(text.into());
         self
+    }
+
+    /// 12.3 step 4: the weight of the text's keyword score when no keywords
+    /// are given (see [`RecallRequest::text_keyword_weight`]).
+    pub fn text_keyword_weight(mut self, w: f32) -> Self {
+        self.text_keyword_weight = w;
+        self
+    }
+
+    /// 12.3 step 4: the weight of this request's keyword score: the text's
+    /// when it's the text that's scored, the keywords' otherwise.
+    pub(crate) fn effective_keyword_weight(&self) -> f32 {
+        if self.keywords.is_none() {
+            self.text_keyword_weight
+        } else {
+            self.keyword_weight
+        }
+    }
+
+    /// 12.3 step 4: the text BM25 scores for this request: the keywords
+    /// given (none if they're empty), or else the query text on a v9 file.
+    pub(crate) fn keywords_for(&self, v9: bool) -> Option<&str> {
+        match self.keywords.as_deref() {
+            Some(k) if k.trim().is_empty() => None,
+            Some(k) => Some(k),
+            None if v9 => self.text.as_deref().filter(|t| !t.trim().is_empty()),
+            None => None,
+        }
     }
 
     /// FMT-9d: the weight ε of the keyword score in hybrid recall.
@@ -574,15 +627,25 @@ impl RecallRequest {
     }
 
     /// Build a request by embedding `query_text` with the supplied
-    /// embedder (Phase 3). Shorthand for `embedder.embed(&[text])` +
-    /// [`RecallRequest::new`]; same defaults as `new`. Fails if the
-    /// embedder returns an empty vector list or an embedding failure.
+    /// embedder (Phase 3). Since v0.15 it embeds with
+    /// [`Embedder::embed_query`] and keeps the text in
+    /// [`RecallRequest::text`], so the recall is hybrid by default (see
+    /// [`RecallRequest::keywords`]; `.keywords("")` opts out). Otherwise the
+    /// same defaults as `new`. Fails if the embedder returns an empty vector
+    /// list or an embedding failure.
     pub fn from_text(embedder: &dyn Embedder, query_text: &str) -> Result<Self> {
-        let mut vectors = embedder.embed(&[query_text])?;
+        let mut vectors = embedder.embed_query(&[query_text])?;
         let v = vectors.pop().ok_or_else(|| {
             MnemoError::Invalid("embedder returned no vector for the query text".into())
         })?;
-        Ok(Self::new(v))
+        Ok(Self::new(v).text(query_text))
+    }
+
+    /// 12.3 step 4: set the query text (see [`RecallRequest::text`]), for
+    /// a caller that embedded it itself.
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
     }
     /// Set the result cap.
     pub fn top_k(mut self, k: usize) -> Self {
@@ -755,6 +818,11 @@ pub struct Stats {
     /// The bytes the retained snapshots keep from reuse (pages freed after
     /// the oldest one). `0` on v8, which never reuses pages.
     pub snapshot_pinned_bytes: u64,
+    /// TOK-1 (v0.15): the keyword index's tokenizer: `V2` for a file v0.15
+    /// created or rebuilt, `V1` for an older file until a compaction or
+    /// `reembed` rebuilds it, `Mixed` after a build before v0.15 wrote to
+    /// a tokenizer 2 index. `None` on v8, which has no keyword index.
+    pub keyword_tokenizer: Option<crate::KeywordTokenizer>,
 }
 
 /// [`Mnemo::stats_summary`]: the cheap statistics, read from the catalog and
@@ -889,6 +957,25 @@ pub struct CompactReport {
     pub zero_vector_memories: usize,
 }
 
+/// What [`Mnemo::reembed_file`] did (12.3 step 4, v0.15).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReembedReport {
+    /// Live memories embedded again (expired ones are dropped, as by
+    /// compaction).
+    pub memories: usize,
+    /// Manifests kept on the sentinel vector (resized to the new width).
+    pub manifests: usize,
+    /// Result-cache entries copied (the engine's own aren't counted).
+    pub cache_entries: usize,
+    /// Semantic cache entries dropped because their vector has the old
+    /// width (only when the width changed).
+    pub cache_dropped: usize,
+    /// The identity the file recorded before, if any.
+    pub from: Option<crate::EmbedderIdentity>,
+    /// The identity it records now.
+    pub to: crate::EmbedderIdentity,
+}
+
 /// What [`Mnemo::verify_report`] checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifyReport {
@@ -898,6 +985,9 @@ pub struct VerifyReport {
     /// Live memories whose vector is all zeros (from before the zero-vector
     /// rule). They score 0.0 on every vector query.
     pub zero_vector_memories: usize,
+    /// TOK-1: the keyword index's tokenizer (see
+    /// [`Stats::keyword_tokenizer`]). `Mixed` is worth a compaction.
+    pub keyword_tokenizer: Option<crate::KeywordTokenizer>,
 }
 
 /// An encrypted, single-file agent memory database.

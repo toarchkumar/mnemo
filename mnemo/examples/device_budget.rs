@@ -372,6 +372,7 @@ impl Embedder for Canned {
             name: "device-budget-canned".into(),
             dimensions: self.0.len(),
             normalize: true,
+            ..Default::default()
         }
     }
     fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {

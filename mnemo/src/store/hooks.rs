@@ -27,6 +27,16 @@ impl Mnemo {
         )
     }
 
+    /// **Not a stable API.** TOK-1: from now on this handle splits the
+    /// documents it writes with tokenizer 1 and writes unmarked keyword
+    /// segments, as every build before v0.15 does, so a test can make the
+    /// mixed index an older build leaves without one. It stays on through
+    /// later commits on this handle.
+    #[doc(hidden)]
+    pub fn __write_keywords_like_an_older_build_for_testing(&mut self) {
+        self.bm25.like_older_build = true;
+    }
+
     /// **Not a stable API.** The file's on-disk format version.
     /// Writes `m` as a record already in a file would be copied: no
     /// zero-vector check (the dimension check stays). For the zero-vector

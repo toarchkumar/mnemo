@@ -41,7 +41,10 @@ use serde_json::{Map, Value};
 /// scaffold manifest so that reopening with a different embedder is
 /// caught at `set_embedder` time instead of silently polluting the
 /// index.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Build one with a struct literal ending in `..Default::default()`, so a
+/// field added later (as `query_convention` was in v0.15) doesn't break it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EmbedderIdentity {
     /// Model identifier the caller chose. Convention: a short, stable
     /// slug — `"all-MiniLM-L6-v2"`, `"text-embedding-3-small"`.
@@ -54,12 +57,37 @@ pub struct EmbedderIdentity {
     /// so downstream readers can tell whether a dot product is cosine
     /// equivalent.
     pub normalize: bool,
+    /// 12.3 step 4 (v0.15): how [`Embedder::embed_query`] differs from
+    /// [`Embedder::embed`]. Empty (the default) when queries are embedded
+    /// like documents; otherwise a short, stable name for the convention,
+    /// such as `"bge-query-instruction"` for a model that prefixes queries
+    /// with an instruction. It's part of the identity: a file embedded one
+    /// way refuses an embedder that queries another way
+    /// ([`MnemoError::EmbedderMismatch`]); `mnemo reembed` moves a file to a
+    /// new identity. Stored only when it isn't empty, so a symmetric
+    /// embedder records what it did before v0.15. Builds before v0.15
+    /// ignore it.
+    pub query_convention: String,
 }
 
 impl EmbedderIdentity {
     /// Message rendered inside [`MnemoError::Invalid`] on an identity
     /// mismatch. Public so tests + binding layers can assert on it.
     pub const MISMATCH_MSG: &'static str = "embedder identity mismatch";
+
+    /// The identity as `(name=…, dimensions=…, normalize=…)`, with
+    /// `query_convention=…` when it isn't empty.
+    pub(crate) fn describe(&self) -> String {
+        let mut s = format!(
+            "(name={:?}, dimensions={}, normalize={}",
+            self.name, self.dimensions, self.normalize
+        );
+        if !self.query_convention.is_empty() {
+            s.push_str(&format!(", query_convention={:?}", self.query_convention));
+        }
+        s.push(')');
+        s
+    }
 }
 
 /// Minimal trait any embedder implementation must satisfy. Returns
@@ -80,7 +108,33 @@ pub trait Embedder: Send + Sync {
     /// in a local model) should bubble up as [`MnemoError::Invalid`]
     /// with a short message — the specific crypto / page errors in
     /// [`MnemoError`] are reserved for the engine's own concerns.
+    ///
+    /// This is the **document side**: everything stored is embedded with it.
     fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
+
+    /// 12.3 step 4 (v0.15): embed `texts` as **queries**. Every recall by
+    /// text uses it ([`crate::RecallRequest::from_text`], the CLI's
+    /// `recall --text`, the MCP `recall` tool, Python's `recall_text`). It
+    /// defaults to [`Embedder::embed`]. A model that embeds queries
+    /// differently (an instruction prefix, a separate query encoder)
+    /// overrides it and names the difference in
+    /// [`EmbedderIdentity::query_convention`].
+    fn embed_query(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts)
+    }
+}
+
+/// The JSON key of [`EmbedderIdentity::query_convention`] in both stored
+/// identities, written only when it isn't empty.
+pub(crate) const QUERY_CONVENTION_KEY: &str = "query_convention";
+
+/// The query convention from a stored identity object: empty when absent.
+/// A present key that isn't a string makes the identity malformed.
+fn convention_from(obj: &Map<String, Value>) -> Option<String> {
+    match obj.get(QUERY_CONVENTION_KEY) {
+        None => Some(String::new()),
+        Some(v) => v.as_str().map(str::to_string),
+    }
 }
 
 /// Returns `true` iff every component of `v` is exactly `0.0`. This is
@@ -122,6 +176,7 @@ pub(crate) fn read_identity_from_metadata(meta: &Map<String, Value>) -> Option<E
             name: name.to_string(),
             dimensions: dims as usize,
             normalize: norm,
+            query_convention: convention_from(obj)?,
         });
     }
     // Legacy flat fallback.
@@ -132,6 +187,7 @@ pub(crate) fn read_identity_from_metadata(meta: &Map<String, Value>) -> Option<E
         name: name.to_string(),
         dimensions: dims as usize,
         normalize: norm,
+        query_convention: String::new(),
     })
 }
 
@@ -150,6 +206,12 @@ pub(crate) fn write_identity_into_metadata(
         Value::Number(serde_json::Number::from(identity.dimensions as u64)),
     );
     obj.insert("normalize".into(), Value::Bool(identity.normalize));
+    if !identity.query_convention.is_empty() {
+        obj.insert(
+            QUERY_CONVENTION_KEY.into(),
+            Value::String(identity.query_convention.clone()),
+        );
+    }
     meta.insert(MANIFEST_EMBEDDER_KEY.into(), Value::Object(obj));
     // Drop legacy flat keys if present so the manifest canonicalizes
     // on the next flush. Harmless no-op when they're absent.
@@ -167,8 +229,8 @@ pub(crate) fn identity_mismatch_err(
     given: &EmbedderIdentity,
 ) -> MnemoError {
     MnemoError::EmbedderMismatch {
-        stored: stored.clone(),
-        given: given.clone(),
+        stored: Box::new(stored.clone()),
+        given: Box::new(given.clone()),
     }
 }
 
@@ -191,12 +253,15 @@ pub(crate) fn is_reserved_namespace(namespace: &str) -> bool {
 
 /// The identity as the JSON the identity entry stores.
 pub(crate) fn identity_to_json(identity: &EmbedderIdentity) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
+    let mut v = serde_json::json!({
         "name": identity.name,
         "dimensions": identity.dimensions as u64,
         "normalize": identity.normalize,
-    }))
-    .expect("a JSON object of a string, a number and a bool serializes")
+    });
+    if !identity.query_convention.is_empty() {
+        v[QUERY_CONVENTION_KEY] = Value::String(identity.query_convention.clone());
+    }
+    serde_json::to_vec(&v).expect("a JSON object of strings, a number and a bool serializes")
 }
 
 /// The identity from the identity entry's JSON, or `None` if it's
@@ -208,6 +273,7 @@ pub(crate) fn identity_from_json(bytes: &[u8]) -> Option<EmbedderIdentity> {
         name: obj.get("name")?.as_str()?.to_string(),
         dimensions: obj.get("dimensions")?.as_u64()? as usize,
         normalize: obj.get("normalize")?.as_bool()?,
+        query_convention: convention_from(obj)?,
     })
 }
 
@@ -219,16 +285,11 @@ pub(crate) fn identity_conflict_err(
     record: &EmbedderIdentity,
 ) -> MnemoError {
     MnemoError::Invalid(format!(
-        "{}: this file's manifest records embedder (name={:?}, dimensions={}, normalize={}), \
-         but its identity record holds (name={:?}, dimensions={}, normalize={}); \
+        "{}: this file's manifest records embedder {}, but its identity record holds {}; \
          fix the manifest (`mnemo update`) to match the embedder its vectors came from",
         EmbedderIdentity::MISMATCH_MSG,
-        manifest.name,
-        manifest.dimensions,
-        manifest.normalize,
-        record.name,
-        record.dimensions,
-        record.normalize,
+        manifest.describe(),
+        record.describe(),
     ))
 }
 
@@ -301,6 +362,7 @@ mod tests {
                 name: "new".into(),
                 dimensions: 384,
                 normalize: true,
+                ..Default::default()
             },
         );
         // Legacy keys gone.
@@ -322,11 +384,13 @@ mod tests {
             name: "A".into(),
             dimensions: 4,
             normalize: true,
+            ..Default::default()
         };
         let saw = EmbedderIdentity {
             name: "B".into(),
             dimensions: 4,
             normalize: false,
+            ..Default::default()
         };
         let msg = format!("{}", identity_mismatch_err(&want, &saw));
         assert!(msg.contains(EmbedderIdentity::MISMATCH_MSG));

@@ -66,8 +66,79 @@ Pre-1.0, the minor component carries the breaking-change signal.
     parse is left alone.
   - Claude Code goes through `claude mcp add-json` when `claude` is on the
     PATH.
+- **The query side of an embedder (12.3 step 4).** `Embedder::embed_query`
+  (it defaults to `embed`) embeds every recall by text:
+  `RecallRequest::from_text`, `mnemo recall --text`, the MCP `recall` tool
+  and Python's `recall_text`. Everything stored still goes through `embed`.
+  - `EmbedderIdentity::query_convention` names how a model's queries differ
+    (`"bge-query-instruction"`, say). It's part of the identity, so a file
+    embedded one way refuses an embedder that queries another way. It's
+    stored only when it isn't empty, so a symmetric embedder records what
+    it did before.
+  - `--embed-query <convention>` on `remember`, `recall`, `update`, `serve`
+    and `thread ingest`: the `--embed-cmd` command then gets each request as
+    `{"kind":"query"|"document","text":…}`. Without it the protocol is
+    unchanged.
+  - Python: `set_embedder(…, query_fn=…, query_convention=…)`, both or
+    neither. One-argument callables work as before.
+  - `mcp::EmbedSpec` and `serve_stdio_with_spec` / `serve_with_streams_spec`
+    carry the convention to the MCP server; the tuple functions still work.
+- **`mnemo reembed <file> --embed-cmd … --embed-name …`** and
+  `Mnemo::reembed_file` (with `_with_key` and `_waiting`): embed every live
+  memory again with a new embedder and record its identity. It's a
+  compaction with new vectors: under the exclusive lock, into a temp copy
+  with the same salt, renamed over the file, so an interrupted run leaves
+  the file as it was. The width can change (`--embed-dims`), and
+  `--embed-query` sets the new convention.
+- **Keyword tokenizer 2 (TOK-1).** The keyword index also indexes the parts
+  of a token: `nosync` finds `mnemo.nosync`, `icloud` finds `iCloud's`,
+  `bytes` finds `max_bytes` (split on `.`, `/`, `_`, `-` and `::`, plus a
+  possessive's stem; parts that are only digits are left out). New files
+  use it; an existing file keeps tokenizer 1 until a compaction or
+  `reembed` rebuilds its index. `Stats::keyword_tokenizer` and
+  `VerifyReport::keyword_tokenizer` (`KeywordTokenizer`: `V1`, `V2` or
+  `Mixed`), `mnemo info`'s `keywords:` line and Python's
+  `stats()["keyword_tokenizer"]` show which. `KeywordIndex` (`mnemo
+  inspect`'s search) uses tokenizer 2.
+- **CI's `compat (v0.14.0, linux)` job** runs a tokenizer 2 file against the
+  published v0.14.0 CLI.
 
 ### Changed
+
+- **A recall by text is hybrid by default (12.3 step 4):** with no
+  `keywords`, the text itself is also matched by keyword (BM25), in the
+  library (`RecallRequest::from_text`, which sets the new
+  `RecallRequest::text`), `mnemo recall --text`, the MCP `recall` tool and
+  Python's `recall_text`. **Results change** for callers who recall by text
+  without keywords.
+  - The text's keyword score has weight 0.25
+    (`DEFAULT_TEXT_KEYWORD_WEIGHT`, `RecallRequest::text_keyword_weight`),
+    half that of keywords given, because a question's common words match
+    unrelated memories. Python's `keyword_weight=` sets both.
+  - Keywords given replace the text, as before. **Empty keywords opt out**
+    (vector only): `.keywords("")`, `keywords=""`, `"keywords": ""`, or
+    `mnemo recall --no-keywords`.
+  - A v8 file (no keyword index) ignores the text, so its recall by text
+    works as before.
+- **Files v0.15 creates or compacts use keyword tokenizer 2, and older
+  builds keep opening them.** The BM25 manifest's tokenizer byte stays 1
+  (every v9 build before v0.15 refuses any other value), and each keyword
+  segment records its own tokenizer instead. A document a build before
+  v0.15 writes to such a file is indexed by whole words only: the file's
+  index is then `Mixed` (parts match only the documents v0.15 wrote) until
+  a v0.15 compaction. A compaction by an older build leaves tokenizer 1.
+- **`EmbedderIdentity` has a new public field, `query_convention`,** and
+  derives `Default`: a struct literal that names every field needs
+  `query_convention: String::new()` or `..Default::default()`. Builds
+  before v0.15 ignore the convention a file records, and would query an
+  asymmetric file with its document side (worse recall, not corruption).
+- **`MnemoError::EmbedderMismatch`'s `stored` and `given` are boxed**
+  (`Box<EmbedderIdentity>`), which keeps `MnemoError` small; reading their
+  fields works as before. The message names the query convention when
+  there is one, and mentions `mnemo reembed`.
+- **`RecallRequest` has two new public fields,** `text` and
+  `text_keyword_weight`; build one with `RecallRequest::new` or
+  `from_text`. `Stats` and `VerifyReport` have `keyword_tokenizer`.
 
 - **`mnemo init` with no passphrase source generates a key** instead of
   prompting. `--ask-passphrase` asks for a passphrase as before, and
@@ -87,7 +158,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   about 570 ms there (v0.14: 2.9 s, and lockouts). A reader that has itself
   waited 500 ms stops holding back and retries every few ms, so writers
   can't starve readers in turn; with eight writers looping, a read can wait
-  up to about a second, and up to about 2 s on a slow machine. The bound holds when every process using the file shared runs v0.15 or later.
+  up to about a second, and up to about 2 s on a slow machine. The bound
+  holds when every process using the file shared runs v0.15 or later.
   A plain long operation (`compact`, `rekey`, `import`) that started before
   any shared handle now picks up the sidecar while it waits.
 - **The released CLI binaries and wheels are built with the `keychain`

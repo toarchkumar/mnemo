@@ -612,6 +612,7 @@ impl Mnemo {
         Ok(VerifyReport {
             records: n,
             zero_vector_memories,
+            keyword_tokenizer: self.keyword_tokenizer()?,
         })
     }
 
@@ -768,6 +769,7 @@ impl Mnemo {
             snapshots_retained: rp.retained,
             oldest_restorable_at: rp.oldest_at,
             snapshot_pinned_bytes: rp.pinned_bytes,
+            keyword_tokenizer: self.keyword_tokenizer()?,
         })
     }
 
@@ -887,7 +889,7 @@ impl Mnemo {
             return Err(e);
         }
         // `compact_into` releases the old file's lock only after the rename.
-        let result = Self::compact_into(old, new, &real, &tmp);
+        let result = Self::compact_into(old, new, &real, &tmp, |old, new| old.copy_live_into(new));
         if result.is_err() {
             let _ = std::fs::remove_file(&tmp);
         }
@@ -918,13 +920,14 @@ impl Mnemo {
     /// been lost into `Replaced`. (Probed on CI, 2026-11-13: 1.75 to 1.84
     /// refuse, 1.85 to 1.100 succeed; the released binaries are built with
     /// stable.)
-    fn compact_into(
+    fn compact_into<R>(
         mut old: Mnemo,
         mut new: Mnemo,
         path: &Path,
         tmp: &Path,
-    ) -> Result<CompactReport> {
-        let report = old.copy_live_into(&mut new)?;
+        copy: impl FnOnce(&mut Mnemo, &mut Mnemo) -> Result<R>,
+    ) -> Result<R> {
+        let report = copy(&mut old, &mut new)?;
 
         new.flush()?;
         // The new file is closed before the rename: Windows won't rename a
@@ -958,6 +961,228 @@ impl Mnemo {
         // Only now does the old file's lock go.
         drop(old);
         Ok(report)
+    }
+
+    /// 12.3 step 4 (v0.15): **embed every live memory again with
+    /// `embedder`** and record its identity, so a file moves to a new model
+    /// (or a new query convention, or a new width) in one step.
+    ///
+    /// It's a compaction with new vectors: it runs under the file's
+    /// exclusive lock (waiting 10 s for it, like [`Mnemo::compact_file`]),
+    /// writes a temp file beside the brain with the same salt and KDF
+    /// parameters, and renames it over the brain while the lock is held. An
+    /// interrupted run leaves the old file whole (and a temp file the next
+    /// compaction or reembed removes), so the file never opens with two
+    /// identities or mixed vectors.
+    ///
+    /// - Every live memory is embedded with [`Embedder::embed`] (the
+    ///   document side), in batches of 64, except a manifest, which keeps
+    ///   the sentinel vector at the new width.
+    /// - The new identity is recorded in the `_mnemo.embedder` entry and in
+    ///   the manifest's `metadata.embedder`.
+    /// - The result cache is copied as compaction copies it; a semantic
+    ///   entry whose vector has the old width is dropped.
+    /// - The ANN index is rebuilt if there was one, and the keyword index
+    ///   with the current tokenizer (TOK-1). Snapshot history is dropped,
+    ///   as by compaction.
+    pub fn reembed_file(
+        path: &str,
+        passphrase: &str,
+        embedder: &dyn Embedder,
+    ) -> Result<ReembedReport> {
+        Self::reembed_file_secret(
+            path,
+            passphrase.as_bytes(),
+            SecretKind::Passphrase,
+            embedder,
+            &crate::SharedOptions::default(),
+        )
+    }
+
+    /// [`Mnemo::reembed_file`] for a raw-key database.
+    pub fn reembed_file_with_key(
+        path: &str,
+        key: &[u8; crypto::KEY_LEN],
+        embedder: &dyn Embedder,
+    ) -> Result<ReembedReport> {
+        Self::reembed_file_secret(
+            path,
+            key,
+            SecretKind::Key,
+            embedder,
+            &crate::SharedOptions::default(),
+        )
+    }
+
+    /// [`Mnemo::reembed_file`] with the lock layer's options (how long to
+    /// wait for the lock, a cancel), as [`Mnemo::compact_file_waiting`].
+    pub fn reembed_file_waiting(
+        path: &str,
+        passphrase: &str,
+        embedder: &dyn Embedder,
+        opts: crate::SharedOptions,
+    ) -> Result<ReembedReport> {
+        Self::reembed_file_secret(
+            path,
+            passphrase.as_bytes(),
+            SecretKind::Passphrase,
+            embedder,
+            &opts,
+        )
+    }
+
+    /// [`Mnemo::reembed_file_waiting`] for a raw-key database.
+    pub fn reembed_file_waiting_with_key(
+        path: &str,
+        key: &[u8; crypto::KEY_LEN],
+        embedder: &dyn Embedder,
+        opts: crate::SharedOptions,
+    ) -> Result<ReembedReport> {
+        Self::reembed_file_secret(path, key, SecretKind::Key, embedder, &opts)
+    }
+
+    fn reembed_file_secret(
+        path: &str,
+        secret: &[u8],
+        kind: SecretKind,
+        embedder: &dyn Embedder,
+        opts: &crate::SharedOptions,
+    ) -> Result<ReembedReport> {
+        let to = embedder.identity();
+        if to.dimensions == 0 {
+            return Err(MnemoError::Invalid(
+                "reembed: the embedder's identity has 0 dimensions".into(),
+            ));
+        }
+        let real = std::fs::canonicalize(path)?;
+        let mut old = Mnemo::open_exclusive_secret(&real, secret, "reembed", opts, true)?;
+        remove_dead_temps(&real, "reembed");
+        let from = old.recorded_identity()?;
+        let kdf = if kind == SecretKind::Passphrase && old.kdf.below_passphrase_floor() {
+            old.kdf.for_passphrase()
+        } else {
+            old.kdf
+        };
+        let salt = old.header.salt;
+        let config = MnemoConfig {
+            dimensions: to.dimensions,
+            kdf,
+            format_version: 0,
+            store_float_vectors: old.float_vectors(),
+            ..Default::default()
+        };
+        let (tmp, new) = create_temp(&real, "reembed", secret, kind, config, Some(salt))?;
+        if let Err(e) = copy_mode(old.pager.file(), new.pager.file()) {
+            drop(new);
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        let result = Self::compact_into(old, new, &real, &tmp, |old, new| {
+            old.copy_reembedded_into(new, embedder, from.clone(), to.clone())
+        });
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
+    }
+
+    /// [`Mnemo::reembed_file`]'s copy: every live memory with a new vector,
+    /// the new identity, and the cache.
+    fn copy_reembedded_into(
+        &mut self,
+        new: &mut Mnemo,
+        embedder: &dyn Embedder,
+        from: Option<embed::EmbedderIdentity>,
+        to: embed::EmbedderIdentity,
+    ) -> Result<ReembedReport> {
+        const BATCH: usize = 64;
+        new.turn_compress_after = 0;
+        let want_index = self.has_index();
+        let now = memory::now_secs();
+        let dims = to.dimensions;
+        let mut live: Vec<Memory> = self
+            .memories()?
+            .into_iter()
+            .filter(|m| !m.is_expired(now))
+            .collect();
+        let mut manifests = 0;
+        for m in live.iter_mut() {
+            if embed::read_identity_from_metadata(&m.metadata).is_some() {
+                embed::write_identity_into_metadata(&mut m.metadata, &to);
+            }
+        }
+        let to_embed: Vec<usize> = (0..live.len())
+            .filter(|&i| !is_manifest(&live[i]))
+            .collect();
+        for chunk in to_embed.chunks(BATCH) {
+            let texts: Vec<&str> = chunk.iter().map(|&i| live[i].content.as_str()).collect();
+            let vectors = embedder.embed(&texts)?;
+            if vectors.len() != texts.len() {
+                return Err(MnemoError::Invalid(format!(
+                    "reembed: the embedder returned {} vectors for {} texts",
+                    vectors.len(),
+                    texts.len()
+                )));
+            }
+            for (&i, v) in chunk.iter().zip(vectors) {
+                if v.len() != dims {
+                    return Err(MnemoError::DimensionMismatch {
+                        expected: dims,
+                        got: v.len(),
+                    });
+                }
+                if embed::is_zero_vector(&v) {
+                    return Err(MnemoError::Invalid(format!(
+                        "reembed: the embedder returned an all-zero vector for memory {}",
+                        live[i].id
+                    )));
+                }
+                live[i].vector = v;
+            }
+        }
+        let memories = live.len();
+        for mut m in live {
+            if is_manifest(&m) {
+                m.vector = Memory::scaffold_manifest(dims).vector;
+                manifests += 1;
+            }
+            new.put_existing(m)?;
+        }
+        if want_index && memories > 0 {
+            new.build_index_with(IndexConfig::default())?;
+        }
+        let mut cache_entries = 0;
+        let mut cache_dropped = 0;
+        for pos in 0..self.cache_dir.len() {
+            let (keep, reserved, wrong_width) = {
+                let e = &self.cache_dir[pos];
+                (
+                    !e.deleted && !e.is_expired(now),
+                    embed::is_reserved_namespace(&e.namespace),
+                    e.vector.as_ref().is_some_and(|v| v.len() != dims),
+                )
+            };
+            if !keep || (reserved && self.cache_dir[pos].namespace == embed::IDENTITY_NAMESPACE) {
+                continue;
+            }
+            if wrong_width {
+                cache_dropped += 1;
+                continue;
+            }
+            new.copy_cache_entry_from(self, pos)?;
+            if !reserved {
+                cache_entries += 1;
+            }
+        }
+        new.record_identity(&to)?;
+        Ok(ReembedReport {
+            memories: memories - manifests,
+            manifests,
+            cache_entries,
+            cache_dropped,
+            from,
+            to,
+        })
     }
 
     /// Copy one live cache entry from `old` at directory position
