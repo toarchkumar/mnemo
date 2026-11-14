@@ -209,11 +209,19 @@ fn a_plain_operation_picks_up_the_sidecar_while_it_waits() {
     let mut plain = Locks::for_plain(&p, &opts(10_000)).unwrap();
     assert!(!plain.has_sidecar());
     let stop = Arc::new(AtomicBool::new(false));
-    let (rs, _) = readers(&p, 16, Duration::ZERO, &stop);
-    std::thread::sleep(Duration::from_millis(100));
+    let (rs, reads) = readers(&p, 16, Duration::ZERO, &stop);
+    // The readers are running (so the sidecar exists), and a shared lock
+    // is held as the plain operation starts, so it has to wait: on a loaded
+    // machine the readers alone could leave it a gap, and an operation
+    // that gets in at once never looks for the sidecar.
+    while reads.load(Ordering::Relaxed) == 0 {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let holder = hold_shared(&p, Duration::from_millis(300));
     let t = Instant::now();
     let held = plain.exclusive(&opts(10_000)).map(drop);
     let waited = t.elapsed();
+    holder.join().unwrap();
     stop.store(true, Ordering::Relaxed);
     for r in rs {
         r.join().unwrap();
