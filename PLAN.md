@@ -23626,3 +23626,669 @@ entry). After PR 72's merge, push runs green, and a coordination sync.
   headline cells in the entry, the rest in the JSON), and stop before
   merging. **Then READY** is next: I check every job on the branch's push
   runs and call REVIEWER-B's release review through the user.
+
+### 2026-11-13 — WORKER — BLOCKED — step 5's bench: 8 writers' p99 is over 500 ms at 10K (your call), and readers starve under continuous writes
+
+**Done first:**
+- PR 72 fast-forwarded into `release-0.14.0` (`01650e6`'s parent,
+  `4126a8b`); `rel0140-dogfood1` deleted.
+- **Push runs on `4126a8b`:** CI 43515746095 (14 of 14 jobs) and Mobile CI
+  43515745915 (6 of 6), all green on attempt 1.
+- **Coordination sync:** `01650e6`.
+
+**The bench is built and run, uncommitted** on `release-0.14.0`:
+- `mnemo/examples/shared_bench.rs` (new, dev-hooks; children are the same
+  binary run again);
+- `src/shared/call.rs`: a dev-hooks-only switch,
+  `MNEMO_DEV_BACKOFF=young`, for cell 7's alternative shape (1 to 2 ms
+  sleeps for a wait's first 15 ms, then doubling from 2 ms; a non-dev-hooks
+  build always uses today's shape);
+- `src/lib.rs`: a dev-hooks `__fsync_count()` for cell 2;
+- `test/scripts/perf_v0.5.0.json`: the new `shared_v0_14_0` section, with
+  every cell, the machine, the build, the repetitions and
+  `remeasured: "2026-11-13"`.
+
+**The machine:**
+- **Hardware and build:** Apple M1 Pro, macOS 26.7.1, on AC power,
+  `caffeinate -dims` during the runs, release build. REVIEWER-B idle.
+- **Not idle:** macOS daemons were busy throughout and I didn't stop them
+  (fileproviderd 80 to 100 % CPU, spotlightknowledged up to 85 %,
+  mediaanalysisd about 50 %, an iOS Simulator's pairedsyncd about 70 % at
+  the start); load average 2.6 to 6.6. The JSON says so.
+- **What that affects:** the single-handle cells (1 to 4) are steady
+  enough. The multi-process cells (5 to 8) are one 8 s run each and should
+  be read for their shape, not to the millisecond.
+
+**Headline cells** (ms; p50 / p99):
+
+| Cell | 1K | 10K | 100K |
+|---|---|---|---|
+| 1. Empty read window | 0.048 / 0.057 | 0.048 / 0.054 | 0.048 / 0.060 |
+| 1. `get` in a read window | 0.050 / 0.063 | 0.049 / 0.057 | 0.049 / 0.062 |
+| 1. Plain `get` | 0.001 / 0.008 | 0.001 / 0.008 | 0.001 / 0.009 |
+| 2. Shared `remember` window | 23.9 / 31.9 (5.1 fsyncs) | 23.9 / 32.4 (5.0) | 27.0 / 47.4 (5.0) |
+| 2. Plain `remember` + `flush` | 14.9 / 21.0 (3.1) | 14.7 / 26.2 (3.0) | 17.0 / 38.0 (3.0) |
+| 3. Empty write window | 0.14 / 0.35 | 0.14 / 0.48 | 0.14 / 0.19 |
+| 3. Refused write | 0.06 / 0.13 | 0.06 / 0.12 | 0.13 / 0.17 |
+| 3. The next read after a refused write | 0.51 / 0.89 | 2.99 / 4.48 | 31.8 / 36.5 |
+| 4. A read after another handle's commit (full reload) | 2.35 / 3.47 | 5.20 / 7.17 | 34.1 / 35.1 |
+| 4. RSS per shared handle (MB, median of 3) | 1.6 | 4.7 | 17.8 |
+
+- **Cell 1:** the per-call check costs about 0.05 ms against a plain
+  handle's 0.001 ms, flat across sizes.
+- **Cell 2:** a shared write costs about 9 to 10 ms more than a plain one,
+  the lease's two extra fsyncs (5 against 3).
+- **Cell 3 (RB-007.6):** a no-op window leaves the transaction id unchanged
+  and makes no fsync, at every size.
+  - **But a refused write makes the handle's next call do a full reload**
+    (31.8 ms at 100K): a failed write window clears the stamp, as built
+    (protocol step 7), even when the closure failed before changing
+    anything.
+  - The first run measured the empty write window right after a refused one
+    in the same loop, which gave 34 ms at 100K. I split the two to find
+    this; the JSON has the separated numbers.
+
+**Cells 5 and 6** (10K; per second, and latency p50 / p99 in ms):
+
+| Mix | Writes/s | Write p50 / p99 | Reads/s | Read wait p50 / p99 |
+|---|---|---|---|---|
+| 1 writer, 1 reader | 41.0 | 24.0 / 40.8 | **0.75** | **776 / 4,085** |
+| 1 writer, 7 readers | 35.1 | 23.9 / 40.2 | 4,091 | 0.21 / 1.01 |
+| 2 writers | 19.3 | 102 / 166 | | |
+| 8 writers | 19.8 | 172 / **2,539** | | |
+| 4 writers, 2 readers | 18.0 | 116 / 1,021 | **0.38** | **8,177 / 8,189** |
+| 8 writers, 2 readers | 21.0 | 109 / **3,959** | **0.25** | **8,505 / 8,527** |
+
+- **At 100K the shape is the same:** 8 writers' p99 is 3,749 ms (8 writers
+  with 2 readers: 3,116), and the readers in the 4- and 8-writer mixes wait
+  8.3 to 8.8 s.
+
+**What stops me (your decision rules):**
+1. **Writer ordering:** 8 writers' p99 write latency at 10K is **2,539 ms**
+   (3,959 ms with 2 readers), over your 500 ms bar. Commits a second stay
+   about 19 to 21 in all; the p99 is the unluckiest writer losing the race
+   for the intent lock many times. You said report it and stop.
+2. **Readers starve under continuous writes,** which no rule covers.
+   - With one writer committing back to back, a lone reader gets 0.75
+     reads a second and waits up to 4 s. With 4 or 8 writers, readers
+     finish almost nothing in 8 s.
+   - **Cell 8 is the same thing:** against 3 writers and a compaction every
+     ~100 ms, the opener's two opens each waited out their 10 s deadline
+     and got `Locked`, so no open completed in 20 s. An open starts with a
+     read. That's **far over your 1 s open-time bar.** At 100K a
+     compaction takes long enough that even the writers stall: 0 writes,
+     6 of their calls `Locked`.
+   - **The cause, by reading:** a writer holds the intent lock while it
+     waits and takes it again as soon as its commit ends. A reader takes
+     the intent lock shared for one try only (RB-006.4) and otherwise backs
+     off, so under a saturated writer it almost never lands in the gap.
+   - With 7 readers it doesn't show: the readers keep the main lock shared,
+     the writer waits, and readers already in get through.
+   - Agents don't write back to back, so this is a worst case. But it's
+     the case the note says writer preference handles ("busy readers can't
+     starve a writer"), and here the reverse happens.
+3. **The backoff, by your rule: keep today's.**
+   - The young shape raises commits a second by 12 to 35 % at 10K (2
+     writers 19.3 → 22.4, 8 writers 19.8 → 22.8, 4 writers and 2 readers
+     18.0 → 24.4), and is flat at 100K.
+   - But it makes p99s worse by far more than 10 %: 8 writers 2,539 →
+     3,546, 4 writers and 2 readers 1,021 → 2,247, 8 writers and 2 readers
+     3,959 → 4,929.
+   - It doesn't help the starved readers either.
+   - So nothing is adopted. The switch stays dev-hooks-only, for the next
+     measurement.
+
+**Not done, because of the stop:**
+- the Windows one-off for cell 8 (a throwaway workflow; cheap, about 10
+  minutes of a runner; not started);
+- correcting the 12.4 note's numbers;
+- the PR.
+
+**What I'd suggest you weigh** (your call, not applied):
+- **(a) Bounded writer preference:** after a reader has waited some time
+  (say 50 to 100 ms), it takes the intent lock **exclusively** for one try,
+  as a writer does, so the next writer queues behind it. Or writers give
+  the intent lock up for a moment after each commit when a reader has
+  queued. Either fixes the starvation, and probably the 8-writer p99 too.
+- **(b) The refused-write reload:** don't clear the stamp when a write
+  window's closure fails before the handle's state changed (nothing dirty,
+  `commit_point` unset). It saves a full reload, 32 ms at 100K, after any
+  validation error.
+- **(c) Report and move on:** if agents' write rates make (a) moot for
+  v0.14, record the numbers and the starvation in the note as a known
+  limit, and take (a) into 12.4's later steps.
+
+**To unblock:** your decision on 1 to 3 (and (a) to (c)). I'll then finish
+the PR: the bench, the JSON, the note's numbers, and whatever you decide.
+
+### 2026-11-13 — PLANNER-A — DECISION — step 5's stop: fix reader starvation in v0.14 (readers keep the intent lock while a writer commits); writers' p99 measured again after; the refused-write reload stays; the backoff stays
+
+**The numbers are good where it matters most:** 0.05 ms per call when
+nobody wrote, no-op windows free (RB-007.6 holds), about 20 commits a
+second, 1.6 to 17.8 MB per handle. **The stop is real.**
+
+**Why readers starve** (read `shared/lock.rs:163-219`):
+- A writer drops the intent lock as soon as it gets the main lock
+  (line 180), so the intent lock is free while it commits.
+- A reader that comes in then gets the intent lock, finds the main lock
+  held, and lets the intent lock go (the one-try rule, RB-006.4 rec. 1).
+- The next writer takes the intent lock exclusively and waits on the main
+  lock, so with two or more writers some writer always holds the intent
+  lock, and readers never get in.
+- With one writer writing back to back, its next call finds both locks free
+  microseconds after its commit, and wins.
+
+The one-try rule was there so busy readers couldn't starve a writer. As
+written, it starves readers.
+
+**DECISION 1: fix it in v0.14** (step 5b, in step 5's PR). v0.14's claim is
+several processes on one brain. A script writing a batch in shared mode
+(DOGFOOD-1's `--from-file` does exactly that) would keep a hook's 2 s read
+out for the whole batch. REVIEWER-B reviews the lock layer at READY anyway.
+
+**The rule, refining RB-006.4 rec. 1:**
+- A reader takes the intent lock shared and tries the main lock once.
+- **If the main lock is free or held shared,** it gets in, or it lets the
+  intent lock go at once: today's rule, so busy readers still can't starve
+  a writer.
+- **If the main lock is held exclusively** (a shared `try_lock` fails only
+  then), the reader **keeps** the intent lock shared while it waits for
+  that writer, within its deadline and cancel. The next writer then can't
+  take the intent lock and queues behind the waiting readers. When the
+  writer's commit ends, the readers get in together, and then the next
+  writer goes.
+- That alternates a writer with a batch of readers (phase-fair), and needs
+  no new lock file and no format change.
+- Every lock still goes through `LockedFile`, and a cancel or the deadline
+  drops both locks (the existing tests must still hold).
+- Update the note's "Writer preference" section and the throughput
+  paragraph, marked "(since step 5)".
+
+**Then measure again** (cells 5, 6 and 8 at 10K and 100K; **three runs
+each** for the multi-process cells, given the busy daemons, with the median
+run reported):
+- **Readers:** 1 writer back to back with 1 reader: at least 10 reads a
+  second and a read-wait p99 under 200 ms. 4 writers with 2 readers, and 8
+  with 2: a read-wait p99 under 500 ms.
+- **No regression:** the 8-readers-against-a-writer test still passes, and
+  commits a second fall by no more than 10 %.
+- **Writers:** if 8 writers' p99 at 10K is still over 500 ms, try one
+  addition: **a newcomer defers to an older waiter.** A caller that has
+  waited longer than the young period (15 ms) holds a `waiting.lock` in the
+  sidecar shared; a caller just starting finds it held (an exclusive
+  `try_lock` fails) and backs off once before trying the intent lock.
+  That stops a writer's next call from barging past writers that have
+  waited. Keep it only if it brings the p99 under 500 ms without breaking
+  the reader targets. If neither does, report the numbers and stop: then
+  it's a v0.14 scope question for the user.
+- **Cell 8:** opens complete within their deadline. Report p50 and p99 with
+  each compaction's duration, since an open during a compaction rightly
+  waits for it. Then the Windows one-off.
+- **Tests:** in `tests/shared_lock.rs`, a reader against a writer looping
+  back to back must finish at least 20 reads in 2 s, and, for the newcomer
+  rule if it's kept, 4 writers each committing within a bound. Check each
+  against its change undone. A cross-process version in `cross_process.rs`
+  if it's cheap.
+
+**DECISION 2: the refused-write reload stays** ((b), not adopted). Clearing
+the stamp at every write window's start is RB-006.1's rule. Proving that "the
+closure failed before changing anything" covers all of the handle's
+in-memory state is a new correctness argument, for about 32 ms at 100K after
+a validation error, which is rare. Step 6's incremental catch-up makes that
+reload cheap anyway; note it there.
+
+**DECISION 3: the backoff stays,** by the rule. Keep the dev-hooks switch.
+Re-run cell 7 once after the fairness change and apply the same rule.
+
+**Also noted for step 6:** a shared write costs about 9 ms more than a plain
+one (5 fsyncs against 3, the lease). Whether the lease can share the
+commit's syncs without weakening RB-006.11 (a) is a question for step 6's
+design, not now.
+
+**This counts as fix round 1 for step 5.** Log DONE when the PR is green
+(the bench, the JSON with both runs labelled, the note's numbers, the
+fairness change and its tests), and stop before merging.
+
+### 2026-11-13 — WORKER — BLOCKED — step 5 fix round 1: readers no longer starve, but writers now do against busy readers, and 8 writers' p99 stays over 500 ms with or without the newcomer rule (a v0.14 scope question)
+
+**What I did, as decided** (uncommitted, on `rel0140-step5-bench`; the
+bench, the dev-hooks switch and the JSON from the BLOCKED entry above are
+there too):
+- **The fairness change** in `shared/lock.rs` `acquire`: a reader whose
+  shared try of the main lock fails keeps the intent lock shared while it
+  waits (a shared try fails only when the main lock is held exclusively). A
+  reader that gets in, or finds the main lock free or shared, lets it go at
+  once, as before.
+- **The tests:**
+  - New `a_reader_gets_in_against_a_writer_looping_back_to_back`
+    (`tests/shared_lock.rs`): 29,047 reads and 73 writes in 2 s. **Against
+    the old rule it fails** (the reader waits out its deadline, `Locked`).
+  - **One step 2a test encoded the old rule**
+    (`a_reader_holds_the_intent_lock_for_one_try_only`: readers waiting for
+    a writer leave the intent lock free). It's now
+    `readers_waiting_for_a_writer_keep_the_intent_lock` and asserts the
+    opposite.
+  - The 8-busy-readers test still passes (17 of 17 in the file).
+  - `shared_handle`, `shared_fixes` and `cross_process` all pass.
+- **The bench again:** cells 5, 6 and 8 at 10K and 100K, three runs each
+  (load average 2.8 to 4.8, the same daemons), and cell 7 once.
+
+**Results with the fairness change** (median of three runs; per second, and
+p50 / p99 in ms):
+
+| Mix (10K) | Writes/s before → now | Write p99 before → now | Reads/s before → now | Read-wait p99 before → now |
+|---|---|---|---|---|
+| 1 writer, 1 reader | 41.0 → **16.4** | 41 → 273 | 0.75 → **4,931** | 4,085 → **0.11** |
+| 1 writer, 7 readers | 35.1 → **0.63** | 40 → **2,940** | 4,091 → 27,733 | 1.0 → 0.74 |
+| 2 writers | 19.3 → 19.0 | 166 → 167 | | |
+| 8 writers | 19.8 → 19.5 | 2,539 → **2,477** | | |
+| 4 writers, 2 readers | 18.0 → 15.0 | 1,021 → 1,359 | 0.38 → 6,311 | 8,189 → **0.13** |
+| 8 writers, 2 readers | 21.0 → 18.1 | 3,959 → 1,906 | 0.25 → 1,722 | 8,527 → **0.17** |
+
+At 100K: 1 writer with 1 reader gives 15.4 reads a second (p99 170 ms);
+1 writer with 7 readers, 0.88 writes a second (p99 5,523 ms); 8 writers,
+p99 3,604 ms; 8 writers with 2 readers, read-wait p99 540 ms.
+
+**Against your targets:**
+- **Readers: met at 10K.**
+  - 1 writer with 1 reader: 4,931 reads a second, p99 0.11 ms (target
+    ≥ 10, < 200 ms).
+  - 4 or 8 writers with 2 readers: p99 0.13 and 0.17 ms (target < 500).
+  - At 100K: 1 writer with 1 reader is 15.4 a second, p99 170 ms (met);
+    8 writers with 2 readers is 540 ms (just over).
+- **No regression: failed.**
+  - Against 7 busy readers a writer falls from 35 commits a second to
+    0.63, with p99 2.9 s at 10K and 5.5 s at 100K.
+  - Against 1 busy reader it falls from 41 to 16.
+  - 4 and 8 writers with 2 readers lose 14 to 17 % of their commits.
+  - Writer preference now loses to back-to-back readers.
+  - **The cause, by reading:** a writer waiting for the intent lock must
+    get it exclusively. With several readers looping, some reader nearly
+    always holds it shared for its one try, so the writer's exclusive try
+    keeps failing and its backoff grows. The readers waiting through the
+    writer's own commit (the change) also make its next call wait for all
+    of them.
+  - The in-process 8-readers test still passes; the bench's readers are
+    separate processes calling back to back, a harsher load.
+- **Writers: 8 writers' p99 at 10K is still 2,477 ms.**
+- **The newcomer rule, tried as specified:**
+  - `waiting.lock` in the sidecar, held shared by a caller once it has
+    waited 15 ms; a caller under 15 ms that finds it held backs off once.
+  - One run at 10K: 8 writers' p99 **2,156 ms** (still over 500).
+  - A writer against 7 readers: 5.25 commits a second (better, still far
+    below 35).
+  - 8 writers with 2 readers: read-wait p99 **1,162 ms**, which breaks a
+    reader target.
+  - **Not kept:** reverted; the tree has the fairness change only.
+- **Cell 7 (the young backoff) after the change:** still fails your rule.
+  - The good: 1 writer with 1 reader 16 → 28 commits a second, 2 writers
+    +27 %, 4 writers with 2 readers +63 %.
+  - The bad: 8 writers' p99 2,221 → 3,457 (+56 %), and 8 writers with 2
+    readers 2,458 → 3,141 (+28 %).
+  - Kept today's.
+- **Cell 8 (opens under compaction), 10K:** opens now complete, about 7 a
+  second, p50 6 to 7 ms, p99 927 / 1,397 / 1,023 ms (median 1,023 ms, just
+  over your 1 s bar). Compaction (p50 / p99): 175 to 241 / 952 to 1,386 ms.
+  - At 100K one compaction took **175 s** (each of three runs), so an open
+    during it waits its 10 s and gets `Locked`, rightly: that's the
+    compaction's length, not the lock.
+  - The Windows one-off isn't run.
+
+**Why I stopped:** your decision: "If neither does, report the numbers and
+stop: then it's a v0.14 scope question for the user." On top of that, the
+fairness change breaks the no-regression target, which the decision listed
+alongside it.
+
+**What I'd put to the user** (your call, and theirs):
+1. **Ship v0.14 with today's rule** (readers starve under a saturated
+   writer) and document it: shared mode suits agents' bursty writes, and a
+   continuous writer (a batch import in shared mode) blocks readers for
+   its length. Take real fairness to a later 12.4 step.
+2. **Ship with the fairness change** (readers fine; a writer against
+   back-to-back readers slows sharply) and document that instead.
+   Readers looping back to back is less like agents than a batch writer
+   is.
+3. **Hold v0.14 for a proper fair lock:** a ticket or queue in the
+   sidecar (each caller takes a sequence number and waits its turn, or
+   phase-fair with an explicit writer-waiting mark that readers check
+   before taking the intent lock). That's a design change in the lock
+   layer, not a constant, and wants REVIEWER-B's eyes before it's built.
+4. **For 8 writers' p99:** it's the unluckiest writer losing the intent
+   race many times while the total stays about 20 commits a second. Only
+   a queue (3) fixes that. 1 and 2 leave it as a documented tail.
+
+**State:** nothing committed for step 5; the tree has the bench, the JSON
+(the first run's section only; the second run's files are in my
+scratchpad), the dev-hooks switch and fsync counter, the fairness change
+and its two tests. Nothing is pushed.
+
+### 2026-11-13 — PLANNER-A — NEEDS-USER — v0.14 scope: which lock fairness ships (step 5's second stop)
+
+**The question for the user:** the first fix made readers fair but slowed
+writers sharply against back-to-back readers, and 8 writers' slowest 1 %
+stays about 2.5 s. Only a real queue fixes both, and that's a design change.
+
+**The options** (from the Worker's BLOCKED entry, with my read):
+1. **Ship today's rule** and document it. A continuous writer (a batch in
+   shared mode) locks readers out: they wait the full deadline and fail with
+   `Locked`. **A hard failure.**
+2. **Ship the fairness change** and document it. Readers are fine everywhere
+   (p99 under 0.2 ms at 10K). A writer against readers looping back to back
+   slows to under 1 commit a second (p99 2.9 s at 10K, 5.5 s at 100K), but
+   it still gets through within its 10 s deadline. **It degrades, it doesn't
+   fail.**
+3. **Hold v0.14 for a fair queue** (a ticket or phase-fair lock in the
+   sidecar): a new design, a REVIEWER-B pass on paper, then code. Probably a
+   day or more of work, plus a review round.
+
+**My recommendation: 2 now, 3 later.**
+- Agents write a few times a minute and read on demand. Neither saturating
+  load is typical. When one happens, 2 slows down where 1 fails.
+- Shared mode is opt-in in v0.14 (`serve --mcp` stays exclusive until step
+  8), so the tail only reaches users who turn it on.
+- The queue goes into 12.4's later steps, **before step 8 makes shared the
+  default**, with REVIEWER-B on its design first.
+- REVIEWER-B's release review at READY covers the lock change either way.
+
+**If the user picks 2,** the Worker:
+- commits the fairness change and its two tests, with the bench and the JSON
+  (both runs labelled);
+- writes the measured limits into `docs/shared-mode.md` and the 12.4 note:
+  a writer against back-to-back readers, the 8-writer tail, and that a
+  compaction holds the file for its whole length;
+- runs the Windows one-off for cell 8, then opens the PR.
+
+**Also from the bench, noted, no change for v0.14:**
+- **A 100K compaction took 175 s** on this machine, and it holds the file the
+  whole time. PERF-2 should measure and cut it. The docs should say to
+  compact when no agent is working.
+- Cell 8's open p99 is 1.02 s against my 1 s bar, under a compaction every
+  ~100 ms. That's extreme, and hooks' 2 s stays.
+
+**Waiting for the user.** The Worker stays stopped; nothing is committed.
+
+### 2026-11-13 — PLANNER-A — DECISION + DISPATCH — the user picks option 2 for v0.14 (readers first); the writer safety valve is planned for later; step 5 resumes
+
+**DECISION (user, 2026-11-13): option 2.** v0.14 ships the fairness change
+as built: a reader that finds a writer committing keeps the intent lock and
+goes next. The user's reasoning is the design rule from now on: **reads are
+what an agent waits on, so readers come first; writes can wait.**
+
+**Planned for later: LOCK-2, the writer safety valve** (user, 2026-11-13).
+Readers keep priority, but a writer that has waited longer than a set time
+(about 2 s) gets the next turn, and readers arriving after that let it in
+first. Saves then never time out because of readers. It goes **before 12.4
+step 8** (shared becomes the MCP default), as its own small PR with its
+bench cells (a writer against back-to-back readers: no `Locked`; readers'
+p99 unchanged otherwise), and REVIEWER-B reads it. A strict first-come,
+first-served queue (option 3) is **not** planned, since it would make
+readers wait behind writers.
+
+**Also noted for later:**
+- **Background saves** (candidate, for 12.2's hooks and 13.1b): the MCP
+  server or hook accepts a save at once and commits it in the background, so
+  an agent never waits on a write. It follows the same rule: reads first.
+- **PERF-2:** a 100K compaction took 175 s on the M1 Pro and holds the file
+  throughout. Measure and cut it.
+
+**DISPATCH — finish step 5 with option 2** (as in my NEEDS-USER entry, "If
+the user picks 2"):
+- Commit the fairness change with its two tests
+  (`a_reader_gets_in_against_a_writer_looping_back_to_back`, and
+  `readers_waiting_for_a_writer_keep_the_intent_lock` replacing the step 2a
+  test). Commit the bench, the dev-hooks switch and fsync counter, and the
+  JSON with both runs labelled (before and after the change).
+- **Docs** (`docs/shared-mode.md`, and the 12.4 note marked "(since step
+  5)"): readers come first; the measured limits:
+  - a writer against readers looping back to back (under 1 commit a second,
+    p99 2.9 s at 10K, 5.5 s at 100K, within the 10 s deadline);
+  - the 8-writer tail (p99 about 2.5 s);
+  - a compaction holds the file for its whole length (175 s at 100K
+    measured), so compact when no agent is working;
+  - the note's numbers corrected from `shared_v0_14_0`;
+  - LOCK-2 named as the planned fix.
+- CHANGELOG `[Unreleased]`: a Changed line (readers waiting for a writer
+  keep their place).
+- The Windows one-off for cell 8 (counts only), then delete the throwaway
+  workflow.
+- One PR into `release-0.14.0`. Log DONE when green, and stop before
+  merging. **Then READY.**
+
+### 2026-11-13 — WORKER — DONE — v0.14.0 step 5: the shared-mode bench, readers first, and the measured limits (PR 73, green)
+
+Acting on "the user picks option 2 for v0.14 (readers first)…; step 5
+resumes". **PR 73** into `release-0.14.0`, not merged.
+
+**Commits** (on `rel0140-step5-bench`, from `01650e6`):
+- `e2e0d18` fix(shared): readers waiting for a writer keep the intent lock.
+  `shared/lock.rs`, the two tests in `tests/shared_lock.rs`
+  (`a_reader_gets_in_against_a_writer_looping_back_to_back`;
+  `readers_waiting_for_a_writer_keep_the_intent_lock`, replacing step 2a's
+  one-try test), and the CHANGELOG Changed line.
+- `5ab9566` bench(shared): `examples/shared_bench.rs`, dev-hooks-only
+  `__fsync_count()` and `MNEMO_DEV_BACKOFF=young` (`shared/call.rs`,
+  `lib.rs`). Release builds have only the doubling backoff.
+- `4f379f2` docs(shared):
+  - `shared_v0_14_0` in `test/scripts/perf_v0.5.0.json`, the runs labelled
+    `cells_5_to_8_before_fairness` and `cells_5_6_8_after_fairness` (three
+    runs and `median_of_3`), plus `cell_7_after_fairness` and a `reading`.
+    Inserted as text; no other section changed.
+  - `docs/shared-mode.md`: readers come first, and a new section "How busy a
+    file can get" with the measured limits: a writer against back-to-back
+    readers (under 1 commit a second, p99 2.9 s at 10K, 5.5 s at 100K, within
+    the deadline), the 8-writer tail (p99 about 2.5 s), and that a compaction
+    holds the file throughout (175 s at 100K), so compact when no agent is
+    working. It names LOCK-2 as the planned fix.
+  - The 12.4 note's changed sections are marked "since step 5": writer
+    preference, protocol step 7, the comparison table, a new "Step 5's
+    measurements" table (the note's numbers corrected from the bench), the
+    implementation order, and a "What changed" row.
+
+**Runs:** CI 43533952905 on the PR, all 15 jobs passed. Mobile CI isn't
+triggered: the PR touches no mobile paths.
+
+**Local:** `cargo test --features failpoints` 470 passed, 0 failed (39
+binaries). `cargo fmt --check` and `cargo clippy --all-targets --features
+failpoints,benches -- -D warnings` clean. The first clippy run flagged two
+lints in the bench (a doc line read as a list item, a boolean to simplify),
+fixed before the commit.
+
+**Windows one-off, cell 8 at 10K, counts only:** run 43533915929 on
+`windows-latest`, a throwaway workflow on `exp-step5-win-cell8`, then
+deleted (branch removed locally and on GitHub; no workflow file left on any
+branch). In 20 s:
+- 75 opens (`open_shared`, 10 s deadline), p50 75 ms, p99 2.4 s;
+- 31 compactions, p50 415 ms;
+- 123 writes from 3 writers, p99 2.1 s;
+- no `Locked` anywhere.
+
+That's a GitHub runner, not comparable with the M1 Pro's latencies.
+
+**Deviations:**
+- The 12.4 note's cell 8 line says `open_shared`: the bench's opener uses it,
+  not `open_exclusive`.
+- The note's first bullet ("No 12.4 code exists yet…") is stale but outside
+  step 5's sections; left alone.
+
+**Not done:** `test/project.mnemo` not updated this step.
+
+**Next:** stopped before merging. After merge and the push runs, READY per
+your entry.
+
+### 2026-11-13 — PLANNER-A — REVIEW + DISPATCH — step 5 accepted (PR 73); merge, two doc lines, then READY
+
+**Step 5 (PR 73, head of `rel0140-step5-bench`): ACCEPTED.** 14 of 14 checks
+green (`gh pr checks 73`). Read the `shared/lock.rs` change: the shared branch
+of the inner loop now keeps the intent lock instead of breaking out, exactly
+the rule decided, and nothing else in the loop changed. The bench, the JSON
+(both runs labelled), the docs' "How busy a file can get", the note's "since
+step 5" sections and the Windows one-off (no `Locked` in 20 s; the throwaway
+branch is gone, checked with `git ls-remote`) are as dispatched. **12.4 steps
+1 to 5 are done.**
+
+**Two doc lines** (one `docs(shared)` commit on `release-0.14.0` after the
+merge, no PR needed; the push runs below cover it):
+- `acquire`'s doc comment says busy readers "can't starve" a writer. Since
+  step 5 that's no longer what we measured: say a writer still gets in, but
+  readers looping back to back slow it (see `docs/shared-mode.md`, "How busy
+  a file can get"; LOCK-2 is the planned fix).
+- The 12.4 note's stale first bullet ("No 12.4 code exists yet…"): say
+  steps 1 to 5 shipped in v0.14.0.
+
+**DISPATCH — to READY:**
+1. Squash and merge PR 73 (or merge normally if its three commits stand
+   alone), delete the branch, add the two doc lines, push.
+2. **Every job green on `release-0.14.0`'s final push:** CI and Mobile CI,
+   every job run (re-run any "not run" job until it runs).
+3. Coordination sync.
+4. **Log READY** for v0.14.0: the branch head, the push runs, the full
+   CHANGELOG `[Unreleased]` summary, test counts, the plain callers left,
+   and anything you know is open. Don't bump versions or tag yet: REVIEWER-B's
+   release review comes first, then the triage, any fixes, and my release
+   HANDOFF.
+
+### 2026-11-13 — WORKER — BLOCKED — v0.14.0 to READY: release-0.14.0's push run failed two CI jobs (the step 2a writer test's 1 s bound under readers first; the 0.13.2-compactor case's `Replaced` race)
+
+Acting on "step 5 accepted (PR 73); merge, two doc lines, then READY".
+
+**Done:**
+- PR 73 merged by fast-forward: its three commits stand alone, and the PR
+  shows MERGED at `4f379f2`. Branch deleted locally and on GitHub.
+- `968aa3a` docs(shared): `acquire`'s doc comment (a writer still gets in,
+  but readers looping back to back slow it; LOCK-2) and the 12.4 note's
+  first bullet (steps 1 to 5 shipped in v0.14.0). Pushed:
+  `release-0.14.0` is at `968aa3a`.
+- **Mobile CI 43535125103: success,** all 6 jobs.
+- **CI 43535125214: failure,** 2 of 14 jobs:
+  - `rust (macos-latest)`;
+  - `old compactor (v0.13.2, linux)`.
+  
+  The other 12 passed. Both jobs passed on PR 73's run (43533952905), so
+  both failures are intermittent. By the step 3 rule that's a bug until
+  shown otherwise, so I stopped: no coordination sync, no READY.
+
+**1. `rust (macos-latest)`: `a_writer_gets_in_against_eight_busy_readers`
+(`tests/shared_lock.rs:207`), "a write waited 1.084989333s".**
+- This is step 2a's writer-preference test. Eight reader threads hold the
+  shared lock 2 ms each in a loop, and 100 writes must each wait under 1 s.
+  The bound is the 12.4 note's own test spec ("every write under 1 s across
+  100 commits").
+- **It's the readers-first rule's measured cost, not a new bug.** Local
+  runs, 10 each, of the longest wait over the 100 writes:
+  - with step 5's rule (`968aa3a`): 202 to 325 ms;
+  - with the old rule (`lock.rs` from `01650e6`, put back after;
+    `git status` clean): 1.1 to 11.6 ms.
+  
+  So the change raised this test's tail about 30-fold. A slower CI runner
+  crosses 1 s. Step 5's bench measured the same thing in processes: a
+  writer against 7 back-to-back readers, p99 2.9 s.
+- The test is still right about what matters (the writer gets in, and
+  readers don't starve it out). Its 1 s bound is what option 2 gave up.
+- **Options (the Planner decides, since the bound is the note's spec):**
+  1. Bound the test by what v0.14 now promises: every write gets in within
+     its deadline (10 s), with no `Locked`. It keeps catching a writer that
+     starves. Update the note's test line to match, with LOCK-2 to restore
+     a tighter bound.
+  2. A middle bound such as 5 s: still a real tail check, about 15 times
+     the local worst. It could still flake on a very slow runner.
+  3. Hold READY for LOCK-2, the writer safety valve (planned before step 8),
+     and keep the 1 s bound.
+
+  My read: option 1 for v0.14, with LOCK-2's PR restoring a tight bound.
+  It matches the docs ("still commits within the 10 s deadline").
+
+**2. `old compactor (v0.13.2, linux)`:
+`the_0_13_2_compactor_never_loses_an_acknowledged_write`
+(`tests/cross_process.rs:540`, through `no_errors`).**
+- errors.log: "writer w0: writing w0-84: the file at …/b.mnemo was replaced
+  after this handle opened it (by a compaction, or by another program);
+  nothing was written. Reopen it". That's `MnemoError::Replaced`.
+- **Cause, from the code:** the 0.13.2 compactor releases its lock before
+  it renames (the known old-build exception). Its rename can land inside a
+  shared write window:
+  1. after the window's identity check (protocol step 4);
+  2. before the commit;
+  3. then the commit's pre-write check, `Mnemo::ensure_not_replaced`
+     (`store/load.rs`, step 1's "a handle refuses to write to a replaced
+     file"), refuses with `Replaced`.
+  
+  Nothing was written and nothing acknowledged, so **no write is lost:
+  the outcome is safe.** But:
+  - the test's writer allows only `ReplacedDuringWrite` (the rename after
+    the commit), not this earlier window;
+  - the shared surface returns a plain-handle error whose advice ("Reopen
+    it") doesn't apply: a shared handle's next call reloads anyway;
+  - `docs/shared-mode.md`'s error table doesn't list `Replaced`.
+- **Not caused by step 5:** that case has 3 writers and no readers, and the
+  change touches only readers. It's a timing race in step 3's test. It ran
+  green on every push and PR since step 3, and 4 of 4 times locally
+  (0.13.2 binary from my scratchpad; 0 replaced each time, 57 to 71
+  compactions a run).
+- **Options:**
+  1. Engine: inside a shared write window, map `Replaced` from the commit's
+     pre-write check to `ReplacedDuringWrite`. Both mean "not in the file
+     at the path", and shared callers then see the one error the docs list.
+     Test: a failpoint that renames over the path between the window's
+     identity check and the commit, which fails without the mapping.
+  2. Test only: the writer child also allows `Replaced` under
+     `XP_ALLOW_REPLACED` (counted, never acknowledged), and the docs'
+     error table lists `Replaced` for shared mode.
+
+  My read: option 1. It's small, keeps the shared error surface as
+  documented, and fixes the advice.
+
+**State:**
+- `release-0.14.0` at `968aa3a`. Nothing uncommitted except `PLAN.md`
+  (this entry and the earlier ones since the last sync).
+- No coordination sync yet; it waits for a green push.
+- No version bump, no tag.
+
+**To unblock:** pick an option for each (one PR for both is fine), then a
+green push on `release-0.14.0`, the sync, and READY.
+
+### 2026-11-13 — PLANNER-A — DECISION — unblocked: the writer test's bound becomes 5 s (LOCK-2 restores 1 s); a pre-commit `Replaced` in a shared window stays its own error, with the right advice
+
+**1. `a_writer_gets_in_against_eight_busy_readers`: option 2, a 5 s bound.**
+- The 1 s bound was the note's spec under the old rule. Readers-first
+  (the user's decision) raised this test's worst wait from about 11 ms to
+  200–325 ms locally, and a CI runner crossed 1 s. That's the accepted cost,
+  not a new bug.
+- Option 1 (only "within the 10 s deadline") would barely test anything: it
+  catches only total starvation. A 5 s bound still catches a real
+  regression, and it's about 15 times the local worst.
+- Assert every write gets in with no `Locked`, and the worst wait under
+  5 s, and print the worst and the median, so a later run shows the trend.
+- Update the note's test line ("under 5 s since step 5; LOCK-2 restores a
+  tight bound"), and add "restore this test's 1 s bound" to LOCK-2's entry
+  in my option 2 decision's carried list (in your DONE; I keep the list).
+
+**2. The 0.13.2 compactor's `Replaced`: neither option as written.**
+- `Replaced` before the commit means **nothing was written**. Retrying the
+  call is safe. `ReplacedDuringWrite` means the write may be in the old,
+  replaced file. Mapping one onto the other (option 1) would tell callers a
+  safe case is the unsafe one. Keep them apart.
+- **What to change:**
+  - In a shared window, the pre-commit `Replaced` keeps its variant, but
+    its message for a shared handle says what's true there: "the file at
+    … was replaced (an older build's compaction) before this write;
+    nothing was written, and the next call follows the new file". No
+    "Reopen it" for a shared handle. The plain handle's message stays.
+  - The window clears the stamp on it, as for any failed write, so the
+    next call reloads. Confirm that's already so.
+  - `docs/shared-mode.md`'s error table gains `Replaced` (Python:
+    `MnemoError`, or its own class if one exists), "nothing was written;
+    call again".
+  - The test's writer child accepts `Replaced` (counted, never
+    acknowledged) alongside `ReplacedDuringWrite`, and the job prints both
+    counts. The "no acknowledged write lost" assertion is unchanged.
+  - **A test, if a hook makes it cheap:** a rename over the path between
+    the window's identity check and the commit gives `Replaced`, with the
+    new message, and the next call sees the new file. If it needs a new
+    failpoint, add one (failpoints builds only).
+- It only happens with a pre-0.14 binary renaming without its lock: the
+  named mixed-version exception, which the upgrade note covers.
+
+**Then:** one PR into `release-0.14.0` for both (it touches `store/`, so it
+goes through the PR's CI first), merge, every job green on the branch's
+push, the coordination sync, and READY. Neither is a fix round (the hop cap
+counts review rounds).
