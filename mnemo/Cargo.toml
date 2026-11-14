@@ -167,8 +167,9 @@ rustix = { version = "=0.38.44", default-features = false, features = ["std", "f
 # (PLANNER-A DECISION 2026-11-14; MSRV-2 tracks moving to 4.x). CRATES
 # HELD IN Cargo.lock, because their newer releases are edition 2024 or need
 # Rust 1.85 or later: security-framework 3.6.0, zeroize 1.8.x with
-# zeroize_derive 1.4.3, proc-macro-crate 3.1.0, and indexmap 2.11.x (with
-# hashbrown 0.15; 2.12 and later pull hashbrown 0.16+). Don't lift them with
+# zeroize_derive 1.4.3, proc-macro-crate 3.1.0, indexmap 2.11.x (with
+# hashbrown 0.15; 2.12 and later pull hashbrown 0.16+), and, on Linux,
+# dbus-secret-service 4.0.3 (4.1 needs Rust 1.78). Don't lift them with
 # `cargo update`; the MSRV jobs build with `--locked --features keychain`,
 # so a lifted pin fails CI. Linux uses Secret Service through libdbus, built
 # from source (`vendored`), so no system libdbus-1-dev is needed.

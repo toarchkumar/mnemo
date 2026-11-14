@@ -183,10 +183,12 @@ fn a_store_that_errors_is_left_alone_when_mnemo_key_answers() {
     let b = e.path("b.mnemo");
     let key = key_brain(&b);
     let hex = keys::hex(&key);
-    // A regular file where the store's directory should be: every lookup
-    // fails.
-    let broken = e.path("not-a-directory");
-    std::fs::write(&broken, "x").unwrap();
+    // A directory where this brain's entry file should be: reading the
+    // entry fails, on every platform (Windows reads a path under a regular
+    // file as "not found", so a file where the store should be won't do).
+    let broken = e.path("broken-store");
+    let salt = keys::file_info(&b).unwrap().salt;
+    std::fs::create_dir_all(broken.join(keys::hex(&salt))).unwrap();
     let run = |env: &[(&str, &str)]| {
         let o = e
             .command(&["info", s(&b)], env, Some(&broken))
@@ -213,10 +215,7 @@ fn a_store_that_errors_is_left_alone_when_mnemo_key_answers() {
     // Nothing else: the store's error is the error.
     let (ok, _, err) = run(&[]);
     assert!(!ok);
-    assert!(
-        err.contains("not-a-directory") || err.contains("Not a directory"),
-        "{err}"
-    );
+    assert!(err.contains("the test key store at"), "{err}");
 }
 
 // --- a damaged page 0 ---

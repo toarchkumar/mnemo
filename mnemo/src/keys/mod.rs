@@ -210,7 +210,10 @@ impl KeyStore for DirKeyStore {
         match std::fs::read_to_string(self.entry(salt)) {
             Ok(text) => StoredSecret::decode(Zeroizing::new(text).trim_end()).map(Some),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => Err(MnemoError::Io(std::io::Error::other(format!(
+                "{} (reading): {e}",
+                self.describe()
+            )))),
         }
     }
 
