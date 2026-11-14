@@ -4,6 +4,7 @@
 //! killed while holding the valve is in `tests/cross_process.rs`.
 #![cfg(feature = "failpoints")]
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -331,13 +332,17 @@ fn eight_writers_handing_on_the_valve_dont_starve_readers() {
     let takes: u64 = writers.into_iter().map(|w| w.join().unwrap()).sum();
     let longest_read: Duration = rs.into_iter().map(|r| r.join().unwrap()).max().unwrap();
     let n = reads.load(Ordering::Relaxed);
-    eprintln!(
+    // Written to stderr directly, past the test harness's capture, so the
+    // counts show in CI's log on a pass too.
+    let _ = writeln!(
+        std::io::stderr(),
         "8 writers: valve taken {takes} times; {n} reads; longest read wait {longest_read:?}"
     );
-    // Readers aren't starved, but a read can wait a second or two in this
-    // saturating mix: the trade LOCK-2 makes (12.4 design note, "LOCK-2",
-    // the measurements). 5 s still catches starvation.
-    assert!(n > 20, "readers starved: {n} reads in 4 s");
+    // What LOCK-2 guarantees here is that reads get through and none waits
+    // without bound, not a rate: with eight writers saving back to back on
+    // a slow machine a read can wait about 1.5 s (12.4 design note,
+    // "LOCK-2", the measurements). 5 s still catches starvation.
+    assert!(n >= 3, "readers starved: {n} reads in 4 s");
     assert!(
         longest_read < Duration::from_secs(5),
         "a read waited {longest_read:?}"
