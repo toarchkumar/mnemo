@@ -318,3 +318,95 @@ fn a_key_brain_not_in_the_keychain_says_so() {
     assert!(ok, "{err}");
     assert!(err.contains("mnemo unlock"), "{err}");
 }
+
+/// Start `serve --mcp <arg>` in `cwd` with `project` as `CLAUDE_PROJECT_DIR`
+/// (when given), call `list`, and return the response and stderr.
+fn serve_list(e: &Env, arg: &str, cwd: &Path, project: Option<&Path>) -> (Value, String) {
+    use std::io::{BufRead, BufReader, Write};
+    let mut c = Command::new(env!("CARGO_BIN_EXE_mnemo"));
+    c.args(["serve", "--mcp", arg]);
+    for v in CLEARED {
+        c.env_remove(v);
+    }
+    c.env_remove("CLAUDE_PROJECT_DIR");
+    if let Some(p) = project {
+        c.env("CLAUDE_PROJECT_DIR", p);
+    }
+    c.env("HOME", e.p("home"))
+        .env("MNEMO_PASSPHRASE", "pw")
+        .env("MNEMO_DEV_NO_KEYCHAIN", "1")
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut call = |line: &str| -> Value {
+        if writeln!(stdin, "{line}")
+            .and_then(|_| stdin.flush())
+            .is_err()
+        {
+            return Value::Null;
+        }
+        match stdout.next() {
+            Some(Ok(l)) => serde_json::from_str(&l).unwrap(),
+            _ => Value::Null,
+        }
+    };
+    call(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
+    );
+    let r = call(
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list","arguments":{}}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
+    let mut err = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+    (r, err)
+}
+
+/// What `mcp install` writes for Claude Code reaches the server as
+/// `./<path>` (Claude Code doesn't expand `${CLAUDE_PROJECT_DIR}` itself);
+/// the server resolves it against `CLAUDE_PROJECT_DIR`, from any working
+/// directory.
+#[test]
+fn serve_resolves_a_relative_path_against_claude_project_dir() {
+    let e = Env::new();
+    e.brain("project/b.mnemo");
+    let sub = e.p("project/deep/sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let project = std::fs::canonicalize(e.p("project")).unwrap();
+    let (r, err) = serve_list(&e, "./b.mnemo", &sub, Some(&project));
+    assert!(r["result"].is_object(), "{r} {err}");
+    assert!(err.contains("relative to CLAUDE_PROJECT_DIR"), "{err}");
+    assert!(!sub.join("b.mnemo").exists());
+}
+
+/// Without `CLAUDE_PROJECT_DIR`, the working directory, as before.
+#[test]
+fn serve_without_claude_project_dir_uses_the_working_directory() {
+    let e = Env::new();
+    e.brain("project/b.mnemo");
+    let (r, err) = serve_list(&e, "./b.mnemo", &e.p("project"), None);
+    assert!(r["result"].is_object(), "{r} {err}");
+    assert!(!err.contains("CLAUDE_PROJECT_DIR"), "{err}");
+}
+
+/// A missing brain is an error, and the server never makes one: a wrong
+/// directory can't produce a new, empty brain.
+#[test]
+fn serve_on_a_missing_brain_fails_and_creates_nothing() {
+    let e = Env::new();
+    let sub = e.p("project/sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let (r, err) = serve_list(&e, "./b.mnemo", &sub, None);
+    assert!(r.is_null() || r["result"].is_null(), "{r}");
+    assert!(err.contains("never creates one"), "{err}");
+    assert!(!sub.join("b.mnemo").exists());
+    let project = std::fs::canonicalize(e.p("project")).unwrap();
+    let (_, err) = serve_list(&e, "./b.mnemo", &sub, Some(&project));
+    assert!(err.contains("never creates one"), "{err}");
+    assert!(!e.p("project/b.mnemo").exists());
+}

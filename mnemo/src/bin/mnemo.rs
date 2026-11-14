@@ -688,6 +688,9 @@ enum Command {
     /// the key sources (`MNEMO_PASSPHRASE`, `MNEMO_KEY`, `MNEMO_KEY_FILE`,
     /// `MNEMO_KEY_COMMAND`, or the keychain); there's no flag for it, which
     /// would leak into shell history and process listings, and no prompt.
+    /// A relative path is resolved against `CLAUDE_PROJECT_DIR` when Claude
+    /// Code sets it, else against the working directory; a missing brain is
+    /// an error, never a new one.
     Serve {
         /// Path to the `.mnemo` file.
         path: String,
@@ -1258,6 +1261,43 @@ fn new_passphrase(arg: &Option<String>, env_var: &str) -> std::result::Result<St
         return Err(format!("no passphrase: pass the flag or set {env_var}"));
     }
     prompt_new_passphrase()
+}
+
+/// 12.3 step 3: the brain `serve --mcp` opens. A relative path is resolved
+/// against `CLAUDE_PROJECT_DIR` when Claude Code set it (absolute) in the
+/// server's environment, else against the working directory. Claude Code's
+/// docs (code.claude.com/docs/en/mcp, 2026-11-14): "This variable is set in
+/// the server's environment, not in Claude Code's own environment, so
+/// referencing it via `${VAR}` expansion in the `command` or `args` of a
+/// project-scoped `.mcp.json` entry … requires a default such as
+/// `${CLAUDE_PROJECT_DIR:-.}`", and the variable is there "so your server can
+/// resolve project-relative paths without depending on the working
+/// directory". So `mcp install`'s `${CLAUDE_PROJECT_DIR:-.}/<path>` reaches
+/// the server as `./<path>`, and is resolved here. A missing brain is an
+/// error: the server never creates one.
+fn serve_path(path: &str) -> std::result::Result<std::path::PathBuf, String> {
+    let given = std::path::Path::new(path);
+    let project = std::env::var_os("CLAUDE_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|d| d.is_absolute());
+    let resolved = match (&project, given.is_relative()) {
+        (Some(dir), true) => {
+            let r = dir.join(given);
+            eprintln!(
+                "mnemo mcp: {path} is relative to CLAUDE_PROJECT_DIR: {}",
+                r.display()
+            );
+            r
+        }
+        _ => given.to_path_buf(),
+    };
+    if !resolved.is_file() {
+        return Err(format!(
+            "no brain at {}; the MCP server never creates one (make one with `mnemo init`)",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
 }
 
 /// Ask for a new passphrase twice, without echo (`init --ask-passphrase`,
@@ -3078,7 +3118,8 @@ fn run() -> std::result::Result<(), String> {
             // chain with no prompt (12.3) — passing `passphrase()` here would
             // open a TTY prompt and break the
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
-            let p = std::path::Path::new(&path);
+            let resolved = serve_path(&path)?;
+            let p = resolved.as_path();
             let embed_spec = match (embed_cmd, embed_name) {
                 (Some(c), Some(n)) => Some((
                     c,

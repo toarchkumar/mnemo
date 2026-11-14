@@ -86,8 +86,16 @@ mnemo mcp install --client claude-desktop --print me.mnemo
     (`${CLAUDE_PROJECT_DIR:-.}/…` for Claude Code, `${workspaceFolder}/…`
     for Cursor).
   - It never holds an absolute path, `--embed-cmd` or a key command.
+  - Claude Code doesn't expand `${CLAUDE_PROJECT_DIR}` in `args` itself
+    (it sets it in the server's environment), so the server gets
+    `./<path>`. `serve --mcp` resolves a relative path against
+    `CLAUDE_PROJECT_DIR` when it's set, so the brain is found from any
+    directory `claude` starts in. A missing brain is an error, never a new
+    one.
   - A user or local scope uses absolute paths, since a GUI client doesn't
-    get the shell's PATH.
+    get the shell's PATH. That includes the path of the `mnemo` that ran
+    `mcp install`, so after reinstalling `mnemo` somewhere else (a new
+    virtualenv, say) run `mcp install` again.
 - **Before it writes,** it shows a diff with every `env` and `headers` value
   masked, and asks at a terminal. `--yes` writes without asking, and
   `--print` shows it and writes nothing.
