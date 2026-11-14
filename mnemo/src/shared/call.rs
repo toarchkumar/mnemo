@@ -61,7 +61,13 @@ pub(crate) struct Call {
     /// Whether this call has already reopened the sidecar directory once
     /// (RB-007.7).
     pub(crate) sidecar_reopened: bool,
+    /// LOCK-2: a writer past the valve's threshold retries every few ms, so
+    /// it doesn't sleep through the readers' drain.
+    hurried: bool,
 }
+
+/// LOCK-2: a hurried writer's sleeps, 1 to 2 ms, jittered.
+const HURRIED: (f64, f64) = (1.0, 2.0);
 
 /// The backoff's first and longest sleep. Step 5's bench tunes them (the
 /// design note: shorter sleeps while a wait is young).
@@ -112,7 +118,19 @@ impl Call {
             cancel: cancel.cloned(),
             sleep: FIRST_SLEEP,
             sidecar_reopened: false,
+            hurried: false,
         }
+    }
+
+    /// How long this call has been waiting.
+    pub(crate) fn waited(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    /// LOCK-2: from now on, retry every 1 to 2 ms instead of the doubling
+    /// backoff (a writer past the valve's threshold).
+    pub(crate) fn hurry(&mut self) {
+        self.hurried = true;
     }
 
     /// `Err(Cancelled)` once the call is cancelled.
@@ -141,7 +159,9 @@ impl Call {
         let jittered = {
             use rand::Rng;
             // Step 5's alternative: 1 to 2 ms sleeps while the wait is young.
-            let (lo, hi) = if young {
+            let (lo, hi) = if self.hurried {
+                HURRIED
+            } else if young {
                 (1.0, 2.0)
             } else {
                 let ms = self.sleep.as_secs_f64() * 1000.0;

@@ -435,6 +435,8 @@ pub mod __shared {
     pub const SUFFIX: &str = crate::shared::testing::SUFFIX;
     pub const INTENT: &str = crate::shared::testing::INTENT;
     pub const LOCK_INFO: &str = crate::shared::testing::LOCK_INFO;
+    /// LOCK-2's valve file name.
+    pub const VALVE: &str = crate::shared::testing::VALVE;
 
     /// Whether this build refuses shared mode (Windows, Rust before 1.85).
     pub const WINDOWS_OLD_RENAME: bool = crate::shared::WINDOWS_OLD_RENAME;
@@ -461,6 +463,14 @@ pub mod __shared {
     impl Locks {
         pub fn new(path: &Path, opts: &SharedOptions) -> Result<Self> {
             BrainLocks::new(path, opts).map(Locks)
+        }
+        /// A plain long operation's layer, which never creates the sidecar.
+        pub fn for_plain(path: &Path, opts: &SharedOptions) -> Result<Self> {
+            BrainLocks::for_plain(path, opts).map(Locks)
+        }
+        /// LOCK-2: how many times this layer's writers took the valve.
+        pub fn valve_takes(&self) -> u64 {
+            self.0.valve_takes()
         }
         pub fn shared(&mut self, opts: &SharedOptions) -> Result<Lock> {
             let mut call = Call::new(opts.deadline, opts.cancel.as_ref());

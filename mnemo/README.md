@@ -819,10 +819,12 @@ for the file's lock when another process holds it (`10s` by default;
 ...) run alongside other readers. Writes (`remember`, `update`, `forget`,
 `import`, `compact`, `rekey`, and the other commands that change the file)
 take the exclusive lock and leave a note naming the command while they hold
-it; readers come first, so busy readers slow a write, and enough of them
-can keep it waiting past `--wait` (`docs/shared-mode.md`, "How busy a file
-can get"). When the wait runs out, the error names what holds the file if
-it left a note. A hook that only reads should pass `--wait 2s`; a hook that
+it; readers come first, so busy readers slow a write, but since v0.15 a
+write that has waited 500 ms gets the next turn (LOCK-2), so they can't
+keep it past `--wait`. That holds when every tool using the file shared
+runs v0.15 or later (`docs/shared-mode.md`, "How busy a file can get").
+When the wait runs out, the error names what holds the file if it left a
+note. A hook that only reads should pass `--wait 2s`; a hook that
 saves keeps the default.
 
 ### Self-describing databases

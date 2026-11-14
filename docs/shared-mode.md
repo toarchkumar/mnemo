@@ -50,9 +50,12 @@ When a long operation holds the file, the error names it ("compact since
 agent waits on, so a read that finds a writer committing waits only for
 that commit, and the next writer queues behind it. A waiting writer still
 keeps new readers from cutting in, but readers already waiting go first. So
-readers looping with no pause slow a writer down, and enough of them can
-keep it waiting past its deadline: the write fails with `Locked`, nothing is
-lost, and calling again is safe. "How busy a file can get" has the numbers.
+readers looping with no pause slow a writer down. **Since v0.15 a writer
+that has waited 500 ms gets the next turn** (LOCK-2, the writer safety
+valve): new readers hold back until it's in, so busy readers can't lock out
+a save. That holds when every process using the file shared runs v0.15 or
+later; upgrade the tools that read it too. "How busy a file can get" has
+the numbers.
 
 **Cancelling.** A `CancelToken` (`SharedOptions::cancel`, Python's
 `cancel=`) cancels a call that is *waiting* for the lock, from another
@@ -99,19 +102,22 @@ process looping as fast as it can (`shared_v0_14_0` in
   second per file.
 - **Reads wait under 1 ms** at the 99th percentile in every mix measured,
   against one to eight writers.
-- **A writer against readers looping back to back** slows to under one
-  commit a second, with a 99th percentile of 2.9 s at 10K (5.5 s at 100K).
-  In that mix (seven readers on recall-sized reads) it still commits within
-  the 10 s default deadline. With more processes reading with no pause it
-  may not: against 16 reader processes on cheap reads, 6 of 7 writes waited
-  out 10 s and failed with `Locked`. Nothing is lost (the write wasn't
-  made), and calling again is safe.
-- **Eight writers at once:** the slowest 1 % of writes wait about 2.5 s.
+- **A writer against readers looping back to back** (since v0.15, LOCK-2):
+  a writer that has waited 500 ms gets the next turn, so its 99th
+  percentile is about 570 ms against 7, 8 or 16 readers on cheap reads,
+  with no `Locked` (v0.14: 2.9 s against seven readers, and 6 of 7 writes
+  locked out against sixteen). Measured in v0.15.0's bench
+  (`shared_v0_15_0`).
+- **Eight writers at once:** the slowest 1 % of writes wait under 1 s. With
+  eight writers and two readers all looping, the readers pay for it: a read
+  can wait about a second (v0.14: under 1 ms), because a reader holds back
+  for waiting writers for up to 500 ms itself before it queues.
+- **Mixing versions:** a v0.14 reader doesn't know the valve, so against
+  v0.14 readers a write is only as bounded as in v0.14. Upgrade every tool
+  that uses the file shared.
 
 Agents write a few times a minute and read on demand, so these are limits,
-not the usual load. A planned change (LOCK-2, before shared mode becomes the
-default for `serve --mcp`) gives a writer that has waited about 2 s the next
-turn, so readers can't hold a save past its deadline.
+not the usual load.
 
 **A compaction holds the file for its whole length.** It took about 0.2 s
 at 10K and about 175 s at 100K on the same machine, and every call that

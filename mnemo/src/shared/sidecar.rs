@@ -38,6 +38,13 @@ pub const INTENT: &str = "intent.lock";
 /// The long-operation line's file name.
 pub const LOCK_INFO: &str = "lock-info";
 
+/// LOCK-2's valve: the lock a writer that has waited past the threshold
+/// holds, which readers try (shared, without waiting) before the intent
+/// lock and back off from while it's held. Only writers ever hold it. Made
+/// up front by a v0.15 shared handle's sidecar, or by the first writer that
+/// needs it; never by a reader (12.4 design note, "LOCK-2").
+pub const VALVE: &str = "writer.lock";
+
 /// `<brain>.mnemo-shared` for an already resolved brain path.
 pub(crate) fn sidecar_path(brain: &Path) -> PathBuf {
     let mut p = brain.as_os_str().to_os_string();
@@ -57,6 +64,11 @@ pub(crate) struct Sidecar {
     path: PathBuf,
     #[cfg(unix)]
     dir: rustix::fd::OwnedFd,
+    /// LOCK-2: the valve file, kept open once a reader has found it, so a
+    /// reader's check is a lock try and an unlock, not an `openat` too. It
+    /// holds no lock between calls. A replaced directory gets a new
+    /// `Sidecar`, and with it a new descriptor.
+    valve: std::sync::OnceLock<File>,
 }
 
 impl std::fmt::Debug for Sidecar {
@@ -107,6 +119,17 @@ impl Sidecar {
     /// Remove `lock-info` (best effort: a hint, not a lock).
     pub(crate) fn remove_lock_info(&self) {
         let _ = self.remove(LOCK_INFO);
+    }
+
+    /// LOCK-2: the valve file for a reader's check, opened read-only and kept
+    /// once it exists. `None` while it doesn't (a sidecar made before v0.15,
+    /// until a writer needs it): no valve, the reader goes on.
+    pub(crate) fn valve_for_reading(&self) -> Option<&File> {
+        if let Some(f) = self.valve.get() {
+            return Some(f);
+        }
+        let f = self.open_existing(VALVE, false).ok()?;
+        Some(self.valve.get_or_init(|| f))
     }
 }
 
@@ -178,7 +201,11 @@ mod imp {
                 ));
             }
         }
-        SidecarState::Ready(Sidecar { path, dir })
+        SidecarState::Ready(Sidecar {
+            path,
+            dir,
+            valve: std::sync::OnceLock::new(),
+        })
     }
 
     fn check_regular(f: &File) -> std::io::Result<()> {
@@ -286,9 +313,10 @@ mod imp {
             }
         }
         match std::fs::symlink_metadata(&path) {
-            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {
-                SidecarState::Ready(Sidecar { path })
-            }
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => SidecarState::Ready(Sidecar {
+                path,
+                valve: std::sync::OnceLock::new(),
+            }),
             _ => SidecarState::Unavailable(format!("{} isn't a real directory", path.display())),
         }
     }
