@@ -13,6 +13,11 @@
 //! [`default_store`] is `None` in a release build.
 
 pub mod display;
+#[cfg(all(
+    feature = "keychain",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
+mod os_store;
 pub mod recovery;
 
 use std::io::Read;
@@ -147,8 +152,8 @@ impl StoredSecret {
     }
 }
 
-/// Where brains' secrets are kept, each found by its brain's salt. Step 2
-/// implements it over the OS keychain.
+/// Where brains' secrets are kept, each found by its brain's salt: the OS
+/// keychain (the `keychain` feature), or the test store.
 pub trait KeyStore {
     /// How to name it to a person ("the test key store at …").
     fn describe(&self) -> String;
@@ -159,6 +164,19 @@ pub trait KeyStore {
     fn put(&self, salt: &[u8; SALT_LEN], secret: &StoredSecret, label: &str) -> Result<()>;
     /// Remove the entry for `salt`, if there is one.
     fn delete(&self, salt: &[u8; SALT_LEN]) -> Result<()>;
+    /// Whether an entry is known to be on disk when [`KeyStore::put`]
+    /// returns. None of the OS stores documents it, so the default is
+    /// `false`, and the keys note's section 4 rule applies: a new key the
+    /// display rule can't show isn't left in the store alone.
+    fn durable(&self) -> bool {
+        false
+    }
+    /// Whether the store can be used here at all: an error says why not
+    /// (no Secret Service on the session bus, no access). It reads one
+    /// entry that never exists, so it asks nothing of the user.
+    fn check_available(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// **Tests only.** A key store in a directory, one 0600 file per salt.
@@ -217,18 +235,45 @@ impl KeyStore for DirKeyStore {
             _ => Ok(()),
         }
     }
+
+    /// Each entry is written to a temp file, synced and renamed. A test can
+    /// make it say otherwise with `MNEMO_DEV_KEYSTORE_NOT_DURABLE`, to stand
+    /// in for an OS store.
+    fn durable(&self) -> bool {
+        std::env::var_os("MNEMO_DEV_KEYSTORE_NOT_DURABLE").is_none()
+    }
 }
 
-/// The key store this build uses, if it has one. Step 1 has no OS
-/// keychain yet: a `dev-hooks` build uses the directory `MNEMO_DEV_KEYSTORE`
-/// names, and any other build has none.
+/// The key store this build uses, if it has one: in a `dev-hooks` build,
+/// the directory `MNEMO_DEV_KEYSTORE` names when it's set; otherwise the OS
+/// keychain when the `keychain` feature is on (macOS, Windows, Linux).
+/// `None` otherwise. Making one asks nothing of the store: whether it can be
+/// used shows at the first lookup, or through
+/// [`KeyStore::check_available`].
 pub fn default_store() -> Option<Box<dyn KeyStore>> {
     #[cfg(feature = "dev-hooks")]
-    if let Some(dir) = std::env::var_os("MNEMO_DEV_KEYSTORE").filter(|d| !d.is_empty()) {
-        return Some(Box::new(DirKeyStore::new(PathBuf::from(dir))));
+    {
+        if let Some(dir) = std::env::var_os("MNEMO_DEV_KEYSTORE").filter(|d| !d.is_empty()) {
+            return Some(Box::new(DirKeyStore::new(PathBuf::from(dir))));
+        }
+        // A test that wants no store at all, in a `keychain` build, so it
+        // never reaches the real keychain of whoever runs it.
+        if std::env::var_os("MNEMO_DEV_NO_KEYCHAIN").is_some() {
+            return None;
+        }
     }
+    #[cfg(all(
+        feature = "keychain",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
+    return Some(Box::new(os_store::OsKeyStore));
+    #[allow(unreachable_code)]
     None
 }
+
+/// The keychain's service name for every brain's entry; the account is the
+/// brain's salt in lower-case hex (the keys note, section 4).
+pub const KEYCHAIN_SERVICE: &str = "io.github.toarchkumar.mnemo.brain";
 
 /// Store `secret` under `salt`, then read it back. A store that doesn't
 /// give back what it was given has its entry removed, and the call fails.
@@ -483,8 +528,9 @@ pub struct Resolved {
     pub secret: Secret,
     /// Where it came from.
     pub source: Source,
-    /// The next source of the same kind that's present, for the error when
-    /// this one doesn't open the file.
+    /// The next source of the same kind, for the error when this one
+    /// doesn't open the file: the next environment source that's present,
+    /// or the key store, which isn't looked up (it may have no entry).
     pub next: Option<Source>,
     /// Sources that were skipped, and why, to show the user.
     pub notes: Vec<String>,
@@ -527,25 +573,156 @@ fn kind_word(k: SecretKind) -> &'static str {
 /// once (for a key file, only a passphrase source). Nothing is tried: the
 /// caller opens with what comes back.
 ///
-/// When page 0 can't be read, the kind is unknown: the first source present,
-/// in the table's order and without the store, is used.
+/// **The key store is looked up last, and only when it's needed** (step
+/// 2): when no earlier source of the file's kind is present, or for the one
+/// try of the other kind. So a keychain that would ask the user something,
+/// or can't be reached at all, is never touched when `MNEMO_KEY` answers. A
+/// store error is a note when another source answers, and the error only
+/// when the store was the one left.
+///
+/// **When page 0 doesn't parse,** the salts and the kind come from the
+/// header frames in the file's write-ahead log (newest first), and the
+/// store is looked up under each in turn; the open that follows heals the
+/// header. With neither, the kind is unknown: the first environment source
+/// present is used.
 pub fn resolve(
     path: impl AsRef<Path>,
     store: Option<&dyn KeyStore>,
     command_timeout: Duration,
 ) -> Result<Resolution> {
     let path = path.as_ref();
-    let info = file_info(path).ok();
-    let entry = match (store, &info) {
-        (Some(s), Some(i)) => s.get(&i.salt)?.map(|e| (s.describe(), e)),
-        _ => None,
+    let file_name = path.display().to_string();
+    let mut notes = Vec::new();
+    let (kind, salts) = match file_info(path) {
+        Ok(i) => (Some(i.kind), vec![i.salt]),
+        Err(_) => match crate::store::wal_header_salts(path) {
+            Ok(c) if !c.is_empty() => {
+                notes.push(format!(
+                    "{file_name}'s header couldn't be read; its write-ahead log names {} salt(s) \
+                     to look up",
+                    c.len()
+                ));
+                (
+                    Some(kind_of_kdf(c[0].1)),
+                    c.iter().map(|(s, _)| *s).collect(),
+                )
+            }
+            _ => (None, Vec::new()),
+        },
     };
-    let entry_kind = entry.as_ref().map(|(_, e)| match e {
-        StoredSecret::Key(_) => SecretKind::Key,
-        StoredSecret::Passphrase(_) => SecretKind::Passphrase,
-    });
-    // The sources present, in the table's order, with their kind.
-    let mut present: Vec<(Source, SecretKind)> = Vec::new();
+    let env = env_sources();
+    let Some(kind) = kind else {
+        // The kind is unknown, and there's no salt to look up.
+        let Some((src, _)) = env.first().cloned() else {
+            return Ok(Resolution::NoSource {
+                kind: SecretKind::Passphrase,
+                notes,
+            });
+        };
+        notes.push(format!(
+            "{file_name}'s header couldn't be read, so its kind of secret is unknown"
+        ));
+        let secret = fetch(&src, None, command_timeout)?;
+        return Ok(Resolution::Found(Resolved {
+            secret,
+            source: src,
+            next: None,
+            notes,
+        }));
+    };
+    let mine: Vec<&(Source, SecretKind)> = env.iter().filter(|(_, k)| *k == kind).collect();
+    let other: Vec<&(Source, SecretKind)> = env.iter().filter(|(_, k)| *k != kind).collect();
+    let skipped = |notes: &mut Vec<String>, using: &Source| {
+        for (s, k) in &other {
+            notes.push(format!(
+                "{s} holds {}, but {file_name} uses {}; skipped it, using {using}",
+                kind_word(*k),
+                kind_word(kind)
+            ));
+        }
+    };
+    // An environment source of the file's kind: the store isn't touched.
+    if let Some(first) = mine.first() {
+        skipped(&mut notes, &first.0);
+        let secret = fetch(&first.0, None, command_timeout)?;
+        return Ok(Resolution::Found(Resolved {
+            secret,
+            source: first.0.clone(),
+            // The next source of this kind: the next environment one, else
+            // the store, which isn't looked up now (it may have no entry).
+            next: mine
+                .get(1)
+                .map(|(s, _)| s.clone())
+                .or_else(|| store.map(|st| Source::Store(st.describe()))),
+            notes,
+        }));
+    }
+    // The store, last.
+    let looked = match store {
+        None => Ok(None),
+        // Section 8: a store that can't be used here at all (no Secret
+        // Service on the session bus, no access) is no store, and the chain
+        // goes on without it. Any other error is the store's own.
+        Some(st) => match lookup_salts(st, &salts) {
+            Ok(e) => Ok(e.map(|e| (st.describe(), e))),
+            Err(_) if st.check_available().is_err() => Ok(None),
+            Err(e) => Err(e),
+        },
+    };
+    let (store_other, store_error) = match looked {
+        Ok(Some((desc, e))) if stored_kind(&e) == kind => {
+            let src = Source::Store(desc);
+            skipped(&mut notes, &src);
+            return Ok(Resolution::Found(Resolved {
+                secret: e.into_secret(),
+                source: src,
+                next: None,
+                notes,
+            }));
+        }
+        Ok(found) => (found, None),
+        Err(e) => (None, Some(e)),
+    };
+    // No source of the file's kind: the first of the other kind, once.
+    if let Some(first) = other.first() {
+        if let (Some(e), Some(st)) = (&store_error, store) {
+            notes.push(format!("{} couldn't be read ({e})", st.describe()));
+        }
+        notes.push(format!(
+            "{file_name} uses {}, and no source of that kind is set; trying {} once",
+            kind_word(kind),
+            first.0
+        ));
+        let secret = fetch(&first.0, None, command_timeout)?;
+        return Ok(Resolution::Found(Resolved {
+            secret,
+            source: first.0.clone(),
+            next: None,
+            notes,
+        }));
+    }
+    if let Some(e) = store_error {
+        return Err(e);
+    }
+    if let Some((desc, e)) = store_other {
+        let src = Source::Store(desc);
+        notes.push(format!(
+            "{file_name} uses {}, and no source of that kind is set; trying {src} once",
+            kind_word(kind)
+        ));
+        return Ok(Resolution::Found(Resolved {
+            secret: e.into_secret(),
+            source: src,
+            next: None,
+            notes,
+        }));
+    }
+    Ok(Resolution::NoSource { kind, notes })
+}
+
+/// The environment's sources that are present, in the table's order.
+fn env_sources() -> Vec<(Source, SecretKind)> {
+    let mut present = Vec::new();
     if env_set("MNEMO_PASSPHRASE").is_some() {
         present.push((Source::EnvPassphrase, SecretKind::Passphrase));
     }
@@ -558,75 +735,32 @@ pub fn resolve(
     if env_set("MNEMO_KEY_COMMAND").is_some() {
         present.push((Source::KeyCommand, SecretKind::Key));
     }
-    if let (Some((name, _)), Some(k)) = (&entry, entry_kind) {
-        present.push((Source::Store(name.clone()), k));
-    }
-    let file_name = path.display().to_string();
-    let Some(info) = info else {
-        // The kind is unknown: the first source present.
-        let Some((src, _)) = present.first().cloned() else {
-            return Ok(Resolution::NoSource {
-                kind: SecretKind::Passphrase,
-                notes: Vec::new(),
-            });
-        };
-        let secret = fetch(&src, None, command_timeout)?;
-        return Ok(Resolution::Found(Resolved {
-            secret,
-            source: src,
-            next: None,
-            notes: vec![format!(
-                "{file_name}'s header couldn't be read, so its kind of secret is unknown"
-            )],
-        }));
-    };
-    let mine: Vec<&(Source, SecretKind)> =
-        present.iter().filter(|(_, k)| *k == info.kind).collect();
-    let other: Vec<&(Source, SecretKind)> =
-        present.iter().filter(|(_, k)| *k != info.kind).collect();
-    let (chosen, next, notes) = if let Some(first) = mine.first() {
-        let notes = other
-            .iter()
-            .map(|(s, k)| {
-                format!(
-                    "{s} holds {}, but {file_name} uses {}; skipped it, using {}",
-                    kind_word(*k),
-                    kind_word(info.kind),
-                    first.0
-                )
-            })
-            .collect();
-        (first.0.clone(), mine.get(1).map(|(s, _)| s.clone()), notes)
-    } else {
-        // The exception: the first source of the other kind, once. A key
-        // file isn't offered a prompt, so only a present passphrase source
-        // counts, which this list already is.
-        match other.first() {
-            Some(first) => (
-                first.0.clone(),
-                None,
-                vec![format!(
-                    "{file_name} uses {}, and no source of that kind is set; trying {} once",
-                    kind_word(info.kind),
-                    first.0
-                )],
-            ),
-            None => {
-                return Ok(Resolution::NoSource {
-                    kind: info.kind,
-                    notes: Vec::new(),
-                })
-            }
+    present
+}
+
+/// The first entry `store` has under any of `salts`, in order.
+fn lookup_salts(store: &dyn KeyStore, salts: &[[u8; SALT_LEN]]) -> Result<Option<StoredSecret>> {
+    for salt in salts {
+        if let Some(e) = store.get(salt)? {
+            return Ok(Some(e));
         }
-    };
-    let entry_secret = entry.map(|(_, e)| e);
-    let secret = fetch(&chosen, entry_secret, command_timeout)?;
-    Ok(Resolution::Found(Resolved {
-        secret,
-        source: chosen,
-        next,
-        notes,
-    }))
+    }
+    Ok(None)
+}
+
+fn stored_kind(e: &StoredSecret) -> SecretKind {
+    match e {
+        StoredSecret::Key(_) => SecretKind::Key,
+        StoredSecret::Passphrase(_) => SecretKind::Passphrase,
+    }
+}
+
+fn kind_of_kdf(kdf: KdfParams) -> SecretKind {
+    if kdf.below_passphrase_floor() {
+        SecretKind::Key
+    } else {
+        SecretKind::Passphrase
+    }
 }
 
 /// Read the secret out of a present source.
@@ -723,6 +857,9 @@ pub struct StoredRekeyError {
     pub error: MnemoError,
     /// What became of the entries.
     pub entries: String,
+    /// Whether the new secret is certainly not in force (the old salt is
+    /// still on disk), so anything written for it can go.
+    pub new_secret_dropped: bool,
 }
 
 impl std::fmt::Display for StoredRekeyError {
@@ -776,6 +913,7 @@ pub fn rekey_stored(
                 return Err(StoredRekeyError {
                     error,
                     entries: "the key store wasn't changed".into(),
+                    new_secret_dropped: true,
                 });
             };
             // REKEY-1's one exception: page 0 may or may not have landed,
@@ -786,24 +924,38 @@ pub fn rekey_stored(
                     entries: "both entries are kept, since the file may open with either \
                               secret"
                         .into(),
+                    new_secret_dropped: false,
                 });
             }
-            let entries = match db.disk_salt() {
+            let (entries, new_secret_dropped) = match db.disk_salt() {
                 Ok(s) if s == old_salt => match store.delete(&ns) {
-                    Ok(()) => "the old secret is still in force, and the new entry was removed"
-                        .to_string(),
-                    Err(e) => format!(
-                        "the old secret is still in force; removing the new entry failed ({e})"
+                    Ok(()) => (
+                        "the old secret is still in force, and the new entry was removed"
+                            .to_string(),
+                        true,
+                    ),
+                    Err(e) => (
+                        format!(
+                            "the old secret is still in force; removing the new entry failed ({e})"
+                        ),
+                        true,
                     ),
                 },
-                Ok(s) if s == ns => "the file may now open only with the new secret, so both \
-                                     entries are kept"
-                    .to_string(),
-                _ => {
-                    "the file's header couldn't be read back, so both entries are kept".to_string()
-                }
+                Ok(s) if s == ns => (
+                    "the file may now open only with the new secret, so both entries are kept"
+                        .to_string(),
+                    false,
+                ),
+                _ => (
+                    "the file's header couldn't be read back, so both entries are kept".to_string(),
+                    false,
+                ),
             };
-            Err(StoredRekeyError { error, entries })
+            Err(StoredRekeyError {
+                error,
+                entries,
+                new_secret_dropped,
+            })
         }
     }
 }

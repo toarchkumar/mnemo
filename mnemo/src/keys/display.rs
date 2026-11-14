@@ -28,7 +28,7 @@ pub const AGENT_MARKERS: &[&str] = &["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION"];
 /// What the user is told when a code isn't shown.
 pub const REFUSAL: &str = "the recovery code wasn't shown, because this doesn't look like a \
 terminal a person is at. Run `mnemo recovery-code <file>` in a terminal of your own, not \
-through an agent's shell (for example, Claude Code's `!`)";
+through an agent's shell or an editor terminal that one runs in (for example, Claude Code's `!`)";
 
 /// Why the rule doesn't hold here, or `None` when it does.
 pub fn refusal_reason() -> Option<String> {

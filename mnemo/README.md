@@ -794,6 +794,7 @@ cargo run --bin mnemo -- <command>
 |-----------|------------------------------------------------------|
 | `init`    | Create a new encrypted database (auto-adds scaffold manifest). Since v0.15, with no passphrase source it generates a key and keeps it in the key store; `--ask-passphrase` asks for a passphrase instead, `--key-file <PATH>` writes the generated key to a new 0600 file |
 | `recovery-code` | Show a brain's recovery code from the key store, only to a person at a terminal (v0.15) |
+| `unlock`  | Keep a brain's key in this machine's keychain, from its recovery code (read from a prompt or stdin) (v0.15) |
 | `info`    | Print statistics (including ANN index shape)         |
 | `about`   | Self-describing briefing — print onboarding memories |
 | `import`  | Bulk-load memories from a JSON Lines file            |
@@ -936,19 +937,27 @@ how a raw-key v8 file becomes v9.
 
 - **`mnemo init <file>`** with no passphrase source makes a random 256-bit
   key, protects the file with the raw-key KDF parameters (an open costs
-  microseconds), and keeps the key in the key store, found by the file's
-  salt. A compaction keeps the salt, so `mnemo compact` and
+  microseconds), and keeps the key in the OS keychain, found by the file's
+  salt (service `io.github.toarchkumar.mnemo.brain`, account the salt in
+  hex). It refuses a path that already exists. A compaction keeps the salt, so `mnemo compact` and
   `mnemo rekey --rotate` keep the entry working.
   - `--ask-passphrase` asks for a passphrase instead (what `init` did
     before v0.15), and `MNEMO_PASSPHRASE` or `--passphrase` still work.
   - `--key-file <PATH>` writes the generated key to a new file, mode 0600.
-  - With no key store, `init` without a passphrase fails and creates
-    nothing. It never writes a key to a file you didn't name.
+  - With no keychain (a build without the `keychain` feature, or no Secret
+    Service on a headless Linux machine, or no access), `init` without a
+    passphrase fails, leads with `--ask-passphrase`, and creates nothing.
+    It never writes a key to a file you didn't name.
 - **The recovery code** is the key written for a person: `MN1-` and
   thirteen groups of five Crockford Base32 characters, each group with a
   check character, so a typo is reported by group. Case, spaces and
   hyphens don't matter.
-  - `mnemo recovery-code <file>` shows it again from the key store.
+  - `mnemo recovery-code <file>` shows it again from the keychain.
+  - **`mnemo unlock <file>`** keeps a brain's key in this machine's
+    keychain, from its code: read from a prompt (no echo) or from stdin,
+    never from the command line. A typo is named by group, and a code that
+    doesn't open the file isn't stored. In CI and containers, set
+    `MNEMO_KEY` to the code instead.
   - It's shown only when stdout and stdin are terminals, no agent harness
     is driving the command (`CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
     are checked), and the controlling terminal opens. It appears there
@@ -960,9 +969,17 @@ how a raw-key v8 file becomes v9.
   then takes the first source of the file's kind.
   - **For a key:** `MNEMO_KEY` (64 hex digits or a recovery code), then
     `MNEMO_KEY_FILE`, then `MNEMO_KEY_COMMAND` (a command that prints the
-    key, run without a shell, 60 s at most), then the key store.
-  - **For a passphrase:** `MNEMO_PASSPHRASE`, then the prompt at a
-    terminal.
+    key, run without a shell, 60 s at most; 10 s in the MCP server), then
+    the keychain.
+  - **For a passphrase:** `MNEMO_PASSPHRASE`, then a passphrase entry in
+    the keychain, then the prompt at a terminal.
+  - The keychain is looked up last, and only when no earlier source of the
+    file's kind is set, so `MNEMO_KEY` never touches it. A keychain that
+    can't be used here at all is skipped.
+  - The MCP server (`serve --mcp`) and Python's `mnemo.open(path)` with no
+    passphrase use the same chain, without the prompt.
+  - When page 0 doesn't parse, the salt comes from the header frames in
+    the file's write-ahead log, and a write open heals the header.
   - A source of the other kind is skipped and named, so a
     `MNEMO_PASSPHRASE` left over from v0.14 doesn't block a key brain.
     Within a kind nothing is tried in turn: a wrong source fails and says
@@ -982,8 +999,24 @@ how a raw-key v8 file becomes v9.
   users' reach. It doesn't keep it from programs running as you, and
   `mnemo recovery-code` can be run by any of them; the display rule keeps
   the code out of an agent's transcript by accident, not by force.
-- **This release's key store** is a test store only (`dev-hooks` builds);
-  the OS keychain arrives in the next step of 12.3, with `mnemo unlock`.
+- **`rekey --new-key`** keeps the new key in the keychain before the rekey
+  commits, and shows its code first. No OS keychain promises its write is
+  on disk when it returns, so when the code can't be shown it refuses
+  unless `--new-key-file <PATH>` writes the key to a new file too.
+- **The `keychain` cargo feature** (v0.15) is the OS keychain: the macOS
+  login keychain, Windows Credential Manager, or Secret Service on Linux
+  (through libdbus, built from source). It's off for the library and on in
+  the released CLI binaries and wheels. It uses `keyring` 3.6.3 with a few
+  crates held in `Cargo.lock` for Rust 1.75, so **building it from source
+  on a compiler older than 1.85 needs `--locked`** (`cargo install
+  mnemo-engine --features keychain --locked`).
+- **Windows:** while another process holds a brain open with a plain
+  (long-lived) handle, its lock covers the whole file, so neither page 0
+  nor the write-ahead log can be read for the salt, and a command can't
+  find the brain's keychain entry: it fails as if no source were set.
+  `MNEMO_KEY`, a key file, or the passphrase still work. Shared-mode
+  handles (`serve --mcp --shared`) hold nothing between calls, so they
+  don't cause this.
 
 For real applications, prefer the library API and supply the passphrase
 in-process.

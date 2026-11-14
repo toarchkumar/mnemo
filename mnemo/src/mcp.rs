@@ -36,12 +36,15 @@
 //! Every mutation calls `Mnemo::flush()` before returning success — MCP
 //! clients treat tool calls as atomic and expect on-disk durability.
 //!
-//! ## Passphrase
+//! ## The secret
 //!
-//! Read from the `MNEMO_PASSPHRASE` environment variable only.
-//! `serve_stdio` refuses to start without it. There is no CLI-flag
-//! fallback here — that would leave the passphrase in shell history
-//! and process listings.
+//! 12.3 step 2: found through the key-source chain
+//! ([`crate::keys::resolve`]), by the file's kind: `MNEMO_KEY`,
+//! `MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND` (10 s at most) or the keychain for a
+//! key; `MNEMO_PASSPHRASE` or the keychain for a passphrase. The server never
+//! prompts (stdio carries JSON-RPC) and takes no key flag, so what a client's
+//! config holds carries no secret. It logs where the secret came from to
+//! stderr at start, never the secret.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -57,9 +60,6 @@ use crate::store::{Mnemo, RecallRequest, SharedMnemo};
 
 /// MCP protocol version we advertise on `initialize`.
 const PROTOCOL_VERSION: &str = "2025-06-18";
-
-/// Environment variable that supplies the database passphrase.
-const PASSPHRASE_ENV: &str = "MNEMO_PASSPHRASE";
 
 /// Fuzz-target helper: parse a single JSON-RPC line as a `Request` and
 /// discard. Panic-free — malformed input returns `Err(String)`, valid
@@ -133,9 +133,8 @@ const INTERNAL_ERROR: i32 = -32603;
 /// stdout, and logs diagnostics to stderr. Returns when stdin closes
 /// (typical MCP client shutdown) or on a fatal I/O error.
 ///
-/// The passphrase is read from the `MNEMO_PASSPHRASE` environment
-/// variable. If unset, returns [`MnemoError::Invalid`] without opening
-/// the file.
+/// The secret comes from the key-source chain (see the module docs). With
+/// no source, returns [`MnemoError::Invalid`] without opening the file.
 pub fn serve_stdio(path: &Path) -> Result<()> {
     serve_stdio_with_embedder(path, None)
 }
@@ -230,20 +229,47 @@ pub fn serve_with_streams_opts<R: Read, W: Write>(
     embed_spec: Option<(String, String, bool, std::time::Duration)>,
     shared: Option<SharedOptions>,
 ) -> Result<()> {
-    let passphrase = std::env::var(PASSPHRASE_ENV).map_err(|_| {
-        MnemoError::Invalid(format!(
-            "{PASSPHRASE_ENV} is required to serve — set it in the shell before starting"
-        ))
-    })?;
-
+    use crate::keys::{Resolution, Secret};
+    let store = crate::keys::default_store();
+    let found =
+        match crate::keys::resolve(path, store.as_deref(), crate::keys::SERVER_COMMAND_TIMEOUT)? {
+            Resolution::Found(r) => r,
+            Resolution::NoSource { notes, .. } => {
+                for n in &notes {
+                    eprintln!("mnemo mcp: note: {n}");
+                }
+                return Err(MnemoError::Invalid(format!(
+                    "no secret for {}: set MNEMO_PASSPHRASE, MNEMO_KEY, MNEMO_KEY_FILE or \
+                 MNEMO_KEY_COMMAND in the server's environment, or keep its key in the keychain \
+                 (`mnemo init`, `mnemo unlock`); the server never prompts",
+                    path.display()
+                )));
+            }
+        };
+    for n in &found.notes {
+        eprintln!("mnemo mcp: note: {n}");
+    }
     eprintln!(
-        "mnemo mcp: opening {} (protocol {PROTOCOL_VERSION})",
-        path.display()
+        "mnemo mcp: opening {} with the secret from {} (protocol {PROTOCOL_VERSION})",
+        path.display(),
+        found.source
     );
     let mut db = match shared {
-        None => ServerDb::Plain(Mnemo::open(path, &passphrase)?),
+        None => {
+            let db = match &found.secret {
+                Secret::Passphrase(p) => Mnemo::open(path, p)?,
+                Secret::Key(k) => Mnemo::open_with_key(path, k)?,
+            };
+            for n in db.notices() {
+                eprintln!("mnemo mcp: note: {n}");
+            }
+            ServerDb::Plain(db)
+        }
         Some(opts) => {
-            let s = Mnemo::open_shared(path, &passphrase, opts)?;
+            let s = match &found.secret {
+                Secret::Passphrase(p) => Mnemo::open_shared(path, p, opts)?,
+                Secret::Key(k) => Mnemo::open_shared_with_key(path, k, opts)?,
+            };
             // The notices once, at start (RB-007.8 item 9).
             for n in s.notices() {
                 eprintln!("mnemo mcp: note: {n}");

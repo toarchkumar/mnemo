@@ -788,6 +788,78 @@ def test_rekey_to_a_passphrase_gets_full_kdf_parameters():
     print("ok  rekey to a passphrase gets full KDF parameters (plain and shared)")
 
 
+def test_open_without_a_passphrase_uses_the_key_sources():
+    """12.3 step 2: `mnemo.open(path)` with no passphrase finds the secret by
+    the file's kind: a key brain from the key store (the test store, a
+    dev-hooks wheel's `MNEMO_DEV_KEYSTORE`) and a passphrase brain from
+    `MNEMO_PASSPHRASE`, in one process. Plain, read-only and shared opens."""
+    import warnings
+    saved = {k: os.environ.get(k) for k in ("MNEMO_DEV_KEYSTORE", "MNEMO_PASSPHRASE", "MNEMO_KEY")}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            store = os.path.join(d, "store")
+            os.mkdir(store)
+            key_brain = os.path.join(d, "project.mnemo")
+            key = mnemo.generate_key()
+            db = mnemo.open_with_key(key_brain, key, dimensions=2)
+            db.remember("project fact", "semantic", [1.0, 0.0])
+            db.close()
+            del db
+            with open(key_brain, "rb") as f:
+                salt = f.read(102)[86:102]
+            with open(os.path.join(store, salt.hex()), "w") as f:
+                f.write("key:" + key.hex())
+
+            pp_brain = os.path.join(d, "personal.mnemo")
+            db = mnemo.open(pp_brain, "personal passphrase", dimensions=2)
+            db.remember("personal fact", "semantic", [0.0, 1.0])
+            db.close()
+            del db
+
+            os.environ["MNEMO_DEV_KEYSTORE"] = store
+            os.environ["MNEMO_PASSPHRASE"] = "personal passphrase"
+            os.environ.pop("MNEMO_KEY", None)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                a = mnemo.open(key_brain)
+            assert any("skipped" in str(x.message) for x in w), [str(x.message) for x in w]
+            b = mnemo.open(pp_brain)
+            assert a.memories()[0]["content"] == "project fact"
+            assert b.memories()[0]["content"] == "personal fact"
+            a.close()
+            b.close()
+            del a, b
+            r = mnemo.open(key_brain, read_only=True)
+            assert len(r) == 1
+            r.close()
+            del r
+            s = mnemo.open(key_brain, shared=True)
+            assert len(s) == 1
+            s.close()
+            del s
+
+            # A missing file, and no source of any kind.
+            try:
+                mnemo.open(os.path.join(d, "missing.mnemo"))
+                raise AssertionError("a missing file should be refused")
+            except ValueError as e:
+                assert "mnemo init" in str(e), e
+            os.environ.pop("MNEMO_DEV_KEYSTORE")
+            os.environ.pop("MNEMO_PASSPHRASE")
+            try:
+                mnemo.open(key_brain)
+                raise AssertionError("no source should be refused")
+            except ValueError as e:
+                assert "no secret" in str(e), e
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    print("ok  open(path) with no passphrase: a key brain and a passphrase brain in one process")
+
+
 def test_exception_types():
     """v0.13.1 (RB-003.8 item 3): each engine error has its own type, all
     under `mnemo.MnemoError`, which is a `RuntimeError`."""
@@ -1736,6 +1808,7 @@ if __name__ == "__main__":
     test_compact_file_module_fn()
     test_compact_file_with_key()
     test_rekey_to_a_passphrase_gets_full_kdf_parameters()
+    test_open_without_a_passphrase_uses_the_key_sources()
     test_exception_types()
     test_recall_accepts_n_probe_n_rerank_overrides()
     test_rebuild_index_reclusters_under_current_defaults()

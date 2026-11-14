@@ -106,6 +106,11 @@ pinned to a commit (Dependabot keeps them current).
    - `VERSION_NAME` in `mnemo/bindings/kotlin/gradle.properties`;
    - the samples (`MARKETING_VERSION` in `examples/mobile/ios/project.yml`,
      and the `mnemo-android` version in the Android sample).
+   - **Don't lift the crates held in `Cargo.lock` for the keychain** with
+     `cargo update` (they're named by the `keyring` lines in
+     `mnemo/Cargo.toml`): their newer releases need Rust 1.85 or later. The
+     MSRV jobs build `--locked --features keychain`, so a lifted one fails
+     there.
 2. **The changelog.** Cut `[Unreleased]` into `[X.Y.Z] - <date>`.
 3. **Install lines.** The Swift and Kotlin package READMEs
    (`mnemo/bindings/*/README.md`) name the new version. On a release that

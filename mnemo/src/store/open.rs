@@ -55,12 +55,28 @@ fn scan_header_recovery_candidates(
     secret: &[u8],
     held_dek: Option<&[u8; crypto::KEY_LEN]>,
 ) -> Result<Option<Vec<wal::Frame>>> {
+    let mut best: Option<(u64, Vec<wal::Frame>)> = None;
+    for_each_wal_candidate(file, &mut |file, page_no| {
+        if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, secret, held_dek)? {
+            if best.as_ref().map_or(true, |(id, _)| txn_id > *id) {
+                best = Some((txn_id, frames));
+            }
+        }
+        Ok(())
+    })?;
+    Ok(best.map(|(_, f)| f))
+}
+
+/// Call `f` with every page-aligned page past page 0 whose first four bytes
+/// are `MWAL`: the candidate WAL-region starts the torn-header scan walks.
+fn for_each_wal_candidate(
+    file: &mut File,
+    f: &mut dyn FnMut(&mut File, u64) -> Result<()>,
+) -> Result<()> {
     let file_len = file.seek(SeekFrom::End(0))?;
     if file_len < PAGE_SIZE as u64 * 2 {
-        return Ok(None); // No room for even one WAL page past the header.
+        return Ok(()); // No room for even one WAL page past the header.
     }
-
-    let mut best: Option<(u64, Vec<wal::Frame>)> = None;
     let page_sz = PAGE_SIZE as u64;
     let mut offset = page_sz; // Skip page 0.
 
@@ -88,24 +104,74 @@ fn scan_header_recovery_candidates(
         while inner + 4 <= filled {
             if &chunk[inner..inner + 4] == wal::FRAME_MAGIC_BYTES {
                 let page_no = (offset + inner as u64) / page_sz;
-                if let Some((txn_id, frames)) =
-                    try_recover_candidate(file, page_no, secret, held_dek)?
-                {
-                    let keep = match &best {
-                        None => true,
-                        Some((id, _)) => txn_id > *id,
-                    };
-                    if keep {
-                        best = Some((txn_id, frames));
-                    }
-                }
+                f(file, page_no)?;
             }
             inner += PAGE_SIZE;
         }
         offset += filled as u64;
     }
+    Ok(())
+}
 
-    Ok(best.map(|(_, f)| f))
+/// 12.3 step 2 (the keys note, section 6): the salts and KDF parameters in
+/// the header frames of the file's committed WAL transactions, newest first
+/// and each salt once, read **without a key** (a WAL frame holds a plaintext
+/// page-0 image). For finding a key-store entry when page 0 doesn't parse.
+/// Nothing here is trusted: the open that follows verifies it all, and heals
+/// the header.
+pub(crate) fn wal_header_salts(path: &Path) -> Result<Vec<([u8; crypto::SALT_LEN], KdfParams)>> {
+    let mut file = File::open(path)?;
+    let mut found: Vec<(u64, [u8; crypto::SALT_LEN], KdfParams)> = Vec::new();
+    for_each_wal_candidate(&mut file, &mut |file, page_no| {
+        if let Some((txn_id, _, h)) = committed_header_candidate(file, page_no)? {
+            found.push((
+                txn_id,
+                h.salt,
+                KdfParams {
+                    m_cost: h.m_cost,
+                    t_cost: h.t_cost,
+                    p_cost: h.p_cost,
+                },
+            ));
+        }
+        Ok(())
+    })?;
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    let mut out: Vec<([u8; crypto::SALT_LEN], KdfParams)> = Vec::new();
+    for (_, salt, kdf) in found {
+        if !out.iter().any(|(s, _)| *s == salt) {
+            out.push((salt, kdf));
+        }
+    }
+    Ok(out)
+}
+
+/// A committed WAL transaction starting at `candidate_page_no` whose header
+/// frame parses and names that region (`wal_start`, `wal_seq`), before any
+/// key is involved.
+fn committed_header_candidate(
+    file: &mut File,
+    candidate_page_no: u64,
+) -> Result<Option<(u64, Vec<wal::Frame>, Header)>> {
+    let Some((txn_id, frames)) = wal::scan_committed_txn(file, candidate_page_no)? else {
+        return Ok(None);
+    };
+    let header_bytes = match frames.iter().find(|(p, _)| *p == 0) {
+        Some((_, b)) => b,
+        None => return Ok(None),
+    };
+    if header_bytes.len() != PAGE_SIZE {
+        return Ok(None);
+    }
+    let mut hbuf = [0u8; PAGE_SIZE];
+    hbuf.copy_from_slice(header_bytes);
+    let Ok(candidate) = Header::from_page(&hbuf) else {
+        return Ok(None);
+    };
+    if candidate.wal_start != candidate_page_no || candidate.wal_seq != txn_id {
+        return Ok(None);
+    }
+    Ok(Some((txn_id, frames, candidate)))
 }
 
 /// Try to recover a committed transaction from `candidate_page_no`,
@@ -123,33 +189,15 @@ fn try_recover_candidate(
     secret: &[u8],
     held_dek: Option<&[u8; crypto::KEY_LEN]>,
 ) -> Result<Option<(u64, Vec<wal::Frame>)>> {
-    let Some((txn_id, frames)) = wal::scan_committed_txn(file, candidate_page_no)? else {
+    // A header frame at page 0 whose claimed region matches where we found
+    // it, and whose `wal_seq` matches the committed transaction's `txn_id`
+    // — this is what pins the frame to the region it was written into and
+    // keeps a stale checkpointed-and-copied frame from being accepted as a
+    // new region's root.
+    let Some((txn_id, frames, candidate)) = committed_header_candidate(file, candidate_page_no)?
+    else {
         return Ok(None);
     };
-
-    // Must contain a header frame at page 0.
-    let header_bytes = match frames.iter().find(|(p, _)| *p == 0) {
-        Some((_, b)) => b,
-        None => return Ok(None),
-    };
-    if header_bytes.len() != PAGE_SIZE {
-        return Ok(None);
-    }
-    let mut hbuf = [0u8; PAGE_SIZE];
-    hbuf.copy_from_slice(header_bytes);
-    let candidate = match Header::from_page(&hbuf) {
-        Ok(h) => h,
-        Err(_) => return Ok(None),
-    };
-
-    // The frame's claimed region must match where we found it, and the
-    // header frame's `wal_seq` must match the committed transaction's
-    // `txn_id` — this is what pins the frame to the region it was
-    // written into and keeps a stale checkpointed-and-copied frame
-    // from being accepted as a new region's root.
-    if candidate.wal_start != candidate_page_no || candidate.wal_seq != txn_id {
-        return Ok(None);
-    }
     // RB-007.2: a shared handle's data key, when the candidate's seal
     // verifies under it, without the KDF.
     if let Some(held) = held_dek {

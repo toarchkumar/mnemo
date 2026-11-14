@@ -19,6 +19,7 @@ const CLEARED: &[&str] = &[
     "MNEMO_KEY_FILE",
     "MNEMO_KEY_COMMAND",
     "MNEMO_DEV_KEYSTORE",
+    "MNEMO_DEV_NO_KEYCHAIN",
     "MNEMO_DEV_ABORT_INIT_BEFORE_RENAME",
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
@@ -48,6 +49,9 @@ impl Env {
         }
         if with_store {
             c.env("MNEMO_DEV_KEYSTORE", self.store());
+        } else {
+            // In a `keychain` build, "no store" must not mean the real one.
+            c.env("MNEMO_DEV_NO_KEYCHAIN", "1");
         }
         for (k, v) in env {
             c.env(k, v);
@@ -223,7 +227,7 @@ fn each_source_opens_a_key_brain_and_a_passphrase_is_skipped_and_named() {
     let (ok, _, err) = info(&[("MNEMO_KEY", &wrong)], true);
     assert!(!ok);
     assert!(
-        err.contains("came from MNEMO_KEY") && err.contains("is also set"),
+        err.contains("came from MNEMO_KEY") && err.contains("comes next"),
         "{err}"
     );
 

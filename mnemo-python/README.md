@@ -142,7 +142,18 @@ its own agent.
 
 ## API
 
-`mnemo.open(path, passphrase, dimensions=None, read_only=False, *, shared=False, wait=10.0, allow_network_fs=False, cancel=None) -> Mnemo`
+`mnemo.open(path, passphrase=None, dimensions=None, read_only=False, *, shared=False, wait=10.0, allow_network_fs=False, cancel=None) -> Mnemo`
+
+**No passphrase** (v0.15, 12.3): `mnemo.open(path)` opens an existing file
+through the key-source chain, by the file's kind. A key comes from
+`MNEMO_KEY`, `MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND` or the OS keychain (a
+brain made by `mnemo init`, or kept there by `mnemo unlock`); a passphrase
+from `MNEMO_PASSPHRASE` or the keychain. It never prompts. A missing file
+raises `ValueError` (create one with `mnemo init`), and so does a file no
+source has a secret for. It works with `read_only=True` and `shared=True`,
+and one process can hold a keychain brain and a `MNEMO_PASSPHRASE` brain at
+once. The released wheels carry the keychain; a wheel built from source
+needs `--features keychain`.
 
 **Shared mode** (v0.14, `shared=True`): several processes and sessions use
 one file at once. The handle takes the file's lock for each call and holds
