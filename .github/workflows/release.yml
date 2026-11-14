@@ -64,13 +64,13 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, build-wheels, check-wheel-arm, build-sdist, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, build-wheels, check-artifacts, build-sdist, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
       && needs.build-cli.result == 'success'
       && needs.build-wheels.result == 'success'
-      && needs.check-wheel-arm.result == 'success'
+      && needs.check-artifacts.result == 'success'
       && needs.build-sdist.result == 'success'
       && (needs.mobile-prepare.outputs.mobile != 'true'
           || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
@@ -217,15 +217,14 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             manylinux: auto
+          # 12.3 step 5: built natively on an arm runner, in maturin's
+          # native manylinux2014_aarch64 image. The cross image's old gcc
+          # can't build ring (the model download's TLS) correctly: forcing
+          # `__ARM_ARCH` built a wheel that rejected every certificate
+          # (BadSignature). `check-artifacts` runs it on aarch64.
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             manylinux: auto
-            # 12.3 step 5: ring (the model download's TLS) assembles ARMv8
-            # code that needs `__ARM_ARCH`, which the manylinux2014 aarch64
-            # cross gcc doesn't define. Every aarch64 target is ARMv8. Passed
-            # into maturin's container for this target only; the wheel keeps
-            # manylinux2014. `check-wheel-arm` runs it on real aarch64.
-            docker_options: -e CFLAGS_aarch64_unknown_linux_gnu=-D__ARM_ARCH=8
           - target: x86_64-apple-darwin
             os: macos-latest
             manylinux: "off"
@@ -259,7 +258,6 @@ jobs:
           # since step 5, the built-in embedder (`embed-candle`).
           args: --release --out dist --features keychain,embed-candle
           working-directory: mnemo-python
-          docker-options: ${{ matrix.docker_options || '' }}
           # No `rustflags:` input: this version of the action doesn't take
           # one (it warned "Unexpected input(s) 'rustflags'"). The job-level
           # `env.RUSTFLAGS` reaches the aarch64 manylinux container anyway:
@@ -273,16 +271,26 @@ jobs:
           name: wheel-${{ matrix.target }}
           path: mnemo-python/dist/*
 
-  # --- 12.3 step 5: the aarch64 Linux wheel on real aarch64. It's
-  #     cross-built (with the `__ARM_ARCH` define above), so install it on an
-  #     arm runner and fetch the built-in embedder's model through it (ring's
-  #     TLS, the SHA-256 checks), then one remember and recall. A release
-  #     waits for it (`approve-release`).
-  check-wheel-arm:
-    name: wheel check (aarch64 linux, the built-in embedder)
-    needs: build-wheels
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
+  # --- 12.3 step 5: the CLI and the wheel run on the targets no other
+  #     check runs on: aarch64 Linux (the CLI is cross-built with zig) and
+  #     x86_64 macOS (built on an Apple Silicon runner). Each fetches the
+  #     built-in embedder's model (ring's TLS, the SHA-256 checks), then a
+  #     remember and two recalls on a new brain. A release waits for both
+  #     (`approve-release`).
+  check-artifacts:
+    name: artifact check (${{ matrix.target }}, the built-in embedder)
+    needs: [build-cli, build-wheels]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          # GitHub's Intel macOS image (macos-13 is retired).
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
     steps:
       - name: Set up Python
         timeout-minutes: 10
@@ -293,16 +301,46 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 10
         with:
-          name: wheel-aarch64-unknown-linux-gnu
+          name: wheel-${{ matrix.target }}
           path: wheel
 
-      - name: Install the wheel, fetch the model, remember and recall
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: cli-${{ matrix.target }}
+          path: cli
+
+      - name: The CLI fetches the model, remembers and recalls
         timeout-minutes: 10
         env:
-          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
+          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache-cli
+          # A throwaway passphrase, so `init` doesn't reach for the keychain.
+          MNEMO_PASSPHRASE: artifact-check
         run: |
           set -euo pipefail
           uname -m
+          mnemo="$(ls cli/mnemo-v*)"
+          chmod +x "$mnemo"
+          "$mnemo" --version
+          "$mnemo" embedder install
+          "$mnemo" embedder status | tee status
+          grep "installed:  yes" status
+          brain="$RUNNER_TEMP/cli.mnemo"
+          "$mnemo" init "$brain"
+          "$mnemo" remember "$brain" --text "snapshot_list returns every snapshot, newest first"
+          "$mnemo" remember "$brain" --text "The release needs one approval click"
+          "$mnemo" recall "$brain" --text "what does \`snapshot_list\` return" --top-k 1 | tee out1
+          grep -q "snapshot_list returns" out1
+          "$mnemo" recall "$brain" --text "who approves a release" --top-k 1 | tee out2
+          grep -q "approval click" out2
+          echo "ok: the ${{ matrix.target }} CLI fetched, checked and used the built-in embedder"
+
+      - name: The wheel fetches the model, remembers and recalls
+        timeout-minutes: 10
+        env:
+          MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache-wheel
+        run: |
+          set -euo pipefail
           pip install wheel/*.whl
           python - <<'PY'
           import os, tempfile
@@ -312,7 +350,7 @@ jobs:
           print("installed into", mnemo.install_builtin_embedder())
           assert mnemo.builtin_embedder_info()["installed"]
           with tempfile.TemporaryDirectory() as d:
-              db = mnemo.open(os.path.join(d, "arm.mnemo"), "arm-check", dimensions=384)
+              db = mnemo.open(os.path.join(d, "check.mnemo"), "artifact-check", dimensions=384)
               db.use_builtin_embedder()
               db.remember_text("snapshot_list returns every snapshot, newest first", "semantic")
               db.remember_text("The release needs one approval click", "semantic")
@@ -321,7 +359,7 @@ jobs:
               hits = db.recall_text("who approves a release", top_k=1, track_access=False)
               assert "approval" in hits[0]["content"], hits
               db.close()
-          print("ok: the aarch64 wheel fetched, checked and used the built-in embedder")
+          print("ok: the wheel fetched, checked and used the built-in embedder")
           PY
 
   # --- Build the Python source distribution (sdist) once. `pip install
