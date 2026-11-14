@@ -39,8 +39,9 @@ clients) can drive it as a tool:
 mnemo serve --mcp path/to/agent.mnemo
 ```
 
-The passphrase is read from `MNEMO_PASSPHRASE` (never a CLI flag — that
-would leak into shell history and process listings). Tools exposed:
+The secret comes from the key sources (`MNEMO_PASSPHRASE`, `MNEMO_KEY`,
+`MNEMO_KEY_FILE`, `MNEMO_KEY_COMMAND`, or the keychain; never a CLI flag,
+which would leak into shell history and process listings). Tools exposed:
 `about`, `remember`, `recall`, `forget`, `list`, `snapshot_list`, `stats`,
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`. Every mutation flushes before returning.
@@ -58,6 +59,44 @@ Update every `mnemo` on the machine before you turn it on; see
 ```sh
 MNEMO_PASSPHRASE=... mnemo serve --mcp --shared team.mnemo
 ```
+
+#### Install in a client (v0.15, 12.3)
+
+`mnemo mcp install --client <name> <file>` adds the brain's server to a
+client's config. It always writes `serve --mcp --shared <file>` and never a
+secret: the server finds the key through the key sources (a brain from
+`mnemo init` needs nothing more).
+
+```sh
+mnemo mcp install --client claude-code project.mnemo     # inside a git repo: the project scope
+mnemo mcp install --client cursor --scope user me.mnemo  # every project, for you
+mnemo mcp install --client claude-desktop --print me.mnemo
+```
+
+- **`claude-code`:** through `claude mcp add-json` when `claude` is on the
+  PATH (`--scope project|local|user`); otherwise it writes the project's
+  `.mcp.json` (project scope only).
+- **`cursor`:** `.cursor/mcp.json` in the project, or `~/.cursor/mcp.json`
+  (`--scope project|user`).
+- **`claude-desktop`:** its per-user config (`--scope user` only).
+- **The scope:** `project` when the brain is inside the current git work
+  tree, `user` otherwise.
+  - A project-scoped file is committed, so it holds `mnemo` from the PATH
+    and the brain's path relative to the project root
+    (`${CLAUDE_PROJECT_DIR:-.}/…` for Claude Code, `${workspaceFolder}/…`
+    for Cursor).
+  - It never holds an absolute path, `--embed-cmd` or a key command.
+  - A user or local scope uses absolute paths, since a GUI client doesn't
+    get the shell's PATH.
+- **Before it writes,** it shows a diff with every `env` and `headers` value
+  masked, and asks at a terminal. `--yes` writes without asking, and
+  `--print` shows it and writes nothing.
+- **How it writes:** other servers and keys are kept as they were, the
+  write is atomic and keeps the file's mode, and a config it can't parse is
+  left alone.
+- **A `MNEMO_PASSPHRASE` in the entry it replaces** can be moved into the
+  keychain at a terminal. `--yes` never moves one; it stops instead.
+- VS Code and Codex aren't in the table yet.
 
 #### Text-in via `--embed-cmd` (Phase 3)
 
@@ -795,6 +834,7 @@ cargo run --bin mnemo -- <command>
 | `init`    | Create a new encrypted database (auto-adds scaffold manifest). Since v0.15, with no passphrase source it generates a key and keeps it in the key store; `--ask-passphrase` asks for a passphrase instead, `--key-file <PATH>` writes the generated key to a new 0600 file |
 | `recovery-code` | Show a brain's recovery code from the key store, only to a person at a terminal (v0.15) |
 | `unlock`  | Keep a brain's key in this machine's keychain, from its recovery code (read from a prompt or stdin) (v0.15) |
+| `mcp install` | Add the brain's MCP server (`serve --mcp --shared`) to Claude Code, Cursor or Claude Desktop, with no secret and a diff first (v0.15) |
 | `info`    | Print statistics (including ANN index shape)         |
 | `about`   | Self-describing briefing — print onboarding memories |
 | `import`  | Bulk-load memories from a JSON Lines file            |

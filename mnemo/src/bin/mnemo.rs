@@ -11,6 +11,8 @@ use std::process::ExitCode;
 mod export;
 #[path = "mnemo/inspect.rs"]
 mod inspect;
+#[path = "mnemo/mcp_install.rs"]
+mod mcp_install;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
@@ -675,11 +677,17 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// MCP clients: `mcp install` adds this brain's server to one.
+    Mcp {
+        #[command(subcommand)]
+        cmd: McpCmd,
+    },
     /// Serve the `.mnemo` file as a Model Context Protocol server. Reads
     /// JSON-RPC 2.0 requests line-by-line from stdin, writes responses
-    /// to stdout, and logs diagnostics to stderr. Passphrase must be
-    /// provided via `MNEMO_PASSPHRASE` (no CLI-flag fallback — that
-    /// would leak into shell history and process listings).
+    /// to stdout, and logs diagnostics to stderr. The secret comes from
+    /// the key sources (`MNEMO_PASSPHRASE`, `MNEMO_KEY`, `MNEMO_KEY_FILE`,
+    /// `MNEMO_KEY_COMMAND`, or the keychain); there's no flag for it, which
+    /// would leak into shell history and process listings, and no prompt.
     Serve {
         /// Path to the `.mnemo` file.
         path: String,
@@ -727,6 +735,39 @@ enum Command {
 }
 
 /// Subcommands under `mnemo thread` (Phase 12.7a archive layer).
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Add this brain's MCP server to a client's config (12.3).
+    ///
+    /// It writes `serve --mcp --shared <file>`, never a secret. In a project
+    /// scope (a file that's committed) it writes `mnemo` from the PATH and a
+    /// path relative to the project root, never an absolute path or a
+    /// command. It shows a diff first (environment values masked) and asks,
+    /// unless `--yes`; `--print` shows it and writes nothing. Clients:
+    /// claude-code (through `claude mcp add-json` when `claude` is on the
+    /// PATH, else `.mcp.json`), cursor, claude-desktop.
+    Install {
+        /// The client.
+        #[arg(long, value_enum)]
+        client: mcp_install::Client,
+        /// Where: `project` (the default inside a git work tree), `local`
+        /// (Claude Code only) or `user` (the default elsewhere).
+        #[arg(long, value_enum)]
+        scope: Option<mcp_install::Scope>,
+        /// The server's name in the client.
+        #[arg(long, default_value = "mnemo")]
+        name: String,
+        /// Show what would be written, and write nothing.
+        #[arg(long)]
+        print: bool,
+        /// Write without asking.
+        #[arg(long, conflicts_with = "print")]
+        yes: bool,
+        /// Path to the `.mnemo` file.
+        path: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum ThreadCmd {
     /// Ingest a transcript file into a thread's archive. Idempotent
@@ -3055,6 +3096,24 @@ fn run() -> std::result::Result<(), String> {
             mnemo_engine::mcp::serve_stdio_with_options(p, embed_spec, shared).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
+        Command::Mcp {
+            cmd:
+                McpCmd::Install {
+                    client,
+                    scope,
+                    name,
+                    print,
+                    yes,
+                    path,
+                },
+        } => mcp_install::run(mcp_install::Install {
+            client,
+            file: path,
+            scope,
+            name,
+            print,
+            yes,
+        })?,
     }
     Ok(())
 }

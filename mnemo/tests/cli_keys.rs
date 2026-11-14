@@ -455,7 +455,22 @@ fn under_pty(
             seen2.lock().unwrap().extend_from_slice(&buf[..n]);
         }
     });
-    std::thread::sleep(delay);
+    // Wait until the child has printed something it waits on (the prompt),
+    // or has finished, or `delay` has passed with output, capped at 10 s, so
+    // a loaded machine can't race the check (a fixed sleep did once).
+    let start = std::time::Instant::now();
+    loop {
+        let text = String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
+        let finished = child.try_wait().ok().flatten().is_some();
+        if text.contains("Press Enter")
+            || finished
+            || (start.elapsed() >= delay && !text.is_empty())
+            || start.elapsed() >= std::time::Duration::from_secs(10)
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     let before = String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();
     let mut stdin = child.stdin.take().unwrap();
     let _ = stdin.write_all(input);

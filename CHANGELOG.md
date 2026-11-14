@@ -54,6 +54,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
   its code can't be shown unless this is given.
 - When page 0 doesn't parse, the chain finds the brain's keychain entry
   through the salts in the write-ahead log's header frames.
+- **`mnemo mcp install --client <claude-code|cursor|claude-desktop> <file>`**
+  (12.3 step 3) adds the brain's MCP server to a client's config: always
+  `serve --mcp --shared`, never a secret.
+  - In a project scope (the default inside a git work tree) it writes
+    `mnemo` from the PATH and a path relative to the project root, never an
+    absolute path or a command.
+  - It shows a diff with `env` values masked, asks at a terminal (or
+    `--yes`), and `--print` writes nothing.
+  - Other servers are kept, the write is atomic, and a config it can't
+    parse is left alone.
+  - Claude Code goes through `claude mcp add-json` when `claude` is on the
+    PATH.
 
 ### Changed
 
