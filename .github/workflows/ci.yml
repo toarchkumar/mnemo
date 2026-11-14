@@ -114,6 +114,14 @@ jobs:
           MNEMO_TEST_OS_KEYCHAIN: "1"
         run: cargo test --features failpoints,keychain --test keychain_os --test cli_keys --test cli_keychain -- --nocapture
 
+      # 12.3 step 5: the built-in embedder (`embed-candle`). Its own unit
+      # tests (the identifier rule, the checked download against a local
+      # server) and the CLI's offline paths run on every platform; the tests
+      # that need the model skip here and run in `builtin embedder (linux)`.
+      - name: cargo test (the built-in embedder, offline)
+        working-directory: mnemo
+        run: cargo test --features embed-candle --lib --test builtin_embedder --test builtin_cli --test query_keywords
+
       - name: cargo clippy
         working-directory: mnemo
         # `benches` feature pulls criterion (and its rayon / half /
@@ -121,7 +129,9 @@ jobs:
         # MSRV to 1.80+; built here on stable so the Phase 6 benches
         # are compile-checked and linted on every PR. Mirrors what
         # `cargo bench --no-run --features benches` would check.
-        run: cargo clippy --all-targets --features failpoints,benches,keychain -- -D warnings
+        # 12.3 step 5: `embed-candle` too, so the built-in embedder and the
+        # `candle_hard` example are linted.
+        run: cargo clippy --all-targets --features failpoints,benches,keychain,embed-candle -- -D warnings
 
       # MOBILE-1a: the UniFFI binding crate (a non-default workspace member,
       # so the two steps above don't build it).
@@ -147,6 +157,49 @@ jobs:
   #     (same pattern PR 7.1 used for cargo-fuzz) — no source compile.
   #     Linux-only: license SPDX + advisory DB checks are platform-
   #     independent, and running on 3 OSes would just triple runtime.
+  # --- 12.3 step 5: the built-in embedder with its model. `mnemo embedder
+  #     install` fetches the pinned files from Hugging Face (91 MB, kept in
+  #     the Actions cache by revision), then the tests that need the model
+  #     run against them: the vectors against `transformers`' reference,
+  #     identifier-aware recall, and every CLI path, `install` included
+  #     (through a local server of the same files).
+  builtin:
+    name: builtin embedder (linux)
+    runs-on: ubuntu-latest
+    env:
+      MNEMO_CACHE_DIR: ${{ runner.temp }}/mnemo-cache
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: builtin
+
+      - name: Cache the model
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/mnemo-cache
+          # The revision pinned in mnemo/src/builtin.rs.
+          key: mnemo-model-arctic-xs-${{ hashFiles('mnemo/src/builtin.rs') }}
+
+      - name: mnemo embedder install
+        working-directory: mnemo
+        run: |
+          cargo run --release --locked --features embed-candle --bin mnemo -- embedder install
+          cargo run --release --locked --features embed-candle --bin mnemo -- embedder status
+
+      - name: cargo test (with the model)
+        working-directory: mnemo
+        run: |
+          export MNEMO_TEST_MODEL_DIR="$(cargo run -q --release --locked --features embed-candle --bin mnemo -- embedder status | sed -n 's/^cache: *//p')"
+          test -f "$MNEMO_TEST_MODEL_DIR/model.safetensors"
+          cargo test --release --locked --features embed-candle --test builtin_embedder --test builtin_cli -- --nocapture
+
   deny:
     name: cargo-deny (linux)
     runs-on: ubuntu-latest
@@ -162,8 +215,9 @@ jobs:
         working-directory: mnemo
         # `--workspace`: every member (the engine, mnemo-node, mnemo-uniffi),
         # not only the root package.
-        # 12.3: with the `keychain` feature, so its optional crates are checked.
-        run: cargo deny --workspace --features keychain check
+        # 12.3: with the `keychain` feature, so its optional crates are checked,
+        # and `embed-candle` (step 5), the built-in embedder's.
+        run: cargo deny --workspace --features keychain,embed-candle check
 
       # HOOKS-1: the release builds (the CLI, mnemo-uniffi for the phones,
       # the Python wheel, mnemo-node) must resolve the engine without
@@ -187,7 +241,7 @@ jobs:
 
   # --- MSRV check: ensure the codebase still builds against the floor
   #     declared in Cargo.toml (`rust-version = "1.92"`, since v0.15 step 5a,
-  #     MSRV-2: `fastembed`'s `ort` needs it). Linux-only to
+  #     MSRV-2; the built-in embedder on candle builds at it). Linux-only to
   #     keep job count down; toolchain drift across platforms is rare and
   #     would surface on the stable matrix above first.
   msrv:
@@ -215,9 +269,9 @@ jobs:
         # their MSRV is pinned by whatever `rustc` the maintainer uses
         # to run them, not by this gate.
         # 12.3: `--locked --features keychain`, so the keychain stores and
-        # the vendored libdbus are compiled at the MSRV; step 5a adds
-        # `embed-fastembed` (`ort`, whose 1.92 sets the MSRV).
-        run: cargo build --locked --lib --bins --tests --features failpoints,keychain,embed-fastembed
+        # the vendored libdbus are compiled at the MSRV; step 5 adds
+        # `embed-candle`, the built-in embedder, as the release builds have it.
+        run: cargo build --locked --lib --bins --tests --features failpoints,keychain,embed-candle
 
       - name: cargo test (lib + integration only)
         working-directory: mnemo
@@ -291,7 +345,8 @@ jobs:
       # released wheels (release.yml) are built without it.
       - name: Build wheel
         working-directory: mnemo-python
-        run: maturin build --release --features dev-hooks --out target/wheels
+        # 12.3 step 5: `embed-candle` too, as the released wheels have it.
+        run: maturin build --release --features dev-hooks,embed-candle --out target/wheels
 
       - name: Install wheel
         working-directory: mnemo-python

@@ -1100,6 +1100,47 @@ impl Mnemo {
         }
     }
 
+    /// 12.3 step 5 (v0.15): register the built-in embedder
+    /// (snowflake-arctic-embed-xs on candle, 384 dimensions) on this handle,
+    /// in place of `set_embedder`. Its model is loaded from the cache
+    /// directory, and fetched there first (91.0 MB, said on stderr) if it
+    /// isn't in it yet; see `install_builtin_embedder`. `model_dir` loads
+    /// the three files from a directory of your own instead, and never
+    /// downloads.
+    ///
+    /// With the built-in, `recall_text` is identifier-aware: the question's
+    /// plain words aren't scored as keywords, and the identifiers in it
+    /// (`snapshot_list`, `--features`, `store.rs`, ...) are, unless you pass
+    /// `keywords`.
+    ///
+    /// Raises `RuntimeError` when the model can't be fetched or loaded (no
+    /// network, say), `EmbedderMismatchError` when the file records another
+    /// embedder, `DimensionMismatchError` on a file that isn't 384-wide, and
+    /// `RuntimeError` in a build without the built-in embedder.
+    #[pyo3(signature = (*, model_dir=None))]
+    fn use_builtin_embedder(&mut self, py: Python<'_>, model_dir: Option<String>) -> PyResult<()> {
+        #[cfg(feature = "embed-candle")]
+        {
+            let embedder = py
+                .allow_threads(move || match model_dir {
+                    Some(d) => mnemo_core::BuiltinEmbedder::from_dir(std::path::Path::new(&d)),
+                    None => mnemo_core::BuiltinEmbedder::load_or_install(&mut |m| eprintln!("{m}")),
+                })
+                .map_err(to_py)?;
+            match self.handle()? {
+                Handle::Plain(c) => c.set_embedder(embedder).map_err(to_py),
+                Handle::Shared(s) => s.set_embedder(embedder).map_err(to_py),
+            }
+        }
+        #[cfg(not(feature = "embed-candle"))]
+        {
+            let _ = (py, model_dir);
+            Err(PyRuntimeError::new_err(
+                "this build of mnemo_engine has no built-in embedder (use set_embedder)",
+            ))
+        }
+    }
+
     /// Embed `content` with the registered embedder and `remember` the
     /// result. Accepts the same per-memory kwargs as `remember` so
     /// callers can migrate code wholesale: swap `remember(content,
@@ -3199,6 +3240,59 @@ fn generate_key(py: Python<'_>) -> PyObject {
         .unbind()
 }
 
+/// 12.3 step 5 (v0.15): fetch the built-in embedder's model (91.0 MB) into
+/// the cache directory, checking each file's SHA-256, and return the
+/// directory. Nothing is fetched when it's there already. The size and the
+/// place are said on stderr before a download. Raises `RuntimeError` when
+/// the download fails or this build has no built-in embedder.
+#[pyfunction]
+fn install_builtin_embedder(py: Python<'_>) -> PyResult<String> {
+    #[cfg(feature = "embed-candle")]
+    {
+        let dir = py
+            .allow_threads(|| {
+                let dir = mnemo_core::builtin::install(&mut |m| eprintln!("{m}"))?;
+                mnemo_core::BuiltinEmbedder::load().map(|_| dir)
+            })
+            .map_err(to_py)?;
+        Ok(dir.display().to_string())
+    }
+    #[cfg(not(feature = "embed-candle"))]
+    {
+        let _ = py;
+        Err(PyRuntimeError::new_err(
+            "this build of mnemo_engine has no built-in embedder",
+        ))
+    }
+}
+
+/// 12.3 step 5 (v0.15): the built-in embedder, as a dict: `available`
+/// (whether this build has it) and, when it does, `model`, `revision`,
+/// `identity` (the name a file records), `dimensions`, `cache_dir`,
+/// `installed` and `download_bytes`.
+#[pyfunction]
+fn builtin_embedder_info(py: Python<'_>) -> PyResult<PyObject> {
+    let d = PyDict::new_bound(py);
+    #[cfg(feature = "embed-candle")]
+    {
+        use mnemo_core::builtin;
+        d.set_item("available", true)?;
+        d.set_item("model", builtin::MODEL)?;
+        d.set_item("revision", builtin::REVISION)?;
+        d.set_item("identity", builtin::identity().name)?;
+        d.set_item("dimensions", builtin::DIMENSIONS)?;
+        d.set_item(
+            "cache_dir",
+            builtin::model_dir().map_err(to_py)?.display().to_string(),
+        )?;
+        d.set_item("installed", builtin::is_installed())?;
+        d.set_item("download_bytes", builtin::download_size())?;
+    }
+    #[cfg(not(feature = "embed-candle"))]
+    d.set_item("available", false)?;
+    Ok(d.into())
+}
+
 /// Rewrite the file at `path` out-of-place, dropping tombstoned and
 /// expired memories and reclaiming stale pages. The compacted file
 /// atomically replaces the original via `rename`.
@@ -3343,6 +3437,8 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file_with_key, m)?)?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
+    m.add_function(wrap_pyfunction!(install_builtin_embedder, m)?)?;
+    m.add_function(wrap_pyfunction!(builtin_embedder_info, m)?)?;
     #[cfg(feature = "dev-hooks")]
     m.add_function(wrap_pyfunction!(_dev_set_writes_until_fail, m)?)?;
     #[cfg(feature = "dev-hooks")]

@@ -117,6 +117,18 @@ exceptions = [
     { allow = ["MPL-2.0"], crate = "uniffi_build" },
     { allow = ["MPL-2.0"], crate = "uniffi_udl" },
     { allow = ["ISC"], crate = "libloading" },
+    # 12.3 step 5 (v0.15), the built-in embedder (`embed-candle`), all
+    # permissive. `foldhash` (Zlib) comes in through `hashbrown` 0.16, which
+    # `safetensors` uses for the model's weights.
+    { allow = ["Zlib"], crate = "foldhash" },
+    # The model download's TLS (ureq with rustls): `ring`, rustls's crypto
+    # (Apache-2.0 AND ISC), `rustls-webpki` and `untrusted` (ISC).
+    { allow = ["ISC"], crate = "ring" },
+    { allow = ["ISC"], crate = "rustls-webpki" },
+    { allow = ["ISC"], crate = "untrusted" },
+    # `webpki-roots`: Mozilla's CA certificates as data, under the
+    # Community Data License Agreement (Permissive 2.0).
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
 ]
 
 # ---------------------------------------------------------------------
@@ -136,7 +148,21 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 allow = []
 deny = []
-skip = []
+# 12.3 step 5 (v0.15): the second versions the built-in embedder
+# (`embed-candle`) brings in. Its crates pin them; none can be collapsed
+# from here, and none is in a build without the feature.
+skip = [
+    { crate = "base64@0.13.1", reason = "tokenizers (spm_precompiled); ureq uses 0.23" },
+    { crate = "fancy-regex@0.17.0", reason = "tokenizers; candle-transformers uses 0.19" },
+    { crate = "hashbrown@0.16.0", reason = "safetensors; indexmap uses 0.15" },
+    { crate = "r-efi@5.3.0", reason = "getrandom 0.3 under candle's rand 0.9; getrandom 0.4 uses 6" },
+    { crate = "rand@0.9.5", reason = "candle; the engine uses 0.8" },
+    { crate = "rand_chacha@0.9.0", reason = "candle's rand 0.9; the engine's rand 0.8 uses 0.3" },
+    { crate = "rand_core@0.9.5", reason = "candle's rand 0.9; the engine's rand 0.8 uses 0.6" },
+    { crate = "strsim@0.11.1", reason = "darling, under tokenizers' derive_builder; clap uses 0.10" },
+    { crate = "thiserror@2.0.21", reason = "candle, tokenizers and safetensors; the engine uses 1" },
+    { crate = "thiserror-impl@2.0.21", reason = "with thiserror 2" },
+]
 skip-tree = []
 
 # ---------------------------------------------------------------------

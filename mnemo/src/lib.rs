@@ -57,6 +57,10 @@
 #![allow(unknown_lints)]
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+/// 12.3 step 5 (v0.15): the built-in embedder (snowflake-arctic-embed-xs on
+/// candle), behind the `embed-candle` feature.
+#[cfg(feature = "embed-candle")]
+pub mod builtin;
 mod cache;
 mod crypto;
 mod embed;
@@ -64,6 +68,7 @@ mod embed_cmd;
 mod error;
 mod format;
 mod freelist;
+mod ident;
 mod index;
 pub mod keys;
 mod keyslot;
@@ -79,6 +84,8 @@ mod transcript;
 mod veccol;
 mod wal;
 
+#[cfg(feature = "embed-candle")]
+pub use builtin::BuiltinEmbedder;
 pub use crypto::{KdfParams, SecretKind};
 pub use embed::{Embedder, EmbedderIdentity};
 pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};

@@ -122,6 +122,57 @@ pub trait Embedder: Send + Sync {
     fn embed_query(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts)
     }
+
+    /// 12.3 step 5 (v0.15): the keywords a recall by text scores with BM25
+    /// in place of its text, when the caller gave none. `None` (the
+    /// default) scores the text itself, at
+    /// [`crate::RecallRequest::text_keyword_weight`]. `Some(k)` scores `k`
+    /// as explicit keywords, at [`crate::RecallRequest::keyword_weight`];
+    /// `Some("")` makes the recall vector-only.
+    ///
+    /// The handle's registered embedder ([`crate::Mnemo::set_embedder`]) is
+    /// asked on every recall that has a text and no keywords, on a v9 file.
+    /// Keywords the caller gives always win. The built-in embedder answers
+    /// with the identifiers in the question (identifier-aware recall; see
+    /// `mnemo_engine::builtin`).
+    fn query_keywords(&self, text: &str) -> Option<String> {
+        let _ = text;
+        None
+    }
+}
+
+/// A boxed embedder is an embedder, so a caller can choose one at run time
+/// (the CLI's `--embed-cmd` or the built-in) and register it.
+impl<E: Embedder + ?Sized> Embedder for Box<E> {
+    fn identity(&self) -> EmbedderIdentity {
+        (**self).identity()
+    }
+    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        (**self).embed(texts)
+    }
+    fn embed_query(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        (**self).embed_query(texts)
+    }
+    fn query_keywords(&self, text: &str) -> Option<String> {
+        (**self).query_keywords(text)
+    }
+}
+
+/// A shared embedder is an embedder, so one loaded model can serve several
+/// handles.
+impl<E: Embedder + ?Sized> Embedder for std::sync::Arc<E> {
+    fn identity(&self) -> EmbedderIdentity {
+        (**self).identity()
+    }
+    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        (**self).embed(texts)
+    }
+    fn embed_query(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        (**self).embed_query(texts)
+    }
+    fn query_keywords(&self, text: &str) -> Option<String> {
+        (**self).query_keywords(text)
+    }
 }
 
 /// The JSON key of [`EmbedderIdentity::query_convention`] in both stored

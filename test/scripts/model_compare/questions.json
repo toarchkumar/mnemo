@@ -1,0 +1,249 @@
+{
+ "version": 1,
+ "note": "Step 5's model comparison (v0.15.0, 12.3). Written before any model ran and not tuned afterwards. Each expected snippet is text PLAN.md already shows; the harness matches it to memory ids at run time. A question is answered when any expected memory ranks.",
+ "questions": [
+  {
+   "id": "q01",
+   "kind": "dogfood-0",
+   "question": "how releases are approved",
+   "expected": [
+    "A release needs one human approval: the approve-release job on the release"
+   ]
+  },
+  {
+   "id": "q02",
+   "kind": "dogfood-0",
+   "question": "where the repo lives and why",
+   "expected": [
+    "The repo lives at ~/Documents/GitHub/mnemo.nosync. It was renamed out of iCloud's reach"
+   ]
+  },
+  {
+   "id": "q03",
+   "kind": "dogfood-0",
+   "question": "what stops for the user",
+   "expected": [
+    "What stops for the user: starting a new roadmap phase or minor"
+   ]
+  },
+  {
+   "id": "q04",
+   "kind": "lookup",
+   "question": "keyword tokenizer 2 and older builds opening the file",
+   "expected": [
+    "at the start of each",
+    "needs no extra write and"
+   ]
+  },
+  {
+   "id": "q05",
+   "kind": "lookup",
+   "question": "tokenizer 2 double counting parts per whitespace run",
+   "expected": [
+    "and counts each distinct term once"
+   ]
+  },
+  {
+   "id": "q06",
+   "kind": "lookup",
+   "question": "raise the MSRV and upgrade keyring",
+   "expected": [
+    "the MSRV to 1.92 (step 5a"
+   ]
+  },
+  {
+   "id": "q07",
+   "kind": "lookup",
+   "question": "keyring 4 store entries written by keyring 3.6.3, macOS access prompt per binary",
+   "expected": [
+    "and the keyring 4 stores"
+   ]
+  },
+  {
+   "id": "q08",
+   "kind": "why",
+   "question": "why did the writer safety valve go into v0.15",
+   "expected": [
+    "step 2b, after the keychain and before"
+   ]
+  },
+  {
+   "id": "q09",
+   "kind": "why",
+   "question": "why is the recovery code never shown in an agent's shell",
+   "expected": [
+    "recovery code is shown only when stdout"
+   ]
+  },
+  {
+   "id": "q10",
+   "kind": "why",
+   "question": "why did the keychain first use keyring 3.6.3",
+   "expected": [
+    "the MSRV to 1.92 (step 5a"
+   ]
+  },
+  {
+   "id": "q11",
+   "kind": "why",
+   "question": "why is the valve threshold 500 ms",
+   "expected": [
+    "A reader past T stops deferring to the valve"
+   ]
+  },
+  {
+   "id": "q12",
+   "kind": "why",
+   "question": "why was LOCK-2 shipped even though reads can wait",
+   "expected": [
+    "with many writers saving back to back on a slow machine"
+   ]
+  },
+  {
+   "id": "q13",
+   "kind": "why",
+   "question": "why does the BM25 manifest's tokenizer byte stay at 1",
+   "expected": [
+    "needs no extra write and",
+    "at the start of each"
+   ]
+  },
+  {
+   "id": "q14",
+   "kind": "why",
+   "question": "why do the question's own words get a lower keyword weight",
+   "expected": [
+    "the question's own words",
+    "0.25 the right fact led all three"
+   ]
+  },
+  {
+   "id": "q15",
+   "kind": "why",
+   "question": "why aren't digit-only parts of version numbers indexed",
+   "expected": [
+    "and counts each distinct term once"
+   ]
+  },
+  {
+   "id": "q16",
+   "kind": "why",
+   "question": "why does the worker recall the brain at the start of each dispatch",
+   "expected": [
+    "The ledgers stay the authority"
+   ]
+  },
+  {
+   "id": "q17",
+   "kind": "why",
+   "question": "why is the flaky CLI embed-before-lock test not fixed yet",
+   "expected": [
+    "as runner timing for now, with"
+   ]
+  },
+  {
+   "id": "q18",
+   "kind": "procedure",
+   "question": "how do I rebuild the test virtualenv",
+   "expected": [
+    "with the venv active"
+   ]
+  },
+  {
+   "id": "q19",
+   "kind": "procedure",
+   "question": "does a CI job cancelled before it ran block a merge",
+   "expected": [
+    "doesn't block a merge, but every job must be green on the"
+   ]
+  },
+  {
+   "id": "q20",
+   "kind": "procedure",
+   "question": "where do unfixed security findings go",
+   "expected": [
+    "Security findings stay in the gitignored SECURITY.local.md"
+   ]
+  },
+  {
+   "id": "q21",
+   "kind": "handover",
+   "question": "when may the worker append to PLAN.md",
+   "expected": [
+    "at its DONE or BLOCKED"
+   ]
+  },
+  {
+   "id": "q22",
+   "kind": "handover",
+   "question": "how do I keep the agents running when the laptop lid closes",
+   "expected": [
+    "a closed lid sleeps the Mac unless a display is attached"
+   ]
+  },
+  {
+   "id": "q23",
+   "kind": "handover",
+   "question": "who is the product for",
+   "expected": [
+    "on-device agents and apps, from desktop apps down to tablets, phones and"
+   ]
+  },
+  {
+   "id": "q24",
+   "kind": "handover",
+   "question": "the old mnemo folder came back, what do I do",
+   "expected": [
+    "The old ~/Documents/GitHub/mnemo folder is stale: it reappeared once as iCloud placeholders"
+   ]
+  },
+  {
+   "id": "q25",
+   "kind": "conventions",
+   "question": "what may mnemo mcp install write into a project-scoped config",
+   "expected": [
+    "no secret, no absolute path"
+   ]
+  },
+  {
+   "id": "q26",
+   "kind": "findings",
+   "question": "which cargo features does the CI clippy run use",
+   "expected": [
+    "4's first CI run failed"
+   ]
+  },
+  {
+   "id": "q27",
+   "kind": "findings",
+   "question": "why not use MediaPipe for the Android embedder",
+   "expected": [
+    "1.2.2 ships a 16.6 MB arm64"
+   ]
+  },
+  {
+   "id": "q28",
+   "kind": "findings",
+   "question": "what does a Replaced error mean",
+   "expected": [
+    "and the next call follows the new file"
+   ]
+  },
+  {
+   "id": "q29",
+   "kind": "findings",
+   "question": "what --wait should a read-only session hook use",
+   "expected": [
+    "delays a session's start by"
+   ]
+  },
+  {
+   "id": "q30",
+   "kind": "findings",
+   "question": "does an optional dependency raise the minimum Rust version",
+   "expected": [
+    "because the release builds will turn the"
+   ]
+  }
+ ]
+}

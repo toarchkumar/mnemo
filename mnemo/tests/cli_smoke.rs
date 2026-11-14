@@ -1133,6 +1133,7 @@ fn mcp_text_param_without_embedder_returns_helpful_error() {
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
             r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"recall","arguments":{"text":"anything"}}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"remember","arguments":{"content":"x","memory_type":"semantic","text":"x"}}}"#,
         ];
         for line in script {
             writeln!(stdin, "{line}").unwrap();
@@ -1155,11 +1156,18 @@ fn mcp_text_param_without_embedder_returns_helpful_error() {
         panic!("mnemo serve --mcp never acquired the lock: stderr={last_stderr}")
     });
     let stdout = String::from_utf8_lossy(&out.stdout);
-    // The recall call should surface an RPC error pointing at
-    // --embed-cmd / --embed-name.
+    let replies: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    // 12.3 step 5 (v0.15): `recall`'s text is matched by keyword only on a
+    // server without an embedder (a v9 file), so it succeeds...
+    assert!(replies[1].get("error").is_none(), "{stdout}");
+    // ...and `remember`'s text still needs one: an RPC error that says how.
+    let err = replies[2]["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        stdout.contains("--embed-cmd") || stdout.contains("embedder"),
-        "expected a helpful error mentioning --embed-cmd, got: {stdout}"
+        err.contains("--embed-cmd") && err.contains("built-in"),
+        "expected a helpful error mentioning the embedders, got: {stdout}"
     );
 }
 

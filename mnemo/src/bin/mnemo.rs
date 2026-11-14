@@ -31,6 +31,13 @@ struct Cli {
     #[arg(long, global = true, value_name = "DURATION", default_value = "10s",
           value_parser = parse_wait)]
     wait: std::time::Duration,
+    /// 12.3 step 5: load the built-in embedder from this directory (its
+    /// `config.json`, `tokenizer.json` and `model.safetensors`) instead of
+    /// the cache, and never download. When they're the pinned files it's
+    /// the built-in embedder; otherwise the identity records each file's
+    /// SHA-256.
+    #[arg(long, global = true, value_name = "DIR")]
+    model_dir: Option<std::path::PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -63,8 +70,9 @@ enum Command {
     Init {
         /// Path to the new `.mnemo` file.
         path: String,
-        /// Embedding dimensionality.
-        #[arg(long, default_value_t = 768)]
+        /// Embedding dimensionality. The default, 384, is the built-in
+        /// embedder's (12.3 step 5; 768 before v0.15).
+        #[arg(long, default_value_t = 384)]
         dimensions: usize,
         /// Skip the auto-generated scaffold manifest (create an empty file).
         #[arg(long)]
@@ -187,11 +195,12 @@ enum Command {
         /// Path to the `.mnemo` file.
         path: String,
         /// The new embedder's command (the `remember --embed-cmd` protocol).
-        #[arg(long)]
-        embed_cmd: String,
+        /// Without it, the file moves to the built-in embedder (12.3 step 5).
+        #[arg(long, requires = "embed_name")]
+        embed_cmd: Option<String>,
         /// The new embedder's identity name.
-        #[arg(long)]
-        embed_name: String,
+        #[arg(long, requires = "embed_cmd")]
+        embed_name: Option<String>,
         /// Whether the new embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
@@ -236,11 +245,11 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
-    /// Store a single memory from text, embedding it via an external
-    /// command (Phase 3). The command is spawned once; it reads one
-    /// JSON string per line from stdin and writes one JSON float
-    /// array per line to stdout. See `--embed-cmd` for the full
-    /// contract.
+    /// Store a single memory from text. It's embedded with the built-in
+    /// embedder (12.3 step 5; fetched on first use, see `mnemo embedder`),
+    /// or with an external command given by `--embed-cmd` (Phase 3): spawned
+    /// once, it reads one JSON string per line from stdin and writes one
+    /// JSON float array per line to stdout.
     Remember {
         /// Path to the `.mnemo` file.
         path: String,
@@ -277,19 +286,19 @@ enum Command {
         /// history --key`. Matching content adopts it as is (`updated`).
         #[arg(long, requires = "key", value_name = "ID")]
         supersedes: Option<String>,
-        /// Embedder command. Shell-style quoted but **not** executed
-        /// via a shell — e.g. `"python3 embedder.py"` or `"my-embed
-        /// --model=foo"`. Protocol: child reads one JSON string per
-        /// line from stdin, writes one JSON array of floats per line
-        /// to stdout, flushes after each reply.
-        #[arg(long)]
-        embed_cmd: String,
-        /// Embedder identity recorded on the scaffold manifest. The
-        /// first `remember`/`recall` on a fresh file writes this
-        /// name; later calls on the same file must pass the same
+        /// Embedder command, in place of the built-in embedder.
+        /// Shell-style quoted but **not** executed via a shell — e.g.
+        /// `"python3 embedder.py"` or `"my-embed --model=foo"`. Protocol:
+        /// child reads one JSON string per line from stdin, writes one JSON
+        /// array of floats per line to stdout, flushes after each reply.
+        #[arg(long, requires = "embed_name")]
+        embed_cmd: Option<String>,
+        /// Embedder identity recorded on the scaffold manifest (with
+        /// `--embed-cmd`). The first `remember`/`recall` on a fresh file
+        /// writes this name; later calls on the same file must pass the same
         /// name or `set_embedder` refuses with an identity mismatch.
-        #[arg(long)]
-        embed_name: String,
+        #[arg(long, requires = "embed_cmd")]
+        embed_name: Option<String>,
         /// Whether the embedder returns unit-normalized vectors
         /// (defaults to `true`; set `--embed-normalize=false` for
         /// embedders that return raw dot-space vectors).
@@ -807,6 +816,13 @@ enum Command {
         #[arg(long, requires = "shared")]
         allow_network_fs: bool,
     },
+    /// 12.3 step 5: the built-in embedder (snowflake-arctic-embed-xs on
+    /// candle). Its model is fetched once into the cache directory, on first
+    /// use or with `mnemo embedder install`.
+    Embedder {
+        #[command(subcommand)]
+        cmd: EmbedderCmd,
+    },
     /// Result-cache management (Phase 10.1). One `.mnemo` file is
     /// both an agent-memory store AND a durable key/value cache;
     /// these commands manipulate the cache side.
@@ -817,6 +833,17 @@ enum Command {
 }
 
 /// Subcommands under `mnemo thread` (Phase 12.7a archive layer).
+#[derive(Subcommand)]
+enum EmbedderCmd {
+    /// Download the built-in embedder's model (91.0 MB) into the cache
+    /// directory, checking each file's SHA-256. Prints the size first, and
+    /// fetches nothing when the model is already there.
+    Install,
+    /// Show the built-in embedder's model, its identity, and whether it's
+    /// installed (or, with `--model-dir`, what that directory holds).
+    Status,
+}
+
 #[derive(Subcommand)]
 enum McpCmd {
     /// Add this brain's MCP server to a client's config (12.3).
@@ -854,8 +881,8 @@ enum McpCmd {
 enum ThreadCmd {
     /// Ingest a transcript file into a thread's archive. Idempotent
     /// by per-turn `turn_id`: running it again on a longer transcript
-    /// appends only the new turns. Requires an embedder (`--embed-cmd`
-    /// + `--embed-name`) because the ingest batch-embeds every turn.
+    /// appends only the new turns. It batch-embeds every turn, with the
+    /// built-in embedder or `--embed-cmd` + `--embed-name`.
     Ingest {
         /// Path to the `.mnemo` file.
         path: String,
@@ -869,12 +896,14 @@ enum ThreadCmd {
         /// `claude-code-jsonl` (`~/.claude/projects/<p>/<s>.jsonl`).
         #[arg(long, default_value = "jsonl")]
         format: String,
-        /// Embedder command (same contract as `mnemo remember --embed-cmd`).
-        #[arg(long)]
-        embed_cmd: String,
-        /// Embedder identity recorded on the scaffold manifest.
-        #[arg(long)]
-        embed_name: String,
+        /// Embedder command (same contract as `mnemo remember --embed-cmd`),
+        /// in place of the built-in embedder.
+        #[arg(long, requires = "embed_name")]
+        embed_cmd: Option<String>,
+        /// Embedder identity recorded on the scaffold manifest (with
+        /// `--embed-cmd`).
+        #[arg(long, requires = "embed_cmd")]
+        embed_name: Option<String>,
         /// Whether the embedder returns unit-normalized vectors.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         embed_normalize: bool,
@@ -1217,48 +1246,213 @@ fn open_w(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mne
 }
 
 /// A started embedder and the vectors it made.
-type Embedded = (mnemo_engine::EmbedCmd, Vec<Vec<f32>>);
+type Embedded = (Box<dyn mnemo_engine::Embedder>, Vec<Vec<f32>>);
 
 /// 12.4 (slow work first, unlocked): start the embedder and embed `texts`
-/// before the brain's lock is taken, so a slow embedder never keeps other
-/// sessions waiting. The identity's width comes from the file's header (no
-/// key, no lock); when that can't be read (a torn header), `None`, and the
-/// caller embeds after its write open, as before.
+/// before the brain's lock is taken, so a slow embedder (or the built-in's
+/// first download) never keeps other sessions waiting. The identity's width
+/// comes from the file's header (no key, no lock); when that can't be read
+/// (a torn header), `None`, and the caller embeds after its write open, as
+/// before.
 fn embed_first(
     path: &str,
-    cmd: &str,
-    name: &str,
+    cmd: Option<&str>,
+    name: Option<&str>,
     normalize: bool,
     timeout: u64,
     query: &str,
     texts: &[&str],
 ) -> std::result::Result<Option<Embedded>, String> {
-    use mnemo_engine::Embedder;
     let Ok(dimensions) = Mnemo::peek_dimensions(path) else {
         return Ok(None);
     };
-    let embedder = new_embedder(cmd, name, normalize, timeout, query, dimensions)?;
+    let embedder = new_embedder(cmd, name, normalize, timeout, query, Some(dimensions))?;
     let vectors = embedder.embed(texts).map_err(fmt)?;
     Ok(Some((embedder, vectors)))
 }
 
+/// 12.3 step 5: the global `--model-dir`.
+static MODEL_DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+
+/// The embedder a command uses: the `--embed-cmd` protocol when it's given
+/// (with `--embed-name`), otherwise the built-in embedder (12.3 step 5).
+/// `dimensions` is the file's width: an `--embed-cmd` identity takes it, and
+/// the built-in, whose width is its own, is checked against it. `None`
+/// (`reembed` to the built-in) skips that check.
 fn new_embedder(
-    cmd: &str,
-    name: &str,
+    cmd: Option<&str>,
+    name: Option<&str>,
     normalize: bool,
     timeout: u64,
     query: &str,
-    dimensions: usize,
-) -> std::result::Result<mnemo_engine::EmbedCmd, String> {
+    dimensions: Option<usize>,
+) -> std::result::Result<Box<dyn mnemo_engine::Embedder>, String> {
+    let Some(cmd) = cmd else {
+        if name.is_some() {
+            return Err("--embed-name needs --embed-cmd".into());
+        }
+        let builtin = builtin_embedder()?;
+        if let Some(d) = dimensions {
+            let width = builtin.identity().dimensions;
+            if d != width {
+                return Err(format!(
+                    "this file is {d}-dimensional and the built-in embedder is {width}: pass \
+                     the file's own embedder (--embed-cmd and --embed-name), or move the file \
+                     to the built-in with `mnemo reembed <file> --embed-dims {width}`"
+                ));
+            }
+        }
+        return Ok(builtin);
+    };
+    let name = name.ok_or_else(|| "--embed-cmd needs --embed-name".to_string())?;
     let identity = mnemo_engine::EmbedderIdentity {
         name: name.to_string(),
-        dimensions,
+        dimensions: dimensions.unwrap_or_default(),
         normalize,
         query_convention: query.to_string(),
     };
-    Ok(mnemo_engine::EmbedCmd::new(cmd, identity)
-        .map_err(fmt)?
-        .with_timeout(std::time::Duration::from_secs(timeout)))
+    Ok(Box::new(
+        mnemo_engine::EmbedCmd::new(cmd, identity)
+            .map_err(fmt)?
+            .with_timeout(std::time::Duration::from_secs(timeout)),
+    ))
+}
+
+/// 12.3 step 5: the built-in embedder, from `--model-dir`, or from the cache
+/// (downloaded on first use, with the size said on stderr first).
+#[cfg(feature = "embed-candle")]
+fn builtin_embedder() -> std::result::Result<Box<dyn mnemo_engine::Embedder>, String> {
+    let e = match MODEL_DIR.get().and_then(Option::as_deref) {
+        Some(dir) => mnemo_engine::BuiltinEmbedder::from_dir(dir),
+        None => mnemo_engine::BuiltinEmbedder::load_or_install(&mut |m| eprintln!("{m}")),
+    }
+    .map_err(fmt)?;
+    Ok(Box::new(e))
+}
+
+/// Without `embed-candle` there's no built-in embedder.
+#[cfg(not(feature = "embed-candle"))]
+fn builtin_embedder() -> std::result::Result<Box<dyn mnemo_engine::Embedder>, String> {
+    Err("this build of mnemo has no built-in embedder: pass --embed-cmd and --embed-name".into())
+}
+
+/// 12.3 step 5: `mnemo embedder install` and `mnemo embedder status`.
+#[cfg(feature = "embed-candle")]
+fn run_embedder(cmd: EmbedderCmd) -> std::result::Result<(), String> {
+    use mnemo_engine::builtin;
+    use mnemo_engine::Embedder;
+    let dir = builtin::model_dir().map_err(fmt)?;
+    let size = builtin::human_size(builtin::download_size());
+    match cmd {
+        EmbedderCmd::Install => {
+            if MODEL_DIR.get().is_some_and(Option::is_some) {
+                return Err(
+                    "--model-dir loads a model of your own; there's nothing to install".into(),
+                );
+            }
+            println!(
+                "the built-in embedder: {}@{} ({size}), into {}",
+                builtin::MODEL,
+                builtin::REVISION,
+                dir.display()
+            );
+            if builtin::is_installed() {
+                // Check the hashes too, so `install` repairs a changed file.
+                match builtin::BuiltinEmbedder::load() {
+                    Ok(_) => {
+                        println!("already installed");
+                        return Ok(());
+                    }
+                    Err(e) => return Err(fmt(e)),
+                }
+            }
+            builtin::install(&mut |m| eprintln!("{m}")).map_err(fmt)?;
+            builtin::BuiltinEmbedder::load().map_err(fmt)?;
+            println!("installed");
+        }
+        EmbedderCmd::Status => {
+            println!("model:      {}", builtin::MODEL);
+            println!("revision:   {}", builtin::REVISION);
+            match MODEL_DIR.get().and_then(Option::as_deref) {
+                Some(d) => {
+                    let e = builtin::BuiltinEmbedder::from_dir(d).map_err(fmt)?;
+                    println!("model dir:  {} (--model-dir)", d.display());
+                    println!(
+                        "files:      {}",
+                        if e.is_builtin() {
+                            "the pinned files (the built-in embedder)"
+                        } else {
+                            "not the pinned files (an identity of their own)"
+                        }
+                    );
+                    println!("identity:   {}", e.identity().name);
+                }
+                None => {
+                    println!("identity:   {}", builtin::identity().name);
+                    println!("cache:      {}", dir.display());
+                    println!(
+                        "installed:  {}",
+                        if builtin::is_installed() {
+                            "yes".to_string()
+                        } else {
+                            format!(
+                                "no ({size} to fetch on first use, or `mnemo embedder install`)"
+                            )
+                        }
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Without `embed-candle` there's no built-in embedder.
+#[cfg(not(feature = "embed-candle"))]
+fn run_embedder(_: EmbedderCmd) -> std::result::Result<(), String> {
+    Err("this build of mnemo has no built-in embedder (pass --embed-cmd and --embed-name)".into())
+}
+
+/// 12.3 step 5: `serve --mcp` with no `--embed-cmd` serves with the
+/// built-in embedder, in a build that has it.
+fn serve_builtin(
+    p: &std::path::Path,
+    shared: Option<mnemo_engine::SharedOptions>,
+) -> mnemo_engine::Result<()> {
+    #[cfg(feature = "embed-candle")]
+    {
+        let dir = MODEL_DIR.get().and_then(Option::as_deref);
+        mnemo_engine::mcp::serve_stdio_with_builtin(p, dir, shared)
+    }
+    #[cfg(not(feature = "embed-candle"))]
+    {
+        mnemo_engine::mcp::serve_stdio_with_spec(p, None, shared)
+    }
+}
+
+/// 12.3 step 5: whether the built-in embedder loads without a download
+/// (`--model-dir`, or the model already in the cache).
+fn builtin_ready() -> bool {
+    #[cfg(feature = "embed-candle")]
+    {
+        MODEL_DIR.get().is_some_and(Option::is_some) || mnemo_engine::builtin::is_installed()
+    }
+    #[cfg(not(feature = "embed-candle"))]
+    {
+        false
+    }
+}
+
+/// 12.3 step 5: the pinned built-in identity, in a build that has it.
+fn builtin_identity() -> Option<mnemo_engine::EmbedderIdentity> {
+    #[cfg(feature = "embed-candle")]
+    {
+        Some(mnemo_engine::builtin::identity())
+    }
+    #[cfg(not(feature = "embed-candle"))]
+    {
+        None
+    }
 }
 
 /// A read-only open with either secret (waiting, as [`open_r`]).
@@ -1793,6 +1987,7 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 fn run() -> std::result::Result<(), String> {
     let cli = Cli::parse();
     let _ = WAIT.set(cli.wait);
+    let _ = MODEL_DIR.set(cli.model_dir.clone());
     match cli.command {
         Command::Init {
             path,
@@ -2225,13 +2420,16 @@ fn run() -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let secret = secret_for(&path, &pp, &key_file)?;
-            let dims = match embed_dims {
-                Some(d) => d,
-                None => Mnemo::peek_dimensions(&path).map_err(fmt)?,
+            // The built-in has its own width; `--embed-dims` only has to
+            // agree with it.
+            let dims = match (&embed_cmd, embed_dims) {
+                (_, Some(d)) => Some(d),
+                (Some(_), None) => Some(Mnemo::peek_dimensions(&path).map_err(fmt)?),
+                (None, None) => None,
             };
             let embedder = new_embedder(
-                &embed_cmd,
-                &embed_name,
+                embed_cmd.as_deref(),
+                embed_name.as_deref(),
                 embed_normalize,
                 embed_timeout,
                 embed_query.as_deref().unwrap_or_default(),
@@ -2334,10 +2532,6 @@ fn run() -> std::result::Result<(), String> {
             embed_timeout,
             passphrase: pp,
         } => {
-            // `Memory` is already imported at the file top; keep only
-            // the Phase-3 bits we add here to avoid Rust 1.75's
-            // redundant-import warning (which `-D warnings` makes fatal).
-            use mnemo_engine::{EmbedCmd, EmbedderIdentity};
             let pp = secret_for(&path, &pp, &None)?;
             let mt = parse_memory_types(&r#type)?
                 .pop()
@@ -2348,8 +2542,8 @@ fn run() -> std::result::Result<(), String> {
             // before anything is written.
             let (mut db, vector) = match embed_first(
                 &path,
-                &embed_cmd,
-                &embed_name,
+                embed_cmd.as_deref(),
+                embed_name.as_deref(),
                 embed_normalize,
                 embed_timeout,
                 embed_query.as_deref().unwrap_or_default(),
@@ -2366,15 +2560,14 @@ fn run() -> std::result::Result<(), String> {
                 // The header couldn't be read: the old order.
                 None => {
                     let mut db = open_w(&path, &pp, "remember").map_err(fmt)?;
-                    let identity = EmbedderIdentity {
-                        name: embed_name,
-                        dimensions: db.dimensions(),
-                        normalize: embed_normalize,
-                        query_convention: embed_query.clone().unwrap_or_default(),
-                    };
-                    let embedder = EmbedCmd::new(&embed_cmd, identity)
-                        .map_err(fmt)?
-                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                    let embedder = new_embedder(
+                        embed_cmd.as_deref(),
+                        embed_name.as_deref(),
+                        embed_normalize,
+                        embed_timeout,
+                        embed_query.as_deref().unwrap_or_default(),
+                        Some(db.dimensions()),
+                    )?;
                     db.set_embedder(embedder).map_err(fmt)?;
                     let vector = {
                         let embedder_ref = db
@@ -2873,7 +3066,6 @@ fn run() -> std::result::Result<(), String> {
             key_file,
             passphrase: pp,
         } => {
-            use mnemo_engine::{EmbedCmd, EmbedderIdentity};
             let secret = secret_for(&path, &pp, &key_file)?;
             if query.is_none() && query_file.is_none() && text.is_none() && keywords.is_none() {
                 return Err(
@@ -2953,57 +3145,91 @@ fn run() -> std::result::Result<(), String> {
             // The query text, for keyword matching (hybrid by default).
             let mut query_text: Option<String> = None;
             let (q, mut db_opt, mut effective_no_track) = match text {
-                Some(_) if embed_cmd.is_none() && no_keywords => {
-                    return Err(
-                        "--no-keywords with --text needs --embed-cmd and --embed-name \
-                                (without an embedder, --text is matched by keyword only)"
-                            .to_string(),
-                    );
-                }
-                Some(text) if embed_cmd.is_none() => {
-                    // No embedder: keyword-only recall, which needs v9.
-                    let (db, effective_no_track) =
-                        open_recall(&path, &secret, no_track).map_err(fmt)?;
-                    if db.stats_summary().format_version < 9 {
-                        return Err("--text requires --embed-cmd and --embed-name \
-                                    (or a v9 file, which can recall by keyword)"
-                            .to_string());
-                    }
-                    if keyword.is_none() {
-                        keyword = Some(text);
-                    }
-                    (Vec::new(), Some(db), effective_no_track)
-                }
                 Some(text) => {
-                    let ecmd = embed_cmd.ok_or_else(|| {
-                        "--text requires --embed-cmd and --embed-name".to_string()
-                    })?;
-                    let ename = embed_name.ok_or_else(|| {
-                        "--text requires --embed-cmd and --embed-name".to_string()
-                    })?;
-                    let (mut db, effective_no_track) =
+                    // 12.3 step 5: `--embed-cmd`, or else the built-in
+                    // embedder, loaded (or fetched) before the open so no lock
+                    // is held meanwhile. The built-in is used only on a file
+                    // that records its identity, so a recall never records
+                    // one; otherwise (and offline, or in a build without it)
+                    // `--text` is matched by keyword only on a v9 file.
+                    let mut builtin =
+                        (embed_cmd.is_none() && builtin_ready()).then(builtin_embedder);
+                    let (mut db, mut effective_no_track) =
                         open_recall(&path, &secret, no_track).map_err(fmt)?;
-                    let identity = EmbedderIdentity {
-                        name: ename,
-                        dimensions: db.dimensions(),
-                        normalize: embed_normalize,
-                        query_convention: embed_query.clone().unwrap_or_default(),
+                    if embed_cmd.is_none() && builtin.is_none() {
+                        let recorded = db.embedder_identity().map_err(fmt)?;
+                        if recorded.is_some() && recorded == builtin_identity() {
+                            // The first use on a file the built-in wrote: fetch
+                            // the model with the file closed, then open again.
+                            drop(db);
+                            builtin = Some(builtin_embedder());
+                            (db, effective_no_track) =
+                                open_recall(&path, &secret, no_track).map_err(fmt)?;
+                        }
+                    }
+                    let embedder = if embed_cmd.is_some() {
+                        Ok(new_embedder(
+                            embed_cmd.as_deref(),
+                            embed_name.as_deref(),
+                            embed_normalize,
+                            embed_timeout,
+                            embed_query.as_deref().unwrap_or_default(),
+                            Some(db.dimensions()),
+                        )?)
+                    } else {
+                        let recorded = db.embedder_identity().map_err(fmt)?;
+                        match builtin {
+                            Some(Ok(b)) if recorded.as_ref() == Some(&b.identity()) => Ok(b),
+                            Some(Err(e)) => Err(e),
+                            _ => Err(match recorded {
+                                Some(r) => format!(
+                                    "this file's embedder is {:?}, not the built-in (pass \
+                                     --embed-cmd and --embed-name for it)",
+                                    r.name
+                                ),
+                                None if builtin_identity().is_none() => {
+                                    "this build has no built-in embedder".to_string()
+                                }
+                                None => "this file records no embedder yet".to_string(),
+                            }),
+                        }
                     };
-                    let embedder = EmbedCmd::new(&ecmd, identity)
-                        .map_err(fmt)?
-                        .with_timeout(std::time::Duration::from_secs(embed_timeout));
-                    db.set_embedder(embedder).map_err(fmt)?;
-                    let vector = {
-                        let embedder_ref = db
-                            .embedder()
-                            .ok_or_else(|| "embedder vanished after set_embedder".to_string())?;
-                        // 12.3 step 4: the query side.
-                        let mut vs = embedder_ref.embed_query(&[text.as_str()]).map_err(fmt)?;
-                        vs.pop()
-                            .ok_or_else(|| "embedder returned no vector".to_string())?
-                    };
-                    query_text = Some(text);
-                    (vector, Some(db), effective_no_track)
+                    match embedder {
+                        Ok(embedder) => {
+                            db.set_embedder(embedder).map_err(fmt)?;
+                            let vector = {
+                                let embedder_ref = db.embedder().ok_or_else(|| {
+                                    "embedder vanished after set_embedder".to_string()
+                                })?;
+                                // 12.3 step 4: the query side.
+                                let mut vs =
+                                    embedder_ref.embed_query(&[text.as_str()]).map_err(fmt)?;
+                                vs.pop()
+                                    .ok_or_else(|| "embedder returned no vector".to_string())?
+                            };
+                            query_text = Some(text);
+                            (vector, Some(db), effective_no_track)
+                        }
+                        Err(why) => {
+                            if no_keywords {
+                                return Err(format!(
+                                    "--no-keywords with --text needs an embedder: {why}"
+                                ));
+                            }
+                            // No embedder: keyword-only recall, which needs v9.
+                            if db.stats_summary().format_version < 9 {
+                                return Err(format!(
+                                    "--text needs an embedder on a v8 file (or a v9 file, \
+                                     which can recall by keyword): {why}"
+                                ));
+                            }
+                            eprintln!("mnemo: recalling by keywords only: {why}");
+                            if keyword.is_none() {
+                                keyword = Some(text);
+                            }
+                            (Vec::new(), Some(db), effective_no_track)
+                        }
+                    }
                 }
                 None if query.is_none() && query_file.is_none() => (Vec::new(), None, no_track),
                 None => (resolve_query(query, query_file)?, None, no_track),
@@ -3096,7 +3322,7 @@ fn run() -> std::result::Result<(), String> {
             embed_timeout,
             passphrase: pp,
         } => {
-            use mnemo_engine::{EmbedCmd, EmbedderIdentity, MemoryPatch, WriteOutcome};
+            use mnemo_engine::{MemoryPatch, WriteOutcome};
             let pp = secret_for(&path, &pp, &None)?;
             let ulid = parse_ulid(&id)?;
 
@@ -3120,17 +3346,12 @@ fn run() -> std::result::Result<(), String> {
 
             let (mut db, outcome) = match text {
                 Some(t) => {
-                    let ecmd = embed_cmd.ok_or_else(|| {
-                        "--text requires --embed-cmd and --embed-name".to_string()
-                    })?;
-                    let ename = embed_name.ok_or_else(|| {
-                        "--text requires --embed-cmd and --embed-name".to_string()
-                    })?;
-                    // 12.4: embed first, then take the write lock.
+                    // 12.4: embed first, then take the write lock. 12.3 step
+                    // 5: with no `--embed-cmd`, the built-in embedder.
                     match embed_first(
                         &path,
-                        &ecmd,
-                        &ename,
+                        embed_cmd.as_deref(),
+                        embed_name.as_deref(),
                         embed_normalize,
                         embed_timeout,
                         embed_query.as_deref().unwrap_or_default(),
@@ -3156,15 +3377,14 @@ fn run() -> std::result::Result<(), String> {
                         }
                         None => {
                             let mut db = open_w(&path, &pp, "update").map_err(fmt)?;
-                            let identity = EmbedderIdentity {
-                                name: ename,
-                                dimensions: db.dimensions(),
-                                normalize: embed_normalize,
-                                query_convention: embed_query.clone().unwrap_or_default(),
-                            };
-                            let embedder = EmbedCmd::new(&ecmd, identity)
-                                .map_err(fmt)?
-                                .with_timeout(std::time::Duration::from_secs(embed_timeout));
+                            let embedder = new_embedder(
+                                embed_cmd.as_deref(),
+                                embed_name.as_deref(),
+                                embed_normalize,
+                                embed_timeout,
+                                embed_query.as_deref().unwrap_or_default(),
+                                Some(db.dimensions()),
+                            )?;
                             db.set_embedder(embedder).map_err(fmt)?;
                             let outcome = db.update_text(&ulid, &t, patch).map_err(fmt)?;
                             (db, outcome)
@@ -3326,23 +3546,28 @@ fn run() -> std::result::Result<(), String> {
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let resolved = serve_path(&path)?;
             let p = resolved.as_path();
-            let embed_spec = match (embed_cmd, embed_name) {
-                (Some(c), Some(n)) => Some(mnemo_engine::mcp::EmbedSpec {
-                    command: c,
-                    name: n,
-                    normalize: embed_normalize,
-                    timeout: std::time::Duration::from_secs(embed_timeout),
-                    query_convention: embed_query.unwrap_or_default(),
-                }),
-                _ => None,
-            };
             let shared = shared.then(|| {
                 let mut o = wait_opts();
                 o.allow_network_fs = allow_network_fs;
                 o
             });
-            mnemo_engine::mcp::serve_stdio_with_spec(p, embed_spec, shared).map_err(fmt)?;
+            match (embed_cmd, embed_name) {
+                (Some(c), Some(n)) => {
+                    let spec = mnemo_engine::mcp::EmbedSpec {
+                        command: c,
+                        name: n,
+                        normalize: embed_normalize,
+                        timeout: std::time::Duration::from_secs(embed_timeout),
+                        query_convention: embed_query.unwrap_or_default(),
+                    };
+                    mnemo_engine::mcp::serve_stdio_with_spec(p, Some(spec), shared)
+                }
+                (None, None) => serve_builtin(p, shared),
+                _ => return Err("--embed-cmd and --embed-name go together".into()),
+            }
+            .map_err(fmt)?;
         }
+        Command::Embedder { cmd } => run_embedder(cmd)?,
         Command::Cache { op } => run_cache_op(op)?,
         Command::Mcp {
             cmd:
@@ -3589,12 +3814,12 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 )
             };
             let embedder = new_embedder(
-                &embed_cmd,
-                &embed_name,
+                embed_cmd.as_deref(),
+                embed_name.as_deref(),
                 embed_normalize,
                 embed_timeout,
                 embed_query.as_deref().unwrap_or_default(),
-                dimensions,
+                Some(dimensions),
             )?;
             let pre: Vec<Vec<f32>> = if texts.is_empty() {
                 Vec::new()

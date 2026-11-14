@@ -1609,6 +1609,60 @@ def test_remember_supersedes_a_named_memory():
     print("ok  remember(key=, supersedes=) adopts a named memory (v0.15)")
 
 
+def test_builtin_embedder_offline():
+    """v0.15 (12.3 step 5): the built-in embedder in a wheel with it, with a
+    cache of its own and a download base nothing listens on, so nothing
+    reaches the network or the real cache. `MNEMO_TEST_MODEL_DIR` (a
+    directory with the model's files) adds a run with the model."""
+    import socket
+
+    info = mnemo.builtin_embedder_info()
+    if not info["available"]:
+        print("ok  builtin_embedder_info: this wheel has no built-in embedder")
+        return
+    assert info["model"] == "Snowflake/snowflake-arctic-embed-xs", info
+    assert info["identity"].startswith(info["model"] + "@"), info
+    assert info["dimensions"] == 384 and info["download_bytes"] == 90_985_042, info
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    saved = {k: os.environ.get(k) for k in ("MNEMO_CACHE_DIR", "MNEMO_MODEL_URL")}
+    with tempfile.TemporaryDirectory() as d:
+        os.environ["MNEMO_CACHE_DIR"] = os.path.join(d, "cache")
+        os.environ["MNEMO_MODEL_URL"] = f"http://127.0.0.1:{port}"
+        try:
+            info = mnemo.builtin_embedder_info()
+            assert info["installed"] is False, info
+            assert info["cache_dir"].startswith(os.path.join(d, "cache")), info
+            for call in (mnemo.install_builtin_embedder,
+                         lambda: mnemo.open(os.path.join(d, "t.mnemo"), "pw",
+                                            dimensions=384).use_builtin_embedder()):
+                try:
+                    call()
+                except RuntimeError as e:
+                    assert "download of config.json failed" in str(e), e
+                else:
+                    raise AssertionError("an offline download should raise")
+            model = os.environ.get("MNEMO_TEST_MODEL_DIR")
+            if model:
+                db = mnemo.open(os.path.join(d, "m.mnemo"), "pw", dimensions=384)
+                db.use_builtin_embedder(model_dir=model)
+                db.remember_text("snapshot_list returns every snapshot", "semantic")
+                db.remember_text("The release needs one approval click", "semantic")
+                hits = db.recall_text("what does `snapshot_list` return", top_k=1,
+                                      track_access=False)
+                assert hits[0]["content"].startswith("snapshot_list"), hits
+                db.close()
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    print("ok  the built-in embedder: info, and offline errors (v0.15)")
+
+
 # --- 12.4 shared mode (v0.14.0 step 4a) --------------------------------------
 
 def _shared_file(d, n=0):
@@ -1910,6 +1964,7 @@ if __name__ == "__main__":
     test_recall_text_keywords_and_vector_cache_budget()
     test_query_fn_and_hybrid_recall_text()
     test_remember_supersedes_a_named_memory()
+    test_builtin_embedder_offline()
     test_shared_handles_see_each_others_writes()
     test_shared_handle_waits_for_a_plain_one_then_raises_locked()
     test_shared_mode_exception_types()

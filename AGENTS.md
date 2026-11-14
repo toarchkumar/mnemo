@@ -62,9 +62,8 @@ python test_mnemo.py
 ```
 
 Minimum supported Rust version: **1.92** (since v0.15; 1.75 before). The
-built-in embedder's ONNX Runtime binding (`ort`, behind `embed-fastembed`)
-sets it. All dependency versions are pinned exactly (`=x.y.z`) for
-reproducibility.
+CI MSRV job builds the built-in embedder (`embed-candle`) at it. All
+dependency versions are pinned exactly (`=x.y.z`) for reproducibility.
 
 ## Conventions
 
@@ -139,6 +138,7 @@ Stop, don't stage or delete anything, and log `BLOCKED` for the user.
 | Cut a release | `RELEASING.md` (the checklist, the dry run, the credential renewals) and `.github/workflows/release.yml`. One `v*` tag releases the engine (crates.io, PyPI), the Swift package (the XCFramework zip and the `toarchkumar/mnemo-swift` mirror) and the Android library (Maven Central). A manual run is a dry run that publishes nothing |
 | Add an MCP tool | `mnemo/src/mcp.rs` — extend the JSON schema in `tools_list()` and add a `tool_*` handler dispatched from `tools_call()`. Mutating tools must `db.flush()` before returning. |
 | Change the inspector (`mnemo inspect`) | `mnemo/src/bin/mnemo/inspect.rs` (the loader, the `GET`-only loopback server, the JSON routes) and `inspect.html` beside it (the page, compiled in with `include_str!`; no build step). It reads the file once and closes it: never keep a handle open between requests, and never add an endpoint that writes. Tests: `mnemo/tests/inspect_cli.rs`; the acceptance fixture `tests/fixtures/inspect/ios_export.mnemo` is written by the uniffi test `write_the_inspect_fixture` (`cargo test -p mnemo-uniffi -- --ignored write_the_inspect_fixture`) |
+| Touch the built-in embedder | `mnemo/src/builtin.rs` (the pinned model, revision and file SHA-256s, the cache directory, the checked download, the candle forward pass) and `mnemo/src/ident.rs` (identifier-aware recall's rule, with its cases as unit tests); the hook is `Embedder::query_keywords`, asked in `store/recall.rs`. All behind `embed-candle` except `ident.rs` and the hook. A new revision means new hashes and sizes in `FILES` and a new reference in `tests/builtin_embedder.rs`. Tests that need the model read it from `MNEMO_TEST_MODEL_DIR` (CI's `builtin embedder (linux)` job); every CLI test sets `MNEMO_CACHE_DIR` and `MNEMO_MODEL_URL`, so nothing touches the network or the real cache. The retrieval check on the brain is `examples/candle_hard.rs` with `test/scripts/model_compare/` |
 | Touch the result cache | `mnemo/src/result_cache.rs` (types + on-disk shapes) and `mnemo/src/store/cache_api.rs` (the `Mnemo` cache API). **Not `cache.rs`** — that's the page cache. Cache-mutating methods must gate on `self.read_only`, dirty `self.dirty_cache`, and call `self.cache_batch.record_dirty()` so the Batched flush policy fires correctly. |
 
 ## CI

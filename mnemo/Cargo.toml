@@ -158,12 +158,19 @@ zstd = { version = "=0.13.4", default-features = false }
 # lz4_flex as the pure-Rust page-compression candidate, compared before
 # the format was frozen. Only built with `--features fmt9_proto`.
 lz4_flex = { version = "=0.11.6", default-features = false, features = ["std", "safe-encode", "safe-decode"], optional = true }
-# 12.3 step 5 (the built-in embedder), added by step 5a (MSRV-2) for the
-# lockfile check only: nothing uses it yet. `default-features = false`, so
-# no image models and no native TLS: ONNX Runtime through `ort`, with its
-# binaries and the models fetched over rustls. Behind `embed-fastembed`,
-# off for the library.
-fastembed = { version = "=7.7.0", default-features = false, features = ["onnx", "ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"], optional = true }
+# 12.3 step 5 (v0.15): the built-in embedder, snowflake-arctic-embed-xs
+# on candle (pure Rust, CPU only: no Metal, CUDA, MKL or Accelerate), with
+# the `tokenizers` crate on its pure-Rust `fancy-regex` (no `onig`, which is
+# C, and no `esaxx_fast`, which is C++). The model's three files are fetched
+# once over HTTPS with `ureq` (rustls with ring, and the webpki roots: no
+# native TLS and nothing downloaded at build time) and checked against the
+# SHA-256s in `builtin.rs`. Behind `embed-candle`: on for the release CLI
+# binaries and wheels, off for the library and the mobile packages.
+candle-core = { version = "=0.11.1", default-features = false, optional = true }
+candle-nn = { version = "=0.11.1", default-features = false, optional = true }
+candle-transformers = { version = "=0.11.1", default-features = false, optional = true }
+tokenizers = { version = "=0.23.2", default-features = false, features = ["fancy-regex"], optional = true }
+ureq = { version = "=3.5.2", default-features = false, features = ["rustls"], optional = true }
 
 # 12.4 step 2a, the shared lock layer: safe wrappers for `openat`,
 # `mkdir`, `O_NOFOLLOW`, `fstat`, `statfs`, `geteuid` and `kill(pid, 0)`, so
@@ -214,6 +221,12 @@ mnemo-engine = { path = ".", features = ["dev-hooks"] }
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
 [target.'cfg(windows)'.dev-dependencies]
 keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
+
+# 12.3 step 5: the built-in embedder's retrieval check on this project's
+# brain (dev-only; see the example's docs).
+[[example]]
+name = "candle_hard"
+required-features = ["embed-candle"]
 
 [[bench]]
 name = "write"
@@ -272,9 +285,11 @@ keychain = ["dep:keyring-core", "dep:apple-native-keyring-store", "dep:windows-n
 # `--all-targets --features failpoints,benches`; the MSRV CI job
 # never sees them. Not for production use.
 benches = ["dep:criterion"]
-# 12.3 step 5: the built-in embedder (`fastembed`, ONNX). Nothing uses it
-# yet (step 5a only checks the lockfile with it); off for the library.
-embed-fastembed = ["dep:fastembed"]
+# 12.3 step 5 (v0.15): the built-in embedder (`mnemo_engine::builtin`):
+# snowflake-arctic-embed-xs on candle, fetched on first use. Off for the
+# library and the mobile packages; the release CLI binaries and wheels turn
+# it on.
+embed-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:ureq"]
 # Phase 12.1 MEM-1 open_rss example variant 4: swap the global
 # allocator for mimalloc inside the example binary only. Default
 # consumers do not carry the dep. Combine with `--features benches`

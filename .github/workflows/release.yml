@@ -164,15 +164,17 @@ jobs:
           cargo install --locked cargo-zigbuild --version 0.24.1
 
       # 12.3: the CLI carries the OS keychain (`keychain` feature; on Linux
-      # it builds libdbus from source, so the zig cross-build compiles C).
+      # it builds libdbus from source, so the zig cross-build compiles C)
+      # and, since step 5, the built-in embedder (`embed-candle`; its model
+      # is fetched on first use, not shipped).
       - name: Build release binary
         timeout-minutes: 20
         working-directory: mnemo
         run: |
           if [ "${{ matrix.use_zig }}" = "true" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }} --features keychain
+            cargo zigbuild --release --target ${{ matrix.target }} --features keychain,embed-candle
           else
-            cargo build --release --target ${{ matrix.target }} --features keychain
+            cargo build --release --target ${{ matrix.target }} --features keychain,embed-candle
           fi
         shell: bash
 
@@ -246,8 +248,9 @@ jobs:
           # `auto` lets maturin pick the right manylinux baseline. On
           # macOS/Windows the field is ignored when set to "off".
           manylinux: ${{ matrix.manylinux }}
-          # 12.3: the wheels carry the OS keychain (`keychain` feature).
-          args: --release --out dist --features keychain
+          # 12.3: the wheels carry the OS keychain (`keychain` feature) and,
+          # since step 5, the built-in embedder (`embed-candle`).
+          args: --release --out dist --features keychain,embed-candle
           working-directory: mnemo-python
           # No `rustflags:` input: this version of the action doesn't take
           # one (it warned "Unexpected input(s) 'rustflags'"). The job-level

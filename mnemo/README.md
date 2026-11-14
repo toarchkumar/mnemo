@@ -20,8 +20,11 @@ mnemo about path/to/agent.mnemo
 
 # Starting fresh? `init` auto-inserts a scaffold manifest so the new file
 # is self-describing from creation. Replace the scaffold once you know your
-# embedder, agent_id convention, and project metadata.
-mnemo init my-agent.mnemo --dimensions 768
+# agent_id convention and project metadata. Text is embedded with the
+# built-in embedder (384 dimensions, `init`'s default since v0.15).
+mnemo init my-agent.mnemo
+mnemo remember my-agent.mnemo --text "The release needs one approval click"
+mnemo recall my-agent.mnemo --text "who approves a release"
 mnemo about my-agent.mnemo
 ```
 
@@ -45,6 +48,12 @@ which would leak into shell history and process listings). Tools exposed:
 `about`, `remember`, `recall`, `forget`, `list`, `snapshot_list`, `stats`,
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`. Every mutation flushes before returning.
+
+With no `--embed-cmd`, the server embeds `text` with the built-in embedder
+(v0.15; see "The built-in embedder" below), loaded once at start. On a
+file that records another embedder, or when the model can't be loaded
+(offline, first use), it serves without one and says so on stderr:
+`recall`'s `text` is then matched by keyword only (v9 files).
 
 The server holds the file's lock for its whole life by default, so a second
 server or a CLI write on the same file gets `Locked`. **`--shared`** (v0.14,
@@ -875,10 +884,16 @@ cargo run --bin mnemo -- <command>
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |
-| `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
+| `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`; without `--embed-cmd`, the built-in) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
+| `embedder install` | Fetch the built-in embedder's model (91.0 MB) into the cache directory, checking each file's SHA-256; prints the size first (v0.15) |
+| `embedder status` | The built-in embedder's model, identity and cache, and whether it's installed (v0.15) |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |
+
+**`--model-dir <DIR>`** (v0.15), on every command: load the built-in
+embedder from this directory instead of the cache (see "The built-in
+embedder").
 
 **`--wait <duration>`** (v0.14, 12.4), on every command: how long to wait
 for the file's lock when another process holds it (`10s` by default;
@@ -894,6 +909,50 @@ runs v0.15 or later (`docs/shared-mode.md`, "How busy a file can get").
 When the wait runs out, the error names what holds the file if it left a
 note. A hook that only reads should pass `--wait 2s`; a hook that
 saves keeps the default.
+
+### The built-in embedder
+
+Since v0.15, the CLI and the Python wheels embed text themselves: `mnemo
+remember --text`, `recall --text`, `update --text`, `thread ingest`,
+`reembed` and `serve --mcp` use the built-in embedder unless you pass
+`--embed-cmd` and `--embed-name` (Python: `db.use_builtin_embedder()`).
+
+- **The model:** [snowflake-arctic-embed-xs](https://huggingface.co/Snowflake/snowflake-arctic-embed-xs)
+  (Apache-2.0) at a pinned revision, 384 dimensions, run on
+  [candle](https://github.com/huggingface/candle) in pure Rust on the CPU.
+  A file embedded with it records the identity
+  `Snowflake/snowflake-arctic-embed-xs@<revision>`, and refuses any other
+  embedder, as before.
+- **The download:** the model's three files (91.0 MB) aren't in the
+  binary. They're fetched once over HTTPS into the cache directory
+  (`~/Library/Caches/mnemo` on macOS, `%LOCALAPPDATA%\mnemo\cache` on
+  Windows, `$XDG_CACHE_HOME/mnemo` or `~/.cache/mnemo` elsewhere;
+  `MNEMO_CACHE_DIR` moves it), on first use with the size said on stderr,
+  or ahead of time with `mnemo embedder install`. Each file's SHA-256 is in
+  the binary and is checked before every load; a changed file is refused.
+  `MNEMO_MODEL_URL` points the download at a mirror (the hashes are still
+  checked).
+- **Your own copy:** `--model-dir <DIR>` (on any command) loads the three
+  files (`config.json`, `tokenizer.json`, `model.safetensors`) from a
+  directory and never downloads. The pinned files there are the built-in
+  embedder; other files get an identity naming their SHA-256s.
+- **Identifier-aware recall:** with the built-in, a recall by text scores
+  no keywords for the question's plain words (the vector does better
+  alone) and scores the identifiers in it (`snapshot_list`,
+  `RecallRequest::from_text`, `--features`, `store.rs`, `keyring@3.6.3`)
+  as explicit keywords. `--keywords` still overrides. Other embedders keep
+  the text's keyword weight of 0.25.
+- **Offline, or with no model:** `recall --text` is matched by keyword
+  only (on a v9 file), with a notice on stderr, and writes that need a
+  vector fail with the reason. A recall downloads the model only for a
+  file that records the built-in, and never records an identity.
+- **A file made with another embedder** keeps it: pass its `--embed-cmd`,
+  or move the file with `mnemo reembed <file>` (`--embed-dims 384` when its
+  width differs).
+
+The library and the mobile packages don't carry it: it's the
+`embed-candle` feature (`mnemo_engine::BuiltinEmbedder`), on in the
+release CLI binaries and wheels.
 
 ### Keyed facts: superseding instead of duplicating
 
