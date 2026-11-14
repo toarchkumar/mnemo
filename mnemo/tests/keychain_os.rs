@@ -69,3 +69,48 @@ fn the_os_keychain_keeps_and_gives_back_an_entry_or_says_it_isnt_there() {
         }
     }
 }
+
+/// Step 5a (MSRV-2): an entry written through `keyring` 3.6.3 (the
+/// keychain's crate before the `keyring` 4 stores) reads through the new
+/// store, so a key an earlier build kept is still found. One test binary
+/// writes and reads, so macOS asks no second binary for access. macOS and
+/// Windows (Linux CI has no Secret Service); a salt no brain has.
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn an_entry_keyring_3_wrote_reads_under_the_keyring_4_store() {
+    if !wanted() {
+        eprintln!("MNEMO_TEST_OS_KEYCHAIN isn't 1; the OS keychain isn't touched");
+        return;
+    }
+    let store = keys::default_store().expect("a keychain build has a store");
+    if let Err(e) = store.check_available() {
+        eprintln!("no keychain here ({e}); skipped");
+        return;
+    }
+    let mut salt = [0u8; 16];
+    salt.copy_from_slice(&Mnemo::generate_key()[..16]);
+    let key = Mnemo::generate_key();
+    let value = StoredSecret::Key(Zeroizing::new(key)).encode();
+    let old = keyring::Entry::new(keys::KEYCHAIN_SERVICE, &keys::hex(&salt)).unwrap();
+    old.set_password(&value).unwrap();
+    let found = store.get(&salt);
+    // Remove the entry before asserting, so a failure leaves nothing behind.
+    let _ = old.delete_credential();
+    match found.unwrap() {
+        Some(StoredSecret::Key(k)) => assert_eq!(*k, key),
+        Some(_) => panic!("the entry came back as a passphrase"),
+        None => panic!("the keyring 3.6.3 entry wasn't found by the keyring 4 store"),
+    }
+    // And the other way: the new store's entry reads through 3.6.3.
+    keys::store_and_check(
+        &*store,
+        &salt,
+        &StoredSecret::Key(Zeroizing::new(key)),
+        "test",
+    )
+    .unwrap();
+    let back = old.get_password();
+    store.delete(&salt).unwrap();
+    assert_eq!(*value, back.unwrap());
+    assert!(store.get(&salt).unwrap().is_none());
+}

@@ -766,9 +766,9 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
             let keep = |m: &Value| {
                 types
                     .as_ref()
-                    .map_or(true, |ts| ts.contains(&m["type"].as_str().unwrap_or("")))
-                    && q("agent").map_or(true, |a| m["agent"] == a)
-                    && q("thread").map_or(true, |t| m["thread"] == t)
+                    .is_none_or(|ts| ts.contains(&m["type"].as_str().unwrap_or("")))
+                    && q("agent").is_none_or(|a| m["agent"] == a)
+                    && q("thread").is_none_or(|t| m["thread"] == t)
                     && match q("keyed") {
                         Some("yes") => m.get("key").is_some(),
                         Some("no") => m.get("key").is_none(),

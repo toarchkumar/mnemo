@@ -61,8 +61,10 @@ maturin develop --release    # installs into the active venv
 python test_mnemo.py
 ```
 
-Minimum supported Rust version: **1.75**. All dependency versions are pinned
-exactly (`=x.y.z`) for reproducibility.
+Minimum supported Rust version: **1.92** (since v0.15; 1.75 before). The
+built-in embedder's ONNX Runtime binding (`ort`, behind `embed-fastembed`)
+sets it. All dependency versions are pinned exactly (`=x.y.z`) for
+reproducibility.
 
 ## Conventions
 

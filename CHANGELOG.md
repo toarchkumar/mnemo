@@ -108,6 +108,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **Building from source needs Rust 1.92 or later** (was 1.75; 12.3 step
+  5a, MSRV-2). The built-in embedder's ONNX Runtime binding (`ort`, behind
+  the new, still unused `embed-fastembed` feature) needs it. The released
+  CLI binaries and wheels are built with stable and are unaffected. The
+  UniFFI binding's floor moves from 1.82 to 1.92 with it.
+- **The `keychain` feature uses the `keyring` 4 family** (`keyring-core`
+  1.0.1 with `apple-native-keyring-store`, `windows-native-keyring-store`
+  and `dbus-secret-service-keyring-store`) in place of `keyring` 3.6.3.
+  Entries are named as before, so a key the earlier build kept is found.
+  The crates held back in `Cargo.lock` for Rust 1.75 are lifted, so
+  building with the keychain no longer needs `--locked`.
 - **A recall by text is hybrid by default (12.3 step 4):** with no
   `keywords`, the text itself is also matched by keyword (BM25), in the
   library (`RecallRequest::from_text`, which sets the new

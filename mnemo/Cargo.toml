@@ -12,7 +12,7 @@
 name = "mnemo-engine"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.92"
 # `benches/corpus.rs` is a shared helper module pulled into real benches
 # via `#[path = "corpus.rs"] mod corpus;`, not a bench target. Disable
 # auto-discovery so cargo doesn't try to build it as its own bench
@@ -85,10 +85,13 @@ serde = { version = "=1.0.210", features = ["derive"] }
 # client config byte for byte. No new crate.
 serde_json = { version = "=1.0.128", features = ["raw_value"] }
 rmp-serde = "=1.3.0"
-# Pin the transitive `rmp` crate: 0.8.15+ requires the edition2024 Cargo
-# feature, which is unavailable on our MSRV (1.75).
+# Pin the transitive `rmp` crate. It was pinned because 0.8.15+ is edition
+# 2024, which the old MSRV (1.75) couldn't parse; since step 5a (MSRV 1.92)
+# that reason is gone, and the pin stays because `rmp` encodes the file's
+# records (lifting it is its own change, with the format tests).
 rmp = "=0.8.14"
-# Pulled in by `argon2`; 1.7+ requires edition2024.
+# Pulled in by `argon2`; pinned when 1.7+ (edition 2024) was above the old
+# MSRV. It feeds the key derivation, so lifting it is its own change.
 base64ct = "=1.6.0"
 ulid = { version = "=1.1.3", features = ["serde"] }
 thiserror = "=1.0.64"
@@ -148,13 +151,19 @@ unicode-segmentation = "=1.12.0"
 # (`store.rs`, `compress_turn_record`). Required, not optional, since
 # every build must read those records. The engine's first C dependency
 # (`zstd-sys`, built by `cc`); CI cross-builds it for iOS and Android.
-# `cc`'s `parallel` feature pulls `jobserver`, pinned in Cargo.lock to
-# 0.1.34 (rust-version 1.63): 0.1.35 needs Rust 1.85, above our 1.75.
+# `cc`'s `parallel` feature pulls `jobserver` (held at 0.1.34 for the old
+# MSRV until step 5a lifted it).
 zstd = { version = "=0.13.4", default-features = false }
 # FMT-9a prototype measurement (`examples/fmt9_proto.rs --part compress`):
 # lz4_flex as the pure-Rust page-compression candidate, compared before
 # the format was frozen. Only built with `--features fmt9_proto`.
 lz4_flex = { version = "=0.11.6", default-features = false, features = ["std", "safe-encode", "safe-decode"], optional = true }
+# 12.3 step 5 (the built-in embedder), added by step 5a (MSRV-2) for the
+# lockfile check only: nothing uses it yet. `default-features = false`, so
+# no image models and no native TLS: ONNX Runtime through `ort`, with its
+# binaries and the models fetched over rustls. Behind `embed-fastembed`,
+# off for the library.
+fastembed = { version = "=7.7.0", default-features = false, features = ["onnx", "ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"], optional = true }
 
 # 12.4 step 2a, the shared lock layer: safe wrappers for `openat`,
 # `mkdir`, `O_NOFOLLOW`, `fstat`, `statfs`, `geteuid` and `kill(pid, 0)`, so
@@ -164,28 +173,30 @@ lz4_flex = { version = "=0.11.6", default-features = false, features = ["std", "
 rustix = { version = "=0.38.44", default-features = false, features = ["std", "fs", "process"] }
 
 # 12.3 step 2: the OS keychain behind the `keychain` feature (off for the
-# library; on for the release CLI binaries and wheels). `keyring` 3.6.3, not
-# 4.x: every 4.x store crate needs Rust 1.85 or later, and the MSRV is 1.75
-# (PLANNER-A DECISION 2026-11-14; MSRV-2 tracks moving to 4.x). CRATES
-# HELD IN Cargo.lock, because their newer releases are edition 2024 or need
-# Rust 1.85 or later: security-framework 3.6.0, zeroize 1.8.x with
-# zeroize_derive 1.4.3, proc-macro-crate 3.1.0, indexmap 2.11.x (with
-# hashbrown 0.15; 2.12 and later pull hashbrown 0.16+), and, on Linux,
-# dbus-secret-service 4.0.3 (4.1 needs Rust 1.78). Don't lift them with
-# `cargo update`; the MSRV jobs build with `--locked --features keychain`,
-# so a lifted pin fails CI. Linux uses Secret Service through libdbus, built
-# from source (`vendored`), so no system libdbus-1-dev is needed.
+# library; on for the release CLI binaries and wheels). Since step 5a
+# (MSRV-2, Rust 1.92): the `keyring` 4 family, as `keyring-core` and one
+# store crate per platform, which is what `keyring` 4 itself advises for an
+# application that picks its stores (the `keyring` crate's own `v1` mode
+# would pull the async zbus store on Linux). The stores name entries as
+# `keyring` 3.6.3 did, so its entries keep working: the macOS user
+# keychain's generic password (service, account); Windows Credential
+# Manager's `{account}.{service}`, UTF-16; Secret Service items found by
+# `service` and `username`, through libdbus built from source (`vendored`),
+# so no system libdbus-1-dev is needed.
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "=3.6.3", optional = true, default-features = false, features = ["apple-native"] }
+keyring-core = { version = "=1.0.1", optional = true }
+apple-native-keyring-store = { version = "=1.0.2", optional = true, features = ["keychain"] }
 [target.'cfg(windows)'.dependencies]
-keyring = { version = "=3.6.3", optional = true, default-features = false, features = ["windows-native"] }
+keyring-core = { version = "=1.0.1", optional = true }
+windows-native-keyring-store = { version = "=1.1.0", optional = true, default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "=3.6.3", optional = true, default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
+keyring-core = { version = "=1.0.1", optional = true }
+dbus-secret-service-keyring-store = { version = "=1.0.1", optional = true, features = ["crypto-rust", "vendored"] }
 
 [dev-dependencies]
 tempfile = "=3.10.1"
 # Property-based testing (Phase 1.3). Pinned exactly; `=1.5.0`'s MSRV
-# is Rust 1.65, well under our 1.75 floor. Kept as a dev-dep only —
+# is Rust 1.65, well under our 1.92 floor. Kept as a dev-dep only —
 # it does not appear in the shipped library dependency set.
 proptest = "=1.5.0"
 # HOOKS-1: the crate's own tests, benches and examples get the hidden test
@@ -194,6 +205,15 @@ proptest = "=1.5.0"
 # `cargo build` / `cargo install` and the release workflow make stay without
 # them.
 mnemo-engine = { path = ".", features = ["dev-hooks"] }
+
+# Step 5a (MSRV-2): `keyring` 3.6.3, which the keychain used before the
+# `keyring` 4 stores, for `tests/keychain_os.rs` only: one test binary
+# writes an entry through it and reads it back through the new store, so
+# macOS never asks a second binary for access. Never in a release build.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
+[target.'cfg(windows)'.dev-dependencies]
+keyring = { version = "=3.6.3", default-features = false, features = ["windows-native"] }
 
 [[bench]]
 name = "write"
@@ -243,8 +263,8 @@ dev-hooks = []
 # 12.3 step 2: the OS keychain as the key store (macOS Keychain, Windows
 # Credential Manager, Secret Service on Linux). Off by default for the
 # library; the release CLI binaries and wheels turn it on. See the
-# `keyring` lines below for the held crates.
-keychain = ["dep:keyring"]
+# `keyring-core` lines below.
+keychain = ["dep:keyring-core", "dep:apple-native-keyring-store", "dep:windows-native-keyring-store", "dep:dbus-secret-service-keyring-store"]
 # Phase 6 speed benchmarks. Pulls criterion (and its rayon/half/
 # ciborium subtree, which raised MSRV to 1.80+). Opt-in only — the
 # maintainer runs `cargo bench --no-run --features benches` on the
@@ -252,6 +272,9 @@ keychain = ["dep:keyring"]
 # `--all-targets --features failpoints,benches`; the MSRV CI job
 # never sees them. Not for production use.
 benches = ["dep:criterion"]
+# 12.3 step 5: the built-in embedder (`fastembed`, ONNX). Nothing uses it
+# yet (step 5a only checks the lockfile with it); off for the library.
+embed-fastembed = ["dep:fastembed"]
 # Phase 12.1 MEM-1 open_rss example variant 4: swap the global
 # allocator for mimalloc inside the example binary only. Default
 # consumers do not carry the dep. Combine with `--features benches`
@@ -269,7 +292,7 @@ codegen-units = 1
 # at the repo root and by `RUSTFLAGS` in CI + release workflows). rustc
 # doesn't know those cfg names on its own, so without this declaration
 # `-D warnings` would trip on `unexpected_cfgs` and break every build.
-# Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.75.
+# Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.92.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(aes_armv8)',

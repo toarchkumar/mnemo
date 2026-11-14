@@ -48,6 +48,14 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// Step 5a (MSRV 1.92): `as_chunks` (stable since 1.88) is now within the
+// MSRV, so clippy suggests it for every constant-size `chunks_exact`. Those
+// are the hot kernels (PQ distance tables, fp16 vectors, the WAL checksum);
+// rewriting them waits for a change that measures them with the benches.
+// `unknown_lints` first, so a clippy older than the lint (before 1.100)
+// doesn't fail on its name.
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 mod cache;
 mod crypto;

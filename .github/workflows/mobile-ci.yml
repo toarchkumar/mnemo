@@ -130,22 +130,23 @@ jobs:
           echo "### libmnemo_uniffi.a (${{ matrix.target }}): $(stat -f %z "$A") bytes (before app linking; 1d reports the App Thinning delta)" >> "$GITHUB_STEP_SUMMARY"
 
   # --- MOBILE-1a: the UniFFI binding crate on its own declared minimum Rust
-  #     (`rust-version` in mnemo/bindings/uniffi/Cargo.toml). The engine's
-  #     MSRV job (1.75) never builds it: it's a non-default workspace member.
+  #     (`rust-version` in mnemo/bindings/uniffi/Cargo.toml, the engine's
+  #     1.92 since v0.15 step 5a). The engine's MSRV job never builds it:
+  #     it's a non-default workspace member.
   msrv-uniffi:
-    name: msrv-uniffi (rust 1.82, linux)
+    name: msrv-uniffi (rust 1.92, linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust 1.82
-        uses: dtolnay/rust-toolchain@1.82
+      - name: Install Rust 1.92
+        uses: dtolnay/rust-toolchain@1.92
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: mnemo
-          key: msrv-uniffi-1.82
+          key: msrv-uniffi-1.92
 
       - name: cargo test -p mnemo-uniffi
         working-directory: mnemo

@@ -274,7 +274,7 @@ fn role_writer() -> RoleResult {
     };
     let mut n = 0usize;
     let mut acked = 0usize;
-    while !stopped() && count.map_or(true, |c| acked < c) {
+    while !stopped() && count.is_none_or(|c| acked < c) {
         let content = format!("{id}-{n}");
         n += 1;
         let m = mem(&content);
@@ -282,7 +282,7 @@ fn role_writer() -> RoleResult {
             Ok(uid) => {
                 append(&dir.join("acks"), &id, &content);
                 acked += 1;
-                if acked % 10 == 0 {
+                if acked.is_multiple_of(10) {
                     match s.read(|db| db.get(&uid)) {
                         Ok(back) if back.content == content => {}
                         Ok(back) => {
@@ -340,7 +340,7 @@ fn role_compactor() -> RoleResult {
     let count: Option<usize> = std::env::var("XP_COUNT").ok().map(|c| c.parse().unwrap());
     let secret = var_or("XP_SECRET", PW);
     let mut done = 0usize;
-    while !stopped() && count.map_or(true, |c| done < c) {
+    while !stopped() && count.is_none_or(|c| done < c) {
         let p = &paths[done % paths.len()];
         match Mnemo::compact_file(p, &secret) {
             Ok(_) => {

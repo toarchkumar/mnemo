@@ -58,7 +58,7 @@ fn scan_header_recovery_candidates(
     let mut best: Option<(u64, Vec<wal::Frame>)> = None;
     for_each_wal_candidate(file, &mut |file, page_no| {
         if let Some((txn_id, frames)) = try_recover_candidate(file, page_no, secret, held_dek)? {
-            if best.as_ref().map_or(true, |(id, _)| txn_id > *id) {
+            if best.as_ref().is_none_or(|(id, _)| txn_id > *id) {
                 best = Some((txn_id, frames));
             }
         }

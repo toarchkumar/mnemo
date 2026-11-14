@@ -1,15 +1,15 @@
 # MOBILE-1a: the UniFFI binding of the MNemo engine, the source of the Swift
 # (MOBILE-1b) and Kotlin (MOBILE-1c) packages. A workspace member but not a
-# default member, so the engine's own MSRV job (1.75) never builds it.
+# default member, so the engine's own MSRV job never builds it.
 #
-# UniFFI declares no `rust-version`; its CHANGELOG last stated an MSRV of
-# 1.82.0 (v0.29.1), and the `msrv-uniffi` CI job proves this crate builds
-# on the version declared here.
+# UniFFI declares no `rust-version` (its CHANGELOG last stated 1.82.0, at
+# v0.29.1); since v0.15 step 5a this crate's floor is the engine's, 1.92,
+# and the `msrv-uniffi` CI job proves it builds on the version declared here.
 [package]
 name = "mnemo-uniffi"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.92"
 license = "Apache-2.0"
 description = "UniFFI (Swift and Kotlin) bindings for the MNemo encrypted agent-memory engine"
 repository = "https://github.com/toarchkumar/mnemo"

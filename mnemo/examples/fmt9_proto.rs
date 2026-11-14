@@ -19,6 +19,10 @@
 //! Markdown (PLAN.md, CHANGELOG.md, READMEs): English prose dense with
 //! identifiers, like an agent's memory. No transcripts are read.
 
+// As in lib.rs (step 5a): the constant-size `chunks_exact` loops stay.
+#![allow(unknown_lints)]
+#![allow(clippy::chunks_exact_to_as_chunks)]
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -572,7 +576,11 @@ fn turn_record(content: String, seq: u64, part: Option<u64>) -> Memory {
     m.metadata.insert("_mnemo.seq".into(), json!(seq));
     m.metadata.insert(
         "_mnemo.role".into(),
-        json!(if seq % 2 == 0 { "user" } else { "assistant" }),
+        json!(if seq.is_multiple_of(2) {
+            "user"
+        } else {
+            "assistant"
+        }),
     );
     if let Some(p) = part {
         m.metadata.insert("_mnemo.part".into(), json!(p));

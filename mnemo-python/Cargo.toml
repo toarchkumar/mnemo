@@ -6,7 +6,7 @@
 name = "mnemo-python"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.92"
 description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-engine wheel on PyPI"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
