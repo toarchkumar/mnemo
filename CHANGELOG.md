@@ -85,9 +85,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   sidecar directory), so busy readers can't lock out a save: no `Locked`
   against 8 or 16 readers on cheap reads, and a write's 99th percentile
   about 570 ms there (v0.14: 2.9 s, and lockouts). A reader that has itself
-  waited 500 ms stops holding back, so writers can't starve readers in
-  turn; with eight writers looping, a read can wait about a second. The
-  bound holds when every process using the file shared runs v0.15 or later.
+  waited 500 ms stops holding back and retries every few ms, so writers
+  can't starve readers in turn; with eight writers looping, a read can wait
+  up to about a second, and up to about 2 s on a slow machine. The bound holds when every process using the file shared runs v0.15 or later.
   A plain long operation (`compact`, `rekey`, `import`) that started before
   any shared handle now picks up the sidecar while it waits.
 - **The released CLI binaries and wheels are built with the `keychain`
