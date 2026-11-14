@@ -816,9 +816,12 @@ for the file's lock when another process holds it (`10s` by default;
 `search`, `history`, `export`, `verify`, `recall --no-track`, `inspect`,
 ...) run alongside other readers. Writes (`remember`, `update`, `forget`,
 `import`, `compact`, `rekey`, and the other commands that change the file)
-take the lock with writer preference and leave a note naming the command
-while they hold it. When the wait runs out, the error names what holds the
-file if it left a note. A session hook should pass `--wait 2s`.
+take the exclusive lock and leave a note naming the command while they hold
+it; readers come first, so busy readers slow a write, and enough of them
+can keep it waiting past `--wait` (`docs/shared-mode.md`, "How busy a file
+can get"). When the wait runs out, the error names what holds the file if
+it left a note. A hook that only reads should pass `--wait 2s`; a hook that
+saves keeps the default.
 
 ### Self-describing databases
 

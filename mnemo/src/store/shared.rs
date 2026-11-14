@@ -739,7 +739,11 @@ impl SharedMnemo {
 /// plain handle's "reopen it".
 fn in_shared_window(e: MnemoError) -> MnemoError {
     match e {
-        MnemoError::Replaced { path, .. } => MnemoError::Replaced { path, shared: true },
+        MnemoError::Replaced { path, missing, .. } => MnemoError::Replaced {
+            path,
+            shared: true,
+            missing,
+        },
         e => e,
     }
 }

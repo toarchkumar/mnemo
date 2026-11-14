@@ -129,21 +129,25 @@ pub enum MnemoError {
 
     /// The file at this handle's path is no longer the file the handle
     /// opened: something renamed another file over it (a compaction in
-    /// another process, or another program). Writing would go to the
-    /// replaced file and be lost, so the handle refuses, and writes nothing.
-    /// A plain handle: reopen the path to use the file that's there now. A
-    /// shared handle (`shared`): the rename came between the window's
-    /// identity check and its commit (an older build's compaction renames
-    /// without its lock); calling again is safe, and the next call follows
-    /// the new file.
-    #[error("{}", replaced_message(path, *shared))]
+    /// another process, or another program), or the file was moved or
+    /// removed (`missing`). Writing would go to a file nobody finds at the
+    /// path, so the handle refuses, and writes nothing.
+    /// A plain handle: reopen the path to use the file that's there now
+    /// ([`crate::Mnemo::try_close`] hands the handle back). A shared handle
+    /// (`shared`): the rename came between the window's identity check and
+    /// its commit (an older build's compaction renames without its lock);
+    /// calling again is safe, and the next call follows the new file.
+    #[error("{}", replaced_message(path, *shared, *missing))]
     #[non_exhaustive]
     Replaced {
-        /// The path that now names a different file.
+        /// The handle's path, which no longer names the file it opened.
         path: std::path::PathBuf,
         /// Raised in a shared-mode write window, where the next call
         /// follows the new file by itself.
         shared: bool,
+        /// Nothing is at the path any more: the file was moved or removed,
+        /// rather than another file renamed over it.
+        missing: bool,
     },
 
     /// A mutation was attempted on a handle opened via
@@ -224,9 +228,15 @@ fn holder_suffix(holder: &Option<String>) -> String {
     }
 }
 
-fn replaced_message(path: &std::path::Path, shared: bool) -> String {
+fn replaced_message(path: &std::path::Path, shared: bool, missing: bool) -> String {
     let path = path.display();
-    if shared {
+    if missing {
+        format!(
+            "the file at {path} was moved or removed after this handle opened it, and this \
+             handle's path no longer names it; nothing was written. Move it back, or open it \
+             where it is now"
+        )
+    } else if shared {
         format!(
             "the file at {path} was replaced (by an older build's compaction, or by another \
              program) before this write; nothing was written, and the next call follows the \

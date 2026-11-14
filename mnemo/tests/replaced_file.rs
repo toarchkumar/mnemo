@@ -191,6 +191,126 @@ fn a_handle_refuses_to_write_to_a_file_replaced_at_its_path() {
     assert_eq!(count(&path), 5);
 }
 
+/// What a file holds, read while a handle holds its lock: its bytes on
+/// Unix, where the lock is advisory; its length on Windows, where the lock
+/// is a mandatory byte-range lock and a read of the locked range fails
+/// (os error 33).
+fn snapshot(path: &Path) -> Vec<u8> {
+    if cfg!(windows) {
+        std::fs::metadata(path)
+            .unwrap()
+            .len()
+            .to_le_bytes()
+            .to_vec()
+    } else {
+        std::fs::read(path).unwrap()
+    }
+}
+
+/// RB-008.2: a brain moved or removed under a live handle. Nothing is at
+/// the path, so the message says the file was moved or removed (not
+/// "replaced"), `try_close` hands the handle back, and once the file is
+/// moved back the same handle commits what it held.
+#[test]
+fn a_moved_or_removed_brain_says_so_and_a_copy_says_replaced() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("a.mnemo");
+    let moved = dir.path().join("moved.mnemo");
+    seed(&path, 2);
+
+    // Renamed away, in the same directory.
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    db.remember(Memory::new("pending", MemoryType::Semantic, vec![1.0, 0.0]))
+        .unwrap();
+    if let Err(e) = std::fs::rename(&path, &moved) {
+        if is_rename_refused(&MnemoError::Io(e)) {
+            eprintln!("skipped: this toolchain's rename can't move an open file");
+            return;
+        }
+        panic!("rename failed");
+    }
+    let before = snapshot(&moved);
+    let err = db.flush().unwrap_err();
+    assert!(
+        matches!(err, MnemoError::Replaced { missing: true, .. }),
+        "{err}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("was moved or removed")
+            && msg.contains("no longer names it")
+            && msg.contains("nothing was written"),
+        "{msg}"
+    );
+    assert!(!msg.contains("was replaced"), "{msg}");
+    let back = match db.try_close() {
+        Ok(()) => panic!("a close on a moved brain must fail"),
+        Err(e) => {
+            assert!(
+                matches!(e.error(), MnemoError::Replaced { missing: true, .. }),
+                "{}",
+                e.error()
+            );
+            e.into_inner()
+        }
+    };
+    assert_eq!(
+        snapshot(&moved),
+        before,
+        "nothing was written to the moved file"
+    );
+    std::fs::rename(&moved, &path).unwrap();
+    back.close().unwrap();
+    assert_eq!(count(&path), 3, "moved back, the handle's write commits");
+
+    // Replaced by a copy of itself: another file is at the path. (The copy
+    // is made before the handle opens: on Windows a locked file can't be
+    // read.)
+    let copy = dir.path().join("copy.mnemo");
+    std::fs::copy(&path, &copy).unwrap();
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    db.remember(Memory::new("lost", MemoryType::Semantic, vec![1.0, 0.0]))
+        .unwrap();
+    if let Err(e) = std::fs::rename(&copy, &path) {
+        if is_rename_refused(&MnemoError::Io(e)) {
+            eprintln!("skipped: this toolchain's rename can't replace an open file");
+            return;
+        }
+        panic!("rename failed");
+    }
+    let err = db.flush().unwrap_err();
+    assert!(
+        matches!(err, MnemoError::Replaced { missing: false, .. }),
+        "{err}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("was replaced") && msg.contains("Reopen"),
+        "{msg}"
+    );
+    assert!(!msg.contains("moved or removed"), "{msg}");
+    drop(db);
+    assert_eq!(count(&path), 3);
+
+    // Removed. (Unix only: on Windows a removed file that a handle has
+    // open can stay at its path, pending deletion, until the handle closes.)
+    #[cfg(unix)]
+    {
+        let mut db = Mnemo::open(&path, PW).unwrap();
+        db.remember(Memory::new("gone", MemoryType::Semantic, vec![1.0, 0.0]))
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let err = db.flush().unwrap_err();
+        assert!(
+            matches!(err, MnemoError::Replaced { missing: true, .. }),
+            "{err}"
+        );
+        assert!(err.to_string().contains("was moved or removed"), "{err}");
+        drop(db);
+        assert!(!path.exists());
+    }
+}
+
 /// The path is checked as an absolute path, so a handle opened with a
 /// relative path keeps working after the process changes directory.
 /// (The only test here that changes the current directory; it restores it.)

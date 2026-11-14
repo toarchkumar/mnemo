@@ -145,6 +145,12 @@ mod exc {
     );
     pyo3::create_exception!(
         mnemo_engine,
+        ReplacedError,
+        MnemoError,
+        "The file at the handle's path is no longer the one it opened (another file renamed over it, or it was moved or removed); nothing was written. `shared` is True in a shared-mode write, where calling again is safe and the next call follows the new file."
+    );
+    pyo3::create_exception!(
+        mnemo_engine,
         ReplacedDuringWriteError,
         MnemoError,
         "The file was replaced at its path during a shared-mode write; the write isn't in the file now there."
@@ -193,6 +199,17 @@ fn _dev_rename_after_next_shared_commit(src: String, dest: String) {
     })
 }
 
+/// HOOKS-1 test hook (`dev-hooks`): on this thread's next shared-mode
+/// write, after the window's closure and before its commit, rename `src`
+/// over `dest`, so the write raises `ReplacedError` with `shared` set.
+#[cfg(feature = "dev-hooks")]
+#[pyfunction]
+fn _dev_rename_before_next_shared_commit(src: String, dest: String) {
+    mnemo_core::__failpoints::before_next_shared_commit(move || {
+        let _ = std::fs::rename(&src, &dest);
+    })
+}
+
 /// Map a core error onto its Python exception type (the message is the
 /// engine's, unchanged).
 fn to_py(e: mnemo_core::MnemoError) -> PyErr {
@@ -217,6 +234,18 @@ fn to_py(e: mnemo_core::MnemoError) -> PyErr {
         E::Unsupported(_) => exc::UnsupportedError::new_err(msg),
         E::MaybeStored(_) => exc::MaybeStoredError::new_err(msg),
         E::ReplacedDuringWrite { .. } => exc::ReplacedDuringWriteError::new_err(msg),
+        // RB-008.3: its own class, with `shared` set, since the shared one
+        // is the error whose advice is "call again".
+        E::Replaced { shared, .. } => {
+            let err = exc::ReplacedError::new_err(msg);
+            Python::with_gil(|py| {
+                // Setting an attribute on a fresh exception instance can't
+                // fail in practice; if it did, the error still has its
+                // class and message.
+                let _ = err.value_bound(py).setattr("shared", shared);
+            });
+            err
+        }
         _ => exc::MnemoError::new_err(msg),
     }
 }
@@ -3121,6 +3150,7 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "MaybeStoredError",
         py.get_type_bound::<exc::MaybeStoredError>(),
     )?;
+    m.add("ReplacedError", py.get_type_bound::<exc::ReplacedError>())?;
     m.add(
         "ReplacedDuringWriteError",
         py.get_type_bound::<exc::ReplacedDuringWriteError>(),
@@ -3139,6 +3169,8 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_dev_set_writes_until_fail, m)?)?;
     #[cfg(feature = "dev-hooks")]
     m.add_function(wrap_pyfunction!(_dev_rename_after_next_shared_commit, m)?)?;
+    #[cfg(feature = "dev-hooks")]
+    m.add_function(wrap_pyfunction!(_dev_rename_before_next_shared_commit, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

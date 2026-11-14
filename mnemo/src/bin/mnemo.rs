@@ -23,8 +23,9 @@ use mnemo_engine::{
 struct Cli {
     /// How long to wait for the brain's lock when another process holds it
     /// (12.4 shared mode): `10s`, `500ms`, `2m`, or a number of seconds.
-    /// Reads run alongside other readers; writes wait with writer
-    /// preference. A session hook should pass `--wait 2s`.
+    /// Reads run alongside other readers, and readers come first. A hook
+    /// that only reads should pass `--wait 2s`; one that saves keeps the
+    /// default, since busy readers can hold a write longer.
     #[arg(long, global = true, value_name = "DURATION", default_value = "10s",
           value_parser = parse_wait)]
     wait: std::time::Duration,

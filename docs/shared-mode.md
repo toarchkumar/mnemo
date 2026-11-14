@@ -29,7 +29,7 @@ before you use shared mode on it:
 |---|---|---|
 | Rust | `Mnemo::open_shared(path, passphrase, SharedOptions::default())` (or `open_shared_with_key`) returns a `SharedMnemo`; call `read(\|db\| ...)` and `write(\|db\| ...)` | v0.14 |
 | Python | `mnemo_engine.open(path, passphrase, shared=True, wait=10.0, allow_network_fs=False)` (or `open_with_key(...)`); the same methods as a plain handle, each one read or one write | v0.14 |
-| CLI | Nothing to turn on: every command waits up to `--wait` (default 10 s) for the lock, reads alongside other readers and writes with writer preference. A session hook should pass `--wait 2s`, so a busy file delays a session's start by at most about two seconds | v0.14 |
+| CLI | Nothing to turn on: every command waits up to `--wait` (default 10 s) for the lock, reads alongside other readers, and readers come first ("The wait"). A hook that only reads should pass `--wait 2s`, so a busy file delays a session's start by at most about two seconds; a hook that saves keeps the default, because a busy file can hold a write longer than that ("How busy a file can get") | v0.14 |
 | MCP server | `mnemo serve --mcp --shared <file>` holds no lock between tool calls; each call is one read or one write window, waiting up to `--wait`. `--allow-network-fs` with it. Off by default in v0.14: without `--shared` the server holds the file for its whole life | v0.14 |
 | `inspect` | Its read-only open waits up to `--wait`. A pending WAL or a torn header it can't recover (it never writes) is explained: any writer's next call recovers it | v0.14 |
 | Swift, Kotlin | not in v0.14 | later |
@@ -49,8 +49,10 @@ When a long operation holds the file, the error names it ("compact since
 12:01:05 UTC (pid 4242, mnemo)"). **Readers come first:** reads are what an
 agent waits on, so a read that finds a writer committing waits only for
 that commit, and the next writer queues behind it. A waiting writer still
-keeps new readers from cutting in, so busy readers slow a writer down but
-don't lock it out. "How busy a file can get" has the numbers.
+keeps new readers from cutting in, but readers already waiting go first. So
+readers looping with no pause slow a writer down, and enough of them can
+keep it waiting past its deadline: the write fails with `Locked`, nothing is
+lost, and calling again is safe. "How busy a file can get" has the numbers.
 
 **Cancelling.** A `CancelToken` (`SharedOptions::cancel`, Python's
 `cancel=`) cancels a call that is *waiting* for the lock, from another
@@ -99,13 +101,17 @@ process looping as fast as it can (`shared_v0_14_0` in
   against one to eight writers.
 - **A writer against readers looping back to back** slows to under one
   commit a second, with a 99th percentile of 2.9 s at 10K (5.5 s at 100K).
-  It still commits within the 10 s default deadline.
+  In that mix (seven readers on recall-sized reads) it still commits within
+  the 10 s default deadline. With more processes reading with no pause it
+  may not: against 16 reader processes on cheap reads, 6 of 7 writes waited
+  out 10 s and failed with `Locked`. Nothing is lost (the write wasn't
+  made), and calling again is safe.
 - **Eight writers at once:** the slowest 1 % of writes wait about 2.5 s.
 
 Agents write a few times a minute and read on demand, so these are limits,
 not the usual load. A planned change (LOCK-2, before shared mode becomes the
 default for `serve --mcp`) gives a writer that has waited about 2 s the next
-turn, so readers can't push a save toward its deadline.
+turn, so readers can't hold a save past its deadline.
 
 **A compaction holds the file for its whole length.** It took about 0.2 s
 at 10K and about 175 s at 100K on the same machine, and every call that
@@ -144,7 +150,9 @@ compaction). Compact, or rekey with `--rotate`, when no agent is working.
   budgets, the cache flush policy, turn compression) keep their defaults on
   a shared handle; setting one raises `Unsupported`. Per-handle settings
   (the page cache's size, the vector cache budget, the embedder) work and
-  are kept across reloads.
+  are kept across reloads. `cache_stats` counts hits and misses since the
+  handle's last reload: another process's commit makes the handle rebuild,
+  and the counters start again.
 
 ## Errors
 
@@ -155,5 +163,6 @@ compaction). Compact, or rekey with `--rotate`, when no agent is working.
 | `Unsupported` | `UnsupportedError` | shared mode isn't available here (a network or synced folder, an old Windows build), or a file-wide setting on a shared handle |
 | `MaybeStored` | `MaybeStoredError` | a write failed after its commit point (or after an earlier commit in the same window): it may be in the file; check before retrying |
 | `ReplacedDuringWrite` | `ReplacedDuringWriteError` | something (an older compactor) renamed another file over the path during the write; the write isn't in the file now at the path |
-| `Replaced { shared: true }` | `MnemoError` | something (an older compactor) renamed another file over the path just before the write's commit; nothing was written, so calling again is safe, and the next call follows the new file |
+| `Replaced { shared: true }` | `ReplacedError` (`shared` is `True`) | something (an older compactor) renamed another file over the path just before the write's commit; nothing was written, so calling again is safe, and the next call follows the new file |
+| `Replaced { missing: true }` | `ReplacedError` | the brain was moved or removed: the handle's path no longer names it, and nothing was written. Move it back, or open it where it is now |
 | `NeedsWriteOpen` | `NeedsWriteOpenError` | a read had to recover the file (a pending WAL, a torn header) and this process can't write it |

@@ -105,11 +105,6 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [v.tolist() for v in vectors]
 
 
-# How long a write waits for the brain's lock (12.4 shared mode): a session
-# hook's figure, so a busy file delays a call by at most about two seconds.
-WRITE_WAIT_SECS = 2.0
-
-
 def open_db(*, create: bool = False, write: bool = True):
     """Open the test database AND register the embedder on the handle.
     Phase 3 (PR 10a) added `db.set_embedder(fn, ...)` as a per-handle
@@ -121,8 +116,10 @@ def open_db(*, create: bool = False, write: bool = True):
 
     DOGFOOD-1: reads (`write=False`) open read-only, so a Planner or a
     Reviewer (who must not write) can use them, alongside other readers.
-    Writes open in shared mode (`shared=True, wait=2.0`), so they take the
-    lock per call and wait for other sessions instead of failing. Shared
+    Writes open in shared mode (`shared=True`, with the default 10 s wait:
+    a save keeps the default, since busy readers can hold a write longer
+    than a read hook's 2 s; RB-008.1), so they take the lock per call and
+    wait for other sessions instead of failing. Shared
     mode never creates a file, so a missing brain is created first with a
     plain open."""
     mnemo = require_mnemo()
@@ -134,7 +131,7 @@ def open_db(*, create: bool = False, write: bool = True):
             MNEMO_PATH.unlink()
         mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS).close()
     if write:
-        db = mnemo.open(str(MNEMO_PATH), pp, shared=True, wait=WRITE_WAIT_SECS)
+        db = mnemo.open(str(MNEMO_PATH), pp, shared=True)
     else:
         db = mnemo.open(str(MNEMO_PATH), pp, read_only=True)
     db.set_embedder(

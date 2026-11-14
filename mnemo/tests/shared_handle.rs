@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use mnemo_engine::__failpoints::{
-    after_next_shared_commit, before_next_shared_commit, set_writes_until_fail,
-    set_writes_until_fail_n,
+    after_next_shared_commit, before_next_shared_commit, path_check_failures_left,
+    set_path_check_failures, set_writes_until_fail, set_writes_until_fail_n,
 };
 
 use mnemo_engine::{
@@ -430,6 +430,67 @@ fn a_rename_before_the_commit_is_refused_and_the_next_call_follows() {
     assert_eq!(in_handle(&mut a), vec!["the other file"]);
     remember(&mut a, "after the rename").unwrap();
     assert_eq!(on_disk(&p), vec!["after the rename", "the other file"]);
+}
+
+/// RB-008.2: a brain moved away between the window's identity check and
+/// its commit: the commit refuses, saying the file was moved or removed.
+#[test]
+fn a_move_before_the_commit_says_moved_or_removed() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let moved = dir.path().join("moved.mnemo");
+    let Some(mut a) = shared(&p) else { return };
+    let (from, to) = (p.clone(), moved.clone());
+    before_next_shared_commit(move || std::fs::rename(&from, &to).unwrap());
+    let e = remember(&mut a, "never written").unwrap_err();
+    assert!(
+        matches!(
+            e,
+            MnemoError::Replaced {
+                shared: true,
+                missing: true,
+                ..
+            }
+        ),
+        "{e}"
+    );
+    assert!(e.to_string().contains("was moved or removed"), "{e}");
+    assert_eq!(on_disk(&moved).len(), 1, "nothing was written");
+}
+
+/// RB-008.2: when the check that the path still names the open file fails
+/// itself (here a failpoint's permission error), a plain handle commits as
+/// v0.13.2 did: it has held the lock since it opened, so nothing can have
+/// compacted over it. A shared handle, which holds nothing between calls,
+/// returns the error and writes nothing.
+#[test]
+fn a_failing_path_check_lets_a_plain_handle_commit_and_stops_a_shared_one() {
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    db.remember(mem("plain write")).unwrap();
+    set_path_check_failures(1);
+    let r = db.flush();
+    let left = path_check_failures_left();
+    set_path_check_failures(0);
+    r.unwrap();
+    assert_eq!(left, 0, "the flush checked the path");
+    db.close().unwrap();
+    assert_eq!(on_disk(&p).len(), 2);
+
+    let Some(mut a) = shared(&p) else { return };
+    set_path_check_failures(1);
+    let r = remember(&mut a, "shared write");
+    set_path_check_failures(0);
+    let e = r.unwrap_err();
+    assert!(
+        matches!(&e, MnemoError::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied),
+        "{e}"
+    );
+    assert_eq!(on_disk(&p).len(), 2, "nothing was written");
+    remember(&mut a, "shared write").unwrap();
+    assert_eq!(on_disk(&p).len(), 3);
 }
 
 // --- What only this handle writes --------------------------------------

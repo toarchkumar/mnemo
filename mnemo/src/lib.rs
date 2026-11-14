@@ -380,6 +380,32 @@ pub mod __failpoints {
         EUID_OVERRIDE.with(|c| c.get())
     }
 
+    thread_local! {
+        static PATH_CHECK_FAILURES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Make this thread's next `n` checks that a handle's path still names
+    /// its open file fail with a permission error (RB-008.2), as when the
+    /// process has lost access to the path. `0` disarms.
+    pub fn set_path_check_failures(n: u64) {
+        PATH_CHECK_FAILURES.with(|c| c.set(n));
+    }
+
+    /// How many armed path-check failures this thread has left.
+    pub fn path_check_failures_left() -> u64 {
+        PATH_CHECK_FAILURES.with(|c| c.get())
+    }
+
+    pub(crate) fn take_path_check_failure() -> bool {
+        PATH_CHECK_FAILURES.with(|c| {
+            let n = c.get();
+            if n > 0 {
+                c.set(n - 1);
+            }
+            n > 0
+        })
+    }
+
     pub(crate) fn take_shared_replaced() -> bool {
         SHARED_REPLACED.with(|c| {
             let n = c.get();

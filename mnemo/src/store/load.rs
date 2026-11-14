@@ -45,6 +45,7 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result
             return Err(MnemoError::Replaced {
                 path: path.to_path_buf(),
                 shared: false,
+                missing: false,
             });
         }
         // Replaced between our open and our lock: unlock (on drop) and open
@@ -53,6 +54,7 @@ pub(super) fn open_with_lock(path: &Path, write: bool, create: Create) -> Result
     Err(MnemoError::Replaced {
         path: path.to_path_buf(),
         shared: false,
+        missing: false,
     })
 }
 
@@ -120,30 +122,94 @@ pub(super) fn absolute(path: PathBuf) -> PathBuf {
 impl Mnemo {
     /// v0.14.0 step 1: refuse to write when the file at this handle's path
     /// is no longer the one it has open (something renamed another file
-    /// over it), since every write would go to the replaced file and be
-    /// lost. Called before each commit (`flush`, `rekey`); costs a `stat`
-    /// of the path and of the open file.
+    /// over it, or the file was moved or removed), since every write would
+    /// go to a file nobody finds at the path. Called before each commit
+    /// (`flush`, `rekey`); costs an `fstat` of the open file and a `stat`
+    /// of the path.
+    ///
+    /// RB-008.2: when the check itself fails (permission to the path lost,
+    /// the descriptor limit on Windows), a plain handle commits as v0.13.2
+    /// did. It holds the lock for its whole life, so nothing it can't see
+    /// can compact over it. A shared handle returns the error.
     pub(super) fn ensure_not_replaced(&self) -> Result<()> {
-        if is_file_at(self.pager.file(), &self.path)? {
-            Ok(())
-        } else {
-            Err(MnemoError::Replaced {
+        let at = match file_at(self.pager.file(), &self.path) {
+            Ok(at) => at,
+            Err(_) if !self.shared => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        match at {
+            AtPath::Same => Ok(()),
+            AtPath::Other | AtPath::Nothing => Err(MnemoError::Replaced {
                 path: self.path.clone(),
                 shared: false,
-            })
+                missing: at == AtPath::Nothing,
+            }),
         }
     }
+}
+
+/// What a path names, against a file a handle has open.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum AtPath {
+    /// The open file.
+    Same,
+    /// Another file (one was renamed over the path).
+    Other,
+    /// Nothing: the file was moved or removed.
+    Nothing,
 }
 
 /// Does `path` still name the file `file` has open? `false` when the path
 /// names another file, or none (it was removed or renamed away).
 pub(crate) fn is_file_at(file: &File, path: &Path) -> Result<bool> {
-    let open = same_file::Handle::from_file(file.try_clone()?)?;
-    match same_file::Handle::from_path(path) {
-        Ok(at_path) => Ok(at_path == open),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(MnemoError::Io(e)),
+    Ok(file_at(file, path)? == AtPath::Same)
+}
+
+/// What `path` names, against the file `file` has open. On Unix, the
+/// device and inode of an `fstat` of the open descriptor against a `stat`
+/// of the path (RB-008.2: no new descriptor). Elsewhere, `same_file`.
+pub(crate) fn file_at(file: &File, path: &Path) -> Result<AtPath> {
+    #[cfg(any(test, feature = "failpoints"))]
+    if crate::__failpoints::take_path_check_failure() {
+        return Err(MnemoError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "path check failed (failpoint)",
+        )));
     }
+    let at_path = match path_identity(path) {
+        Ok(id) => id,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(AtPath::Nothing),
+        Err(e) => return Err(MnemoError::Io(e)),
+    };
+    if file_identity(file)? == at_path {
+        Ok(AtPath::Same)
+    } else {
+        Ok(AtPath::Other)
+    }
+}
+
+#[cfg(unix)]
+fn file_identity(file: &File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let m = file.metadata()?;
+    Ok((m.dev(), m.ino()))
+}
+
+#[cfg(unix)]
+fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path)?;
+    Ok((m.dev(), m.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_identity(file: &File) -> std::io::Result<same_file::Handle> {
+    same_file::Handle::from_file(file.try_clone()?)
+}
+
+#[cfg(not(unix))]
+fn path_identity(path: &Path) -> std::io::Result<same_file::Handle> {
+    same_file::Handle::from_path(path)
 }
 
 /// How [`open_with_lock`] treats a missing or existing file.
