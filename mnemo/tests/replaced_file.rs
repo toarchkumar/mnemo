@@ -191,6 +191,22 @@ fn a_handle_refuses_to_write_to_a_file_replaced_at_its_path() {
     assert_eq!(count(&path), 5);
 }
 
+/// What a file holds, read while a handle holds its lock: its bytes on
+/// Unix, where the lock is advisory; its length on Windows, where the lock
+/// is a mandatory byte-range lock and a read of the locked range fails
+/// (os error 33).
+fn snapshot(path: &Path) -> Vec<u8> {
+    if cfg!(windows) {
+        std::fs::metadata(path)
+            .unwrap()
+            .len()
+            .to_le_bytes()
+            .to_vec()
+    } else {
+        std::fs::read(path).unwrap()
+    }
+}
+
 /// RB-008.2: a brain moved or removed under a live handle. Nothing is at
 /// the path, so the message says the file was moved or removed (not
 /// "replaced"), `try_close` hands the handle back, and once the file is
@@ -213,7 +229,7 @@ fn a_moved_or_removed_brain_says_so_and_a_copy_says_replaced() {
         }
         panic!("rename failed");
     }
-    let before = std::fs::read(&moved).unwrap();
+    let before = snapshot(&moved);
     let err = db.flush().unwrap_err();
     assert!(
         matches!(err, MnemoError::Replaced { missing: true, .. }),
@@ -239,7 +255,7 @@ fn a_moved_or_removed_brain_says_so_and_a_copy_says_replaced() {
         }
     };
     assert_eq!(
-        std::fs::read(&moved).unwrap(),
+        snapshot(&moved),
         before,
         "nothing was written to the moved file"
     );
