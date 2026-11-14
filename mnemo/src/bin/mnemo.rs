@@ -11,6 +11,8 @@ use std::process::ExitCode;
 mod export;
 #[path = "mnemo/inspect.rs"]
 mod inspect;
+#[path = "mnemo/mcp_install.rs"]
+mod mcp_install;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
@@ -675,11 +677,20 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// MCP clients: `mcp install` adds this brain's server to one.
+    Mcp {
+        #[command(subcommand)]
+        cmd: McpCmd,
+    },
     /// Serve the `.mnemo` file as a Model Context Protocol server. Reads
     /// JSON-RPC 2.0 requests line-by-line from stdin, writes responses
-    /// to stdout, and logs diagnostics to stderr. Passphrase must be
-    /// provided via `MNEMO_PASSPHRASE` (no CLI-flag fallback — that
-    /// would leak into shell history and process listings).
+    /// to stdout, and logs diagnostics to stderr. The secret comes from
+    /// the key sources (`MNEMO_PASSPHRASE`, `MNEMO_KEY`, `MNEMO_KEY_FILE`,
+    /// `MNEMO_KEY_COMMAND`, or the keychain); there's no flag for it, which
+    /// would leak into shell history and process listings, and no prompt.
+    /// A relative path is resolved against `CLAUDE_PROJECT_DIR` when Claude
+    /// Code sets it, else against the working directory; a missing brain is
+    /// an error, never a new one.
     Serve {
         /// Path to the `.mnemo` file.
         path: String,
@@ -727,6 +738,39 @@ enum Command {
 }
 
 /// Subcommands under `mnemo thread` (Phase 12.7a archive layer).
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Add this brain's MCP server to a client's config (12.3).
+    ///
+    /// It writes `serve --mcp --shared <file>`, never a secret. In a project
+    /// scope (a file that's committed) it writes `mnemo` from the PATH and a
+    /// path relative to the project root, never an absolute path or a
+    /// command. It shows a diff first (environment values masked) and asks,
+    /// unless `--yes`; `--print` shows it and writes nothing. Clients:
+    /// claude-code (through `claude mcp add-json` when `claude` is on the
+    /// PATH, else `.mcp.json`), cursor, claude-desktop.
+    Install {
+        /// The client.
+        #[arg(long, value_enum)]
+        client: mcp_install::Client,
+        /// Where: `project` (the default inside a git work tree), `local`
+        /// (Claude Code only) or `user` (the default elsewhere).
+        #[arg(long, value_enum)]
+        scope: Option<mcp_install::Scope>,
+        /// The server's name in the client.
+        #[arg(long, default_value = "mnemo")]
+        name: String,
+        /// Show what would be written, and write nothing.
+        #[arg(long)]
+        print: bool,
+        /// Write without asking.
+        #[arg(long, conflicts_with = "print")]
+        yes: bool,
+        /// Path to the `.mnemo` file.
+        path: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum ThreadCmd {
     /// Ingest a transcript file into a thread's archive. Idempotent
@@ -1217,6 +1261,43 @@ fn new_passphrase(arg: &Option<String>, env_var: &str) -> std::result::Result<St
         return Err(format!("no passphrase: pass the flag or set {env_var}"));
     }
     prompt_new_passphrase()
+}
+
+/// 12.3 step 3: the brain `serve --mcp` opens. A relative path is resolved
+/// against `CLAUDE_PROJECT_DIR` when Claude Code set it (absolute) in the
+/// server's environment, else against the working directory. Claude Code's
+/// docs (code.claude.com/docs/en/mcp, 2026-11-14): "This variable is set in
+/// the server's environment, not in Claude Code's own environment, so
+/// referencing it via `${VAR}` expansion in the `command` or `args` of a
+/// project-scoped `.mcp.json` entry … requires a default such as
+/// `${CLAUDE_PROJECT_DIR:-.}`", and the variable is there "so your server can
+/// resolve project-relative paths without depending on the working
+/// directory". So `mcp install`'s `${CLAUDE_PROJECT_DIR:-.}/<path>` reaches
+/// the server as `./<path>`, and is resolved here. A missing brain is an
+/// error: the server never creates one.
+fn serve_path(path: &str) -> std::result::Result<std::path::PathBuf, String> {
+    let given = std::path::Path::new(path);
+    let project = std::env::var_os("CLAUDE_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|d| d.is_absolute());
+    let resolved = match (&project, given.is_relative()) {
+        (Some(dir), true) => {
+            let r = dir.join(given);
+            eprintln!(
+                "mnemo mcp: {path} is relative to CLAUDE_PROJECT_DIR: {}",
+                r.display()
+            );
+            r
+        }
+        _ => given.to_path_buf(),
+    };
+    if !resolved.is_file() {
+        return Err(format!(
+            "no brain at {}; the MCP server never creates one (make one with `mnemo init`)",
+            resolved.display()
+        ));
+    }
+    Ok(resolved)
 }
 
 /// Ask for a new passphrase twice, without echo (`init --ask-passphrase`,
@@ -3037,7 +3118,8 @@ fn run() -> std::result::Result<(), String> {
             // chain with no prompt (12.3) — passing `passphrase()` here would
             // open a TTY prompt and break the
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
-            let p = std::path::Path::new(&path);
+            let resolved = serve_path(&path)?;
+            let p = resolved.as_path();
             let embed_spec = match (embed_cmd, embed_name) {
                 (Some(c), Some(n)) => Some((
                     c,
@@ -3055,6 +3137,24 @@ fn run() -> std::result::Result<(), String> {
             mnemo_engine::mcp::serve_stdio_with_options(p, embed_spec, shared).map_err(fmt)?;
         }
         Command::Cache { op } => run_cache_op(op)?,
+        Command::Mcp {
+            cmd:
+                McpCmd::Install {
+                    client,
+                    scope,
+                    name,
+                    print,
+                    yes,
+                    path,
+                },
+        } => mcp_install::run(mcp_install::Install {
+            client,
+            file: path,
+            scope,
+            name,
+            print,
+            yes,
+        })?,
     }
     Ok(())
 }

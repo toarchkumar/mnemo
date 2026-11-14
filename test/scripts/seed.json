@@ -393,5 +393,14 @@
       "area": "conventions",
       "topic": "shared-mode"
     }
+  },
+  {
+    "content": "MCP INSTALL (v0.15, 12.3 step 3): `mnemo mcp install --client claude-code|cursor|claude-desktop [--scope project|local|user] [--name mnemo] [--print|--yes] <file>` writes {command, args: [serve, --mcp, --shared, <file>]} into a client's config, never a secret (the server finds its key through the key sources). The default scope is project inside a git work tree, else user. A project-scoped file is committed, so it holds `mnemo` from the PATH and a project-relative path (${CLAUDE_PROJECT_DIR:-.}/... for Claude Code's .mcp.json, ${workspaceFolder}/... for Cursor's .cursor/mcp.json), never an absolute path, --embed-cmd or a key command; user and local scopes use absolute paths. Claude Code goes through `claude mcp add-json` when claude is on the PATH (its local and user scopes live in ~/.claude.json); Claude Desktop has only the user scope. It shows a diff with env and headers values masked, keeps other servers byte for byte (serde_json raw_value), writes atomically, refuses a config it can't parse, and --yes never moves or drops a MNEMO_PASSPHRASE. VS Code and Codex aren't supported. Tests run it with a temporary HOME, APPDATA and PATH (a fake claude), never against real client configs.",
+    "memory_type": "procedural",
+    "importance": 0.7,
+    "metadata": {
+      "area": "conventions",
+      "topic": "mcp-install"
+    }
   }
 ]
