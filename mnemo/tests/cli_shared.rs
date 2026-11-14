@@ -523,7 +523,13 @@ fn the_cli_embeds_before_it_takes_the_lock() {
     // The CLI is embedding now (1.5 s), holding no lock.
     wait_until_embedding(&marker);
     let t = Instant::now();
-    let wrote = s.write(|db| db.remember(mem("while it embeds")));
+    let mut inside = (Duration::ZERO, Duration::ZERO);
+    let wrote = s.write(|db| {
+        let got_lock = t.elapsed();
+        let r = db.remember(mem("while it embeds"));
+        inside = (got_lock, t.elapsed());
+        r
+    });
     let took = t.elapsed();
     let out = cli.wait_with_output().unwrap();
     let cli_err = String::from_utf8_lossy(&out.stderr);
@@ -531,7 +537,10 @@ fn the_cli_embeds_before_it_takes_the_lock() {
     // says what held the lock.
     assert!(
         wrote.is_ok() && took < Duration::from_millis(500),
-        "the shared write took {took:?} ({:?}); the CLI said: {cli_err}",
+        "the shared write took {took:?} (lock at {:?}, remember done at {:?}, then the \
+         commit; {:?}); the CLI said: {cli_err}",
+        inside.0,
+        inside.1,
         wrote.err()
     );
     assert!(out.status.success(), "{cli_err}");
