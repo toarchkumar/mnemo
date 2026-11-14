@@ -247,6 +247,7 @@ before the engine sees them, are still `ValueError`):
 | `UnsupportedError` | shared mode isn't available here (a network or synced folder, an old Windows build), or a file-wide setting on a shared handle | pass `allow_network_fs=True` if you know the lock works there; drop the setting |
 | `MaybeStoredError` | shared mode: a write failed after its commit point; it may be in the file | check whether it's there before retrying |
 | `ReplacedDuringWriteError` | shared mode: another file was renamed over the path during the write (an older `mnemo compact`); the write isn't in the file at the path now | update every `mnemo` that opens the file, then write again |
+| `ReplacedError` | the file at the path is no longer the one the handle opened: another file was renamed over it, or it was moved or removed; nothing was written. `shared` is `True` in a shared-mode write (an older `mnemo compact` renamed over the path just before the commit) | `shared` true: call again, and the call follows the new file. Otherwise reopen the path, or move a moved brain back |
 | `MnemoError` (only) | I/O, cryptography, key derivation or serialization | the message says which |
 
 ```python

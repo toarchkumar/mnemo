@@ -1485,7 +1485,7 @@ def test_shared_mode_exception_types():
         raise AssertionError(f"expected {kind.__name__}")
 
     for name in ("CancelledError", "UnsupportedError", "MaybeStoredError",
-                 "ReplacedDuringWriteError"):
+                 "ReplacedDuringWriteError", "ReplacedError"):
         assert issubclass(getattr(mnemo, name), mnemo.MnemoError), name
     with tempfile.TemporaryDirectory() as d:
         path = _shared_file(d, 1)
@@ -1541,7 +1541,28 @@ def test_shared_mode_exception_types():
         e = raises(mnemo.ReplacedDuringWriteError,
                    lambda: s.remember("lost", "semantic", [1.0, 0.0]))
         assert "replaced" in str(e)
+
+        # Replaced, shared (RB-008.3): a file renamed over the path just
+        # before the commit. Nothing was written; calling again is safe.
+        shutil.copy(path, other)
+        mnemo._dev_rename_before_next_shared_commit(other, path)
+        e = raises(mnemo.ReplacedError,
+                   lambda: s.remember("refused", "semantic", [1.0, 0.0]))
+        assert e.shared is True, e.shared
+        assert "next call follows the new file" in str(e), str(e)
+        s.remember("called again", "semantic", [1.0, 0.0])
         s.close()
+
+        # Replaced, plain: a copy renamed over the path under a live handle.
+        plain = mnemo.open(path, "pw")
+        plain.remember("pending", "semantic", [1.0, 0.0])
+        shutil.copy(path, other)
+        os.replace(other, path)
+        e = raises(mnemo.ReplacedError, plain.flush)
+        assert e.shared is False, e.shared
+        assert "Reopen" in str(e), str(e)
+        # close flushes, refuses the same way, and still releases the file.
+        raises(mnemo.ReplacedError, plain.close)
 
         # Arguments.
         for bad in (dict(read_only=True), dict(wait=-1.0), dict(wait=float("nan"))):
@@ -1560,7 +1581,7 @@ def test_shared_mode_exception_types():
             pass
         plain.close()
     print("ok  shared: CancelledError, UnsupportedError, MaybeStoredError, "
-          "ReplacedDuringWriteError (12.4)")
+          "ReplacedDuringWriteError, ReplacedError (12.4)")
 
 
 def test_shared_notices_are_warned_once():
