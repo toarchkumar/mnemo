@@ -5,6 +5,7 @@
 //! ```text
 //! cargo run --release --example shared_bench -- --cells 1,2,3,4 --sizes 1000,10000,100000
 //! cargo run --release --example shared_bench -- --cells 5,6,7,8 --sizes 10000,100000 --secs 8
+//! cargo run --release --example shared_bench -- --cells 9 --sizes 10000 --secs 20 --valve-ms 250,500,1000,2000
 //! ```
 //!
 //! Child processes are this binary run again with `MNEMO_SB_ROLE` set
@@ -536,6 +537,45 @@ fn main() {
                     );
                 }
             }
+        }
+        // LOCK-2 (cell 9): readers alone, with and without the valve; then
+        // the threshold sweep on the cheap-read cells (RB-008.1 rec. 3).
+        if cells.contains(&9) {
+            let sweep: Vec<String> = arg("--valve-ms", "250,500,1000,2000")
+                .split(',')
+                .map(str::to_string)
+                .collect();
+            let alone: [(&str, &[(&str, usize)]); 2] =
+                [("8r", &[("reader", 8)]), ("16r", &[("reader", 16)])];
+            for (valve, off) in [("with", false), ("without", true)] {
+                if off {
+                    std::env::set_var("MNEMO_DEV_NO_VALVE", "1");
+                }
+                for (name, roles) in alone {
+                    eprintln!("cell 9 {name} alone, {valve} the valve, at {n}");
+                    cellv.insert(
+                        format!("9_alone_{name}_{valve}_valve"),
+                        run_mix(n, roles, secs, false, &scratch),
+                    );
+                }
+                std::env::remove_var("MNEMO_DEV_NO_VALVE");
+            }
+            let cheap: [(&str, &[(&str, usize)]); 3] = [
+                ("1w_7r", &[("writer", 1), ("reader", 7)]),
+                ("1w_8r", &[("writer", 1), ("reader", 8)]),
+                ("1w_16r", &[("writer", 1), ("reader", 16)]),
+            ];
+            for t in &sweep {
+                std::env::set_var("MNEMO_DEV_VALVE_MS", t);
+                for (name, roles) in cheap {
+                    eprintln!("cell 9 T={t} ms {name} at {n}");
+                    cellv.insert(
+                        format!("9_t{t}_{name}"),
+                        run_mix(n, roles, secs, false, &scratch),
+                    );
+                }
+            }
+            std::env::remove_var("MNEMO_DEV_VALVE_MS");
         }
         if cells.contains(&8) {
             eprintln!("cell 8 at {n}");

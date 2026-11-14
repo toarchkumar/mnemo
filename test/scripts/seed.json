@@ -384,5 +384,14 @@
       "area": "conventions",
       "topic": "key-sources"
     }
+  },
+  {
+    "content": "SHARED MODE (v0.14 12.4, v0.15 LOCK-2; docs/shared-mode.md, docs/design/12.4-shared-access.md): Mnemo::open_shared, Python open(..., shared=True) and `serve --mcp --shared` let several processes use one brain; each call takes the file's lock (shared to read, exclusive to write) within one deadline (10 s, --wait on the CLI) and holds nothing between calls. The sidecar directory <brain>.mnemo-shared/ (gitignore *.mnemo-shared/) holds intent.lock (writer preference, readers first), writer.lock (LOCK-2's valve) and lock-info. Readers come first, but a writer that has waited 500 ms takes writer.lock and new readers hold back until it's in, so busy readers can't lock out a save (no Locked against 16 cheap readers); a reader that has itself waited 500 ms stops holding back, so writers can't starve readers. The bound needs every process using the file shared on v0.15+. Dev switches (dev-hooks only): MNEMO_DEV_VALVE_MS, MNEMO_DEV_NO_VALVE. A hook that only reads passes --wait 2s; a hook that saves keeps the default.",
+    "memory_type": "procedural",
+    "importance": 0.8,
+    "metadata": {
+      "area": "conventions",
+      "topic": "shared-mode"
+    }
   }
 ]

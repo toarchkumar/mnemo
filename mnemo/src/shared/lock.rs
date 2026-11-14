@@ -16,7 +16,7 @@ use fs4::fs_std::FileExt;
 
 use super::call::{Call, CancelToken};
 use super::fscheck;
-use super::sidecar::{self, Sidecar, SidecarState, INTENT};
+use super::sidecar::{self, Sidecar, SidecarState, INTENT, VALVE};
 use crate::error::{MnemoError, Result};
 use crate::pager::LockedFile;
 use crate::store::{is_file_at, is_lock_conflict};
@@ -72,6 +72,46 @@ pub(crate) struct BrainLocks {
     resolved: PathBuf,
     sidecar: Option<Arc<Sidecar>>,
     notices: Vec<String>,
+    /// A plain long operation's layer ([`BrainLocks::for_plain`]): it never
+    /// creates the sidecar, but looks for it again before each wait
+    /// (RB-008.3 item 5).
+    plain: bool,
+    /// LOCK-2: how many times this layer's writers took the valve (for the
+    /// tests and the bench).
+    valve_takes: u64,
+}
+
+/// LOCK-2: how long a writer waits before it takes the valve. 500 ms, by
+/// the bench's sweep rule (12.4 design note, "LOCK-2"); a `dev-hooks` build
+/// reads `MNEMO_DEV_VALVE_MS` for the sweep.
+const VALVE_AFTER: Duration = Duration::from_millis(500);
+
+/// The bench's baseline: a `dev-hooks` build with `MNEMO_DEV_NO_VALVE` set
+/// runs without the valve (readers don't check it, writers don't take it).
+fn valve_off() -> bool {
+    #[cfg(feature = "dev-hooks")]
+    {
+        static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *OFF.get_or_init(|| std::env::var_os("MNEMO_DEV_NO_VALVE").is_some())
+    }
+    #[cfg(not(feature = "dev-hooks"))]
+    false
+}
+
+fn valve_after() -> Duration {
+    #[cfg(feature = "dev-hooks")]
+    {
+        static AFTER: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+        *AFTER.get_or_init(|| {
+            std::env::var("MNEMO_DEV_VALVE_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .map(Duration::from_millis)
+                .unwrap_or(VALVE_AFTER)
+        })
+    }
+    #[cfg(not(feature = "dev-hooks"))]
+    VALVE_AFTER
 }
 
 /// The Windows refusal before Rust 1.85 (see `build.rs`).
@@ -118,7 +158,14 @@ impl BrainLocks {
             None
         } else {
             match sidecar::open(&resolved) {
-                SidecarState::Ready(s) => Some(Arc::new(s)),
+                SidecarState::Ready(s) => {
+                    // LOCK-2: a v0.15 shared handle makes the valve file up
+                    // front, so readers can keep its descriptor.
+                    if create {
+                        let _ = s.lock_file(VALVE);
+                    }
+                    Some(Arc::new(s))
+                }
                 SidecarState::Unavailable(why) => {
                     notices.push(format!(
                         "not using the sidecar directory: {why}; each call takes the main \
@@ -133,6 +180,8 @@ impl BrainLocks {
             resolved,
             sidecar,
             notices,
+            plain: !create,
+            valve_takes: 0,
         })
     }
 
@@ -150,6 +199,11 @@ impl BrainLocks {
     /// The sidecar directory, when in use.
     pub(crate) fn sidecar_path(&self) -> Option<&Path> {
         self.sidecar.as_deref().map(Sidecar::path)
+    }
+
+    /// LOCK-2: how many times this layer's writers took the valve.
+    pub(crate) fn valve_takes(&self) -> u64 {
+        self.valve_takes
     }
 
     /// Take the main lock for one call, within the call's deadline, unless
@@ -172,15 +226,37 @@ impl BrainLocks {
     /// One [`Call`] covers every lock a shared handle's window takes, so a
     /// read that has to take the exclusive lock to heal the file still
     /// waits one deadline in all (RB-007.8 item 2).
+    ///
+    /// **LOCK-2, the writer safety valve:** a writer that has waited past
+    /// [`VALVE_AFTER`] also takes `writer.lock` exclusively, and from then
+    /// on retries every 1 to 2 ms. A reader tries that lock shared, without
+    /// waiting, before the intent lock, and backs off while a writer holds
+    /// it, until it has itself waited past the threshold (then it queues on
+    /// the intent lock as before, so a chain of writers past the threshold
+    /// can't starve it). So new readers stop arriving, the ones inside
+    /// drain, and the writer gets the intent lock and the main lock. It lets
+    /// the valve go as soon as it holds the main lock.
     pub(crate) fn acquire(&mut self, kind: LockKind, call: &mut Call) -> Result<Held> {
         let mut replaced_once = false;
+        let mut valve: Option<LockedFile> = None;
         'call: loop {
             call.check()?;
+            // A reader that has itself waited past the threshold stops
+            // deferring to the valve, so writers handing it on to each other
+            // can't keep readers out (the bench's 8-writer mix).
+            if kind == LockKind::Shared
+                && !valve_off()
+                && call.waited() < valve_after()
+                && self.valve_held()
+            {
+                self.wait(kind, call, &mut valve)?;
+                continue;
+            }
             let intent = match self.try_intent(kind, call)? {
                 Intent::Held(f) => Some(f),
                 Intent::NotUsed => None,
                 Intent::Busy => {
-                    self.wait(call)?;
+                    self.wait(kind, call, &mut valve)?;
                     continue;
                 }
             };
@@ -189,6 +265,7 @@ impl BrainLocks {
                 crate::__failpoints::count_shared_main_try();
                 match self.try_main(kind)? {
                     Main::Got(file) => {
+                        drop(valve);
                         drop(intent);
                         return Ok(Held {
                             file: Some(file),
@@ -210,7 +287,7 @@ impl BrainLocks {
                         }
                         if replaced_once {
                             drop(intent);
-                            self.wait(call)?;
+                            self.wait(kind, call, &mut valve)?;
                             continue 'call;
                         }
                         replaced_once = true;
@@ -226,19 +303,115 @@ impl BrainLocks {
                 // while a writer holds the main lock (the only time its
                 // shared try fails), so the next writer queues behind it
                 // (step 5; before, readers let it go and starved).
-                self.wait(call)?;
+                self.wait(kind, call, &mut valve)?;
             }
             drop(intent);
-            self.wait(call)?;
+            self.wait(kind, call, &mut valve)?;
         }
     }
 
     /// One backoff; past the deadline, `Locked` with what holds the file.
-    fn wait(&self, call: &mut Call) -> Result<()> {
+    /// Before it sleeps: a plain long operation looks for a sidecar that
+    /// shared handles made meanwhile, and a writer past the threshold takes
+    /// the valve (LOCK-2).
+    fn wait(
+        &mut self,
+        kind: LockKind,
+        call: &mut Call,
+        valve: &mut Option<LockedFile>,
+    ) -> Result<()> {
+        self.find_sidecar();
+        if kind == LockKind::Exclusive
+            && valve.is_none()
+            && !valve_off()
+            && call.waited() >= valve_after()
+        {
+            call.hurry();
+            *valve = self.take_valve(call);
+        }
         if call.back_off()? {
             Ok(())
         } else {
             Err(self.locked())
+        }
+    }
+
+    /// RB-008.3 item 5: a plain long operation's layer, with no sidecar,
+    /// checks whether one has appeared (one `lstat`), and uses it once it
+    /// has, with every check. It never creates one.
+    fn find_sidecar(&mut self) {
+        if !self.plain || self.sidecar.is_some() {
+            return;
+        }
+        if std::fs::symlink_metadata(sidecar::sidecar_path(&self.resolved)).is_err() {
+            return;
+        }
+        if let SidecarState::Ready(s) = sidecar::open(&self.resolved) {
+            self.sidecar = Some(Arc::new(s));
+        }
+    }
+
+    /// LOCK-2: the valve, exclusively, without waiting: `None` while
+    /// another writer holds it, or when it can't be used (no sidecar, a
+    /// directory this caller can't write in: said once, and the call goes
+    /// on without it).
+    fn take_valve(&mut self, call: &mut Call) -> Option<LockedFile> {
+        let side = self.sidecar.clone()?;
+        let f = match side.lock_file(VALVE) {
+            Ok(f) => f,
+            // The directory may have been removed or replaced since the
+            // handle opened it (RB-007.7): open it again by path, once per
+            // call, as the intent lock does.
+            Err(_) if !call.sidecar_reopened => {
+                call.sidecar_reopened = true;
+                let SidecarState::Ready(s) = sidecar::open(&self.resolved) else {
+                    return None;
+                };
+                let s = Arc::new(s);
+                self.sidecar = Some(s.clone());
+                match s.lock_file(VALVE) {
+                    Ok(f) => f,
+                    Err(e) => return self.no_valve(&s, e),
+                }
+            }
+            Err(e) => return self.no_valve(&side, e),
+        };
+        match FileExt::try_lock_exclusive(&f) {
+            Ok(()) => {
+                self.valve_takes += 1;
+                Some(LockedFile::new(f))
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// The valve can't be made or opened: said once (something else at its
+    /// name, a directory that refuses it), but not for a directory being
+    /// removed (`NotFound`, which the next call recovers from). The call goes
+    /// on without the valve either way.
+    fn no_valve(&mut self, side: &Sidecar, e: std::io::Error) -> Option<LockedFile> {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            self.notice(format!(
+                "can't use {}: {e}; a write that waits goes on without the writer safety valve",
+                side.path().join(VALVE).display()
+            ));
+        }
+        None
+    }
+
+    /// LOCK-2: whether a writer holds the valve. A reader's shared try,
+    /// without waiting, and the unlock: about two system calls. Anything
+    /// but a conflict (no sidecar, no valve file yet, an error) is "no".
+    fn valve_held(&self) -> bool {
+        let Some(f) = self.sidecar.as_ref().and_then(|s| s.valve_for_reading()) else {
+            return false;
+        };
+        match FileExt::try_lock_shared(f) {
+            Ok(()) => {
+                let _ = FileExt::unlock(f);
+                false
+            }
+            Err(e) => is_lock_conflict(&e),
         }
     }
 

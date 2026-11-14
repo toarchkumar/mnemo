@@ -68,6 +68,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **Key files must be owned by you with mode 0600 or 0400** on Unix
   (`--key-file` and `MNEMO_KEY_FILE`); anything else is refused, naming
   `chmod 600 <path>`.
+- **Shared mode: a writer that has waited 500 ms gets the next turn ahead
+  of new readers** (LOCK-2, the writer safety valve, `writer.lock` in the
+  sidecar directory), so busy readers can't lock out a save: no `Locked`
+  against 8 or 16 readers on cheap reads, and a write's 99th percentile
+  about 570 ms there (v0.14: 2.9 s, and lockouts). A reader that has itself
+  waited 500 ms stops holding back, so writers can't starve readers in
+  turn; with eight writers looping, a read can wait about a second. The
+  bound holds when every process using the file shared runs v0.15 or later.
+  A plain long operation (`compact`, `rekey`, `import`) that started before
+  any shared handle now picks up the sidecar while it waits.
 - **The released CLI binaries and wheels are built with the `keychain`
   feature.**
 - **The chain looks the keychain up last, and only when it's needed:**

@@ -209,11 +209,10 @@ fn a_writer_gets_in_against_eight_busy_readers() {
     waits.sort();
     let (median, worst) = (waits[waits.len() / 2], waits[waits.len() - 1]);
     eprintln!("100 writes, median wait {median:?}, longest {worst:?}; {reads} reads meanwhile");
-    // Readers come first since step 5, so a writer against busy readers
-    // waits longer than it did (worst about 200-325 ms locally, against
-    // about 10 ms before): 5 s still catches a writer being starved. LOCK-2
-    // (the writer safety valve) restores a 1 s bound.
-    assert!(worst < Duration::from_secs(5), "a write waited {worst:?}");
+    // Readers come first since step 5; LOCK-2 (the writer safety valve)
+    // gives a writer that has waited 500 ms the next turn, so the bound is
+    // 1 s again (it was 5 s from step 5 until LOCK-2).
+    assert!(worst < Duration::from_secs(1), "a write waited {worst:?}");
     assert!(reads > 0);
 }
 

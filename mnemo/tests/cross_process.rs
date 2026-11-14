@@ -114,6 +114,54 @@ fn texts(s: &mut SharedMnemo) -> Vec<String> {
     v
 }
 
+/// LOCK-2 test 4: a writer killed while it holds the valve. While it holds
+/// it, a new reader backs off; once the process is gone the kernel has
+/// released it, readers get in at once, and the next writer can take it.
+#[test]
+fn a_writer_killed_holding_the_valve_lets_readers_in() {
+    if refused() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let d = dir.path();
+    let p = brain(d, 1);
+    let mut holder = spawn("valve_holder", d, &[("XP_PATH", p.display().to_string())]);
+    let start = Instant::now();
+    while !d.join("ready").exists() {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "{}",
+            child_logs(d)
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let mut short = Mnemo::open_shared(&p, PW, opts(300));
+    // A reader backs off while the valve is held: a short deadline runs out.
+    // (Its open's first read may meet the held valve too.)
+    let blocked = match &mut short {
+        Ok(s) => matches!(s.read(|db| Ok(db.len())), Err(MnemoError::Locked { .. })),
+        Err(MnemoError::Locked { .. }) => true,
+        Err(e) => panic!("{e}"),
+    };
+    assert!(blocked, "a reader got past a held valve");
+    holder.kill().unwrap();
+    holder.wait().unwrap();
+    let t = Instant::now();
+    let mut r = Mnemo::open_shared(&p, PW, opts(10_000)).unwrap();
+    assert_eq!(r.read(|db| Ok(db.len())).unwrap(), 1);
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    let valve = __shared::sidecar_path(&std::fs::canonicalize(&p).unwrap()).join(__shared::VALVE);
+    let f = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(valve)
+        .unwrap();
+    assert!(
+        FileExt::try_lock_exclusive(&f).is_ok(),
+        "the dead writer's valve is still held"
+    );
+}
+
 // --- The child side ---------------------------------------------------------
 
 /// The child entry point. In a normal run `MNEMO_XP_ROLE` isn't set and this
@@ -196,6 +244,7 @@ fn run_role(role: &str) -> RoleResult {
         "reader" => role_reader(),
         "compactor" => role_compactor(),
         "plain_holder" => role_plain_holder(),
+        "valve_holder" => role_valve_holder(),
         "rekey" => role_rekey(),
         "die_after_commit" => role_die_after_commit(),
         "crash_op" => role_crash_op(),
@@ -316,6 +365,27 @@ fn role_plain_holder() -> RoleResult {
     }
     drop(db);
     Ok(0)
+}
+
+/// LOCK-2: stands in for a writer past the threshold, holding the valve
+/// (`writer.lock`) exclusively until it's killed.
+fn role_valve_holder() -> RoleResult {
+    let path = PathBuf::from(var("XP_PATH"));
+    // A shared handle's open makes the sidecar and the valve file.
+    let s = Mnemo::open_shared(&path, PW, child_opts()).map_err(|e| format!("open: {e}"))?;
+    let valve =
+        __shared::sidecar_path(&std::fs::canonicalize(&path).unwrap()).join(__shared::VALVE);
+    let f = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&valve)
+        .map_err(|e| format!("opening the valve: {e}"))?;
+    FileExt::lock_exclusive(&f).map_err(|e| format!("locking the valve: {e}"))?;
+    append(&work_dir(), "ready", "held");
+    loop {
+        std::thread::sleep(Duration::from_millis(50));
+        let _ = (&s, &f);
+    }
 }
 
 /// A plain rekey from `XP_SECRET` to `XP_SECRET2`, then, with

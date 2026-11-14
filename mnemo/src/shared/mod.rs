@@ -24,5 +24,5 @@ pub(crate) use sidecar::pid_alive;
 #[cfg(any(test, feature = "failpoints"))]
 pub(crate) mod testing {
     pub(crate) use super::fscheck::{classify_synced, linux_fs_allowed};
-    pub(crate) use super::sidecar::{sidecar_path, INTENT, LOCK_INFO, SUFFIX};
+    pub(crate) use super::sidecar::{sidecar_path, INTENT, LOCK_INFO, SUFFIX, VALVE};
 }

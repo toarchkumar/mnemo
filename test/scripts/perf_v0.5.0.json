@@ -8387,5 +8387,477 @@
       }
     },
     "reading": "Readers no longer starve: after the change a reader against a continuous writer waits p99 0.11 ms at 10K (4085 ms before), and readers among 4 or 8 writers 0.13-0.17 ms (8.2-8.5 s before). The cost lands on a writer against readers looping back to back: 1 writer with 7 readers commits 0.63/s (35/s before), p99 2.9 s at 10K and 5.5 s at 100K, within the 10 s deadline, no Locked. 8 writers' p99 stays about 2.5 s at 10K either way. Cell 7: the young backoff doesn't meet its adoption rule, so the doubling backoff stays. Cell 8: at 10K opens complete under a compaction every ~100 ms (p99 about 1.0 s); at 100K one compaction takes about 175 s and holds the file, so opens and writes in it time out with Locked. The planned fix for the writer side is LOCK-2 (a writer waiting over about 2 s goes next)."
+  },
+  "shared_v0_15_0": {
+    "remeasured": "2026-11-14",
+    "what": "v0.15.0 step 2b (LOCK-2, the writer safety valve): mnemo/examples/shared_bench.rs. Cells 5 and 6 are step 5's six mixes (8 s runs) at the default threshold (500 ms); cell 9 is readers alone with and without the valve (MNEMO_DEV_NO_VALVE) and the threshold sweep (MNEMO_DEV_VALVE_MS = 250, 500, 1000, 2000) on 1 writer with 7, 8 and 16 readers on cheap reads (a get of a known id), 20 s runs. Corpus: benches/corpus.rs at 10K (384 dims, IVF+PQ, fast KDF), a fresh copy per mix. One run per cell. Latencies in ms; p99 nearest-rank.",
+    "machine": "Apple M1 Pro (8 cores, 16 GB), on AC power, caffeinate -dims during the runs. Other sessions were running on the machine: the load average was 3 to 12 during the runs, so the numbers are noisier than shared_v0_14_0's.",
+    "reader_rule": "A reader that has itself waited past the threshold stops deferring to the valve (added after the first run, in which 8 writers handing the valve on starved 2 readers: 2.5 reads a second, p99 3.4 s).",
+    "cells": {
+      "10000": {
+        "5_doubling_1w_1r": {
+          "reader": {
+            "latency": {
+              "max_ms": 147.82,
+              "mean_ms": 1.047,
+              "n": 7701,
+              "p50_ms": 0.051,
+              "p99_ms": 45.963
+            },
+            "locked": 0,
+            "per_sec": 962.625
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 133.71,
+              "mean_ms": 60.395,
+              "n": 133,
+              "p50_ms": 55.936,
+              "p99_ms": 133.475
+            },
+            "locked": 0,
+            "per_sec": 16.625
+          }
+        },
+        "5_doubling_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 67.472,
+              "mean_ms": 0.201,
+              "n": 278071,
+              "p50_ms": 0.158,
+              "p99_ms": 0.532
+            },
+            "locked": 0,
+            "per_sec": 34758.875
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 566.3,
+              "mean_ms": 298.118,
+              "n": 27,
+              "p50_ms": 230.291,
+              "p99_ms": 566.3
+            },
+            "locked": 0,
+            "per_sec": 3.375
+          }
+        },
+        "5_doubling_2w": {
+          "writer": {
+            "latency": {
+              "max_ms": 173.691,
+              "mean_ms": 121.436,
+              "n": 133,
+              "p50_ms": 113.923,
+              "p99_ms": 168.827
+            },
+            "locked": 0,
+            "per_sec": 16.625
+          }
+        },
+        "5_doubling_8w": {
+          "writer": {
+            "latency": {
+              "max_ms": 922.658,
+              "mean_ms": 385.665,
+              "n": 170,
+              "p50_ms": 426.932,
+              "p99_ms": 903.754
+            },
+            "locked": 0,
+            "per_sec": 21.25
+          }
+        },
+        "6_doubling_4w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 953.274,
+              "mean_ms": 0.915,
+              "n": 17614,
+              "p50_ms": 0.049,
+              "p99_ms": 0.165
+            },
+            "locked": 0,
+            "per_sec": 2201.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 697.729,
+              "mean_ms": 251.717,
+              "n": 129,
+              "p50_ms": 184.101,
+              "p99_ms": 644.484
+            },
+            "locked": 0,
+            "per_sec": 16.125
+          }
+        },
+        "6_doubling_8w_2r": {
+          "reader": {
+            "latency": {
+              "max_ms": 1821.074,
+              "mean_ms": 28.597,
+              "n": 569,
+              "p50_ms": 0.097,
+              "p99_ms": 1060.392
+            },
+            "locked": 0,
+            "per_sec": 71.125
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1226.645,
+              "mean_ms": 399.717,
+              "n": 164,
+              "p50_ms": 410.009,
+              "p99_ms": 994.49
+            },
+            "locked": 0,
+            "per_sec": 20.5
+          }
+        },
+        "9_alone_16r_with_valve": {
+          "reader": {
+            "latency": {
+              "max_ms": 131.181,
+              "mean_ms": 0.432,
+              "n": 740608,
+              "p50_ms": 0.205,
+              "p99_ms": 4.147
+            },
+            "locked": 0,
+            "per_sec": 37030.4
+          }
+        },
+        "9_alone_16r_without_valve": {
+          "reader": {
+            "latency": {
+              "max_ms": 102.936,
+              "mean_ms": 0.422,
+              "n": 758282,
+              "p50_ms": 0.188,
+              "p99_ms": 4.457
+            },
+            "locked": 0,
+            "per_sec": 37914.1
+          }
+        },
+        "9_alone_8r_with_valve": {
+          "reader": {
+            "latency": {
+              "max_ms": 12.247,
+              "mean_ms": 0.212,
+              "n": 754061,
+              "p50_ms": 0.176,
+              "p99_ms": 0.835
+            },
+            "locked": 0,
+            "per_sec": 37703.05
+          }
+        },
+        "9_alone_8r_without_valve": {
+          "reader": {
+            "latency": {
+              "max_ms": 12.677,
+              "mean_ms": 0.215,
+              "n": 744729,
+              "p50_ms": 0.182,
+              "p99_ms": 0.78
+            },
+            "locked": 0,
+            "per_sec": 37236.45
+          }
+        },
+        "9_t1000_1w_16r": {
+          "reader": {
+            "latency": {
+              "max_ms": 94.168,
+              "mean_ms": 0.442,
+              "n": 724593,
+              "p50_ms": 0.203,
+              "p99_ms": 4.125
+            },
+            "locked": 0,
+            "per_sec": 36229.65
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1073.506,
+              "mean_ms": 1000.32,
+              "n": 20,
+              "p50_ms": 1047.875,
+              "p99_ms": 1073.506
+            },
+            "locked": 0,
+            "per_sec": 1.0
+          }
+        },
+        "9_t1000_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 123.685,
+              "mean_ms": 0.207,
+              "n": 676637,
+              "p50_ms": 0.157,
+              "p99_ms": 0.618
+            },
+            "locked": 0,
+            "per_sec": 33831.85
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1043.705,
+              "mean_ms": 339.783,
+              "n": 59,
+              "p50_ms": 218.892,
+              "p99_ms": 1043.705
+            },
+            "locked": 0,
+            "per_sec": 2.95
+          }
+        },
+        "9_t1000_1w_8r": {
+          "reader": {
+            "latency": {
+              "max_ms": 127.111,
+              "mean_ms": 0.233,
+              "n": 686431,
+              "p50_ms": 0.176,
+              "p99_ms": 0.78
+            },
+            "locked": 0,
+            "per_sec": 34321.55
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 1064.225,
+              "mean_ms": 445.732,
+              "n": 45,
+              "p50_ms": 285.044,
+              "p99_ms": 1064.225
+            },
+            "locked": 0,
+            "per_sec": 2.25
+          }
+        },
+        "9_t2000_1w_16r": {
+          "reader": {
+            "latency": {
+              "max_ms": 106.686,
+              "mean_ms": 0.438,
+              "n": 730478,
+              "p50_ms": 0.202,
+              "p99_ms": 4.341
+            },
+            "locked": 0,
+            "per_sec": 36523.9
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2069.302,
+              "mean_ms": 2006.037,
+              "n": 10,
+              "p50_ms": 2034.232,
+              "p99_ms": 2069.302
+            },
+            "locked": 0,
+            "per_sec": 0.5
+          }
+        },
+        "9_t2000_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 119.361,
+              "mean_ms": 0.202,
+              "n": 693442,
+              "p50_ms": 0.159,
+              "p99_ms": 0.534
+            },
+            "locked": 0,
+            "per_sec": 34672.1
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2052.738,
+              "mean_ms": 371.509,
+              "n": 54,
+              "p50_ms": 204.056,
+              "p99_ms": 2052.738
+            },
+            "locked": 0,
+            "per_sec": 2.7
+          }
+        },
+        "9_t2000_1w_8r": {
+          "reader": {
+            "latency": {
+              "max_ms": 129.492,
+              "mean_ms": 0.227,
+              "n": 705084,
+              "p50_ms": 0.175,
+              "p99_ms": 0.785
+            },
+            "locked": 0,
+            "per_sec": 35254.2
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 2035.862,
+              "mean_ms": 571.604,
+              "n": 35,
+              "p50_ms": 426.136,
+              "p99_ms": 2035.862
+            },
+            "locked": 0,
+            "per_sec": 1.75
+          }
+        },
+        "9_t250_1w_16r": {
+          "reader": {
+            "latency": {
+              "max_ms": 137.107,
+              "mean_ms": 0.487,
+              "n": 657105,
+              "p50_ms": 0.199,
+              "p99_ms": 4.548
+            },
+            "locked": 0,
+            "per_sec": 32855.25
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 333.924,
+              "mean_ms": 282.157,
+              "n": 71,
+              "p50_ms": 290.087,
+              "p99_ms": 333.924
+            },
+            "locked": 0,
+            "per_sec": 3.55
+          }
+        },
+        "9_t250_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 101.048,
+              "mean_ms": 0.215,
+              "n": 649566,
+              "p50_ms": 0.156,
+              "p99_ms": 0.544
+            },
+            "locked": 0,
+            "per_sec": 32478.3
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 342.457,
+              "mean_ms": 206.543,
+              "n": 97,
+              "p50_ms": 264.939,
+              "p99_ms": 342.457
+            },
+            "locked": 0,
+            "per_sec": 4.85
+          }
+        },
+        "9_t250_1w_8r": {
+          "reader": {
+            "latency": {
+              "max_ms": 123.866,
+              "mean_ms": 0.252,
+              "n": 634718,
+              "p50_ms": 0.177,
+              "p99_ms": 0.816
+            },
+            "locked": 0,
+            "per_sec": 31735.9
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 327.166,
+              "mean_ms": 233.002,
+              "n": 86,
+              "p50_ms": 283.587,
+              "p99_ms": 327.166
+            },
+            "locked": 0,
+            "per_sec": 4.3
+          }
+        },
+        "9_t500_1w_16r": {
+          "reader": {
+            "latency": {
+              "max_ms": 94.89,
+              "mean_ms": 0.452,
+              "n": 707146,
+              "p50_ms": 0.201,
+              "p99_ms": 4.337
+            },
+            "locked": 0,
+            "per_sec": 35357.3
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 579.625,
+              "mean_ms": 541.558,
+              "n": 37,
+              "p50_ms": 541.127,
+              "p99_ms": 579.625
+            },
+            "locked": 0,
+            "per_sec": 1.85
+          }
+        },
+        "9_t500_1w_7r": {
+          "reader": {
+            "latency": {
+              "max_ms": 125.573,
+              "mean_ms": 0.205,
+              "n": 683150,
+              "p50_ms": 0.159,
+              "p99_ms": 0.533
+            },
+            "locked": 0,
+            "per_sec": 34157.5
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 565.975,
+              "mean_ms": 290.597,
+              "n": 69,
+              "p50_ms": 238.943,
+              "p99_ms": 565.975
+            },
+            "locked": 0,
+            "per_sec": 3.45
+          }
+        },
+        "9_t500_1w_8r": {
+          "reader": {
+            "latency": {
+              "max_ms": 136.158,
+              "mean_ms": 0.236,
+              "n": 678815,
+              "p50_ms": 0.177,
+              "p99_ms": 0.771
+            },
+            "locked": 0,
+            "per_sec": 33940.75
+          },
+          "writer": {
+            "latency": {
+              "max_ms": 565.756,
+              "mean_ms": 339.391,
+              "n": 59,
+              "p50_ms": 347.729,
+              "p99_ms": 565.756
+            },
+            "locked": 0,
+            "per_sec": 2.95
+          }
+        }
+      }
+    }
   }
 }
