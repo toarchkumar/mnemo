@@ -56,6 +56,9 @@ struct Cli {
 fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
     match cmd {
         Command::Init { path, .. }
+        | Command::Unlock { path }
+        | Command::RecoveryCode { path }
+        | Command::Rekey { path, .. }
         | Command::Info { path, .. }
         | Command::Verify { path, .. }
         | Command::Remember { path, .. }
@@ -172,7 +175,10 @@ enum Command {
     /// (`... | mnemo unlock <file>`), never from the command line. A typo is
     /// named by group; a code that doesn't open the file isn't stored.
     Unlock {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
     },
     /// Show a brain's recovery code, from the key store.
@@ -181,7 +187,10 @@ enum Command {
     /// terminals, no agent harness may be driving it, and the code appears
     /// on the controlling terminal after you press Enter, then is cleared.
     RecoveryCode {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
     },
     /// Print database statistics.
@@ -218,7 +227,10 @@ enum Command {
     /// refuses unless `--new-key-file` also writes the key to a new file:
     /// otherwise a power cut could leave the key nowhere.
     Rekey {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Unlock with a raw key (32 bytes, 64 hex digits or a recovery
         /// code) instead of a passphrase.
@@ -869,8 +881,9 @@ enum Command {
         /// Print only the guide, and touch nothing.
         #[arg(long)]
         guide: bool,
-        /// The guide's format: `markdown`, or `llms-txt` (the llms.txt shape
-        /// the site serves).
+        /// The guide's format: `markdown`; `llms-txt`, the site's `llms.txt`
+        /// (the card and links, in the llms.txt shape); or `llms-full`, the
+        /// site's `llms-full.txt` (the whole guide).
         #[arg(long, value_enum, default_value = "markdown", requires = "guide")]
         format: GuideFormat,
     },
@@ -968,8 +981,11 @@ enum EmbedderCmd {
 enum GuideFormat {
     /// The guide as Markdown.
     Markdown,
-    /// The guide in the llms.txt shape (<https://llmstxt.org/>).
+    /// The guide's card and links in the llms.txt shape
+    /// (<https://llmstxt.org/>), as the site's `llms.txt`.
     LlmsTxt,
+    /// The whole guide, as the site's `llms-full.txt`.
+    LlmsFull,
 }
 
 #[derive(Subcommand)]
@@ -3743,6 +3759,7 @@ fn run() -> std::result::Result<(), String> {
             let text = match format {
                 GuideFormat::Markdown => mnemo_engine::guide::markdown(),
                 GuideFormat::LlmsTxt => mnemo_engine::guide::llms_txt(),
+                GuideFormat::LlmsFull => mnemo_engine::guide::llms_full(),
             };
             print!("{text}");
         }

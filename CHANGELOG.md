@@ -23,17 +23,39 @@ Pre-1.0, the minor component carries the breaking-change signal.
   git's `-C`. When `CLAUDE_PROJECT_DIR` picks the brain and the working
   directory is in another repository, one line on stderr names the brain
   used (`-C .` uses the working directory's).
+- **The MCP server's resources, prompts and instructions (12.2 step 3).**
+  `initialize` sends the guide's card as `instructions`, and offers:
+  - the resources `mnemo://about`, `mnemo://recent`, `mnemo://guide` and
+    the template `mnemo://key/{key}`, as Markdown with size limits;
+  - the prompts `session-start` (with an optional `task`) and
+    `session-end` (with an optional `thread`).
+
+  Everything they show from the brain comes after a line that marks it as
+  data, not instructions. Reads don't count as accesses. A missing key or
+  an unknown URI is the error `-32002`. The library has
+  `Mnemo::recent(n)`.
+- **`recovery-code`, `unlock` and `rekey` take no path** in a git
+  repository, like the other brain commands.
 - **The guide for agents (GUIDE-1, 12.2 step 2).** `mnemo onboard --guide`
   prints how to set up a project and how to organize its memory: the
   tools, keys, the four types, the essence, budgets, and what to save and
   never save. It's one source (`mnemo/guide/guide.md`), compiled in, so
   each binary carries its own. CI runs every command and MCP call in it.
-  `--format llms-txt` prints the `llms.txt` the site serves. `mnemo
-  onboard` without `--guide` exits 2 until the rest of it lands.
+  `--format llms-txt` prints the site's `llms.txt` (the card and links, in
+  the llms.txt shape), and `--format llms-full` its `llms-full.txt` (the
+  whole guide). `mnemo onboard` without `--guide` exits 2 until the rest of
+  it lands.
 - **`mcp install` with no path** writes an entry with no path in it:
   `serve --mcp --shared` for Claude Code (project and local scopes), and
   `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A user scope
   keeps the absolute path.
+
+### Changed
+
+- **The MCP `remember` embeds `content`** when it's given no `text` and no
+  vector, as the CLI's `remember --text` stores what it embeds. Before, the
+  call was refused. `text` is now only for when the embedded text should
+  differ.
 
 ## [0.15.0] — 2026-11-15
 

@@ -67,6 +67,7 @@ mod cache_api;
 mod continuation;
 mod crud;
 mod essence;
+pub(crate) use essence::format_unix_date;
 mod flush;
 #[cfg(test)]
 mod header_graft_tests;

@@ -50,6 +50,65 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// 12.2 (`mnemo://recent`): the `n` most recently written live memories,
+    /// newest first. Only facts: no thread turns, essence items, thread
+    /// links or onboarding records, and nothing superseded or expired. A
+    /// keyed replacement is a new record, so it counts from when it was
+    /// written; an in-place [`Mnemo::update`] keeps its `created_at`. Reads
+    /// the catalog's rows and decrypts only the records it returns (on v9),
+    /// and doesn't count as an access.
+    pub fn recent(&mut self, n: usize) -> Result<Vec<Memory>> {
+        let now = crate::memory::now_secs();
+        let mut rows: Vec<(i64, CatalogEntry)> = Vec::new();
+        let mut unrowed: Vec<CatalogEntry> = Vec::new();
+        for e in self.catalog.iter().filter(|e| !e.deleted) {
+            match e.v9 {
+                Some(r) => {
+                    if r.kind != ROW_KIND_FACT
+                        || r.flags & ROW_SUPERSEDED != 0
+                        || (r.flags & ROW_HAS_TTL != 0 && now >= r.expires_at)
+                        || self.superseded.as_ref().is_some_and(|s| s.contains(&e.id))
+                    {
+                        continue;
+                    }
+                    rows.push((r.created_at, e.clone()));
+                }
+                // A v8 file (read-only) has no rows: its records are read.
+                None => unrowed.push(e.clone()),
+            }
+        }
+        rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.id.cmp(&a.1.id)));
+        let keep = |m: &Memory| {
+            !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)
+                && !m.metadata.contains_key(MNEMO_META_KIND)
+                && !is_onboarding(m)
+                && !m.is_expired(now)
+        };
+        let mut out = Vec::new();
+        for (_, e) in rows {
+            if out.len() >= n {
+                break;
+            }
+            let m = self.read_memory(&e)?;
+            if keep(&m) {
+                out.push(m);
+            }
+        }
+        for e in unrowed {
+            let m = self.read_memory(&e)?;
+            if keep(&m) {
+                out.push(m);
+            }
+        }
+        out.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+        out.truncate(n);
+        Ok(out)
+    }
+
     /// Return the database's **self-describing onboarding memories** — the
     /// ones tagged `metadata.area = "onboarding"`. This is the engine-level
     /// surface for the *single-file philosophy*: an agent who receives a
