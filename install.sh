@@ -13,7 +13,7 @@
 # 5. With the GitHub CLI (`gh`) installed and signed in, it also checks the
 #    build's attestation: a signature saying this repository's release
 #    workflow (.github/workflows/release.yml) built the binary at the tag of
-#    this version (refs/tags/v0.16.0). Without `gh`, or with one too old for
+#    this version (refs/tags/v<version>). Without `gh`, or with one too old for
 #    those checks, it says only the SHA-256 was checked.
 # 6. Copies it beside ~/.local/bin/mnemo (no sudo), checks that its
 #    `--version` is the version asked for, then replaces an older one in a
@@ -135,6 +135,23 @@ attest() {
     fi
 }
 
+# A line for each other `mnemo` on the PATH: a shell that found one of
+# them before may still run it (its command hash), and one earlier on the
+# PATH shadows this install.
+others() {
+    old_ifs=$IFS
+    IFS=:
+    set -f
+    # shellcheck disable=SC2086 # split on ':' only (IFS), globbing off
+    for d in ${PATH:-}; do
+        d=${d%/}
+        [ -n "$d" ] && [ "$d" != "${1%/}" ] && [ -x "$d/mnemo" ] && [ ! -d "$d/mnemo" ] || continue
+        say "another mnemo is on your PATH: $d/mnemo. If \`mnemo --version\` doesn't say mnemo $2, run \`hash -r\` (zsh: \`rehash\`) or open a new terminal, and if it still doesn't, remove that one or put $1 first on your PATH"
+    done
+    set +f
+    IFS=$old_ifs
+}
+
 main() {
     base=${MNEMO_INSTALL_BASE:-}
     if [ -n "$base" ]; then
@@ -180,7 +197,6 @@ main() {
         attest "$tmp/$name" "$version"
     fi
 
-
     [ -n "${HOME:-}" ] || die "HOME isn't set"
     dir="$HOME/.local/bin"
     mkdir -p "$dir"
@@ -201,6 +217,7 @@ main() {
     mv -f "$staged" "$dir/mnemo"
 
     say "installed $dir/mnemo ($said)"
+    others "$dir" "$version"
     case ":${PATH:-}:" in
         *":$dir:"*)
             say "Next: mnemo onboard"

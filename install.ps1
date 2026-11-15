@@ -151,6 +151,13 @@ function Install-Mnemo {
             Fail "couldn't replace $dest, likely because it's running (Claude Code or Cursor runs mnemo's MCP server): close them, then run this again"
         }
         Write-Output "installed $dest ($said)"
+        # A line for each other mnemo.exe on the PATH, which would run
+        # instead of this one when it comes first.
+        foreach ($other in @(Get-Command mnemo -All -CommandType Application -ErrorAction SilentlyContinue)) {
+            if ($other.Source -and ($other.Source -ne $dest)) {
+                Write-Output "another mnemo is on your PATH: $($other.Source). If ``mnemo --version`` doesn't say mnemo $version in a new terminal, remove that one or put $dir first on your PATH"
+            }
+        }
         $onPath = ($env:PATH -split ';') -contains $dir
         if ($onPath) {
             Write-Output "Next: mnemo onboard"

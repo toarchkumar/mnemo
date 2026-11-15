@@ -56,7 +56,8 @@ wrote, but never the brain or its key.
 
 **One step is for a person.** The brain's recovery code is the only way
 back in if the keychain entry is lost. `onboard` shows it only to a person
-at a terminal. If an agent ran `onboard`, the person runs this in a
+at a terminal. Its output ends with the `human step:` lines; an agent that
+ran it passes them to its user word for word. The person runs this in a
 terminal of their own and writes the code down:
 
 ```sh
