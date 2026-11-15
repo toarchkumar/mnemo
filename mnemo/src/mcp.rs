@@ -58,6 +58,8 @@ use crate::result_cache::{CachePutOpts, SemanticCachePutOpts, DEFAULT_SEMANTIC_T
 use crate::shared::SharedOptions;
 use crate::store::{Mnemo, RecallRequest, SharedMnemo};
 
+mod context;
+
 /// MCP protocol version we advertise on `initialize`.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -639,6 +641,12 @@ fn handle(db: &mut ServerDb, req: &Request) -> std::result::Result<Value, RpcErr
         "notifications/initialized" | "notifications/cancelled" => Ok(Value::Null),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tools_list()),
+        // 12.2 step 3: resources and prompts (`mcp/context.rs`).
+        "resources/list" => Ok(context::resources_list()),
+        "resources/templates/list" => Ok(context::resource_templates_list()),
+        "resources/read" => context::resources_read(db, &req.params),
+        "prompts/list" => Ok(context::prompts_list()),
+        "prompts/get" => context::prompts_get(db, &req.params),
         "tools/call" => match db {
             ServerDb::Plain(db) => tools_call(db, &req.params),
             ServerDb::Shared(s) => shared_tools_call(s, &req.params),
@@ -662,7 +670,13 @@ fn initialize_result(params: &Value) -> Value {
         "protocolVersion": client_version,
         "capabilities": {
             "tools": { "listChanged": false },
+            // 12.2 step 3: read-only resources, with no subscriptions and a
+            // fixed list, and two prompts.
+            "resources": {},
+            "prompts": {},
         },
+        // GUIDE-1: the guide's card, from the binary.
+        "instructions": crate::guide::card(),
         "serverInfo": {
             "name": "mnemo",
             "version": env!("CARGO_PKG_VERSION"),
@@ -689,7 +703,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "remember",
-                "description": "Insert, overwrite, or UPSERT a memory. Pass EITHER `vector` (explicit embedding) OR `text` (embedded by the server if it was started with --embed-cmd / --embed-name). Phase 12.1: when `key` is set, this becomes a keyed upsert — if a live memory already holds this `(agent + key)` slot the prior record is marked `_mnemo.superseded_by` and a new one is inserted, and an identical re-write is a no-op. **PREFER `key` for any fact that replaces an earlier one** (versions, current status, user preferences, plan outcomes). Persists to disk before returning. Returns `{id, outcome}` where `outcome` is `added`, `superseded`, `unchanged`, or (no key) `inserted`.",
+                "description": "Insert, overwrite, or UPSERT a memory. The server embeds `content` with its embedder; pass `text` only when the embedded text should differ, or `vector` for an explicit embedding. Phase 12.1: when `key` is set, this becomes a keyed upsert — if a live memory already holds this `(agent + key)` slot the prior record is marked `_mnemo.superseded_by` and a new one is inserted, and an identical re-write is a no-op. **PREFER `key` for any fact that replaces an earlier one** (versions, current status, user preferences, plan outcomes). Persists to disk before returning. Returns `{id, outcome}` where `outcome` is `added`, `superseded`, `unchanged`, or (no key) `inserted`.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["content", "memory_type"],
@@ -697,7 +711,7 @@ fn tools_list() -> Value {
                         "content": { "type": "string" },
                         "memory_type": { "type": "string", "enum": ["episodic", "semantic", "procedural", "working"] },
                         "vector": { "type": "array", "items": { "type": "number" }, "description": "Explicit embedding; mutually exclusive with `text`." },
-                        "text": { "type": "string", "description": "Content to embed via the server's registered embedder; mutually exclusive with `vector`. Requires the server to have been started with --embed-cmd." },
+                        "text": { "type": "string", "description": "Optional: what's embedded, when it should differ from `content` (which is embedded by default). Mutually exclusive with `vector`. Needs the server's embedder (the built-in, or --embed-cmd)." },
                         "importance": { "type": "number", "minimum": 0, "maximum": 1 },
                         "agent_id": { "type": "string" },
                         "session_id": { "type": "string" },
@@ -1184,10 +1198,13 @@ fn pre_embed(s: &SharedMnemo, params: &Value) -> std::result::Result<(), RpcErro
     let Some(args) = params.get("arguments") else {
         return Ok(());
     };
-    let (Some(text), None) = (
-        args.get("text").and_then(Value::as_str),
-        args.get(vector_arg),
-    ) else {
+    // 12.2 step 3: `remember` with no `text` embeds its `content`.
+    let text = args.get("text").and_then(Value::as_str).or_else(|| {
+        (name == "remember")
+            .then(|| args.get("content").and_then(Value::as_str))
+            .flatten()
+    });
+    let (Some(text), None) = (text, args.get(vector_arg)) else {
         return Ok(());
     };
     let Some(embedder) = s.embedder_arc() else {
@@ -1273,12 +1290,8 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
             })?;
             embed_text_via_server(db, "remember", text)?
         }
-        (None, None) => {
-            return Err(RpcError::new(
-                INVALID_PARAMS,
-                "remember: missing 'vector' or 'text'",
-            ))
-        }
+        // 12.2 step 3: with neither, the server embeds `content`.
+        (None, None) => embed_text_via_server(db, "remember", content)?,
     };
 
     let mut mem = Memory::new(content, mtype, vector);

@@ -7,8 +7,8 @@
 //!    gets a result, not an error;
 //! 4. every `mnemo …` command in the guide, in prose or in any shell block,
 //!    parses with the CLI (every platform);
-//! 5. the generated files (the repository's `llms.txt`) equal what the
-//!    binary generates.
+//! 5. the generated files (the repository's `llms.txt` and `llms-full.txt`)
+//!    equal what the binary generates.
 //!
 //! The blocks run in a temporary git repository with a temporary `HOME`,
 //! the test key store (`MNEMO_DEV_KEYSTORE`, never the OS keychain), a cache
@@ -26,9 +26,6 @@ use mnemo_engine::guide;
 /// place, if there is one), and each step removes its entries. **At READY
 /// this list must be empty.**
 const PENDING_UNTIL_STEP: &[(&str, u8, Option<&str>)] = &[
-    // Step 3: the MCP server's resources and prompts.
-    ("resources/read", 3, None),
-    ("prompts/get", 3, None),
     // Step 4: the hooks.
     ("mnemo hook", 4, None),
     // Step 5: `onboard` itself; until then the brain comes from `init`.
@@ -162,18 +159,24 @@ fn every_command_in_the_guide_parses() {
 #[test]
 fn the_generated_files_match() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    // A Windows checkout may end its lines in `\r\n`.
-    let llms = std::fs::read_to_string(root.join("llms.txt"))
-        .expect("llms.txt at the repository root")
-        .replace("\r\n", "\n");
-    assert!(
-        llms == guide::llms_txt(),
-        "llms.txt is stale: run `mnemo onboard --guide --format llms-txt > llms.txt` \
-         from the repository root"
-    );
+    for (file, format, want) in [
+        ("llms.txt", "llms-txt", guide::llms_txt()),
+        ("llms-full.txt", "llms-full", guide::llms_full()),
+    ] {
+        // A Windows checkout may end its lines in `\r\n`.
+        let have = std::fs::read_to_string(root.join(file))
+            .unwrap_or_else(|e| panic!("{file} at the repository root: {e}"))
+            .replace("\r\n", "\n");
+        assert!(
+            have == want,
+            "{file} is stale: run `mnemo onboard --guide --format {format} > {file}` from the \
+             repository root"
+        );
+    }
     for (format, want) in [
         ("markdown", guide::markdown()),
         ("llms-txt", guide::llms_txt()),
+        ("llms-full", guide::llms_full()),
     ] {
         let o = Command::new(env!("CARGO_BIN_EXE_mnemo"))
             .args(["onboard", "--guide", "--format", format])

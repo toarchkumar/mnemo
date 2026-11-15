@@ -544,3 +544,29 @@ fn claude_project_dir_names_the_brain_when_the_working_directory_differs() {
         assert!(!err.contains(note), "{cwd}: {err}");
     }
 }
+
+/// 12.2 step 3 (from step 2's review): `recovery-code`, `unlock` and
+/// `rekey` take no path either, so the guide's `mnemo recovery-code` works
+/// from a subdirectory and from a linked worktree.
+#[test]
+fn recovery_code_unlock_and_rekey_find_the_project_brain() {
+    let e = Env::new();
+    e.init();
+    for cwd in ["main/sub/deep", "wt"] {
+        for args in [&["recovery-code"][..], &["unlock"][..], &["rekey"][..]] {
+            let err = e.fails(&e.p(cwd), args);
+            // Past the arguments: the keychain (there's none here) or the new
+            // secret is what's missing, not the path.
+            assert!(
+                !err.contains("required") && !err.contains("no project brain"),
+                "{cwd} {args:?}: {err}"
+            );
+            assert!(
+                err.contains("keychain") || err.contains("passphrase"),
+                "{cwd} {args:?}: {err}"
+            );
+        }
+    }
+    let err = e.fails(&e.p("plain"), &["recovery-code"]);
+    assert!(err.contains("no project brain here"), "{err}");
+}

@@ -27,7 +27,7 @@ fn render_essence_item(section: EssenceSection, m: &Memory) -> String {
 
 /// Minimal unix-seconds → `YYYY-MM-DD` formatter (no chrono/time
 /// dependency; mirrors the ISO 8601 parser in `transcript.rs`).
-fn format_unix_date(secs: i64) -> String {
+pub(crate) fn format_unix_date(secs: i64) -> String {
     let days_total = secs.div_euclid(86_400);
     let (y, m, d) = civil_from_days(days_total);
     format!("{y:04}-{m:02}-{d:02}")
