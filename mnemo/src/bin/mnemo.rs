@@ -13,6 +13,8 @@ mod export;
 mod inspect;
 #[path = "mnemo/mcp_install.rs"]
 mod mcp_install;
+#[path = "mnemo/project.rs"]
+mod project;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
@@ -38,8 +40,77 @@ struct Cli {
     /// SHA-256.
     #[arg(long, global = true, value_name = "DIR")]
     model_dir: Option<std::path::PathBuf>,
+    /// 12.2: run as if started in this directory, like git's `-C`. Relative
+    /// paths are read from it, and a brain argument left out is this
+    /// directory's project brain.
+    #[arg(short = 'C', global = true, value_name = "DIR")]
+    dir: Option<std::path::PathBuf>,
     #[command(subcommand)]
     command: Command,
+}
+
+/// 12.2 step 1: the brain argument of the commands that may leave it out
+/// (an empty string when it was left out), or `None` for the others.
+/// Commands with a positional argument after the brain (`get`,
+/// `thread start`, `essence update|resolve|remove`) keep it required.
+fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
+    match cmd {
+        Command::Init { path, .. }
+        | Command::Info { path, .. }
+        | Command::Verify { path, .. }
+        | Command::Remember { path, .. }
+        | Command::About { path, .. }
+        | Command::List { path, .. }
+        | Command::Export { path, .. }
+        | Command::Inspect { path, .. }
+        | Command::Recall { path, .. }
+        | Command::History { path, .. }
+        | Command::Serve { path, .. }
+        | Command::Mcp {
+            cmd: McpCmd::Install { path, .. },
+        }
+        | Command::Thread {
+            cmd:
+                ThreadCmd::Ingest { path, .. }
+                | ThreadCmd::Export { path, .. }
+                | ThreadCmd::Forget { path, .. },
+        }
+        | Command::Essence {
+            cmd:
+                EssenceCmd::Render { path, .. }
+                | EssenceCmd::Add { path, .. }
+                | EssenceCmd::Append { path, .. },
+        } => Some(path),
+        _ => None,
+    }
+}
+
+/// Fill in a brain argument that was left out with the project brain.
+/// `init` creates the brain's directory (0700); every other command needs
+/// the brain to exist. Returns whether it was left out.
+fn resolve_brain_arg(cmd: &mut Command, moved: bool) -> std::result::Result<bool, String> {
+    let creating = matches!(cmd, Command::Init { .. });
+    let Some(path) = brain_arg(cmd) else {
+        return Ok(false);
+    };
+    if !path.is_empty() {
+        return Ok(false);
+    }
+    let start = project::start_dir(moved)?;
+    let brain = project::brain_path(&start)?;
+    if creating {
+        project::create_dir(&brain)?;
+    } else if !brain.is_file() {
+        return Err(format!(
+            "no project brain at {} yet; create it with `mnemo init` in this repository",
+            brain.display()
+        ));
+    }
+    *path = brain
+        .to_str()
+        .ok_or_else(|| format!("{}: the path isn't UTF-8", brain.display()))?
+        .to_string();
+    Ok(true)
 }
 
 #[derive(Subcommand)]
@@ -71,7 +142,10 @@ enum Command {
     /// to read it. "The key no longer sits in plain text" is the whole
     /// claim.
     Init {
-        /// Path to the new `.mnemo` file.
+        /// Path to the new `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Embedding dimensionality. The default, 384, is the built-in
         /// embedder's (12.3 step 5; 768 before v0.15).
@@ -113,7 +187,10 @@ enum Command {
     },
     /// Print database statistics.
     Info {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
         /// passphrase.
@@ -226,7 +303,10 @@ enum Command {
     },
     /// Decrypt and re-verify every live record.
     Verify {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
         /// passphrase.
@@ -254,7 +334,10 @@ enum Command {
     /// once, it reads one JSON string per line from stdin and writes one
     /// JSON float array per line to stdout.
     Remember {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Content to remember.
         #[arg(long)]
@@ -391,7 +474,10 @@ enum Command {
     /// A canonical entry tagged `metadata.topic = "manifest"` is treated as
     /// the headline orientation point.
     About {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
@@ -426,7 +512,10 @@ enum Command {
     },
     /// Browse all live memories.
     List {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
@@ -463,7 +552,10 @@ enum Command {
     /// are left out; `--git` makes the output diff-clean (ordered by key,
     /// then id; no thread turns and no access stats).
     Export {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Output format.
         #[arg(long, value_enum, default_value_t = export::ExportFormat::Markdown)]
@@ -498,7 +590,10 @@ enum Command {
     /// only, at a URL carrying a random token, and only GET: nothing in the
     /// view can change the file. Press Ctrl-C to stop.
     Inspect {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Port on 127.0.0.1 (default: a random free one).
         #[arg(long)]
@@ -529,7 +624,10 @@ enum Command {
     /// filters, uses the ANN index if one has been built, and updates the
     /// returned memories' access stats (persisted on the next `flush`).
     Recall {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Query vector as comma-separated floats. Mutually exclusive with
         /// `--query-file` and `--text`. Must match the DB's dimensionality.
@@ -704,7 +802,10 @@ enum Command {
     /// walks the default agent's private slot (v0.8.1 bugfix); pass
     /// `--shared` for the shared slot.
     History {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Keyed slot name (passed to `mnemo remember --key` /
         /// `remember_keyed`).
@@ -776,7 +877,10 @@ enum Command {
     /// Code sets it, else against the working directory; a missing brain is
     /// an error, never a new one.
     Serve {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Speak the Model Context Protocol (stdio transport). Required
         /// today — the flag exists so future transports (HTTP, SSE, ...)
@@ -875,7 +979,10 @@ enum McpCmd {
         /// Write without asking.
         #[arg(long, conflicts_with = "print")]
         yes: bool,
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
     },
 }
@@ -887,7 +994,10 @@ enum ThreadCmd {
     /// appends only the new turns. It batch-embeds every turn, with the
     /// built-in embedder or `--embed-cmd` + `--embed-name`.
     Ingest {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Thread id to append under. New if no prior ingest used it.
         #[arg(long)]
@@ -928,7 +1038,10 @@ enum ThreadCmd {
     /// round trip (ingest → export) is byte-equal for turns that
     /// weren't truncated or chunked.
     Export {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Thread id to export.
         #[arg(long)]
@@ -942,7 +1055,10 @@ enum ThreadCmd {
     /// Soft-delete every record in a thread's archive. Compact later
     /// to reclaim space permanently.
     Forget {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Thread id to forget.
         #[arg(long)]
@@ -973,7 +1089,10 @@ enum EssenceCmd {
     /// Render the deterministic markdown view of a thread's essence
     /// (or the project layer with `--project`). Prints to stdout.
     Render {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Thread id. Omit with `--project` for the project layer.
         #[arg(long, conflicts_with = "project")]
@@ -990,7 +1109,10 @@ enum EssenceCmd {
     /// Add a new section item (intent/conventions/decisions/state/
     /// open/next/lessons). Status starts at `open`.
     Add {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Section name.
         #[arg(long)]
@@ -1012,7 +1134,10 @@ enum EssenceCmd {
     },
     /// Append a new timeline entry (append-only, ≤ 600 bytes).
     Append {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain,
+        /// `<git-common-dir>/mnemo/project.mnemo` (12.2), found from `-C`,
+        /// else `CLAUDE_PROJECT_DIR`, else the working directory.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Entry text (≤ 600 bytes).
         #[arg(long)]
@@ -1999,9 +2124,13 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 }
 
 fn run() -> std::result::Result<(), String> {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     let _ = WAIT.set(cli.wait);
     let _ = MODEL_DIR.set(cli.model_dir.clone());
+    if let Some(dir) = &cli.dir {
+        std::env::set_current_dir(dir).map_err(|e| format!("-C {}: {e}", dir.display()))?;
+    }
+    let project_brain = resolve_brain_arg(&mut cli.command, cli.dir.is_some())?;
     match cli.command {
         Command::Init {
             path,
@@ -3596,6 +3725,7 @@ fn run() -> std::result::Result<(), String> {
         } => mcp_install::run(mcp_install::Install {
             client,
             file: path,
+            project: project_brain,
             scope,
             name,
             print,

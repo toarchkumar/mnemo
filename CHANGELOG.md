@@ -8,6 +8,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **The project brain (12.2 step 1).** In a git repository, the brain
+  commands take no path and use `<git-common-dir>/mnemo/project.mnemo`,
+  so every worktree shares one brain and git never tracks it: `init`,
+  `info`, `verify`, `remember`, `about`, `list`, `export`, `inspect`,
+  `recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
+  and `essence render|add|append`. It's found from `-C <dir>`, else
+  `CLAUDE_PROJECT_DIR`, else the working directory. `init` creates its
+  directory with mode 0700, and refuses a symbolic link in its place.
+  Outside a git repository the error says to give the path.
+- **`-C <dir>`** on every command: run as if started in `<dir>`, like
+  git's `-C`.
+- **`mcp install` with no path** writes an entry with no path in it:
+  `serve --mcp --shared` for Claude Code (project and local scopes), and
+  `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A user scope
+  keeps the absolute path.
+
 ## [0.15.0] — 2026-11-15
 
 ### Added
