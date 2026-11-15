@@ -5,6 +5,16 @@ in this step. **Revised** (round 1, the same day) for PLANNER-A's six
 changes: the manifest's default agent, the per-turn hook's one write, brain
 text in the hook's line and never in a pointer, the hop count across fresh
 messages, what step 1 can test, and how a woken session sees the pointer.
+**Revised again** (v0.17.0 step 2) for REVIEWER-A's REV-010, as PLANNER-A
+triaged it:
+- claims and presence change in place (R-010.8);
+- acked messages are pruned (R-010.8);
+- a task whose owner lapsed is reclaimed (R-010.7);
+- the per-turn hook is measured first, with a fast path if needed
+  (R-010.6);
+- `--as` and `--role` on the coordination commands, and the alias recipe
+  (R-010.9);
+- tasks and the inbox are presented before claims (R-010.3).
 
 **Scope** (PLAN.md Phase 13, R-006.1's split):
 - 13.1 messages and tasks, with 13.1b delivery;
@@ -83,6 +93,9 @@ CHANGELOG says to upgrade every session's `mnemo` together.
   edit-in-place, the way essence items resolve. A message is one record for
   its life. Supersession isn't used: a message isn't a fact with versions.
 - **`ack(id, note)`** sets `acked` and `done`. Reading the inbox sets `seen`.
+- **Acked messages don't stay forever** (R-010.8): `compact` and `mnemo
+  inbox --prune` drop a message acked more than 30 days ago. Its effect
+  already lives in a task or a fact, and `export --git` never had it.
 - **A message to a role** is acked by the first of that role to ack it. Each
   agent sees `seen` as it was set by anyone.
 
@@ -92,7 +105,7 @@ CHANGELOG says to upgrade every session's `mnemo` together.
 |---|---|
 | title and body | `content`, as for messages |
 | `_mnemo.key` = `task:<slug>` | A keyed slot, so a re-add with the same slug is an update, not a duplicate. The slug comes from the caller or the title |
-| `_mnemo.status` | `queued → active → ready → done`, or `blocked`, with `blocked → active` the only back edge (`TASK_TRANSITIONS`, declared since 12.7) |
+| `_mnemo.status` | `queued → active → ready → done`, or `blocked`; the back edges are `blocked → active` and, since REV-010, `active → queued` (an owner hands a task back, or someone requeues an abandoned one), in `TASK_TRANSITIONS` |
 | `_mnemo.role` | The role that may take it (`worker`) |
 | `_mnemo.owner` | The agent id that took it (set by `next`) |
 | `_mnemo.after` | Task ids it waits for |
@@ -104,16 +117,32 @@ CHANGELOG says to upgrade every session's `mnemo` together.
 - **`next(role)`** returns the oldest `queued` task for the role whose
   `after` tasks are all `done`. It claims `task:<slug>` (section 4) and sets
   `active` and the owner, all in one exclusive window.
+- **A task whose owner's claim lapsed is taken back** (R-010.7). After the
+  ready `queued` tasks, `next` also takes an `active` task whose
+  `task:<slug>` claim has lapsed: a new claim, a new owner, and a
+  `status_history` entry naming the old owner, in the same window.
+  - Otherwise a crashed or out-of-usage worker would leave its task stuck
+    in `active`, which nothing could take.
+- **A `task update` from an owner whose claim is lost is refused** with
+  `Lost`, so a worker that wakes up after its task was reclaimed can't
+  overwrite the new owner's work. Step 4 has a crash-and-reclaim test.
 - **`ready` waits for the task's creator to set `done`,** unless
   `pre_approved`. That's today's "READY before tagging".
 
 ### Claims and presence
 
-As 12.4 designed them ("Claims and presence", with its step 7 rework):
-- a claim is a keyed record, `claim:<topic>` in the shared scope, holding
-  the holder, `expires_at`, the lease and a token;
-- presence is a keyed record, `presence:<agent>`, holding the role, the
-  tool and `last_active`, plus a sidecar lock for `alive`.
+As 12.4 designed them ("Claims and presence", with its step 7 rework), with
+one change from REV-010 (R-010.8):
+- a claim is one record per topic, `claim:<topic>` in the shared scope,
+  holding the holder, `expires_at`, the lease and the **token**
+  (`_mnemo.claim_token`);
+- presence is one record per agent, `presence:<agent>`, holding the role,
+  the tool and `last_active`, plus a sidecar lock for `alive`;
+- **both change in place,** not by keyed supersession. A keyed write keeps
+  every superseded version for `history --key`, and a heartbeat once a
+  minute would leave about 10,000 versions per agent per month that nobody
+  reads. A claim's new holder gets a new token in the same record, so
+  `check`, `renew` and `release` still see `Lost`.
 
 Section 4 has the TTLs.
 
@@ -284,6 +313,19 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
        measures the hook itself at a load under 2;
      - **context:** nothing on most turns, and at most 600 bytes when work
        arrives, against the brief's 8,000 bytes once per session.
+   - **Measure first, then a fast path if it's needed** (R-010.6). Step 5
+     times an unchanged turn at a load under 2. **If it's over about 20
+     ms** (the keychain read is the likely part), the hook gets a
+     per-session stamp in the brain's sidecar directory (0600) holding
+     the last check's time, the header seal it saw, and when a claim of
+     its own next needs a warning.
+     - **An unchanged turn reads page 0 alone:** with the seal the same and
+       no claim near its warning, it updates the stamp and exits, with no
+       keychain read and no open. The seal is part of the unencrypted
+       header (12.4's stamp), and step 5 confirms it can be read without the
+       key.
+     - **Cursor's once-a-minute gate** (`postToolUse` fires many times a
+       turn) is checked in that stamp first, before anything else.
    - **The brief** gets a "Your work" part (section 7) with the same counts
      at session start.
 2. **The idle wake-up through the session's own socket (Claude Code; step 6).**
@@ -491,7 +533,10 @@ Until then the gitignored file stays the place.
 
 ## 7. The surfaces
 
-**MCP: three new tools, each with an `op`,** to keep the tool list short:
+**MCP: three new tools, each with an `op`,** to keep the tool list short.
+Their descriptions, the guide and the site present **tasks and the inbox
+before claims** (R-010.3): agents think in "what's next" and "what's in my
+inbox", and a claim is mostly what `task next` uses underneath.
 
 | Tool | Ops |
 |---|---|
@@ -505,6 +550,11 @@ Until then the gitignored file stays the place.
 
 **CLI:**
 - `mnemo inbox [--all]`, `mnemo post <to> <subject> [--body …] [--refs …]`, `mnemo ack <id>`;
+- **`--as <agent>` and `--role <role>`** on each coordination command
+  (`post`, `inbox`, `ack`, `task`, `claim`, `who`), falling back to
+  `MNEMO_AGENT` and `MNEMO_ROLE` (R-010.9). So a session without hooks
+  (reviewer-a in Antigravity) or a person in a plain terminal runs
+  `mnemo inbox --as reviewer-a`, with no environment prefix;
 - `mnemo task add|next|update|list|get`;
 - `mnemo claim take|renew|release|check|who`;
 - `mnemo stale`, `mnemo wake pause|resume|status`;
@@ -528,7 +578,10 @@ most 600 bytes, taken from the recall's share.** For example: "2 unread
 part is left out when there's nothing.
 
 **The guide's new section, "Working with other agents":**
-- starting each session with `MNEMO_AGENT` and `MNEMO_ROLE`;
+- starting each session with `MNEMO_AGENT` and `MNEMO_ROLE`, with an alias
+  per role as the recipe (R-010.9): `alias claude-worker='MNEMO_AGENT=worker-a
+  MNEMO_ROLE=worker claude'`;
+- tasks and the inbox first, then claims (R-010.3);
 - `inbox`, `task` and `claim`, as `sh test` and `json mcp` blocks that CI
   runs against a scratch brain;
 - the rule that messages are information;
