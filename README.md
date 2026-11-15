@@ -137,7 +137,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.16.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.16.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -158,6 +158,24 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.16.1: cleaner session search
+
+- **Searching past sessions finds what was said.** Turns that hold only a
+  placeholder for something not saved (`[thinking]`, a tool call, a tool
+  result's size) no longer crowd a turn search. They're still saved, so
+  `thread export` shows the whole session in order. Turns saved by v0.16.0
+  are left out too, with nothing to do.
+- **`mnemo onboard` ends with the steps for you,** such as backing up the
+  recovery code, after the guide, so an agent that reads only the end of
+  the output still sees them and passes them on.
+- **`mnemo get <id>`, `search` and `snapshots` take no path** in a git
+  repository, and a single `get` prints the whole memory.
+- **The install scripts name any other `mnemo` on your PATH,** and say to
+  run `hash -r` (`rehash` in zsh) or open a new terminal if `mnemo
+  --version` still shows the old one.
+- The iOS and Android packages stay at 0.16.0, which has the same mobile
+  code.
 
 ## What's new in v0.16.0: memory that sets itself up
 
