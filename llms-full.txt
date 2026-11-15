@@ -225,8 +225,9 @@ mnemo export --git
 
 ## 5. Hooks and MCP extras
 
-`onboard` installs three hooks. Each runs `mnemo hook <event>`, never
-blocks the session, and never asks for anything:
+`onboard` installs three hooks: `mnemo hook session-start`, `mnemo hook
+pre-compact` and `mnemo hook session-end`. None of them blocks the
+session, asks for anything or downloads anything:
 
 ```sh
 echo '{"session_id": "s1", "source": "startup"}' | mnemo hook session-start --client claude-code
@@ -235,7 +236,10 @@ echo '{"session_id": "s1", "source": "startup"}' | mnemo hook session-start --cl
 - **Session start** adds the card, the project essence and a short recall
   to the agent's context, at most 8,000 bytes (`--budget` lowers it).
 - **Before compaction** and **at session end**, the hook saves the
-  transcript into the session's thread.
+  transcript into the session's thread. Tool output is left out (only its
+  size is kept), and known secret shapes (private keys, API tokens,
+  recovery codes) are replaced with `[redacted: <kind>]`. That's a best
+  effort, so still never paste a secret into a session.
 
 The server also offers resources and prompts:
 

@@ -26,8 +26,6 @@ use mnemo_engine::guide;
 /// place, if there is one), and each step removes its entries. **At READY
 /// this list must be empty.**
 const PENDING_UNTIL_STEP: &[(&str, u8, Option<&str>)] = &[
-    // Step 4: the hooks.
-    ("mnemo hook", 4, None),
     // Step 5: `onboard` itself; until then the brain comes from `init`.
     ("mnemo onboard --yes", 5, Some("mnemo init")),
     ("mnemo onboard --undo", 5, None),

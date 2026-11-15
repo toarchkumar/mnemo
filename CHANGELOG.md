@@ -34,6 +34,36 @@ Pre-1.0, the minor component carries the breaking-change signal.
   data, not instructions. Reads don't count as accesses. A missing key or
   an unknown URI is the error `-32002`. The library has
   `Mnemo::recent(n)`.
+- **`mnemo hook <session-start|pre-compact|session-end> --client
+  <claude-code|cursor>` (12.2 step 4),** the hooks `onboard` will
+  install:
+  - **`session-start`** adds the guide's card, then (after a line that
+    marks it as data) the project's notes, its essence, the session
+    thread's essence on `resume` and `compact`, and a short recall, to the
+    agent's context. The default is 8,000 bytes, and `--budget` takes up
+    to 9,000. The recall is dropped if the hook passes 3 s.
+  - **`pre-compact`** and **`session-end`** save the transcript into the
+    session's thread (`claude-code:<id>` or `cursor:<id>`). `pre-compact`
+    also gives Claude Code compaction instructions.
+  - **The rules:**
+    - It always exits 0, never prompts, and never downloads.
+    - It reads with a 2 s wait, and writes in shared mode.
+    - It checks the session id and the transcript path. A FIFO or a
+      device is refused without blocking, and a transcript over 64 MiB
+      is read from its last 64 MiB.
+    - A Claude Code hook that Cursor runs stands aside.
+    - A save needs the built-in model installed, and says so when it
+      isn't.
+- **`thread ingest --tool-results omit` and `--redact`,** and the library's
+  `redact::secrets` and `read_transcript_with`. `omit` keeps only a
+  `[tool_result ok|error, N bytes]` marker. `--redact` replaces known
+  secret shapes with `[redacted: <kind>]`: private keys, AWS key ids,
+  GitHub and Slack tokens, `sk-` keys, JWTs, recovery codes, and
+  secret-looking `NAME=value`s. Each shape needs a word boundary and a
+  vendor-length minimum, so prose stays. **The hooks' saves always use
+  both, which narrows "a thread's turns are kept losslessly" for the
+  hooks:** tool output isn't kept, only its size. A direct `thread ingest`
+  keeps everything unless asked. Redaction is a best effort.
 - **`recovery-code`, `unlock` and `rekey` take no path** in a git
   repository, like the other brain commands.
 - **The guide for agents (GUIDE-1, 12.2 step 2).** `mnemo onboard --guide`

@@ -76,6 +76,7 @@ mod keyslot;
 pub mod mcp;
 mod memory;
 mod pager;
+pub mod redact;
 mod result_cache;
 mod session;
 mod shared;
@@ -123,7 +124,9 @@ pub use store::{
     V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };
 pub use text::{KeywordIndex, KeywordTokenizer};
-pub use transcript::{read_transcript, TranscriptFormat};
+pub use transcript::{
+    read_transcript, read_transcript_with, ToolResults, TranscriptFormat, TranscriptOptions,
+};
 
 /// Re-export of [`ulid::Ulid`], the identifier type used for memories.
 pub use ulid::Ulid;

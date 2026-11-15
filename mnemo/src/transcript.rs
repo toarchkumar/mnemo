@@ -49,26 +49,74 @@ impl TranscriptFormat {
     }
 }
 
+/// What a Claude Code transcript's tool results keep (12.2 step 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolResults {
+    /// The body, as `[tool_result ok|error] <body>` (what ingest always
+    /// kept).
+    #[default]
+    Full,
+    /// Only a marker with the body's size, `[tool_result ok|error, N
+    /// bytes]`: tool output is where most secrets land, and most of a
+    /// transcript's size. The hooks' ingest uses it.
+    Omit,
+}
+
+/// How [`read_transcript_with`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TranscriptOptions {
+    /// What tool results keep.
+    pub tool_results: ToolResults,
+    /// Skip a line that isn't JSON or isn't a valid turn, instead of
+    /// failing: the hooks read a transcript the client may be writing, so
+    /// its last line can be half written.
+    pub lenient: bool,
+}
+
 /// Read a transcript from any `Read` in the given format and return the
 /// turns in file order. Non-matching / unrecognized line types are
 /// skipped silently (Claude Code adds new `type` values over time).
 pub fn read_transcript<R: Read>(reader: R, format: TranscriptFormat) -> Result<Vec<ThreadTurn>> {
+    read_transcript_with(reader, format, TranscriptOptions::default())
+}
+
+/// [`read_transcript`] with [`TranscriptOptions`].
+pub fn read_transcript_with<R: Read>(
+    reader: R,
+    format: TranscriptFormat,
+    opts: TranscriptOptions,
+) -> Result<Vec<ThreadTurn>> {
     let mut out = Vec::new();
     for (lineno, line) in BufReader::new(reader).lines().enumerate() {
-        let line = line.map_err(MnemoError::Io)?;
+        let line = match line {
+            Ok(l) => l,
+            // Not UTF-8 (a cut in the middle of a character, say).
+            Err(e) if opts.lenient && e.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(e) => return Err(MnemoError::Io(e)),
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let v: Value = serde_json::from_str(trimmed).map_err(|e| {
-            MnemoError::Invalid(format!("transcript line {}: invalid JSON: {e}", lineno + 1))
-        })?;
-        let turn = match format {
-            TranscriptFormat::JsonlGeneric => parse_generic_line(&v)?,
-            TranscriptFormat::ClaudeCodeJsonl => parse_claude_code_line(&v)?,
+        let v: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) if opts.lenient => continue,
+            Err(e) => {
+                return Err(MnemoError::Invalid(format!(
+                    "transcript line {}: invalid JSON: {e}",
+                    lineno + 1
+                )))
+            }
         };
-        if let Some(t) = turn {
-            out.push(t);
+        let turn = match format {
+            TranscriptFormat::JsonlGeneric => parse_generic_line(&v),
+            TranscriptFormat::ClaudeCodeJsonl => parse_claude_code_line(&v, opts.tool_results),
+        };
+        match turn {
+            Ok(Some(t)) => out.push(t),
+            Ok(None) => {}
+            Err(_) if opts.lenient => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(out)
@@ -124,7 +172,7 @@ fn parse_generic_line(v: &Value) -> Result<Option<ThreadTurn>> {
 /// Non-text blocks (tool_use, tool_result, image) are flattened into a
 /// readable text summary so the archive stays browsable without being
 /// lossless about the original block structure.
-fn parse_claude_code_line(v: &Value) -> Result<Option<ThreadTurn>> {
+fn parse_claude_code_line(v: &Value, tool_results: ToolResults) -> Result<Option<ThreadTurn>> {
     let obj = match v.as_object() {
         Some(o) => o,
         None => return Ok(None),
@@ -156,7 +204,7 @@ fn parse_claude_code_line(v: &Value) -> Result<Option<ThreadTurn>> {
         .to_string();
     let content = match message.get("content") {
         Some(Value::String(s)) => s.clone(),
-        Some(Value::Array(blocks)) => flatten_blocks(blocks),
+        Some(Value::Array(blocks)) => flatten_blocks(blocks, tool_results),
         _ => String::new(),
     };
     // Timestamps in Claude Code jsonl live under `message.timestamp`
@@ -185,7 +233,7 @@ fn parse_claude_code_line(v: &Value) -> Result<Option<ThreadTurn>> {
 /// single string. Text blocks come through verbatim; other block types
 /// are rendered as short readable summaries so the archive is
 /// grep-able (`[tool_use name=Bash]`, `[tool_result ok]`, `[image]`).
-fn flatten_blocks(blocks: &[Value]) -> String {
+fn flatten_blocks(blocks: &[Value], tool_results: ToolResults) -> String {
     let mut out = String::new();
     for b in blocks {
         let Some(obj) = b.as_object() else {
@@ -216,15 +264,21 @@ fn flatten_blocks(blocks: &[Value]) -> String {
                 let status = if is_error { "error" } else { "ok" };
                 let inner = obj.get("content").and_then(|c| match c {
                     Value::String(s) => Some(s.clone()),
-                    Value::Array(nested) => Some(flatten_blocks(nested)),
+                    Value::Array(nested) => Some(flatten_blocks(nested, tool_results)),
                     _ => None,
                 });
                 if !out.is_empty() {
                     out.push('\n');
                 }
-                match inner {
-                    Some(body) => out.push_str(&format!("[tool_result {status}] {body}")),
-                    None => out.push_str(&format!("[tool_result {status}]")),
+                match (inner, tool_results) {
+                    (Some(body), ToolResults::Full) => {
+                        out.push_str(&format!("[tool_result {status}] {body}"))
+                    }
+                    (inner, ToolResults::Omit) => out.push_str(&format!(
+                        "[tool_result {status}, {} bytes]",
+                        inner.map_or(0, |b| b.len())
+                    )),
+                    (None, ToolResults::Full) => out.push_str(&format!("[tool_result {status}]")),
                 }
             }
             "image" => {
