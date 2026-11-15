@@ -64,13 +64,14 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, build-wheels, check-artifacts, build-sdist, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, build-wheels, check-artifacts, build-sdist, check-sdist, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
       && needs.build-cli.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.check-artifacts.result == 'success'
+      && needs.check-sdist.result == 'success'
       && needs.build-sdist.result == 'success'
       && (needs.mobile-prepare.outputs.mobile != 'true'
           || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
@@ -271,26 +272,37 @@ jobs:
           name: wheel-${{ matrix.target }}
           path: mnemo-python/dist/*
 
-  # --- 12.3 step 5: the CLI and the wheel run on the targets no other
-  #     check runs on: aarch64 Linux (the CLI is cross-built with zig) and
-  #     x86_64 macOS (built on an Apple Silicon runner). Each fetches the
-  #     built-in embedder's model (ring's TLS, the SHA-256 checks), then a
-  #     remember and two recalls on a new brain. A release waits for both
+  # --- 12.3 step 5: every published CLI and wheel runs before the
+  #     approval (RB-010.3), each on a runner of its own target: the
+  #     cross-built ones (aarch64 Linux, zig; x86_64 macOS, built on Apple
+  #     Silicon) and the three built where they run. Each fetches the built-in
+  #     embedder's model (ring's TLS, the SHA-256 checks), then a remember and
+  #     two recalls on a new brain. A release waits for all five
   #     (`approve-release`).
   check-artifacts:
     name: artifact check (${{ matrix.target }}, the built-in embedder)
     needs: [build-cli, build-wheels]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    defaults:
+      run:
+        # Windows too: the steps are bash (Git Bash on windows-latest).
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
           # GitHub's Intel macOS image (macos-13 is retired).
           - target: x86_64-apple-darwin
             os: macos-15-intel
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     steps:
       - name: Set up Python
         timeout-minutes: 10
@@ -360,6 +372,49 @@ jobs:
               assert "approval" in hits[0]["content"], hits
               db.close()
           print("ok: the wheel fetched, checked and used the built-in embedder")
+          PY
+
+  # --- RB-010.3: the sdist is built and imported before the approval: a
+  #     `pip install` from it (no wheel; a source build, with the features
+  #     pyproject.toml names, so no keychain and no built-in embedder), then
+  #     an import, `builtin_embedder_info()`, and a remember and recall by
+  #     vector. A release waits for it (`approve-release`).
+  check-sdist:
+    name: sdist check (built and imported on Linux)
+    needs: build-sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Set up Python
+        timeout-minutes: 10
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.10"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: sdist
+          path: sdist
+
+      - name: Build and install the sdist, then use it
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          ls -l sdist
+          pip install --no-binary mnemo-engine sdist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          python - <<'PY'
+          import os, tempfile
+          import mnemo_engine as mnemo
+          print("mnemo_engine", mnemo.__version__, mnemo.builtin_embedder_info())
+          with tempfile.TemporaryDirectory() as d:
+              db = mnemo.open(os.path.join(d, "sdist.mnemo"), "sdist-check", dimensions=4)
+              db.remember("the release needs one approval click", "semantic", [1.0, 0.5, 0.25, 0.1])
+              hits = db.recall([1.0, 0.5, 0.25, 0.1], top_k=1, track_access=False)
+              assert hits[0]["content"].startswith("the release"), hits
+              db.close()
+          print("ok: the sdist built, imported and stored a memory")
           PY
 
   # --- Build the Python source distribution (sdist) once. `pip install

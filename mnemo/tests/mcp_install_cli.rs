@@ -277,6 +277,59 @@ fn print_writes_nothing_and_env_values_are_masked() {
 }
 
 #[test]
+fn only_its_own_entry_is_shown_never_another_servers_secrets() {
+    let e = Env::new();
+    let b = e.brain("project/b.mnemo");
+    let cfg = e.p("project/.cursor/mcp.json");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    // Other servers' secrets in an argument, a URL's query and user-info, an
+    // env value and a header; and an old mnemo entry with a passphrase flag.
+    let old = r#"{
+  "theme": "dark-secret-theme",
+  "mcpServers": {
+    "search": {"command": "npx", "args": ["search-server", "--api-key", "sk-live-arg-secret"]},
+    "remote": {"url": "https://user:pw-in-url@example.com/sse?token=tok-in-query"},
+    "db": {"command": "db", "env": {"DB_PASSWORD": "env-secret"}, "headers": {"Authorization": "Bearer hdr-secret"}},
+    "mnemo": {"command": "mnemo", "args": ["serve", "--mcp", "--passphrase", "old-flag-secret", "b.mnemo"]}
+  }
+}"#;
+    std::fs::write(&cfg, old).unwrap();
+    let secrets = [
+        "sk-live-arg-secret",
+        "pw-in-url",
+        "tok-in-query",
+        "env-secret",
+        "hdr-secret",
+        "old-flag-secret",
+        "dark-secret-theme",
+        "search-server",
+    ];
+    // --print, and a run declined (not at a terminal, no --yes).
+    for args in [
+        vec!["--client", "cursor", "--print", s(&b)],
+        vec!["--client", "cursor", s(&b)],
+    ] {
+        let (_, out, err) = e.run(&args);
+        let all = format!("{out}{err}");
+        for secret in secrets {
+            assert!(!all.contains(secret), "{args:?} showed {secret:?}: {all}");
+        }
+        // Its own entry, the old one it replaces, and the count.
+        assert!(out.contains("--shared"), "{out}");
+        assert!(out.contains("- "), "the replaced entry: {out}");
+        assert!(
+            out.contains("(3 other servers in the file left unchanged)"),
+            "{out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&cfg).unwrap(),
+            old,
+            "{args:?} wrote"
+        );
+    }
+}
+
+#[test]
 fn an_entry_without_a_secret_is_replaced_and_no_terminal_means_no_write() {
     let e = Env::new();
     let b = e.brain("project/b.mnemo");

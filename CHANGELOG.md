@@ -8,6 +8,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-15
+
 ### Added
 
 - **Generated keys (12.3).** `mnemo init` with no passphrase source makes a
@@ -20,7 +22,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   group. `mnemo recovery-code <file>` shows a brain's code from the key
   store, only to a person at a terminal: stdout and stdin are terminals,
   no agent harness marker is set, and the code appears on the controlling
-  terminal after a key press, on the alternate screen.
+  terminal after a key press, on the alternate screen. On Windows the
+  console has no alternate screen, so the code stays in its scrollback.
 - **`mnemo rekey --new-key`** rekeys to a new generated key, keeps it in
   the key store under the new salt before the commit, and shows its code
   before the commit. `--store` keeps a new passphrase there too. The old
@@ -61,8 +64,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - In a project scope (the default inside a git work tree) it writes
     `mnemo` from the PATH and a path relative to the project root, never an
     absolute path or a command.
-  - It shows a diff with `env` values masked, asks at a terminal (or
-    `--yes`), and `--print` writes nothing.
+  - It shows only its own entry (a diff against the one it replaces, with
+    `env` and `headers` values masked) and a count of the other servers
+    left unchanged, asks at a terminal (or `--yes`), and `--print` writes
+    nothing.
   - Other servers are kept, the write is atomic, and a config it can't
     parse is left alone.
   - Claude Code goes through `claude mcp add-json` when `claude` is on the
@@ -153,6 +158,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   names; RELEASING.md says how to read a backtrace from a release.
 - **`mnemo init`'s default width is 384** (was 768), the built-in
   embedder's. Pass `--dimensions` for another embedder.
+- **`mnemo serve --mcp` without `--embed-cmd` uses the built-in embedder,**
+  and never fails to start because of it. Case by case, said on stderr:
+  - a file whose width isn't the built-in's (384): served without an
+    embedder, and the model isn't loaded or fetched. The notice names
+    `--embed-cmd`, `--embed-name` and `mnemo reembed <file> --embed-dims
+    384`;
+  - a file that records the built-in: served with it;
+  - a file that records another embedder: served without one;
+  - a file that records no embedder and has memories besides its
+    onboarding scaffold (vectors from elsewhere): served without one, and
+    nothing is written at start;
+  - a new file, with only its scaffold: the built-in is used and recorded;
+  - the model can't be loaded (offline, first use): served without one.
+
+  Without an embedder, `recall`'s `text` is matched by keyword (v9 files)
+  and a `remember` with `text` is refused. The same holds with `--shared`.
 - **The MCP `recall` tool with `text` on a server without an embedder**
   matches the text by keyword (v9 files) instead of returning an error.
   `remember` with `text` still needs an embedder.
@@ -4038,7 +4059,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/toarchkumar/mnemo/compare/v0.13.0...v0.13.1

@@ -234,7 +234,12 @@ fn offline_the_mcp_server_matches_text_by_keyword() {
         &[],
         &[(2, "recall", serde_json::json!({"text": "release approval"}))],
     );
-    assert!(out.stderr.contains("no embedder"), "{}", out.stderr);
+    // A 4-wide file: the width notice (RB-010.1), so no download is tried.
+    assert!(
+        out.stderr.contains("matched by keyword only") && !out.stderr.contains("downloading"),
+        "{}",
+        out.stderr
+    );
     let hits = out.results[0].as_array().unwrap();
     assert!(hits[0]["content"].as_str().unwrap().contains("approval"));
 }
@@ -242,6 +247,10 @@ fn offline_the_mcp_server_matches_text_by_keyword() {
 struct McpOut {
     results: Vec<serde_json::Value>,
     stderr: String,
+    /// Whether `initialize` (id 1) was answered.
+    initialized: bool,
+    /// Whether the server exited 0.
+    ok: bool,
 }
 
 fn mcp(
@@ -281,15 +290,24 @@ fn mcp(
     let out = child.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     let mut results = Vec::new();
+    let mut initialized = false;
     for l in String::from_utf8_lossy(&out.stdout).lines() {
         let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        if v["id"].as_u64() == Some(1) && v.get("result").is_some() {
+            initialized = true;
+        }
         if v["id"].as_u64().unwrap_or(0) > 1 {
             assert!(v.get("error").is_none(), "{v}\n{stderr}");
             let text = v["result"]["content"][0]["text"].as_str().unwrap();
             results.push(serde_json::from_str(text).unwrap_or(serde_json::json!(text)));
         }
     }
-    McpOut { results, stderr }
+    McpOut {
+        results,
+        stderr,
+        initialized,
+        ok: out.status.success(),
+    }
 }
 
 #[test]
@@ -331,19 +349,31 @@ fn install_fetches_checks_and_then_serves_every_command() {
     assert!(top("what does `snapshot_list` return").contains("snapshot_list returns"));
     assert!(top("who approves a release").contains("approval click"));
 
-    // A changed file in the cache is refused, and `install` says so.
+    // A changed file of the right size: refused at load with the fix named,
+    // `status` says so (it hashes), and `install` replaces it (RB-010.4).
     let tok = env.installed_dir().join("tokenizer.json");
     let mut bytes = std::fs::read(&tok).unwrap();
     bytes[10] ^= 1;
     std::fs::write(&tok, &bytes).unwrap();
     let e = fails(&env.run(&["remember", p, "--text", "x"]));
-    assert!(e.contains("doesn't match its pinned SHA-256"), "{e}");
-    let e = fails(&env.run(&["embedder", "install"]));
-    assert!(e.contains("doesn't match its pinned SHA-256"), "{e}");
-    // Deleting it lets `install` fetch it again.
-    std::fs::remove_file(&tok).unwrap();
-    ok(&env.run(&["embedder", "install"]));
+    assert!(
+        e.contains("doesn't match its pinned SHA-256") && e.contains("embedder install"),
+        "{e}"
+    );
+    let t = ok(&env.run(&["embedder", "status"]));
+    assert!(
+        t.contains("installed:  no (tokenizer.json") && t.contains("doesn't match"),
+        "{t}"
+    );
+    // A dead download's leftover is removed by the next install.
+    let stale = env.installed_dir().join("config.json.999999999.part");
+    std::fs::write(&stale, b"half a file").unwrap();
+    let t = ok(&env.run(&["embedder", "install"]));
+    assert!(t.contains("installed") && !t.contains("already"), "{t}");
     assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 4);
+    assert!(!stale.exists());
+    assert!(ok(&env.run(&["embedder", "status"])).contains("installed:  yes"));
+    ok(&env.run(&["remember", p, "--text", "x"]));
 
     // The MCP server uses it with no flags: `remember` and `recall` by text.
     let out = mcp(
@@ -435,4 +465,161 @@ fn model_dir_and_reembed() {
         "{t}"
     );
     assert!(String::from_utf8_lossy(&o.stdout).contains("readers come first"));
+}
+
+// --- RB-010.1: `serve --mcp` with the built-in never fails to start, and
+// writes nothing at start to a file that has vectors from elsewhere.
+
+/// The model's files put in the run's cache, as `install` leaves them.
+fn put_model_in_cache(env: &Env, model: &Path) {
+    std::fs::create_dir_all(env.installed_dir()).unwrap();
+    for f in FILES {
+        std::fs::copy(model.join(f.name), env.installed_dir().join(f.name)).unwrap();
+    }
+}
+
+/// A brain of `dims` with the scaffold manifest and, if `with_vectors`, a
+/// memory whose vector came from elsewhere. It records no embedder.
+fn brain_without_embedder(env: &Env, name: &str, dims: usize, with_vectors: bool) -> PathBuf {
+    let p = env.dir.path().join(name);
+    let mut db = Mnemo::create(
+        &p,
+        PASS,
+        MnemoConfig {
+            dimensions: dims,
+            kdf: KdfParams::fast(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    db.remember(mnemo_engine::Memory::scaffold_manifest(dims))
+        .unwrap();
+    if with_vectors {
+        let mut v = vec![0.0; dims];
+        v[0] = 1.0;
+        db.remember(mnemo_engine::Memory::new(
+            String::from("the release workflow needs one approval"),
+            mnemo_engine::MemoryType::Semantic,
+            v,
+        ))
+        .unwrap();
+    }
+    db.close().unwrap();
+    p
+}
+
+fn sha(p: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(std::fs::read(p).unwrap()))
+}
+
+const MODES: [&[&str]; 2] = [&[], &["--shared"]];
+
+#[test]
+fn the_server_serves_a_file_of_another_width_without_the_builtin() {
+    // Offline always, and with the model in the cache when there is one: the
+    // model is neither fetched nor loaded for a 768-wide file.
+    for with_model in [false, true] {
+        let model = if with_model {
+            match model_dir() {
+                Some(m) => Some(m),
+                None => continue,
+            }
+        } else {
+            None
+        };
+        for mode in MODES {
+            let env = Env::new(offline());
+            if let Some(m) = &model {
+                put_model_in_cache(&env, m);
+            }
+            let b = brain_without_embedder(&env, "w768.mnemo", 768, true);
+            let out = mcp(
+                &env,
+                &b,
+                mode,
+                &[(2, "recall", serde_json::json!({"text": "release approval"}))],
+            );
+            let ctx = format!("model {with_model}, mode {mode:?}: {}", out.stderr);
+            assert!(out.ok && out.initialized, "{ctx}");
+            assert!(
+                out.stderr
+                    .contains("768-dimensional and the built-in embedder is 384"),
+                "{ctx}"
+            );
+            assert!(out.stderr.contains("--embed-dims 384"), "{ctx}");
+            assert!(!out.stderr.contains("downloading"), "{ctx}");
+            let hits = out.results[0].as_array().unwrap();
+            assert!(
+                hits[0]["content"].as_str().unwrap().contains("approval"),
+                "{ctx}"
+            );
+            let db = Mnemo::open_read_only(&b, PASS).unwrap();
+            drop(db);
+        }
+    }
+}
+
+#[test]
+fn the_server_writes_nothing_at_start_to_a_file_with_vectors_from_elsewhere() {
+    for with_model in [false, true] {
+        let model = if with_model {
+            match model_dir() {
+                Some(m) => Some(m),
+                None => continue,
+            }
+        } else {
+            None
+        };
+        for mode in MODES {
+            let env = Env::new(offline());
+            if let Some(m) = &model {
+                put_model_in_cache(&env, m);
+            }
+            let b = brain_without_embedder(&env, "w384.mnemo", 384, true);
+            let before = sha(&b);
+            let out = mcp(&env, &b, mode, &[]);
+            let ctx = format!("model {with_model}, mode {mode:?}: {}", out.stderr);
+            assert!(out.ok && out.initialized, "{ctx}");
+            assert_eq!(sha(&b), before, "the file changed at start; {ctx}");
+            if with_model {
+                assert!(out.stderr.contains("records no embedder"), "{ctx}");
+            }
+            assert!(!out.stderr.contains("embedder ready"), "{ctx}");
+            // A text recall is keyword-only, and a text write is refused.
+            let out = mcp(
+                &env,
+                &b,
+                mode,
+                &[(2, "recall", serde_json::json!({"text": "release approval"}))],
+            );
+            let hits = out.results[0].as_array().unwrap();
+            assert!(
+                hits[0]["content"].as_str().unwrap().contains("approval"),
+                "{ctx}"
+            );
+            let mut db = Mnemo::open_read_only(&b, PASS).unwrap();
+            assert_eq!(db.embedder_identity().unwrap(), None, "{ctx}");
+        }
+    }
+}
+
+#[test]
+fn the_server_adopts_the_builtin_on_a_file_with_only_its_scaffold() {
+    let Some(model) = model_dir() else { return };
+    for mode in MODES {
+        let env = Env::new(offline());
+        put_model_in_cache(&env, &model);
+        let b = brain_without_embedder(&env, "fresh.mnemo", 384, false);
+        let out = mcp(&env, &b, mode, &[]);
+        let ctx = format!("mode {mode:?}: {}", out.stderr);
+        assert!(out.ok && out.initialized, "{ctx}");
+        assert!(out.stderr.contains("embedder ready (the built-in"), "{ctx}");
+        let mut db = Mnemo::open_read_only(&b, PASS).unwrap();
+        assert_eq!(
+            db.embedder_identity().unwrap(),
+            Some(builtin::identity()),
+            "{ctx}"
+        );
+    }
 }

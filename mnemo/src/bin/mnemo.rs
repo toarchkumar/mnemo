@@ -54,7 +54,10 @@ enum Command {
     /// `--ask-passphrase`), `init` generates a random 256-bit key and keeps
     /// it in the OS keychain, so every tool opens the brain with nothing
     /// typed. Its recovery code is shown once, at a terminal a person is at
-    /// (`mnemo recovery-code` shows it again). A generated-key `init`
+    /// (`mnemo recovery-code` shows it again), on the terminal's alternate
+    /// screen so it doesn't stay in scrollback; on Windows the console has
+    /// no alternate screen, so the code stays in its scrollback until the
+    /// window is cleared or closed. A generated-key `init`
     /// refuses a path that already exists. With no keychain, it fails and
     /// creates nothing: use `--ask-passphrase` or `--key-file`.
     ///
@@ -1356,19 +1359,23 @@ fn run_embedder(cmd: EmbedderCmd) -> std::result::Result<(), String> {
                 builtin::REVISION,
                 dir.display()
             );
-            if builtin::is_installed() {
-                // Check the hashes too, so `install` repairs a changed file.
-                match builtin::BuiltinEmbedder::load() {
-                    Ok(_) => {
-                        println!("already installed");
-                        return Ok(());
-                    }
-                    Err(e) => return Err(fmt(e)),
-                }
-            }
-            builtin::install(&mut |m| eprintln!("{m}")).map_err(fmt)?;
+            // `install` hashes the files there and replaces any that don't
+            // match (RB-010.4 item 2).
+            let mut fetched = false;
+            builtin::install(&mut |m| {
+                fetched = true;
+                eprintln!("{m}")
+            })
+            .map_err(fmt)?;
             builtin::BuiltinEmbedder::load().map_err(fmt)?;
-            println!("installed");
+            println!(
+                "{}",
+                if fetched {
+                    "installed"
+                } else {
+                    "already installed"
+                }
+            );
         }
         EmbedderCmd::Status => {
             println!("model:      {}", builtin::MODEL);
@@ -1390,14 +1397,21 @@ fn run_embedder(cmd: EmbedderCmd) -> std::result::Result<(), String> {
                 None => {
                     println!("identity:   {}", builtin::identity().name);
                     println!("cache:      {}", dir.display());
+                    // The hashes, not just the sizes (RB-010.4 item 1).
                     println!(
                         "installed:  {}",
-                        if builtin::is_installed() {
-                            "yes".to_string()
-                        } else {
+                        if !builtin::is_installed() {
                             format!(
                                 "no ({size} to fetch on first use, or `mnemo embedder install`)"
                             )
+                        } else {
+                            match builtin::verify_installed() {
+                                Ok(()) => "yes (every file matches its pinned SHA-256)".into(),
+                                Err(mnemo_engine::MnemoError::Invalid(why)) => {
+                                    format!("no ({why})")
+                                }
+                                Err(e) => format!("no ({e})"),
+                            }
                         }
                     );
                 }

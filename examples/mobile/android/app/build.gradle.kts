@@ -64,7 +64,7 @@ android {
 }
 
 dependencies {
-    implementation("io.github.toarchkumar:mnemo-android:0.14.0")
+    implementation("io.github.toarchkumar:mnemo-android:0.15.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)

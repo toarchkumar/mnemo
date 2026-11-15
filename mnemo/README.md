@@ -105,8 +105,10 @@ mnemo mcp install --client claude-desktop --print me.mnemo
     get the shell's PATH. That includes the path of the `mnemo` that ran
     `mcp install`, so after reinstalling `mnemo` somewhere else (a new
     virtualenv, say) run `mcp install` again.
-- **Before it writes,** it shows a diff with every `env` and `headers` value
-  masked, and asks at a terminal. `--yes` writes without asking, and
+- **Before it writes,** it shows only its own entry, as a diff against the
+  `mnemo` entry it replaces (with `env` and `headers` values masked), and
+  how many other servers it leaves unchanged; nothing else of the file is
+  printed. It asks at a terminal. `--yes` writes without asking, and
   `--print` shows it and writes nothing.
 - **How it writes:** other servers and keys are kept as they were, the
   write is atomic and keeps the file's mode, and a config it can't parse is
@@ -132,7 +134,10 @@ The embedder is a **persistent child process** spawned once at serve
 start. Protocol: it reads one JSON-encoded string per line from stdin
 and writes one JSON array of floats per line to stdout, flushed after
 every reply. See `mnemo/examples/embedder_server.py` for a 10-line
-reference implementation (sentence-transformers + MiniLM, 384-dim).
+reference implementation (sentence-transformers + MiniLM, 384-dim). The
+embed command (and a key command, `MNEMO_KEY_COMMAND`) doesn't receive the
+brain's secret: since v0.15, `MNEMO_PASSPHRASE`, `MNEMO_KEY`,
+`MNEMO_KEY_FILE` and `MNEMO_KEY_COMMAND` are removed from its environment.
 
 > **Stdout is for replies only.** Any line the embedder prints to
 > stdout outside a reply — startup banners, model-load progress,
@@ -192,8 +197,9 @@ Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desk
 }
 ```
 
-Omit `--embed-cmd`/`--embed-name` to keep the pre-Phase-3
-embedder-agnostic behavior (`vector`/`query` only).
+Without `--embed-cmd`/`--embed-name`, the server uses the built-in
+embedder (v0.15; see "The built-in embedder"), or serves `vector`/`query`
+only when it can't.
 
 **Models that embed queries differently** (v0.15, 12.3 step 4): add
 `--embed-query <convention>`, a short name for the difference (an
@@ -1135,8 +1141,17 @@ how a raw-key v8 file becomes v9.
 - **Key files** (for `--key-file` and `MNEMO_KEY_FILE`) must be regular
   files owned by you, with no access for group or others (mode 0600 or
   0400) on Unix, as `ssh` asks of a private key. Anything else is refused,
-  naming `chmod 600 <path>`. In CI and containers, prefer `MNEMO_KEY` from
-  the platform's secret store.
+  naming `chmod 600 <path>`.
+- **In CI and containers,** prefer `MNEMO_KEY` (the recovery code or the 64
+  hex digits) from the platform's secret store: a CI secret, or a
+  Kubernetes `env.valueFrom.secretKeyRef`. A mounted key file must pass the
+  check above, owned by the user the process runs as with mode 0400 or
+  0600, and the usual mounts don't come that way: a Docker secret is owned
+  by root and readable by all, and a Kubernetes secret volume is 0644 and
+  owned by root unless set otherwise. On Docker, set the secret's `uid` and
+  `mode` (or copy it at start-up); on Kubernetes, use `defaultMode: 0400`
+  with a pod that runs as the file's owner (`runAsUser`, `fsGroup`), or an
+  init step that copies it.
 - **Passphrase KDF parameters have a floor.** The engine refuses a
   passphrase with raw-key parameters on every create and rekey, a rekey to
   a passphrase always gets at least `KdfParams::secure()`, and a file below
