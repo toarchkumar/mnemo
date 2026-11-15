@@ -3,34 +3,115 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MNemo — Encrypted memory for on-device AI agents, in one file</title>
-<meta name="description" content="MNemo is an encrypted, single-file memory engine for on-device AI agents, from desktop apps to phones, written in Rust. Durable memory, a result cache, and an MCP server in one portable .mnemo file.">
-<meta property="og:title" content="MNemo — Encrypted memory and cache for AI agents">
-<meta property="og:description" content="Durable agent memory, a result cache and an MCP server inside one encrypted, portable file. Written in Rust.">
+<title>MNemo — your coding agent forgets; give it a memory</title>
+<meta name="description" content="MNemo gives Claude Code and Cursor a memory that lasts between sessions: one encrypted file in your repository, set up with one command. Free and open source, written in Rust. No server, no account.">
+<meta property="og:title" content="MNemo — your coding agent forgets. Give it a memory.">
+<meta property="og:description" content="One encrypted file in your repo. mnemo onboard sets up Claude Code and Cursor to load it at the start of a session and save it at the end. No server, no account.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://toarchkumar.github.io/mnemo/">
-<meta name="theme-color" content="#FBFAF7">
+<meta name="theme-color" content="#FBFAF7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1113" media="(prefers-color-scheme: dark)">
+<link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230E7C74'/%3E%3Cpath d='M9 22V11l7 7 7-7v11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script>
+// The theme: the visitor's choice if they made one, else the system's.
+(function () {
+  try {
+    var t = localStorage.getItem("mnemo-theme");
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+})();
+</script>
 <style>
 :root {
+  color-scheme: light;
   --bg: #FBFAF7;
+  --bg-2: #F5F3EE;
   --surface: #FFFFFF;
   --surface-2: #F4F2EC;
   --ink: #15181E;
   --ink-2: #4A5160;
-  --ink-3: #737A88;
+  --ink-3: #6E7583;
   --line: #E7E3DA;
   --line-2: #D9D4C8;
   --accent: #0E7C74;
   --accent-ink: #0A5E58;
   --accent-tint: #E3F2EF;
-  --amber: #B45309;
+  --on-accent: #FFFFFF;
+  --amber: #A34B07;
   --amber-tint: #FDF1E3;
+  --nav-bg: rgba(251,250,247,.85);
+  --shadow: 0 1px 2px rgba(21,24,30,.04), 0 6px 24px rgba(21,24,30,.06);
+  --shadow-lg: 0 1px 2px rgba(21,24,30,.04), 0 18px 50px rgba(21,24,30,.10);
+  --code-ink: #2B303B;
+  --code-k: #7C3AED; --code-s: #0F766E; --code-n: #B45309; --code-c: #7E8590; --code-f: #1D4ED8; --code-t: #A16207;
+  /* The terminal is dark in both themes. */
+  --term-bg: #101518;
+  --term-bar: #161D21;
+  --term-line: #232C31;
+  --term-ink: #D7DCE0;
+  --term-dim: #7F8A93;
+  --term-accent: #5FD0C4;
+  --term-amber: #F0A35A;
+  --term-user: #E8EAED;
   --radius: 12px;
   --radius-sm: 8px;
-  --shadow: 0 1px 2px rgba(21,24,30,.04), 0 6px 24px rgba(21,24,30,.06);
   --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0E1113;
+    --bg-2: #12161A;
+    --surface: #151A1D;
+    --surface-2: #1B2125;
+    --ink: #E8EAED;
+    --ink-2: #AEB5BD;
+    --ink-3: #848C96;
+    --line: #252C31;
+    --line-2: #333C42;
+    --accent: #2BB3A6;
+    --accent-ink: #6FD6CB;
+    --accent-tint: rgba(43,179,166,.13);
+    --on-accent: #06201D;
+    --amber: #F0A35A;
+    --amber-tint: rgba(240,163,90,.12);
+    --nav-bg: rgba(14,17,19,.82);
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 24px rgba(0,0,0,.25);
+    --shadow-lg: 0 1px 2px rgba(0,0,0,.3), 0 18px 50px rgba(0,0,0,.4);
+    --code-ink: #D7DCE0;
+    --code-k: #C4A7FF; --code-s: #6FD6CB; --code-n: #F0A35A; --code-c: #7F8A93; --code-f: #8AB4FF; --code-t: #E8C37A;
+    --term-bg: #0B0F11;
+    --term-bar: #12181B;
+    --term-line: #1F272B;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0E1113;
+  --bg-2: #12161A;
+  --surface: #151A1D;
+  --surface-2: #1B2125;
+  --ink: #E8EAED;
+  --ink-2: #AEB5BD;
+  --ink-3: #848C96;
+  --line: #252C31;
+  --line-2: #333C42;
+  --accent: #2BB3A6;
+  --accent-ink: #6FD6CB;
+  --accent-tint: rgba(43,179,166,.13);
+  --on-accent: #06201D;
+  --amber: #F0A35A;
+  --amber-tint: rgba(240,163,90,.12);
+  --nav-bg: rgba(14,17,19,.82);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 24px rgba(0,0,0,.25);
+  --shadow-lg: 0 1px 2px rgba(0,0,0,.3), 0 18px 50px rgba(0,0,0,.4);
+  --code-ink: #D7DCE0;
+  --code-k: #C4A7FF; --code-s: #6FD6CB; --code-n: #F0A35A; --code-c: #7F8A93; --code-f: #8AB4FF; --code-t: #E8C37A;
+  --term-bg: #0B0F11;
+  --term-bar: #12181B;
+  --term-line: #1F272B;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -44,19 +125,19 @@ body {
   overflow-x: hidden;
 }
 a { color: var(--accent-ink); }
-code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .05em .35em; }
+code { font-family: var(--mono); font-size: .88em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .05em .35em; overflow-wrap: anywhere; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
 /* ---------- NAV ---------- */
-nav {
+nav.top {
   position: sticky; top: 0; z-index: 50;
-  background: rgba(251,250,247,.85);
+  background: var(--nav-bg);
   backdrop-filter: saturate(160%) blur(12px);
   -webkit-backdrop-filter: saturate(160%) blur(12px);
   border-bottom: 1px solid var(--line);
 }
 .nav-inner {
-  max-width: 1120px; margin: 0 auto; padding: .8rem 1.5rem;
+  max-width: 1160px; margin: 0 auto; padding: .75rem 1.5rem;
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
 }
 .brand {
@@ -64,15 +145,17 @@ nav {
   font-weight: 700; font-size: 1.05rem; letter-spacing: -.01em;
   color: var(--ink); text-decoration: none;
 }
-.brand-mark {
-  width: 28px; height: 28px; border-radius: 7px; background: var(--accent);
-  display: grid; place-items: center;
-}
+.brand-mark { width: 28px; height: 28px; border-radius: 7px; background: #0E7C74; display: grid; place-items: center; }
 .brand-mark svg { width: 16px; height: 16px; }
-.brand small { font-family: var(--mono); font-weight: 500; font-size: .78rem; color: var(--ink-3); }
-.nav-links { display: flex; align-items: center; gap: 1.4rem; }
+.nav-links { display: flex; align-items: center; gap: 1.3rem; }
 .nav-links a { color: var(--ink-2); text-decoration: none; font-size: .9rem; }
 .nav-links a:hover { color: var(--ink); }
+.theme-btn {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--line-2); color: var(--ink-2); cursor: pointer;
+}
+.theme-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+.theme-btn svg { width: 17px; height: 17px; }
 
 /* ---------- BUTTONS ---------- */
 .btn {
@@ -83,148 +166,143 @@ nav {
   transition: background .15s, border-color .15s, transform .15s, box-shadow .15s;
 }
 .btn svg { width: 17px; height: 17px; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-ink); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(14,124,116,.22); }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { filter: brightness(1.06); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(14,124,116,.25); }
 .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line-2); }
 .btn-ghost:hover { border-color: var(--ink-3); transform: translateY(-1px); }
-.btn-sm { padding: .45rem .85rem; font-size: .85rem; }
+.btn-sm { padding: .42rem .8rem; font-size: .85rem; }
 
 /* ---------- LAYOUT ---------- */
-.wrap { max-width: 1120px; margin: 0 auto; padding: 0 1.5rem; }
+.wrap { max-width: 1160px; margin: 0 auto; padding: 0 1.5rem; }
 section { padding: 5.5rem 0; }
 section + section { border-top: 1px solid var(--line); }
-.eyebrow {
-  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: .7rem;
-}
-h2.title { font-size: clamp(1.6rem, 3.2vw, 2.25rem); line-height: 1.2; letter-spacing: -.02em; margin-bottom: .9rem; }
-.lead { font-size: 1.07rem; color: var(--ink-2); max-width: 640px; }
-.head { margin-bottom: 2.8rem; }
+section.alt { background: var(--bg-2); }
+.eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-ink); margin-bottom: .7rem; }
+h2.title { font-size: clamp(1.6rem, 3.2vw, 2.25rem); line-height: 1.2; letter-spacing: -.02em; margin-bottom: .9rem; text-wrap: balance; }
+.lead { font-size: 1.07rem; color: var(--ink-2); max-width: 660px; }
+.head { margin-bottom: 2.6rem; }
 
 /* ---------- HERO ---------- */
-.hero { padding: 4.5rem 0 5rem; border-top: none; }
-.hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3.5rem; align-items: center; }
+.hero { padding: 4.2rem 0 4.8rem; border-top: none; }
+.hero-grid { display: grid; grid-template-columns: 1fr 1.02fr; gap: 3.2rem; align-items: center; }
+.hero-grid > * { min-width: 0; }
 .pills { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.4rem; }
 .pill {
   display: inline-flex; align-items: center; gap: .4rem;
   font-size: .8rem; font-weight: 600; color: var(--ink-2);
   background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
-  padding: .28rem .7rem;
+  padding: .28rem .7rem; text-decoration: none;
 }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .hero h1 {
-  font-size: clamp(2.2rem, 5vw, 3.4rem);
-  line-height: 1.08; letter-spacing: -.035em; font-weight: 800;
-  margin-bottom: 1.2rem;
+  font-size: clamp(2.3rem, 5.2vw, 3.6rem);
+  line-height: 1.05; letter-spacing: -.035em; font-weight: 800;
+  margin-bottom: 1.2rem; text-wrap: balance;
 }
 .hero h1 span { color: var(--accent); }
-.hero p.sub { font-size: 1.15rem; color: var(--ink-2); max-width: 540px; margin-bottom: 1.8rem; }
-.hero-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-bottom: 1.6rem; }
+.hero p.sub { font-size: 1.15rem; color: var(--ink-2); max-width: 560px; margin-bottom: 1.7rem; }
 
-.install {
+.steps { display: grid; gap: .7rem; max-width: 560px; }
+.step {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); max-width: 520px; overflow: hidden;
+  box-shadow: var(--shadow); overflow: hidden;
 }
-.install-tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-.install-tabs button {
+.step-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; background: var(--surface-2); border-bottom: 1px solid var(--line); padding-left: .9rem; }
+.step-head .num { font: 700 .74rem var(--sans); color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.step-tabs { display: flex; }
+.step-tabs button {
   font: 600 .8rem var(--sans); color: var(--ink-3); background: none; border: none;
-  padding: .55rem .95rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  padding: .5rem .85rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
-.install-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--surface); }
-.install-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .8rem .95rem; }
-.install-row code { background: none; border: none; padding: 0; font-size: .92rem; color: var(--ink); }
-.install-row code .p { color: var(--ink-3); user-select: none; }
+.step-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--surface); }
+.step-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem .9rem; }
+.step-row code { background: none; border: none; padding: 0; font-size: .9rem; color: var(--ink); min-width: 0; }
+.step-row code .p { color: var(--ink-3); user-select: none; }
+.step-row .hint { font-size: .8rem; color: var(--ink-3); white-space: nowrap; }
 .copy {
   font: 600 .78rem var(--sans); color: var(--ink-2); background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 7px; padding: .3rem .6rem; cursor: pointer; flex-shrink: 0;
 }
 .copy:hover { color: var(--ink); border-color: var(--line-2); }
+.hero-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.2rem; margin-top: 1.3rem; font-size: .88rem; color: var(--ink-3); }
+.hero-foot a { color: var(--ink-2); }
+.hero-foot .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line-2); }
 
-/* the .mnemo file card */
-.filecard {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
-  box-shadow: 0 1px 2px rgba(21,24,30,.04), 0 18px 50px rgba(21,24,30,.09);
-  overflow: hidden;
+/* ---------- TERMINAL ---------- */
+.term {
+  background: var(--term-bg); border: 1px solid var(--term-line); border-radius: 14px;
+  box-shadow: var(--shadow-lg); overflow: hidden; color: var(--term-ink);
 }
-.filecard-top {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: .85rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--surface-2);
+.term-bar { display: flex; align-items: center; gap: 6px; padding: .65rem .9rem; background: var(--term-bar); border-bottom: 1px solid var(--term-line); }
+.term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #2C363C; }
+.term-bar span { margin-left: .6rem; font: 600 .74rem var(--mono); color: var(--term-dim); }
+.term pre { font: .79rem/1.7 var(--mono); padding: 1.05rem 1.2rem 1.15rem; overflow-x: auto; white-space: pre; }
+.term .d { color: var(--term-dim); }
+.term .a { color: var(--term-accent); }
+.term .w { color: var(--term-amber); }
+.term .u { color: var(--term-user); font-weight: 600; }
+.term .div { display: block; color: var(--term-dim); border-top: 1px dashed var(--term-line); margin: .55rem 0 .35rem; padding-top: .45rem; }
+.term-note { font-size: .78rem; color: var(--ink-3); margin-top: .7rem; text-align: right; }
+
+/* ---------- PROBLEM ---------- */
+.trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.trio > div { border-left: 2px solid var(--line-2); padding: .2rem 0 .2rem 1.1rem; }
+.trio > div.yes { border-left-color: var(--accent); }
+.trio h3 { font-size: 1.02rem; letter-spacing: -.01em; margin-bottom: .35rem; }
+.trio p { font-size: .93rem; color: var(--ink-2); }
+
+/* ---------- FLOW ---------- */
+.flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: .8rem; align-items: stretch; }
+.flow .box {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 1.25rem 1.2rem; box-shadow: var(--shadow);
 }
-.filecard-name { font-family: var(--mono); font-weight: 600; font-size: .9rem; display: flex; align-items: center; gap: .5rem; }
-.filecard-name svg { width: 16px; height: 16px; color: var(--ink-3); }
+.flow .when { font: 700 .72rem var(--mono); color: var(--accent-ink); background: var(--accent-tint); border-radius: 6px; padding: .15rem .45rem; display: inline-block; margin-bottom: .7rem; }
+.flow h3 { font-size: 1rem; margin-bottom: .35rem; letter-spacing: -.01em; }
+.flow p { font-size: .88rem; color: var(--ink-2); }
+.flow .arrow { align-self: center; color: var(--ink-3); font: 700 1.2rem var(--mono); }
+.file-strip {
+  margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .55rem 1rem;
+  background: var(--surface); border: 1px dashed var(--line-2); border-radius: var(--radius); padding: .85rem 1rem;
+  font-size: .88rem; color: var(--ink-2);
+}
+.file-strip b { font: 600 .86rem var(--mono); color: var(--ink); }
 .lockbadge {
   display: inline-flex; align-items: center; gap: .35rem;
   font: 600 .72rem var(--mono); color: var(--accent-ink);
   background: var(--accent-tint); border-radius: 999px; padding: .2rem .6rem;
 }
 .lockbadge svg { width: 12px; height: 12px; }
-.layers { padding: .9rem; display: grid; gap: .55rem; }
-.layer {
-  display: grid; grid-template-columns: 6px 1fr; gap: .85rem; align-items: stretch;
-  border: 1px solid var(--line); border-radius: 10px; padding: .75rem .9rem .75rem .75rem;
-  background: var(--surface);
-}
-.layer i { border-radius: 4px; }
-.layer b { display: block; font-size: .92rem; }
-.layer span { font-size: .82rem; color: var(--ink-3); }
-.filecard-foot {
-  font: .75rem var(--mono); color: var(--ink-3);
-  padding: .7rem 1.1rem; border-top: 1px dashed var(--line);
-}
 
-/* ---------- FEATURE GRID ---------- */
+/* ---------- CARDS ---------- */
 .grid { display: grid; gap: 1rem; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 1.4rem 1.35rem;
+  padding: 1.35rem 1.3rem;
   transition: border-color .15s, box-shadow .15s, transform .15s;
 }
 .card:hover { border-color: var(--line-2); box-shadow: var(--shadow); transform: translateY(-2px); }
-.icon {
-  width: 38px; height: 38px; border-radius: 10px;
-  display: grid; place-items: center;
-  background: var(--accent-tint); color: var(--accent-ink);
-  margin-bottom: .9rem;
-}
+.icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-tint); color: var(--accent-ink); margin-bottom: .9rem; }
 .icon svg { width: 20px; height: 20px; }
 .card h3 { font-size: 1rem; letter-spacing: -.01em; margin-bottom: .35rem; }
 .card p { font-size: .9rem; color: var(--ink-2); }
-.tag-new {
-  display: inline-block; margin-left: .35rem; vertical-align: 2px;
-  font: 700 .64rem var(--sans); letter-spacing: .06em; text-transform: uppercase;
-  color: var(--amber); background: var(--amber-tint); border-radius: 5px; padding: .1rem .38rem;
-}
 
 /* ---------- SPLIT ---------- */
 .split { display: grid; grid-template-columns: 1fr 1.1fr; gap: 3rem; align-items: start; }
-.chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.3rem 0 1.4rem; }
-.chip {
-  font: 500 .8rem var(--mono); color: var(--ink-2);
-  background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: .22rem .55rem;
-}
-.chip.cache { color: var(--accent-ink); background: var(--accent-tint); border-color: transparent; }
-.note {
-  font-size: .88rem; color: var(--ink-2);
-  border-left: 3px solid var(--amber); background: var(--amber-tint);
-  padding: .65rem .85rem; border-radius: 0 8px 8px 0;
-}
+.split > * { min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.2rem 0 0; }
+.chip { font: 500 .8rem var(--mono); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: .22rem .55rem; }
+.chip.on { color: var(--accent-ink); background: var(--accent-tint); border-color: transparent; }
 ul.checks { list-style: none; display: grid; gap: .6rem; margin-top: 1.2rem; }
 ul.checks li { display: grid; grid-template-columns: 20px 1fr; gap: .6rem; font-size: .95rem; color: var(--ink-2); }
 ul.checks li svg { width: 18px; height: 18px; margin-top: .2rem; color: var(--accent); }
 ul.checks li b { color: var(--ink); font-weight: 600; }
 
 /* ---------- CODE ---------- */
-.codebox {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); overflow: hidden;
-}
-.codebar {
-  display: flex; align-items: center; justify-content: space-between;
-  border-bottom: 1px solid var(--line); background: var(--surface-2); padding-right: .6rem;
-}
+.codebox { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.codebar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: var(--surface-2); padding-right: .6rem; }
 .codebar .tabs { display: flex; }
 .codebar .tabs button {
   font: 600 .82rem var(--sans); color: var(--ink-3); background: none; border: none;
@@ -232,69 +310,49 @@ ul.checks li b { color: var(--ink); font-weight: 600; }
 }
 .codebar .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); background: var(--surface); }
 .codebar .label { font: 600 .78rem var(--mono); color: var(--ink-3); padding: .7rem 1rem; }
-pre.code {
-  font-family: var(--mono); font-size: .84rem; line-height: 1.7;
-  padding: 1.25rem 1.4rem; overflow-x: auto; color: #2B303B; background: var(--surface);
-  tab-size: 4;
-}
+pre.code { font-family: var(--mono); font-size: .83rem; line-height: 1.7; padding: 1.2rem 1.35rem; overflow-x: auto; color: var(--code-ink); background: var(--surface); tab-size: 4; }
 pre.code[hidden] { display: none; }
-.k { color: #7C3AED; } .s { color: #0F766E; } .n { color: #B45309; }
-.c { color: #8B919C; font-style: italic; } .f { color: #1D4ED8; } .t { color: #A16207; }
-.pr { color: #9AA0AA; user-select: none; }
+pre.wrap-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.k { color: var(--code-k); } .s { color: var(--code-s); } .n { color: var(--code-n); }
+.c { color: var(--code-c); font-style: italic; } .f { color: var(--code-f); } .t { color: var(--code-t); }
+.pr { color: var(--code-c); user-select: none; }
 
 /* ---------- RECALL FORMULA ---------- */
-.formula {
-  display: grid; grid-template-columns: auto 1fr auto repeat(3, 1fr) auto; gap: .8rem; align-items: stretch;
-}
-.formula .eq {
-  font: 700 1.05rem var(--mono); align-self: center; color: var(--ink-2); padding-right: .3rem;
-}
-.term {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 1.1rem 1.1rem 1rem; position: relative;
-}
-.term + .term::before {
-  content: "+"; position: absolute; left: -0.62rem; top: 50%; transform: translate(-50%, -50%);
-  font: 700 1rem var(--mono); color: var(--ink-3);
-}
-.term .m { font: 600 .95rem var(--mono); color: var(--ink); margin-bottom: .35rem; }
-.term .m em { color: var(--accent); font-style: normal; }
-.term p { font-size: .85rem; color: var(--ink-2); }
-
-/* ---------- TERMINAL ---------- */
-.term-window {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); overflow: hidden;
-}
-.term-window .bar { display: flex; gap: 6px; padding: .7rem .9rem; border-bottom: 1px solid var(--line); background: var(--surface-2); }
-.term-window .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--line-2); }
-.term-window pre { font: .8rem/1.65 var(--mono); padding: 1.1rem 1.25rem; overflow-x: auto; color: #3A404C; }
-.term-window .h { color: var(--accent-ink); font-weight: 600; }
+.formula { display: grid; grid-template-columns: auto 1fr auto repeat(3, 1fr) auto; gap: .8rem; align-items: stretch; }
+.formula .eq { font: 700 1.05rem var(--mono); align-self: center; color: var(--ink-2); padding-right: .3rem; }
+.fterm { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.1rem 1rem; position: relative; }
+.fterm + .fterm::before { content: "+"; position: absolute; left: -0.62rem; top: 50%; transform: translate(-50%, -50%); font: 700 1rem var(--mono); color: var(--ink-3); }
+.fterm .m { font: 600 .95rem var(--mono); color: var(--ink); margin-bottom: .35rem; }
+.fterm .m em { color: var(--accent-ink); font-style: normal; }
+.fterm p { font-size: .85rem; color: var(--ink-2); }
 
 /* ---------- SECURITY ---------- */
 .keyflow { display: grid; gap: .6rem; }
 .kf-row { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
-.kf-box {
-  font: 600 .82rem var(--mono); color: var(--ink);
-  background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: .45rem .7rem;
-}
+.kf-box { font: 600 .82rem var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: .45rem .7rem; }
 .kf-box.a { background: var(--accent-tint); border-color: transparent; color: var(--accent-ink); }
 .kf-arrow { font: .75rem var(--mono); color: var(--ink-3); display: inline-flex; align-items: center; gap: .3rem; }
 .kf-arrow::after { content: "→"; font-size: 1rem; color: var(--ink-3); }
-.filemap { margin-top: 1.6rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.filemap { margin-top: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .filemap div { padding: .7rem 1rem; border-bottom: 1px solid var(--line); font-size: .86rem; color: var(--ink-2); display: flex; justify-content: space-between; gap: 1rem; }
 .filemap div:last-child { border-bottom: none; }
 .filemap b { font-family: var(--mono); font-size: .8rem; color: var(--ink); font-weight: 600; }
 .filemap .enc { color: var(--accent-ink); font: 600 .74rem var(--mono); white-space: nowrap; }
 .filemap .plain { color: var(--amber); font: 600 .74rem var(--mono); white-space: nowrap; }
-.limits { margin-top: 1.6rem; font-size: .88rem; color: var(--ink-2); }
+.limits { margin-top: 1.5rem; font-size: .88rem; color: var(--ink-2); }
 .limits b { color: var(--ink); }
 
 /* ---------- STATS ---------- */
 .stat .v { font: 800 2.1rem/1.1 var(--sans); letter-spacing: -.03em; color: var(--ink); margin-bottom: .35rem; }
-.stat .v span { color: var(--accent); }
+.stat .v span { color: var(--accent-ink); }
 .stat .l { font-size: .92rem; color: var(--ink-2); font-weight: 600; }
 .stat .d { font-size: .8rem; color: var(--ink-3); margin-top: .3rem; }
+.proof { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.8rem; }
+.proof span { font-size: .84rem; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: .3rem .75rem; }
+.proof b { color: var(--ink); }
+
+/* ---------- AGENT PROMPT ---------- */
+.prompt-links { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.3rem; }
 
 /* ---------- ROADMAP ---------- */
 .road .card h3 { display: flex; align-items: center; gap: .5rem; margin-bottom: .8rem; }
@@ -307,15 +365,18 @@ pre.code[hidden] { display: none; }
 .road li::before { content: ""; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
 .road .done-col li::before { background: var(--accent); }
 .road .next-col li::before { background: var(--amber); }
+.road .more { margin-top: .9rem; font-size: .85rem; }
 
 /* ---------- CTA + FOOTER ---------- */
 .cta { text-align: center; padding: 5.5rem 0 6rem; }
 .cta h2 { font-size: clamp(1.7rem, 3.6vw, 2.5rem); letter-spacing: -.025em; margin-bottom: .8rem; }
-.cta p { color: var(--ink-2); font-size: 1.05rem; margin-bottom: 1.8rem; }
-.cta .hero-actions { justify-content: center; }
+.cta p { color: var(--ink-2); font-size: 1.05rem; margin-bottom: 1.6rem; }
+.cta .steps { margin: 0 auto 1.6rem; text-align: left; }
+.actions { display: flex; flex-wrap: wrap; gap: .7rem; }
+.cta .actions { justify-content: center; }
 footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: center; font-size: .85rem; color: var(--ink-3); }
-.foot nav { all: unset; display: flex; flex-wrap: wrap; gap: 1.2rem; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 1.2rem; }
 .foot a { color: var(--ink-2); text-decoration: none; }
 .foot a:hover { color: var(--ink); }
 
@@ -325,17 +386,24 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .formula { grid-template-columns: 1fr 1fr; }
   .formula .eq { grid-column: 1 / -1; padding: 0; }
-  .term + .term::before { display: none; }
+  .fterm + .fterm::before { display: none; }
+  .flow { grid-template-columns: 1fr; }
+  .flow .arrow { justify-self: center; transform: rotate(90deg); }
+  .trio { grid-template-columns: 1fr; gap: 1.2rem; }
 }
 @media (max-width: 760px) {
   .nav-links a:not(.btn) { display: none; }
   .grid-3 { grid-template-columns: 1fr; }
+  .step-row .hint { display: none; }
 }
 @media (max-width: 560px) {
   section { padding: 4rem 0; }
   .grid-4, .formula { grid-template-columns: 1fr; }
-  .wrap, .nav-inner { padding-left: 1.1rem; padding-right: 1.1rem; }
-  pre.code { font-size: .76rem; padding: 1rem; }
+  .wrap, .nav-inner { padding-left: 16px; padding-right: 16px; }
+  pre.code { font-size: .75rem; padding: 1rem; }
+  .term pre { font-size: .72rem; padding: .9rem; }
+  .step-row code { font-size: .8rem; }
+  .step-row { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -345,35 +413,38 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 </head>
 <body>
 
-<!-- Inline icon sprite (no external requests) -->
+<!-- Inline icon sprite: this page loads nothing from any other site -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
-    <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 0 0-5.8 1A3 3 0 0 0 4 9.5a3 3 0 0 0 .6 4.9A3.5 3.5 0 0 0 9 19a3 3 0 0 0 3-1V5z"/><path d="M12 5a3 3 0 0 1 5.8 1A3 3 0 0 1 20 9.5a3 3 0 0 1-.6 4.9A3.5 3.5 0 0 1 15 19a3 3 0 0 1-3-1"/></symbol>
-    <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
-    <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></symbol>
-    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-rewind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></symbol>
-    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 20a6.5 6.5 0 0 0-3-5.5"/></symbol>
-    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7M8 11h5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
     <symbol id="i-gh" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.44 9.8 8.2 11.39.6.1.83-.26.83-.57v-2.24c-3.34.73-4.04-1.41-4.04-1.41-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></symbol>
   </defs>
 </svg>
 
-<nav aria-label="Main">
+<nav class="top" aria-label="Main">
   <div class="nav-inner">
     <a href="./" class="brand" aria-label="MNemo home">
       <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18V7l7 7 7-7v11"/></svg></span>
-      MNemo <small>.mnemo</small>
+      MNemo
     </a>
     <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#mcp">MCP</a>
-      <a href="#quickstart">Quick start</a>
+      <a href="#how">How it works</a>
       <a href="#security">Security</a>
+      <a href="#library">Library</a>
       <a href="#roadmap">Roadmap</a>
+      <a href="llms.txt">llms.txt</a>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to dark theme"><svg><use href="#i-moon"/></svg></button>
       <a class="btn btn-ghost btn-sm" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>GitHub</a>
     </div>
   </div>
@@ -386,142 +457,274 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.16.1</span>
-        <span class="pill">Apache-2.0</span>
-        <span class="pill">Rust · Python · iOS · Android · CLI · MCP</span>
+        <a class="pill" href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md"><span class="dot"></span>v0.16.1</a>
+        <span class="pill">Free and open source · Apache-2.0</span>
+        <span class="pill">Claude Code · Cursor · any MCP client</span>
       </div>
-      <h1>Encrypted memory for on-device AI agents, <span>in one file</span>.</h1>
-      <p class="sub">MNemo gives an agent durable memory and a cache for expensive calls, inside a single encrypted <code>.mnemo</code> file. There's no server or vector database to run. Copy the file and the memory comes with it.</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#quickstart">Get started</a>
-        <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>View on GitHub</a>
+      <h1>Your coding agent forgets. <span>Give it a memory.</span></h1>
+      <p class="sub">One encrypted file in your repo. <code>mnemo onboard</code> sets up Claude Code and Cursor to load it at the start of a session and save it at the end. No server, no account.</p>
+
+      <div class="steps" role="region" aria-label="Install">
+        <div class="step">
+          <div class="step-head">
+            <span class="num">1 · Install</span>
+            <div class="step-tabs" role="tablist" aria-label="Platform">
+              <button role="tab" aria-selected="true" data-install="sh">macOS · Linux</button>
+              <button role="tab" aria-selected="false" data-install="ps">Windows</button>
+            </div>
+          </div>
+          <div class="step-row">
+            <code><span class="p">$ </span><span id="install-text">curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh</span></code>
+            <button class="copy" data-copy-target="install-text" type="button">Copy</button>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-head"><span class="num">2 · In your repository</span></div>
+          <div class="step-row">
+            <code><span class="p">$ </span><span id="onboard-text">mnemo onboard</span></code>
+            <span class="hint">shows the plan, asks once</span>
+            <button class="copy" data-copy-target="onboard-text" type="button">Copy</button>
+          </div>
+        </div>
       </div>
 
-      <div class="install" role="region" aria-label="Install">
-        <div class="install-tabs" role="tablist" aria-label="Install method">
-          <button role="tab" aria-selected="true" data-install="sh">CLI</button>
-          <button role="tab" aria-selected="false" data-install="ps">Windows</button>
-          <button role="tab" aria-selected="false" data-install="pip">Python</button>
-          <button role="tab" aria-selected="false" data-install="cargo-add">Rust library</button>
-        </div>
-        <div class="install-row">
-          <code id="install-cmd"><span class="p">$ </span><span id="install-text">curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh</span></code>
-          <button class="copy" data-copy-target="install-text" type="button">Copy</button>
-        </div>
+      <div class="hero-foot">
+        <span>The script checks each download's SHA-256 and GitHub build attestation</span>
+        <span class="sep"></span>
+        <a href="#agent">Or let your agent set it up</a>
       </div>
     </div>
 
-    <div class="filecard" aria-label="What's inside a .mnemo file">
-      <div class="filecard-top">
-        <span class="filecard-name"><svg><use href="#i-file"/></svg>agent.mnemo</span>
-        <span class="lockbadge"><svg><use href="#i-lock"/></svg>AES-256-GCM</span>
+    <div>
+      <div class="term" aria-label="A test session, shortened">
+        <div class="term-bar"><i></i><i></i><i></i><span>~/demo</span></div>
+<pre><span class="d">$</span> mnemo onboard --yes
+<span class="a">created:</span> .git/mnemo/project.mnemo  <span class="d"># key kept in the keychain</span>
+<span class="a">wrote:</span> .claude/settings.local.json  <span class="d"># the hooks</span>
+<span class="a">wrote:</span> .claude/skills/mnemo/SKILL.md
+<span class="w">human step:</span> back up the recovery code: run
+  `mnemo recovery-code` in a terminal of your own
+<span class="div"># a new Claude Code session</span><span class="u">&gt; This project deploys to staging-7, and the</span>
+<span class="u">  payments team owns it.</span>
+<span class="a">mnemo · remember</span>  key fact.deploy-target
+<span class="a">mnemo · remember</span>  key fact.owner
+<span class="d"># /exit: the session-end hook saves it</span>
+<span class="div"># a fresh session</span><span class="u">&gt; Where does this project deploy, and who owns it?</span>
+The project's MNemo memory says it deploys to the
+staging-7 environment and is owned by the payments team.</pre>
       </div>
-      <div class="layers">
-        <div class="layer"><i style="background:#0E7C74"></i><div><b>Memories</b><span>episodic · semantic · procedural · working</span></div></div>
-        <div class="layer"><i style="background:#B45309"></i><div><b>Result cache</b><span>exact keys · similar prompts · TTL · size budgets</span></div></div>
-        <div class="layer"><i style="background:#1D4ED8"></i><div><b>Search index</b><span>IVF + PQ for large files, exact scan always available</span></div></div>
-        <div class="layer"><i style="background:#7C3AED"></i><div><b>Snapshots</b><span>every commit, restorable by id or by time</span></div></div>
-        <div class="layer"><i style="background:#737A88"></i><div><b>Write-ahead log</b><span>one fsync per commit, recovers after a crash</span></div></div>
+      <p class="term-note">From a test session on v0.16, shortened.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PROBLEM ================= -->
+<section class="alt">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Why</p>
+      <h2 class="title">Every session starts from zero</h2>
+    </div>
+    <div class="trio">
+      <div>
+        <h3>Yesterday is gone</h3>
+        <p>Decisions, conventions and the fix that finally worked disappear when a session ends or gets compacted, unless you paste them back in.</p>
       </div>
-      <div class="filecard-foot">one file · every page encrypted · open it anywhere</div>
+      <div>
+        <h3>Hosted memory has a price</h3>
+        <p>Memory services want an account, an API key, and your project's context on their servers.</p>
+      </div>
+      <div class="yes">
+        <h3>MNemo is a file</h3>
+        <p>It lives inside your repository's <code>.git</code> folder, encrypted, shared by every worktree and never committed. It runs on your machine and is free.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section id="how">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">How it works</p>
+      <h2 class="title">Hooks load it, tools use it, hooks save it</h2>
+      <p class="lead"><code>mnemo onboard</code> adds three hooks, an MCP server and a short guide to each client it finds. You don't change how you work.</p>
+    </div>
+    <div class="flow">
+      <div class="box">
+        <span class="when">session start</span>
+        <h3>The agent is briefed</h3>
+        <p>A hook gives it the guide's short card, the project's notes, where work stands, and the memories most related to the task. 8,000 bytes by default, so it never floods the context.</p>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="box">
+        <span class="when">while it works</span>
+        <h3>It recalls and remembers</h3>
+        <p>Through MCP tools: <code>recall</code> before a task, <code>remember</code> for what will matter later. A fact saved under a key replaces its old version, and history is kept.</p>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="box">
+        <span class="when">compaction · end</span>
+        <h3>The session is saved</h3>
+        <p>Into its own thread, without tool output (only its size) and with known secret shapes such as tokens and keys blanked. A best effort, not a guarantee.</p>
+      </div>
+    </div>
+    <div class="file-strip">
+      <b>.git/mnemo/project.mnemo</b>
+      <span class="lockbadge"><svg><use href="#i-lock"/></svg>AES-256-GCM</span>
+      <span>memories · past sessions · where work stands · history · snapshots</span>
     </div>
   </div>
 </section>
 
 <!-- ================= FEATURES ================= -->
-<section id="features">
+<section id="features" class="alt">
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">What you get</p>
-      <h2 class="title">Memory and a cache, without the infrastructure</h2>
-      <p class="lead">Most agent memory means running a separate vector service: another thing to deploy, and another place for secrets to leak. MNemo treats memory like SQLite treats data. It's a file.</p>
+      <h2 class="title">Everything runs on your machine</h2>
+      <p class="lead">No vector database, no service to deploy, no API to call. MNemo treats memory the way SQLite treats data.</p>
     </div>
     <div class="grid grid-4">
       <div class="card">
         <div class="icon"><svg><use href="#i-file"/></svg></div>
-        <h3>One portable file</h3>
-        <p>Memories, cache, index, write-ahead log and snapshot history all live in one <code>.mnemo</code> file. A plain copy is a complete, consistent backup.</p>
+        <h3>One file per project</h3>
+        <p>Memories, past sessions, the search index and snapshot history in one <code>.mnemo</code> file. A plain copy is a complete backup.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg><use href="#i-lock"/></svg></div>
-        <h3>Encrypted at rest</h3>
-        <p>Every 8 KiB page is sealed with AES-256-GCM under a key derived with Argon2id. Changing the passphrase re-wraps one key; the data is never rewritten.</p>
+        <div class="icon"><svg><use href="#i-key"/></svg></div>
+        <h3>Encrypted, no passphrase</h3>
+        <p>Every page is sealed with AES-256-GCM. The key is generated and kept in your OS keychain, and a recovery code opens the file on another machine.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg><use href="#i-brain"/></svg></div>
-        <h3>Text in, text out <span class="tag-new">New</span></h3>
-        <p>Hand MNemo plain text. It calls your embedding model, checks it's the one the file was built with, and ranks recall on meaning, recency, importance and use.</p>
-      </div>
-      <div class="card">
-        <div class="icon"><svg><use href="#i-bolt"/></svg></div>
-        <h3>A cache for expensive calls</h3>
-        <p>Cache LLM responses, tool outputs and API calls by exact key, or match near-identical prompts by meaning. Namespaces, expiry and size limits included.</p>
-      </div>
-      <div class="card">
-        <div class="icon"><svg><use href="#i-plug"/></svg></div>
-        <h3>MCP server built in</h3>
-        <p><code>mnemo serve --mcp</code> exposes memory and cache as tools to Claude Desktop, Cursor or any MCP client.</p>
-      </div>
-      <div class="card">
-        <div class="icon"><svg><use href="#i-shield"/></svg></div>
-        <h3>Crash-safe writes</h3>
-        <p>Each commit goes through a write-ahead log with a single fsync. Kill the process mid-write and the file recovers cleanly next time it opens.</p>
+        <div class="icon"><svg><use href="#i-chip"/></svg></div>
+        <h3>A local model</h3>
+        <p>Text is embedded on your CPU by a small built-in model, fetched once (91 MB) and checked by SHA-256 before every load. No embedding API, no key.</p>
       </div>
       <div class="card">
         <div class="icon"><svg><use href="#i-rewind"/></svg></div>
-        <h3>Point-in-time restore</h3>
-        <p>Every commit is a snapshot. Roll back to any past transaction or moment, and roll forward again if you change your mind.</p>
+        <h3>Facts that change</h3>
+        <p>Save a fact under a key, like <code>decision.release-order</code>, and the new version replaces the old one in recall. Every version stays in its history.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg><use href="#i-users"/></svg></div>
-        <h3>Safe to share</h3>
-        <p>One writer, many readers, enforced with OS file locks. Shared mode lets several agents and tools take turns on one file, each catching up on what the others wrote.</p>
+        <div class="icon"><svg><use href="#i-search"/></svg></div>
+        <h3>Recall that finds names</h3>
+        <p>Meaning and keywords together, so exact identifiers like <code>snapshot_list</code> or <code>v0.10.0</code> are found, and past sessions can be searched by meaning.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-in"/></svg></div>
+        <h3>Small context first</h3>
+        <p>Every read takes a byte budget, so small local models and long sessions get the most relevant memories, not all of them.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-out"/></svg></div>
+        <h3>Several agents, one file</h3>
+        <p>Shared mode lets several sessions and tools take turns on one brain, each catching up on what the others wrote.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg><use href="#i-eye"/></svg></div>
+        <h3>See what it remembers</h3>
+        <p><code>mnemo inspect</code> opens the file read-only in your browser, with search and each fact's history. <code>mnemo export --git</code> gives a diff-clean text copy.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= MCP ================= -->
-<section id="mcp">
+<!-- ================= AGENT ================= -->
+<section id="agent">
   <div class="wrap split">
     <div>
       <p class="eyebrow">For agents</p>
-      <h2 class="title">Plug it into Claude, Cursor or any MCP client</h2>
-      <p class="lead">Point your MCP client at a <code>.mnemo</code> file and the agent gets memory and caching as ordinary tools. The passphrase comes from an environment variable, never a tool argument.</p>
-      <div class="chips" aria-label="Tools exposed over MCP">
-        <span class="chip">about</span><span class="chip">remember</span><span class="chip">recall</span><span class="chip">forget</span>
-        <span class="chip">list</span><span class="chip">stats</span><span class="chip">snapshot_list</span>
-        <span class="chip cache">cache_put</span><span class="chip cache">cache_get</span><span class="chip cache">cache_stats</span>
-        <span class="chip cache">cache_put_semantic</span><span class="chip cache">cache_get_semantic</span>
-      </div>
-      <p class="lead" style="font-size:.95rem">Add <code>--embed-cmd</code> and the tools accept plain text. MNemo starts your embedding program once, keeps it running, and restarts it cleanly if it misbehaves. A slow or broken embedder produces an error, never a mismatched memory.</p>
+      <h2 class="title">Or let your agent set it up</h2>
+      <p class="lead">Paste this into Claude Code or Cursor in your repository. It's the prompt from our own test, plus one line: the agent installs MNemo, runs <code>onboard</code> without help, and hands you the one step that's yours.</p>
+      <ul class="checks">
+        <li><svg><use href="#i-check"/></svg><span><b>The guide is in the binary.</b> <code>mnemo onboard --guide</code> prints how to use and organize the memory, and it always matches the version you run. CI runs every command in it.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Brain content is data.</b> Anything read from memory is marked as notes from past sessions, never instructions that override the guide or you.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Secrets stay with you.</b> The recovery code is shown only to a person at a terminal, never to an agent.</span></li>
+      </ul>
     </div>
-    <div class="codebox">
-      <div class="codebar"><span class="label">claude_desktop_config.json</span><button class="copy" data-copy-target="mcp-json" type="button">Copy</button></div>
-<pre class="code" id="mcp-json">{
-  <span class="s">"mcpServers"</span>: {
-    <span class="s">"mnemo"</span>: {
-      <span class="s">"command"</span>: <span class="s">"mnemo"</span>,
-      <span class="s">"args"</span>: [
-        <span class="s">"serve"</span>, <span class="s">"--mcp"</span>, <span class="s">"/absolute/path/to/agent.mnemo"</span>,
-        <span class="s">"--embed-cmd"</span>, <span class="s">"python3 /absolute/path/to/embedder_server.py"</span>,
-        <span class="s">"--embed-name"</span>, <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>
-      ],
-      <span class="s">"env"</span>: { <span class="s">"MNEMO_PASSPHRASE"</span>: <span class="s">"your-passphrase-here"</span> }
-    }
-  }
-}</pre>
+    <div>
+      <div class="codebox">
+        <div class="codebar"><span class="label">prompt</span><button class="copy" data-copy-target="agent-prompt" type="button">Copy</button></div>
+<pre class="code wrap-text" id="agent-prompt">Install mnemo with `curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh`, then run `mnemo onboard` in this repository. Pass on any human steps it prints.</pre>
+      </div>
+      <div class="prompt-links">
+        <a class="btn btn-ghost btn-sm" href="llms.txt">llms.txt</a>
+        <a class="btn btn-ghost btn-sm" href="llms-full.txt">llms-full.txt (the whole guide)</a>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ================= QUICK START ================= -->
-<section id="quickstart">
+<!-- ================= SECURITY ================= -->
+<section id="security" class="alt">
+  <div class="wrap split">
+    <div>
+      <p class="eyebrow">Security</p>
+      <h2 class="title">Private by default, tamper-evident on disk</h2>
+      <p class="lead">Without the key the file is opaque, and changed bytes are detected rather than silently trusted.</p>
+      <ul class="checks">
+        <li><svg><use href="#i-check"/></svg><span><b>Pages are pinned to their position.</b> A valid encrypted page moved to another slot fails authentication.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>The header is sealed.</b> Pointing it at an older catalog is caught on open as tampering.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Safe to copy and keep writing.</b> Every writing session uses a fresh random nonce prefix, so diverged copies never reuse nonces.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Checked installs.</b> The install script verifies each binary's SHA-256 and, when <code>gh</code> is signed in, GitHub's build attestation for the release's tag. PyPI packages carry signed provenance.</span></li>
+        <li><svg><use href="#i-check"/></svg><span><b>Tested hard.</b> Fuzzed parsers, property tests with simulated crashes, a dependency audit on every change, and no <code>unsafe</code> code in the core.</span></li>
+      </ul>
+      <p class="limits"><b>Stated plainly:</b> the keychain keeps the key out of config files, backups and screen shares, not away from programs running as you. Anyone with write access can delete the file, and an older copy of the whole file can't be detected from inside it. Memories your agent recalls go into its context, and so to its model provider. <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/README.md#security-model">Read the full security model</a>.</p>
+    </div>
+    <div>
+      <div class="card" style="padding:1.4rem">
+        <h3 style="margin-bottom:1rem">How the keys fit together</h3>
+        <div class="keyflow">
+          <div class="kf-row"><span class="kf-box">key from the keychain</span><span class="kf-arrow">or</span><span class="kf-box">passphrase</span><span class="kf-arrow">Argon2id</span></div>
+          <div class="kf-row"><span class="kf-box">key-encryption key</span><span class="kf-arrow">wraps</span><span class="kf-box a">random 256-bit data key</span></div>
+          <div class="kf-row"><span class="kf-box a">data key</span><span class="kf-arrow">AES-256-GCM</span><span class="kf-box">every 8 KiB page</span></div>
+        </div>
+        <div class="filemap" aria-label="File layout">
+          <div><span><b>Page 0 · header</b><br>format version, key settings, wrapped data key</span><span class="plain">plaintext + sealed</span></div>
+          <div><span><b>Write-ahead log</b><br>pending commits, replayed after a crash</span><span class="enc">encrypted</span></div>
+          <div><span><b>Records</b><br>memories, session turns, cache entries</span><span class="enc">encrypted</span></div>
+          <div><span><b>Catalog · index</b><br>what's where, plus the search index</span><span class="enc">encrypted</span></div>
+          <div><span><b>Snapshot manifest</b><br>one entry per commit, for restore</span><span class="enc">encrypted</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PERFORMANCE ================= -->
+<section id="performance">
   <div class="wrap">
     <div class="head">
-      <p class="eyebrow">Quick start</p>
-      <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.16.1. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <p class="eyebrow">Performance</p>
+      <h2 class="title">Measured, not promised</h2>
+      <p class="lead">We only publish numbers we've measured. These are from v0.11.0 on an Apple M1 Pro (release build, 384-dimension vectors, about 300 bytes of text per memory). <a href="https://github.com/toarchkumar/mnemo#performance">See the full results</a>.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card stat"><div class="v">~3<span> ms</span></div><div class="l">Open a 10K-memory file</div><div class="d">With a key from the OS keychain: 0.4 ms at 1K memories, 30 ms at 100K. A passphrase adds ~15 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
+      <div class="card stat"><div class="v">~2.5<span> ms</span></div><div class="l">Search, 100K memories</div><div class="d">Finds 98% of the true top 10 at the default settings. 2.2 ms at 10K and 0.2 ms at 1K, where every search is exact.</div></div>
+      <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">Memories share pages, vectors are stored at half precision, and saves write only what changed.</div></div>
+    </div>
+    <div class="proof" aria-label="Project facts">
+      <span><b>29</b> tagged releases</span>
+      <span>Rust core, <b>no unsafe</b></span>
+      <span>On <b>PyPI</b>, <b>crates.io</b>, <b>Swift PM</b> and <b>Maven Central</b></span>
+      <span>Built using its own memory</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LIBRARY ================= -->
+<section id="library" class="alt">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Also a library</p>
+      <h2 class="title">Memory and a cache for your own agents</h2>
+      <p class="lead">The same engine runs inside your app, in Python, Rust, Swift and Kotlin, with a result cache for LLM and tool calls. These examples use v0.16.1. Phone guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <div class="chips" aria-label="Packages">
+        <span class="chip on">pip install mnemo-engine</span><span class="chip on">cargo add mnemo-engine</span>
+        <span class="chip">io.github.toarchkumar:mnemo-android</span><span class="chip">toarchkumar/mnemo-swift</span>
+      </div>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -576,9 +779,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     }
     Ok(())
 }</pre>
-<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span>mnemo onboard                                    <span class="c"># in a git repository: a brain, Claude Code and Cursor, the hooks</span>
-
-<span class="pr">$ </span>mnemo init agent.mnemo                           <span class="c"># a generated key, kept in the OS keychain</span>
+<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span>mnemo init agent.mnemo                           <span class="c"># a generated key, kept in the OS keychain</span>
 <span class="pr">$ </span>mnemo about agent.mnemo                          <span class="c"># what is this file and how do I use it?</span>
 <span class="pr">$ </span>mnemo remember agent.mnemo --text <span class="s">"the user prefers dark mode"</span> --importance <span class="n">0.8</span>
 <span class="pr">$ </span>mnemo recall   agent.mnemo --text <span class="s">"which theme does the user like?"</span> --top-k <span class="n">5</span>
@@ -589,128 +790,19 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 <span class="pr">$ </span>mnemo snapshots agent.mnemo                      <span class="c"># every commit is restorable</span>
 <span class="pr">$ </span>mnemo restore agent.mnemo --to-txn <span class="n">12</span>
 
-<span class="pr">$ </span>mnemo mcp install --client claude-code agent.mnemo   <span class="c"># add it to an MCP client, no secret in the config</span></pre>
+<span class="pr">$ </span>mnemo mcp install --client claude-desktop agent.mnemo   <span class="c"># add it to an MCP client, no secret in the config</span></pre>
     </div>
-  </div>
-</section>
 
-<!-- ================= RECALL ================= -->
-<section id="recall">
-  <div class="wrap">
-    <div class="head">
-      <p class="eyebrow">Multi-signal recall</p>
-      <h2 class="title">Ranked on more than similarity</h2>
-      <p class="lead">An agent needs the right memory, not just the closest vector. Every candidate is scored on four signals, with weights you can set per query. The three bonuses are scaled by similarity, so an unrelated memory can't win by being new, important or popular.</p>
-    </div>
-    <div class="formula">
+    <div class="formula" style="margin-top:2.4rem" aria-label="How recall ranks">
       <div class="eq">score =</div>
-      <div class="term"><div class="m"><em>α</em> · similarity</div><p>How close the meaning is: cosine, dot product or L2.</p></div>
+      <div class="fterm"><div class="m"><em>α</em> · similarity</div><p>How close the meaning is, combined with keyword matches for text queries.</p></div>
       <div class="eq">+ similarity<br>× (</div>
-      <div class="term"><div class="m"><em>β</em> · recency</div><p>Counted from when the memory was stored. Fades with a 7-day half-life by default.</p></div>
-      <div class="term"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored, centred on 0.5.</p></div>
-      <div class="term"><div class="m"><em>δ</em> · uses</div><p>A capped boost for memories the agent keeps coming back to, so popular memories can't snowball.</p></div>
+      <div class="fterm"><div class="m"><em>β</em> · recency</div><p>Fades with a 7-day half-life by default.</p></div>
+      <div class="fterm"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored.</p></div>
+      <div class="fterm"><div class="m"><em>δ</em> · uses</div><p>A capped boost for memories the agent keeps coming back to.</p></div>
       <div class="eq">)</div>
     </div>
-    <div class="grid grid-4" style="margin-top:1.4rem">
-      <div class="card"><h3>Episodic</h3><p>What happened: conversation turns and events. Sessions promote their turns here when they close.</p></div>
-      <div class="card"><h3>Semantic</h3><p>What's known: facts about the user, the project and the world.</p></div>
-      <div class="card"><h3>Procedural</h3><p>How to behave: preferences, rules and working conventions.</p></div>
-      <div class="card"><h3>Working</h3><p>Right now: the current session's scratchpad, kept or discarded when it ends.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= SELF-DESCRIBING ================= -->
-<section id="about-files">
-  <div class="wrap split">
-    <div>
-      <p class="eyebrow">Agent-first</p>
-      <h2 class="title">Every file introduces itself</h2>
-      <p class="lead">Hand an agent a <code>.mnemo</code> file and its passphrase, and one command tells it what the file is: which embedding model it expects, the conventions used, and any notes the author left. No separate README required.</p>
-      <ul class="checks">
-        <li><svg><use href="#i-check"/></svg><span><b>Self-describing.</b> A manifest stored inside the file, printed by <code>mnemo about</code> or <code>db.about()</code>.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>Ready from creation.</b> <code>mnemo init</code> adds a starter manifest so new files are never blank.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>Same everywhere.</b> The Rust library, Python package, CLI and MCP server share one engine and one behaviour.</span></li>
-      </ul>
-    </div>
-    <div class="term-window" aria-label="Example mnemo about output">
-      <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="pr">$ </span>mnemo about agent.mnemo
-<span class="c"># agent.mnemo  (66 memories · 384-dim · encrypted · 33 snapshots)</span>
-
-<span class="h">### MANIFEST</span>
-This .mnemo file is the project memory for MNemo.
-Embedder: sentence-transformers/all-MiniLM-L6-v2
-(384-dim, normalized). Default agent_id: cursor-agent.
-
-<span class="h">### onboarding / mission</span>
-Ongoing project context lives in this file, so new
-AI sessions stay aligned without relying on chat history.
-
-<span class="c">## Quick start</span>
-  mnemo list   agent.mnemo
-  mnemo recall agent.mnemo --query VEC
-  mnemo get    agent.mnemo &lt;id&gt; --verbose</pre>
-    </div>
-  </div>
-</section>
-
-<!-- ================= SECURITY ================= -->
-<section id="security">
-  <div class="wrap split">
-    <div>
-      <p class="eyebrow">Security &amp; reliability</p>
-      <h2 class="title">Private by default, tamper-evident on disk</h2>
-      <p class="lead">Without the passphrase the file is opaque, and changed bytes are detected rather than silently trusted.</p>
-      <ul class="checks">
-        <li><svg><use href="#i-check"/></svg><span><b>Pages are pinned to their position.</b> A valid encrypted page moved to another slot fails authentication.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>The header is sealed.</b> Pointing it at an older catalog is caught on open as tampering.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>No password oracle.</b> A wrong passphrase and a damaged key look identical.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>Safe to copy and keep writing.</b> Every writing session uses a fresh random nonce prefix, so two diverged copies of a file never reuse encryption nonces (fixed in v0.5.2; <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">see the advisory</a>).</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>Tested hard.</b> Fuzzed parsers, property tests with simulated crashes, and a dependency audit on every change.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>No <code>unsafe</code> code.</b> The core crate forbids it outright.</span></li>
-        <li><svg><use href="#i-check"/></svg><span><b>Verifiable releases.</b> PyPI packages are published from CI with signed provenance (Trusted Publishing).</span></li>
-      </ul>
-      <p class="limits"><b>Out of scope, stated plainly:</b> anyone with write access can still delete or truncate the file, swapping in an older valid copy of the whole file can't be detected from inside it, and anyone who has the passphrase is the owner. <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/README.md#security-model">Read the full security model</a>.</p>
-    </div>
-    <div>
-      <div class="card" style="padding:1.4rem">
-        <h3 style="margin-bottom:1rem">How the keys fit together</h3>
-        <div class="keyflow">
-          <div class="kf-row"><span class="kf-box">passphrase</span><span class="kf-arrow">Argon2id</span><span class="kf-box">key-encryption key</span></div>
-          <div class="kf-row"><span class="kf-box">key-encryption key</span><span class="kf-arrow">wraps</span><span class="kf-box a">random 256-bit data key</span></div>
-          <div class="kf-row"><span class="kf-box a">data key</span><span class="kf-arrow">AES-256-GCM</span><span class="kf-box">every 8 KiB page</span></div>
-        </div>
-        <div class="filemap" aria-label="File layout">
-          <div><span><b>Page 0 · header</b><br>format version, key-derivation settings, wrapped data key</span><span class="plain">plaintext + sealed</span></div>
-          <div><span><b>Write-ahead log</b><br>pending commits, replayed after a crash</span><span class="enc">encrypted</span></div>
-          <div><span><b>Records</b><br>memories and cache entries</span><span class="enc">encrypted</span></div>
-          <div><span><b>Catalog · index · cache directory</b><br>what's where, plus the IVF+PQ search index</span><span class="enc">encrypted</span></div>
-          <div><span><b>Snapshot manifest</b><br>one entry per commit, for restore</span><span class="enc">encrypted</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= PERFORMANCE ================= -->
-<section id="performance">
-  <div class="wrap">
-    <div class="head">
-      <p class="eyebrow">Performance</p>
-      <h2 class="title">Measured, not promised</h2>
-      <p class="lead">We only publish numbers we've measured. These are from v0.11.0 on an Apple M1 Pro (release build, 384-dimension vectors, about 300 bytes of text per memory). <a href="https://github.com/toarchkumar/mnemo/blob/main/test/scripts/perf_v0.5.0.json">See the full results</a>.</p>
-    </div>
-    <div class="grid grid-3">
-      <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">About 6× smaller than v0.10: memories share pages, vectors are stored at half precision, and saves write only what changed.</div></div>
-      <div class="card stat"><div class="v">~1<span> µs</span></div><div class="l">Cache hit</div><div class="d">Looking up a cached LLM or tool result by its exact key. Matching a prompt by meaning across 500 entries takes ~0.4 ms.</div></div>
-      <div class="card stat"><div class="v">~3<span> ms</span></div><div class="l">Open a 10K-memory file</div><div class="d">With a random key from the OS keychain: 0.4 ms at 1K memories, 30 ms at 100K. With a passphrase, add ~15 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
-      <div class="card stat"><div class="v">~16<span> ms</span></div><div class="l">Store a memory durably</div><div class="d">Bound by disk syncs, from 1K to 100K memories. Commit 100 at once and each costs about 0.2–0.3 ms.</div></div>
-      <div class="card stat"><div class="v">~17<span> MB</span></div><div class="l">Memory for an open 10K-memory file</div><div class="d">About 3 MB at 1K memories: small enough for phones and tablets. At 100K it's about 112 MB, because vectors stay in memory for fast search. The library itself is about 2.6 MB.</div></div>
-      <div class="card stat"><div class="v">~2.5<span> ms</span></div><div class="l">Search, 100K memories</div><div class="d">Finds 98% of the true top-10 at the default settings. 2.2 ms at 10K and 0.2 ms at 1K, where every search is exact.</div></div>
-    </div>
-    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">On an iPhone (v0.12.0, 10K memories): 2.1 ms to open a file, 1.7 ms per search, 12 ms to store a memory durably, and 7.3 MB of memory for an open file. The first search after opening takes about 7 ms while the vectors load.</p>
-    <p class="lead" style="margin-top:1.6rem;font-size:.95rem">From v0.5.1, Apple Silicon and ARM Linux builds use the CPU's hardware AES, which makes scans 3–6× faster than v0.5.0, depending on the chip.</p>
+    <p class="lead" style="margin-top:1rem;font-size:.92rem">The bonuses are scaled by similarity, so an unrelated memory can't win by being new, important or popular. Weights can be set per query.</p>
   </div>
 </section>
 
@@ -719,54 +811,35 @@ AI sessions stay aligned without relying on chat history.
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">Roadmap</p>
-      <h2 class="title">Where MNemo is headed</h2>
-      <p class="lead">Built in the open, one reviewed release at a time. Full history in the <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">changelog</a>.</p>
+      <h2 class="title">Built in the open, one reviewed release at a time</h2>
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.16</span></h3>
+        <h3>Shipped recently <span class="status done">v0.13 – v0.16</span></h3>
         <ul>
-          <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>): a brain per project, its MCP server, and hooks that load the memory when a session starts and save the session before it's compacted or ends; a guide for agents built in (<a href="llms.txt">llms.txt</a>); and an install script that checks what it downloads</li>
-          <li>No setup: keys generated and kept in the OS keychain, with a recovery code; a built-in local embedding model; and <code>mnemo mcp install</code> for Claude Code, Cursor and Claude Desktop</li>
-          <li>Better recall by text: keyword and meaning together by default, names found by their parts, and exact identifiers in a question matched</li>
-          <li>Several agents on one file: shared mode for Rust, Python, the CLI and the MCP server, with commands that wait for a busy file instead of failing</li>
-          <li>A memory inspector: open a file in your browser and see what your agents remember, with search and the history of each fact; plus a readable, git-friendly export</li>
-          <li>iOS and Android packages: a Swift package and an Android library, keys in the Keychain or Keystore, and files that close safely when an app goes to the background</li>
-          <li>A compact file format: files about 6× smaller, saves that write only what changed, and old conversation turns compressed</li>
-          <li>Keyword search combined with meaning-based search, so exact names, versions and ids are found reliably</li>
-          <li>Smaller and faster (v0.10): at 100K memories, opening went from 384 ms to 9 ms, saving from 449 ms to 28 ms, and memory use dropped about 3×; plus keychain-friendly random keys</li>
-          <li>Session continuity: a full copy of each working thread, plus an essence of where things stand, so a new session carries on where the last one stopped</li>
-          <li>Facts that change: a newer version replaces the old one and history is kept; edit memories in place</li>
-          <li>Recall filtered by session or tag, and recall within a size budget for small context windows</li>
-          <li>Better ranking: the right memory comes first more often, and frequently shown memories no longer crowd out the relevant one</li>
-          <li>Accurate index search: the default finds 96–98% of the true best matches, up from 40%</li>
-          <li>Stronger crash recovery: a damaged file header is rebuilt from the write-ahead log, and tampering is always reported</li>
-          <li>Plain text in and out from Python, the CLI and MCP; MNemo calls your embedding model</li>
-          <li>A check that each file is used with the embedding model it was built with</li>
-          <li>Result cache: exact keys and similar prompts</li>
-          <li>MCP server for Claude, Cursor and other clients</li>
-          <li>File locking and read-only opens</li>
-          <li>Fuzzing, property tests and dependency audits in CI</li>
-          <li>Benchmarks at 100K–1M memories, plus a ranking-quality test</li>
-          <li>Hardware AES on ARM: 3–6× faster scans</li>
-          <li>Automated releases, with signed provenance on PyPI</li>
+          <li>One-command setup for Claude Code and Cursor, with hooks that load and save the memory, and an install script that checks what it downloads</li>
+          <li>Keys generated and kept in the OS keychain, with a recovery code; a built-in local embedding model</li>
+          <li>Recall by meaning and keywords together, with exact identifiers matched</li>
+          <li>Several agents sharing one file in turn</li>
+          <li>A memory inspector in your browser, and a git-friendly export</li>
+          <li>iOS and Android packages</li>
         </ul>
+        <p class="more"><a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">Everything since v0.1, in the changelog</a></p>
       </div>
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Encrypted sync for your brains across your devices and your team; the server never sees your data. <a href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the waitlist</a></li>
           <li>Sharing one file, continued: catching up on only what changed, and sharing on by default for the MCP server</li>
           <li>Agents coordinating on one machine: messages, tasks and claims between them</li>
+          <li>Encrypted sync for your brains across your devices and your team; the server never sees your data. <a href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the waitlist</a></li>
         </ul>
       </div>
       <div class="card">
         <h3>After that <span class="status later">planned</span></h3>
         <ul>
-          <li>A faster first search after opening, by loading only what a search needs; more speedups wherever the benchmarks point</li>
+          <li>A faster first search after opening, by loading only what a search needs</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
           <li>Teams across people and machines: per-agent keys, signed authorship, and merging copies of a file</li>
-          <li>Encrypted sync across machines through a relay that can't read your data, and correcting memories from the inspector</li>
           <li>Ready-made iOS and Android screens that let an app's users see and delete what it remembers about them</li>
           <li>A Node.js package and framework integrations</li>
         </ul>
@@ -776,14 +849,21 @@ AI sessions stay aligned without relying on chat history.
 </section>
 
 <!-- ================= CTA ================= -->
-<section class="cta">
+<section class="cta alt">
   <div class="wrap">
-    <h2>Give your agent a memory it can carry</h2>
-    <p>Open source under Apache-2.0. Written in Rust, with Python, iOS, Android, CLI and MCP on top.</p>
-    <div class="hero-actions">
-      <a class="btn btn-primary" href="#quickstart">Get started</a>
+    <h2>Give your coding agent a memory</h2>
+    <p>Free and open source under Apache-2.0. Two commands, and the next session starts where the last one stopped.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-row">
+          <code><span class="p">$ </span><span id="cta-text">curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh &amp;&amp; mnemo onboard</span></code>
+          <button class="copy" data-copy-target="cta-text" type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+    <div class="actions">
+      <a class="btn btn-primary" href="#how">How it works</a>
       <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>Star on GitHub</a>
-      <a class="btn btn-ghost" href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the sync waitlist</a>
     </div>
   </div>
 </section>
@@ -792,12 +872,13 @@ AI sessions stay aligned without relying on chat history.
 
 <footer>
   <div class="wrap foot">
-    <span>MNemo (Memory Nemo) · Apache-2.0</span>
+    <span>MNemo (Memory Nemo) · Apache-2.0 · this page loads nothing from other sites</span>
     <nav aria-label="Footer">
       <a href="https://github.com/toarchkumar/mnemo">GitHub</a>
       <a href="https://pypi.org/project/mnemo-engine/">PyPI</a>
       <a href="https://crates.io/crates/mnemo-engine">crates.io</a>
       <a href="https://docs.rs/mnemo-engine">Docs</a>
+      <a href="llms.txt">llms.txt</a>
       <a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">Changelog</a>
       <a href="https://github.com/toarchkumar/mnemo/releases">Releases</a>
     </nav>
@@ -806,12 +887,35 @@ AI sessions stay aligned without relying on chat history.
 
 <script>
 (function () {
+  // Theme toggle: flips between light and dark, and remembers the choice.
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-btn");
+  function current() {
+    var t = root.getAttribute("data-theme");
+    if (t) return t;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function paint() {
+    var dark = current() === "dark";
+    btn.innerHTML = '<svg><use href="#i-' + (dark ? "sun" : "moon") + '"/></svg>';
+    btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+  }
+  btn.addEventListener("click", function () {
+    var next = current() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("mnemo-theme", next); } catch (e) {}
+    paint();
+  });
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", paint);
+  }
+  paint();
+
   // Install tabs
   var installs = {
     "sh": "curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh",
-    "ps": "irm https://toarchkumar.github.io/mnemo/install.ps1 | iex",
-    "pip": "pip install mnemo-engine",
-    "cargo-add": "cargo add mnemo-engine"
+    "ps": "irm https://toarchkumar.github.io/mnemo/install.ps1 | iex"
   };
   var itabs = document.querySelectorAll("[data-install]");
   itabs.forEach(function (b) {
