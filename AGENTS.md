@@ -34,8 +34,8 @@ mnemo/              Rust core: library + CLI + integration tests
   tests/            integration + cli_smoke
   examples/         quickstart, session
 mnemo-python/       PyO3 bindings published as `mnemo-engine` on PyPI
-test/               Dogfooding sandbox (encrypted project.mnemo + helpers)
-  scripts/          project_memory.py — recall, remember, bootstrap, perf
+test/               Dogfooding helpers (the brain itself is .git/mnemo/project.mnemo)
+  scripts/          project_memory.py — recall, remember, perf, bootstrap (scratch only)
   scripts/seed.json Canonical onboarding seed (manifest + 16 orientation memories)
 index.html          Landing page
 ```
@@ -82,36 +82,59 @@ job builds `embed-candle` there. All dependency versions are pinned exactly
 
 ## Dogfood the engine on yourself
 
-This repo keeps an encrypted project memory at `test/project.mnemo`. Before
-substantive work, orient yourself from the database itself:
+This repo's project memory is its **project brain,
+`.git/mnemo/project.mnemo`** (since the v0.16 dogfood switch). Git never
+tracks it, every worktree shares it, and its generated key is in the
+user's keychain, so no session handles a passphrase. Every session runs
+`mnemo onboard`'s hooks: they load a brief (the guide's card, the project's
+notes and essence, a short recall) when a session starts, and save the
+session's transcript into its own thread (tmux rule 9).
+
+Before substantive work, orient yourself from the brain. In a git
+repository the commands take no path:
 
 ```bash
-# Engine-level: what is this file?
-mnemo about test/project.mnemo
-
-# Project-specific: pull context for the current task
-python test/scripts/project_memory.py recall "<short description of your task>"
+mnemo about                                    # what this brain holds
+mnemo recall --text "<your task in one sentence>" --no-track
 ```
 
-After learning something durable, persist it for the next session:
+Or use the MCP tools the session has (`recall`, `essence` with `op:
+"render"`), which the guide's card describes.
+
+**Only the Worker writes facts**, one per write, each with a key, so a new
+version supersedes the old one instead of sitting beside it. The brain's
+facts belong to the agent `cursor-agent`, and a key's slot is per agent, so
+a write must name it (the CLI's and the MCP server's default agent is
+`default`, which would start a second slot beside the first). The helper
+does that for you:
 
 ```bash
-python test/scripts/project_memory.py remember "<one concise fact or decision>" \
-  --type semantic|episodic|procedural --importance 0.0-1.0
+python test/scripts/project_memory.py remember "<one fact or decision>" \
+  --type episodic --key decision.<topic>
+# or several at once, from a JSON Lines file (content, type, importance,
+# metadata, key per line):
+python test/scripts/project_memory.py remember --from-file facts.jsonl
+# the CLI directly: mnemo remember --text "…" --agent cursor-agent --key …
+# the MCP tool: remember with "key" and "agent_id": "cursor-agent"
 ```
 
-One fact per `remember` call. Use `episodic` for dated events/decisions,
-`procedural` for how-to steps, `semantic` for stable facts.
+Use `episodic` for dated events and decisions, `procedural` for how-to
+steps, and `semantic` for stable facts. The Planner and the Reviewers only
+read (`recall`, `--no-track`).
 
-For performance baselines: `python test/scripts/project_memory.py perf <file.json>`
-ingests a structured measurement set as episodic memories — see
-`test/scripts/perf_v0.1.0.json` for the schema.
+`test/scripts/project_memory.py` runs the installed `mnemo` CLI (the first
+on the PATH that can read the keychain; `$MNEMO_BIN` overrides it). It also
+keeps `perf <file.json>`, which ingests a measurement set as episodic
+memories (`test/scripts/perf_v0.1.0.json` has the schema), and `bootstrap`,
+which builds a **scratch** brain from `test/scripts/seed.json` and refuses
+the project brain, since it wipes what it builds.
 
-**Never commit:** `test/.env`, `test/project.mnemo`, or any other `.mnemo`
-file. The `.gitignore` already excludes them. **The one exception:** test
-fixtures under `mnemo/tests/fixtures/`, which hold synthetic data under
-throwaway test secrets only, never real memories. `.gitignore` lets those
-through, so nobody needs `git add -f`.
+**Never commit** a `.mnemo` file (the project brain is under `.git`, so git
+can't). `test/.env` and `test/project.mnemo` are the old layout, retired at
+the switch. **The one exception:** test fixtures under
+`mnemo/tests/fixtures/`, which hold synthetic data under throwaway test
+secrets only, never real memories. `.gitignore` lets those through, so
+nobody needs `git add -f`.
 
 **If cloud sync touches the working tree:** files named like `name 2.ext`
 (a sync conflict copy), "Resource deadlock avoided" (EDEADLK), or files
