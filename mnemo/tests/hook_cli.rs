@@ -1000,3 +1000,44 @@ fn marker_only_turns_are_saved_but_not_recalled() {
         "{out}"
     );
 }
+
+/// 13a step 1 (v0.17): a hook reads `MNEMO_AGENT`, so the turns it saves
+/// carry the session's agent as `_mnemo.author`.
+#[test]
+fn a_hooks_saved_turns_carry_the_sessions_agent() {
+    let e = Env::new();
+    let t = e.transcript(
+        "t.jsonl",
+        &[("user", json!("hello there")), ("assistant", json!("hi"))],
+    );
+    let input = json!({"session_id": "s1", "transcript_path": t, "cwd": e.p("repo")});
+    let mut c = e.cmd(
+        &e.p("repo"),
+        &["hook", "session-end", "--client", "claude-code"],
+    );
+    c.env("MNEMO_DEV_HOOK_EMBED_CMD", e.embed_cmd())
+        .env("MNEMO_DEV_HOOK_EMBED_NAME", "test-4")
+        .env("MNEMO_AGENT", "worker-a")
+        .stdin(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    let out = e.ok_cmd(&e.p("repo"), &["list", "--format", "jsonl"]);
+    let turns: Vec<Value> = out
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["metadata"]["_mnemo.kind"] == "turn")
+        .collect();
+    assert_eq!(turns.len(), 2, "{out}");
+    assert!(
+        turns
+            .iter()
+            .all(|t| t["metadata"]["_mnemo.author"] == "worker-a"),
+        "{turns:?}"
+    );
+}

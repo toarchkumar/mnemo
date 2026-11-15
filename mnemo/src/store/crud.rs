@@ -332,10 +332,15 @@ impl Mnemo {
     /// an overwrite in place, the `_mnemo.*` keys must equal the stored
     /// record's.
     pub(super) fn check_caller_metadata(&mut self, memory: &Memory) -> Result<()> {
+        // 13a: visibility and freshness are the caller's to set (checked);
+        // every other `_mnemo.*` key is the engine's.
+        for (k, v) in memory.metadata.iter().filter(|(k, _)| is_caller_key(k)) {
+            crate::memory::check_caller_key(k, v).map_err(MnemoError::Invalid)?;
+        }
         let reserved: Vec<(&String, &Value)> = memory
             .metadata
             .iter()
-            .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS))
+            .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS) && !is_caller_key(k))
             .collect();
         if reserved.is_empty() {
             return Ok(());
@@ -355,7 +360,7 @@ impl Mnemo {
             let old_reserved: Vec<(&String, &Value)> = old
                 .metadata
                 .iter()
-                .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS))
+                .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS) && !is_caller_key(k))
                 .collect();
             if old_reserved == reserved {
                 return Ok(());

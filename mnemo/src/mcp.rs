@@ -444,6 +444,23 @@ fn attach_builtin(db: &mut ServerDb, e: crate::BuiltinEmbedder) {
     }
 }
 
+/// 13a: an identity variable's value, when it's a valid agent id (1 to 64
+/// of letters, digits, `.`, `_`, `-`); otherwise `None`, with a note.
+fn env_name(var: &str) -> Option<String> {
+    let v = std::env::var(var).ok()?.trim().to_string();
+    if v.is_empty() {
+        return None;
+    }
+    if crate::memory::valid_agent_id(&v) {
+        Some(v)
+    } else {
+        eprintln!(
+            "mnemo mcp: note: {var} isn't 1 to 64 of letters, digits, '.', '_' and '-'; it's ignored"
+        );
+        None
+    }
+}
+
 /// The server's embedder, as chosen at start.
 enum ServerEmbedder {
     /// None: vectors (and keywords) only.
@@ -569,6 +586,22 @@ fn serve_inner<R: Read, W: Write>(
             "mnemo mcp: embedder ready (text params accepted, timeout {}s)",
             timeout.as_secs()
         );
+    }
+    // 13a: this session's agent, from MNEMO_AGENT and MNEMO_ROLE (the
+    // client passes its environment to the server). What the server writes
+    // carries the agent's name.
+    let (agent, role) = (env_name("MNEMO_AGENT"), env_name("MNEMO_ROLE"));
+    match (&agent, &role) {
+        (Some(a), Some(r)) => eprintln!("mnemo mcp: agent {a} (role {r})"),
+        (Some(a), None) => eprintln!("mnemo mcp: agent {a} (no MNEMO_ROLE)"),
+        _ => eprintln!(
+            "mnemo mcp: no MNEMO_AGENT: this session is anonymous to other agents (set \
+             MNEMO_AGENT and MNEMO_ROLE before starting the client)"
+        ),
+    }
+    match &mut db {
+        ServerDb::Plain(db) => db.set_author(agent),
+        ServerDb::Shared(s) => s.set_author(agent),
     }
     eprintln!("mnemo mcp: ready ({} live memories)", db.len()?);
 
@@ -773,11 +806,14 @@ fn tools_list() -> Value {
                         "vector": { "type": "array", "items": { "type": "number" }, "description": "Explicit embedding; mutually exclusive with `text`." },
                         "text": { "type": "string", "description": "Optional: what's embedded, when it should differ from `content` (which is embedded by default). Mutually exclusive with `vector`. Needs the server's embedder (the built-in, or --embed-cmd)." },
                         "importance": { "type": "number", "minimum": 0, "maximum": 1 },
-                        "agent_id": { "type": "string" },
+                        "agent_id": { "type": "string", "description": "The agent it's for. Left out: the brain's default agent (`mnemo default-agent`), else `default`." },
                         "session_id": { "type": "string" },
                         "ttl_secs": { "type": "integer" },
                         "shared": { "type": "boolean" },
                         "metadata": { "type": "object" },
+                        "visibility": { "type": "string", "enum": ["public", "team", "private"], "description": "v0.17: who it's for. `team` (the default) and `public` show everywhere; `private` only when asked. A filter, not a security boundary." },
+                        "review_by": { "type": "integer", "description": "v0.17: when to look at it again, in unix seconds." },
+                        "as_of": { "type": "integer", "description": "v0.17: when the content was true, in unix seconds (default: when it's written)." },
                         "key": { "type": "string", "description": "Phase 12.1 upsert slot name. A later `remember` with the same `key` + agent scope supersedes the prior record; an identical re-write is a no-op. Use this for any fact that replaces an earlier one." },
                         "supersedes": { "type": "string", "description": "With `key` only (v0.15): the id of a memory written without a key, which this write adopts as the key's first version and supersedes. It stops showing in recall and stays in the key's history. Use it to put an old unkeyed fact under a key." }
                     },
@@ -798,7 +834,10 @@ fn tools_list() -> Value {
                         "importance": { "type": "number", "minimum": 0, "maximum": 1 },
                         "metadata": { "type": "object", "description": "Replace the user-visible metadata. Reserved `_mnemo.*` keys on the record are preserved." },
                         "ttl_secs": { "type": "integer", "description": "Set the TTL to this many seconds. Use `clear_ttl: true` to drop any TTL." },
-                        "clear_ttl": { "type": "boolean", "description": "Clear any TTL on the record." }
+                        "clear_ttl": { "type": "boolean", "description": "Clear any TTL on the record." },
+                        "visibility": { "type": "string", "enum": ["public", "team", "private"], "description": "v0.17: who it's for. `team` (the default) and `public` show everywhere; `private` only when asked. A filter, not a security boundary." },
+                        "review_by": { "type": "integer", "description": "v0.17: when to look at it again, in unix seconds." },
+                        "as_of": { "type": "integer", "description": "v0.17: when the content was true, in unix seconds (default: when it's written)." }
                     },
                     "additionalProperties": false
                 }
@@ -1355,9 +1394,15 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
     };
 
     let mut mem = Memory::new(content, mtype, vector);
-    if let Some(agent) = args.get("agent_id").and_then(|v| v.as_str()) {
+    // 13a (AGENT-DEFAULT): no `agent_id`, the brain's default agent.
+    let agent = match args.get("agent_id").and_then(|v| v.as_str()) {
+        Some(a) => Some(a.to_string()),
+        None => db.default_agent().map_err(mnemo_err)?,
+    };
+    if let Some(agent) = agent {
         mem = mem.with_agent(agent);
     }
+    mem.metadata.extend(fresh_keys("remember", args)?);
     if let Some(sess) = args.get("session_id").and_then(|v| v.as_str()) {
         mem = mem.with_session(sess);
     }
@@ -1426,6 +1471,24 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
     }
 }
 
+/// 13a: the caller keys a write tool's arguments set (`visibility`,
+/// `review_by`, `as_of`), checked.
+fn fresh_keys(tool: &str, args: &Value) -> std::result::Result<Map<String, Value>, RpcError> {
+    let mut m = Map::new();
+    for (arg, key) in [
+        ("visibility", crate::memory::MNEMO_META_VISIBILITY),
+        ("review_by", crate::memory::MNEMO_META_REVIEW_BY),
+        ("as_of", crate::memory::MNEMO_META_AS_OF),
+    ] {
+        if let Some(v) = args.get(arg).filter(|v| !v.is_null()) {
+            crate::memory::check_caller_key(key, v)
+                .map_err(|e| RpcError::new(INVALID_PARAMS, format!("{tool}: {arg}: {e}")))?;
+            m.insert(key.to_string(), v.clone());
+        }
+    }
+    Ok(m)
+}
+
 fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
     use crate::Ulid;
     use crate::{MemoryPatch, WriteOutcome};
@@ -1476,6 +1539,10 @@ fn tool_update(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     }
     if let Some(meta) = args.get("metadata").and_then(|v| v.as_object()) {
         patch.metadata = Some(meta.clone());
+    }
+    let keys = fresh_keys("update", args)?;
+    if !keys.is_empty() {
+        patch.caller_keys = Some(keys);
     }
     let clear_ttl = args
         .get("clear_ttl")
@@ -1972,8 +2039,12 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
     let scope = if shared {
         KeyScope::Shared
     } else {
-        match agent {
-            Some(a) => KeyScope::Private(a.to_string()),
+        // 13a (AGENT-DEFAULT): no `agent`, the brain's default agent.
+        match agent
+            .map(str::to_string)
+            .or(db.default_agent().map_err(mnemo_err)?)
+        {
+            Some(a) => KeyScope::Private(a),
             None => KeyScope::private_default(),
         }
     };

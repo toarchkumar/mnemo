@@ -1461,6 +1461,47 @@ def test_identical_keyed_rewrite_is_unchanged():
     print("ok  identical keyed re-write is unchanged (v0.16)")
 
 
+def test_author_default_agent_and_freshness():
+    """v0.17 (13a step 1): set_author stamps _mnemo.author on new records;
+    the manifest's default agent; visibility, review_by and as_of."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "a.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.insert_default_manifest()
+            assert db.default_agent() is None
+            assert db.set_default_agent("cursor-agent") == "updated"
+            assert db.set_default_agent("cursor-agent") == "unchanged"
+            assert db.default_agent() == "cursor-agent"
+            db.set_author("worker-a")
+            r = db.remember("a fact", "semantic", [1.0, 0.0, 0.0, 0.0],
+                            visibility="private", review_by=1900000000, as_of=1700000000)
+            m = db.get(r["id"] if isinstance(r, dict) else r)
+            meta = m["metadata"]
+            assert meta["_mnemo.author"] == "worker-a", meta
+            assert meta["_mnemo.visibility"] == "private"
+            assert meta["_mnemo.review_by"] == 1900000000
+            assert meta["_mnemo.as_of"] == 1700000000
+            mid = r["id"] if isinstance(r, dict) else r
+            assert db.update(mid, visibility="public")["outcome"] == "updated"
+            assert db.get(mid)["metadata"]["_mnemo.visibility"] == "public"
+            for bad in [dict(visibility="secret"), dict(review_by=-1)]:
+                try:
+                    db.remember("x", "semantic", [1.0, 0.0, 0.0, 0.0], **bad)
+                    raise AssertionError(f"{bad} should be refused")
+                except ValueError:
+                    pass
+            try:
+                db.set_author("not valid!")
+                raise AssertionError("a bad author should be refused")
+            except ValueError:
+                pass
+            assert db.set_default_agent(None) == "updated"
+            assert db.default_agent() is None
+        finally:
+            db.close()
+    print("ok  author, default agent and freshness (v0.17)")
+
+
 def test_open_with_key():
     """PERF-1 step 7: raw-key databases."""
     key = mnemo.generate_key()
@@ -2004,6 +2045,7 @@ if __name__ == "__main__":
     test_about_essence()
     test_recent()
     test_identical_keyed_rewrite_is_unchanged()
+    test_author_default_agent_and_freshness()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()

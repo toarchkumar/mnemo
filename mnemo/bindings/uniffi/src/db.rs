@@ -455,6 +455,8 @@ impl MnemoDb {
             } else {
                 patch.ttl_secs.map(Some)
             },
+            // 13a: visibility and freshness aren't in the mobile API yet.
+            caller_keys: None,
         };
         self.with(|db| db.update(&id, p)).map(Into::into)
     }

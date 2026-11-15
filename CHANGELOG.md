@@ -8,6 +8,54 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **Agents on one machine (13a step 1, the plumbing).**
+  - **`MNEMO_AGENT` and `MNEMO_ROLE`** name the session an agent runs in.
+    The CLI, the MCP server and the hooks read them, and each new record
+    they write gets `_mnemo.author`. It's unproven until signed authorship
+    (13b). The server says at start which agent it serves, or that it's
+    anonymous. An invalid value is ignored, with a note.
+  - **`mnemo default-agent [--set <id> | --clear]`,** with
+    `Mnemo::default_agent` and `set_default_agent` (Python too): the agent a
+    write that names none is made for, kept on the manifest as
+    `_mnemo.default_agent`. The CLI's `remember` and `history`, and the MCP
+    `remember` and `history`, use it in place of `default`. A new brain has
+    none.
+  - **Visibility and freshness are the caller's to set:**
+    - `_mnemo.visibility` (`public`, `team` or `private`), `_mnemo.review_by`
+      and `_mnemo.as_of` (unix seconds), checked;
+    - through `remember` and `update` (`--visibility`, `--review-by`,
+      `--as-of`, which take `30d` or a date), the MCP `remember` and
+      `update`, Python's `remember`, `remember_text`, `update` and
+      `update_text`, and Rust's `Memory::with_visibility`, `with_review_by`,
+      `with_as_of` and `MemoryPatch::caller_keys`;
+    - they're stored now. The filters and `mnemo stale` come later in
+      v0.17;
+    - every other `_mnemo.*` key is still the engine's.
+
+    A keyed re-write that changes one of them is a new version, not
+    "unchanged".
+  - **Four record kinds,** `message`, `task`, `claim` and `presence`, are
+    reserved. They're never recall, keyword, ANN or `about` hits, whatever
+    the filter, and each gets its API in a later step. No format change: an
+    older build reads such a record as an ordinary one.
+- **More commands take no path in a git repository:** `update <ID>`,
+  `thread start <NEW>`, and `essence update|resolve|remove <ID>`, with the
+  same rule as `get` (CLI-PATHLESS-2). `thread start` with one argument that
+  looks like a brain's path says to give the thread id.
+
+### Changed
+
+- **Rust: `MemoryPatch` has a new field, `caller_keys`.** A patch written
+  with `..Default::default()` is unaffected. One that names every field
+  needs `caller_keys: None`.
+
+### Fixed
+
+- **`mnemo update --help`** said `--text` needs `--embed-cmd`. Without one it
+  uses the built-in embedder.
+
 ## [0.16.1] — 2026-11-15
 
 A patch before this project moves its own memory onto v0.16. The mobile

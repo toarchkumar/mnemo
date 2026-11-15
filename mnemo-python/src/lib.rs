@@ -578,6 +578,28 @@ fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEss
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
+/// 13a: the caller keys (visibility, `review_by`, `as_of`), checked.
+fn fresh_keys(
+    visibility: Option<String>,
+    review_by: Option<i64>,
+    as_of: Option<i64>,
+) -> PyResult<serde_json::Map<String, serde_json::Value>> {
+    let mut m = serde_json::Map::new();
+    if let Some(v) = visibility {
+        m.insert(mnemo_core::MNEMO_META_VISIBILITY.into(), v.into());
+    }
+    if let Some(t) = review_by {
+        m.insert(mnemo_core::MNEMO_META_REVIEW_BY.into(), t.into());
+    }
+    if let Some(t) = as_of {
+        m.insert(mnemo_core::MNEMO_META_AS_OF.into(), t.into());
+    }
+    for (k, v) in &m {
+        mnemo_core::check_caller_key(k, v).map_err(PyValueError::new_err)?;
+    }
+    Ok(m)
+}
+
 fn write_outcome_str(o: WriteOutcome) -> &'static str {
     match o {
         WriteOutcome::Added => "added",
@@ -980,7 +1002,8 @@ impl Mnemo {
     /// written: it takes the key, and the outcome is `"updated"`.
     #[pyo3(signature = (content, memory_type, vector, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None, key=None, supersedes=None))]
+                        shared=false, metadata=None, key=None, supersedes=None,
+                        visibility=None, review_by=None, as_of=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember(
         &mut self,
@@ -996,8 +1019,13 @@ impl Mnemo {
         metadata: Option<Bound<'_, PyDict>>,
         key: Option<String>,
         supersedes: Option<String>,
+        visibility: Option<String>,
+        review_by: Option<i64>,
+        as_of: Option<i64>,
     ) -> PyResult<PyObject> {
+        let fresh = fresh_keys(visibility, review_by, as_of)?;
         let mut memory = Memory::new(content, parse_type(memory_type)?, vector);
+        memory.metadata.extend(fresh);
         if let Some(a) = agent_id {
             memory = memory.with_agent(a);
         }
@@ -1152,7 +1180,8 @@ impl Mnemo {
     /// vector width, or if the callback raised a Python exception.
     #[pyo3(signature = (content, memory_type, *, agent_id=None,
                         importance=None, session_id=None, ttl_secs=None,
-                        shared=false, metadata=None, key=None, supersedes=None))]
+                        shared=false, metadata=None, key=None, supersedes=None,
+                        visibility=None, review_by=None, as_of=None))]
     #[allow(clippy::too_many_arguments)]
     fn remember_text(
         slf: Py<Self>,
@@ -1167,8 +1196,12 @@ impl Mnemo {
         metadata: Option<Bound<'_, PyDict>>,
         key: Option<String>,
         supersedes: Option<String>,
+        visibility: Option<String>,
+        review_by: Option<i64>,
+        as_of: Option<i64>,
     ) -> PyResult<PyObject> {
         let mt = parse_type(memory_type)?;
+        let fresh = fresh_keys(visibility, review_by, as_of)?;
         // PY-1 (R-001.11): take `slf: Py<Self>` instead of `&mut self` so
         // the PyO3-level `PyRefMut` does NOT live across the embedder
         // callback. We open a short `PyRef` to clone the embedder Arc,
@@ -1191,6 +1224,7 @@ impl Mnemo {
             })?
         };
         let mut memory = Memory::new(content, mt, vector);
+        memory.metadata.extend(fresh);
         if let Some(a) = agent_id {
             memory = memory.with_agent(a);
         }
@@ -1248,7 +1282,8 @@ impl Mnemo {
     /// * an integer → set the TTL to that many seconds,
     /// * pass `clear_ttl=True` to drop any TTL.
     #[pyo3(signature = (id, *, content=None, vector=None, importance=None,
-                        metadata=None, memory_type=None, ttl_secs=None, clear_ttl=false))]
+                        metadata=None, memory_type=None, ttl_secs=None, clear_ttl=false,
+                        visibility=None, review_by=None, as_of=None))]
     #[allow(clippy::too_many_arguments)]
     fn update(
         &mut self,
@@ -1261,14 +1296,19 @@ impl Mnemo {
         memory_type: Option<&str>,
         ttl_secs: Option<i64>,
         clear_ttl: bool,
+        visibility: Option<String>,
+        review_by: Option<i64>,
+        as_of: Option<i64>,
     ) -> PyResult<PyObject> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let fresh = fresh_keys(visibility, review_by, as_of)?;
         let mut patch = MemoryPatch {
             content,
             vector,
             importance,
             memory_type: memory_type.map(parse_type).transpose()?,
+            caller_keys: (!fresh.is_empty()).then_some(fresh),
             ..Default::default()
         };
         if let Some(dict) = metadata {
@@ -1295,7 +1335,8 @@ impl Mnemo {
     /// content=new_text, vector=embedder.embed([new_text])[0], ...)`.
     /// Other kwargs behave as in [`Mnemo::update`].
     #[pyo3(signature = (id, new_text, *, importance=None, metadata=None,
-                        memory_type=None, ttl_secs=None, clear_ttl=false))]
+                        memory_type=None, ttl_secs=None, clear_ttl=false,
+                        visibility=None, review_by=None, as_of=None))]
     #[allow(clippy::too_many_arguments)]
     fn update_text(
         slf: Py<Self>,
@@ -1307,9 +1348,13 @@ impl Mnemo {
         memory_type: Option<&str>,
         ttl_secs: Option<i64>,
         clear_ttl: bool,
+        visibility: Option<String>,
+        review_by: Option<i64>,
+        as_of: Option<i64>,
     ) -> PyResult<PyObject> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let fresh = fresh_keys(visibility, review_by, as_of)?;
         // PY-1 (R-001.11): clone embedder Arc under a short PyRef, drop
         // the borrow, then take a fresh PyRefMut for the update call.
         let embedder = {
@@ -1327,6 +1372,7 @@ impl Mnemo {
             vector: Some(vector),
             importance,
             memory_type: memory_type.map(parse_type).transpose()?,
+            caller_keys: (!fresh.is_empty()).then_some(fresh),
             ..Default::default()
         };
         if let Some(dict) = metadata {
@@ -2251,6 +2297,39 @@ impl Mnemo {
             db.set_turn_compress_after(secs);
             Ok(())
         })
+    }
+
+    /// 13a: stamp `_mnemo.author` = `name` on each new record this handle
+    /// writes (`None` stops it). Unproven until signed authorship. This
+    /// handle only; nothing is written.
+    #[pyo3(signature = (name))]
+    fn set_author(&mut self, name: Option<String>) -> PyResult<()> {
+        if let Some(n) = &name {
+            if !mnemo_core::valid_agent_id(n) {
+                return Err(PyValueError::new_err(format!(
+                    "{n:?} isn't an agent id: 1 to 64 of letters, digits, '.', '_' and '-'"
+                )));
+            }
+        }
+        match self.handle()? {
+            Handle::Plain(c) => c.set_author(name),
+            Handle::Shared(s) => s.set_author(name),
+        }
+        Ok(())
+    }
+
+    /// 13a: the agent the manifest names for a write that names none
+    /// (`_mnemo.default_agent`), or `None`.
+    fn default_agent(&mut self) -> PyResult<Option<String>> {
+        self.rd(|db| db.default_agent())
+    }
+
+    /// 13a: set (or with `None`, clear) the manifest's default agent.
+    /// Returns `"updated"` or `"unchanged"`.
+    #[pyo3(signature = (agent))]
+    fn set_default_agent(&mut self, agent: Option<String>) -> PyResult<&'static str> {
+        let outcome = self.wr(move |db| db.set_default_agent(agent.as_deref()))?;
+        Ok(write_outcome_str(outcome))
     }
 
     /// Summary statistics as a dict.

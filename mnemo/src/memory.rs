@@ -134,6 +134,25 @@ impl Memory {
         self.importance = importance.clamp(0.0, 1.0);
         self
     }
+    /// 13a (13.5): `public`, `team` or `private` (checked when it's
+    /// written).
+    pub fn with_visibility(mut self, level: &str) -> Self {
+        self.metadata
+            .insert(MNEMO_META_VISIBILITY.into(), Value::String(level.into()));
+        self
+    }
+    /// 13a (13.6): when the content was true, in unix seconds.
+    pub fn with_as_of(mut self, unix_secs: i64) -> Self {
+        self.metadata
+            .insert(MNEMO_META_AS_OF.into(), Value::Number(unix_secs.into()));
+        self
+    }
+    /// 13a (13.6): when someone should look at it again, in unix seconds.
+    pub fn with_review_by(mut self, unix_secs: i64) -> Self {
+        self.metadata
+            .insert(MNEMO_META_REVIEW_BY.into(), Value::Number(unix_secs.into()));
+        self
+    }
     /// Set the visibility scope.
     pub fn with_scope(mut self, scope: Scope) -> Self {
         self.scope = scope;
@@ -318,6 +337,98 @@ pub const MNEMO_META_LENGTH: &str = "_mnemo.length";
 
 /// Marker value for `_mnemo.kind` on thread-turn records.
 pub const MNEMO_META_KIND_TURN: &str = "turn";
+
+/// 13a: `_mnemo.kind` of a message between agents (13.1).
+pub const MNEMO_META_KIND_MESSAGE: &str = "message";
+/// 13a: `_mnemo.kind` of a task in the queue (13.1).
+pub const MNEMO_META_KIND_TASK: &str = "task";
+/// 13a: `_mnemo.kind` of a claim on a topic (13.3).
+pub const MNEMO_META_KIND_CLAIM: &str = "claim";
+/// 13a: `_mnemo.kind` of an agent's presence record (13.3).
+pub const MNEMO_META_KIND_PRESENCE: &str = "presence";
+/// 13a: the coordination kinds. Each is an ordinary record in the shared
+/// scope with the sentinel vector, never embedded, and never a hit in
+/// `recall`, the keyword index, the ANN or `about`: each is read through
+/// its own API (`docs/design/13a-coordination.md`, section 1).
+pub const COORDINATION_KINDS: [&str; 4] = [
+    MNEMO_META_KIND_MESSAGE,
+    MNEMO_META_KIND_TASK,
+    MNEMO_META_KIND_CLAIM,
+    MNEMO_META_KIND_PRESENCE,
+];
+
+/// 13a: who wrote a record, the writing handle's author
+/// ([`crate::Mnemo::set_author`], from `MNEMO_AGENT` in the CLI, the MCP
+/// server and the hooks). Stamped by the engine on new records, never set
+/// by a caller, and unproven until 13.4 signs it.
+pub const MNEMO_META_AUTHOR: &str = "_mnemo.author";
+/// 13a (13.5): `public`, `team` (the default when absent) or `private`. A
+/// filter, not a security boundary, until 13b. A caller may set it.
+pub const MNEMO_META_VISIBILITY: &str = "_mnemo.visibility";
+/// 13a (13.6): when the content was true, in unix seconds. A caller may
+/// set it; absent, it's the record's `created_at` (or `_mnemo.updated_at`).
+pub const MNEMO_META_AS_OF: &str = "_mnemo.as_of";
+/// 13a (13.6): when someone should look at the record again, in unix
+/// seconds. A caller may set it.
+pub const MNEMO_META_REVIEW_BY: &str = "_mnemo.review_by";
+/// 13a (AGENT-DEFAULT): on the manifest, the agent a write that names none
+/// is made for, in place of `default`. Set with
+/// [`crate::Mnemo::set_default_agent`]; a new brain's manifest has none.
+pub const MNEMO_META_DEFAULT_AGENT: &str = "_mnemo.default_agent";
+
+/// The visibility levels (13.5).
+pub const VISIBILITY_LEVELS: [&str; 3] = ["public", "team", "private"];
+
+/// 13a: the reserved keys a caller may set on a write (visibility and
+/// freshness), each checked by [`check_caller_key`]. Every other
+/// `_mnemo.*` key stays the engine's.
+pub const CALLER_KEYS: [&str; 3] = [
+    MNEMO_META_VISIBILITY,
+    MNEMO_META_AS_OF,
+    MNEMO_META_REVIEW_BY,
+];
+
+/// 13a: an agent id (`MNEMO_AGENT`, `_mnemo.default_agent`, a message's
+/// `to`): 1 to 64 of `[A-Za-z0-9._-]`. A role (`MNEMO_ROLE`) follows the
+/// same rule.
+pub fn valid_agent_id(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Whether `key` is one of [`CALLER_KEYS`].
+pub fn is_caller_key(key: &str) -> bool {
+    CALLER_KEYS.contains(&key)
+}
+
+/// Check a caller-settable reserved key's value: a visibility level, or a
+/// whole number of unix seconds that isn't negative.
+pub fn check_caller_key(key: &str, value: &Value) -> std::result::Result<(), String> {
+    match key {
+        MNEMO_META_VISIBILITY => match value.as_str() {
+            Some(v) if VISIBILITY_LEVELS.contains(&v) => Ok(()),
+            _ => Err(format!(
+                "{key} must be one of public, team or private (got {value})"
+            )),
+        },
+        MNEMO_META_AS_OF | MNEMO_META_REVIEW_BY => match value.as_i64() {
+            Some(t) if t >= 0 => Ok(()),
+            _ => Err(format!(
+                "{key} must be a time in unix seconds, 0 or more (got {value})"
+            )),
+        },
+        _ => Err(format!("{key} isn't a key a caller may set")),
+    }
+}
+
+/// Whether a record is one of the coordination kinds ([`COORDINATION_KINDS`]).
+pub fn is_coordination(m: &Memory) -> bool {
+    m.metadata
+        .get(MNEMO_META_KIND)
+        .and_then(Value::as_str)
+        .is_some_and(|k| COORDINATION_KINDS.contains(&k))
+}
 
 /// v0.16.1: `true` on a turn whose content is only the markers a
 /// transcript reader makes for blocks it doesn't keep (`[thinking]`,
@@ -714,6 +825,10 @@ pub struct MemoryPatch {
     /// Change the TTL. Outer `None` → leave unchanged; `Some(Some(s))` →
     /// set TTL to `s`; `Some(None)` → clear any existing TTL.
     pub ttl_secs: Option<Option<i64>>,
+    /// 13a: set these caller keys ([`CALLER_KEYS`]: visibility, `as_of`,
+    /// `review_by`), each checked, without replacing the user metadata. A
+    /// `null` value removes the key.
+    pub caller_keys: Option<Map<String, Value>>,
 }
 
 /// One turn fed into [`crate::Mnemo::ingest_thread`] (Phase 12.7a).

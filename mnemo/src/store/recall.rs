@@ -134,7 +134,10 @@ impl Mnemo {
         let mut out: Vec<Memory> = Vec::new();
         for e in self.live_entries(ids) {
             let m = self.read_memory(&e)?;
-            if !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) && is_onboarding(&m) {
+            if !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)
+                && is_onboarding(&m)
+                && !is_coordination(&m)
+            {
                 out.push(m);
             }
         }
@@ -396,6 +399,11 @@ impl Mnemo {
             if is_markers_only_turn(&m) {
                 continue;
             }
+            // 13a: messages, tasks, claims and presence are read through
+            // their own APIs, never as recall hits (whatever the filter).
+            if is_coordination(&m) {
+                continue;
+            }
             // Phase 12.7: default-exclude the thread layers from fact
             // recall: archive turns (12.7a), essence items (12.7b; read
             // by scope through the render, not by similarity) and
@@ -480,7 +488,7 @@ impl Mnemo {
             }
             if matches!(
                 r.kind,
-                ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK
+                ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK | ROW_KIND_COORDINATION
             ) {
                 continue;
             }

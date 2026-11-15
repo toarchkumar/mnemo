@@ -35,7 +35,8 @@
         "repo": "https://github.com/toarchkumar/mnemo",
         "engine_docs": "mnemo/README.md",
         "dogfood_helper": "test/scripts/project_memory.py"
-      }
+      },
+      "_mnemo.default_agent": "cursor-agent"
     }
   },
   {

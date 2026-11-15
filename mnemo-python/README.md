@@ -178,7 +178,7 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 
 | Method | Purpose |
 |---|---|
-| `remember(content, memory_type, vector, *, agent_id, importance, session_id, ttl_secs, shared, metadata, key, supersedes)` | Store a memory; returns its id. With `key`, a keyed write that supersedes the key's live record (returns `{"id", "outcome"}`). **`supersedes` (v0.15, with `key`):** the id of a memory written without a key, which becomes the key's first version and is superseded; matching content adopts it as is (`"updated"`) |
+| `remember(content, memory_type, vector, *, agent_id, importance, session_id, ttl_secs, shared, metadata, key, supersedes, visibility, review_by, as_of)` | Store a memory; returns its id. **v0.17:** `visibility` (`"public"`, `"team"`, `"private"`), `review_by` and `as_of` (unix seconds), also on `remember_text`, `update` and `update_text`. With `key`, a keyed write that supersedes the key's live record (returns `{"id", "outcome"}`). **`supersedes` (v0.15, with `key`):** the id of a memory written without a key, which becomes the key's first version and is superseded; matching content adopts it as is (`"updated"`) |
 | `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True, n_probe=None, n_rerank=None)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall). `n_probe` / `n_rerank` (PR ANN-1): per-query ANN tuning — `None` uses the index's build-time defaults (ANN-1 auto-formulas: `(partitions+1)/2` and `500`) |
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
@@ -202,6 +202,8 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `set_cache_budget(namespace, max_entries, max_bytes)` | Per-namespace LRU cap (defaults 10 000 entries / 64 MiB). On the next `cache_put` the LRU is evicted until both limits are satisfied |
 | `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
 | `set_vector_cache_budget(bytes)` | v9 files: keep the fp16 vector column in memory while it takes at most `bytes` (default 96 MiB, about 125K vectors at 384 dims); above it recall reads vectors through the page cache (less memory, slower recall). This handle only |
+| `set_author(name)` | v0.17: stamp `_mnemo.author` = `name` on each new record this handle writes (`None` stops it). This handle only |
+| `default_agent()`, `set_default_agent(agent)` | v0.17: the agent the manifest names for a write that names none (`_mnemo.default_agent`), or `None`; set it, or clear it with `None` (returns `"updated"` or `"unchanged"`) |
 | `set_turn_compress_after(secs)` | v9 files: compress thread turns once they're older than `secs` (default 7 days; `0` compresses at write). This handle only |
 | `memories()` | Enumerate every live (non-deleted, non-expired) memory as a list of dicts |
 | `dimensions()` | Embedding dimensionality this database was created with (also on `stats()["dimensions"]`) |

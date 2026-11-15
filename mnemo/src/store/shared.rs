@@ -265,6 +265,8 @@ pub struct SharedMnemo {
     stamp: Option<Stamp>,
     delta: AccessDelta,
     embedder: Option<Arc<dyn Embedder>>,
+    /// 13a: the author stamped on new records, kept across reloads.
+    author: Option<String>,
     reloads: u64,
     /// What the last [`SharedMnemo::rekey`] couldn't scrub.
     rekey_cleanup: Option<String>,
@@ -292,6 +294,7 @@ impl SharedMnemo {
             stamp: None,
             delta: AccessDelta::default(),
             embedder: None,
+            author: None,
             reloads: 0,
             rekey_cleanup: None,
         };
@@ -317,6 +320,15 @@ impl SharedMnemo {
     /// commit is in the file.
     pub fn write<R>(&mut self, f: impl FnOnce(&mut Mnemo) -> Result<R>) -> Result<R> {
         self.window(LockKind::Exclusive, |s| s.run_write(f))
+    }
+
+    /// 13a: the author stamped as `_mnemo.author` on each new record (as
+    /// [`Mnemo::set_author`]), kept across reloads. Writes nothing.
+    pub fn set_author(&mut self, author: Option<String>) {
+        if let Some(db) = self.db.as_mut() {
+            db.author = author.clone();
+        }
+        self.author = author;
     }
 
     /// Attach an embedder (as [`Mnemo::set_embedder`]). It's kept across
@@ -584,6 +596,7 @@ impl SharedMnemo {
         if let Some(e) = &self.embedder {
             new.embedder = Some(e.clone());
         }
+        new.author = self.author.clone();
         new.shared = true;
         self.stamp = Some(Stamp::of(new.pager.file(), &new.header));
         self.db = Some(new);
