@@ -503,3 +503,44 @@ fn mcp_install_for_claude_code_names_no_path() {
         );
     }
 }
+
+/// 12.2 step 1's review: when `CLAUDE_PROJECT_DIR` picks the brain and the
+/// working directory is in another repository, one stderr line says so.
+#[test]
+fn claude_project_dir_names_the_brain_when_the_working_directory_differs() {
+    let e = Env::new();
+    e.init();
+    std::fs::create_dir_all(e.p("other")).unwrap();
+    e.git(&e.p("other"), &["init", "-q"]);
+    let main = std::fs::canonicalize(e.p("main")).unwrap();
+    let note = "using the project brain of $CLAUDE_PROJECT_DIR";
+    // From another repository: the session's brain is used, and named.
+    let o = e
+        .cmd(&e.p("other"), &["info"])
+        .env("CLAUDE_PROJECT_DIR", &main)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert!(err.contains(note) && err.contains("-C ."), "{err}");
+    assert!(err.contains("project.mnemo"), "{err}");
+    // -C . uses the working directory's repository, which has no brain.
+    let o = e
+        .cmd(&e.p("other"), &["-C", ".", "info"])
+        .env("CLAUDE_PROJECT_DIR", &main)
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    // From inside the project, from its linked worktree (the same common
+    // dir), or outside git: no line.
+    for cwd in ["main/sub/deep", "wt", "plain"] {
+        let o = e
+            .cmd(&e.p(cwd), &["info"])
+            .env("CLAUDE_PROJECT_DIR", &main)
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(o.status.success(), "{cwd}: {err}");
+        assert!(!err.contains(note), "{cwd}: {err}");
+    }
+}

@@ -123,7 +123,7 @@ jobs:
       # that need the model skip here and run in `builtin embedder (linux)`.
       - name: cargo test (the built-in embedder, offline)
         working-directory: mnemo
-        run: cargo test --features embed-candle --lib --test builtin_embedder --test builtin_cli --test query_keywords
+        run: cargo test --features embed-candle --lib --test builtin_embedder --test builtin_cli --test query_keywords --test guide
 
       - name: cargo clippy
         working-directory: mnemo
@@ -203,7 +203,8 @@ jobs:
         run: |
           export MNEMO_TEST_MODEL_DIR="$(cargo run -q --release --locked --features embed-candle --bin mnemo -- embedder status | sed -n 's/^cache: *//p')"
           test -f "$MNEMO_TEST_MODEL_DIR/model.safetensors"
-          cargo test --release --locked --features embed-candle --test builtin_embedder --test builtin_cli -- --nocapture
+          # 12.2 step 2: `guide` runs the guide's blocks that need the model.
+          cargo test --release --locked --features embed-candle --test builtin_embedder --test builtin_cli --test guide -- --nocapture
 
   deny:
     name: cargo-deny (linux)

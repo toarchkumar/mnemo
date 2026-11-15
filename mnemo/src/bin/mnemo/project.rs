@@ -19,16 +19,49 @@ pub const FILE: &str = "project.mnemo";
 
 /// Where the lookup starts: the working directory when `-C` moved the
 /// process there, else `CLAUDE_PROJECT_DIR` when it's set and absolute,
-/// else the working directory.
-pub fn start_dir(moved: bool) -> Result<PathBuf, String> {
+/// else the working directory. The flag says it was `CLAUDE_PROJECT_DIR`.
+pub fn start_dir(moved: bool) -> Result<(PathBuf, bool), String> {
     if !moved {
         if let Some(d) = std::env::var_os("CLAUDE_PROJECT_DIR").map(PathBuf::from) {
             if d.is_absolute() {
-                return Ok(d);
+                return Ok((d, true));
             }
         }
     }
-    std::env::current_dir().map_err(|e| format!("can't read the working directory: {e}"))
+    std::env::current_dir()
+        .map(|d| (d, false))
+        .map_err(|e| format!("can't read the working directory: {e}"))
+}
+
+/// The project brain from where the lookup starts. When that was
+/// `CLAUDE_PROJECT_DIR` and the working directory is in a git repository
+/// with another common dir, one line on stderr says which brain is used
+/// (12.2 step 1's review: an agent that `cd`s to another repository in a
+/// Claude Code session would otherwise get the session's brain silently).
+/// `quiet` skips the line, for a hook, whose stderr isn't the user's.
+pub fn find(moved: bool, quiet: bool) -> Result<PathBuf, String> {
+    let (start, from_env) = start_dir(moved)?;
+    let common = common_dir(&start)?;
+    if from_env && !quiet {
+        if let Ok(cwd) = std::env::current_dir() {
+            let here = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+            let there = std::fs::canonicalize(&start).unwrap_or_else(|_| start.clone());
+            // The second `git rev-parse` runs only when the two differ (a
+            // subdirectory may be another repository, so it isn't skipped).
+            if here != there {
+                if let Ok(other) = common_dir(&here) {
+                    if other != common {
+                        eprintln!(
+                            "mnemo: using the project brain of $CLAUDE_PROJECT_DIR ({}); \
+                             -C . uses this directory's",
+                            common.join(DIR).join(FILE).display()
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(common.join(DIR).join(FILE))
 }
 
 /// The git common dir of the repository `start` is in, absolute.
@@ -68,11 +101,6 @@ pub fn common_dir(start: &Path) -> Result<PathBuf, String> {
     let dir = start.join(line);
     std::fs::canonicalize(&dir)
         .map_err(|e| format!("no project brain here: {}: {e}", dir.display()))
-}
-
-/// The project brain's path from `start` (it may not exist yet).
-pub fn brain_path(start: &Path) -> Result<PathBuf, String> {
-    Ok(common_dir(start)?.join(DIR).join(FILE))
 }
 
 /// Create the brain's directory, mode 0700 on Unix, if it isn't there. A
