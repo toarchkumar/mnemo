@@ -17,11 +17,12 @@ ENV_PATH = TEST_ROOT / ".env"
 
 AGENT_ID = "cursor-agent"
 DIMENSIONS = 384
-# Must match the embedder.name recorded on the dogfood manifest
-# (test/scripts/seed.json → test/project.mnemo). PR 10a.1's identity
-# check is strict exact-match on the nested metadata.embedder.name;
-# sentence-transformers accepts both the short and HF-prefixed forms
-# and loads the same weights, so vectors are unchanged.
+# v0.15 (12.3 step 5): the brain uses the engine's built-in embedder
+# (snowflake-arctic-embed-xs, 384-dim), through `use_builtin_embedder`. A
+# brain whose manifest still records MiniLM (before `mnemo reembed` moved
+# it) keeps sentence-transformers, so the script works on both sides of
+# the move. The name must match the manifest's embedder.name exactly.
+BUILTIN_PREFIX = "Snowflake/snowflake-arctic-embed-xs@"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -51,7 +52,7 @@ def passphrase() -> str:
 REBUILD_HINT = (
     "Rebuild it into this venv:\n"
     "  cd mnemo-python && VIRTUAL_ENV=\"$(cd ../test/.venv && pwd)\" "
-    "PATH=\"$VIRTUAL_ENV/bin:$PATH\" maturin develop --release"
+    "PATH=\"$VIRTUAL_ENV/bin:$PATH\" maturin develop --release --features embed-candle"
 )
 
 # DOGFOOD-1: names the newest tree's binding has. A wheel built before them
@@ -105,6 +106,36 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     return [v.tolist() for v in vectors]
 
 
+def recorded_embedder(db) -> str | None:
+    """The embedder name the brain's manifest records, if any."""
+    for m in db.about():
+        e = (m.get("metadata") or {}).get("embedder")
+        if isinstance(e, dict) and e.get("name"):
+            return e["name"]
+    return None
+
+
+def attach_embedder(db) -> None:
+    """The built-in embedder for a brain that records it (or a new one),
+    sentence-transformers' MiniLM for a brain that records MiniLM."""
+    name = recorded_embedder(db)
+    if name is None or name.startswith(BUILTIN_PREFIX):
+        if hasattr(db, "use_builtin_embedder"):
+            db.use_builtin_embedder()
+            return
+        if name is not None:
+            sys.exit(
+                "this brain uses the built-in embedder, and the installed wheel "
+                "has none. " + REBUILD_HINT
+            )
+    db.set_embedder(
+        embed_texts,
+        name=EMBED_MODEL,
+        dimensions=DIMENSIONS,
+        normalize=True,
+    )
+
+
 def open_db(*, create: bool = False, write: bool = True):
     """Open the test database AND register the embedder on the handle.
     Phase 3 (PR 10a) added `db.set_embedder(fn, ...)` as a per-handle
@@ -134,12 +165,7 @@ def open_db(*, create: bool = False, write: bool = True):
         db = mnemo.open(str(MNEMO_PATH), pp, shared=True)
     else:
         db = mnemo.open(str(MNEMO_PATH), pp, read_only=True)
-    db.set_embedder(
-        embed_texts,
-        name=EMBED_MODEL,
-        dimensions=DIMENSIONS,
-        normalize=True,
-    )
+    attach_embedder(db)
     return db
 
 
@@ -152,29 +178,29 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
     if not SEED_PATH.exists():
         sys.exit(f"seed file not found: {SEED_PATH}")
     entries = json.loads(SEED_PATH.read_text(encoding="utf-8"))
-    texts = [e["content"] for e in entries]
-    print(f"embedding {len(texts)} seed memories ({EMBED_MODEL}, dim={DIMENSIONS})...")
-    vectors = embed_texts(texts)  # kept only for the JSONL export below
+    print(f"embedding {len(entries)} seed memories (dim={DIMENSIONS})...")
 
     mnemo = require_mnemo()
     if MNEMO_PATH.exists():
         MNEMO_PATH.unlink()
     db = mnemo.open(str(MNEMO_PATH), passphrase(), dimensions=DIMENSIONS)
-    db.set_embedder(embed_texts, name=EMBED_MODEL, dimensions=DIMENSIONS, normalize=True)
+    # A new brain: the built-in embedder when the wheel has it.
+    attach_embedder(db)
 
     jsonl_lines: list[str] = []
-    for entry, vector in zip(entries, vectors):
+    for entry in entries:
         content = entry["content"]
         mt = entry.get("memory_type", "semantic")
         importance = float(entry.get("importance", 0.7))
         metadata = entry.get("metadata") or {}
-        db.remember_text(
+        mid = db.remember_text(
             content,
             mt,
             agent_id=AGENT_ID,
             importance=importance,
             metadata=metadata,
         )
+        vector = db.get(mid)["vector"]  # for the JSONL export below
         jsonl_lines.append(
             json.dumps(
                 {
@@ -247,13 +273,13 @@ def cmd_remember_file(args: argparse.Namespace) -> None:
         facts.append(f)
     if not facts:
         sys.exit(f"{path}: no facts")
-    vectors = embed_texts([f["content"] for f in facts])
+    # One open and one model load; the handle's embedder embeds each fact
+    # before its write window.
     db = open_db()
-    for f, vector in zip(facts, vectors):
-        result = db.remember(
+    for f in facts:
+        result = db.remember_text(
             f["content"],
             f.get("type", "semantic"),
-            vector,
             agent_id=AGENT_ID,
             importance=float(f.get("importance", 0.75)),
             metadata=f.get("metadata"),

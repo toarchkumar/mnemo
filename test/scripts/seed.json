@@ -1,15 +1,16 @@
 [
   {
-    "content": "MNEMO MANIFEST \u2014 This .mnemo file is the project memory for the Memory Nemo (MNemo) project, an encrypted single-file Rust agent-memory engine. Embedder: sentence-transformers/all-MiniLM-L6-v2 (384-dim, normalize_embeddings=true). Default agent_id: cursor-agent. Metadata convention: area in {onboarding, performance, decision, ...} with a topic key. Self-describing: run `mnemo about <path>` (or db.about() in Python) to surface every memory tagged area=onboarding, sorted by importance \u2014 that briefing is the source of truth for how to use this file. Dogfood helper: test/scripts/project_memory.py. Engine docs: mnemo/README.md.",
+    "content": "MNEMO MANIFEST \u2014 This .mnemo file is the project memory for the Memory Nemo (MNemo) project, an encrypted single-file Rust agent-memory engine. Embedder: the engine's built-in snowflake-arctic-embed-xs at a pinned revision (384-dim, normalised, with its query prefix; v0.15, 12.3 step 5), registered with use_builtin_embedder(); all-MiniLM-L6-v2 before that. Default agent_id: cursor-agent. Metadata convention: area in {onboarding, performance, decision, ...} with a topic key. Self-describing: run `mnemo about <path>` (or db.about() in Python) to surface every memory tagged area=onboarding, sorted by importance \u2014 that briefing is the source of truth for how to use this file. Dogfood helper: test/scripts/project_memory.py. Engine docs: mnemo/README.md.",
     "memory_type": "semantic",
     "importance": 1.0,
     "metadata": {
       "area": "onboarding",
       "topic": "manifest",
       "embedder": {
-        "name": "sentence-transformers/all-MiniLM-L6-v2",
+        "name": "Snowflake/snowflake-arctic-embed-xs@d8c86521100d3556476a063fc2342036d45c106f",
         "dimensions": 384,
-        "normalize": true
+        "normalize": true,
+        "query_convention": "arctic-query-prefix"
       },
       "agent_id_default": "cursor-agent",
       "conventions": {
@@ -74,7 +75,7 @@
     }
   },
   {
-    "content": "TWO WAYS TO READ MEMORY: (A) Natural language \u2014 python test/scripts/project_memory.py recall \"your question\" (uses sentence-transformers all-MiniLM-L6-v2, 384-dim, local). (B) CLI only \u2014 mnemo info|list|get|verify on test/project.mnemo; mnemo recall|search need --query as comma-separated floats (copy vectors from test/project-memory.jsonl after bootstrap).",
+    "content": "TWO WAYS TO READ MEMORY: (A) Natural language \u2014 python test/scripts/project_memory.py recall \"your question\" (uses the engine's built-in embedder, snowflake-arctic-embed-xs, 384-dim, local). (B) CLI only \u2014 mnemo info|list|get|verify on test/project.mnemo; mnemo recall|search need --query as comma-separated floats (copy vectors from test/project-memory.jsonl after bootstrap).",
     "memory_type": "procedural",
     "importance": 0.95,
     "metadata": {
@@ -207,7 +208,7 @@
     }
   },
   {
-    "content": "Dogfooding sandbox: test/ holds project.mnemo (local encrypted brain). Tracked in git: test/scripts/seed.json, project_memory.py, test/README.md. Runtime gitignored: test/.env, test/project.mnemo, test/.venv, test/.cache/, test/project-memory.jsonl. Embeddings: all-MiniLM-L6-v2, 384 dim.",
+    "content": "Dogfooding sandbox: test/ holds project.mnemo (local encrypted brain). Tracked in git: test/scripts/seed.json, project_memory.py, test/README.md. Runtime gitignored: test/.env, test/project.mnemo, test/.venv, test/.cache/, test/project-memory.jsonl. Embeddings: the built-in snowflake-arctic-embed-xs, 384 dim (all-MiniLM-L6-v2 before v0.15).",
     "memory_type": "semantic",
     "importance": 1.0,
     "metadata": {
@@ -249,7 +250,7 @@
     }
   },
   {
-    "content": "2026-05-25: Started MNemo dogfooding \u2014 test/project.mnemo with local sentence-transformers embeddings and cursor-agent as agent_id. Passphrase in test/.env (gitignored).",
+    "content": "2026-05-25: Started MNemo dogfooding \u2014 test/project.mnemo with local embeddings (sentence-transformers then; the built-in embedder since v0.15) and cursor-agent as agent_id. Passphrase in test/.env (gitignored).",
     "memory_type": "episodic",
     "importance": 0.9,
     "metadata": {
@@ -419,6 +420,15 @@
     "metadata": {
       "area": "conventions",
       "topic": "supersede"
+    }
+  },
+  {
+    "content": "THE BUILT-IN EMBEDDER (v0.15, 12.3 step 5): the CLI (remember/recall/update --text, thread ingest, reembed, serve --mcp without --embed-cmd) and the wheels (db.use_builtin_embedder()) embed with snowflake-arctic-embed-xs at a pinned revision on candle, 384-dim; mnemo init defaults to 384. Its three files (91.0 MB) are fetched once into the cache directory (MNEMO_CACHE_DIR moves it, MNEMO_MODEL_URL points at a mirror) on first use or by mnemo embedder install, and each file's SHA-256 in the binary is checked before every load. --model-dir DIR loads a copy of your own. Identifier-aware recall: with the built-in, a recall by text scores the question's identifiers (snapshot_list, --features, store.rs, keyring@3.6.3) as explicit keywords and its plain words not at all (Embedder::query_keywords); other embedders keep the 0.25 text weight. Offline, recall --text is keyword-only with a notice. The library and mobile packages don't carry it (the embed-candle feature).",
+    "memory_type": "semantic",
+    "importance": 0.8,
+    "metadata": {
+      "area": "architecture",
+      "topic": "builtin-embedder"
     }
   }
 ]

@@ -475,6 +475,18 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// 12.3 step 5: the keywords the registered embedder chooses for this
+    /// request ([`crate::Embedder::query_keywords`]): asked only for a recall
+    /// by text with no keywords given, on a v9 file (a v8 file has no
+    /// keyword index and ignores the text).
+    fn embedder_keywords(&self, req: &RecallRequest) -> Option<String> {
+        if req.keywords.is_some() || !self.is_v9() {
+            return None;
+        }
+        let text = req.text.as_deref().filter(|t| !t.trim().is_empty())?;
+        self.embedder.as_ref()?.query_keywords(text)
+    }
+
     /// Phase-5 multi-signal recall under the v0.7.0 scoring-v2 formula
     /// (see [`crate::ScoreWeights`]). Thin wrapper over
     /// [`Mnemo::recall_budgeted`] that drops the `truncated` flag;
@@ -509,6 +521,16 @@ impl Mnemo {
     /// alone exceeds the budget. [`RecallResponse::truncated`] is
     /// `true` iff at least one hit was dropped by the budget.
     pub fn recall_budgeted(&mut self, req: &RecallRequest) -> Result<RecallResponse> {
+        // 12.3 step 5 (v0.15): the registered embedder may name the keywords
+        // for a recall by text (the built-in's identifier-aware recall).
+        let chosen;
+        let req = match self.embedder_keywords(req) {
+            Some(k) => {
+                chosen = req.clone().keywords(k);
+                &chosen
+            }
+            None => req,
+        };
         // FMT-9d: keyword recall needs a v9 file's BM25 index; a
         // keyword-only request has no vector.
         if req

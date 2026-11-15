@@ -1,0 +1,286 @@
+{
+ "version": 1,
+ "note": "Step 5 part 3's harder set (v0.15.0, 12.3): five groups with rules set by PLANNER-A and enforced by check_hard.py. Written and checked before any model ran on it. Snippets are text PLAN.md already shows, each in one memory only. The brain has one fact over 256 MiniLM tokens, so the long group has one question.",
+ "questions": [
+  {
+   "id": "h01",
+   "group": "ident",
+   "question": "what does MnemoError::Replaced mean for a write",
+   "expected": [
+    "and the next call follows the new file"
+   ],
+   "identifier": "MnemoError::Replaced"
+  },
+  {
+   "id": "h02",
+   "group": "ident",
+   "question": "what value does DEFAULT_TEXT_KEYWORD_WEIGHT have and why",
+   "expected": [
+    "the question's own words"
+   ],
+   "identifier": "DEFAULT_TEXT_KEYWORD_WEIGHT"
+  },
+  {
+   "id": "h03",
+   "group": "ident",
+   "question": "what does load_bm25_manifest refuse in older builds",
+   "expected": [
+    "at the start of each"
+   ],
+   "identifier": "load_bm25_manifest"
+  },
+  {
+   "id": "h04",
+   "group": "ident",
+   "question": "why must spawned test processes clear CLAUDE_CODE_CHILD_SESSION",
+   "expected": [
+    "v0.15.0 step 1 (PR 78"
+   ],
+   "identifier": "CLAUDE_CODE_CHILD_SESSION"
+  },
+  {
+   "id": "h05",
+   "group": "ident",
+   "question": "what does clippy with --features failpoints,benches,keychain catch",
+   "expected": [
+    "4's first CI run failed"
+   ],
+   "identifier": "--features failpoints,benches,keychain"
+  },
+  {
+   "id": "h06",
+   "group": "ident",
+   "question": "which server first offered the snapshot_list tool",
+   "expected": [
+    "list, snapshot_list, stats"
+   ],
+   "identifier": "snapshot_list"
+  },
+  {
+   "id": "h07",
+   "group": "ident",
+   "question": "why was toml_writer held back in the lockfile",
+   "expected": [
+    "need edition 2024"
+   ],
+   "identifier": "toml_writer"
+  },
+  {
+   "id": "h08",
+   "group": "ident",
+   "question": "does ActivityScenario.moveToState(CREATED) send ON_STOP",
+   "expected": [
+    "Android instrumented tests: ActivityScenario.moveToState(CREATED) stops an activity"
+   ],
+   "identifier": "ActivityScenario.moveToState(CREATED)"
+  },
+  {
+   "id": "h09",
+   "group": "ident",
+   "question": "what was decided about cli_shared::the_cli_embeds_before_it_takes_the_lock",
+   "expected": [
+    "as runner timing for now, with"
+   ],
+   "identifier": "cli_shared::the_cli_embeds_before_it_takes_the_lock"
+  },
+  {
+   "id": "h10",
+   "group": "ident",
+   "question": "what does mnemo rekey --rotate do that a plain rekey doesn't",
+   "expected": [
+    "keeps the data key"
+   ],
+   "identifier": "rekey --rotate"
+  },
+  {
+   "id": "h11",
+   "group": "paraphrase",
+   "question": "how can I prevent my notebook from dozing off overnight",
+   "expected": [
+    "a closed lid sleeps the Mac unless a display is attached"
+   ]
+  },
+  {
+   "id": "h12",
+   "group": "paraphrase",
+   "question": "my isolated interpreter environment is broken, how do I recreate it",
+   "expected": [
+    "with the venv active"
+   ]
+  },
+  {
+   "id": "h13",
+   "group": "paraphrase",
+   "question": "if automation aborted before starting anything, does that count against shipping",
+   "expected": [
+    "doesn't block a merge, but every job must be green on the"
+   ]
+  },
+  {
+   "id": "h14",
+   "group": "paraphrase",
+   "question": "where should unpatched vulnerabilities be documented",
+   "expected": [
+    "Security findings stay in the gitignored SECURITY.local.md"
+   ]
+  },
+  {
+   "id": "h15",
+   "group": "paraphrase",
+   "question": "can two collaborators edit the coordination ledger simultaneously",
+   "expected": [
+    "at its DONE or BLOCKED"
+   ]
+  },
+  {
+   "id": "h16",
+   "group": "paraphrase",
+   "question": "who is the intended customer base",
+   "expected": [
+    "on-device agents and apps, from desktop apps down to tablets, phones and"
+   ]
+  },
+  {
+   "id": "h17",
+   "group": "paraphrase",
+   "question": "why didn't Google's handset vectorizer package work out",
+   "expected": [
+    "1.2.2 ships a 16.6 MB arm64"
+   ]
+  },
+  {
+   "id": "h18",
+   "group": "paraphrase",
+   "question": "why might Apple's bundled language representations give nothing back",
+   "expected": [
+    "LinguisticData asset isn't on the device"
+   ]
+  },
+  {
+   "id": "h19",
+   "group": "paraphrase",
+   "question": "how does the owner like progress updates phrased",
+   "expected": [
+    "plain English, short status, no recaps of steps. Verify claims in the"
+   ]
+  },
+  {
+   "id": "h20",
+   "group": "paraphrase",
+   "question": "how long may a lookup-only launch routine stall on a contended file",
+   "expected": [
+    "delays a session's start by"
+   ]
+  },
+  {
+   "id": "h21",
+   "group": "long",
+   "question": "can a 0.3.x build open files written by v0.4.0",
+   "expected": [
+    "written by v0.4.0 do NOT open on"
+   ],
+   "answer_snippet": "written by v0.4.0 do NOT open on"
+  },
+  {
+   "id": "h22",
+   "group": "current",
+   "question": "what is the minimum supported Rust version now",
+   "expected": [
+    "the MSRV to 1.92 (step 5a"
+   ],
+   "stale": [
+    "Rust MSRV is 1.75"
+   ]
+  },
+  {
+   "id": "h23",
+   "group": "current",
+   "question": "has v0.14.0 shipped yet",
+   "expected": [
+    "is served without"
+   ],
+   "stale": [
+    "steps 1, 2a, 2b, 2c, 3"
+   ]
+  },
+  {
+   "id": "h24",
+   "group": "current",
+   "question": "can busy readers still lock out a save in shared mode",
+   "expected": [
+    "step 2b, after the keychain and before",
+    "A reader past T stops deferring to the valve"
+   ],
+   "stale": [
+    "readers slow a writer, and with many processes reading with no pause"
+   ]
+  },
+  {
+   "id": "h25",
+   "group": "current",
+   "question": "which file format version is the project brain on",
+   "expected": [
+    "scripts; no agent types or pastes one"
+   ],
+   "stale": [
+    "an empty cache directory"
+   ]
+  },
+  {
+   "id": "h26",
+   "group": "current",
+   "question": "does the Python binding have rekey and compact_file now",
+   "expected": [
+    "PyPI Trusted Publishing (OIDC"
+   ],
+   "stale": [
+    "set_cache_flush_policy, set_cache_budget, rekey"
+   ]
+  },
+  {
+   "id": "h27",
+   "group": "pair",
+   "question": "who approves a release, and which credentials does publishing use",
+   "expected": [
+    "A release needs one human approval: the approve-release job on the release",
+    "Maven Central user token renews by 2027-11-09"
+   ]
+  },
+  {
+   "id": "h28",
+   "group": "pair",
+   "question": "where is the repo now, and what should I do with the old folder",
+   "expected": [
+    "The repo lives at ~/Documents/GitHub/mnemo.nosync. It was renamed out of iCloud's reach",
+    "The old ~/Documents/GitHub/mnemo folder is stale: it reappeared once as iCloud placeholders"
+   ]
+  },
+  {
+   "id": "h29",
+   "group": "pair",
+   "question": "what do older builds do with a tokenizer 2 file, and where is the tokenizer recorded",
+   "expected": [
+    "at the start of each",
+    "needs no extra write and"
+   ]
+  },
+  {
+   "id": "h30",
+   "group": "pair",
+   "question": "what threshold does the writer valve use, and why was it shipped with slow reads",
+   "expected": [
+    "A reader past T stops deferring to the valve",
+    "with many writers saving back to back on a slow machine"
+   ]
+  },
+  {
+   "id": "h31",
+   "group": "pair",
+   "question": "which keyring crates does the keychain use now, and do entries from the old crate still read",
+   "expected": [
+    "the MSRV to 1.92 (step 5a",
+    "and the keyring 4 stores"
+   ]
+  }
+ ]
+}

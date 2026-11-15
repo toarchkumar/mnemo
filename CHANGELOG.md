@@ -114,14 +114,52 @@ Pre-1.0, the minor component carries the breaking-change signal.
   inspect`'s search) uses tokenizer 2.
 - **CI's `compat (v0.14.0, linux)` job** runs a tokenizer 2 file against the
   published v0.14.0 CLI.
+- **The built-in embedder (12.3 step 5).** The CLI and the wheels embed text
+  themselves: snowflake-arctic-embed-xs (Apache-2.0, 384 dimensions) at a
+  pinned revision, on candle in pure Rust on the CPU, behind the new
+  `embed-candle` feature (on in the release CLI binaries and wheels, off
+  for the library and the mobile packages).
+  - `mnemo remember --text`, `recall --text`, `update --text`, `thread
+    ingest`, `reembed` and `serve --mcp` use it when `--embed-cmd` isn't
+    given; Python's `db.use_builtin_embedder()`.
+  - The model's three files (91.0 MB) are fetched once over HTTPS (ureq,
+    rustls) into the platform's cache directory, on first use with the size
+    said on stderr, or with **`mnemo embedder install`** (Python:
+    `install_builtin_embedder()`). Each file's SHA-256 is in the binary and
+    is checked before every load. **`mnemo embedder status`** (Python:
+    `builtin_embedder_info()`) says what's installed. `MNEMO_CACHE_DIR`
+    moves the cache and `MNEMO_MODEL_URL` points at a mirror.
+  - **`--model-dir <DIR>`**, on every command, loads the files from a
+    directory and never downloads; files other than the pinned ones get an
+    identity that names their SHA-256s.
+  - **Identifier-aware recall** with the built-in: a recall by text scores
+    the identifiers in the question as explicit keywords and its plain
+    words not at all. Other embedders keep the 0.25 text weight.
+  - Offline or with no model, `recall --text` is keyword-only with a
+    notice, and the MCP server starts without an embedder and says so.
+  - `mnemo_engine::builtin` and `mnemo_engine::BuiltinEmbedder`.
+- **`Embedder::query_keywords`** (defaults to `None`): an embedder can
+  choose the keywords a recall by text scores in place of its text. The
+  handle's registered embedder is asked on every recall with a text and no
+  keywords; keywords the caller gives win. `Embedder` is also implemented
+  for `Box<E>` and `Arc<E>`.
 
 ### Changed
 
-- **Building from source needs Rust 1.92 or later** (was 1.75; 12.3 step
-  5a, MSRV-2). The built-in embedder's ONNX Runtime binding (`ort`, behind
-  the new, still unused `embed-fastembed` feature) needs it. The released
-  CLI binaries and wheels are built with stable and are unaffected. The
-  UniFFI binding's floor moves from 1.82 to 1.92 with it.
+- **`mnemo init`'s default width is 384** (was 768), the built-in
+  embedder's. Pass `--dimensions` for another embedder.
+- **The MCP `recall` tool with `text` on a server without an embedder**
+  matches the text by keyword (v9 files) instead of returning an error.
+  `remember` with `text` still needs an embedder.
+- `mnemo recall --text` without an embedder, which was already keyword-only
+  on a v9 file, now says why on stderr.
+
+- **Building from source needs Rust 1.94 or later** (was 1.75; 12.3
+  steps 5a and 5). The built-in embedder's candle-core calls
+  `__cpuid_count` outside `unsafe` on x86_64, which Rust 1.93 and older
+  reject. The released CLI binaries and wheels are built with stable and
+  are unaffected. The UniFFI binding's floor moves from 1.82 to 1.94 with
+  it.
 - **The `keychain` feature uses the `keyring` 4 family** (`keyring-core`
   1.0.1 with `apple-native-keyring-store`, `windows-native-keyring-store`
   and `dbus-secret-service-keyring-store`) in place of `keyring` 3.6.3.

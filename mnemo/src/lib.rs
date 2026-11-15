@@ -48,7 +48,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-// Step 5a (MSRV 1.92): `as_chunks` (stable since 1.88) is now within the
+// Since step 5a (MSRV 1.92, now 1.94): `as_chunks` (stable since 1.88) is within the
 // MSRV, so clippy suggests it for every constant-size `chunks_exact`. Those
 // are the hot kernels (PQ distance tables, fp16 vectors, the WAL checksum);
 // rewriting them waits for a change that measures them with the benches.
@@ -57,6 +57,10 @@
 #![allow(unknown_lints)]
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+/// 12.3 step 5 (v0.15): the built-in embedder (snowflake-arctic-embed-xs on
+/// candle), behind the `embed-candle` feature.
+#[cfg(feature = "embed-candle")]
+pub mod builtin;
 mod cache;
 mod crypto;
 mod embed;
@@ -64,6 +68,7 @@ mod embed_cmd;
 mod error;
 mod format;
 mod freelist;
+mod ident;
 mod index;
 pub mod keys;
 mod keyslot;
@@ -79,6 +84,8 @@ mod transcript;
 mod veccol;
 mod wal;
 
+#[cfg(feature = "embed-candle")]
+pub use builtin::BuiltinEmbedder;
 pub use crypto::{KdfParams, SecretKind};
 pub use embed::{Embedder, EmbedderIdentity};
 pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};

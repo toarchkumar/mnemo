@@ -6,7 +6,7 @@
 name = "mnemo-python"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.94"
 description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-engine wheel on PyPI"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
@@ -49,6 +49,9 @@ dev-hooks = ["mnemo_core/dev-hooks", "mnemo_core/failpoints"]
 # 12.3 step 2: the OS keychain, for `mnemo.open(path)` with no passphrase.
 # The released wheels (release.yml) turn it on.
 keychain = ["mnemo_core/keychain"]
+# 12.3 step 5: the built-in embedder (`use_builtin_embedder`,
+# `install_builtin_embedder`). The released wheels (release.yml) turn it on.
+embed-candle = ["mnemo_core/embed-candle"]
 
 [profile.release]
 lto = true

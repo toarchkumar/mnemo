@@ -3,13 +3,13 @@
 # default member, so the engine's own MSRV job never builds it.
 #
 # UniFFI declares no `rust-version` (its CHANGELOG last stated 1.82.0, at
-# v0.29.1); since v0.15 step 5a this crate's floor is the engine's, 1.92,
+# v0.29.1); since v0.15 this crate's floor is the engine's, 1.94,
 # and the `msrv-uniffi` CI job proves it builds on the version declared here.
 [package]
 name = "mnemo-uniffi"
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.92"
+rust-version = "1.94"
 license = "Apache-2.0"
 description = "UniFFI (Swift and Kotlin) bindings for the MNemo encrypted agent-memory engine"
 repository = "https://github.com/toarchkumar/mnemo"

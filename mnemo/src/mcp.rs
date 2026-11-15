@@ -284,8 +284,67 @@ pub fn serve_with_streams_opts<R: Read, W: Write>(
 pub fn serve_with_streams_spec<R: Read, W: Write>(
     path: &Path,
     reader: R,
-    mut writer: W,
+    writer: W,
     embed_spec: Option<EmbedSpec>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
+    let choice = match embed_spec {
+        Some(spec) => ServerEmbedder::Command(spec),
+        None => ServerEmbedder::None,
+    };
+    serve_inner(path, reader, writer, choice, shared)
+}
+
+/// 12.3 step 5 (v0.15): [`serve_stdio_with_spec`] with the built-in
+/// embedder (`mnemo serve --mcp` with no `--embed-cmd`), loaded before the
+/// file is opened, or fetched first if it isn't in the cache (the size said
+/// on stderr). It's registered when the file records the built-in's identity
+/// or none yet (which it then records). A file that records another
+/// embedder, or a model that can't be loaded (offline), gets a server
+/// without one, said on stderr: `recall`'s `text` is then matched by keyword
+/// only on a v9 file, and the other text tools refuse `text`.
+/// `model_dir` is the CLI's `--model-dir`
+/// ([`crate::BuiltinEmbedder::from_dir`]).
+#[cfg(feature = "embed-candle")]
+pub fn serve_stdio_with_builtin(
+    path: &Path,
+    model_dir: Option<&Path>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    serve_with_streams_builtin(path, stdin.lock(), stdout.lock(), model_dir, shared)
+}
+
+/// [`serve_stdio_with_builtin`] over the given streams.
+#[cfg(feature = "embed-candle")]
+pub fn serve_with_streams_builtin<R: Read, W: Write>(
+    path: &Path,
+    reader: R,
+    writer: W,
+    model_dir: Option<&Path>,
+    shared: Option<SharedOptions>,
+) -> Result<()> {
+    let choice = ServerEmbedder::Builtin(model_dir.map(Path::to_path_buf));
+    serve_inner(path, reader, writer, choice, shared)
+}
+
+/// The server's embedder, as chosen at start.
+enum ServerEmbedder {
+    /// None: vectors (and keywords) only.
+    None,
+    /// `--embed-cmd`.
+    Command(EmbedSpec),
+    /// 12.3 step 5: the built-in, from the cache or a `--model-dir`.
+    #[cfg(feature = "embed-candle")]
+    Builtin(Option<std::path::PathBuf>),
+}
+
+fn serve_inner<R: Read, W: Write>(
+    path: &Path,
+    reader: R,
+    mut writer: W,
+    choice: ServerEmbedder,
     shared: Option<SharedOptions>,
 ) -> Result<()> {
     use crate::keys::{Resolution, Secret};
@@ -308,6 +367,28 @@ pub fn serve_with_streams_spec<R: Read, W: Write>(
     for n in &found.notes {
         eprintln!("mnemo mcp: note: {n}");
     }
+    // 12.3 step 5: the built-in model loads (or is fetched) before the file
+    // is opened, so the download never holds the file's lock.
+    #[cfg(feature = "embed-candle")]
+    let builtin = match &choice {
+        ServerEmbedder::Builtin(dir) => {
+            let loaded = match dir {
+                Some(d) => crate::BuiltinEmbedder::from_dir(d),
+                None => crate::BuiltinEmbedder::load_or_install(&mut |m| eprintln!("{m}")),
+            };
+            match loaded {
+                Ok(e) => Some(e),
+                Err(e) => {
+                    eprintln!(
+                        "mnemo mcp: no embedder ({e}); recall's 'text' is matched by keyword \
+                         only"
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     eprintln!(
         "mnemo mcp: opening {} with the secret from {} (protocol {PROTOCOL_VERSION})",
         path.display(),
@@ -340,13 +421,37 @@ pub fn serve_with_streams_spec<R: Read, W: Write>(
             ServerDb::Shared(s)
         }
     };
-    if let Some(EmbedSpec {
+    #[cfg(feature = "embed-candle")]
+    if let Some(e) = builtin {
+        use crate::Embedder;
+        let recorded = match &mut db {
+            ServerDb::Plain(db) => db.embedder_identity()?,
+            ServerDb::Shared(s) => s.read(|db| db.embedder_identity())?,
+        };
+        match recorded {
+            Some(r) if r != e.identity() => eprintln!(
+                "mnemo mcp: this file's embedder is {:?}, not the built-in: serving without \
+                 one (start with --embed-cmd and --embed-name for it, or move the file with \
+                 `mnemo reembed`); recall's 'text' is matched by keyword only",
+                r.name
+            ),
+            _ => {
+                let name = e.identity().name;
+                match &mut db {
+                    ServerDb::Plain(db) => db.set_embedder(e)?,
+                    ServerDb::Shared(s) => s.set_embedder(e)?,
+                }
+                eprintln!("mnemo mcp: embedder ready (the built-in, {name})");
+            }
+        }
+    }
+    if let ServerEmbedder::Command(EmbedSpec {
         command: cmd,
         name,
         normalize,
         timeout,
         query_convention,
-    }) = embed_spec
+    }) = choice
     {
         let dimensions = match &mut db {
             ServerDb::Plain(db) => db.dimensions(),
@@ -928,7 +1033,9 @@ fn embed_text_via_server(
             INVALID_PARAMS,
             format!(
                 "{tool}: 'text' requires an embedder on the server. \
-                 Start with: mnemo serve --mcp <file> --embed-cmd '<cmd>' --embed-name <name>"
+                 `mnemo serve --mcp <file>` uses the built-in one (`mnemo embedder status` \
+                 says whether it's installed), or start with --embed-cmd '<cmd>' \
+                 --embed-name <name>"
             ),
         )
     })?;
@@ -1741,6 +1848,8 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
 }
 
 fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    // 12.3 step 5: `text` with no embedder on the server is keyword-only.
+    let mut text_by_keyword = false;
     // Accept either `query` (explicit) or `text` (embedded).
     let query = match (args.get("query"), args.get("text")) {
         (Some(_), Some(_)) => {
@@ -1765,7 +1874,20 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
             let text = t
                 .as_str()
                 .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'text' must be a string"))?;
-            embed_text_via_server(db, "recall", text)?
+            // 12.3 step 5: a server without an embedder (none given, or the
+            // built-in unavailable) matches the text by keyword only, on v9.
+            if db.embedder().is_none() && db.stats_summary().format_version >= 9 {
+                if args.get("keywords").and_then(Value::as_str) == Some("") {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        "recall: 'keywords: \"\"' (vector only) needs an embedder on the server",
+                    ));
+                }
+                text_by_keyword = true;
+                Vec::new()
+            } else {
+                embed_text_via_server(db, "recall", text)?
+            }
         }
         // FMT-9d: `keywords` alone is keyword-only recall.
         (None, None) if args.get("keywords").is_some() => Vec::new(),
@@ -1818,6 +1940,9 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     // opts out.
     if let Some(t) = args.get("text").and_then(Value::as_str) {
         req = req.text(t);
+        if text_by_keyword && req.keywords.is_none() {
+            req = req.keywords(t);
+        }
     }
     if let Some(types) = args.get("types").and_then(|v| v.as_array()) {
         let parsed: Vec<MemoryType> = types
