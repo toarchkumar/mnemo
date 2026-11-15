@@ -206,6 +206,31 @@ jobs:
           # 12.2 step 2: `guide` runs the guide's blocks that need the model.
           cargo test --release --locked --features embed-candle --test builtin_embedder --test builtin_cli --test guide -- --nocapture
 
+  # 12.2 step 6: the install scripts. shellcheck on install.sh (POSIX sh),
+  # and PowerShell's own parser on install.ps1; both tools come with the
+  # Ubuntu runner. tests/install_sh.rs runs install.sh itself, and the
+  # release workflow's check-artifacts runs both on their targets.
+  scripts:
+    name: install scripts (shellcheck, PowerShell parse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: shellcheck install.sh
+        run: shellcheck --shell=sh install.sh
+      - name: Parse install.ps1
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors) {
+            $errors | ForEach-Object { Write-Output ("line {0}: {1}" -f $_.Extent.StartLineNumber, $_.Message) }
+            throw "install.ps1 doesn't parse"
+          }
+          Write-Output "install.ps1 parses"
+
   deny:
     name: cargo-deny (linux)
     runs-on: ubuntu-latest

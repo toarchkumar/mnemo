@@ -371,6 +371,15 @@ fn plain(v: &str) -> bool {
 mod tests {
     use super::*;
 
+    // Every secret-shaped test value is built at run time from parts, so
+    // no file holds one a secret scanner would flag (GitHub's flagged an
+    // `ASIA…` literal here once). AWS's documented example id stays.
+    const PK: &str = "PRIVATE KEY";
+
+    fn aws(prefix: &str) -> String {
+        format!("{prefix}{}", "ABCDEFGHIJKLMNOP")
+    }
+
     fn kinds(text: &str) -> Vec<&'static str> {
         secrets(text).counts.iter().map(|(k, _)| *k).collect()
     }
@@ -380,34 +389,99 @@ mod tests {
     fn the_true_cases() {
         let key = crate::keys::recovery::encode(&[7u8; 32]);
         let cases: Vec<(String, &str, &str)> = vec![
-            ("id AKIAIOSFODNN7EXAMPLE here".into(), "aws-key-id", "AKIAIOSFODNN7EXAMPLE"),
-            ("ASIAABCDEFGHIJKLMNOP.".into(), "aws-key-id", "ASIAABCDEFGHIJKLMNOP"),
-            (format!("token ghp_{}", "a1B2".repeat(9)), "github-token", "ghp_a1B2"),
-            (format!("gho_{} end", "Z9".repeat(18)), "github-token", "gho_Z9"),
-            (format!("github_pat_{}", "11ABC_def".repeat(3)), "github-token", "github_pat_11"),
-            ("xoxb-1234567890-abcdefghij".into(), "slack-token", "xoxb-1234567890"),
-            ("key sk-abcdefghijklmnopqrstuvwx".into(), "api-key", "sk-abcdefghij"),
-            (format!("sk-ant-api03-{}", "Ab9_".repeat(10)), "api-key", "sk-ant-api03"),
-            (format!("sk-proj-{}", "x".repeat(30)), "api-key", "sk-proj-xxx"),
             (
-                "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U".into(),
+                "id AKIAIOSFODNN7EXAMPLE here".into(),
+                "aws-key-id",
+                "AKIAIOSFODNN7EXAMPLE",
+            ),
+            (
+                format!("{}.", aws(concat!("AS", "IA"))),
+                "aws-key-id",
+                "ABCDEFGHIJKLMNOP",
+            ),
+            (
+                format!("token ghp_{}", "a1B2".repeat(9)),
+                "github-token",
+                "ghp_a1B2",
+            ),
+            (
+                format!("gho_{} end", "Z9".repeat(18)),
+                "github-token",
+                "gho_Z9",
+            ),
+            (
+                format!("github_pat_{}", "11ABC_def".repeat(3)),
+                "github-token",
+                "github_pat_11",
+            ),
+            (
+                format!("{}-1234567890-abcdefghij", concat!("xo", "xb")),
+                "slack-token",
+                "1234567890-abcd",
+            ),
+            (
+                format!("key {}-{}", concat!("s", "k"), "abcdefghijklmnopqrstuvwx"),
+                "api-key",
+                "abcdefghijklm",
+            ),
+            (
+                format!("sk-ant-api03-{}", "Ab9_".repeat(10)),
+                "api-key",
+                "sk-ant-api03",
+            ),
+            (
+                format!("sk-proj-{}", "x".repeat(30)),
+                "api-key",
+                "sk-proj-xxx",
+            ),
+            (
+                format!(
+                    "Bearer {}.{}.{}",
+                    concat!("ey", "JhbGciOiJIUzI1NiJ9"),
+                    concat!("ey", "JzdWIiOiIxMjM0NTY3ODkwIn0"),
+                    "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+                ),
                 "jwt",
                 "eyJhbGciOiJIUzI1NiJ9",
             ),
-            (format!("the code is {}", key.as_str()), "recovery-code", &key.as_str()[4..14]),
+            (
+                format!("the code is {}", key.as_str()),
+                "recovery-code",
+                &key.as_str()[4..14],
+            ),
             (key.to_lowercase(), "recovery-code", "mn1-"),
             ("API_KEY=a8f3k2m9q7".into(), "secret-value", "a8f3k2m9q7"),
-            ("export GITHUB_TOKEN=Hunter2Hunter".into(), "secret-value", "Hunter2Hunter"),
-            ("{\"password\": \"correct horse 99\"}".into(), "secret-value", "correct horse 99"),
-            ("db_password: CorrectHorse".into(), "secret-value", "CorrectHorse"),
-            ("MNEMO_KEY=4f2a9c0e1b3d5f7a".into(), "secret-value", "4f2a9c0e1b3d5f7a"),
             (
-                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----\nafter".into(),
+                "export GITHUB_TOKEN=Hunter2Hunter".into(),
+                "secret-value",
+                "Hunter2Hunter",
+            ),
+            (
+                "{\"password\": \"correct horse 99\"}".into(),
+                "secret-value",
+                "correct horse 99",
+            ),
+            (
+                "db_password: CorrectHorse".into(),
+                "secret-value",
+                "CorrectHorse",
+            ),
+            (
+                "MNEMO_KEY=4f2a9c0e1b3d5f7a".into(),
+                "secret-value",
+                "4f2a9c0e1b3d5f7a",
+            ),
+            (
+                format!(
+                    "-----BEGIN RSA {PK}-----\nMIIEpAIBAAKCAQEA\n-----END RSA {PK}-----\nafter"
+                ),
                 "private-key",
                 "MIIEpAIBAAKCAQEA",
             ),
             (
-                "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----".into(),
+                format!(
+                    "-----BEGIN OPENSSH {PK}-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH {PK}-----"
+                ),
                 "private-key",
                 "b3BlbnNzaC1rZXk",
             ),
@@ -431,11 +505,8 @@ mod tests {
             secrets("API_KEY=a8f3k2m9q7 ok").text,
             "API_KEY=[redacted: secret-value] ok"
         );
-        assert!(secrets(
-            "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\nafter"
-        )
-        .text
-        .ends_with("\nafter"));
+        let pem = format!("-----BEGIN RSA {PK}-----\nx\n-----END RSA {PK}-----\nafter");
+        assert!(secrets(&pem).text.ends_with("\nafter"));
     }
 
     /// None of the false cases is redacted.
@@ -445,7 +516,7 @@ mod tests {
             "task-list",
             "sk-1",
             "the risk-assessment is done",
-            "ask-for-help-with-this-long-name-here",
+            concat!("as", "k-for-help-with-this-long-name-here"),
             "PRIMARY_KEY=id",
             "SORT_KEY=created_at",
             "password: hunter",
@@ -476,19 +547,20 @@ mod tests {
     /// A PEM block split across two texts (two turns): each half goes.
     #[test]
     fn a_pem_block_split_across_texts() {
-        let a = "here it is\n-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOab";
-        let b = "cdEFgh12\n-----END EC PRIVATE KEY-----\nthat was it";
-        let ra = secrets(a);
+        let a = format!("here it is\n-----BEGIN EC {PK}-----\nMHcCAQEEIOab");
+        let b = format!("cdEFgh12\n-----END EC {PK}-----\nthat was it");
+        let ra = secrets(&a);
         assert_eq!(ra.text, "here it is\n[redacted: private-key]");
-        let rb = secrets(b);
+        let rb = secrets(&b);
         assert_eq!(rb.text, "[redacted: private-key]\nthat was it");
     }
 
     #[test]
     fn counts_add_up_in_kind_order() {
         let t = format!(
-            "AKIAIOSFODNN7EXAMPLE and ghp_{} and AKIAABCDEFGHIJKLMNOP",
-            "a".repeat(36)
+            "AKIAIOSFODNN7EXAMPLE and ghp_{} and {}",
+            "a".repeat(36),
+            aws(concat!("AK", "IA"))
         );
         let r = secrets(&t);
         assert_eq!(r.counts, [("aws-key-id", 2), ("github-token", 1)]);

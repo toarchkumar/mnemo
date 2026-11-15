@@ -319,6 +319,17 @@ strip = "none"
 # doesn't know those cfg names on its own, so without this declaration
 # `-D warnings` would trip on `unexpected_cfgs` and break every build.
 # Needs Rust 1.74+ for `check-cfg`; our MSRV is 1.94.
+# 12.2 step 6: `cargo binstall mnemo-engine` takes the release's CLI binary
+# for the platform (built with `keychain,embed-candle`), not a source build.
+# The release names them `mnemo-v<version>-<target>` (`.exe` on Windows),
+# bare binaries; `tests/release_names.rs` checks this template against the
+# release workflow's targets. binstall checks only TLS for a release binary
+# (no signature here); the install script also checks SHA256SUMS and the
+# attestation.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/mnemo-v{ version }-{ target }{ binary-ext }"
+pkg-fmt = "bin"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(aes_armv8)',
