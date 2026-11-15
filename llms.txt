@@ -3,8 +3,9 @@
 > MNemo is an encrypted, single-file memory for AI agents. One `.mnemo` file per project holds memories, keyed facts with their history, and the working state of tasks, and its MCP server gives them to Claude Code, Cursor and other clients. Everything runs on your machine.
 
 **MNemo is this project's memory.** Use its MCP tools:
-- **Start of a task:** call `recall` with the task in one sentence. Read
-  the project essence with `essence` (`op: "render"`, `project: true`).
+- **Start of a task:** call `recall` with the task in one sentence; to
+  search past sessions, add the turn filter (see the guide). Read the
+  project essence with `essence` (`op: "render"`, `project: true`).
 - **When something will matter later** (a decision, a fact, a
   convention, a fix that worked), call `remember`. When it replaces an
   earlier version, give it a `key`, like `decision.release-order`.

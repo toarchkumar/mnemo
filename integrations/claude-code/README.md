@@ -25,6 +25,10 @@ the project's settings instead of using this plugin. `mnemo onboard
 claude plugin install mnemo --marketplace toarchkumar/mnemo --scope local
 ```
 
+That works from v0.16.0: Claude Code reads the marketplace
+(`.claude-plugin/marketplace.json`) from the repository's default branch,
+which has it once v0.16.0 is released.
+
 Run either from your own terminal. Claude Code ignores `-y` when an agent
 runs the command.
 

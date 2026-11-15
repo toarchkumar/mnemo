@@ -64,11 +64,12 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, build-wheels, check-artifacts, build-sdist, check-sdist, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, checksums, build-wheels, check-artifacts, build-sdist, check-sdist, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
       && needs.build-cli.result == 'success'
+      && needs.checksums.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.check-artifacts.result == 'success'
       && needs.check-sdist.result == 'success'
@@ -201,6 +202,52 @@ jobs:
           name: cli-${{ matrix.target }}
           path: mnemo/${{ steps.stage.outputs.asset }}
 
+  # --- 12.2 step 6: SHA256SUMS over the five CLI binaries, which the install
+  #     scripts check, and on a tag run their build provenance attestation,
+  #     which the scripts check with `gh attestation verify` when `gh` is
+  #     signed in. A dry run attests nothing. Only this job may write
+  #     attestations and mint the OIDC token they need.
+  checksums:
+    name: SHA256SUMS and the attestation
+    needs: [mobile-prepare, build-cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          pattern: cli-*
+          path: cli
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        timeout-minutes: 5
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          n=$(ls mnemo-v* | wc -l)
+          [ "$n" -eq 5 ] || { echo "::error::expected 5 CLI binaries, got $n"; exit 1; }
+          sha256sum mnemo-v* > SHA256SUMS
+          cat SHA256SUMS
+          { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the binaries' build provenance (tag runs)
+        if: needs.mobile-prepare.outputs.dry_run == 'false'
+        timeout-minutes: 10
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: cli/mnemo-v*
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 10
+        with:
+          name: sha256sums
+          path: cli/SHA256SUMS
+
   # --- Build Python wheels for each platform via maturin-action (the
   #     `attach` job puts them on the release). The `publish-pypi` job below optionally uploads
   #     these wheels + the sdist to PyPI when the `ENABLE_PYPI_PUBLISH`
@@ -281,7 +328,7 @@ jobs:
   #     (`approve-release`).
   check-artifacts:
     name: artifact check (${{ matrix.target }}, the built-in embedder)
-    needs: [build-cli, build-wheels]
+    needs: [mobile-prepare, build-cli, checksums, build-wheels]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     defaults:
@@ -304,6 +351,13 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     steps:
+      # 12.2 step 6: the install scripts, from this commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 10
+        with:
+          path: repo
+          persist-credentials: false
+
       - name: Set up Python
         timeout-minutes: 10
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -321,6 +375,49 @@ jobs:
         with:
           name: cli-${{ matrix.target }}
           path: cli
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: sha256sums
+          path: cli
+
+      # 12.2 step 6: the install script checks SHA256SUMS and installs the
+      # binary from a local base (the attestation needs a tag, so it's
+      # skipped), into a HOME of its own whose bin isn't on the PATH.
+      - name: The install script installs it (install.sh)
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        env:
+          MNEMO_INSTALL_BASE: ${{ github.workspace }}/cli
+          MNEMO_VERSION: ${{ needs.mobile-prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/install-home"
+          mkdir -p "$home"
+          HOME="$home" sh repo/install.sh | tee install.out
+          grep -qF "Next: $home/.local/bin/mnemo onboard" install.out
+          "$home/.local/bin/mnemo" --version
+          "$home/.local/bin/mnemo" onboard --guide | head -n 3
+
+      - name: The install script installs it (install.ps1)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          MNEMO_INSTALL_BASE: ${{ github.workspace }}\cli
+          MNEMO_VERSION: ${{ needs.mobile-prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'install-home'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+          $out = & ./repo/install.ps1 | Out-String
+          Write-Output $out
+          if ($out -notmatch "Next: & '") { throw "no full-path Next line" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\mnemo\mnemo.exe'
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "mnemo --version failed" }
+          & $exe onboard --guide | Select-Object -First 3
 
       - name: The CLI fetches the model, remembers and recalls
         timeout-minutes: 10
@@ -460,10 +557,11 @@ jobs:
   #     pattern and lists them instead.
   attach:
     name: attach engine assets
-    needs: [mobile-prepare, create-release, build-cli, build-wheels, build-sdist]
+    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist]
     if: >-
       ${{ !cancelled()
       && needs.build-cli.result == 'success'
+      && needs.checksums.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.build-sdist.result == 'success'
       && (needs.create-release.result == 'success' || needs.mobile-prepare.outputs.dry_run == 'true') }}
@@ -475,7 +573,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 10
         with:
-          pattern: "{cli-*,wheel-*,sdist}"
+          pattern: "{cli-*,wheel-*,sdist,sha256sums}"
           path: dist
           merge-multiple: true
 
@@ -487,7 +585,7 @@ jobs:
           ls -l dist/
           n=$(ls dist/ | wc -l)
           echo "$n files would be attached" | tee -a "$GITHUB_STEP_SUMMARY"
-          [ "$n" -eq 11 ] || { echo "::error::expected 11 files (5 CLI, 5 wheels, 1 sdist), got $n"; exit 1; }
+          [ "$n" -eq 12 ] || { echo "::error::expected 12 files (5 CLI, SHA256SUMS, 5 wheels, 1 sdist), got $n"; exit 1; }
 
       - name: Attach to the release
         timeout-minutes: 10

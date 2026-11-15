@@ -35,7 +35,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   an unknown URI is the error `-32002`. The library has
   `Mnemo::recent(n)`.
 - **`mnemo onboard` (12.2 step 5),** one command, safe to re-run, that
-  sets up a project's memory for Claude Code and Cursor:
+  sets up a project's memory for Claude Code and Cursor. It sets up the
+  project brain only; for a brain elsewhere, use `mcp install <path>`:
   - **The brain:** it finds or creates the project brain, with a
     generated key in the keychain. The recovery code is shown only to a
     person at a terminal, and the last group is asked back. Otherwise
@@ -66,6 +67,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - **`--plugin`** installs the Claude Code plugin (`integrations/claude-code/`,
     with the marketplace `.claude-plugin/marketplace.json`) in place of
     the hooks and the skill.
+- **Install scripts (12.2 step 6):**
+  - `curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh`, and
+    `install.ps1` on Windows. Each downloads the release binary for the
+    platform over HTTPS.
+  - It checks the binary's SHA-256 against the release's new `SHA256SUMS`
+    asset and, when `gh` is signed in, the build's attestation (`gh
+    attestation verify`).
+  - It installs to `~/.local/bin` (or `%LOCALAPPDATA%\Programs\mnemo`)
+    with no sudo, and prints the next step with the full path when that
+    directory isn't on the PATH.
+  - The release now attests each CLI binary's build provenance.
+  - `cargo binstall mnemo-engine` takes the release binary too.
+- **Search past sessions:** the guide shows `recall` with the turn filter
+  (`{"metadata": {"_mnemo.kind": "turn"}}`, or `--filter _mnemo.kind=turn`),
+  since `recall` leaves saved turns out unless asked. Turns are found by
+  meaning, so it needs the built-in model.
 - **`mcp install` with no path** now defaults to Claude Code's local
   scope, and to Cursor's project file, which it lists in
   `.git/info/exclude`.

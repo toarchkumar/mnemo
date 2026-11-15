@@ -655,6 +655,10 @@ fn acceptance_onboard_then_a_hook_save_read_back_over_mcp() {
         .collect();
     let mut c = Command::new(program);
     c.args(&args);
+    // CI has no model: the server gets the test embedder the hook used
+    // (its identity is the dev switch's default name). In real use the
+    // built-in embedder is both the hook's and the server's.
+    c.args(["--embed-cmd", &embed, "--embed-name", "dev-hook"]);
     let base = e.cmd(&e.p("wt"), &[]);
     for (k, v) in base.get_envs() {
         match v {
@@ -695,6 +699,29 @@ fn acceptance_onboard_then_a_hook_save_read_back_over_mcp() {
     assert!(text.contains("decode_frame_v2"), "{r}");
     assert!(!text.contains(&token), "{text}");
     assert!(text.contains("[redacted: github-token]") && text.contains("[tool_result ok, "));
+    // An agent searches past sessions with `recall` and the turn filter
+    // (the guide's "Search past sessions").
+    let r = ask(
+        4,
+        "tools/call",
+        json!({"name": "recall", "arguments": {"text": "the parser bug is in decode_frame_v2",
+            "top_k": 3, "filter": {"metadata": {"_mnemo.kind": "turn"}}}}),
+    );
+    let hits = r["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(hits.contains("decode_frame_v2"), "{r}");
+    // Without the filter, recall leaves turns out.
+    let r = ask(
+        5,
+        "tools/call",
+        json!({"name": "recall", "arguments": {"text": "the parser bug is in decode_frame_v2",
+            "top_k": 3}}),
+    );
+    let plain = r["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(!plain.contains("decode_frame_v2"), "{plain}");
     let r = ask(
         3,
         "prompts/get",

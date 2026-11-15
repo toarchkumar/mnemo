@@ -7,8 +7,9 @@ matches the version you run: `mnemo onboard --guide` prints it.
 
 <!-- card -->
 **MNemo is this project's memory.** Use its MCP tools:
-- **Start of a task:** call `recall` with the task in one sentence. Read
-  the project essence with `essence` (`op: "render"`, `project: true`).
+- **Start of a task:** call `recall` with the task in one sentence; to
+  search past sessions, add the turn filter (see the guide). Read the
+  project essence with `essence` (`op: "render"`, `project: true`).
 - **When something will matter later** (a decision, a fact, a
   convention, a fix that worked), call `remember`. When it replaces an
   earlier version, give it a `key`, like `decision.release-order`.
@@ -174,6 +175,23 @@ A thread is one session's conversation. The hooks `onboard` installs save
 each session's transcript into its thread, without tool output and with
 known secret shapes removed. `thread_start` continues a new thread from an
 old one, carrying its open items and next steps.
+
+**Search past sessions.** `recall` leaves saved turns out unless you ask
+for them. Add the turn filter:
+
+```json mcp model
+{"name": "recall", "arguments": {"text": "where the parser bug was", "top_k": 5, "filter": {"metadata": {"_mnemo.kind": "turn"}}}}
+```
+
+```sh test model
+mnemo recall --text "where the parser bug was" --top-k 5 --filter _mnemo.kind=turn
+```
+
+To search one session only, filter on its thread instead:
+`{"_mnemo.thread": "claude-code:<session id>"}`. Turns are found by
+meaning, not by keyword (they aren't in the keyword index), so this needs
+the built-in model. The hooks save turns only when the model is there
+anyway.
 
 ### Budgets
 
