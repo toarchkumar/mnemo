@@ -66,7 +66,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `R-001.10` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | Positional MessagePack (`rmp_serde::to_vec`) forward-compatibility hazard on `format::VERSION = 8` | `VERIFIED` | Standing rule in PLAN.md + `V052IvfPqIndex` field-count guard in ANN-1.1 |
 | `R-001.11` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `PR PY-1` (`py.allow_threads` + `Option<Core>`): avoid `PyFnEmbedder` re-entrant borrow panic & cover `Session` | `VERIFIED` | Shipped in PR PY-1 (`abfaff3`, `v0.6.0`) |
 | `R-001.12` | 2026-10-31 | `PLAN-REFINEMENT` | `HIGH` | `Recall scoring v2`: similarity-gated boosts, `created_at` vs `accessed_at` recency split, and `ranking_harness.py` timestamp variance | `VERIFIED` | Shipped in `v0.7.0` (`memory.rs:1128-1182`, `store.rs:4043-4052`) |
-| `R-001.13` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `Phase 12.4` Shared Access (`--shared`): `try_lock` contention & `compact_file` `rename` hazards on Windows/Unix | `ACCEPTED` | Phase 12.4 design-note requirements |
+| `R-001.13` | 2026-10-31 | `PLAN-REFINEMENT` | `MEDIUM` | `Phase 12.4` Shared Access (`--shared`): `try_lock` contention & `compact_file` `rename` hazards on Windows/Unix | `VERIFIED` | Shipped in Phase 12.4 (`v0.14.0`, `shared/lock.rs`, `store/shared.rs`, `store/maintenance.rs`) + `LOCK-2` (`bd041dd`, `ca66996`) |
 | `R-001.14` | 2026-10-31 | `PRODUCT` | `HIGH` | Pre-top-k structured metadata & `session_id` predicate filtering in `RecallRequest`, CLI, Python, and MCP | `VERIFIED` | Shipped in Phase 12.6 (`v0.8.0`, `store.rs:4019-4023, 4142-4174`) |
 | `R-001.15` | 2026-10-31 | `PRODUCT` | `MEDIUM` | Token-budgeted context packing & Maximal Marginal Relevance (MMR) diversity in `recall` | `DEFERRED` | `max_bytes` budget `VERIFIED` in Phase 12.8 (`v0.8.0`); MMR diversity -> Phase 7.5 (harness-gated) |
 | `R-001.16` | 2026-10-31 | `PRODUCT` | `MEDIUM` | Cognitive consolidation on `Session::close` & transactional brain diffing (`mnemo diff <txn_a> [txn_b]`) | `ACCEPTED` | diff -> Phase 12.5; consolidation/session -> Phase 12.1 & 12.7 (`commit_deltas`) |
@@ -119,7 +119,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-002.3` | 2026-11-09 | `PERF` | `MEDIUM` | The first `stats()` on a handle decrypts every record (12 ms at 10K, 26 ms at 20K) for an agent list the mobile binding throws away; fix it before MOBILE-2 puts the recall mode in `stats()` | `VERIFIED` | MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
 | `RB-002.4` | 2026-11-09 | `PLAN-REFINEMENT` | `MEDIUM` | MOBILE-2 and the RB-001.22–.24 fixes: ten in-process regression tests that need no device or emulator, with today's result and the result to expect after each fix | `VERIFIED` | The test plan for MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
 | `RB-002.5` | 2026-11-09 | `PERF` | `LOW` | What an app should do at the recall cliff: raising the budget by 1 MB restores 4.9 ms at 22K rows; `buildIndex` also works but took 50 s on an M1 Pro; the MOBILE-2 table should say which first | `VERIFIED` | Docs in MOBILE-2e (v0.12.2); verified in RB-003 at `afd65b3` |
-| `R-006.1` | 2026-11-10 | `PRODUCT` | `HIGH` | Post-`INSP-1` sequencing: pull the Local Multi-Agent Harness stack (`12.4 + 12.3 + 12.2 + 13a`) ahead of `PERF-2`, splitting Phase 13 into Local Coordination (`13a`) vs Multi-Party Crypto (`13b`) | `ACCEPTED` | Order changed (harness stack ahead of PERF-2; 13a/13b); 12.4 design note first |
+| `R-006.1` | 2026-11-10 | `PRODUCT` | `HIGH` | Post-`INSP-1` sequencing: pull the Local Multi-Agent Harness stack (`12.4 + 12.3 + 12.2 + 13a`) ahead of `PERF-2`, splitting Phase 13 into Local Coordination (`13a`) vs Multi-Party Crypto (`13b`) | `VERIFIED` | Shipped in `PLAN.md` execution order (`v0.13.0` INSP-1 → `v0.14.0` 12.4 → `v0.15.0` 12.3 → 12.2 → 13a) |
 | `R-006.2` | 2026-11-10 | `PRODUCT` | `HIGH` | Personal-harness edge over Git (`CLAUDE.md`/`PLAN.md`/`Beads`): `git worktree` resolution, zero-embedder BM25 mode, `mnemo harness init` (Claude Code + Cursor), deterministic `--git` projection, and `--personal` brain mount | `ACCEPTED` | Folded into 12.2–12.5 |
 | `R-006.3` | 2026-11-10 | `PLAN-REFINEMENT` | `HIGH` | Double-Run Dogfood Cutover (`HARNESS-DOGFOOD-1`): 2-PR dual-run orchestrating `Planner`/`Worker`/`Reviewer` through `test/project.mnemo` alongside `PLAN.md` to prove zero drift before retiring manual `WORKLOG` relay | `ACCEPTED` | HARNESS-DOGFOOD-1, with the parity checklist; private brain kept separate |
 | `RB-003.1` | 2026-11-12 | `SECURITY` | `MEDIUM` | `mnemo inspect --open` passed the token on a command line, and the server kept the secret and plaintext with no idle stop (fixed in v0.13.1 as SEC-3; the write-up is now in PLAN.md's WORKLOG) | `VERIFIED` | Fixed in v0.13.1 (SEC-3); REVIEWER-B marks it VERIFIED at its next pass; verified in RB-005 (v0.13.1) |
@@ -163,6 +163,23 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-008.1` | 2026-11-13 | `CORRECTNESS` | `MEDIUM` | Shared mode at READY: readers first can lock a writer out (16 reader processes on cheap reads: 6 of 7 writes `Locked` at 10 s), and seven places in the release say it can't | `ACCEPTED` | v0.14.0 before the tag (rel0140-rb008): the seven places and the hook advice corrected; LOCK-2 (before step 8) gets the 8- and 16-reader cheap-read cells, "no `Locked`" as its target, and rec. 4 as its first design to try |
 | `RB-008.2` | 2026-11-13 | `CORRECTNESS` | `LOW` | A brain moved or deleted under a live plain handle now fails every commit; the message says "replaced… Reopen it", and the CHANGELOG describes only a file moved over the path | `ACCEPTED` | v0.14.0 before the tag (rel0140-rb008): a "moved or removed" message, `stat` against `fstat` on Unix, a plain handle that cannot check the path commits as in v0.13.2, and a CHANGELOG line |
 | `RB-008.3` | 2026-11-13 | `DX/DOCS` | `LOW` | Smaller points at READY: `peek_dimensions` missing from the CHANGELOG, Python can't catch `Replaced`, the MCP server never gets a finished commit, `cache_stats` after a reload, a plain long operation with no sidecar yet, the note's stale status line | `ACCEPTED` | Items 1, 2, 4 (doc line) and 6 before the tag (rel0140-rb008); item 3 DEFERRED to step 6; item 4 carry-over to step 6; item 5 DEFERRED to LOCK-2 |
+| `R-007.1` | 2026-11-14 | `PRODUCT` | `HIGH` | 12.3's built-in embedder: keep `fastembed` on ONNX Runtime for desktop behind the feature (MSRV 1.88, a release-candidate `ort`, default features to turn off), download the model on first use, and measure size and start-up first | `ACCEPTED` | 12.3 step 5 (the built-in embedder): `fastembed` pinned, `default-features = false`, rustls, platform cache dir, `mnemo embedder install`, keyword-only fallback; measure against a budget set in the spec; no mobile model this phase |
+| `R-007.2` | 2026-11-14 | `PLAN-REFINEMENT` | `HIGH` | The default model should be retrieval-tuned (`bge-small-en-v1.5` unless a short comparison says otherwise), and three engine points matter more: `Embedder` can't tell a query from a document, hybrid recall is opt-in, and TOK-1 | `ACCEPTED` | 12.3 step 4 (retrieval): `embed_query` in the trait and the identity, hybrid recall by text by default, TOK-1 as tokenizer v2, `mnemo reembed`; step 5 opens with the three-model comparison (bge-small default unless a clear win); rec. 6 to GUIDE-1 and 12.8 |
+| `R-007.3` | 2026-11-14 | `PRODUCT` | `MEDIUM` | `mcp install`: what Claude Code, Cursor and Claude Desktop expect today; add Codex and VS Code; no absolute path or secret in a committed config; always `--shared`, so LOCK-2 belongs in v0.15 | `VERIFIED` | Shipped in 12.3 step 2b `LOCK-2` (`bd041dd`, `ca66996`) & step 3 `mcp install` (`d4d364b`, `bin/mnemo/mcp_install.rs`) |
+| `R-007.4` | 2026-11-14 | `PLAN-REFINEMENT` | `HIGH` | 12.3 keys the keychain entry by the header's salt, and every compaction gives the file a new salt, so the first `mnemo compact` orphans the key | `VERIFIED` | Shipped in 12.3 steps 1–2 (`c3eb42f`, `c6662c3`, `store/maintenance.rs:888-895, 1066-1074`) |
+| `R-007.5` | 2026-11-14 | `PLAN-REFINEMENT` | `MEDIUM` | Keys on a headless box and in CI (a stated chain of sources, no silent plain-text fallback), the recovery code's shape and re-showing it, the light KDF (standard, already in the engine), and the order inside 12.3 (the embedder last) | `VERIFIED` | Shipped in 12.3 steps 1–2 (`c3eb42f`, `c6662c3`, `ab82da2`, `mnemo/src/keys/`) |
+| `R-007.6` | 2026-11-14 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (12.3's design; no code exists) | `ACCEPTED` | Held in SECURITY.local.md; all five points into 12.3's design note (step 1) and steps 2, 3 and 5 |
+| `RB-009.1` | 2026-11-14 | `CORRECTNESS` | `MEDIUM` | 12.3 keys note: "the first source present, no fall-through" keeps one process from using two brains with different secrets, and a leftover `MNEMO_PASSPHRASE` blocks every keychain brain | `VERIFIED` | Keys note before step 1 code: the chain picks by kind from the header's KDF parameters, no trying; the two-brain test in step 2; verified in RB-010 at `e7a34d8` (rel0150-ready, before the tag) |
+| `RB-009.2` | 2026-11-14 | `CORRECTNESS` | `MEDIUM` | 12.3 keys note: the keychain entry is found by the salt in page 0, which is gone when page 0 is damaged; and in the rekey's "either secret" failure the order deletes the only entry that opens the file | `VERIFIED` | Keys note: recs 2 to 4 before step 1 code (keep both entries unless page 0 still has the old salt; read back the entry before the commit, `--new-key` shows its code before the commit; `init` under a temp name); rec. 1 (WAL salts) in step 2; verified in RB-010 at `e7a34d8` (rel0150-ready, before the tag) |
+| `RB-009.3` | 2026-11-14 | `DX/DOCS` | `LOW` | 12.3 keys note, smaller points: 30 in 31 not 31 in 32, the wrong-length message, the prefix, key files in containers, the key command in the MCP server, tests the list lacks, one sentence on the seal | `VERIFIED` | Keys note edits before step 1 code, all seven; the MCP server's key-command timeout 10 s; containers pointed at `MNEMO_KEY` first; verified in RB-010 at `e7a34d8` (rel0150-ready, before the tag) |
+| `RB-009.4` | 2026-11-14 | `SECURITY` | `LOW` | Held in the gitignored `SECURITY.local.md` (the note's light-KDF rules, with `W-001`, shipped code; and the display rule, no code yet) | `VERIFIED` | Held in SECURITY.local.md; both parts into the keys note before step 1 code; verified in RB-010 at `e7a34d8` (rel0150-ready, before the tag) |
+| `R-008.1` | 2026-11-14 | `PLAN-REFINEMENT` | `HIGH` | Step 5 (`embed-fastembed`) vs. MSRV 1.75: Cargo 1.75 parses the entire shared `Cargo.lock` even for disabled optional dependencies (`R-007.1` cross-check); test `cargo +1.75 check --locked` first or pull `MSRV-2` into Step 5 | `ACCEPTED` | User decision 2026-11-14: MSRV-2 into v0.15 as step 5a, `rust-version` to 1.92 (ort rc.15), `keyring` 4.x and the held crates dropped; rec. 1's lockfile check in step 5a |
+| `R-008.2` | 2026-11-14 | `CORRECTNESS` | `MEDIUM` | In-flight Step 4 (`mnemo/src/text.rs:140-205`): `tokenize` + `tokenize_with(Tokenizer::V2)` double-emits (`tf = 2`) every compound token with `.`, `_`, or `'s` and every sub-token of `.`, `/`, `_`, `-`, `::`, and `'s` | `ACCEPTED` | 12.3 step 4, before merge: tokenizer 2 counts each distinct term once per whitespace run; tokenizer 1 unchanged; the unit test |
+| `R-008.3` | 2026-11-14 | `CORRECTNESS` | `LOW` | In-flight Step 4 (`mnemo/src/store/maintenance.rs:1114-1185`): `copy_reembedded_into` embeds `_mnemo.kind = "thread_link"` sentinel records as text and counts them in `ReembedReport.memories` | `ACCEPTED` | 12.3 step 4, before merge: `reembed` keeps thread-link sentinels at the new width; the report says what it counts |
+| `RB-010.1` | 2026-11-15 | `CORRECTNESS` | `HIGH` | v0.15.0 at READY: `serve --mcp` with no `--embed-cmd` exits at start on a brain that isn't 384 wide and records no embedder (a v0.14 `mnemo init` brain) once the model is in the cache; on a 384-wide brain with no recorded embedder it writes the built-in's identity at start | `ACCEPTED` | Before the tag, in `rel0150-rb010` (PLANNER-A 2026-11-15): recs 1 to 5. The server mirrors the CLI: a width that isn't the built-in's, or a file with vectors and no recorded embedder, is served keyword-only with a notice and nothing written; the model isn't loaded or fetched for a width it can't serve; only a file with nothing but its scaffold adopts and records at start |
+| `RB-010.2` | 2026-11-15 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (two points on where secrets can be seen, both tested; one finishes `R-007.6` point 4) | `ACCEPTED` | Before the tag, in `rel0150-rb010`; held in SECURITY.local.md, neutral wording in commits and the PR |
+| `RB-010.3` | 2026-11-15 | `CORRECTNESS` | `MEDIUM` | Release workflow: `check-artifacts` starts two of the five CLI binaries and wheels (the cross-built ones); the x86_64 Linux, arm64 macOS and Windows artifacts and the sdist are published without having run | `ACCEPTED` | Before the tag, in `rel0150-rb010`: `check-artifacts` gets all five targets on their native runners with the full check, plus the sdist built and imported on Linux; `approve-release` keeps needing the whole matrix; exercised by the dry run on the version-bumped head |
+| `RB-010.4` | 2026-11-15 | `DX/DOCS` | `LOW` | Smaller points at READY: `embedder status` and `install` on a same-size wrong file, stale `.part` files, the server's download before `initialize`, no alternate screen on Windows, Ctrl-C while the code is shown, the key file's check-then-read, two README gaps, `AI_AGENT`, the version string | `ACCEPTED` (items 1, 2, 3, 4's message, 5, 8) / `DEFERRED` (6, 7) / no change (9) / with the bump (10) | Items 1, 2, 3, 5, 8 and a one-line pointer for item 4 in `rel0150-rb010`; item 10 by the version bump in the same PR; item 6 (Ctrl-C restoring the screen) DEFERRED to KEYS-DISPLAY-2 after v0.15; item 7 (one open for the key file) DEFERRED to CLEANUP-1; item 4's download-at-onboard to 12.2 |
 
 ---
 
@@ -310,7 +327,7 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 - **Planner Triage:** `ACCEPTED` (2026-11-01) → Recall scoring v2: created_at recency, similarity-gated/multiplicative bonuses, saturating usage term (plus RRF) become harness-evaluated candidates. Staggered `created_at` timestamps and superseded-fact queries are now REQUIRED harness additions before any formula is chosen. Matches the planner's 2026-10-25 FINDING.
 
 #### R-001.13 — [PLAN-REFINEMENT] [MEDIUM] `Phase 12.4` Shared Access (`--shared`): `try_lock` contention & `compact_file` `rename` hazards on Windows/Unix
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (Phase 12.4 v0.14.0 + LOCK-2 @ bd041dd, ca66996)`
 - **Context / Evidence:** `PLAN.md:731-755, 3192-3199` (`Phase 12.4`), `mnemo/src/pager.rs:78-115`, `mnemo/src/store.rs:2740`.
 - **Finding:** Before locking in the Phase 12.4 design note (`open_shared` / `mnemo serve --mcp --shared`), two OS file-locking and filesystem invariants in the current codebase need explicit treatment:
   1. **`try_lock_*` causes spurious `MnemoError::Locked` under short per-op locks:** Neither Unix `flock` nor Windows `LockFileEx` allows an exclusive writer lock and a shared reader lock simultaneously. Under a lock-per-operation model, if Process A is inside a 15 ms `flush()` (holding exclusive lock) and Process B calls non-blocking `try_lock_shared()`, Process B fails immediately with `MnemoError::Locked`.
@@ -1290,7 +1307,7 @@ The tree has moved since the batch was written. Two commits follow the tag, both
 ---
 
 #### R-006.1 — [PRODUCT] [HIGH] Post-`INSP-1` sequencing: pull the Local Multi-Agent Harness stack (`12.4 + 12.3 + 12.2 + 13a`) ahead of `PERF-2`, splitting Phase 13 into Local Coordination (`13a`) vs Multi-Party Crypto (`13b`)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED (PLAN.md execution order across v0.13.0–v0.15.0)`
 - **Context / Evidence:** `PLAN.md:78-80, 1243-1386, 1546-1592` (`Authoritative execution order`: `v0.12.3 → REL-1 → SAMPLE-1 → INSP-1 (v0.13) → PERF-2 → 12.4 + 12.2 → 12.3 → 12.5 → Phase 13`), `mnemo/src/store/open.rs` (`try_lock_exclusive` single-writer lock).
 - **Finding:** Two sequencing bottlenecks currently delay MNemo's strongest desktop/device adoption wedge (developers orchestrating multiple local agents across Claude Code, Cursor, CLI, and worktrees):
   1. **`PERF-2` is slotted ahead of `Phase 12.4` / `12.2` / `12.3`:** `FMT-9` + `MOBILE-2` already achieved `1.7–2.5 ms` warm recall and `2.1 ms` open. Shaving cold 10K exact-scan first-recall from `~7 ms` to `≤ 5 ms` (`PERF-2`) is an incremental polish, whereas `Phase 12.4` (concurrent multi-process access) fixes a hard blocker: today, if Claude Code holds `project.mnemo` via `mnemo serve --mcp`, Cursor, a second terminal agent, a hook, or `mnemo inspect` cannot open the file for writing (`MnemoError::Locked`).
@@ -2525,3 +2542,561 @@ One does (`RB-008.2`). The rest of what I compared is stated:
   6. **The 12.4 note's first status bullet** still says no 12.4 code exists, as the Worker's step 5 DONE noted.
 - **Would I hold the tag for it?** No. Items 1 and 6 are edits to make with the release text.
 - **Planner Triage:** `ACCEPTED` in part (PLANNER-A, 2026-11-13). Before the tag, in `rel0140-rb008`: item 1 (the CHANGELOG line); item 2 (a Python `ReplacedError`, a subclass of `MnemoError`, for both kinds, with a `shared` attribute, in the binding's README and `docs/shared-mode.md`'s table); item 4 as a doc line ("counts since the handle's last reload"); item 6 (the note's status line). Item 3 `DEFERRED` to step 6 (incremental catch-up reworks the window's commit; today a failure after the commit point is reported as `MaybeStored`, which is true). Item 4's carry-over in `install` goes to step 6 too. Item 5 `DEFERRED` to LOCK-2, which reworks how a waiting writer is seen.
+
+---
+
+### Batch `REV-007` — 2026-11-14 (REVIEWER-A: the pre-phase pass before 12.3, zero-setup embedding and configuration: the built-in embedder, `mcp install`, keychain keys and recovery codes, the order, and what dogfooding says, with six new items)
+
+**What this is.** The scheduled pass before a roadmap phase starts (`Reviewer` rule 4), on PLANNER-A's 2026-11-14 entry "the user's go for 12.3; REVIEWER-A's pre-phase pass (REV-007) is called first". Target: `main` at `185f3ba` (v0.14.0), PLAN.md's 12.3 and 12.2, and the 2026-11-11 `onboard` and GUIDE-1 decision.
+
+**Who wrote it.** The user gave this batch to the session that has been REVIEWER-B. It follows REVIEWER-A's rules: `REV-` and `R-` IDs, market research and product direction, read-only.
+
+**How.**
+- **Web research on 2026-11-14.** Every source below was fetched that day unless marked "from general knowledge, not fetched", which means I'm relying on what I knew and it needs re-checking when the spec is written. Benchmark numbers are the vendors' own, from their model cards, and aren't on one common benchmark version.
+- **The code, by reading,** at `185f3ba` in my own clone (`/tmp/rb-mnemo`): `mnemo/src/embed.rs`, `text.rs`, `mcp.rs`, `store/open.rs`, `crypto.rs`, `release.yml`.
+- **Nothing was built or measured.** The binary and wheel size of an embedded runtime is the Worker's to report, as 12.3's spec already asks.
+- **REV-006 is not re-raised.** Its three items are `ACCEPTED`; where this batch touches the same ground (the zero-embedder mode of R-006.2 (b), the order of R-006.1) it adds what's new and says so.
+- **Security points** are only in the gitignored `SECURITY.local.md` (`R-007.6`).
+
+---
+
+**The answers first.**
+
+1. **The built-in embedder.** Use a retrieval-tuned 384-dimension English model, not all-MiniLM: `bge-small-en-v1.5` unless a one-hour comparison on the project's own brain picks `snowflake-arctic-embed-xs` or IBM's `granite-embedding-small-english-r2` (`R-007.2`). Download it on first use, don't ship it in the binary. Keep `fastembed` on ONNX Runtime for desktop, behind the feature (`R-007.1`).
+2. **`mcp install`.** The three clients in the spec are right, and Codex and VS Code are worth adding. Use Claude Code's own `claude mcp add-json` where it's installed, write no absolute paths into a config that gets committed, and always write `--shared` (`R-007.3`).
+3. **Keys.** Light KDF parameters for a machine-made key are standard practice, and the engine already has them. Two things in the spec need changing: the keychain entry is keyed by the header's salt, which every compaction replaces (`R-007.4`), and a headless box needs a stated chain of sources with no silent plain-text fallback (`R-007.5`).
+4. **The order.** 12.3 before 12.2 is still right. Inside 12.3, do keys, keychain, `unlock` and `mcp install` first and the embedder last, so 12.2 isn't waiting on the riskiest part (`R-007.5`).
+5. **Dogfooding.** Yes, it changes what the default should optimize for: answering a question from a note (asymmetric retrieval), not sentence similarity. But the engine can't tell a query from a document today, hybrid recall is opt-in, and TOK-1 matters more for identifiers than any model does (`R-007.2`).
+
+---
+
+**How local-first memory tools embed today.**
+
+| Tool | Default embedder | How it arrives | Source |
+|---|---|---|---|
+| Basic Memory | `bge-small-en-v1.5` through FastEmbed (ONNX), 384 dimensions; FastEmbed and sqlite-vec are core dependencies since v0.23 | Local, no key | [docs.basicmemory.com](https://docs.basicmemory.com/whats-new/v0-23), [semantic search](https://docs.basicmemory.com/concepts/semantic-search) |
+| Chroma | `all-MiniLM-L6-v2` through ONNX | Downloaded on first use, about 80 MB, to a cache under the home directory | [docs.trychroma.com](https://docs.trychroma.com/docs/embeddings/embedding-functions.md) |
+| mcp-memory-service and several other MCP memory servers | `all-MiniLM-L6-v2` through ONNX | Downloaded once (23 to 90 MB depending on the build), offline after. One offers a keyword-only mode with a later re-embed | [glama.ai listing](https://glama.ai/mcp/servers/@doobidoo/mcp-memory-service/blob/e3f2f241b48ec723a73046f34082003675a8dccd/docs/first-time-setup.md) |
+| Mem0 (open source) | OpenAI `text-embedding-3-small`, a cloud call; its FastEmbed provider defaults to `bge-small-en-v1.5` | A key, unless the user switches provider | [docs.mem0.ai](https://docs.mem0.ai/open-source/overview.md), [FastEmbed provider](https://docs.mem0.ai/components/embedders/models/fastembed.md) |
+| `fastembed` (the Rust crate itself) | `BAAI/bge-small-en-v1.5` | Downloaded on first use | [docs.rs README, 7.7.0](https://docs.rs/crate/fastembed/latest/source/README.md) |
+
+The pattern: a small English model on ONNX Runtime, downloaded on first use and cached in the user's cache directory. Nobody in this group ships the weights inside the package. The two that have moved recently (Basic Memory, Mem0's local provider) moved to `bge-small`, not MiniLM.
+
+---
+
+**New items**
+
+#### R-007.1 — [PRODUCT] [HIGH] The built-in embedder's runtime and packaging: keep `fastembed` on ONNX Runtime for desktop, download the model on first use, and know what the dependency brings
+- **Status:** `OPEN`
+- **Context / Evidence:**
+  - **`fastembed` 7.7.0** ([Cargo.toml on docs.rs](https://docs.rs/crate/fastembed/latest/source/Cargo.toml.orig)): `rust-version = "1.88"`; `ort = "=2.0.0-rc.15"`, pinned exactly, so the ONNX Runtime wrapper is still a release candidate; `tokenizers 0.23.2` with the `onig` feature (a C regex library); default features `onnx`, `ort-download-binaries-native-tls`, `hf-hub-native-tls` and `image-models`.
+  - **Its cache** defaults to `.fastembed_cache`, relative to the working directory; `FASTEMBED_CACHE_DIR` or `with_cache_dir` changes it, and `HF_HOME` wins if set ([README](https://docs.rs/crate/fastembed/latest/source/README.md)).
+  - **Local files:** `try_new_from_user_defined(...)` loads a model from files the caller supplies, so a model outside the crate's list can be used.
+  - **Pure Rust inside the same crate:** `bert-text`, `qwen3` and `nomic-v2-moe` run on candle, not ONNX (same README). Static models need no runtime at all: `model2vec-rs` 0.2.1 runs the `potion` models in plain Rust ([docs.rs](https://docs.rs/crate/model2vec-rs)), at about 82% of MiniLM's retrieval score for the best of them (35.06 against 42.92, [model card](https://huggingface.co/minishlab/potion-retrieval-32M)).
+  - **ONNX Runtime and static builds:** the `ort` crate downloads a prebuilt ONNX Runtime at build time; a fully static musl build is reported as hard and undocumented ([mozilla-ai/encoderfile issue 69](https://github.com/mozilla-ai/encoderfile/issues/69)).
+  - **MNemo today:** MSRV 1.75 (`mnemo/Cargo.toml:15`); release targets are glibc Linux (x86_64, and aarch64 cross-built with zigbuild), macOS on both architectures and Windows x86_64, with `manylinux: auto` wheels (`release.yml:126-143`, `:212-226`). No musl binary is published.
+- **Finding:**
+  1. **`fastembed` is still the right runtime for the desktop CLI and the wheels.** It's what the comparable tools use, it has the models, and the alternatives cost more: candle would mean owning tokenization and pooling for each model, and static models give up too much recall to be the default.
+  2. **It can't be a default dependency.** Its MSRV is 1.88 against the crate's 1.75, so the feature stays off for library users and out of the MSRV job, as the spec says. `cargo deny` will see ONNX Runtime's prebuilt binary and a C library; both need a deliberate entry.
+  3. **Taken with its default features it brings things MNemo doesn't want:** image models, and native TLS (OpenSSL on Linux). And its default cache would leave a `.fastembed_cache` folder in whatever directory an agent runs `mnemo` from, which for this tool is every project.
+  4. **Ship the model by download, not in the package.** The engine is a few megabytes; the smallest useful model is 23 to 34 MB quantized and 90 to 130 MB at full precision (from general knowledge of the published ONNX files, not fetched). Every comparable tool downloads. It also keeps MNemo from redistributing model weights at all.
+  5. **Two build facts to check before promising anything:** whether the prebuilt ONNX Runtime links on the aarch64 cross-build, and what glibc baseline it needs, since `manylinux: auto` may have to move up. I didn't build it.
+  6. **Phones:** nothing here fits the mobile packages in v0.15. That's fine for now, but a brain embedded with one model can only be queried with the same model, so whichever default is chosen is the one a phone will later have to run. All three candidates in `R-007.2` are small enough for ONNX Runtime Mobile or Core ML; a 300M-parameter model isn't.
+- **Recommendation:**
+  1. Keep `fastembed`, with `default-features = false`: ONNX, rustls for the download, no image models. Pin it exactly, as every other dependency is.
+  2. Download on first use into the platform's cache directory (never the working directory), from a pinned revision. Make the download a named step, `mnemo embedder install`, which `onboard` runs and which prints the size before it starts. Offline with no model: say so, and fall back to keyword-only recall (R-006.2 (b)) instead of failing the call.
+  3. The Worker's first step measures and reports: binary and wheel size with the feature on, cold start of one `remember` (DOGFOOD-0 saw about 5 s per call, nearly all start-up), the glibc baseline, and `cargo deny` output. Set a budget before the measurement, not after.
+  4. No built-in model in the Swift and Kotlin packages in this phase. Write down that the default chosen here is the one mobile will need.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), 12.3 step 5, all four recommendations. The budget is set in the spec before measuring: the CLI binary and each wheel grow by at most 30 MB with the feature on; one `remember` from a cold process with the model cached takes at most 1.5 s on an M1; the glibc baseline stays within `manylinux: auto` or the step stops and reports. The feature is off for library users and out of the MSRV job.
+
+#### R-007.2 — [PLAN-REFINEMENT] [HIGH] The default model should be retrieval-tuned, and three things in the engine matter more than which one: it can't tell a query from a document, hybrid recall is opt-in, and TOK-1
+- **Status:** `OPEN`
+- **Context / Evidence:** the candidates, all English, all 384 dimensions except where noted.
+
+| Model | Size | Max tokens | Licence | Retrieval (nDCG@10) | Code retrieval (CoIR) | Notes |
+|---|---|---|---|---|---|---|
+| `all-MiniLM-L6-v2` | 22M | 256 | Apache-2.0 | 41.95 | | What the dogfood brain uses. A sentence-similarity model |
+| `snowflake-arctic-embed-xs` | 22M | 512 | Apache-2.0 | 50.15 | | MiniLM's size. Queries need the prefix "Represent this sentence for searching relevant passages: " |
+| `bge-small-en-v1.5` | 33M | 512 | MIT | 51.68 | 45.8 | `fastembed`'s default, Basic Memory's default |
+| `snowflake-arctic-embed-s` | 33M | 512 | Apache-2.0 | 51.98 | | |
+| `e5-small-v2` | 33M | 512 | MIT | 49.04 | 47.1 | Needs "query: " and "passage: " prefixes |
+| `granite-embedding-small-english-r2` | 47M | 8,192 | Apache-2.0 | 50.9 (BEIR) | 53.4 to 53.8 | August 2025. IBM says it was trained without MS-MARCO, whose licence is non-commercial. Not in `fastembed`'s list; needs `try_new_from_user_defined` |
+| `potion-retrieval-32M` (static, 512 dimensions) | 32M | no limit | MIT | 35.06 | | No runtime. Fast, and well behind |
+| `embeddinggemma-300m` (768 dimensions, cut to 128) | 308M | 2,000 | Gemma terms | "best under 500M, multilingual" per Google | | September 2025. Too large for a default, and not an OSI licence |
+
+  Sources: [snowflake-arctic-embed-xs card](https://huggingface.co/Snowflake/snowflake-arctic-embed-xs) (its table gives MiniLM, bge-small, e5-small and arctic-s on one benchmark); [granite card](https://huggingface.co/ibm-granite/granite-embedding-small-english-r2) (CoIR for granite, bge-small and e5-small); [potion card](https://huggingface.co/minishlab/potion-retrieval-32M); [EmbeddingGemma announcement](https://developers.googleblog.com/en/introducing-embeddinggemma/).
+
+  In the engine:
+  - `Embedder` has one method, `embed(&self, texts: &[&str])` (`mnemo/src/embed.rs:66-80`), and its identity is a name, a width and a normalize flag (`:40-54`). `remember_text` and `RecallRequest::from_text` both call it. Nothing says whether a text is a query or a note. The `--embed-cmd` protocol is the same: lines in, vectors out.
+  - A recall by `text` is dense only. BM25 joins in only when the caller also passes `keywords` (`mnemo/src/mcp.rs:1637-1682`); the weight is `DEFAULT_KEYWORD_WEIGHT = 0.5` (`store/mod.rs:127`).
+  - The tokenizer keeps `mnemo.nosync` and `iCloud's` as single tokens (`mnemo/src/text.rs:27-44`): that's TOK-1. Its version is recorded in the BM25 manifest (`TOKENIZER_V1`, `:21`), so a second one needs no format change.
+  - DOGFOOD-0 (PLAN.md, 2026-11-13): "where the repo lives and why" scored 0.35 at best with MiniLM, and a fact that opens with the question's own words scored 0.94.
+- **Finding:**
+  1. **MiniLM is the wrong default.** It's eight to ten points behind models of the same size and width on retrieval, and it's the model the weak "why" recall was seen with. It was trained to say two sentences mean the same thing. A "why" question and the note that answers it don't.
+  2. **Whichever retrieval model is chosen, it expects queries and notes to be embedded differently** (a prefix on the query for arctic and bge, a prefix on both for e5, task prompts for EmbeddingGemma). With one `embed` method the engine can't do that, so it would get a retrieval model's cost and a similarity model's behaviour. This is the change that makes the model choice count, and it has to be in the trait before the default is fixed, because the convention becomes part of what a file's vectors mean.
+  3. **For identifiers, the model matters least.** Small dense models score 45 to 54 on code retrieval; an exact name like `rekey_secret` or `RB-006.11` is a keyword match. Two things carry that today and both are off or broken by default: hybrid recall needs the caller to pass `keywords` separately, and the tokenizer doesn't index the parts of a dotted name, a path or a possessive.
+  4. **The width doesn't change** (384 for every serious candidate), so storage, the index and the perf numbers stand. But the choice is recorded in every file and can only be changed by re-embedding, so it deserves a test on MNemo's own kind of text, not only a leaderboard.
+  5. **Multilingual** costs about four times the size (`multilingual-e5-small` is 118M parameters; in `fastembed`'s list; not fetched). English as the default with a named multilingual option at `init` is the proportionate answer; the model is fixed per file anyway.
+  6. **Licences:** every candidate's weights are MIT or Apache-2.0 except EmbeddingGemma's. The MS-MARCO point is IBM's sales argument more than a known problem, and MNemo wouldn't redistribute weights; note it and move on.
+- **Recommendation:**
+  1. **Decide the default by a short comparison on the project's brain, with `bge-small-en-v1.5` as the default if nothing wins clearly.** Three models (`bge-small-en-v1.5`, `snowflake-arctic-embed-xs`, `granite-embedding-small-english-r2`), the 35 handover facts plus the brain's existing memories, and a fixed list of about 30 questions including the three from DOGFOOD-0 and ten "why" questions. Score where the right fact ranks. It's an hour of the Worker's time and it settles a choice that's expensive to revisit.
+  2. **Give the trait a query side:** `embed_query`, defaulting to `embed`, used by `from_text` and every recall-by-text path; and record the convention in the embedder identity, so a file embedded one way is never queried the other. Give `--embed-cmd` and the Python callable the same distinction (an environment variable or a second argument).
+  3. **Make recall by text hybrid by default:** when a caller gives `text` and no `keywords`, use the text for BM25 too. Keep `keywords` for exact terms.
+  4. **Do TOK-1 in 12.3,** as tokenizer v2: index the whole token and its parts (split on `.`, `/`, `_`, `-`, `::` and the possessive). It's the identifier fix, and it's cheap next to a model.
+  5. **A re-embed command** (`mnemo reembed --embedder …`) belongs in the same phase: the first default won't be the last, and without it every file is tied to its first model.
+  6. **Carry to GUIDE-1 and 12.8, not here:** write facts as answers ("X because Y"); a minimum similarity or a margin cut for the one-shared-word problem.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14). Recs 2 to 5 are 12.3 step 4 (retrieval), before the embedder, so the query convention is fixed before any file records the default model. Rec. 1 opens step 5: the three models on this project's brain with about 30 questions (DOGFOOD-0's three and ten "why" questions), ranked by where the right fact lands; `bge-small-en-v1.5` unless another wins clearly (I decide on the table). Rec. 6 goes to GUIDE-1 and 12.8.
+
+#### R-007.3 — [PRODUCT] [MEDIUM] `mcp install`: what the clients expect today, two more worth adding, and three rules for what it writes
+- **Status:** `VERIFIED (12.3 step 2b LOCK-2 @ bd041dd, ca66996 & step 3 mcp install @ d4d364b)`
+- **Context / Evidence:**
+  - **Claude Code** ([code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp)):
+    - `claude mcp add [options] <name> -- <command> [args...]`, and `claude mcp add-json <name> '<json>'`; both take `--scope`.
+    - Scopes: `local` (the default: only you, this project; in `~/.claude.json` under the project's path), `project` (`.mcp.json` in the project root, meant for version control, approved by each user before first use) and `user` (`~/.claude.json`, all projects). Precedence: local, project, user, plugins, connectors.
+    - `.mcp.json` expands `${VAR}` and `${VAR:-default}` in `command`, `args` and `env`, and stdio servers get `CLAUDE_PROJECT_DIR`.
+    - Plugins can carry a `.mcp.json`. Resources and prompts are discovered. A server can declare `claude/channel` and be opted in with `--channels` (for 13.1b).
+  - **Cursor** ([cursor.com/docs/context/mcp](https://cursor.com/docs/context/mcp), [install links](https://cursor.com/docs/context/mcp/install-links)):
+    - `.cursor/mcp.json` in the project and `~/.cursor/mcp.json` globally, both with a top-level `mcpServers`.
+    - It resolves `${env:NAME}`, `${userHome}` and `${workspaceFolder}`, and takes an `envFile`.
+    - A deep link installs a server: `cursor://anysphere.cursor-deeplink/mcp/install?name=$NAME&config=$BASE64_ENCODED_CONFIG`, where the config is the server's JSON object, base64-encoded.
+    - It supports resources, prompts, roots and elicitation.
+  - **Claude Desktop:**
+    - The config file is `claude_desktop_config.json`, under `~/Library/Application Support/Claude/` on macOS and `%APPDATA%\Claude\` on Windows (third-party guides; not from Anthropic's docs in this pass).
+    - `.mcpb` bundles ([claude.com/docs/connectors/building/mcpb](https://claude.com/docs/connectors/building/mcpb)) are a zip with a `manifest.json`, installed by double-click, on macOS and Windows only, with Node "strongly recommended". A `user_config` field marked sensitive is kept in the OS keychain ([Anthropic engineering, September 2025](https://www.anthropic.com/engineering/desktop-extensions)).
+    - The same page says: "Desktop extension listings in the directory are deprecated, and the directory no longer accepts MCPB submissions. To distribute a local MCP server through the directory, include it in a plugin."
+  - **The MCP Registry** ([modelcontextprotocol.io/registry/about](https://modelcontextprotocol.io/registry/about)): still "in preview. Breaking changes or data resets may occur before general availability." It holds metadata only (`server.json`), names are `io.github.<user>/<server>`, it supports crates.io and PyPI packages among others, and it's meant for marketplaces to read, not for clients directly.
+  - **Other clients, from general knowledge, not fetched:** Codex CLI (`~/.codex/config.toml`, a `[mcp_servers.<name>]` table, `codex mcp add`), VS Code (`.vscode/mcp.json` with a `servers` key, `code --add-mcp`), Gemini CLI (`~/.gemini/settings.json`), Windsurf (`~/.codeium/windsurf/mcp_config.json`).
+  - **In MNemo:** `serve --mcp` holds the file for its life unless `--shared` is given (v0.14.0); LOCK-2 and the shared default are planned before 12.4's step 8.
+- **Finding:**
+  1. **The spec's three clients are the right core,** and its config locations match what the clients document today, with one refinement: Claude Code has three scopes and a command of its own.
+  2. **"Absolute paths" is wrong for a config that's committed.** Claude Code's project scope and Cursor's project file are meant for version control. An absolute path to one person's brain breaks for everyone else. With `onboard`'s rule that the project brain is found through the common git directory, the committed config needs no path at all.
+  3. **Two installs on one brain collide unless both are shared.** `mcp install --client claude-code` and then `--client cursor` gives two servers on one file. Without `--shared` the second one to start gets `Locked`, and the user's first experience of "works with all your tools" is an error. So what `mcp install` writes depends on v0.14's opt-in flag, and on LOCK-2 for it to behave under load.
+  4. **`.mcpb` isn't worth doing now.** It's built around Node, covers two platforms, and its directory route has just closed in favour of plugins. A plugin is 12.2's deliverable already.
+  5. **The registry is cheap but early:** a `server.json` pointing at the crates.io and PyPI packages is a small file, and the registry may still reset.
+- **Recommendation:**
+  1. **Claude Code:** when `claude` is on the PATH, call `claude mcp add-json … --scope <scope>` and let it own its files; otherwise write `.mcp.json`. Offer `--scope project|local|user`, defaulting to `project` for a project brain and `user` for a personal one.
+  2. **Cursor:** merge into `.cursor/mcp.json` or `~/.cursor/mcp.json`; print the deep link as an alternative.
+  3. **Three rules for everything it writes:** no secret (the keychain, or the client's own `${VAR}` expansion); no absolute path in a project-scoped file; and always `serve --mcp --shared`.
+  4. **Bring LOCK-2 into v0.15.** `mcp install` is the feature that puts several servers on one file by default.
+  5. **Add `codex` and `vscode` at launch** if each is the small table entry it looks like; keep the client list a table (path, format, key name) so `gemini` and `windsurf` are data, not code. Re-check all four paths against the vendors' docs when the spec is written.
+  6. **Skip `.mcpb`.** Publish a `server.json` to the registry when it leaves preview (an idea for later, not this phase).
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), 12.3 step 3. Recs 1, 2, 3, 5 and 6 as written; client paths re-checked against the vendors' docs in the step. **Rec. 4 is `NEEDS-USER`:** by the rule already in PLAN.md (LOCK-2 before shared mode becomes the MCP default), `mcp install` writing `--shared` needs LOCK-2 first, which moves LOCK-2 from 12.4's later steps into v0.15. My recommendation to the user is yes.
+
+#### R-007.4 — [PLAN-REFINEMENT] [HIGH] 12.3 keys the keychain entry by the header's salt, and every compaction gives the file a new salt
+- **Status:** `VERIFIED (12.3 steps 1–2 @ c3eb42f, c6662c3 — store/maintenance.rs:888-895, 1066-1074)`
+- **Context / Evidence:**
+  - 12.3's spec (PLAN.md): `mnemo init` "generates a random 256-bit secret, stores it in the OS keychain under the file's id (its header salt)".
+  - `create_secret` draws a fresh salt for every new file (`mnemo/src/store/open.rs:261`), and a compaction builds its output with `create_secret` (RB-006.2 established the same for the data key). So `mnemo compact`, and `mnemo rekey --rotate`, change the salt while the secret stays the same.
+  - A rekey changes the salt too, but it changes the secret with it, so the entry has to be rewritten anyway.
+  - The v9 header has no other identifier that survives a compaction; bytes 486 to 508 are reserved and must be zero (`mnemo/src/format.rs`).
+- **Finding:** with the spec as written, the first `mnemo compact` leaves the key in the keychain under a name nothing looks up any more. Every tool on the machine then fails to open the brain "with nothing typed", which is the feature. The user's way back is the recovery code, if they kept it. Compaction is routine (it's also how `--rotate` works), so this would be hit by ordinary use.
+- **Recommendation:** one of these, decided in the spec:
+  1. **Compaction keeps the salt** (and the KDF parameters) when the secret is unchanged. The key-encryption key is then the same and wraps a new data key under a fresh nonce, which is what a rekey-free reopen already relies on. No format change, and a copy of the file keeps the same id, which is what a keychain entry wants. A rotation still gets its new data key.
+  2. Or a stable brain id in the header's reserved bytes, through the format-version policy.
+  3. Or key the entry by path as well, and have compaction rewrite the entry. That breaks when a file is moved, and compaction would need the keychain.
+  - I'd take 1. Whichever it is, add the test: `init`, `compact`, then open with nothing typed.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), option 1, in 12.3 step 1: a compaction or `rekey --rotate` whose secret is unchanged keeps the salt and the KDF parameters and wraps its new data key under a fresh nonce; a rekey still draws a new salt. Test: `init`, `compact`, `rekey --rotate`, then open from the keychain with nothing typed. REVIEWER-B reviews it with the step-1 design note (it touches the encryption).
+
+#### R-007.5 — [PLAN-REFINEMENT] [MEDIUM] Keys on a headless box and in CI, the recovery code's shape, the light KDF, and the order inside 12.3
+- **Status:** `VERIFIED (12.3 steps 1–2 @ c3eb42f, c6662c3, ab82da2 — mnemo/src/keys/)`
+- **Context / Evidence:**
+  - **The `keyring` crate** is at 4.2.0 and has been split: the API is now `keyring-core`, and each credential store is its own crate ([docs.rs README](https://docs.rs/crate/keyring/latest/source/README.md)). Its 3.x line offered the Linux kernel keyring (keyutils) for headless machines, with the warning that entries don't survive a reboot ([3.1.0 source](https://docs.rs/crate/keyring/3.1.0/source/src/keyutils.rs)).
+  - **What comparable CLIs do with no credential store:** GitHub's `gh` writes the token to a plain-text file ("If a credential store is not found or there is an issue using it gh will fallback to writing the token to a plain text file", [manual](https://cli.github.com/manual/gh_auth_login)), and that has been criticised for happening silently ([Flox, on `gh` and keyrings](https://flox.dev/blog/get-secure-github-cli-auth-you-can-take-with-you-anywhere)). Grafana's `gcx` refuses unless the user turns the store off explicitly ([docs](https://grafana.com/docs/grafana/next/ai-tools/grafana-cli/gcx/keychain.md)). Backup tools take a file or a command: restic's `RESTIC_PASSWORD_FILE` and `RESTIC_PASSWORD_COMMAND`, borg's `BORG_PASSCOMMAND` (from general knowledge, not fetched).
+  - **Recovery-code formats:**
+    - Crockford's Base32 leaves out I, L, O and U, reads `i` and `l` as 1 and `o` as 0, ignores hyphens, and has an optional check symbol modulo 37 ([crockford.com](https://www.crockford.com/base32.html)).
+    - BitLocker's recovery password is 48 digits in eight groups of six, each group divisible by 11, checked as each group is typed (forum sources; Microsoft documents the 48 digits).
+    - 1Password's Secret Key with its printable Emergency Kit, and FileVault's 24-character key, are the other common shapes (from general knowledge, not fetched).
+  - **The light KDF exists:** `KdfParams::raw_key()` is "the Argon2id floor (8 KiB, one pass), for databases unlocked by a raw random 256-bit key … Never use them with a human passphrase" (`mnemo/src/crypto.rs:65-71`), behind `create_with_key`. The CLI already takes `--key-file` on `inspect`, `export` and `compact`, and `MNEMO_PASSPHRASE` (`mnemo/src/bin/mnemo.rs`).
+  - **The order:** 12.2's acceptance test is a fresh agent running `mnemo onboard` with the keychain prompt as the only human step (PLAN.md, 2026-11-11), and `onboard` calls 12.3's parts.
+- **Finding:**
+  1. **"Light KDF for a random key, full Argon2id for a passphrase" is standard practice,** and the engine has had it since PERF-1. Stretching exists to make guessing a weak secret expensive; a uniformly random 256-bit key can't be guessed. `age` does the same thing: scrypt for a passphrase, none for a key file (from general knowledge). What makes it safe is that nothing but a machine-made key ever reaches a light-KDF file, so `unlock` and `rekey` have to enforce that.
+  2. **The spec has no answer for a machine with no keychain:** a server, a container, CI, WSL without a session. The crate's own headless option forgets the key at reboot. `gh`'s answer, plain text without asking, is the one to avoid.
+  3. **One trailing check digit is thin for a 52-character code.** A 256-bit key in Base32 is 52 characters. A single check tells the user that something is wrong and not where. BitLocker's per-group check is the better pattern for a code typed by hand.
+  4. **Showing it once is stricter than it needs to be.** The key is in the keychain, where its owner can read it anyway, so refusing to show it again protects nothing and turns a lost printout into a lost brain. The tools people know let the owner see it again after authenticating.
+  5. **12.3 before 12.2 is still right,** because `onboard` is made of 12.3's parts and its acceptance test needs them. But the embedder is the long pole (a runtime, an MSRV exception, a size budget, a model choice that's recorded in files), and the key work is independent of it.
+- **Recommendation:**
+  1. **State the chain of key sources, in order,** and use the same chain in every surface: `MNEMO_PASSPHRASE` or `MNEMO_KEY` in the environment, a key file (`MNEMO_KEY_FILE`, the existing `--key-file`), a command (`MNEMO_KEY_COMMAND`, which lets people plug in `pass`, a secrets manager or `systemd-creds`), then the keychain. Where there's no keychain, `init` says so and asks for one of the others; it never writes the key to a plain file on its own.
+  2. **The recovery code:** Crockford Base32, upper case, in groups of four with a check character per group (or per pair of groups), a short version prefix, hyphens optional and case ignored on entry; `unlock` names the group that's wrong. `onboard` asks the user to type the last group back before it goes on.
+  3. **Let the owner see it again:** `mnemo recovery-code <file>` prints it from the keychain. Say in the docs that the keychain is the trust boundary.
+  4. **Enforce the light-KDF rule in code:** `unlock` accepts only a well-formed recovery code; `rekey` from a key to a passphrase raises the KDF to the full parameters; a test for each.
+  5. **Check the `keyring` 4 split before choosing a version:** which store crates are needed for macOS, Windows and Secret Service, their MSRV, and what `cargo deny` says. I only read its README.
+  6. **The order inside 12.3:** keys and the recovery code, the keychain and the source chain, `unlock`, `mcp install`, then the embedder. 12.2 can start once the first four are in, using keyword-only recall until the embedder lands.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14). Recs 1 to 5 in steps 1 and 2, with the source chain written once in the design note and shared by every surface. Rec. 6's order inside 12.3 is taken. Its second half (start 12.2 once the key steps are in) is not: 12.2 starts after v0.15.0 ships, so the roadmap order stays as the user set it.
+
+#### R-007.6 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
+- **Status:** `OPEN`
+- **Context / Evidence:** five points on 12.3's design (the model download, where keys can end up, how the recovery code travels, what the keychain does and doesn't protect, and committed MCP configs). No code exists, so nothing shipped is affected.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14); see `SECURITY.local.md`.
+
+---
+
+### Batch `RB-009` — 2026-11-14 (REVIEWER-B: the 12.3 keys design note, before step 1's code: the salt rule, the light-KDF rules, the recovery code, the key-source chain, the rekey order with the keychain, the display rule and the test list, with four new items)
+
+**What was reviewed.** `docs/design/12.3-keys.md` at `7c0bfbb` (PR 77, `rel0150-1-keys-note`, 661 lines), with the two edits in PLANNER-A's 2026-11-14 entry "LOCK-2 into v0.15…; the keys note signed off with two edits; REVIEWER-B reviews it (RB-009)" taken as part of it, and `W-001` in `SECURITY.local.md`. It's a scheduled review: the note changes how the file's key is made, found and wrapped (`Reviewer` rule 4). The note describes code that isn't written, so the findings are about what it says and leaves out, checked against the engine at `185f3ba` (v0.14.0).
+
+**How.**
+- **My own clone,** `/tmp/rb-mnemo`, at `origin/rel0150-1-keys-note` (`7c0bfbb`, the same commit GitHub has). Nothing was built, fetched or checked out in `mnemo.nosync`. Builds used `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked` and `--offline`.
+- **By reading,** the note against `crypto.rs`, `format.rs`, `store/open.rs`, `store/maintenance.rs`, `store/shared.rs`, `bin/mnemo.rs`, `mcp.rs`, the Python binding and the uniffi and Node bindings.
+- **Three checks I ran,** all in `/tmp/rb-scratch`:
+  1. `rcode.py`: the recovery code written again from the note's description alone (the field, the weights, the encoding), run against its worked example and its three guarantees.
+  2. `rb7/tests/rb9.rs`: which calls put a passphrase on raw-key parameters in v0.14.0, and what finding the salt looks like when page 0 is damaged.
+  3. What this session's own shell looks like to the display rule (whether its streams are terminals, and which environment variable names mark it).
+- **Not done:** nothing on Linux or Windows; no keychain was touched; Python was read, not run.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **Security points** (the light-KDF rules against W-001, and the display rule) are only in `SECURITY.local.md`, as `RB-009.4`.
+
+---
+
+**The verdict first.**
+
+- **The note is sound where it matters most.** The salt rule's argument holds, the recovery code does what it says, and there's no format change.
+- **Four things to fold in before step 1's code,** all edits to the note:
+  1. The chain's "first source present, no fall-through" keeps one process from using two brains with different secrets, and a leftover `MNEMO_PASSPHRASE` blocks every keychain brain (`RB-009.1`).
+  2. The keychain is looked up by the salt in page 0, which is gone when page 0 is damaged; and in one of the rekey's failure cases the order deletes the only entry that opens the file (`RB-009.2`).
+  3. The light-KDF rules miss an entry point that shipped in v0.14.0, and say nothing about files that already have the problem (`RB-009.4`, in `SECURITY.local.md`).
+  4. The display rule's third condition rests on a list that can't be complete; two cheap additions make it hold up better (`RB-009.4`).
+- **I wouldn't hold PR 77's merge for these** if the edits go into the same PR or the note's next revision. I would want them in the note before the code that builds the chain and the rekey order.
+
+---
+
+**What I checked, and what held.**
+
+| Asked to check | Result |
+|---|---|
+| The salt-reuse argument | **Holds, and needs one more sentence.** Same secret, salt and parameters give the same key-encryption key, and each compaction wraps a new data key under it with a fresh nonce. The wrap has no associated data (`crypto.rs`: "Pass `&[]` … used for wrapping the DEK"), so an old copy's wrap would also unwrap under the kept key if someone put it into the new file's header. What stops that is the v9 seal: it's computed under the data key over every header byte, the wrap included (`format.rs:152-155`), so a header carrying the old wrap fails its seal. The note should say so; it's the reason the rule is safe against a swapped header, not only against guessing |
+| The nonce bound | **Holds.** A few thousand wraps under one key with random 96-bit nonces is far below the 2³² limit for random nonces |
+| The light-KDF rules and W-001 | **Two gaps** (`RB-009.4`). The rest is right: every rekey or create with a passphrase in the CLI and uniffi already passes `secure()` (`bin/mnemo.rs:1587`, `uniffi/src/db.rs:286`, `:820`); the Node binding has no such call |
+| The recovery code's check | **Holds.** My independent version reproduces the worked example exactly. On 20,948 random groups no single wrong character, no swap within a group and no group in another slot got through; the algebra says none can (five distinct non-zero weights; the group's index with weight 1). Two small corrections are in `RB-009.3` |
+| The parser rules | Right, with three notes (`RB-009.3` items 1 to 3) |
+| The chain's rules, MCP and Python | `RB-009.1`, and `RB-009.3` items 4 and 5 |
+| The rekey order with the keychain | Right for a clean failure and for a kill at any point. Wrong for one failure case, and silent on two things (`RB-009.2`) |
+| The display rule | `RB-009.4` |
+| The test list | Covers what the note states. What it misses follows from the items; the list is in `RB-009.3` item 6 |
+| Format | **None,** as the note says. A file made with a generated key opens with v0.14 through `open_with_key` |
+
+---
+
+**New items**
+
+#### RB-009.1 — [CORRECTNESS] [MEDIUM] "The first source present is used, with no fall-through" keeps one process from using two brains with different secrets, and a leftover `MNEMO_PASSPHRASE` blocks every keychain brain
+- **Status:** `VERIFIED` (RB-010, `e7a34d8` on rel0150-ready, before the tag)
+- **Context / Evidence:** by reading.
+  - Section 6: sources are tried in one order for the process, and "the first source that's present is used". If it doesn't open the file the call fails and names the next source.
+  - The sources at the top of the chain are environment variables, which are per process. The keychain, at the bottom, is per file (it's found by the file's salt).
+  - A session is meant to hold more than one brain: the 12.4 note says a `--personal` brain is "a second file" and "a session can hold shared handles on both" (R-006.2 (e), accepted).
+  - Every v0.14 setup has `MNEMO_PASSPHRASE` exported or written into an MCP config's `env`, because that was the only source the server read (`mcp.rs:233`).
+  - Section 1's own rule ties the two kinds apart: only a machine-made key reaches a file with raw-key parameters, and a passphrase always gets `secure()` or more. The parameters are in the header in the clear.
+- **Finding:**
+  1. With a project brain opened from the keychain and a personal brain opened by a passphrase, no setting of the environment works for one server: `MNEMO_PASSPHRASE` set makes the project brain fail, unset makes the personal one fail.
+  2. A user who runs `mnemo init` for a new brain while their old `MNEMO_PASSPHRASE` is still exported gets an error on every command for the new brain. The message tells them to unset it, which then breaks the old brain in the same shell.
+  3. The note's reasons against trying each source in turn are good ones (it hides a wrong setting, a wrong passphrase costs a full KDF, and it's unclear which secret opened the file). None of them applies to skipping a source that can't be this file's kind.
+- **Recommendation:**
+  1. **Pick by kind, without trying.** Read the file's KDF parameters first. For a file with raw-key parameters, passphrase sources are skipped; for a file with passphrase parameters, key sources are skipped. Say in the output which source was skipped and why ("MNEMO_PASSPHRASE is set, but this brain uses a key"). That costs no KDF, opens nothing by guessing, and keeps "no fall-through" within a kind.
+  2. Keep the error for a source of the right kind that doesn't open the file, as written.
+  3. Add the two-brain case to step 2's tests: one process, a key brain from the store and a passphrase brain from the environment.
+  4. Files with a passphrase on raw-key parameters (`RB-009.4`) are the one exception to "the parameters tell the kind"; the rule for them belongs with that item.
+- **Would I want it settled before step 1's code?** Yes: step 1 builds the chain as far as the test store.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), recs 1 to 3, in the note before step 1's code. The rule: read the file's KDF parameters first; a raw-key file takes the first key source present, a passphrase file the first passphrase source present; the skipped source is named in the output; within a kind, no fall-through. **Rec. 4's exception:** when no source of the file's kind is present, the first source of the other kind is used. That's how a file with a passphrase on raw-key parameters still opens, and the open then gives RB-009.4's warning. Still one try, no guessing.
+
+#### RB-009.2 — [CORRECTNESS] [MEDIUM] Finding the keychain entry needs the salt from page 0, which is gone when page 0 is damaged; and one failure case of the rekey order deletes the only entry that opens the file
+- **Status:** `VERIFIED` (RB-010, `e7a34d8` on rel0150-ready, before the tag)
+- **Context / Evidence:**
+  - **A damaged page 0,** tested at `185f3ba` (`rb7/tests/rb9.rs`): with the first sector of a key file zeroed, the salt field reads as all zero and `peek_dimensions`, which section 6 names as the model for reading the salt, returns `BadMagic`. `key_opens` with the right key returns true, and `open_with_key` heals the file and the salt is back. So the engine recovers such a file today, given the key.
+  - **The rekey order** (section 4): store the new secret under the new salt, commit, and "on an error, REKEY-1 leaves the old secret in force, and step 2's entry is deleted".
+  - **REKEY-1's one exception** (RB-005, area 1): when page 0's write lands and the write-back then fails, `rekey` returns "may open with either secret", and after a drop or a close the file opens with the **new** secret only.
+  - **`init`** (section 1): the file is created, then the key is stored; "if storing the key fails, `init` removes the new file".
+- **Finding:**
+  1. **A damaged header and a keychain key don't meet.** The chain can't find the entry, because the salt it would look up isn't readable, and the recovery that would restore the salt needs the key. The user is told there's no key source for a file whose key is in their keychain. The way out today would be the recovery code through `MNEMO_KEY`, if they have it.
+  2. **In the "either secret" case the order deletes the wrong entry.** The error comes back, the new entry is deleted as the note says, and the file on disk now opens only with the secret that was just removed from the keychain. With `--new-key` the recovery code hasn't been shown yet, so that key exists nowhere.
+  3. **The note doesn't say the keychain's write is durable before the rekey commits.** The commit is synced; whether the store has written the new entry to disk by then depends on the store. A power cut in between would leave the same state as point 2. I haven't tested any store; it's a question for step 2's check of the store crates.
+  4. **`init` can leave a brain nobody can open.** A kill between creating the file and storing its key leaves an empty file whose key was only in memory. It holds nothing, but the next `init` at that path finds a file it can't open.
+- **Recommendation:**
+  1. **When page 0 doesn't parse, take the candidate salts from the WAL's header frames.** They're plaintext page-0 images, and the torn-header scan already finds them (`store/open.rs`, `scan_header_recovery_candidates`); a variant that returns their salts without a key gives the chain something to look up. A test: a key brain with page 0 zeroed opens with nothing typed.
+  2. **Delete the new entry only when the file on disk still has the old salt.** After any rekey error, read page 0 again (or the candidate it would recover to). If it carries the new salt, keep both entries and say so. Add the case to test 13, using REKEY-2's failpoint set, which can fail the write-back.
+  3. **Read the entry back before the commit,** and state in the note what a power cut between the two can do. For `--new-key` at a terminal, consider showing the code before the commit.
+  4. **`init` creates under a temp name** (step 1's `create_temp` pattern), stores the key, then renames into place.
+- **Would I want it settled before step 1's code?** Recommendations 2 and 4, yes (step 1 builds the rekey order and `init`). Recommendation 1 can be decided now and built in step 2.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14). Recs 2, 3 and 4 in the note and step 1's code: after any rekey error, read page 0 (or the candidate it recovers to) and delete the new entry only if it still carries the old salt, otherwise keep both and say so (test 13 with REKEY-2's failpoints); read the entry back before the commit, and `rekey --new-key` at a terminal shows its code before the commit; `init` creates under a temp name, stores the key, then renames. Rec. 3's power-cut question is part of step 2's store check, and the note states the case. Rec. 1 (salts from the WAL's header frames when page 0 doesn't parse) is decided now and built in step 2, with its test.
+
+#### RB-009.3 — [DX/DOCS] [LOW] Smaller points in the keys note
+- **Status:** `VERIFIED` (RB-010, `e7a34d8` on rel0150-ready, before the tag)
+- **Context / Evidence and recommendation, one item each:**
+  1. **"Two wrong characters in one group are caught 31 times in 32"** is 30 times in 31. For any first error, exactly one of the 31 possible second errors cancels it. My sample missed 1 in 30.3 (6,591 of 200,000).
+  2. **The wrong-length message** names "the first group whose check fails". With one character dropped from a random code (100,000 runs), that was the right group 89% of the time; 8% of the time no complete group failed, because the dropped character was in the last group; and 3% of the time it named a later group. With one character added: 97%, under 1% and 3%. So say "group N, or the one before it", and handle "every complete group checks out" by naming the last group. Better still: when the typed text has hyphens, the group that isn't five characters long is the answer; the note ignores hyphens entirely.
+  3. **The prefix.** The reading rule maps `I` and `L` to `1`. Say that it applies to the prefix too, so `MNI-…` and `MNl-…` are read as `MN1`.
+  4. **Key files in containers.** Section 6 refuses a key file not owned by the user or readable by group or others, and section 8 tells CI and containers to "mount a key file". The usual mounts don't pass: a Docker secret is root-owned and world-readable, and a Kubernetes secret volume is 0644 unless `defaultMode` is set (from general knowledge, not checked here). Say in section 8 what owner and mode to mount with, or point containers at `MNEMO_KEY`. The repository's own key fixtures are checked out 0644, so the tests that use `--key-file` will need the mode set.
+  5. **`MNEMO_KEY_COMMAND` in the MCP server.** The command gets 60 seconds. A server started by a client has no terminal, so a command that waits for a prompt holds the server's start for the whole minute, which is likely longer than a client waits for a server to start (not checked). Use a short timeout in the server, and an error that says the key command didn't answer.
+  6. **Tests the list doesn't have:**
+     - the chain with two brains of different kinds (`RB-009.1`);
+     - a key brain with a damaged page 0 (`RB-009.2`);
+     - the "either secret" rekey failure keeping both entries (`RB-009.2`);
+     - `init` killed between the file and the key (`RB-009.2`);
+     - `SharedMnemo::rekey` and Python's shared handle under the KDF rules, and an open of a file that already has the problem (`RB-009.4`);
+     - a recovery code given through `MNEMO_KEY` and through a key file;
+     - a dropped character in the last group, and a code typed with hyphens and one group short;
+     - the key command: a non-zero exit, no output, more than 4 KiB, and a timeout;
+     - the display rule with a marker set and a pseudo-terminal (the Planner's Edit 1).
+  7. **One sentence for section 2:** why a swapped header doesn't defeat the salt rule (the seal covers the wrap), as in the table above.
+- **Would I want it settled before step 1's code?** Items 2, 3 and 6, since step 1 writes the parser and the tests. The rest are edits.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), all seven, in the note before step 1's code. Item 2: when the typed text has hyphens, the group that isn't five long is named; otherwise "group N or the one before it", and the last group when every complete group checks. Item 4: containers and CI are pointed at `MNEMO_KEY` first; a mounted key file must be owned by the running user with mode 0400 or 0600, and the docs say how (Docker and Kubernetes). The test fixtures set their mode. Item 5: the MCP server gives the key command 10 s, the CLI keeps 60 s, and the error says the command didn't answer.
+
+#### RB-009.4 — [SECURITY] [LOW] Held in `SECURITY.local.md`
+- **Status:** `VERIFIED` (RB-010, `e7a34d8` on rel0150-ready, before the tag)
+- **Context / Evidence:** two parts. One is about shipped code (v0.14.0) and extends `W-001`: an entry point the note's light-KDF rules don't name, tested at `185f3ba`, and what the rules don't say about existing files. The other is about the display rule in the note and the Planner's Edit 1.
+- **Would I want it settled before step 1's code?** Yes, both: step 1 builds the KDF rules and the display rule.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14); see `SECURITY.local.md`.
+
+---
+
+### Batch `REV-008` — 2026-11-14 (`REVIEWER-A`: Independent Double-Check of `REV-007` + Product & Code Review of `v0.13.0` → `v0.14.0` → `v0.15.0` Steps 1–4)
+
+**Scope & Verification Summary:**
+- **Triggered by:** `PLAN.md:185-189` and `PLAN.md:25392-25401` (*"The next time the user boots a separate `reviewer-a` session, its first task is an independent check of REV-007. It reads the batch and my triage, re-checks the claims and sources, and says where it agrees or disagrees, in a follow-up batch (`REV-008`)."*), plus a clear-eyed review of everything built from `v0.13.0` (`INSP-1` + `12.5`) through `v0.14.0` (`12.4` Shared Access) and `release-0.15.0` (`12.3` Steps 1–3 merged at `d4d364b`/`ca66996`, Step 4 in-flight in the working tree).
+- **Shipped `ACCEPTED` items marked `VERIFIED`:**
+  - `R-001.13` (`Phase 12.4` bounded lock acquisition & `compact_file` rename hazards) → `VERIFIED` in `v0.14.0` (`mnemo/src/shared/lock.rs`, `mnemo/src/store/shared.rs`, `mnemo/src/store/maintenance.rs`) + `LOCK-2` (`bd041dd`, `ca66996`).
+  - `R-006.1` (Post-`INSP-1` sequencing: `12.4 → 12.3 → 12.2 → 13a` ahead of `PERF-2`, splitting Phase 13 into `13a` vs `13b`) → `VERIFIED` in `PLAN.md` execution order across `v0.13.0`–`v0.15.0`.
+  - `R-007.3` (`mnemo mcp install` + `LOCK-2` in `v0.15.0`), `R-007.4` (compaction preserving `header.salt` when the secret is unchanged), and `R-007.5` (key-source chain, per-group GF(32) Crockford Base32 recovery code, light-KDF floor enforcement, and `12.3` step order) → `VERIFIED` on `release-0.15.0` (`c3eb42f`, `c6662c3`, `ab82da2`, `bd041dd`, `d4d364b`, `ca66996`).
+
+---
+
+**Independent Check of `REV-007` (`R-007.1`–`R-007.6`) & Its Triage:**
+
+1. **`R-007.4` (Compaction preserving `header.salt` for OS Keychain lookup) — Strongly Agree (`VERIFIED`):**
+   - Catching that `create_secret` drew a fresh random salt on every `compact_file` and `rekey --rotate` was the single most important invariant catch before `12.3`. Without preserving `header.salt` when the secret is unchanged (`mnemo/src/store/maintenance.rs:888-895, 1066-1074`), the first routine compaction would have orphaned the user's `mnemo-key-<hex(salt)>` keychain entry while re-wrapping the new DEK under the same KEK.
+2. **`R-007.5` & `RB-009` (Key-source chain, Crockford Base32 per-group GF(32) recovery code, light-KDF enforcement, and step ordering) — Strongly Agree (`VERIFIED`), with one build-system lesson feeding `R-008.1`:**
+   - The `MN1-` recovery code (`13 × (4 data + 1 GF(32) check)` over $x^5 + x^2 + 1$), kind-aware source selection without guessing (`RB-009.1`), WAL header-frame salt recovery when page 0 is damaged (`RB-009.2`), KDF floor enforcement across all rekey entry points (`W-001` / `RB-009.4`), and controlling-terminal alternate-screen display (`R-007.6` / `RB-009.4`) are cleanly designed and verified in `mnemo/src/keys/`.
+   - Putting the built-in embedder last (Step 5) so Steps 1–4 land independently was the right sequencing call. However, `R-007.5` rec. 5's check of `keyring` 4 exposed a critical Cargo 1.75 constraint (`PLAN.md:26216-26219`) that also applies to Step 5's `fastembed` (`R-008.1` below).
+3. **`R-007.3` (`mnemo mcp install` + pulling `LOCK-2` into `v0.15.0`) — Strongly Agree (`VERIFIED`):**
+   - Pulling `LOCK-2` (`writer.lock` safety valve after `T = 500 ms` with 1–2 ms `hurry` retries) into `v0.15.0` before `mcp install` writes `--shared` into Claude Code, Cursor, and Claude Desktop configs was essential; and scheduling `SNAP-1` ("reads never wait for saves" under concurrent saturating writers) after `v0.15.0` is the right architectural follow-through.
+   - Deferring `vscode` and `codex` in Step 3 was also the right call: as the Worker found (`PLAN.md:27392-27395`), VS Code's project config is `.mcp.json` (the exact same path as Claude Code!) with incompatible root key (`"servers"` vs `"mcpServers"`) and variable syntax (`${workspaceFolder}` vs `${CLAUDE_PROJECT_DIR:-.}`).
+4. **`R-007.2` (Asymmetric retrieval model, `embed_query` + `query_convention`, hybrid recall by default, `TOK-1`, and `mnemo reembed`) — Agree on diagnosis & design, with two concrete code bugs found in the in-flight Step 4 implementation (`R-008.2`, `R-008.3`):**
+   - Moving off symmetric `all-MiniLM-L6-v2` to an asymmetric retrieval-tuned 384-d model (`bge-small-en-v1.5` vs `snowflake-arctic-embed-xs` vs `granite-embedding-small-english-r2` judged on the 30-question dogfood benchmark in Step 5), recording `query_convention` in `EmbedderIdentity`, turning on hybrid BM25 by default for text queries with a lower `DEFAULT_TEXT_KEYWORD_WEIGHT = 0.25` (`mnemo/src/store/mod.rs:138`, preventing common question words like `"how"`/`"the"` from overpowering dense similarity), and shipping `TOK-1` + `mnemo reembed` directly address `DOGFOOD-0`'s root causes.
+   - Notably, the Worker's segment-marked `TOK-1` implementation in `mnemo/src/text.rs:31-134` (placing a sentinel term `\0mnemo.tokenizer.2` or `\0mnemo.tokenizer.mixed` on never-live doc `0` at the head of each segment dictionary while keeping `Bm25Manifest.tokenizer == 1`) is **better** than the spec's external staleness counter: every segment is self-describing even if an older v0.12–v0.14 binary writes or merges segments in between.
+   - However, auditing the uncommitted Step 4 code in `mnemo/src/text.rs` and `mnemo/src/store/maintenance.rs` revealed a **term-frequency double-counting bug (`tf = 2`) in `tokenize` / `Tokenizer::V2` (`R-008.2`)** and a **sentinel-record embedding bug in `reembed_file` (`R-008.3`)** that should be fixed before Step 4 commits.
+5. **`R-007.1` (`fastembed` 7.7.0 behind `embed-fastembed` in Step 5) — Agree on runtime & download-on-first-use, Disagree on one Cargo 1.75 lockfile assumption (`R-008.1`):**
+   - `R-007.1` finding 2 and its triage state: *"Its MSRV is 1.88 against the crate's 1.75, so the feature stays off for library users and out of the MSRV job"*. That assumes Cargo 1.75 ignores disabled optional dependencies in a shared `Cargo.lock`. Step 2 proved otherwise — see `R-008.1`.
+
+---
+
+#### R-008.1 — [PLAN-REFINEMENT] [HIGH] Step 5 (`embed-fastembed`) vs. MSRV 1.75: Cargo 1.75 parses the entire shared `Cargo.lock` even for disabled optional dependencies (`R-007.1` cross-check); test `cargo +1.75 check --locked` first or pull `MSRV-2` into Step 5
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** `R-007.1` (`reviewer_notes.md:2585-2603`), `PLAN.md:26215-26229` (Step 2 `keyring` 3.6.3 MSRV lockfile findings), `mnemo/Cargo.toml:15` (`rust-version = "1.75"`), `.github/workflows/ci.yml` (`msrv` job running `cargo +1.75.0`).
+- **Finding:**
+  1. `R-007.1` noted that `fastembed` 7.7.0 declares `rust-version = "1.88"` and pulls in `ort = "=2.0.0-rc.15"` + `tokenizers 0.23.2` + `hf-hub`, and concluded that keeping `embed-fastembed` off by default and out of the `msrv` CI job keeps MSRV 1.75 intact.
+  2. **Step 2 just disproved that assumption on a much smaller dependency (`keyring`):** As recorded in `PLAN.md:26216-26219`, even when an optional dependency (like `zbus` on macOS or when its feature is off) is **not in the build graph**, its transitive packages still sit in the workspace's shared `Cargo.lock`, and **Cargo 1.75 parses every package entry in `Cargo.lock` and fails before compiling anything** if any transitive crate in the lockfile requires a newer Cargo feature, `edition = "2024"`, or lockfile v4 syntax (or if a newly resolved shared transitive crate like `zeroize` or `proc-macro-crate` bumps past 1.75).
+  3. `fastembed 7.7.0` (`ort 2.0.0-rc.15`, `tokenizers 0.23.2`, `hf-hub`, `ndarray`, `ureq`/`reqwest`, `rustls`) has a vastly larger transitive dependency subgraph than `keyring 3.6.3`. If any crate in that subgraph uses `edition = "2024"` or cannot be back-pinned under `fastembed = "=7.7.0"`'s version constraints, `cargo +1.75 test --locked` will fail even with `--no-default-features`!
+- **Recommendation:**
+  1. **Make the very first 5-minute check of Step 5** adding `fastembed = { version = "=7.7.0", optional = true, default-features = false, ... }` to `mnemo/Cargo.toml` and running `cargo +1.75 check --locked` (without `--features embed-fastembed`) **before** writing the embedder wrapper or running the 3-model comparison.
+  2. **Pre-authorize the fallback if Cargo 1.75 rejects `fastembed`'s lockfile subgraph (or requires >5 fragile transitive back-pins):** Pull **`MSRV-2`** (raising `rust-version` from `1.75` to `1.88`, or `1.85` if `fastembed` is pinned to a 1.85-compatible release) into `v0.15.0` Step 5. Doing `MSRV-2` now also immediately pays down three pieces of debt noted in `PLAN.md:26227-26229`: upgrading unmaintained `keyring 3.6.3 → 4.x`, removing the 5 fragile Step-2 lockfile pins in `mnemo/Cargo.toml`, and removing the pre-1.85 Windows `std::fs::rename` refusal workaround.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14; the user chose to raise the MSRV, so it's v0.15 step 5a in PLAN.md 12.3). Confirmed and wider than stated: `fastembed` 7.7.0 pins `ort` =2.0.0-rc.15, which declares Rust 1.92 and edition 2024 (crates.io, checked 2026-11-14), so it can't sit in a Cargo 1.75 lockfile even with the feature off, and MSRV 1.88 wouldn't be enough. Rec. 1 (the lockfile check first) goes into step 5 whatever the answer. Rec. 2 is the user's: raise the MSRV, or keep 1.75 for the library and build the embedder in a crate with its own lockfile. Note: five of the six commit hashes cited for this batch's VERIFIED marks (`c3eb42f`, `c6662c3`, `ab82da2`, `bd041dd`, `ca66996`) don't exist in the repo; the squash merges are `4c16e54` (step 1), `0a7a727` (step 2), `20737e6` + `4600b81` (LOCK-2) and `f203ac7` (step 3).
+
+#### R-008.2 — [CORRECTNESS] [MEDIUM] In-flight Step 4 (`mnemo/src/text.rs:140-205`): `tokenize` + `tokenize_with(Tokenizer::V2)` double-emits (`tf = 2`) every compound token with `.`, `_`, or `'s` and every sub-token of `.`, `/`, `_`, `-`, `::`, and `'s`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** Uncommitted Step 4 working-tree diff in `mnemo/src/text.rs:140-221` (`tokenize_with`, `token_parts`, `tokenize`, `term_freqs`).
+- **Finding:** Tracing `tokenize` (`text.rs:189-205`) and `tokenize_with(Tokenizer::V2, text)` (`text.rs:140-186`) on compound tokens reveals that a **single occurrence** of an identifier or possessive in a memory or query is emitted **twice (`tf = 2`)**:
+  1. **Whole-token + sub-token duplication on `.`, `_`, and `'s` (`mnemo.nosync`, `open_shared`, `iCloud's`, `v0.9.0`):**
+     - Under UAX #29 (`unicode_words()`), `.` (`MidNumLet`), `_` (`ExtendNumLet`), and `'` / `\u{2019}` (`MidNumLet`) do **not** split a word when flanked by letters/digits. Thus `text.unicode_words()` (`text.rs:191`) emits `"mnemo.nosync"`, `"open_shared"`, `"icloud's"`, and `"v0.9.0"`.
+     - Next, `for run in text.split_whitespace()` (`text.rs:195-203`) inspects the exact same token, sees `t.chars().any(|c| !c.is_alphanumeric()) == true`, and **pushes a second copy** of `"mnemo.nosync"`, `"open_shared"`, `"icloud's"`, and `"v0.9.0"` into `out`!
+     - Next, `tokenize_with(Tokenizer::V2, text)` (`text.rs:143-147`) loops `for i in 0..whole` over **both** copies in `out`, calling `token_parts(&out[i])` twice!
+     - Result: A **single** mention of `"mnemo.nosync"` in a memory produces `["mnemo.nosync", "mnemo.nosync", "mnemo", "nosync", "mnemo", "nosync"]` — giving `"mnemo.nosync"` `tf = 2`, `"mnemo"` `tf = 2`, `"nosync"` `tf = 2`, and adding **`6` to `doc_len`** instead of `3`! Likewise, a single `"iCloud's"` gives `"icloud's"` `tf = 2` and `"icloud"` `tf = 2` (`doc_len += 4`).
+  2. **Sub-token duplication on `-`, `/`, and `::` (`--key-file`, `mnemo/src/text.rs`, `Mnemo::open`):**
+     - For `"--key-file"`, `unicode_words()` splits on `-` and emits `"key"` and `"file"`.
+     - Then `split_whitespace()` emits `"key-file"`.
+     - Then `Tokenizer::V2` calls `token_parts("key-file")`, which splits on `-` and emits `"key"` and `"file"` **a second time**!
+     - Result: A single mention of `"--key-file"` gives `"key"` `tf = 2` and `"file"` `tf = 2` (boosting its BM25 term-frequency factor by `~45%` under `k1 = 1.2` over a memory that writes `"the key file"` as two words with `tf = 1`!).
+- **Recommendation (in-flight Step 4 fix before commit):**
+  1. In `mnemo/src/text.rs`, tokenize per whitespace-delimited run (or deduplicate the whole + part tokens emitted from each single source run before extending `out`) so that **one occurrence** of `mnemo.nosync`, `open_shared`, `key-file`, `mnemo/src/text.rs`, `Mnemo::open`, or `iCloud's` contributes **`tf = 1`** to the whole compound token and **`tf = 1`** to each distinct sub-token, while still incrementing `tf` when a token or sub-token genuinely appears multiple times across the text.
+  2. Add a unit test in `mnemo/src/text.rs` asserting that `term_freqs(Tokenizer::V2, "mnemo.nosync key-file open_shared Mnemo::open iCloud's")` produces `tf == 1` for every emitted term (`"mnemo.nosync"`, `"mnemo"`, `"nosync"`, `"key-file"`, `"key"`, `"file"`, `"open_shared"`, `"open"`, `"shared"`, `"mnemo::open"`, `"icloud's"`, `"icloud"`), with only `"mnemo"` and `"open"` having `tf == 2` because they appear in two separate tokens.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), into step 4 before it merges. Confirmed by reading `text.rs`: tokenizer 2 runs `token_parts` over every tokenizer 1 token, and tokenizer 1 already emits a `.`/`_`/`'s` token twice (`unicode_words` and the whitespace pass, as in v0.14.0), so parts are counted twice. Tokenizer 1 stays exactly as released (existing indexes depend on it). Tokenizer 2 counts each distinct term once per whitespace run (whole token and each part), with the rec. 2 unit test.
+
+#### R-008.3 — [CORRECTNESS] [LOW] In-flight Step 4 (`mnemo/src/store/maintenance.rs:1114-1185`): `copy_reembedded_into` embeds `_mnemo.kind = "thread_link"` sentinel records as text and counts them in `ReembedReport.memories`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** Uncommitted Step 4 working-tree diff in `mnemo/src/store/maintenance.rs:1103-1186` (`copy_reembedded_into`), `mnemo/src/store/continuation.rs:32-50` (`thread_start`), `mnemo/src/store/recall.rs:336-337`.
+- **Finding:**
+  1. In `mnemo/src/store/continuation.rs:32-37`, `Mnemo::thread_start` creates `_mnemo.kind = "thread_link"` marker records (`content = "thread link: <new> continues from <old>"`) with an all-equal **sentinel vector** (`self.sentinel_vector()`), not an embedded vector.
+  2. In `copy_reembedded_into` (`maintenance.rs:1114-1149`), only `is_manifest(&live[i])` is given a resized sentinel vector (`Memory::scaffold_manifest(dims).vector`). Every `_mnemo.kind = "thread_link"` record is passed through `embedder.embed(&texts)`, replacing its sentinel vector with a real embedding of `"thread link: …"` and counting it as a user memory in `ReembedReport.memories`.
+  3. Also note: `self.memories()` returns all non-deleted catalog rows, including superseded versions (`_mnemo.superseded_by`) and archived thread turns (`_mnemo.kind = "turn"`). Re-embedding turns and essence items is useful when a caller runs `_mnemo.thread`-pinned recall, but superseded fact versions are skipped by every recall path (`recall.rs:306, 310, 396`) and never scored by similarity.
+- **Recommendation:**
+  1. In `copy_reembedded_into` (`maintenance.rs:1114-1149`), treat `_mnemo.kind == "thread_link"` (and optionally superseded records, if their vectors are never read by `recall`) the same way as manifests: resize their sentinel vector to `dims` (`Memory::scaffold_manifest(dims).vector`) without calling `embedder.embed` on them.
+  2. Document on `ReembedReport::memories` (or in `mnemo reembed`'s summary output) that the count covers all re-embedded records (facts, essence items, and archived turns).
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-14), into step 4 before it merges. Low harm today (recall leaves out thread links by default, `recall.rs:333-345`), but `reembed` should keep the sentinel vectors of thread links, resized to the new width, as it does for the manifest, and its report should say what the count covers. Superseded versions are re-embedded like the rest, so a later un-supersede or history read stays consistent.
+
+---
+
+### Batch `RB-010` — 2026-11-15 (REVIEWER-B: the v0.15.0 release review at READY, before the tag: keys and the keychain, LOCK-2, `mcp install`, hybrid recall and TOK-1, the built-in embedder, the strip, and the release workflow, with four new items)
+
+**What was reviewed.** `rel0150-ready` at `e7a34d8` against the tag `v0.14.0`, called by PLANNER-A's 2026-11-15 entry "v0.15.0 READY accepted; merge PR 88, then a dry run on `release-0.15.0`; REVIEWER-B's release review (RB-010) is called". It's the scheduled review at a minor release's READY (`Reviewer` rule 4), and the release changes how the file's key is made and found and what the release workflow builds.
+
+**How.**
+- **My own clone,** `/tmp/rb-mnemo`, at `e7a34d8`. GitHub's `release-0.15.0` (`155ed5c`, PR 88's squash merge, the commit the Worker's dry run used) has the same tree (`c2f945c`). Nothing was built, fetched or checked out in `mnemo.nosync`. Builds used `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`.
+- **The Worker's suite on this Mac:** `cargo test --locked --features failpoints --no-fail-fast`: **576 passed, 0 failed, 1 ignored**. `cargo test --locked --features embed-candle --lib --test builtin_embedder --test builtin_cli --test query_keywords`: **75 passed**.
+- **Checks of my own,** all in `/tmp/rb-scratch`, with the debug CLI built from the clone (`--features keychain,embed-candle,dev-hooks`), a test key store (`MNEMO_DEV_KEYSTORE`), a fake `HOME`, and my own `MNEMO_CACHE_DIR`:
+  1. `q1/`: where key material goes (piped `init`, wrong secrets from each source, what an `--embed-cmd` child sees, what `mcp install --print` shows).
+  2. `q2/`: a local server behind `MNEMO_MODEL_URL` that serves wrong, short and long files; two installs at once; files changed in the cache after an install.
+  3. `q3/`: what a v0.14-style MCP setup does under this server, with the model present and without.
+  4. `rb7/`: my cross-process binary from RB-007 and RB-008 rebuilt against this tree (release build): a writer against 8 and 16 cheap-read processes, and one 60 s kill test with a compactor.
+- **The Worker's dry run** [43664209436](https://github.com/toarchkumar/mnemo/actions/runs/43664209436) on `155ed5c`, read with `gh run view`.
+- **Not done:** nothing on Linux or Windows; the real OS keychain wasn't touched (the Worker's `keychain_os` test covers it in CI); the real model cache wasn't touched (the pinned model was downloaded once into `/tmp/rb-cache`); Python was read, not run; `test/project.mnemo` wasn't opened.
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+- **Security points** are only in `SECURITY.local.md`, as `RB-010.2`, with the state of `R-007.6`, `W-001` and `RB-009.4`.
+
+---
+
+**The verdict first.**
+
+- **The release is in good shape,** and most of what I tried to break held: no key material on any stream I could reach, no way I found to load a model file that doesn't match its hash, LOCK-2 does what `RB-008.1` asked for, and the release workflow publishes only what the same run built.
+- **One thing I'd fix before the tag** (`RB-010.1`): `serve --mcp` exits at start on a brain that isn't 384 wide and records no embedder, as soon as the model is in the cache. A brain made by v0.14's `mnemo init` (768 wide) and served without `--embed-cmd` is exactly that. On a 384-wide brain with someone else's vectors, the server writes the built-in's identity into the file at start.
+- **Two security points** are held in `SECURITY.local.md` (`RB-010.2`). Both are small changes. I'd take them before the tag too, or, failing that, before 12.2's `onboard` puts an agent in front of `mcp install`.
+- **The release workflow** runs two of its five CLI binaries and wheels before it asks for approval (`RB-010.3`). Not a reason to hold this tag, since CI tests the same code from source on all three systems, but this is the first release with a stripped binary, a model runtime and a keychain store in it.
+- **`RB-009.1` to `.4` are `VERIFIED`** at `e7a34d8`.
+
+---
+
+**The Planner's four questions.**
+
+**1. Can a key, a passphrase or a recovery code reach anywhere the docs don't say?** In two places, both held in `SECURITY.local.md` (`RB-010.2`). Everything else I tried held:
+
+| Where | Result | How |
+|---|---|---|
+| `init` with its output piped | No key material: no 64-character hex, no `MN1-`, no group of the code | Tested |
+| Error messages | A wrong secret names its source and never the value ("the secret came from MNEMO_KEY"); a mistyped recovery code names the group; the key command's bad output isn't echoed | Tested |
+| `mnemo info` | Names the key source (`key source:  MNEMO_PASSPHRASE`), not the secret | Tested |
+| `mnemo recovery-code` with no terminal | Refuses | Tested |
+| The config `mcp install` writes | `serve --mcp --shared <brain>` and nothing else. Before every write `check_rules` asserts its entry has no `env` block and, in a project scope, no absolute path, embed command or key command (`bin/mnemo/mcp_install.rs:251`) | Tested, and by reading |
+| A keychain entry | Per user, found by the file's salt. A hostile file with a copied salt gets the key tried against it in this process and fails on the wrap; the key goes nowhere. The directory store exists only with `dev-hooks` | By reading |
+| Panics and `Debug` | The secret types hold `Zeroizing` buffers; I found no `Debug` or `Display` that prints one | By reading |
+| What a child process the CLI starts can see | **`RB-010.2`** | Tested |
+| What `mcp install` shows before it writes | **`RB-010.2`** | Tested |
+
+**2. Can a model file that doesn't match its SHA-256 ever be loaded?** Not by any path I found.
+
+- **The hash is checked at every load, on the bytes that are then parsed.** `load_pinned` reads the three files into memory, hashes those buffers and builds the model from the same buffers (`builtin.rs:361`), so there's no window between the check and the use. It matters: a check only after download would trust the cache directory for ever.
+- **Tested against a local server** (`MNEMO_MODEL_URL`):
+
+| Case | Result |
+|---|---|
+| Right size, wrong content | "doesn't match its pinned SHA-256 … nothing was installed"; the model directory is left empty |
+| Five bytes short | "is 732 bytes, not the 737 pinned"; nothing left |
+| Five bytes long | "is larger than the 737 bytes pinned"; nothing left |
+| Two installs at once, wrong content | Both exit 1; nothing left. Each writes its own `<name>.<pid>.part` |
+| A file changed in the cache after install (same size) | `remember --text` refuses with the pinned-hash message; `recall --text` falls back to keywords and says why |
+
+- **`--model-dir`** loads files that aren't the pinned ones under an identity that names their hashes (`local:config.json=<sha>,…`). That's the documented behaviour, and the identity check then keeps such a file from being mixed with the pinned model.
+- **`MNEMO_MODEL_URL`** changes only where the bytes come from. It accepts plain `http`, which the hash makes harmless.
+- **Three small things,** none of which loads a wrong file (`RB-010.4` items 1 to 3): `embedder status` says "installed: yes" on sizes alone; `embedder install` won't replace a same-size wrong file; a killed download leaves its `.part` file.
+
+**3. Does a v0.14 caller behave differently in a way the CHANGELOG doesn't say?** Yes, in one place: the MCP server (`RB-010.1`). The rest matches:
+
+| Checked | Result |
+|---|---|
+| Public functions | None removed and no changed signature that I found (compared by name across `mnemo/src`; 52 added) |
+| Dependencies | No new non-optional one; `serde_json` gains the `raw_value` feature. MSRV 1.94 is in the CHANGELOG |
+| The breaks I looked for | All listed: `EmbedderIdentity.query_convention`, the boxed `EmbedderMismatch` fields, `RecallRequest`'s new fields, `init`'s 384 and its generated key, hybrid recall by default, tokenizer 2, the key file's owner and mode check, the KDF floor, compaction keeping the salt, the strip |
+| A v0.14 file | Opens and is written by this build; the Worker's `compat (v0.14.0, linux)` job reads a tokenizer 2 file with the published v0.14.0 CLI |
+| The CLI on a 768-wide brain with the model installed | Handled well: `recall --text` says "recalling by keywords only: this file records no embedder yet", and `remember --text` refuses with a message that names `--embed-cmd` and `mnemo reembed`. Tested |
+| The MCP server on the same brain | **Exits at start** (`RB-010.1`). Tested |
+
+**4. Can the release workflow publish something no check ran on?** Nothing is published that this run didn't build, but three of the five targets are built and never started (`RB-010.3`).
+
+- **The gate holds.** `approve-release` runs only when `check-artifacts.result == 'success'` (with every build), and every publish job waits for the approval. The publish and attach jobs download this run's artifacts; none builds again.
+- **The unrendered name** (`approve the release (v${{ needs.mobile-prepare.outputs.version }}, …)`) is what GitHub shows for a job that was skipped before its name was evaluated, as in earlier dry runs (`RB-005.4` item 7). The outputs themselves (`version`, `dry_run`, `mobile`) are set from `steps.v` and the jobs that read them ran correctly in the dry run.
+- **The dry run passed** (43664209436, `155ed5c`, `workflow_dispatch`): both artifact checks fetched the model and recalled with the CLI and the wheel; the crates.io, PyPI, attach and Maven Central jobs ran their dry-run steps and skipped their publish steps; the approval, the GitHub Release and the engine gate were skipped, as a dry run should.
+- **What isn't checked** is in `RB-010.3`.
+
+---
+
+**`RB-009`, checked against the tree.**
+
+| Item | What's in the tree at `e7a34d8` | Status |
+|---|---|---|
+| `RB-009.1` | `keys::resolve` reads the file's KDF parameters first and takes the first source of that kind; the Worker's two-brain test passes | `VERIFIED` |
+| `RB-009.2` | `wal_header_salts` when page 0 doesn't parse; `rekey_stored` keeps both entries in the "either secret" case; `store_and_check` reads the entry back before the commit; `create_generated` writes under a temporary name and renames; `KeyStore::durable` | `VERIFIED` |
+| `RB-009.3` | The parser's messages (hyphens, "or the one before it", the last group, the prefix's aliases); "30 times in 31"; the sentence on the seal; the 10 s key-command timeout in the server. The container guidance is in the note (lines 739 to 744) and not yet in `mnemo/README.md` (`RB-010.4` item 7) | `VERIFIED` |
+| `RB-009.4` | Both parts; see `SECURITY.local.md` | `VERIFIED` |
+
+**LOCK-2 (`RB-008.1`), measured again.** A writer making 12 writes against cheap-read processes, release build, this Mac:
+
+| Readers | Deadline | Writes in | `Locked` | Wait and commit, median / max |
+|---|---|---|---|---|
+| 8 (`len`) | 10 s | 12 of 12 | 0 | 203 ms / 540 ms |
+| 16 (`len`) | 10 s | 12 of 12 | 0 | 535 ms / 559 ms |
+| 16 (`recall`) | 10 s | 12 of 12 | 0 | 536 ms / 578 ms |
+| 8 (`len`) | 2 s | 12 of 12 | 0 | 547 ms / 570 ms |
+
+At v0.14.0 READY the 16-reader case lost 6 writes of 7 to `Locked`. Now the wait sits just past the 500 ms valve, as designed. The 60 s kill test (seed 21, a compactor, 248 kills) acknowledged 837 writes with none missing and none stored twice, 243 compactions got in, and `verify` passed.
+
+---
+
+**New items**
+
+#### RB-010.1 — [CORRECTNESS] [HIGH] `serve --mcp` exits at start on a brain that isn't 384 wide and records no embedder, once the model is installed; and it writes the built-in's identity into a 384-wide brain at start
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** tested (`/tmp/rb-scratch/q3`), debug CLI at `e7a34d8`, with `MNEMO_PASSPHRASE`. The brains were made by this build's `init --dimensions 768` and `--dimensions 384` with no embedder, which is what v0.14's `init` made (768 was its default). I didn't use the published v0.14.0 binary.
+  - **The code path.** With no `--embed-cmd`, the CLI serves with the built-in (`bin/mnemo.rs:3565`, `serve_builtin`). `serve_inner` loads or downloads the model before it opens the file (`mcp.rs:372-390`). After the open it compares the file's recorded embedder with the built-in's: a different one is served without an embedder, with a notice; anything else goes to `set_embedder(e)?` (`mcp.rs:424-447`). `set_embedder` returns `DimensionMismatch` when the widths differ, and records the identity in the file when the file has none (`store/crud.rs:159-199`).
+  - **A 768-wide brain with no recorded embedder:**
+
+| The model | `mnemo serve --mcp v768.mnemo` |
+|---|---|
+| Not in the cache, and the download fails | Starts. "no embedder (…); recall's 'text' is matched by keyword only". `remember` with a vector, `recall` with a vector and `recall` by text all answer |
+| In the cache | **Exits 1 before `initialize` is answered:** `error: vector dimension mismatch: database expects 768, got 384`. The same with `--shared` |
+
+  - **A 384-wide brain with no recorded embedder** (vectors supplied by the client, from any 384-wide model): the server starts, prints "embedder ready (the built-in, Snowflake/snowflake-arctic-embed-xs@…)", and the identity is in the file from then on. Starting it afterwards with `--embed-cmd … --embed-name my-minilm` exits 1: "embedder identity mismatch: this file's vectors come from embedder (name="Snowflake/…")".
+  - **The CLI gets both cases right** on the same files: `recall --text` says "recalling by keywords only: this file records no embedder yet", and `remember --text` on the 768 file refuses with the fix in the message.
+- **Finding:**
+  1. **An upgrade breaks a working setup, and the first run hides it.** A v0.14 MCP config for a brain from `mnemo init`, with no `--embed-cmd` (keyword recall, or vectors from the client), works on the first start after the upgrade only if the download fails. Once the 91 MB are in the cache, every start exits before the handshake. The client shows a server that failed to start, and the message on stderr doesn't say what to do.
+  2. **`mcp install` writes that config.** Its entry is `serve --mcp --shared <brain>` with no embedder flag (`mcp_install.rs:214`), so for any existing brain of another width with no recorded embedder, the config it writes is one that exits at start.
+  3. **A brain that does record its embedder is fine** (the notice branch). So the files hit are the ones that were used without the embed protocol. I can't say how many there are; the default `init` made them.
+  4. **The 384 case is a write nobody asked for.** No text call was made. The file now says its vectors came from a model they didn't come from; a later text recall would compare the built-in's query vector with those vectors and return confident, wrong similarity; and the user's own embedder is refused. 384 is a common width (MiniLM, bge-small, e5-small, gte-small). I found no command that clears a recorded identity short of `reembed`.
+  5. **The model is fetched even when it can't be used:** the download comes before the open, so a 768-wide brain pays for 91 MB that the server then can't adopt.
+  6. No test covers the server on a brain of another width (I looked in `tests/builtin_cli.rs` and the MCP tests), and the CHANGELOG's line is "the MCP server starts without an embedder and says so" for the offline case only.
+- **Recommendation:**
+  1. **In `serve_inner`, treat a width other than the built-in's the way a different recorded embedder is treated:** serve without an embedder, with a notice that names `--embed-cmd` and `mnemo reembed <file> --embed-dims 384` (the CLI's wording is right). Never `?` out of the server because of the default embedder.
+  2. **Look before fetching.** `Mnemo::peek_dimensions` exists; when the file isn't 384 wide, don't load or download the model at all.
+  3. **Don't record the identity at start.** Adopt the built-in in memory, and record it when the first text is embedded for a write, or at start only when the file has no memories besides the manifest. A file that has vectors and no recorded embedder is served the way the CLI's recall treats it: keywords only, with the notice.
+  4. A test for each: a 768-wide brain with the model present (the server answers `initialize`, a text recall is keyword-only); a 384-wide brain with vectors and no identity (the file's bytes don't change at start).
+  5. A CHANGELOG line under "Changed" for what `serve --mcp` does without `--embed-cmd`, with the two cases.
+- **Would I hold the tag for it?** Yes, for recommendations 1 and 4's first test at least. It's a few lines, and it's what an upgrading user's agent meets first. Recommendation 3 is the more careful change; if it doesn't fit, say in the CHANGELOG that the server records the built-in on a 384-wide file that has no embedder.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15): before the tag, in `rel0150-rb010`. Verified in code: `serve_inner` loads or fetches the model before the open (`mcp.rs:370-390`) and `?`s `set_embedder` (`mcp.rs:441-444`), which returns `DimensionMismatch` on width and records a missing identity (`store/crud.rs:159-199`); the CLI's recall uses the built-in only on a file that records it (`bin/mnemo.rs:3150-3195`). Recs 1 to 5 taken, rec 3 in its careful form: the server mirrors the CLI (a file with vectors and no recorded embedder is keyword-only, with the notice, and nothing is written at start; only a file with nothing but its scaffold adopts and records), and `peek_dimensions` decides before the model is loaded or fetched.
+
+#### RB-010.2 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** two points about where secrets can be seen, both tested at `e7a34d8`, both small changes. One finishes `R-007.6` point 4.
+- **Would I hold the tag for it?** I'd take both before the tag, since each is a few lines. If not, before 12.2.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15): before the tag, in `rel0150-rb010`; the details and the triage are in `SECURITY.local.md`.
+
+#### RB-010.3 — [CORRECTNESS] [MEDIUM] The release workflow starts two of its five CLI binaries and wheels before the approval; three targets and the sdist are published without having run
+- **Status:** `ACCEPTED`
+- **Context / Evidence:** by reading `.github/workflows/release.yml` at `e7a34d8`, and the dry run 43664209436.
+  - `build-cli` and `build-wheels` each build five targets: x86_64 and aarch64 Linux, x86_64 and arm64 macOS, x86_64 Windows. `build-sdist` builds one more file.
+  - `check-artifacts` has two matrix rows, `aarch64-unknown-linux-gnu` on `ubuntu-24.04-arm` and `x86_64-apple-darwin` on `macos-15-intel`: the two that are cross-built. Each downloads that target's CLI and wheel, installs the model, and runs `init`, `remember` and `recall`. The dry run shows exactly those two jobs.
+  - No step in the workflow starts the x86_64 Linux, arm64 macOS or Windows CLI or wheel, or installs the sdist. `attach` and `publish-pypi` take all of them.
+  - What covers those targets today is `ci.yml`, from source: `cargo test` on the three systems in a debug build (the keychain tests and the offline embedder tests among them), and `builtin embedder (linux)` in a release build with the model. The Python job builds a wheel with `dev-hooks`, which isn't the published one.
+- **Finding:**
+  1. **The checked pair was chosen for a good reason** (they're the builds made on another machine than they run on) and the check is a real one. The gap is the other three, which are the ones most people download.
+  2. **This release changes what a built artifact is:** `strip = "symbols"`, candle, tokenizers, rustls and a keychain store per system are all new in the binary, and `--features keychain,embed-candle` in a release profile is built nowhere in CI for Windows or arm64 macOS. The reverted `llvm-strip` commit (`42d0c36`, `e7a34d8`) shows this is where surprises have been.
+  3. **Windows is the thinnest:** its release binary with the embedder has never been started by any job, and its recovery-code display takes a different branch (`RB-010.4` item 4).
+  4. The sdist is uploaded to PyPI unbuilt. A missing file in it shows up only when someone without a wheel installs it.
+- **Recommendation:**
+  1. Give `check-artifacts` all five rows. The three missing ones run on the runners that built them (`ubuntu-latest`, `macos-latest`, `windows-latest`); the steps are already written, apart from the shell on Windows.
+  2. If the model download five times over is a worry, the three native rows can run a shorter check: `--version`, `embedder status`, `init`, a `remember` and `recall` by keywords, and `import mnemo_engine` with `builtin_embedder_info()`. That alone shows the binary starts and links.
+  3. Build the sdist once (`pip install` it on Linux, `import mnemo_engine`) in the same job, or state in `RELEASING.md` that it's unchecked.
+  4. Keep `approve-release` needing the whole matrix, as now.
+- **Would I hold the tag for it?** No. I'd want it before v0.15.1 or the next release that changes the build. If it's cheap to add now, the tagged run is where it earns its keep.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15): before the tag, in `rel0150-rb010`. Verified: `check-artifacts`' matrix has the two cross-built rows only (`release.yml:280-295`). Recs 1, 3 and 4: all five targets on their native runners with the same full check (Windows under `bash`), the sdist built and imported on Linux, and `approve-release` needing the whole matrix. This release changes what an artifact is, so the tagged run is where it earns its keep; the dry run on the bumped head proves it first.
+
+#### RB-010.4 — [DX/DOCS] [LOW] Smaller points at READY
+- **Status:** `ACCEPTED` (1, 2, 3, 4's message, 5, 8) / `DEFERRED` (6, 7)
+- **Context / Evidence:** tested where it says so, otherwise by reading at `e7a34d8`.
+  1. **`mnemo embedder status` says "installed: yes" for files of the right size and the wrong content** (tested: exit 0). `is_installed` compares sizes; its doc comment says so (`builtin.rs:163-171`). The release workflow's own check greps for that line.
+  2. **`mnemo embedder install` can't repair that case** (tested: exit 1, nothing fetched). "Missing" means absent or the wrong size (`builtin.rs:178-186`), so a same-size bad file is never replaced, and the message doesn't say to delete the directory.
+  3. **A download that's killed leaves `<name>.<pid>.part`** (up to 90 MB) in the model directory. A failed one removes its own (`builtin.rs:280`); nothing removes an older process's. The file is made with `File::create`, which follows a symlink already at that name; that matters only if the cache is in a directory other users can write.
+  4. **The server's first start downloads 91 MB before it answers `initialize`** (`mcp.rs:372-390`). A client with a start timeout kills it part-way, and the next start begins again from zero. `mcp install` could run `embedder install`, or say to.
+  5. **On Windows the recovery code isn't shown on an alternate screen:** the two escape sequences are under `#[cfg(unix)]` (`keys/display.rs:84`, `:101`), so there the code stays in the console's scrollback. The CHANGELOG and `init --help` don't make the exception.
+  6. **Ctrl-C while the code is shown** leaves the terminal on the alternate screen, with the code on it, until the user leaves it. No handler restores it.
+  7. **`read_key_file` checks the file's owner and mode and then reads it by path** (`keys/mod.rs:339`, `:369`): two looks at a name that could change in between. Opening it once and checking the open handle closes that. It needs someone who can already write the directory, so it's tidiness.
+  8. **`mnemo/README.md` doesn't carry two things the note has:** what the keychain protects and what it doesn't (it's in `init --help` and the note), and the key-file guidance for containers (`RB-009.3` item 4; the note's lines 739 to 744).
+  9. **`AI_AGENT`** is still a candidate for the marker list rather than on it (`AGENT_MARKERS` has `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`). The key press and the terminal tests carry the rule, so that's fine; it's listed so it isn't lost.
+  10. **`mnemo --version` says 0.14.0** at READY, and the dry run's Swift branch was named from it. That's the release PR's job; noted so the tagged run isn't the first time 0.15.0 goes through the version check.
+- **Recommendation:** item 1: say "installed: yes (sizes match; the hashes are checked at each load)", or hash in `status`, which is the one place a third of a second doesn't matter. Item 2: when a load fails on the hash, the message names the fix (`embedder install --force`, or delete the directory), and `install` replaces a file whose hash is wrong. Item 3: remove stale `.part` files at install; `create_new`. Items 5, 6 and 8 are a sentence or a few lines each. Items 4, 7, 9 and 10 need no change now.
+- **Would I hold the tag for it?** No. Items 1, 2 and 8 are cheap enough to go with `RB-010.1`.
+- **Planner Triage:** `ACCEPTED` in part (PLANNER-A, 2026-11-15), in `rel0150-rb010`: item 1 (`status` says what it compared, or hashes), item 2 (`install` replaces a wrong-hash file; the load error names the fix), item 3 (stale `.part` files removed at install; `create_new`), item 4's pointer only (`mcp install` says to run `mnemo embedder install` when the model isn't in the cache; the rest of item 4 goes to 12.2's `onboard`), item 5 (the Windows exception in the CHANGELOG and `init --help`), item 8 (the two README points). Item 10 by the version bump in the same PR. `DEFERRED`: item 6 to KEYS-DISPLAY-2 after v0.15 (a signal handler is more than a line); item 7 to CLEANUP-1. Item 9: no change.
