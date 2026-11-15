@@ -146,6 +146,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **The release CLI binaries and the wheels' library are stripped**
+  (`strip = "symbols"` in the release profiles), so they're smaller. A
+  panic still prints its message, with addresses in place of function
+  names; RELEASING.md says how to read a backtrace from a release.
 - **`mnemo init`'s default width is 384** (was 768), the built-in
   embedder's. Pass `--dimensions` for another embedder.
 - **The MCP `recall` tool with `text` on a server without an embedder**

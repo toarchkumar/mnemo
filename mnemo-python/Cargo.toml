@@ -56,6 +56,11 @@ embed-candle = ["mnemo_core/embed-candle"]
 [profile.release]
 lto = true
 codegen-units = 1
+# v0.15 (the user's decision, 2026-11-14): strip the symbol table from
+# the wheels' library. A panic still prints its message, with addresses in place of
+# function names; RELEASING.md says how to read a backtrace (rebuild the tag
+# without the strip).
+strip = "symbols"
 
 # Mirrors the declaration in `mnemo/Cargo.toml` — see that one for the
 # full rationale. The ARMv8 hardware-AES cfgs are set via RUSTFLAGS
