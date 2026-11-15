@@ -927,6 +927,8 @@ cargo run --bin mnemo -- <command>
 | `embedder status` | The built-in embedder's model, identity and cache, and whether it's installed (v0.15) |
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
+| `thread ingest` | Save a transcript into a thread's archive (idempotent per turn). `--tool-results omit` keeps only `[tool_result ok|error, N bytes]` markers, and `--redact` replaces known secret shapes (private keys, cloud and API tokens, JWTs, recovery codes, secret-looking `NAME=value`s) with `[redacted: <kind>]` (v0.16) |
+| `hook`    | The hooks `onboard` installs for Claude Code and Cursor (v0.16): `session-start` adds the guide's card, the project's notes and essence, and a short recall to the context (8,000 bytes by default, `--budget` up to 9,000); `pre-compact` and `session-end` save the transcript without tool output and with secrets redacted. Always exits 0, never prompts or downloads |
 | `demo`    | Self-contained end-to-end demonstration              |
 
 **The project brain** (v0.16, 12.2): in a git repository, these commands

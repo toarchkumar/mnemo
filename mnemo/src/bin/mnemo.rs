@@ -9,6 +9,8 @@ use std::process::ExitCode;
 
 #[path = "mnemo/export.rs"]
 mod export;
+#[path = "mnemo/hook.rs"]
+mod hook;
 #[path = "mnemo/inspect.rs"]
 mod inspect;
 #[path = "mnemo/mcp_install.rs"]
@@ -887,6 +889,26 @@ enum Command {
         #[arg(long, value_enum, default_value = "markdown", requires = "guide")]
         format: GuideFormat,
     },
+    /// The hooks `mnemo onboard` installs for Claude Code and Cursor (12.2).
+    ///
+    /// Reads the client's hook JSON on stdin. `session-start` adds the
+    /// guide's card, the project's notes and essence, and a short recall to
+    /// the agent's context; `pre-compact` and `session-end` save the
+    /// transcript into the session's thread, without tool output and with
+    /// known secret shapes redacted. It always exits 0, never prompts and
+    /// never downloads: a problem is a one-line note.
+    Hook {
+        /// The event.
+        #[arg(value_enum)]
+        event: hook::Event,
+        /// The client that runs it (its input and output shapes).
+        #[arg(long, value_enum)]
+        client: hook::Client,
+        /// `session-start`'s most bytes of context (default 8,000, at most
+        /// 9,000; the card always fits).
+        #[arg(long)]
+        budget: Option<usize>,
+    },
     /// MCP clients: `mcp install` adds this brain's server to one.
     Mcp {
         #[command(subcommand)]
@@ -976,6 +998,24 @@ enum EmbedderCmd {
     Status,
 }
 
+/// `thread ingest --tool-results`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum ToolResultsArg {
+    /// Keep each tool result's body.
+    Full,
+    /// Keep only `[tool_result ok|error, N bytes]`.
+    Omit,
+}
+
+impl From<ToolResultsArg> for mnemo_engine::ToolResults {
+    fn from(t: ToolResultsArg) -> Self {
+        match t {
+            ToolResultsArg::Full => mnemo_engine::ToolResults::Full,
+            ToolResultsArg::Omit => mnemo_engine::ToolResults::Omit,
+        }
+    }
+}
+
 /// `onboard --guide`'s formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum GuideFormat {
@@ -1046,6 +1086,17 @@ enum ThreadCmd {
         /// `claude-code-jsonl` (`~/.claude/projects/<p>/<s>.jsonl`).
         #[arg(long, default_value = "jsonl")]
         format: String,
+        /// 12.2: what a `claude-code-jsonl` transcript's tool results keep:
+        /// `full` (the body) or `omit` (a `[tool_result ok|error, N bytes]`
+        /// marker). The hooks use `omit`.
+        #[arg(long, value_enum, default_value = "full")]
+        tool_results: ToolResultsArg,
+        /// 12.2: replace known secret shapes (private keys, cloud and API
+        /// tokens, JWTs, recovery codes, secret-looking `NAME=value`s) with
+        /// `[redacted: <kind>]` before storing. A best effort. The hooks
+        /// always use it.
+        #[arg(long)]
+        redact: bool,
         /// Embedder command (same contract as `mnemo remember --embed-cmd`),
         /// in place of the built-in embedder.
         #[arg(long, requires = "embed_name")]
@@ -2168,6 +2219,7 @@ fn run() -> std::result::Result<(), String> {
         std::env::set_current_dir(dir).map_err(|e| format!("-C {}: {e}", dir.display()))?;
     }
     let project_brain = resolve_brain_arg(&mut cli.command, cli.dir.is_some())?;
+    let moved = cli.dir.is_some();
     match cli.command {
         Command::Init {
             path,
@@ -3763,6 +3815,16 @@ fn run() -> std::result::Result<(), String> {
             };
             print!("{text}");
         }
+        Command::Hook {
+            event,
+            client,
+            budget,
+        } => hook::run(hook::Opts {
+            event,
+            client,
+            budget,
+            moved,
+        }),
         Command::Embedder { cmd } => run_embedder(cmd)?,
         Command::Cache { op } => run_cache_op(op)?,
         Command::Mcp {
@@ -3965,8 +4027,79 @@ fn fmt(e: mnemo_engine::MnemoError) -> String {
 /// Phase 12.7a: handle `mnemo thread {ingest|export|forget}`. Split
 /// into its own function because the three subcommands share nothing
 /// with the top-level dispatch beyond passphrase resolution.
+/// 12.4: ingest `turns` into `thread`: plan under a short read (which turns
+/// are new, and the chunk texts), embed them with no lock held, then write
+/// the vectors under the write lock. If another process ingested in
+/// between, the plan is made again under the lock and only the texts that
+/// weren't embedded yet are embedded there. `make_embedder` gets the
+/// brain's width. Used by `thread ingest` and the hooks (12.2).
+fn ingest_turns(
+    path: &str,
+    pp: &inspect::Secret,
+    thread: &str,
+    turns: &[mnemo_engine::ThreadTurn],
+    op: &str,
+    make_embedder: impl FnOnce(usize) -> std::result::Result<Box<dyn mnemo_engine::Embedder>, String>,
+) -> std::result::Result<mnemo_engine::IngestReport, String> {
+    // 12.4: plan under a short read (which turns are new, and the
+    // chunk texts), embed them with no lock held, then write the
+    // vectors under the write lock. If another process ingested in
+    // between, the plan is made again under the lock and only the
+    // texts that weren't embedded yet are embedded there.
+    let (texts, dimensions) = {
+        let mut db = open_r(path, pp).map_err(fmt)?;
+        (
+            db.ingest_thread_texts(thread, turns).map_err(fmt)?,
+            db.dimensions(),
+        )
+    };
+    let embedder = make_embedder(dimensions)?;
+    let pre: Vec<Vec<f32>> = if texts.is_empty() {
+        Vec::new()
+    } else {
+        use mnemo_engine::Embedder;
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        embedder.embed(&refs).map_err(fmt)?
+    };
+    let mut db = open_w(path, pp, op).map_err(fmt)?;
+    db.set_embedder(embedder).map_err(fmt)?;
+    let now = db.ingest_thread_texts(thread, turns).map_err(fmt)?;
+    let report = if now == texts {
+        db.ingest_thread_with_vectors(thread, turns, &pre)
+            .map_err(fmt)?
+    } else {
+        let mut have: std::collections::HashMap<&str, &Vec<f32>> =
+            texts.iter().map(String::as_str).zip(pre.iter()).collect();
+        let missing: Vec<&str> = now
+            .iter()
+            .map(String::as_str)
+            .filter(|t| !have.contains_key(t))
+            .collect();
+        let extra = if missing.is_empty() {
+            Vec::new()
+        } else {
+            db.embedder()
+                .ok_or_else(|| "no embedder registered".to_string())?
+                .embed(&missing)
+                .map_err(fmt)?
+        };
+        for (t, v) in missing.iter().zip(extra.iter()) {
+            have.insert(t, v);
+        }
+        let vectors = now
+            .iter()
+            .map(|t| have.get(t.as_str()).map(|v| (*v).clone()))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| "embedder returned too few vectors".to_string())?;
+        db.ingest_thread_with_vectors(thread, turns, &vectors)
+            .map_err(fmt)?
+    };
+    db.flush().map_err(fmt)?;
+    Ok(report)
+}
+
 fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
-    use mnemo_engine::{read_transcript, TranscriptFormat};
+    use mnemo_engine::{read_transcript_with, TranscriptFormat};
     use std::io::{Read, Write};
     match cmd {
         ThreadCmd::Ingest {
@@ -3974,6 +4107,8 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             thread,
             transcript,
             format,
+            tool_results,
+            redact,
             embed_cmd,
             embed_name,
             embed_normalize,
@@ -3986,79 +4121,39 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
                 format!("unknown --format '{format}' (want 'jsonl' or 'claude-code-jsonl')")
             })?;
             // Read the transcript (stdin with `-`, else the file).
-            let turns = if transcript == "-" {
+            let opts = mnemo_engine::TranscriptOptions {
+                tool_results: tool_results.into(),
+                lenient: false,
+            };
+            let mut turns = if transcript == "-" {
                 let mut buf = Vec::new();
                 std::io::stdin()
                     .read_to_end(&mut buf)
                     .map_err(|e| format!("reading stdin: {e}"))?;
-                read_transcript(&buf[..], fmt_enum).map_err(fmt)?
+                read_transcript_with(&buf[..], fmt_enum, opts).map_err(fmt)?
             } else {
                 let file = std::fs::File::open(&transcript)
                     .map_err(|e| format!("opening {transcript}: {e}"))?;
-                read_transcript(file, fmt_enum).map_err(fmt)?
+                read_transcript_with(file, fmt_enum, opts).map_err(fmt)?
             };
-
-            // 12.4: plan under a short read (which turns are new, and the
-            // chunk texts), embed them with no lock held, then write the
-            // vectors under the write lock. If another process ingested in
-            // between, the plan is made again under the lock and only the
-            // texts that weren't embedded yet are embedded there.
-            let (texts, dimensions) = {
-                let mut db = open_r(&path, &pp).map_err(fmt)?;
-                (
-                    db.ingest_thread_texts(&thread, &turns).map_err(fmt)?,
-                    db.dimensions(),
-                )
-            };
-            let embedder = new_embedder(
-                embed_cmd.as_deref(),
-                embed_name.as_deref(),
-                embed_normalize,
-                embed_timeout,
-                embed_query.as_deref().unwrap_or_default(),
-                Some(dimensions),
-            )?;
-            let pre: Vec<Vec<f32>> = if texts.is_empty() {
-                Vec::new()
-            } else {
-                use mnemo_engine::Embedder;
-                let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-                embedder.embed(&refs).map_err(fmt)?
-            };
-            let mut db = open_w(&path, &pp, "thread ingest").map_err(fmt)?;
-            db.set_embedder(embedder).map_err(fmt)?;
-            let now = db.ingest_thread_texts(&thread, &turns).map_err(fmt)?;
-            let report = if now == texts {
-                db.ingest_thread_with_vectors(&thread, &turns, &pre)
-                    .map_err(fmt)?
-            } else {
-                let mut have: std::collections::HashMap<&str, &Vec<f32>> =
-                    texts.iter().map(String::as_str).zip(pre.iter()).collect();
-                let missing: Vec<&str> = now
-                    .iter()
-                    .map(String::as_str)
-                    .filter(|t| !have.contains_key(t))
-                    .collect();
-                let extra = if missing.is_empty() {
-                    Vec::new()
-                } else {
-                    db.embedder()
-                        .ok_or_else(|| "no embedder registered".to_string())?
-                        .embed(&missing)
-                        .map_err(fmt)?
-                };
-                for (t, v) in missing.iter().zip(extra.iter()) {
-                    have.insert(t, v);
+            if redact {
+                let counts = hook::redact_turns(&mut turns);
+                if let Some(line) = hook::redaction_note(&counts) {
+                    eprintln!("{line}");
                 }
-                let vectors = now
-                    .iter()
-                    .map(|t| have.get(t.as_str()).map(|v| (*v).clone()))
-                    .collect::<Option<Vec<_>>>()
-                    .ok_or_else(|| "embedder returned too few vectors".to_string())?;
-                db.ingest_thread_with_vectors(&thread, &turns, &vectors)
-                    .map_err(fmt)?
-            };
-            db.flush().map_err(fmt)?;
+            }
+
+            let report =
+                ingest_turns(&path, &pp, &thread, &turns, "thread ingest", |dimensions| {
+                    new_embedder(
+                        embed_cmd.as_deref(),
+                        embed_name.as_deref(),
+                        embed_normalize,
+                        embed_timeout,
+                        embed_query.as_deref().unwrap_or_default(),
+                        Some(dimensions),
+                    )
+                })?;
             println!(
                 "thread {thread}: added {added} record(s) ({chunked} chunked, {truncated} truncated); \
                  skipped {skipped} already-stored turn(s)",
