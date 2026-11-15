@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.15.0</span>
+        <span class="pill"><span class="dot"></span>v0.16.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · iOS · Android · CLI · MCP</span>
       </div>
@@ -399,12 +399,13 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 
       <div class="install" role="region" aria-label="Install">
         <div class="install-tabs" role="tablist" aria-label="Install method">
-          <button role="tab" aria-selected="true" data-install="pip">Python</button>
+          <button role="tab" aria-selected="true" data-install="sh">CLI</button>
+          <button role="tab" aria-selected="false" data-install="ps">Windows</button>
+          <button role="tab" aria-selected="false" data-install="pip">Python</button>
           <button role="tab" aria-selected="false" data-install="cargo-add">Rust library</button>
-          <button role="tab" aria-selected="false" data-install="cargo-install">CLI</button>
         </div>
         <div class="install-row">
-          <code id="install-cmd"><span class="p">$ </span><span id="install-text">pip install mnemo-engine</span></code>
+          <code id="install-cmd"><span class="p">$ </span><span id="install-text">curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh</span></code>
           <button class="copy" data-copy-target="install-text" type="button">Copy</button>
         </div>
       </div>
@@ -520,7 +521,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.15.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.16.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -541,7 +542,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
         print(round(hit[<span class="s">"score"</span>], <span class="n">3</span>), hit[<span class="s">"content"</span>])
 
     <span class="c"># A fact that changes: the key replaces the old version, history is kept</span>
-    db.remember_text(<span class="s">"the current release is v0.15.0"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
+    db.remember_text(<span class="s">"the current release is v0.16.0"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
 
     <span class="c"># Cache an expensive call</span>
     prompt = <span class="s">"Summarize the release notes"</span>
@@ -575,7 +576,9 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     }
     Ok(())
 }</pre>
-<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span>mnemo init agent.mnemo                           <span class="c"># a generated key, kept in the OS keychain</span>
+<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span>mnemo onboard                                    <span class="c"># in a git repository: a brain, Claude Code and Cursor, the hooks</span>
+
+<span class="pr">$ </span>mnemo init agent.mnemo                           <span class="c"># a generated key, kept in the OS keychain</span>
 <span class="pr">$ </span>mnemo about agent.mnemo                          <span class="c"># what is this file and how do I use it?</span>
 <span class="pr">$ </span>mnemo remember agent.mnemo --text <span class="s">"the user prefers dark mode"</span> --importance <span class="n">0.8</span>
 <span class="pr">$ </span>mnemo recall   agent.mnemo --text <span class="s">"which theme does the user like?"</span> --top-k <span class="n">5</span>
@@ -721,8 +724,9 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.15</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.16</span></h3>
         <ul>
+          <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>): a brain per project, its MCP server, and hooks that load the memory when a session starts and save the session before it's compacted or ends; a guide for agents built in (<a href="llms.txt">llms.txt</a>); and an install script that checks what it downloads</li>
           <li>No setup: keys generated and kept in the OS keychain, with a recovery code; a built-in local embedding model; and <code>mnemo mcp install</code> for Claude Code, Cursor and Claude Desktop</li>
           <li>Better recall by text: keyword and meaning together by default, names found by their parts, and exact identifiers in a question matched</li>
           <li>Several agents on one file: shared mode for Rust, Python, the CLI and the MCP server, with commands that wait for a busy file instead of failing</li>
@@ -751,7 +755,6 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>): a brain, its MCP server and its hooks in one step</li>
           <li>Encrypted sync for your brains across your devices and your team; the server never sees your data. <a href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the waitlist</a></li>
           <li>Sharing one file, continued: catching up on only what changed, and sharing on by default for the MCP server</li>
           <li>Agents coordinating on one machine: messages, tasks and claims between them</li>
@@ -805,9 +808,10 @@ AI sessions stay aligned without relying on chat history.
 (function () {
   // Install tabs
   var installs = {
+    "sh": "curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh",
+    "ps": "irm https://toarchkumar.github.io/mnemo/install.ps1 | iex",
     "pip": "pip install mnemo-engine",
-    "cargo-add": "cargo add mnemo-engine",
-    "cargo-install": "cargo install mnemo-engine --features keychain,embed-candle"
+    "cargo-add": "cargo add mnemo-engine"
   };
   var itabs = document.querySelectorAll("[data-install]");
   itabs.forEach(function (b) {

@@ -21,6 +21,10 @@ copy the file and the memory comes with it.
   or near-identical prompts, with namespaces, expiry and size limits.
 - **An MCP server built in**, so Claude Desktop, Cursor or any MCP client can
   use the file as tools.
+- **Sets itself up in a project (v0.16).** `mnemo onboard` gives a git
+  repository one brain, wires Claude Code and Cursor to it, and adds hooks
+  that load the memory when a session starts and save the session before
+  it's compacted or ends.
 - **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM; commits
   go through a write-ahead log; recent commits are kept as restorable
   snapshots; OS file locks allow one writer and many readers, and shared
@@ -36,28 +40,49 @@ your team, with a server that never sees your data.
 
 ## Install
 
+The `mnemo` CLI and MCP server, on macOS and Linux:
+
+```sh
+curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh
+```
+
+On Windows (PowerShell):
+
+```powershell
+irm https://toarchkumar.github.io/mnemo/install.ps1 | iex
+```
+
+The script downloads the release binary for your platform, checks its
+SHA-256 and, when the GitHub CLI (`gh`) is signed in, the build's
+attestation, then installs it to `~/.local/bin` (or
+`%LOCALAPPDATA%\Programs\mnemo`) without sudo. To read it before running
+it, download it first. Rust users can run `cargo binstall mnemo-engine`
+instead.
+
+The libraries:
+
 ```sh
 pip install mnemo-engine          # Python (import mnemo_engine)
 cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
-cargo install mnemo-engine --features keychain,embed-candle   # the `mnemo` CLI and MCP server
 ```
 
-`cargo install` without those two features builds a CLI with no OS keychain
+To build the CLI from source, run `cargo install mnemo-engine --features
+keychain,embed-candle`. Without those two features it has no OS keychain
 and no built-in embedder (the prebuilt binaries and the PyPI wheels have
 both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
 Windows (x86_64); elsewhere, pip builds from source, without the keychain
 and the built-in embedder.
 
-iOS and Android (from v0.12.0; current 0.15.0):
+iOS and Android (from v0.12.0; current 0.16.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.15.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.16.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.15.0")
+implementation("io.github.toarchkumar:mnemo-android:0.16.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -72,7 +97,20 @@ If you build from crates.io on ARM yourself, see
 
 ## Quick start
 
-CLI. `init` makes a key and keeps it in your OS keychain, and the built-in
+In a project, for Claude Code or Cursor. Run this in the git repository:
+
+```sh
+mnemo onboard
+```
+
+It shows what it will write and asks once. It creates the project's brain
+under `.git` (so every worktree shares it and git never tracks it), keeps
+its key in the OS keychain, installs the built-in model, and wires each
+client it finds: the MCP server, the hooks, and a short guide for the
+agent. Re-running it repairs what's missing, and `mnemo onboard --undo`
+removes what it wrote. `mnemo onboard --guide` prints the guide.
+
+For a file of your own, the CLI. `init` makes a key and keeps it in your OS keychain, and the built-in
 embedder fetches its model (91 MB) once, on first use:
 
 ```sh
@@ -99,7 +137,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.15.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.16.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -120,6 +158,62 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.16.0: memory that sets itself up
+
+- **`mnemo onboard`**, one command, safe to re-run, that sets up a git
+  repository's memory for Claude Code and Cursor:
+  - **one brain per project**, at `.git/mnemo/project.mnemo`, shared by
+    every worktree and never tracked. Its key is generated and kept in the
+    keychain, and the recovery code is shown only to a person at a
+    terminal;
+  - **the clients:** the MCP server, the hooks, and a skill (Claude Code)
+    or rule (Cursor) with the guide's short card. By default everything is
+    local: configs name the binary's full path, and the files it creates
+    are listed in `.git/info/exclude`. `--scope project` writes files to
+    commit instead, and `--plugin` installs the Claude Code plugin;
+  - **the plan first:** it shows only its own entries, with secrets
+    masked, and asks once (`--yes` to skip, `--print` to only show).
+    `--undo` removes only its own entries, never the brain or its key.
+- **Hooks that load and save** (`mnemo hook`):
+  - when a session starts, the agent gets the guide's card, the project's
+    notes and essence, and a short recall, in at most 8,000 bytes;
+  - before compaction and at the end, the session is saved into its own
+    thread, without tool output (only its size) and with known secret
+    shapes replaced by `[redacted: <kind>]`. That's a best effort, not a
+    guarantee;
+  - a hook never blocks or interrupts a session: it always exits 0, never
+    prompts and never downloads.
+- **A guide for agents, built into the binary.** `mnemo onboard --guide`
+  prints how to set up a project and how to organize its memory, and the
+  MCP server sends its card as instructions. CI runs every command in it.
+  The site serves it as [`llms.txt`](https://toarchkumar.github.io/mnemo/llms.txt)
+  and [`llms-full.txt`](https://toarchkumar.github.io/mnemo/llms-full.txt).
+- **The MCP server's resources and prompts:** `mnemo://about`,
+  `mnemo://recent`, `mnemo://guide` and `mnemo://key/{key}`, and the
+  prompts `session-start` and `session-end`. What they show from the brain
+  is marked as data, not instructions.
+- **The brain commands take no path in a git repository,** like `git`,
+  and `-C <dir>` runs any command as if started there.
+- **Install scripts** for macOS, Linux and Windows, which check each
+  binary's SHA-256 and, with `gh`, its build attestation. The release now
+  attests every CLI binary.
+- **Search past sessions:** `recall` with the turn filter
+  (`--filter _mnemo.kind=turn`) finds saved turns by meaning.
+- **Fixed:** re-saving a key with the same value added a new version on
+  v9 files since v0.13. It's a no-op again; the extra versions already in
+  a file stay as history.
+- Python has `Mnemo.recent(n)`. The iOS and Android packages move to
+  0.16.0 with the engine.
+
+**Upgrading from 0.15.x:**
+- **The MCP `remember` embeds `content`** when it's given no `text` and no
+  vector. Before, that call was refused.
+- **`mcp install` with no path** now defaults to Claude Code's local scope
+  and writes an entry with no path in it (the server finds the project
+  brain). A user scope keeps the absolute path.
+- **Windows:** the hooks haven't been tested on Windows yet.
+- See the [changelog](CHANGELOG.md) for everything else.
 
 ## What's new in v0.15.0: no setup
 
@@ -640,12 +734,14 @@ in Rust. Each re-clusters the index with the new defaults.
   and the index on large files: about 112 ms at 100K memories, about 9 ms
   at 10K on a Mac, and about 7 ms at 10K on an iPhone. Searches after that
   take 2–3 ms. Loading only what a search needs is planned.
-- **Saving threads isn't automatic yet.** You (or your agent) call
-  `thread ingest` and the essence tools. A Claude Code plugin with hooks
-  that save before compaction and load at session start is on the roadmap,
-  after the current size and speed work. Transcripts can contain anything that was pasted into
-  them; they're encrypted like everything else, and `thread forget`
-  removes them.
+- **Saved sessions can hold secrets.** Transcripts can contain anything
+  that was pasted into them. The hooks save them without tool output
+  (only its size) and replace known secret shapes, such as private keys,
+  API tokens and recovery codes, with `[redacted: <kind>]`. That's a best
+  effort, not a guarantee. They're encrypted like everything else, and
+  `thread forget` removes them.
+- **The hooks are untested on Windows,** and saved turns are found by
+  meaning only (they aren't in the keyword index yet).
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
