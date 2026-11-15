@@ -34,6 +34,41 @@ Pre-1.0, the minor component carries the breaking-change signal.
   data, not instructions. Reads don't count as accesses. A missing key or
   an unknown URI is the error `-32002`. The library has
   `Mnemo::recent(n)`.
+- **`mnemo onboard` (12.2 step 5),** one command, safe to re-run, that
+  sets up a project's memory for Claude Code and Cursor:
+  - **The brain:** it finds or creates the project brain, with a
+    generated key in the keychain. The recovery code is shown only to a
+    person at a terminal, and the last group is asked back. Otherwise
+    it's a human step in the summary.
+  - **The model:** it installs the built-in model (`--no-model` skips
+    it).
+  - **The clients:** it wires each client it finds (or `--client`):
+    - the MCP server: Claude Code's local scope through `claude mcp
+      add-json`, and Cursor's `.cursor/mcp.json`;
+    - the hooks: `.claude/settings.local.json` and `.cursor/hooks.json`,
+      with timeouts of 15, 30 and 30 s, and `--hook-budget`;
+    - a skill (`.claude/skills/mnemo/SKILL.md`) or rule
+      (`.cursor/rules/mnemo.mdc`) with the guide's card.
+  - **Local by default:** with `--scope local`, the files are listed in a
+    marked block of `.git/info/exclude`, and configs name the binary's
+    full path. `--scope project` writes committed files with a bare
+    `mnemo`.
+  - **The plan:** it shows the plan (only its own entries, with secrets
+    masked) and asks once. `--yes` writes without asking and `--print`
+    only shows. With no terminal and no `--yes` it writes nothing and
+    exits 3.
+  - **Re-runs** write only what's missing or out of date. A file it
+    didn't write, or JSON that doesn't parse, is left alone.
+  - **`--undo`** removes only its own entries (a `mnemo` command with
+    `serve` or `hook`), keeps a user's own hooks beside them, and never
+    removes the brain, its key or the model. The summary says how to
+    delete those, the keychain entry included.
+  - **`--plugin`** installs the Claude Code plugin (`integrations/claude-code/`,
+    with the marketplace `.claude-plugin/marketplace.json`) in place of
+    the hooks and the skill.
+- **`mcp install` with no path** now defaults to Claude Code's local
+  scope, and to Cursor's project file, which it lists in
+  `.git/info/exclude`.
 - **`mnemo hook <session-start|pre-compact|session-end> --client
   <claude-code|cursor>` (12.2 step 4),** the hooks `onboard` will
   install:
@@ -73,8 +108,7 @@ Pre-1.0, the minor component carries the breaking-change signal.
   each binary carries its own. CI runs every command and MCP call in it.
   `--format llms-txt` prints the site's `llms.txt` (the card and links, in
   the llms.txt shape), and `--format llms-full` its `llms-full.txt` (the
-  whole guide). `mnemo onboard` without `--guide` exits 2 until the rest of
-  it lands.
+  whole guide).
 - **`mcp install` with no path** writes an entry with no path in it:
   `serve --mcp --shared` for Claude Code (project and local scopes), and
   `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A user scope

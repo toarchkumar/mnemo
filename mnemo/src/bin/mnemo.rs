@@ -15,6 +15,8 @@ mod hook;
 mod inspect;
 #[path = "mnemo/mcp_install.rs"]
 mod mcp_install;
+#[path = "mnemo/onboard.rs"]
+mod onboard;
 #[path = "mnemo/project.rs"]
 mod project;
 
@@ -875,14 +877,51 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
-    /// Set up this project's memory for your agents (12.2, being built for
-    /// v0.16.0). `--guide` prints the guide for agents: how to set up, and
-    /// how to organize memory. It's built into this binary, so it always
-    /// matches this version.
+    /// Set up this project's memory for Claude Code and Cursor (12.2), and
+    /// print the guide. Safe to run again.
+    ///
+    /// In a git repository, it finds or creates the project brain
+    /// (`.git/mnemo/project.mnemo`) with a generated key kept in the
+    /// keychain, installs the built-in model, and wires each client: the MCP
+    /// server, the hooks that load and save memory, and a skill or rule
+    /// file with the guide's card. It shows the plan first and asks once;
+    /// `--yes` writes without asking, `--print` only shows. With no
+    /// terminal and no `--yes` it writes nothing and exits 3. `--undo`
+    /// removes what it wrote, never the brain, its key or the model.
+    /// `--guide` prints only the guide, which is built into this binary.
     Onboard {
         /// Print only the guide, and touch nothing.
         #[arg(long)]
         guide: bool,
+        /// The clients to wire (comma-separated); by default, those found.
+        #[arg(long, value_enum, value_delimiter = ',')]
+        client: Vec<hook::Client>,
+        /// `local` (this user only; the default) or `project` (committed
+        /// files, for a team where everyone runs onboard).
+        #[arg(long, value_enum, default_value = "local")]
+        scope: onboard::Scope,
+        /// The SessionStart hook's most bytes of context (written into its
+        /// command as `--budget`; at most 9,000).
+        #[arg(long, value_name = "BYTES")]
+        hook_budget: Option<usize>,
+        /// Write without asking.
+        #[arg(long, conflicts_with = "print")]
+        yes: bool,
+        /// Show the plan, and write nothing.
+        #[arg(long)]
+        print: bool,
+        /// Don't install the built-in model (recall is keyword-only, and the
+        /// hooks save nothing, until `mnemo embedder install`).
+        #[arg(long)]
+        no_model: bool,
+        /// Remove what onboard wrote (never the brain, its key or the model).
+        #[arg(long)]
+        undo: bool,
+        /// Install the Claude Code plugin instead of writing the hooks and
+        /// the skill (from your own terminal: Claude Code ignores `-y` when
+        /// an agent runs it).
+        #[arg(long)]
+        plugin: bool,
         /// The guide's format: `markdown`; `llms-txt`, the site's `llms.txt`
         /// (the card and links, in the llms.txt shape); or `llms-full`, the
         /// site's `llms-full.txt` (the whole guide).
@@ -1026,6 +1065,10 @@ enum GuideFormat {
     LlmsTxt,
     /// The whole guide, as the site's `llms-full.txt`.
     LlmsFull,
+    /// The Claude Code plugin's skill
+    /// (`integrations/claude-code/skills/mnemo/SKILL.md`).
+    #[value(hide = true)]
+    PluginSkill,
 }
 
 #[derive(Subcommand)]
@@ -3799,19 +3842,36 @@ fn run() -> std::result::Result<(), String> {
             }
             .map_err(fmt)?;
         }
-        Command::Onboard { guide, format } => {
+        Command::Onboard {
+            guide,
+            format,
+            client,
+            scope,
+            hook_budget,
+            yes,
+            print,
+            no_model,
+            undo,
+            plugin,
+        } => {
             if !guide {
-                // Step 5 builds the rest; until then, exit 2 and say so.
-                eprintln!(
-                    "`mnemo onboard` is being built (v0.16.0); `mnemo onboard --guide` prints \
-                     the guide"
-                );
-                std::process::exit(2);
+                return onboard::run(onboard::Opts {
+                    clients: client,
+                    scope,
+                    hook_budget,
+                    yes,
+                    print,
+                    no_model,
+                    undo,
+                    plugin,
+                    moved,
+                });
             }
             let text = match format {
                 GuideFormat::Markdown => mnemo_engine::guide::markdown(),
                 GuideFormat::LlmsTxt => mnemo_engine::guide::llms_txt(),
                 GuideFormat::LlmsFull => mnemo_engine::guide::llms_full(),
+                GuideFormat::PluginSkill => mnemo_engine::guide::plugin_skill_md(),
             };
             print!("{text}");
         }

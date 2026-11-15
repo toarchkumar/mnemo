@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "mnemo hook session-start --client claude-code", "timeout": 15 }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "mnemo hook pre-compact --client claude-code", "timeout": 30 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "mnemo hook session-end --client claude-code", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}

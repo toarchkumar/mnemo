@@ -100,7 +100,24 @@ pub fn common_dir(start: &Path) -> Result<PathBuf, String> {
     // Older git prints it relative to where it ran (`.git`, `../../.git`).
     let dir = start.join(line);
     std::fs::canonicalize(&dir)
+        .map(plain)
         .map_err(|e| format!("no project brain here: {}: {e}", dir.display()))
+}
+
+/// `p` without Windows' verbatim prefix (`\\?\C:\…` from `canonicalize`),
+/// which a client may not run a command from, and a person doesn't expect
+/// to read. A path the prefix is needed for (over 260 characters) keeps it.
+pub fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() < 260 && rest.as_bytes().get(1) == Some(&b':') => {
+            PathBuf::from(rest)
+        }
+        _ => p,
+    }
 }
 
 /// Create the brain's directory, mode 0700 on Unix, if it isn't there. A
@@ -143,5 +160,132 @@ pub fn create_dir(brain: &Path) -> Result<(), String> {
             }
         }
         Err(e) => Err(format!("can't create {}: {e}", dir.display())),
+    }
+}
+
+/// The marked block `onboard` keeps in `<git-common-dir>/info/exclude`: the
+/// files it wrote for this user inside the work tree, so git doesn't offer
+/// to commit them. `onboard --undo` removes the block.
+pub const EXCLUDE_OPEN: &str =
+    "# >>> mnemo onboard: files it wrote for this user (mnemo onboard --undo removes this block)";
+pub const EXCLUDE_CLOSE: &str = "# <<< mnemo onboard";
+
+/// The exclude file's path.
+pub fn exclude_path(common: &Path) -> PathBuf {
+    common.join("info").join("exclude")
+}
+
+/// `text` (the exclude file's) with `lines` in the marked block, added once;
+/// the rest of the file as it was. `lines` empty removes the block.
+pub fn with_excluded(text: &str, lines: &[String]) -> String {
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    let mut inside: Vec<String> = Vec::new();
+    let mut state = 0; // 0 before, 1 inside, 2 after
+    for l in text.lines() {
+        match state {
+            0 if l == EXCLUDE_OPEN => state = 1,
+            1 if l == EXCLUDE_CLOSE => state = 2,
+            0 => before.push(l.to_string()),
+            1 => inside.push(l.to_string()),
+            _ => after.push(l.to_string()),
+        }
+    }
+    let mut keep: Vec<String> = Vec::new();
+    if !lines.is_empty() {
+        for l in inside.iter().chain(lines) {
+            if !keep.contains(l) {
+                keep.push(l.clone());
+            }
+        }
+    }
+    let mut out: Vec<String> = before;
+    if !keep.is_empty() {
+        out.push(EXCLUDE_OPEN.to_string());
+        out.extend(keep);
+        out.push(EXCLUDE_CLOSE.to_string());
+    }
+    out.extend(after);
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
+/// A work-tree file as an exclude pattern: `/` and its path from the root.
+pub fn exclude_line(root: &Path, file: &Path) -> Option<String> {
+    let rel = file.strip_prefix(root).ok()?;
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    Some(format!("/{}", parts.join("/")))
+}
+
+/// The work tree's root from `start` (`git rev-parse --show-toplevel`).
+pub fn toplevel(start: &Path) -> Result<PathBuf, String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(start)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("git didn't run: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "{} isn't in a git work tree; run this in one",
+            start.display()
+        ));
+    }
+    let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    std::fs::canonicalize(&p)
+        .map(plain)
+        .map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// Whether git tracks `file` (then an exclude line has no effect).
+pub fn tracked(root: &Path, file: &Path) -> bool {
+    Command::new("git")
+        .args(["ls-files", "--error-unmatch", "--"])
+        .arg(file)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_drops_the_verbatim_prefix() {
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\C:\x\mnemo.exe")),
+            PathBuf::from(r"C:\x\mnemo.exe")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\srv\share\a")),
+            PathBuf::from(r"\\srv\share\a")
+        );
+        assert_eq!(
+            plain(PathBuf::from("/usr/bin/mnemo")),
+            PathBuf::from("/usr/bin/mnemo")
+        );
+    }
+
+    #[test]
+    fn the_exclude_block_is_added_once_and_removed_whole() {
+        let base = "# git's own\n*.log\n";
+        let a = with_excluded(base, &["/.cursor/mcp.json".into()]);
+        assert!(a.starts_with(base), "{a}");
+        assert_eq!(a.matches(EXCLUDE_OPEN).count(), 1);
+        let b = with_excluded(&a, &["/.cursor/mcp.json".into(), "/.mcp.json".into()]);
+        assert_eq!(b.matches("/.cursor/mcp.json").count(), 1, "{b}");
+        assert!(b.contains("/.mcp.json"));
+        assert_eq!(with_excluded(&b, &[]), base);
+        assert_eq!(with_excluded("", &[]), "");
     }
 }

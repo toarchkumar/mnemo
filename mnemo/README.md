@@ -9,6 +9,40 @@ cargo run --example quickstart
 cargo run --bin mnemo -- demo
 ```
 
+## Set up a project (v0.16)
+
+In a project's git repository, one command sets up its memory for Claude
+Code and Cursor:
+
+```sh
+mnemo onboard
+```
+
+- **The brain:** it creates the project's brain, `.git/mnemo/project.mnemo`,
+  with a random key kept in the system keychain. Every worktree shares the
+  brain, and git never tracks it.
+- **The model:** it installs the built-in embedding model.
+- **The clients:** it wires each client it finds: the MCP server, the hooks
+  that load memory at session start and save the transcript at compaction
+  and session end, and a skill (Claude Code) or rule (Cursor) with the
+  guide's card.
+- **It asks first.** It shows the plan, with only its own entries and
+  secrets masked, and asks once. With no terminal it writes nothing until
+  you run `mnemo onboard --yes`.
+- **It's safe to run again.** A re-run fixes only what's missing or out of
+  date. `mnemo onboard --undo` removes what it wrote, but never the brain,
+  its key or the model.
+- **The recovery code** is shown only to a person at a terminal. If an
+  agent ran `onboard`, run `mnemo recovery-code` in a terminal of your own
+  and write it down.
+
+By default everything is for you alone (`--scope local`): Claude Code's
+local scope, `.claude/settings.local.json`, and Cursor's files listed in
+`.git/info/exclude`. Configs name the running binary's full path.
+`--scope project` writes committed files with a bare `mnemo` instead, for a
+team where everyone runs `onboard`. `--plugin` installs the Claude Code
+plugin (`integrations/claude-code/`) in place of the hooks and the skill.
+
 ## For AI agents
 
 The CLI is designed so an agent can become productive against a `.mnemo`
@@ -928,6 +962,7 @@ cargo run --bin mnemo -- <command>
 | `snapshots` | List the restorable snapshots (one per flush)      |
 | `restore` | Roll the database back to a past snapshot            |
 | `thread ingest` | Save a transcript into a thread's archive (idempotent per turn). `--tool-results omit` keeps only `[tool_result ok|error, N bytes]` markers, and `--redact` replaces known secret shapes (private keys, cloud and API tokens, JWTs, recovery codes, secret-looking `NAME=value`s) with `[redacted: <kind>]` (v0.16) |
+| `onboard` | Set up the project's memory for Claude Code and Cursor: the brain (a generated key in the keychain), the model, the MCP server, the hooks and a skill or rule. Shows the plan and asks once (`--yes`, `--print`); safe to re-run; `--undo` removes what it wrote. `--guide` prints the guide (v0.16) |
 | `hook`    | The hooks `onboard` installs for Claude Code and Cursor (v0.16): `session-start` adds the guide's card, the project's notes and essence, and a short recall to the context (8,000 bytes by default, `--budget` up to 9,000); `pre-compact` and `session-end` save the transcript without tool output and with secrets redacted. Always exits 0, never prompts or downloads |
 | `demo`    | Self-contained end-to-end demonstration              |
 

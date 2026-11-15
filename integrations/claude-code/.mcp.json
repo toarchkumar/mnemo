@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mnemo": {
+      "type": "stdio",
+      "command": "mnemo",
+      "args": ["serve", "--mcp", "--shared"]
+    }
+  }
+}

@@ -99,7 +99,7 @@ fn scopes(c: Client) -> &'static [Scope] {
 
 /// The git work tree `start` is in: the nearest directory up from it with a
 /// `.git` (a directory, or a worktree's file).
-fn git_root(start: &Path) -> Option<PathBuf> {
+pub(super) fn git_root(start: &Path) -> Option<PathBuf> {
     let mut d = Some(start);
     while let Some(dir) = d {
         if dir.join(".git").exists() {
@@ -110,7 +110,7 @@ fn git_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn home() -> Result<PathBuf, String> {
+pub(super) fn home() -> Result<PathBuf, String> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
@@ -132,7 +132,7 @@ fn desktop_config() -> Result<PathBuf, String> {
 }
 
 /// An executable named `name` on the PATH.
-fn on_path(name: &str) -> Option<PathBuf> {
+pub(super) fn on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).find_map(|d| {
         let p = d.join(name);
@@ -162,6 +162,14 @@ fn plan(o: &Install) -> Result<Plan, String> {
     let allowed = scopes(o.client);
     let scope = match o.scope {
         Some(s) => s,
+        // 12.2 step 5: the project brain is per user, so with the path left
+        // out Claude Code defaults to its local scope, and Cursor (which has
+        // none) to its project file, listed in `.git/info/exclude`.
+        None if o.project && root.is_some() => match o.client {
+            Client::ClaudeCode => Scope::Local,
+            Client::Cursor => Scope::Project,
+            Client::ClaudeDesktop => Scope::User,
+        },
         None => match &root {
             // The project brain is under the git common dir, which for a
             // linked worktree is outside its root.
@@ -317,7 +325,7 @@ fn check_rules(entry: &Value, scope: Scope) -> Result<(), String> {
 // --- An order-keeping JSON object --------------------------------------------
 
 /// A JSON object's members in their order, each value as its original text.
-struct Ordered(Vec<(String, Box<RawValue>)>);
+pub(super) struct Ordered(pub(super) Vec<(String, Box<RawValue>)>);
 
 impl<'de> Deserialize<'de> for Ordered {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -341,7 +349,7 @@ impl<'de> Deserialize<'de> for Ordered {
 
 /// Write `members` as an object at `depth` (two spaces a level); each value's
 /// own text is kept as it was.
-fn write_object(members: &[(String, String)], depth: usize) -> String {
+pub(super) fn write_object(members: &[(String, String)], depth: usize) -> String {
     if members.is_empty() {
         return "{}".into();
     }
@@ -354,7 +362,7 @@ fn write_object(members: &[(String, String)], depth: usize) -> String {
 }
 
 /// `entry` pretty-printed for `depth`.
-fn pretty_at(entry: &Value, depth: usize) -> String {
+pub(super) fn pretty_at(entry: &Value, depth: usize) -> String {
     let text = serde_json::to_string_pretty(entry).unwrap();
     let pad = "  ".repeat(depth);
     text.lines()
@@ -372,7 +380,11 @@ fn pretty_at(entry: &Value, depth: usize) -> String {
 
 /// The config's new text: `entry` under `mcpServers.<name>`, everything else
 /// as it was. Returns it with the old entry, if there was one.
-fn merged(old: &str, name: &str, entry: &Value) -> Result<(String, Option<Value>), String> {
+pub(super) fn merged(
+    old: &str,
+    name: &str,
+    entry: &Value,
+) -> Result<(String, Option<Value>), String> {
     let top: Ordered = if old.trim().is_empty() {
         Ordered(Vec::new())
     } else {
@@ -420,7 +432,7 @@ fn merged(old: &str, name: &str, entry: &Value) -> Result<(String, Option<Value>
 // --- Showing it ---------------------------------------------------------------
 
 /// `v` with every value under an `env` or `headers` key masked, for display.
-fn masked(v: &Value) -> Value {
+pub(super) fn masked(v: &Value) -> Value {
     match v {
         Value::Object(m) => Value::Object(
             m.iter()
@@ -446,7 +458,7 @@ fn masked(v: &Value) -> Value {
 }
 
 /// A line diff of `a` against `b` (`-` removed, `+` added, two spaces kept).
-fn diff(a: &str, b: &str) -> String {
+pub(super) fn diff(a: &str, b: &str) -> String {
     let (a, b): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
     let (n, m) = (a.len(), b.len());
     let mut lcs = vec![vec![0usize; m + 1]; n + 1];
@@ -479,7 +491,7 @@ fn diff(a: &str, b: &str) -> String {
 /// For display, `v` masked further than [`masked`]: a value after a
 /// `--passphrase` in `args`, and the user-info and query of a `url`. Used on
 /// the entry being replaced, which an older config may have written by hand.
-fn masked_entry(v: &Value) -> Value {
+pub(super) fn masked_entry(v: &Value) -> Value {
     let mut v = masked(v);
     if let Some(args) = v.get_mut("args").and_then(Value::as_array_mut) {
         let mut after_flag = false;
@@ -513,7 +525,12 @@ fn masked_entry(v: &Value) -> Value {
 /// against the entry it replaces, and how many other servers the file keeps
 /// unchanged. Nothing of another server, or of the rest of the file, is
 /// printed.
-fn shown_change(old: &str, name: &str, previous: &Option<Value>, entry: &Value) -> String {
+pub(super) fn shown_change(
+    old: &str,
+    name: &str,
+    previous: &Option<Value>,
+    entry: &Value,
+) -> String {
     let named = |v: &Value| {
         let mut m = serde_json::Map::new();
         m.insert(name.to_string(), v.clone());
@@ -536,7 +553,7 @@ fn shown_change(old: &str, name: &str, previous: &Option<Value>, entry: &Value) 
 }
 
 /// Ask `question` at the terminal; `true` for yes.
-fn confirm(question: &str) -> Result<bool, String> {
+pub(super) fn confirm(question: &str) -> Result<bool, String> {
     use std::io::{BufRead, IsTerminal, Write};
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err(
@@ -557,7 +574,7 @@ fn confirm(question: &str) -> Result<bool, String> {
 
 /// Write `text` to `path` atomically: a new temp file beside it, synced,
 /// given the old file's mode, then renamed over it.
-fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
+pub(super) fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
     use std::io::Write;
     let dir = path.parent().ok_or("no parent directory")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -585,7 +602,7 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
 }
 
 /// What the server will need for this brain's secret, said once.
-fn secret_note(brain: &str) -> Option<String> {
+pub(super) fn secret_note(brain: &str) -> Option<String> {
     use mnemo_engine::keys::{self, SecretKind};
     let info = keys::file_info(brain).ok()?;
     match info.kind {
@@ -704,6 +721,11 @@ pub fn run(o: Install) -> Result<(), String> {
         }
         write_atomically(&path, &new)?;
         println!("wrote {}", path.display());
+        // 12.2 step 5: a Cursor project file written for the project brain
+        // is this user's, so git is told to leave it out.
+        if o.project && p.scope == Scope::Project && o.client == Client::Cursor {
+            exclude_file(&path);
+        }
     }
     if let Some(note) = secret_note(&o.file) {
         eprintln!("note: {note}");
@@ -720,6 +742,34 @@ pub fn run(o: Install) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// List a file in `.git/info/exclude`'s marked block, unless git tracks it.
+pub(super) fn exclude_file(path: &Path) {
+    use super::project;
+    let Some(dir) = path.parent() else { return };
+    let (Ok(root), Ok(common)) = (project::toplevel(dir), project::common_dir(dir)) else {
+        return;
+    };
+    let file = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if project::tracked(&root, &file) {
+        eprintln!(
+            "note: git tracks {}, so it can't be left out of commits",
+            file.display()
+        );
+        return;
+    }
+    let Some(line) = project::exclude_line(&root, &file) else {
+        return;
+    };
+    let ex = project::exclude_path(&common);
+    let old = std::fs::read_to_string(&ex).unwrap_or_default();
+    let new = project::with_excluded(&old, &[line]);
+    if new != old {
+        if let Err(e) = write_atomically(&ex, &new) {
+            eprintln!("note: {e}");
+        }
+    }
 }
 
 #[cfg(test)]

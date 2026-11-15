@@ -1,0 +1,14 @@
+{
+  "name": "mnemo-engine",
+  "description": "MNemo, an encrypted single-file memory for AI agents",
+  "owner": {
+    "name": "MNemo"
+  },
+  "plugins": [
+    {
+      "name": "mnemo",
+      "source": "./integrations/claude-code",
+      "description": "This project's memory: the mnemo MCP server, hooks that load and save it, and a skill on when to recall and remember"
+    }
+  ]
+}
