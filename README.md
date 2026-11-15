@@ -30,6 +30,10 @@ copy the file and the memory comes with it.
 
 Site: **https://toarchkumar.github.io/mnemo/**
 
+**Coming next: encrypted sync** for your brains across your devices and
+your team, with a server that never sees your data.
+[Join the waitlist](https://forms.gle/zBrWaECk4L7By4Bc6).
+
 ## Install
 
 ```sh
