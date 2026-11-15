@@ -301,6 +301,17 @@ fmt9_proto = ["dep:lz4_flex"]
 [profile.release]
 lto = true
 codegen-units = 1
+# v0.15 (the user's decision, 2026-11-14): strip the symbol table from
+# the release CLI binaries (and the other release builds of this workspace). A panic still prints its message, with addresses in place of
+# function names; RELEASING.md says how to read a backtrace (rebuild the tag
+# without the strip).
+strip = "symbols"
+
+# The mobile library keeps its symbols: UniFFI's binding generator reads its
+# metadata from the built library (`UNIFFI_META_*`), and the phone builds
+# strip what they ship themselves.
+[profile.release.package.mnemo-uniffi]
+strip = "none"
 
 # `aes` 0.8.4 and `polyval` 0.6.2 enable their ARMv8 hardware paths via
 # `--cfg aes_armv8` / `--cfg polyval_armv8` (set by `.cargo/config.toml`

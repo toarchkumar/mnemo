@@ -36,10 +36,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `below_passphrase_floor` and `is_test_grade`; `Mnemo::notices`.
 - **The OS keychain (12.3 step 2)** as the key store: the macOS login
   keychain, Windows Credential Manager, or Secret Service on Linux. It's the
-  `keychain` cargo feature (off for the library), through `keyring` 3.6.3:
-  `keyring` 4 needs Rust 1.85 or later. A few crates are held in
-  `Cargo.lock` for the 1.75 MSRV, so building the feature from source on an
-  older compiler needs `--locked`. On Linux, libdbus is built from source.
+  `keychain` cargo feature (off for the library; on in the release CLI
+  binaries and wheels), through the `keyring` 4 family: `keyring-core` 1.0.1
+  with `apple-native-keyring-store`, `windows-native-keyring-store` and
+  `dbus-secret-service-keyring-store`. On Linux, libdbus is built from
+  source.
 - **`mnemo unlock <file>`** keeps a brain's key in this machine's keychain,
   from its recovery code (a prompt with no echo, or stdin; never an
   argument). A typo is named by group, a code that doesn't open the file
@@ -146,6 +147,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **The release CLI binaries and the wheels' library are stripped**
+  (`strip = "symbols"` in the release profiles), so they're smaller. A
+  panic still prints its message, with addresses in place of function
+  names; RELEASING.md says how to read a backtrace from a release.
 - **`mnemo init`'s default width is 384** (was 768), the built-in
   embedder's. Pass `--dimensions` for another embedder.
 - **The MCP `recall` tool with `text` on a server without an embedder**
@@ -160,12 +165,6 @@ Pre-1.0, the minor component carries the breaking-change signal.
   reject. The released CLI binaries and wheels are built with stable and
   are unaffected. The UniFFI binding's floor moves from 1.82 to 1.94 with
   it.
-- **The `keychain` feature uses the `keyring` 4 family** (`keyring-core`
-  1.0.1 with `apple-native-keyring-store`, `windows-native-keyring-store`
-  and `dbus-secret-service-keyring-store`) in place of `keyring` 3.6.3.
-  Entries are named as before, so a key the earlier build kept is found.
-  The crates held back in `Cargo.lock` for Rust 1.75 are lifted, so
-  building with the keychain no longer needs `--locked`.
 - **A recall by text is hybrid by default (12.3 step 4):** with no
   `keywords`, the text itself is also matched by keyword (BM25), in the
   library (`RecallRequest::from_text`, which sets the new

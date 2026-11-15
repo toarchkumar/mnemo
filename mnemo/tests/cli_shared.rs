@@ -533,23 +533,37 @@ fn the_cli_embeds_before_it_takes_the_lock() {
     let took = t.elapsed();
     let out = cli.wait_with_output().unwrap();
     let cli_err = String::from_utf8_lossy(&out.stderr);
-    // The write's time and the CLI's stderr, so a slow runner's failure
-    // says what held the lock.
-    assert!(
-        wrote.is_ok() && took < Duration::from_millis(500),
+    // Bounded by what it means, not by the runner's speed (v0.15: a slow
+    // runner's commit took the whole write to 657 and 740 ms):
+    // - the write got the lock within its 500 ms deadline (`Locked`
+    //   otherwise), and took it before the CLI's 1.5 s embed could have
+    //   finished (the marker exists before `t` starts), so the CLI held no
+    //   lock while it embedded;
+    // - the CLI's record is written after ours (the ULIDs' times): it took
+    //   the lock only once its embed was done;
+    // - a loose wall-time guard, for a hang.
+    // The times and the CLI's stderr go in the message, so a failure says
+    // what held the lock.
+    let why = format!(
         "the shared write took {took:?} (lock at {:?}, remember done at {:?}, then the \
          commit; {:?}); the CLI said: {cli_err}",
         inside.0,
         inside.1,
-        wrote.err()
+        wrote.as_ref().err()
     );
+    assert!(wrote.is_ok(), "{why}");
+    assert!(inside.0 < Duration::from_millis(1500), "{why}");
+    assert!(took < Duration::from_secs(5), "{why}");
     assert!(out.status.success(), "{cli_err}");
-    let texts: Vec<String> = s
-        .read(|db| db.memories())
-        .unwrap()
-        .into_iter()
-        .map(|m| m.content)
-        .collect();
-    assert!(texts.contains(&"by the cli".to_string()), "{texts:?}");
-    assert!(texts.contains(&"while it embeds".to_string()));
+    let all = s.read(|db| db.memories()).unwrap();
+    let id_of = |text: &str| {
+        all.iter()
+            .find(|m| m.content == text)
+            .unwrap_or_else(|| panic!("no {text:?} in {all:?}"))
+            .id
+    };
+    assert!(
+        id_of("while it embeds") < id_of("by the cli"),
+        "the CLI wrote before the shared write: it held the lock while embedding. {why}"
+    );
 }

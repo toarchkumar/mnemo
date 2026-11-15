@@ -184,6 +184,14 @@ failed jobs:
   reached `PUBLISHED`, the release is out; if it failed validation, drop
   it in the Portal (Deployments) and re-run.
 
+**Reading a backtrace from a released binary** (since v0.15): the release
+CLI binaries and the wheels' library are stripped (`strip = "symbols"` in
+the release profiles), so a panic prints its message with addresses
+instead of function names. To read one, rebuild the tag without the strip
+(`git checkout vX.Y.Z`, then in `mnemo/` `CARGO_PROFILE_RELEASE_STRIP=none
+cargo build --release --features keychain,embed-candle`), and run the same
+command with `RUST_BACKTRACE=1`.
+
 ## Credentials
 
 They're secrets on `toarchkumar/mnemo`: repository secrets, or secrets of
