@@ -951,6 +951,7 @@ cargo run --bin mnemo -- <command>
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
 | `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
+| `default-agent` | Show, set (`--set <id>`) or clear (`--clear`) the agent a write that names none is made for, kept on the manifest (`_mnemo.default_agent`); the CLI and the MCP server use it in place of `default` (v0.17) |
 | `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1) |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
@@ -971,7 +972,9 @@ take no path, and use the repository's brain,
 `<git-common-dir>/mnemo/project.mnemo` (usually `.git/mnemo/project.mnemo`):
 `init`, `info`, `verify`, `remember`, `about`, `list`, `export`, `inspect`,
 `recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
-and `essence render|add|append`. Every worktree of the repository shares
+and `essence render|add|append`. Since v0.16.1 `get <ID>`, `search` and
+`snapshots` do too, and since v0.17 `update <ID>`, `thread start <NEW>`,
+`essence update|resolve|remove <ID>` and `default-agent`. Every worktree of the repository shares
 it, git never tracks it, and `init` creates its directory with mode 0700.
 It's found from `-C <dir>`, else `CLAUDE_PROJECT_DIR` (when Claude Code
 sets it), else the working directory. Outside a git repository, give the
@@ -981,6 +984,23 @@ path. Commands with another positional argument after the brain (`get`,
 --mcp --shared` for Claude Code, which sets `CLAUDE_PROJECT_DIR` for the
 server, and `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A
 user scope keeps the absolute path.
+
+**Agents and freshness** (v0.17, 13a step 1):
+- **`MNEMO_AGENT` and `MNEMO_ROLE`** name the session an agent runs in
+  (each 1 to 64 of letters, digits, `.`, `_`, `-`).
+  - Start each session with them set (one line in its terminal, before
+    the client).
+  - The CLI, the MCP server and the hooks read them.
+  - Every new record a command, the server or a hook writes gets
+    `_mnemo.author` (unproven until signed authorship). The server names
+    the agent on stderr at start.
+- **`remember` and `update`** take `--visibility public|team|private`,
+  `--review-by <WHEN>` and `--as-of <WHEN>`. A `WHEN` is `30d`, `12h`, `2w`,
+  a date (`2026-12-01`), or unix seconds. The MCP `remember` and `update`
+  take `visibility`, `review_by` and `as_of` (unix seconds).
+  - They're stored now. The filters and `mnemo stale` come with v0.17's
+    later steps.
+  - Visibility is a filter, not a security boundary.
 
 **The guide for agents** (v0.16, GUIDE-1): `mnemo onboard --guide` prints
 how to set up a project and how to organize its memory. It's built into

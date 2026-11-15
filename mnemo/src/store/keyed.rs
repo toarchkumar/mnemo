@@ -37,14 +37,65 @@ impl Mnemo {
         if !same_vector {
             return false;
         }
-        // Strip `_mnemo.*` from both sides before comparing user metadata.
+        // Strip `_mnemo.*` from both sides before comparing user metadata,
+        // all but the caller's own (13a: visibility and freshness count).
         let strip = |m: &Map<String, Value>| -> Map<String, Value> {
             m.iter()
-                .filter(|(k, _)| !k.starts_with(crate::memory::MNEMO_META_NS))
+                .filter(|(k, _)| !k.starts_with(crate::memory::MNEMO_META_NS) || is_caller_key(k))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect()
         };
         strip(&incoming.metadata) == strip(&live.metadata)
+    }
+
+    /// 13a (AGENT-DEFAULT): the agent the manifest names for a write that
+    /// names none (`_mnemo.default_agent`), if it names one. The CLI and the
+    /// MCP server use it in place of `default`; the engine's own default is
+    /// unchanged.
+    pub fn default_agent(&mut self) -> Result<Option<String>> {
+        Ok(self.about()?.into_iter().find(is_manifest).and_then(|m| {
+            m.metadata
+                .get(MNEMO_META_DEFAULT_AGENT)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        }))
+    }
+
+    /// 13a (AGENT-DEFAULT): set (or with `None`, clear) the manifest's
+    /// `_mnemo.default_agent`, in place: the manifest keeps its id, content
+    /// and vector. `agent` must be 1 to 64 of `[A-Za-z0-9._-]`. Returns
+    /// `Unchanged` when it already says so. A brain with no manifest is
+    /// refused.
+    pub fn set_default_agent(&mut self, agent: Option<&str>) -> Result<WriteOutcome> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        if let Some(a) = agent {
+            if !crate::memory::valid_agent_id(a) {
+                return Err(MnemoError::Invalid(format!(
+                    "{a:?} isn't an agent id: 1 to 64 of letters, digits, '.', '_' and '-'"
+                )));
+            }
+        }
+        let Some(mut m) = self.about()?.into_iter().find(is_manifest) else {
+            return Err(MnemoError::Invalid(
+                "this brain has no manifest to record a default agent on".into(),
+            ));
+        };
+        let want = agent.map(|a| Value::String(a.to_string()));
+        if m.metadata.get(MNEMO_META_DEFAULT_AGENT) == want.as_ref() {
+            return Ok(WriteOutcome::Unchanged);
+        }
+        match want {
+            Some(v) => m.metadata.insert(MNEMO_META_DEFAULT_AGENT.into(), v),
+            None => m.metadata.remove(MNEMO_META_DEFAULT_AGENT),
+        };
+        m.metadata.insert(
+            crate::memory::MNEMO_META_UPDATED_AT.into(),
+            Value::Number(memory::now_secs().into()),
+        );
+        self.put(m)?;
+        Ok(WriteOutcome::Updated)
     }
 
     /// Store a memory under a keyed upsert slot. Returns the live record's
@@ -78,13 +129,9 @@ impl Mnemo {
         }
         // RB-001.24: a keyed write is always a new record, so no caller
         // `_mnemo.*` key is accepted (the engine sets `_mnemo.key` below).
-        if let Some(k) = memory
-            .metadata
-            .keys()
-            .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
-        {
-            return Err(super::crud::reserved_key_error(k));
-        }
+        // 13a: visibility and freshness are the caller's (checked); no other
+        // `_mnemo.*` key is.
+        check_caller_reserved(&memory.metadata)?;
         self.ensure_key_caches()?;
         let slot = Self::key_slot_for(&memory, key);
         let existing = self.key_index.as_ref().and_then(|k| k.get(&slot).copied());
@@ -186,13 +233,9 @@ impl Mnemo {
                 "remember_keyed_superseding: 'key' must not be empty".into(),
             ));
         }
-        if let Some(k) = memory
-            .metadata
-            .keys()
-            .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
-        {
-            return Err(super::crud::reserved_key_error(k));
-        }
+        // 13a: visibility and freshness are the caller's (checked); no other
+        // `_mnemo.*` key is.
+        check_caller_reserved(&memory.metadata)?;
         self.ensure_key_caches()?;
         let slot = Self::key_slot_for(&memory, key);
         if self
@@ -353,11 +396,18 @@ impl Mnemo {
     /// [`MnemoError::Invalid`]: those keys are the engine's, and the
     /// record's own are kept as described above.
     pub fn update(&mut self, id: &Ulid, patch: MemoryPatch) -> Result<WriteOutcome> {
-        if let Some(k) = patch.metadata.as_ref().and_then(|m| {
-            m.keys()
-                .find(|k| k.starts_with(crate::memory::MNEMO_META_NS))
-        }) {
-            return Err(super::crud::reserved_key_error(k));
+        if let Some(m) = patch.metadata.as_ref() {
+            check_caller_reserved(m)?;
+        }
+        if let Some(m) = patch.caller_keys.as_ref() {
+            for (k, v) in m {
+                if !is_caller_key(k) {
+                    return Err(super::crud::reserved_key_error(k));
+                }
+                if !v.is_null() {
+                    crate::memory::check_caller_key(k, v).map_err(MnemoError::Invalid)?;
+                }
+            }
         }
         self.update_unchecked(id, patch)
     }
@@ -411,15 +461,27 @@ impl Mnemo {
         }
         if let Some(new_meta) = patch.metadata {
             // Keep reserved `_mnemo.*` keys from the existing record.
+            // 13a: but a caller key the patch sets (visibility, freshness)
+            // is the patch's.
             let reserved: Vec<(String, Value)> = existing
                 .metadata
                 .iter()
                 .filter(|(k, _)| k.starts_with(crate::memory::MNEMO_META_NS))
+                .filter(|(k, _)| !(is_caller_key(k) && new_meta.contains_key(k.as_str())))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             cand.metadata = new_meta;
             for (k, v) in reserved {
                 cand.metadata.insert(k, v);
+            }
+        }
+        if let Some(keys) = patch.caller_keys {
+            for (k, v) in keys {
+                if v.is_null() {
+                    cand.metadata.remove(&k);
+                } else {
+                    cand.metadata.insert(k, v);
+                }
             }
         }
         if let Some(ttl) = patch.ttl_secs {

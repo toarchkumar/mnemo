@@ -29,6 +29,8 @@ const CLEARED: &[&str] = &[
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_COMMON_DIR",
+    "MNEMO_AGENT",
+    "MNEMO_ROLE",
 ];
 
 /// The directory holding `name` on this process's PATH.
@@ -346,10 +348,12 @@ fn outside_git_or_before_init_the_error_says_what_to_do() {
     // `get <ID>` looks for the project brain (v0.16.1)...
     let err = e.fails(&e.p("main"), &["get", "01M7ESWBTNXMB0KEM5XF95YGX3"]);
     assert!(err.contains("no project brain at"), "{err}");
-    // ...and the other commands with a positional argument after the brain
-    // keep it required.
+    // ...as `update <ID>` does since v0.17; a command that still needs both
+    // arguments (`import <PATH> <FILE>`) keeps them required.
     let err = e.fails(&e.p("main"), &["update", "01M7ESWBTNXMB0KEM5XF95YGX3"]);
-    assert!(err.contains("<ID>") || err.contains("required"), "{err}");
+    assert!(err.contains("no project brain at"), "{err}");
+    let err = e.fails(&e.p("main"), &["import", "only-one-argument"]);
+    assert!(err.contains("<FILE>") || err.contains("required"), "{err}");
 }
 
 #[cfg(unix)]
@@ -651,4 +655,178 @@ fn get_search_and_snapshots_take_no_path() {
         "{out}"
     );
     e.ok(&e.p("main/sub"), &["snapshots"]);
+}
+
+/// 13a step 1 (v0.17): `default-agent`; a write that names no agent goes to
+/// it, and `history` reads it back; `MNEMO_AGENT` stamps `_mnemo.author`;
+/// `--visibility`, `--review-by` and `--as-of`; and `update`, `thread start`
+/// and `essence resolve` with no path (CLI-PATHLESS-2).
+#[test]
+fn default_agent_author_freshness_and_more_commands_without_a_path() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let embed = format!("{} \"{}\"", python(), e.p("embed.py").display());
+    assert!(e.ok(&main, &["default-agent"]).contains("(none"));
+    assert_eq!(
+        e.ok(&main, &["default-agent", "--set", "cursor-agent"])
+            .trim(),
+        "cursor-agent\tupdated"
+    );
+    assert_eq!(
+        e.ok(&main, &["default-agent", "--set", "cursor-agent"])
+            .trim(),
+        "cursor-agent\tunchanged"
+    );
+    assert_eq!(e.ok(&main, &["default-agent"]).trim(), "cursor-agent");
+    assert!(e
+        .fails(&main, &["default-agent", "--set", "no spaces"])
+        .contains("isn't an agent id"));
+
+    // A keyed write with no --agent, by worker-a, with freshness.
+    let o = e
+        .cmd(
+            &main,
+            &[
+                "remember",
+                "--text",
+                "the deploy target is staging-7",
+                "--key",
+                "fact.deploy",
+                "--visibility",
+                "private",
+                "--review-by",
+                "30d",
+                "--as-of",
+                "2026-01-02",
+                "--embed-cmd",
+                &embed,
+                "--embed-name",
+                "test-4",
+            ],
+        )
+        .env("MNEMO_AGENT", "worker-a")
+        .env("MNEMO_ROLE", "worker")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let id = String::from_utf8_lossy(&o.stdout)
+        .split('\t')
+        .next()
+        .unwrap()
+        .trim()
+        .to_string();
+    let m: Value = serde_json::from_str(&e.ok(&main, &["get", &id, "--format", "json"])).unwrap();
+    assert_eq!(m["agent_id"], "cursor-agent", "{m}");
+    let meta = &m["metadata"];
+    assert_eq!(meta["_mnemo.author"], "worker-a", "{m}");
+    assert_eq!(meta["_mnemo.visibility"], "private");
+    assert_eq!(
+        meta["_mnemo.as_of"], 1_767_312_000,
+        "2026-01-02 at midnight UTC"
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let review = meta["_mnemo.review_by"].as_i64().unwrap();
+    assert!(
+        (review - now - 30 * 86_400).abs() < 120,
+        "{review} vs {now}"
+    );
+    // `history` with no --agent finds it under the default agent.
+    let h = e.ok(
+        &main,
+        &["history", "--key", "fact.deploy", "--format", "json"],
+    );
+    assert!(h.contains("staging-7"), "{h}");
+    // Bad values are refused before anything is written.
+    let err = e.fails(
+        &main,
+        &[
+            "remember",
+            "--text",
+            "x",
+            "--review-by",
+            "soon",
+            "--embed-cmd",
+            &embed,
+            "--embed-name",
+            "test-4",
+        ],
+    );
+    assert!(err.contains("--review-by"), "{err}");
+    assert!(!e
+        .fails(
+            &main,
+            &["remember", "--text", "x", "--visibility", "secret"]
+        )
+        .is_empty());
+    // An invalid MNEMO_AGENT is ignored, with a note.
+    let o = e
+        .cmd(
+            &main,
+            &[
+                "remember",
+                "--text",
+                "no author",
+                "--embed-cmd",
+                &embed,
+                "--embed-name",
+                "test-4",
+            ],
+        )
+        .env("MNEMO_AGENT", "not valid!")
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("MNEMO_AGENT isn't"));
+    let id2 = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    let m2: Value = serde_json::from_str(&e.ok(&main, &["get", &id2, "--format", "json"])).unwrap();
+    assert!(m2["metadata"].get("_mnemo.author").is_none(), "{m2}");
+
+    // `update <ID>` with no path, setting the visibility only.
+    let out = e.ok(&e.p("main/sub"), &["update", &id, "--visibility", "public"]);
+    assert!(out.contains("updated"), "{out}");
+    let m: Value = serde_json::from_str(&e.ok(&main, &["get", &id, "--format", "json"])).unwrap();
+    assert_eq!(m["metadata"]["_mnemo.visibility"], "public");
+    assert_eq!(
+        m["metadata"]["_mnemo.author"], "worker-a",
+        "an edit keeps the author"
+    );
+    assert!(e
+        .fails(&main, &["update", "not-an-id"])
+        .contains("`update` takes `[PATH] <ID>`"));
+
+    // `essence resolve <ID>` and `thread start <NEW>` with no path.
+    let added = e.ok(
+        &main,
+        &[
+            "essence",
+            "add",
+            "--project",
+            "--section",
+            "decisions",
+            "--text",
+            "ship it",
+        ],
+    );
+    let item = added.split('\t').next().unwrap().trim().to_string();
+    assert!(e
+        .ok(&main, &["essence", "resolve", &item])
+        .contains("resolved"));
+    let err = e.fails(&main, &["thread", "start", "brain.mnemo", "--from", "t1"]);
+    assert!(err.contains("looks like a brain's path"), "{err}");
+    let o = e.run(&main, &["thread", "start", "t2", "--from", "t1"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !err.contains("required") && !err.contains("takes `[PATH]"),
+        "parsed as a thread id: {err}"
+    );
+
+    // Clearing it sends writes to `default` again.
+    assert!(e
+        .ok(&main, &["default-agent", "--clear"])
+        .contains("updated"));
+    assert!(e.ok(&main, &["default-agent"]).contains("(none"));
 }

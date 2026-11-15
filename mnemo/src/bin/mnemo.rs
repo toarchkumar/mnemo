@@ -75,6 +75,8 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Inspect { path, .. }
         | Command::Recall { path, .. }
         | Command::Get { path, .. }
+        | Command::Update { path, .. }
+        | Command::DefaultAgent { path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -86,13 +88,17 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
             cmd:
                 ThreadCmd::Ingest { path, .. }
                 | ThreadCmd::Export { path, .. }
-                | ThreadCmd::Forget { path, .. },
+                | ThreadCmd::Forget { path, .. }
+                | ThreadCmd::Start { path, .. },
         }
         | Command::Essence {
             cmd:
                 EssenceCmd::Render { path, .. }
                 | EssenceCmd::Add { path, .. }
-                | EssenceCmd::Append { path, .. },
+                | EssenceCmd::Append { path, .. }
+                | EssenceCmd::Update { path, .. }
+                | EssenceCmd::Resolve { path, .. }
+                | EssenceCmd::Remove { path, .. },
         } => Some(path),
         _ => None,
     }
@@ -102,17 +108,39 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
 /// moves to the ID, and must be a ULID (so a path given without its ID
 /// says so, rather than being read as an id).
 fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
-    if let Command::Get { path, id, .. } = cmd {
-        if id.is_none() {
-            if parse_ulid(path).is_err() {
-                return Err(format!(
-                    "`get` takes `[PATH] <ID>`: with one argument it's the memory's id, and \
-                     {path:?} isn't one"
-                ));
-            }
-            *id = Some(std::mem::take(path));
-        }
+    // v0.17 (CLI-PATHLESS-2): the same for `update` and `essence
+    // update|resolve|remove`, whose second argument is a ULID too, and
+    // `thread start`, whose second is a thread id.
+    let (name, path, id, ulid) = match cmd {
+        Command::Get { path, id, .. } => ("get", path, id, true),
+        Command::Update { path, id, .. } => ("update", path, id, true),
+        Command::Essence {
+            cmd:
+                EssenceCmd::Update { path, id, .. }
+                | EssenceCmd::Resolve { path, id, .. }
+                | EssenceCmd::Remove { path, id, .. },
+        } => ("essence", path, id, true),
+        Command::Thread {
+            cmd: ThreadCmd::Start { path, new, .. },
+        } => ("thread start", path, new, false),
+        _ => return Ok(()),
+    };
+    if id.is_some() {
+        return Ok(());
     }
+    if ulid && parse_ulid(path).is_err() {
+        return Err(format!(
+            "`{name}` takes `[PATH] <ID>`: with one argument it's the memory's id, and \
+             {path:?} isn't one"
+        ));
+    }
+    if !ulid && (path.ends_with(".mnemo") || std::path::Path::new(path.as_str()).is_file()) {
+        return Err(format!(
+            "`{name}` takes `[PATH] <NEW>`: with one argument it's the new thread id, and \
+             {path:?} looks like a brain's path; give the thread id too"
+        ));
+    }
+    *id = Some(std::mem::take(path));
     Ok(())
 }
 
@@ -388,12 +416,15 @@ enum Command {
         /// Optional importance weight (0.0–1.0; defaults to 0.5).
         #[arg(long)]
         importance: Option<f32>,
-        /// Optional agent id to scope the memory to.
+        /// Optional agent id to scope the memory to. Left out: the brain's
+        /// default agent (`mnemo default-agent`, v0.17), else `default`.
         #[arg(long)]
         agent: Option<String>,
         /// Optional JSON object of extra metadata key/values.
         #[arg(long)]
         metadata: Option<String>,
+        #[command(flatten)]
+        fresh: FreshArgs,
         /// Phase 12.1: optional upsert key. When set, this `remember`
         /// behaves as a keyed write: if a live memory already holds this
         /// `(scope_owner, key)` slot, the prior record is marked
@@ -553,6 +584,23 @@ enum Command {
         /// Include the embedding vector (json only; tables always omit it).
         #[arg(long)]
         vector: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// 13a: show, set or clear the agent a write that names none is made
+    /// for (the manifest's `_mnemo.default_agent`). The CLI and the MCP
+    /// server use it in place of `default`.
+    DefaultAgent {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        /// The agent id to set (1 to 64 of letters, digits, `.`, `_`, `-`).
+        /// Left out, it prints the current one.
+        #[arg(long, conflicts_with = "clear")]
+        set: Option<String>,
+        /// Clear it: writes that name no agent go to `default` again.
+        #[arg(long)]
+        clear: bool,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -795,14 +843,19 @@ enum Command {
     /// embedder (`--embed-cmd` + `--embed-name` required). An identical
     /// patch is a no-op and prints `unchanged`.
     Update {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the memory's ULID. With one
+        /// argument it's the ULID, and the brain is this project's (v0.17).
+        #[arg(value_name = "PATH")]
         path: String,
-        /// ULID of the memory to update.
-        id: String,
-        /// New content text; re-embeds through the embedder you supply
-        /// via `--embed-cmd` + `--embed-name`.
+        /// ULID of the memory to update (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        /// New content text; re-embeds through the built-in embedder, or
+        /// the one `--embed-cmd` + `--embed-name` give.
         #[arg(long)]
         text: Option<String>,
+        #[command(flatten)]
+        fresh: FreshArgs,
         /// New importance in `[0, 1]`.
         #[arg(long)]
         importance: Option<f32>,
@@ -1235,10 +1288,14 @@ enum ThreadCmd {
     /// --thread <new>` then pulls the prior thread's open items,
     /// `next` and last-N timeline entries ahead of its own essence.
     Start {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the new thread id. With one
+        /// argument it's the thread id, and the brain is this project's
+        /// (v0.17).
+        #[arg(value_name = "PATH")]
         path: String,
-        /// New thread id.
-        new: String,
+        /// New thread id (when PATH is given).
+        #[arg(value_name = "NEW")]
+        new: Option<String>,
         /// Previous thread id to continue from.
         #[arg(long)]
         from: String,
@@ -1319,10 +1376,13 @@ enum EssenceCmd {
     },
     /// Update an existing section item's text in place.
     Update {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the item's ULID. With one
+        /// argument it's the ULID, and the brain is this project's (v0.17).
+        #[arg(value_name = "PATH")]
         path: String,
-        /// ULID of the section item to update.
-        id: String,
+        /// ULID of the section item to update (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         /// New text (≤ 280 bytes).
         #[arg(long)]
         text: String,
@@ -1334,19 +1394,25 @@ enum EssenceCmd {
     },
     /// Mark a section item resolved (`open → resolved`).
     Resolve {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the item's ULID. With one
+        /// argument it's the ULID, and the brain is this project's (v0.17).
+        #[arg(value_name = "PATH")]
         path: String,
-        /// ULID of the section item to resolve.
-        id: String,
+        /// ULID of the section item to resolve (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
     /// Soft-delete a section item. Compact to reclaim space.
     Remove {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the item's ULID. With one
+        /// argument it's the ULID, and the brain is this project's (v0.17).
+        #[arg(value_name = "PATH")]
         path: String,
-        /// ULID of the section item to remove.
-        id: String,
+        /// ULID of the section item to remove (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -1841,6 +1907,133 @@ fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mn
         inspect::Secret::Key(k) => Mnemo::open_exclusive_with_key(path, k, op, wait_opts()),
     }
     .map(warn_notices)
+    .map(|mut db| {
+        // 13a: what this command writes carries its agent's name.
+        db.set_author(env_identity().0);
+        db
+    })
+}
+
+/// 13a: this process's agent id and role, from `MNEMO_AGENT` and
+/// `MNEMO_ROLE` (each 1 to 64 of letters, digits, `.`, `_`, `-`). One that
+/// isn't valid is left out, with a note on stderr the first time.
+fn env_identity() -> (Option<String>, Option<String>) {
+    static NOTED: std::sync::Once = std::sync::Once::new();
+    let read = |name: &str| -> Option<String> {
+        let v = std::env::var(name).ok()?;
+        let v = v.trim().to_string();
+        if v.is_empty() {
+            return None;
+        }
+        if mnemo_engine::valid_agent_id(&v) {
+            Some(v)
+        } else {
+            NOTED.call_once(|| {
+                eprintln!(
+                    "mnemo: note: {name} isn't 1 to 64 of letters, digits, '.', '_' and '-'; \
+                     it's ignored"
+                )
+            });
+            None
+        }
+    };
+    (read("MNEMO_AGENT"), read("MNEMO_ROLE"))
+}
+
+/// 13a: visibility and freshness on a write (`remember`, `update`).
+#[derive(clap::Args, Debug, Default)]
+struct FreshArgs {
+    /// `public`, `team` (the default) or `private`: a filter, not a
+    /// security boundary, until per-agent keys.
+    #[arg(long, value_parser = ["public", "team", "private"])]
+    visibility: Option<String>,
+    /// When to look at it again: `30d`, `12h`, `2w`, a date
+    /// (`2026-12-01`), or unix seconds.
+    #[arg(long, value_name = "WHEN")]
+    review_by: Option<String>,
+    /// When the content was true: `3d` (ago), a date, or unix seconds.
+    /// Left out, it's when it was written.
+    #[arg(long, value_name = "WHEN")]
+    as_of: Option<String>,
+}
+
+impl FreshArgs {
+    /// The caller keys these set, checked.
+    fn keys(&self) -> std::result::Result<serde_json::Map<String, serde_json::Value>, String> {
+        let mut m = serde_json::Map::new();
+        if let Some(v) = &self.visibility {
+            m.insert(mnemo_engine::MNEMO_META_VISIBILITY.into(), v.clone().into());
+        }
+        if let Some(w) = &self.review_by {
+            m.insert(
+                mnemo_engine::MNEMO_META_REVIEW_BY.into(),
+                parse_when(w, true)
+                    .map_err(|e| format!("--review-by: {e}"))?
+                    .into(),
+            );
+        }
+        if let Some(w) = &self.as_of {
+            m.insert(
+                mnemo_engine::MNEMO_META_AS_OF.into(),
+                parse_when(w, false)
+                    .map_err(|e| format!("--as-of: {e}"))?
+                    .into(),
+            );
+        }
+        Ok(m)
+    }
+}
+
+/// A time as unix seconds: a duration from now (`30d`, `12h`, `2w`, `90m`,
+/// `45s`; ahead when `ahead`, else ago), a date (`YYYY-MM-DD`, midnight UTC),
+/// or a whole number of unix seconds.
+fn parse_when(s: &str, ahead: bool) -> std::result::Result<i64, String> {
+    let s = s.trim();
+    if let Ok(n) = s.parse::<i64>() {
+        return if n >= 0 {
+            Ok(n)
+        } else {
+            Err(format!("{s:?} is before 1970"))
+        };
+    }
+    let bad = || format!("{s:?} isn't a duration (30d, 12h), a date (2026-12-01) or unix seconds");
+    if let Some((_, mult)) = [
+        ('w', 604_800),
+        ('d', 86_400),
+        ('h', 3_600),
+        ('m', 60),
+        ('s', 1),
+    ]
+    .iter()
+    .find(|(u, _)| s.ends_with(*u))
+    {
+        let n: i64 = s[..s.len() - 1].parse().map_err(|_| bad())?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let d = n.checked_mul(*mult).ok_or_else(bad)?;
+        return Ok(if ahead { now + d } else { (now - d).max(0) });
+    }
+    let parts: Vec<&str> = s.split('-').collect();
+    if let [y, m, d] = parts[..] {
+        let (y, m, d): (i64, i64, i64) = (
+            y.parse().map_err(|_| bad())?,
+            m.parse().map_err(|_| bad())?,
+            d.parse().map_err(|_| bad())?,
+        );
+        if !(1..=12).contains(&m) || !(1..=31).contains(&d) || y < 1970 {
+            return Err(bad());
+        }
+        // Days from 1970-01-01 to the date (the civil-from-days inverse).
+        let (yy, mm) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+        let era = yy.div_euclid(400);
+        let yoe = yy - era * 400;
+        let doy = (153 * mm + 2) / 5 + d - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        let days = era * 146_097 + doe - 719_468;
+        return Ok(days * 86_400);
+    }
+    Err(bad())
 }
 
 /// Like [`passphrase`] but for *new* passphrases on `init` / `rekey`:
@@ -2859,6 +3052,7 @@ fn run() -> std::result::Result<(), String> {
             importance,
             agent,
             metadata,
+            fresh,
             key,
             supersedes,
             embed_cmd,
@@ -2921,6 +3115,11 @@ fn run() -> std::result::Result<(), String> {
             if let Some(i) = importance {
                 memory = memory.with_importance(i);
             }
+            // 13a (AGENT-DEFAULT): no `--agent`, the brain's default agent.
+            let agent = match agent {
+                Some(a) => Some(a),
+                None => db.default_agent().map_err(fmt)?,
+            };
             if let Some(a) = agent {
                 memory = memory.with_agent(a);
             }
@@ -2934,6 +3133,7 @@ fn run() -> std::result::Result<(), String> {
                     memory.metadata.insert(k.clone(), v.clone());
                 }
             }
+            memory.metadata.extend(fresh.keys()?);
             // (Scope defaults to Private; add `--shared` later if the
             // CLI needs to opt into Scope::Shared.)
             //
@@ -3643,11 +3843,36 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
+        Command::DefaultAgent {
+            path,
+            set,
+            clear,
+            passphrase: pp,
+        } => {
+            let pp = secret_for(&path, &pp, &None)?;
+            if set.is_none() && !clear {
+                let mut db = open_r(&path, &pp).map_err(fmt)?;
+                match db.default_agent().map_err(fmt)? {
+                    Some(a) => println!("{a}"),
+                    None => println!("(none: writes that name no agent go to `default`)"),
+                }
+            } else {
+                let mut db = open_w(&path, &pp, "default-agent").map_err(fmt)?;
+                let outcome = db.set_default_agent(set.as_deref()).map_err(fmt)?;
+                db.flush().map_err(fmt)?;
+                let what = set.as_deref().unwrap_or("(none)");
+                match outcome {
+                    mnemo_engine::WriteOutcome::Unchanged => println!("{what}\tunchanged"),
+                    _ => println!("{what}\tupdated"),
+                }
+            }
+        }
         Command::Demo { path } => demo(&path).map_err(fmt)?,
         Command::Update {
             path,
             id,
             text,
+            fresh,
             importance,
             metadata,
             ttl_secs,
@@ -3661,11 +3886,16 @@ fn run() -> std::result::Result<(), String> {
         } => {
             use mnemo_engine::{MemoryPatch, WriteOutcome};
             let pp = secret_for(&path, &pp, &None)?;
+            let id = id.unwrap_or_default();
             let ulid = parse_ulid(&id)?;
 
             let mut patch = MemoryPatch::default();
             if let Some(i) = importance {
                 patch.importance = Some(i);
+            }
+            let keys = fresh.keys()?;
+            if !keys.is_empty() {
+                patch.caller_keys = Some(keys);
             }
             if let Some(meta_str) = metadata {
                 let parsed: serde_json::Value = serde_json::from_str(&meta_str)
@@ -3761,7 +3991,8 @@ fn run() -> std::result::Result<(), String> {
             let scope = if shared {
                 KeyScope::Shared
             } else {
-                match agent {
+                // 13a (AGENT-DEFAULT): no `--agent`, the brain's default.
+                match agent.or(db.default_agent().map_err(fmt)?) {
                     Some(a) => KeyScope::Private(a),
                     None => KeyScope::private_default(),
                 }
@@ -4340,6 +4571,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             from,
             passphrase: pp,
         } => {
+            let new = new.unwrap_or_default();
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "thread start").map_err(fmt)?;
             let id = db.thread_start(&new, &from).map_err(fmt)?;
@@ -4442,6 +4674,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = secret_for(&path, &pp, &None)?;
+            let id = id.unwrap_or_default();
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence update").map_err(fmt)?;
             let outcome = db
@@ -4462,6 +4695,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = secret_for(&path, &pp, &None)?;
+            let id = id.unwrap_or_default();
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence resolve").map_err(fmt)?;
             let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
@@ -4480,6 +4714,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             passphrase: pp,
         } => {
             let pp = secret_for(&path, &pp, &None)?;
+            let id = id.unwrap_or_default();
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence remove").map_err(fmt)?;
             db.essence_remove(&ulid).map_err(fmt)?;

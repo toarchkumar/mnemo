@@ -293,7 +293,7 @@ pub(super) fn scored_row(e: &CatalogEntry) -> bool {
             r.flags & ROW_SUPERSEDED == 0
                 && !matches!(
                     r.kind,
-                    ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK
+                    ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK | ROW_KIND_COORDINATION
                 )
         })
 }
@@ -417,6 +417,10 @@ pub(super) const ROW_KIND_TURN: u8 = 1;
 pub(super) const ROW_KIND_ESSENCE: u8 = 2;
 pub(super) const ROW_KIND_THREAD_LINK: u8 = 3;
 pub(super) const ROW_KIND_ONBOARDING: u8 = 4;
+/// 13a: a message, task, claim or presence record (`COORDINATION_KINDS`).
+/// A new value of the same `u8`, so no format change; an older build reads
+/// such a row as a fact.
+pub(super) const ROW_KIND_COORDINATION: u8 = 5;
 
 /// 32-bit FNV-1a over `parts` (separated), never `0` ("none" in a row).
 pub(super) fn fnv1a32(parts: &[&[u8]]) -> u32 {
@@ -450,6 +454,7 @@ pub(super) fn row_tags(m: &Memory) -> RowV9 {
         Some(MNEMO_META_KIND_TURN) => ROW_KIND_TURN,
         Some(MNEMO_META_KIND_ESSENCE) => ROW_KIND_ESSENCE,
         Some(MNEMO_META_KIND_THREAD_LINK) => ROW_KIND_THREAD_LINK,
+        _ if is_coordination(m) => ROW_KIND_COORDINATION,
         _ if is_onboarding(m) => ROW_KIND_ONBOARDING,
         _ => ROW_KIND_FACT,
     };
@@ -1505,6 +1510,19 @@ impl Mnemo {
             m.id = Ulid::new();
         }
         let id_u: u128 = m.id.0;
+        // 13a: a new record (an id the catalog doesn't hold live) carries
+        // its handle's author; an overwrite in place keeps its own.
+        if let Some(a) = &self.author {
+            let live = self
+                .index
+                .get(id_u, &self.catalog)
+                .is_some_and(|i| !self.catalog[i].deleted);
+            if !live {
+                m.metadata
+                    .entry(MNEMO_META_AUTHOR.to_string())
+                    .or_insert_with(|| Value::String(a.clone()));
+            }
+        }
         // R-004.2: an overwrite with the handle caches built reads the
         // stored version first (one decrypt), so the caches drop exactly
         // what it contributed.

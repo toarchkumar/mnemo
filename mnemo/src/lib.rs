@@ -93,6 +93,13 @@ pub use embed::{Embedder, EmbedderIdentity};
 pub use embed_cmd::{EmbedCmd, DEFAULT_EMBED_TIMEOUT};
 pub use error::{MnemoError, Result};
 pub use index::{IndexConfig, IndexInfo};
+/// 13a: the coordination kinds and the reserved keys a caller may set.
+pub use memory::{
+    check_caller_key, is_caller_key, is_coordination, valid_agent_id, CALLER_KEYS,
+    COORDINATION_KINDS, MNEMO_META_AS_OF, MNEMO_META_AUTHOR, MNEMO_META_DEFAULT_AGENT,
+    MNEMO_META_KIND_CLAIM, MNEMO_META_KIND_MESSAGE, MNEMO_META_KIND_PRESENCE, MNEMO_META_KIND_TASK,
+    MNEMO_META_REVIEW_BY, MNEMO_META_VISIBILITY, VISIBILITY_LEVELS,
+};
 pub use memory::{
     status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind, EssenceScope,
     EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, KeyedMemory, Memory,

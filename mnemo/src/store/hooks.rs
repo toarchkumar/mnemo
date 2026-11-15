@@ -3,6 +3,20 @@
 use super::*;
 
 impl Mnemo {
+    /// **Not a stable API.** 13a step 1: write a coordination record of
+    /// `kind` (message, task, claim, presence), so a test can check it's
+    /// kept out of recall, the keyword index, the ANN and `about` before
+    /// each kind has its own API.
+    #[doc(hidden)]
+    pub fn __put_coordination_for_testing(
+        &mut self,
+        kind: &str,
+        content: &str,
+        metadata: Map<String, Value>,
+    ) -> Result<Ulid> {
+        self.put_coordination(kind, content.to_string(), metadata)
+    }
+
     /// **Not a stable API.** 12.3: create a file protected by a passphrase on
     /// raw-key KDF parameters, which the public paths refuse, so a test can
     /// check what an open, `info`, `verify` and a compaction do with one.

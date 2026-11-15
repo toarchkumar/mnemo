@@ -347,7 +347,10 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
         content = entry["content"]
         mt = entry.get("memory_type", "semantic")
         importance = float(entry.get("importance", 0.7))
-        metadata = entry.get("metadata") or {}
+        metadata = dict(entry.get("metadata") or {})
+        # v0.17: the manifest's default agent is a reserved key the engine
+        # sets itself, so it's applied after the write.
+        default_agent = metadata.pop("_mnemo.default_agent", None)
         kw = {"key": entry["key"]} if entry.get("key") else {}
         r = db.remember_text(
             content,
@@ -359,6 +362,8 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
         )
         # A keyed write returns {"id", "outcome"}.
         mid = r["id"] if isinstance(r, dict) else r
+        if default_agent and hasattr(db, "set_default_agent"):
+            db.set_default_agent(default_agent)
         vector = db.get(mid)["vector"]  # for the JSONL export below
         jsonl_lines.append(
             json.dumps(

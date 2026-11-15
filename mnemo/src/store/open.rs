@@ -430,6 +430,7 @@ impl Mnemo {
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
+            author: None,
             free: FreeList::default(),
             pending_free: Vec::new(),
             free_dirty: false,
@@ -914,6 +915,7 @@ impl Mnemo {
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
+            author: None,
             free,
             pending_free: Vec::new(),
             free_dirty: false,
@@ -1240,6 +1242,7 @@ impl Mnemo {
             window_committed: false,
             shared: false,
             turn_compress_after: DEFAULT_TURN_COMPRESS_AFTER_SECS,
+            author: None,
             free,
             pending_free: Vec::new(),
             free_dirty: false,
@@ -1266,6 +1269,20 @@ impl Mnemo {
             direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
+    }
+
+    /// 13a: stamp `_mnemo.author` = `author` on each new record this handle
+    /// writes (a fact, a turn, an essence item; an edit in place keeps the
+    /// record's own). The CLI, the MCP server and the hooks set it from
+    /// `MNEMO_AGENT`. Unproven until 13.4 signs it. Per handle, not
+    /// persisted.
+    pub fn set_author(&mut self, author: Option<String>) {
+        self.author = author;
+    }
+
+    /// 13a: the author this handle stamps on new records, if any.
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
     }
 
     /// FMT-9e: compress v9 thread-turn records once they're older than

@@ -53,6 +53,9 @@ use crate::memory::{
     MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID,
     MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
+pub(crate) use crate::memory::{
+    is_caller_key, is_coordination, MNEMO_META_AUTHOR, MNEMO_META_DEFAULT_AGENT,
+};
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
@@ -68,6 +71,7 @@ mod continuation;
 mod crud;
 mod essence;
 pub(crate) use essence::format_unix_date;
+mod coordination;
 mod flush;
 #[cfg(test)]
 mod header_graft_tests;
@@ -1129,6 +1133,9 @@ pub struct Mnemo {
     /// FMT-9e: thread turns are compressed once older than this many
     /// seconds (`0`: at write). Per handle, not persisted.
     turn_compress_after: i64,
+    /// 13a: stamped as `_mnemo.author` on each new record this handle
+    /// writes ([`Mnemo::set_author`]).
+    author: Option<String>,
     /// FMT-9 (a): the committed free list (v9; always empty on v8). Pages
     /// allocated from it since the last commit are already removed.
     free: FreeList,
@@ -1354,11 +1361,26 @@ fn a_marker_only_turn_saved_before_the_flag_is_recognised_by_its_content() {
     )));
 }
 
+/// 13a: a caller's `_mnemo.*` keys: [`crate::memory::CALLER_KEYS`] are
+/// allowed and checked; any other is refused.
+pub(super) fn check_caller_reserved(metadata: &Map<String, Value>) -> Result<()> {
+    for (k, v) in metadata {
+        if !k.starts_with(crate::memory::MNEMO_META_NS) {
+            continue;
+        }
+        if !is_caller_key(k) {
+            return Err(crud::reserved_key_error(k));
+        }
+        crate::memory::check_caller_key(k, v).map_err(MnemoError::Invalid)?;
+    }
+    Ok(())
+}
+
 fn is_ann_kind(m: &Memory) -> bool {
     !matches!(
         m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),
         Some(MNEMO_META_KIND_TURN)
             | Some(MNEMO_META_KIND_ESSENCE)
             | Some(MNEMO_META_KIND_THREAD_LINK)
-    )
+    ) && !is_coordination(m)
 }

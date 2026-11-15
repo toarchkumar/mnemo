@@ -534,3 +534,65 @@ fn a_resource_only_session_writes_nothing() {
     );
     assert_eq!(std::fs::read(b.path()).unwrap(), before);
 }
+
+/// 13a step 1 (v0.17): the server names its agent at start
+/// (`MNEMO_AGENT`, `MNEMO_ROLE`), stamps it as `_mnemo.author`, writes for
+/// the brain's default agent when `agent_id` is left out (and reads
+/// `history` from it), and takes `visibility`, `review_by` and `as_of`.
+#[test]
+fn the_server_names_its_agent_and_takes_the_default_agent_and_freshness() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        {
+            let mut db = Mnemo::open(b.path(), PASS).unwrap();
+            db.remember(mnemo_engine::Memory::scaffold_manifest(4))
+                .unwrap();
+            db.set_default_agent(Some("cursor-agent")).unwrap();
+            db.close().unwrap();
+        }
+        let (rs, err) = b.session_env(
+            shared,
+            true,
+            &[("MNEMO_AGENT", "worker-a"), ("MNEMO_ROLE", "worker")],
+            &[
+                tool("remember", json!({"content": "deploys go to staging-7", "memory_type": "semantic",
+                    "key": "fact.deploy", "visibility": "private", "review_by": 1_900_000_000_i64, "as_of": 1_700_000_000_i64})),
+                tool("history", json!({"key": "fact.deploy"})),
+                tool("remember", json!({"content": "x", "memory_type": "semantic", "visibility": "secret"})),
+            ],
+        );
+        assert!(
+            err.contains("mnemo mcp: agent worker-a (role worker)"),
+            "{err}"
+        );
+        let r: Value =
+            serde_json::from_str(ok(&rs[1])["content"][0]["text"].as_str().unwrap()).unwrap();
+        let id = r["id"].as_str().unwrap().to_string();
+        let h = ok(&rs[2])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            h.contains("staging-7"),
+            "history reads the default agent's slot: {h}"
+        );
+        assert!(
+            rs[3]["error"].is_object() || rs[3]["result"]["isError"] == json!(true),
+            "a bad visibility is refused: {}",
+            rs[3]
+        );
+        let mut db = Mnemo::open(b.path(), PASS).unwrap();
+        let m = db
+            .get(&mnemo_engine::Ulid::from_string(&id).unwrap())
+            .unwrap();
+        assert_eq!(m.agent_id, "cursor-agent");
+        assert_eq!(m.metadata["_mnemo.author"], json!("worker-a"));
+        assert_eq!(m.metadata["_mnemo.visibility"], json!("private"));
+        assert_eq!(m.metadata["_mnemo.review_by"], json!(1_900_000_000_i64));
+        assert_eq!(m.metadata["_mnemo.as_of"], json!(1_700_000_000_i64));
+        db.close().unwrap();
+        // With no MNEMO_AGENT it says it's anonymous.
+        let (_, err) = b.session_env(shared, false, &[], &[]);
+        assert!(err.contains("no MNEMO_AGENT"), "{err}");
+    });
+}
