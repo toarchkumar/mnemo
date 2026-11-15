@@ -174,14 +174,6 @@ jobs:
         run: |
           if [ "${{ matrix.use_zig }}" = "true" ]; then
             cargo zigbuild --release --target ${{ matrix.target }} --features keychain,embed-candle
-            # v0.15: the release profile's `strip = "symbols"` doesn't reach
-            # the zig link (the binary came out the same size), so strip it
-            # here with rustup's llvm-strip. Windows needs nothing: MSVC
-            # keeps the symbols in a .pdb, which isn't shipped.
-            rustup component add llvm-tools
-            host="$(rustc -vV | sed -n 's/^host: //p')"
-            "$(rustc --print sysroot)/lib/rustlib/$host/bin/llvm-strip" --strip-all \
-              "target/${{ matrix.target }}/release/mnemo"
           else
             cargo build --release --target ${{ matrix.target }} --features keychain,embed-candle
           fi
