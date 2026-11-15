@@ -61,7 +61,27 @@ pub fn find(moved: bool, quiet: bool) -> Result<PathBuf, String> {
             }
         }
     }
-    Ok(common.join(DIR).join(FILE))
+    let brain = common.join(DIR).join(FILE);
+    refuse_link(&brain)?;
+    Ok(brain)
+}
+
+/// RB-011.2: a project brain found without a path must be a real file in a
+/// real directory. A symbolic link in either place (one a cloned or
+/// unpacked repository can carry) could lead to another project's brain, so
+/// it's refused; a brain named by its path may still be a link.
+pub fn refuse_link(brain: &Path) -> Result<(), String> {
+    let dir = brain.parent().unwrap_or(brain);
+    for p in [dir, brain] {
+        if std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(format!(
+                "{} is a symbolic link; a project brain found without a path must be a real \
+                 file in a real directory (give the brain's path to use it)",
+                p.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The git common dir of the repository `start` is in, absolute.
@@ -186,6 +206,12 @@ pub fn with_excluded(text: &str, lines: &[String]) -> String {
         match state {
             0 if l == EXCLUDE_OPEN => state = 1,
             1 if l == EXCLUDE_CLOSE => state = 2,
+            // A block whose closing line was edited away ends at the first
+            // line that isn't one of ours (RB-011.5 item 5).
+            1 if !l.starts_with('/') => {
+                state = 2;
+                after.push(l.to_string());
+            }
             0 => before.push(l.to_string()),
             1 => inside.push(l.to_string()),
             _ => after.push(l.to_string()),
@@ -287,5 +313,11 @@ mod tests {
         assert!(b.contains("/.mcp.json"));
         assert_eq!(with_excluded(&b, &[]), base);
         assert_eq!(with_excluded("", &[]), "");
+        // No closing line: the block ends at the first line not ours.
+        let open = format!("{base}{EXCLUDE_OPEN}\n/.mcp.json\n\n# mine\n*.tmp\n");
+        assert_eq!(
+            with_excluded(&open, &[]),
+            format!("{base}\n# mine\n*.tmp\n")
+        );
     }
 }

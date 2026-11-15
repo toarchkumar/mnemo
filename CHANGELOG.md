@@ -8,6 +8,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-15
+
 ### Added
 
 - **The project brain (12.2 step 1).** In a git repository, the brain
@@ -17,8 +19,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
   and `essence render|add|append`. It's found from `-C <dir>`, else
   `CLAUDE_PROJECT_DIR`, else the working directory. `init` creates its
-  directory with mode 0700, and refuses a symbolic link in its place.
-  Outside a git repository the error says to give the path.
+  directory with mode 0700, and refuses a symbolic link in its place. A
+  brain found without a path must be a real file in a real directory: a
+  symbolic link in either place is refused (by the commands, the hooks and
+  `onboard`), and a brain named by its path may still be one. Outside a git
+  repository the error says to give the path.
 - **`-C <dir>`** on every command: run as if started in `<dir>`, like
   git's `-C`. When `CLAUDE_PROJECT_DIR` picks the brain and the working
   directory is in another repository, one line on stderr names the brain
@@ -31,9 +36,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
     `session-end` (with an optional `thread`).
 
   Everything they show from the brain comes after a line that marks it as
-  data, not instructions. Reads don't count as accesses. A missing key or
-  an unknown URI is the error `-32002`. The library has
-  `Mnemo::recent(n)`.
+  data, not instructions, and a line of brain text that starts with `#` or
+  with that line's words gets a `\` in front. Reads don't count as
+  accesses. A missing key or an unknown URI is the error `-32002`. The
+  library has `Mnemo::recent(n)`.
+- **The MCP server answers a request that hits an internal error** with
+  the error `-32603` and goes on. After one inside a tool call it stops
+  using the file (later requests get an error saying to restart it, and
+  nothing more is flushed), since the handle may hold a half-made change.
+  At start it says so when the secret comes from its environment while the
+  brain has its own keychain entry, naming the source.
 - **`mnemo onboard` (12.2 step 5),** one command, safe to re-run, that
   sets up a project's memory for Claude Code and Cursor. It sets up the
   project brain only; for a brain elsewhere, use `mcp install <path>`:
@@ -50,16 +62,23 @@ Pre-1.0, the minor component carries the breaking-change signal.
       with timeouts of 15, 30 and 30 s, and `--hook-budget`;
     - a skill (`.claude/skills/mnemo/SKILL.md`) or rule
       (`.cursor/rules/mnemo.mdc`) with the guide's card.
-  - **Local by default:** with `--scope local`, the files are listed in a
-    marked block of `.git/info/exclude`, and configs name the binary's
-    full path. `--scope project` writes committed files with a bare
-    `mnemo`.
+  - **Local by default:** with `--scope local`, configs name the binary's
+    full path, and the files `onboard` creates are listed in a marked
+    block of `.git/info/exclude`. A file of the user's that it merges into
+    stays visible to git, and the plan says not to commit it. `--scope
+    project` writes committed files with a bare `mnemo`. A hook command's
+    program is always quoted (with `/` on Windows).
   - **The plan:** it shows the plan (only its own entries, with secrets
     masked) and asks once. `--yes` writes without asking and `--print`
     only shows. With no terminal and no `--yes` it writes nothing and
     exits 3.
-  - **Re-runs** write only what's missing or out of date. A file it
-    didn't write, or JSON that doesn't parse, is left alone.
+  - **Re-runs** write only what's missing or out of date. An entry of its
+    own is "already right" only when it's exactly what `onboard` would
+    write; one with anything more (an `env` block, say) is replaced, and
+    the plan names what's dropped, without values (`mcp install`'s plan
+    does too). A file it didn't write, or JSON that doesn't parse, is left
+    alone. A config file that's a symbolic link is written through the
+    link.
   - **`--undo`** removes only its own entries (a `mnemo` command with
     `serve` or `hook`), keeps a user's own hooks beside them, and never
     removes the brain, its key or the model. The summary says how to
@@ -73,11 +92,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
     platform over HTTPS.
   - It checks the binary's SHA-256 against the release's new `SHA256SUMS`
     asset and, when `gh` is signed in, the build's attestation (`gh
-    attestation verify`).
+    attestation verify` with `--signer-workflow` for this repository's
+    `release.yml` and `--source-ref` for the version's tag). Then it
+    checks that the binary's `--version` is the version asked for, before
+    it replaces anything.
   - It installs to `~/.local/bin` (or `%LOCALAPPDATA%\Programs\mnemo`)
     with no sudo, and prints the next step with the full path when that
     directory isn't on the PATH.
-  - The release now attests each CLI binary's build provenance.
+  - The release now attests each CLI binary's build provenance, after the
+    approval; `attach` and both publish jobs wait for it.
+  - On Windows on ARM, `install.ps1` installs the x86_64 build, which runs
+    under emulation. When `mnemo.exe` can't be replaced because a client
+    is running it, it says to close the client and run it again.
   - `cargo binstall mnemo-engine` takes the release binary too.
 - **Search past sessions:** the guide shows `recall` with the turn filter
   (`{"metadata": {"_mnemo.kind": "turn"}}`, or `--filter _mnemo.kind=turn`),
@@ -107,7 +133,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
     session's thread (`claude-code:<id>` or `cursor:<id>`). `pre-compact`
     also gives Claude Code compaction instructions.
   - **The rules:**
-    - It always exits 0, never prompts, and never downloads.
+    - It always exits 0, never prompts, and never downloads. It reads its
+      own command line, so an event, client or option this build doesn't
+      know, a bad `--budget` or a `-C` directory that's gone is a note,
+      not clap's exit 2. A panic's note names only where it happened.
+    - `pre-compact` prints its instructions before the save, so a save
+      that fails still leaves the summary its pointer.
+    - A save writes 50 turns at a time, so a run the client's timeout
+      cuts short has kept what it got to, and the next run goes on.
     - It reads with a 2 s wait, and writes in shared mode.
     - It checks the session id and the transcript path. A FIFO or a
       device is refused without blocking, and a transcript over 64 MiB
@@ -115,13 +148,30 @@ Pre-1.0, the minor component carries the breaking-change signal.
     - A Claude Code hook that Cursor runs stands aside.
     - A save needs the built-in model installed, and says so when it
       isn't.
+  - **Windows:** the hooks haven't been run on Windows yet (which shell
+    Claude Code and Cursor use for a hook's command there is unchecked),
+    so treat them as untested there.
 - **`thread ingest --tool-results omit` and `--redact`,** and the library's
   `redact::secrets` and `read_transcript_with`. `omit` keeps only a
   `[tool_result ok|error, N bytes]` marker. `--redact` replaces known
-  secret shapes with `[redacted: <kind>]`: private keys, AWS key ids,
-  GitHub and Slack tokens, `sk-` keys, JWTs, recovery codes, and
-  secret-looking `NAME=value`s. Each shape needs a word boundary and a
-  vendor-length minimum, so prose stays. **The hooks' saves always use
+  secret shapes with `[redacted: <kind>]`:
+  - private keys (a PEM marker only mentioned in prose loses the marker
+    alone), AWS key ids, GitHub, Slack, GitLab, npm and Hugging Face
+    tokens, `sk-`, `sk_live_`, `rk_live_` and `AIza` keys, JWTs, and
+    recovery codes (with hyphens, spaces or line breaks between groups);
+  - the value of a `NAME=value`, `NAME: value` or `"name": "value"` whose
+    name ends in `PASSWORD` or `PASSPHRASE` (any value of 8 or more, to
+    the end of the line when unquoted), or in `TOKEN`, `SECRET`, `_KEY`,
+    `-KEY` or `APIKEY` (when it isn't a plain word; database names like
+    `cache_key` and `sort_key` stay);
+  - the word after `--passphrase` and `--password`, and after `--token`
+    and `--key` when it looks like key material (a memory key or a path
+    stays);
+  - `Authorization:` and `Bearer` credentials, and a URL's password.
+
+  References and placeholders (`$X`, `<x>`, `{{ x }}`, `%{x}`) stay. Each
+  shape needs a word boundary and a vendor-length minimum, so prose stays,
+  and it works on text in any language. **The hooks' saves always use
   both, which narrows "a thread's turns are kept losslessly" for the
   hooks:** tool output isn't kept, only its size. A direct `thread ingest`
   keeps everything unless asked. Redaction is a best effort.
@@ -139,6 +189,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `serve --mcp --shared` for Claude Code (project and local scopes), and
   `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A user scope
   keeps the absolute path.
+
+### Fixed
+
+- **Re-writing a key with the same value added a version on v9 files**
+  (since v0.13): the stored vector is fp16-rounded, and it was compared
+  with the new one before the same rounding, so with a real embedder the
+  write was never "unchanged". It's compared after the rounding now. The
+  extra versions already in a file stay, as history.
 
 ### Changed
 
@@ -4198,7 +4256,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/toarchkumar/mnemo/compare/v0.13.1...v0.13.2

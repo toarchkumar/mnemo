@@ -2255,6 +2255,21 @@ fn print_recall_hits(hits: &[RecallResult], format: OutputFormat) {
 }
 
 fn run() -> std::result::Result<(), String> {
+    // RB-011.3: `mnemo hook` reads its own command line, so no usage error
+    // and no missing `-C` directory can make it exit with anything but 0.
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(a) = hook::parse_args(&argv) {
+        match a.wait.as_deref().map(parse_wait) {
+            Some(Ok(w)) => {
+                let _ = WAIT.set(w);
+            }
+            Some(Err(e)) => eprintln!("mnemo: hook: --wait: {e}; the default was used"),
+            None => {}
+        }
+        let _ = MODEL_DIR.set(a.model_dir.clone());
+        hook::run_args(a);
+        return Ok(());
+    }
     let mut cli = Cli::parse();
     let _ = WAIT.set(cli.wait);
     let _ = MODEL_DIR.set(cli.model_dir.clone());

@@ -79,6 +79,168 @@ const TRANSCRIPT_MAX: u64 = 64 << 20;
 /// The most of the hook's input read.
 const INPUT_MAX: u64 = 1 << 20;
 
+/// `mnemo hook …`'s command line, read by [`parse_args`] instead of clap so
+/// that nothing on it can make the hook exit with anything but 0
+/// (RB-011.3): an event, client or flag this build doesn't know, a bad
+/// `--budget` or `--wait`, or a `-C` directory that's gone is a note.
+#[derive(Debug, Default, PartialEq)]
+pub struct Args {
+    pub event: Option<Event>,
+    pub client: Option<Client>,
+    pub budget: Option<usize>,
+    pub dir: Option<PathBuf>,
+    pub wait: Option<String>,
+    pub model_dir: Option<PathBuf>,
+    /// Notes on what was left out, in order.
+    pub notes: Vec<String>,
+}
+
+/// The hook's arguments when `argv` is `mnemo [global options] hook …`;
+/// `None` for any other command, and for `hook --help` (clap shows that).
+pub fn parse_args(argv: &[std::ffi::OsString]) -> Option<Args> {
+    let mut a = Args::default();
+    let mut it = argv.iter().skip(1).peekable();
+    let mut in_hook = false;
+    let mut event: Option<String> = None;
+    while let Some(arg) = it.next() {
+        let Some(s) = arg.to_str() else {
+            if in_hook {
+                a.notes
+                    .push("an argument that isn't UTF-8 was left out".into());
+                continue;
+            }
+            return None;
+        };
+        // `--name value` or `--name=value`.
+        let mut value = |name: &str| -> Option<Option<std::ffi::OsString>> {
+            if s == name {
+                Some(it.next().cloned())
+            } else {
+                s.strip_prefix(name)
+                    .and_then(|r| r.strip_prefix('='))
+                    .map(|v| Some(v.into()))
+            }
+        };
+        if let Some(v) = value("--wait") {
+            a.wait = v.map(|v| v.to_string_lossy().into_owned());
+            continue;
+        }
+        if let Some(v) = value("--model-dir") {
+            a.model_dir = v.map(PathBuf::from);
+            continue;
+        }
+        if s == "-C" {
+            a.dir = it.next().map(PathBuf::from);
+            continue;
+        }
+        if let Some(d) = s.strip_prefix("-C") {
+            a.dir = Some(PathBuf::from(d.strip_prefix('=').unwrap_or(d)));
+            continue;
+        }
+        if !in_hook {
+            if s == "hook" {
+                in_hook = true;
+                continue;
+            }
+            return None;
+        }
+        if matches!(s, "-h" | "--help") {
+            return None;
+        }
+        if let Some(v) = value("--client") {
+            let v = v
+                .map(|v| v.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match <Client as clap::ValueEnum>::from_str(&v, false) {
+                Ok(c) => a.client = Some(c),
+                Err(_) => a
+                    .notes
+                    .push(format!("this mnemo doesn't know the client {v:?}")),
+            }
+            continue;
+        }
+        if let Some(v) = value("--budget") {
+            let v = v
+                .map(|v| v.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match v.parse::<usize>() {
+                Ok(b) => a.budget = Some(b),
+                Err(_) => a.notes.push(format!(
+                    "--budget {v:?} isn't a number of bytes; the default was used"
+                )),
+            }
+            continue;
+        }
+        if s.starts_with('-') {
+            a.notes.push(format!("the option {s:?} was left out"));
+            continue;
+        }
+        if event.is_none() {
+            event = Some(s.to_string());
+        } else {
+            a.notes.push(format!("the argument {s:?} was left out"));
+        }
+    }
+    if !in_hook {
+        return None;
+    }
+    match event {
+        Some(e) => match <Event as clap::ValueEnum>::from_str(&e, false) {
+            Ok(ev) => a.event = Some(ev),
+            Err(_) => a
+                .notes
+                .push(format!("this mnemo doesn't know the event {e:?}")),
+        },
+        None => a.notes.push("no event was named".into()),
+    }
+    if a.client.is_none() && !a.notes.iter().any(|n| n.contains("client")) {
+        a.notes.push("no --client was named".into());
+    }
+    Some(a)
+}
+
+/// Run the hook from [`parse_args`]'s result: `-C`, then the event. Without
+/// an event or a client it does nothing but say why. Every outcome is exit
+/// 0.
+pub fn run_args(a: Args) {
+    quiet_panics();
+    for n in &a.notes {
+        eprintln!("mnemo: hook: {n}");
+    }
+    let (Some(event), Some(client)) = (a.event, a.client) else {
+        eprintln!(
+            "mnemo: the hook did nothing (this mnemo may be older than the one that wrote \
+             the hook; `mnemo onboard` writes it again)"
+        );
+        return;
+    };
+    if let Some(d) = &a.dir {
+        if let Err(e) = std::env::set_current_dir(d) {
+            eprintln!("mnemo: the hook did nothing: -C {}: {e}", d.display());
+            return;
+        }
+    }
+    run(Opts {
+        event,
+        client,
+        budget: a.budget,
+        moved: a.dir.is_some(),
+    });
+}
+
+/// A panic's line names where it happened, never what it was about: the
+/// message of a panic inside the redactor could quote the transcript
+/// (RB-011.1).
+fn quiet_panics() {
+    std::panic::set_hook(Box::new(|info| {
+        let at = info
+            .location()
+            .map(|l| format!(" at {}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        eprintln!("mnemo: internal error{at}");
+    }));
+}
+
 /// What a hook run needs from the command line.
 pub struct Opts {
     pub event: Event,
@@ -124,12 +286,16 @@ pub fn event(o: &Opts, input: &Value) {
         }
         Event::PreCompact | Event::SessionEnd => {
             let id = session_id(o.client, input);
-            save_transcript(o, input, id.as_deref());
+            // The instructions first, so a save that fails for any reason
+            // doesn't cost the summary its pointer (RB-011.1).
             if o.event == Event::PreCompact && o.client == Client::ClaudeCode {
-                if let Some(id) = id {
-                    print!("{}", compact_instructions(o.client, &id));
+                if let Some(id) = &id {
+                    use std::io::Write;
+                    print!("{}", compact_instructions(o.client, id));
+                    let _ = std::io::stdout().flush();
                 }
             }
+            save_transcript(o, input, id.as_deref());
         }
     }
 }
@@ -196,6 +362,7 @@ fn brain(o: &Opts, input: &Value) -> Result<PathBuf, String> {
     let start = start_dir(o, input).ok_or_else(|| NO_BRAIN.to_string())?;
     let common = project::common_dir(&start).map_err(|_| NO_BRAIN.to_string())?;
     let b = common.join(project::DIR).join(project::FILE);
+    project::refuse_link(&b).map_err(|e| format!("mnemo: {e}"))?;
     if b.is_file() {
         Ok(b)
     } else {
@@ -333,7 +500,7 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
             .about()
             .map(|ms| {
                 ms.iter()
-                    .map(|m| m.content.trim().to_string())
+                    .map(|m| guide::escape_brain(m.content.trim()))
                     .collect::<Vec<_>>()
                     .join("\n\n")
             })
@@ -346,13 +513,13 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
                 .essence(EssenceScope::Project, room.max(256))
                 .unwrap_or_default();
         }
-        parts.push(("Project essence", essence.trim().to_string()));
+        parts.push(("Project essence", guide::escape_brain(essence.trim())));
         // 4. The session thread's essence, on resume and compact.
         let mut t4 = String::new();
         if let (true, Some(t)) = (resume, &thread) {
             if let Ok(r) = db.essence(EssenceScope::Thread(t.clone()), room.max(256)) {
                 if r.lines().any(|l| l.starts_with("## ")) {
-                    t4 = r.trim().to_string();
+                    t4 = guide::escape_brain(r.trim());
                 }
             }
         }
@@ -520,7 +687,7 @@ fn recall(
                     "- `{}` {}{key}: {}",
                     m.id,
                     m.memory_type.as_str(),
-                    fit_plain(&one_line(&m.content), 600)
+                    guide::escape_brain(&fit_plain(&one_line(&m.content), 600))
                 )
             })
             .collect(),
@@ -617,37 +784,79 @@ fn save_transcript(o: &Opts, input: &Value, id: Option<&str>) {
     };
     let thread = thread_id(o.client, id);
     let p = path.to_string_lossy().into_owned();
-    // The brain's identity, to pick the embedder (a short read).
-    let identity = match open_read(&path, &s) {
-        Ok(mut db) => db.embedder_identity().ok().flatten(),
+    // The brain's identity, to pick the embedder, and the first batch with
+    // a new turn in it (a short read).
+    let (identity, first) = match open_read(&path, &s) {
+        Ok(mut db) => (
+            db.embedder_identity().ok().flatten(),
+            first_new_batch(&mut db, &thread, &turns),
+        ),
         Err(note) => return eprintln!("{note}"),
     };
-    let r = super::ingest_turns(
-        &p,
-        &s,
-        &thread,
-        &turns,
-        "the hook's transcript save",
-        |dims| {
-            embedder(dims, identity.as_ref()).ok_or_else(|| {
-                "mnemo: the transcript wasn't saved: the built-in model isn't installed \
-             (`mnemo embedder install`)"
-                    .to_string()
-            })
-        },
-    );
-    if let Err(e) = r {
-        let e = if e.starts_with("mnemo:") {
-            e
-        } else if e.contains("ocked") || e.contains("busy") {
-            format!(
-                "mnemo: the brain was busy; the next save catches up ({})",
-                one_line(&e)
-            )
-        } else {
-            format!("mnemo: the transcript wasn't saved: {}", one_line(&e))
-        };
-        eprintln!("{e}");
+    let Some(first) = first else {
+        return;
+    };
+    // RB-011.5 item 7: each batch of turns is its own write, so a run that
+    // the client's timeout cuts short has still saved what it got to, and
+    // the next run goes on from there.
+    let mut end = first;
+    let mut saved = None;
+    loop {
+        let r = super::ingest_turns(
+            &p,
+            &s,
+            &thread,
+            &turns[..end],
+            "the hook's transcript save",
+            |dims| {
+                embedder(dims, identity.as_ref()).ok_or_else(|| {
+                    "mnemo: the transcript wasn't saved: the built-in model isn't installed \
+                 (`mnemo embedder install`)"
+                        .to_string()
+                })
+            },
+        );
+        if let Err(e) = r {
+            let e = if e.starts_with("mnemo:") {
+                e
+            } else if e.contains("ocked") || e.contains("busy") {
+                format!(
+                    "mnemo: the brain was busy; the next save catches up ({})",
+                    one_line(&e)
+                )
+            } else {
+                format!("mnemo: the transcript wasn't saved: {}", one_line(&e))
+            };
+            eprintln!("{e}");
+            if let Some(n) = saved {
+                eprintln!("mnemo: the transcript's first {n} turns are saved");
+            }
+            return;
+        }
+        saved = Some(end);
+        if end == turns.len() {
+            return;
+        }
+        end = (end + SAVE_BATCH).min(turns.len());
+    }
+}
+
+/// How many turns each of the hook's saves writes at most.
+pub const SAVE_BATCH: usize = 50;
+
+/// The end of the first batch of [`SAVE_BATCH`] turns that has a turn the
+/// thread doesn't hold yet, or `None` when nothing is new.
+fn first_new_batch(db: &mut Mnemo, thread: &str, turns: &[ThreadTurn]) -> Option<usize> {
+    let mut end = SAVE_BATCH.min(turns.len());
+    loop {
+        match db.ingest_thread_texts(thread, &turns[..end]) {
+            Ok(t) if t.is_empty() => {}
+            _ => return Some(end),
+        }
+        if end == turns.len() {
+            return None;
+        }
+        end = (end + SAVE_BATCH).min(turns.len());
     }
 }
 

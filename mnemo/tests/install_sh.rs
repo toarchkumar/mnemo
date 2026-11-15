@@ -11,7 +11,9 @@ use std::process::{Command, Output};
 
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "9.8.7";
+/// This build's own version, which its `--version` says (the script checks
+/// it).
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The release target `install.sh` picks for this machine.
 fn target() -> String {
@@ -39,11 +41,15 @@ impl Env {
     /// A base directory with this build's binary under its release name,
     /// and a SHA256SUMS that lists it (or `bad_sum`'s hash instead).
     fn new(bad_sum: bool) -> Env {
+        Env::named(bad_sum, VERSION)
+    }
+    /// The same, with the binary under `version`'s release name.
+    fn named(bad_sum: bool, version: &str) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let e = Env { dir };
         std::fs::create_dir_all(e.p("base")).unwrap();
         std::fs::create_dir_all(e.p("home")).unwrap();
-        let name = format!("mnemo-v{VERSION}-{}", target());
+        let name = format!("mnemo-v{version}-{}", target());
         let bin = std::fs::read(env!("CARGO_BIN_EXE_mnemo")).unwrap();
         std::fs::write(e.p("base").join(&name), &bin).unwrap();
         let mut h = Sha256::new();
@@ -55,7 +61,7 @@ impl Env {
         let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         std::fs::write(
             e.p("base/SHA256SUMS"),
-            format!("{hex}  {name}\n0000  mnemo-v{VERSION}-other-target\n"),
+            format!("{hex}  {name}\n0000  mnemo-v{version}-other-target\n"),
         )
         .unwrap();
         e
@@ -166,4 +172,27 @@ fn a_bad_version_or_base_is_refused() {
     let o = e.run(base.to_str().unwrap(), "1.2.3", false);
     assert!(!o.status.success() && text(&o).contains("no mnemo-v1.2.3-"));
     assert!(!e.installed().exists());
+}
+
+/// RB-011.2: a binary whose `--version` isn't the version asked for (an
+/// older release's file under a newer name) installs nothing.
+#[test]
+fn a_binary_of_another_version_installs_nothing() {
+    let e = Env::named(false, "9.8.7");
+    let o = e.run(e.p("base").to_str().unwrap(), "9.8.7", false);
+    let t = text(&o);
+    assert!(!o.status.success(), "{t}");
+    assert!(
+        t.contains(&format!(
+            "says 'mnemo {}', not 'mnemo 9.8.7'; nothing was installed",
+            env!("CARGO_PKG_VERSION")
+        )),
+        "{t}"
+    );
+    assert!(!e.installed().exists());
+    let left: Vec<_> = std::fs::read_dir(e.p("home/.local/bin"))
+        .unwrap()
+        .map(|d| d.unwrap().file_name())
+        .collect();
+    assert!(left.is_empty(), "the staged copy is removed: {left:?}");
 }
