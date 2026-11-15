@@ -897,6 +897,25 @@ cargo run --bin mnemo -- <command>
 | `restore` | Roll the database back to a past snapshot            |
 | `demo`    | Self-contained end-to-end demonstration              |
 
+**The project brain** (v0.16, 12.2): in a git repository, these commands
+take no path, and use the repository's brain,
+`<git-common-dir>/mnemo/project.mnemo` (usually `.git/mnemo/project.mnemo`):
+`init`, `info`, `verify`, `remember`, `about`, `list`, `export`, `inspect`,
+`recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
+and `essence render|add|append`. Every worktree of the repository shares
+it, git never tracks it, and `init` creates its directory with mode 0700.
+It's found from `-C <dir>`, else `CLAUDE_PROJECT_DIR` (when Claude Code
+sets it), else the working directory. Outside a git repository, give the
+path. Commands with another positional argument after the brain (`get`,
+`thread start`, `essence update|resolve|remove`) still need the path.
+`mcp install` with no path writes an entry with no path in it: `serve
+--mcp --shared` for Claude Code, which sets `CLAUDE_PROJECT_DIR` for the
+server, and `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A
+user scope keeps the absolute path.
+
+**`-C <dir>`** (v0.16), on every command: run as if started in `<dir>`,
+like git's `-C`. Relative paths are read from it.
+
 **`--model-dir <DIR>`** (v0.15), on every command: load the built-in
 embedder from this directory instead of the cache (see "The built-in
 embedder").

@@ -26,6 +26,8 @@ on:
       - index.html
       - CHANGELOG.md
       - RELEASING.md
+      # Design notes (12.2 step 0's sign-off): a note-only PR runs no CI.
+      - "docs/**"
   pull_request:
     branches: [main, "release/**", "release-*"]
     paths-ignore:
@@ -37,6 +39,7 @@ on:
       - index.html
       - CHANGELOG.md
       - RELEASING.md
+      - "docs/**"
 
 # A newer push to a branch or PR cancels its older run (RB-001.7). Every run
 # on `main` gets a group of its own, so `main` is never cancelled or queued

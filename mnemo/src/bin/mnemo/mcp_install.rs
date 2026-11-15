@@ -70,6 +70,11 @@ impl Scope {
 pub struct Install {
     pub client: Client,
     pub file: String,
+    /// 12.2: the path was left out, and `file` is the project brain. A
+    /// project or local entry then names no path: the server finds the
+    /// brain itself (`CLAUDE_PROJECT_DIR` for Claude Code, `-C
+    /// ${workspaceFolder}` for Cursor).
+    pub project: bool,
     pub scope: Option<Scope>,
     pub name: String,
     pub print: bool,
@@ -158,7 +163,11 @@ fn plan(o: &Install) -> Result<Plan, String> {
     let scope = match o.scope {
         Some(s) => s,
         None => match &root {
-            Some(r) if brain.starts_with(r) && allowed.contains(&Scope::Project) => Scope::Project,
+            // The project brain is under the git common dir, which for a
+            // linked worktree is outside its root.
+            Some(r) if (o.project || brain.starts_with(r)) && allowed.contains(&Scope::Project) => {
+                Scope::Project
+            }
             _ => Scope::User,
         },
     };
@@ -174,7 +183,29 @@ fn plan(o: &Install) -> Result<Plan, String> {
     // The command and the path. In a project scope (committed), `mnemo`
     // from the PATH and a path relative to the project root; otherwise
     // absolute, since a GUI client doesn't get the shell's PATH.
-    let (command, brain_arg) = if scope == Scope::Project {
+    //
+    // 12.2: with the path left out, a project or local entry names no path
+    // at all, and the server finds the project brain from where the client
+    // starts it. A user scope (every project) keeps the absolute path.
+    let (command, brain_arg) = if o.project && scope != Scope::User {
+        if root.is_none() {
+            return Err(format!(
+                "the {} scope needs a git work tree, and {} isn't in one; use --scope user",
+                scope.word(),
+                cwd.display()
+            ));
+        }
+        let command = if scope == Scope::Project {
+            "mnemo".to_string()
+        } else {
+            std::env::current_exe()
+                .and_then(std::fs::canonicalize)
+                .map_err(|e| format!("can't find this mnemo's path: {e}"))?
+                .to_string_lossy()
+                .into_owned()
+        };
+        (command, None)
+    } else if scope == Scope::Project {
         let Some(root) = &root else {
             return Err(format!(
                 "the project scope needs a git work tree, and {} isn't in one; use --scope user",
@@ -199,19 +230,27 @@ fn plan(o: &Install) -> Result<Plan, String> {
             Client::Cursor => format!("${{workspaceFolder}}/{rel}"),
             Client::ClaudeDesktop => unreachable!("no project scope"),
         };
-        ("mnemo".to_string(), arg)
+        ("mnemo".to_string(), Some(arg))
     } else {
         let exe = std::env::current_exe()
             .and_then(std::fs::canonicalize)
             .map_err(|e| format!("can't find this mnemo's path: {e}"))?;
         (
             exe.to_string_lossy().into_owned(),
-            brain.to_string_lossy().into_owned(),
+            Some(brain.to_string_lossy().into_owned()),
         )
     };
+    let mut args: Vec<String> = Vec::new();
+    if brain_arg.is_none() && o.client == Client::Cursor {
+        // Cursor starts a server in no particular directory; its
+        // `${workspaceFolder}` is the folder that holds `.cursor/mcp.json`.
+        args.extend(["-C".to_string(), "${workspaceFolder}".to_string()]);
+    }
+    args.extend(["serve", "--mcp", "--shared"].map(String::from));
+    args.extend(brain_arg);
     let mut entry = json!({
         "command": command,
-        "args": ["serve", "--mcp", "--shared", brain_arg],
+        "args": args,
     });
     if o.client != Client::ClaudeDesktop {
         entry["type"] = json!("stdio");
