@@ -132,7 +132,10 @@ The embedder is a **persistent child process** spawned once at serve
 start. Protocol: it reads one JSON-encoded string per line from stdin
 and writes one JSON array of floats per line to stdout, flushed after
 every reply. See `mnemo/examples/embedder_server.py` for a 10-line
-reference implementation (sentence-transformers + MiniLM, 384-dim).
+reference implementation (sentence-transformers + MiniLM, 384-dim). The
+embed command (and a key command, `MNEMO_KEY_COMMAND`) doesn't receive the
+brain's secret: since v0.15, `MNEMO_PASSPHRASE`, `MNEMO_KEY`,
+`MNEMO_KEY_FILE` and `MNEMO_KEY_COMMAND` are removed from its environment.
 
 > **Stdout is for replies only.** Any line the embedder prints to
 > stdout outside a reply — startup banners, model-load progress,
@@ -192,8 +195,9 @@ Claude Desktop config snippet (`~/Library/Application Support/Claude/claude_desk
 }
 ```
 
-Omit `--embed-cmd`/`--embed-name` to keep the pre-Phase-3
-embedder-agnostic behavior (`vector`/`query` only).
+Without `--embed-cmd`/`--embed-name`, the server uses the built-in
+embedder (v0.15; see "The built-in embedder"), or serves `vector`/`query`
+only when it can't.
 
 **Models that embed queries differently** (v0.15, 12.3 step 4): add
 `--embed-query <convention>`, a short name for the difference (an

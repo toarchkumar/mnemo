@@ -205,7 +205,12 @@ fn teardown(mut st: ChildState) {
 /// Spawn one child + reader thread. Returns a fresh [`ChildState`].
 fn spawn_child(argv: &[String]) -> Result<ChildState> {
     let (program, args) = argv.split_first().expect("argv non-empty by caller");
-    let mut child = Command::new(program)
+    // The child gets the text to embed, never the brain's secret.
+    let mut command = Command::new(program);
+    for var in crate::keys::SECRET_ENV_VARS {
+        command.env_remove(var);
+    }
+    let mut child = command
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

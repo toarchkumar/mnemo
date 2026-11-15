@@ -409,6 +409,16 @@ pub fn write_new_key_file(path: impl AsRef<Path>, key: &[u8; 32]) -> Result<()> 
 /// The most a key command may print.
 const COMMAND_OUTPUT_CAP: usize = 4096;
 
+/// The environment variables that carry a brain's secret. The embed command
+/// and the key command start with them removed from their environment: they
+/// need the text to embed or their own credentials, never the brain's.
+pub(crate) const SECRET_ENV_VARS: [&str; 4] = [
+    "MNEMO_PASSPHRASE",
+    "MNEMO_KEY",
+    "MNEMO_KEY_FILE",
+    "MNEMO_KEY_COMMAND",
+];
+
 /// Run `cmd` (split as `--embed-cmd` is, no shell) and read a key from the
 /// first line of its output (the keys note, section 6): stdin closed,
 /// stderr passed through, stdout capped at 4 KiB, its exit status checked,
@@ -418,7 +428,11 @@ pub fn run_key_command(cmd: &str, timeout: Duration) -> Result<Zeroizing<[u8; 32
     let argv = crate::embed_cmd::shlex_split(cmd)
         .filter(|a| !a.is_empty())
         .ok_or_else(|| MnemoError::Invalid("MNEMO_KEY_COMMAND is empty or badly quoted".into()))?;
-    let mut child = Command::new(&argv[0])
+    let mut command = Command::new(&argv[0]);
+    for var in SECRET_ENV_VARS {
+        command.env_remove(var);
+    }
+    let mut child = command
         .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
