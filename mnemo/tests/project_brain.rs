@@ -31,12 +31,12 @@ const CLEARED: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-/// The directory holding `git` on this process's PATH.
-fn git_dir() -> PathBuf {
+/// The directory holding `name` on this process's PATH.
+fn tool_dir(name: &str) -> PathBuf {
     let path = std::env::var_os("PATH").expect("PATH");
     std::env::split_paths(&path)
-        .find(|d| d.join("git").is_file() || d.join("git.exe").is_file())
-        .expect("git on the PATH")
+        .find(|d| d.join(name).is_file() || d.join(format!("{name}.exe")).is_file())
+        .unwrap_or_else(|| panic!("{name} on the PATH"))
 }
 
 /// A 4-wide embed command: answers each JSON string with a vector.
@@ -120,7 +120,10 @@ impl Env {
         for v in CLEARED {
             c.env_remove(v);
         }
-        let path = std::env::join_paths([self.p("bin"), git_dir()]).unwrap();
+        // The test's own directory first (a fake `claude` shadows any
+        // real one), then git and the embed command's python.
+        let path =
+            std::env::join_paths([self.p("bin"), tool_dir("git"), tool_dir(python())]).unwrap();
         c.env("HOME", self.p("home"))
             .env("USERPROFILE", self.p("home"))
             .env("APPDATA", self.p("home"))
