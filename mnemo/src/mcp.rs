@@ -329,6 +329,119 @@ pub fn serve_with_streams_builtin<R: Read, W: Write>(
     serve_inner(path, reader, writer, choice, shared)
 }
 
+/// RB-010.1: `serve --mcp` with no `--embed-cmd` never fails to start because
+/// of the built-in. What it does, decided before the open and said on stderr:
+/// - **a file whose width isn't the model's:** no embedder, and the model
+///   isn't loaded or fetched;
+/// - **the model can't be loaded** (offline, say): no embedder.
+///
+/// Recall's `text` is then matched by keyword only (v9 files), and a write
+/// with `text` is refused, as with no embedder at all.
+#[cfg(feature = "embed-candle")]
+fn builtin_for(path: &Path, dir: Option<&Path>) -> Option<crate::BuiltinEmbedder> {
+    use crate::Embedder;
+    let not_its_width = |d: usize, width: usize| {
+        eprintln!(
+            "mnemo mcp: this file is {d}-dimensional and the built-in embedder is {width}: \
+             serving without one (pass the file's own embedder with --embed-cmd and \
+             --embed-name, or move the file to the built-in with `mnemo reembed <file> \
+             --embed-dims {width}`); recall's 'text' is matched by keyword only"
+        );
+    };
+    // An unreadable header is the open's to report.
+    let file_width = Mnemo::peek_dimensions(path).ok();
+    if dir.is_none() {
+        if let Some(d) = file_width.filter(|&d| d != crate::builtin::DIMENSIONS) {
+            not_its_width(d, crate::builtin::DIMENSIONS);
+            return None;
+        }
+    }
+    let loaded = match dir {
+        Some(d) => crate::BuiltinEmbedder::from_dir(d),
+        None => crate::BuiltinEmbedder::load_or_install(&mut |m| eprintln!("{m}")),
+    };
+    match loaded {
+        Ok(e) => match file_width {
+            Some(d) if d != e.identity().dimensions => {
+                not_its_width(d, e.identity().dimensions);
+                None
+            }
+            _ => Some(e),
+        },
+        Err(e) => {
+            eprintln!("mnemo mcp: no embedder ({e}); recall's 'text' is matched by keyword only");
+            None
+        }
+    }
+}
+
+/// RB-010.1: register the built-in on the open file, the way the CLI's recall
+/// treats a file, with nothing written unless the file is new. Never an error:
+/// each case that leaves the server without an embedder says why on stderr.
+/// - **The file records the built-in:** registered.
+/// - **It records another embedder:** none.
+/// - **It records none, and has memories besides its onboarding scaffold**
+///   (vectors from somewhere else): none, and nothing is written.
+/// - **It records none, and has only its scaffold:** registered and recorded
+///   (a fresh file).
+#[cfg(feature = "embed-candle")]
+fn attach_builtin(db: &mut ServerDb, e: crate::BuiltinEmbedder) {
+    use crate::Embedder;
+    let without = |why: String| {
+        eprintln!(
+            "mnemo mcp: {why}: serving without an embedder; recall's 'text' is matched by \
+             keyword only"
+        );
+    };
+    let recorded = match db {
+        ServerDb::Plain(db) => db.embedder_identity(),
+        ServerDb::Shared(s) => s.read(|db| db.embedder_identity()),
+    };
+    let fresh = |db: &mut Mnemo| -> Result<bool> {
+        let onboarding = db.about()?.len();
+        Ok(db.len() <= onboarding)
+    };
+    match recorded {
+        Err(err) => return without(format!("can't read this file's embedder ({err})")),
+        Ok(Some(r)) if r != e.identity() => {
+            return without(format!(
+                "this file's embedder is {:?}, not the built-in (start with --embed-cmd and \
+                 --embed-name for it, or move the file with `mnemo reembed`)",
+                r.name
+            ))
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            let only_scaffold = match db {
+                ServerDb::Plain(db) => fresh(db),
+                ServerDb::Shared(s) => s.read(fresh),
+            };
+            match only_scaffold {
+                Ok(true) => {}
+                Ok(false) => {
+                    return without(
+                        "this file records no embedder, and its memories' vectors came from \
+                         elsewhere, so the built-in isn't recorded and nothing is written \
+                         (start with --embed-cmd and --embed-name for the file's embedder, or \
+                         move it to the built-in with `mnemo reembed <file>`)"
+                            .to_string(),
+                    )
+                }
+                Err(err) => return without(format!("can't read this file's memories ({err})")),
+            }
+        }
+    }
+    let name = e.identity().name;
+    let attached = match db {
+        ServerDb::Plain(db) => db.set_embedder(e),
+        ServerDb::Shared(s) => s.set_embedder(e),
+    };
+    match attached {
+        Ok(()) => eprintln!("mnemo mcp: embedder ready (the built-in, {name})"),
+        Err(err) => without(format!("the built-in can't be used on this file ({err})")),
+    }
+}
+
 /// The server's embedder, as chosen at start.
 enum ServerEmbedder {
     /// None: vectors (and keywords) only.
@@ -368,25 +481,11 @@ fn serve_inner<R: Read, W: Write>(
         eprintln!("mnemo mcp: note: {n}");
     }
     // 12.3 step 5: the built-in model loads (or is fetched) before the file
-    // is opened, so the download never holds the file's lock.
+    // is opened, so the download never holds the file's lock; and only for a
+    // file of its width (RB-010.1), read from the header first.
     #[cfg(feature = "embed-candle")]
     let builtin = match &choice {
-        ServerEmbedder::Builtin(dir) => {
-            let loaded = match dir {
-                Some(d) => crate::BuiltinEmbedder::from_dir(d),
-                None => crate::BuiltinEmbedder::load_or_install(&mut |m| eprintln!("{m}")),
-            };
-            match loaded {
-                Ok(e) => Some(e),
-                Err(e) => {
-                    eprintln!(
-                        "mnemo mcp: no embedder ({e}); recall's 'text' is matched by keyword \
-                         only"
-                    );
-                    None
-                }
-            }
-        }
+        ServerEmbedder::Builtin(dir) => builtin_for(path, dir.as_deref()),
         _ => None,
     };
     eprintln!(
@@ -423,27 +522,7 @@ fn serve_inner<R: Read, W: Write>(
     };
     #[cfg(feature = "embed-candle")]
     if let Some(e) = builtin {
-        use crate::Embedder;
-        let recorded = match &mut db {
-            ServerDb::Plain(db) => db.embedder_identity()?,
-            ServerDb::Shared(s) => s.read(|db| db.embedder_identity())?,
-        };
-        match recorded {
-            Some(r) if r != e.identity() => eprintln!(
-                "mnemo mcp: this file's embedder is {:?}, not the built-in: serving without \
-                 one (start with --embed-cmd and --embed-name for it, or move the file with \
-                 `mnemo reembed`); recall's 'text' is matched by keyword only",
-                r.name
-            ),
-            _ => {
-                let name = e.identity().name;
-                match &mut db {
-                    ServerDb::Plain(db) => db.set_embedder(e)?,
-                    ServerDb::Shared(s) => s.set_embedder(e)?,
-                }
-                eprintln!("mnemo mcp: embedder ready (the built-in, {name})");
-            }
-        }
+        attach_builtin(&mut db, e);
     }
     if let ServerEmbedder::Command(EmbedSpec {
         command: cmd,

@@ -153,6 +153,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   names; RELEASING.md says how to read a backtrace from a release.
 - **`mnemo init`'s default width is 384** (was 768), the built-in
   embedder's. Pass `--dimensions` for another embedder.
+- **`mnemo serve --mcp` without `--embed-cmd` uses the built-in embedder,**
+  and never fails to start because of it. Case by case, said on stderr:
+  - a file whose width isn't the built-in's (384): served without an
+    embedder, and the model isn't loaded or fetched. The notice names
+    `--embed-cmd`, `--embed-name` and `mnemo reembed <file> --embed-dims
+    384`;
+  - a file that records the built-in: served with it;
+  - a file that records another embedder: served without one;
+  - a file that records no embedder and has memories besides its
+    onboarding scaffold (vectors from elsewhere): served without one, and
+    nothing is written at start;
+  - a new file, with only its scaffold: the built-in is used and recorded;
+  - the model can't be loaded (offline, first use): served without one.
+
+  Without an embedder, `recall`'s `text` is matched by keyword (v9 files)
+  and a `remember` with `text` is refused. The same holds with `--shared`.
 - **The MCP `recall` tool with `text` on a server without an embedder**
   matches the text by keyword (v9 files) instead of returning an error.
   `remember` with `text` still needs an embedder.
