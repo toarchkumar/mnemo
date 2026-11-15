@@ -25,8 +25,10 @@ pub const CARD_MAX: usize = 1200;
 const CARD_OPEN: &str = "<!-- card -->";
 const CARD_CLOSE: &str = "<!-- /card -->";
 
-/// The card: the text between the card marks, trimmed.
-pub fn card() -> &'static str {
+/// The card: the text between the card marks, trimmed, with `\n` line
+/// ends whatever the checkout used (a Windows checkout may turn the
+/// source's into `\r\n`).
+pub fn card() -> String {
     let start = SOURCE
         .find(CARD_OPEN)
         .map(|i| i + CARD_OPEN.len())
@@ -35,7 +37,12 @@ pub fn card() -> &'static str {
         .find(CARD_CLOSE)
         .map(|i| start + i)
         .expect("the guide's card is closed");
-    SOURCE[start..end].trim()
+    SOURCE[start..end]
+        .lines()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 /// A fenced block of the guide.
@@ -91,7 +98,7 @@ pub fn blocks() -> Vec<Block> {
 }
 
 /// The guide as Markdown, for `mnemo onboard --guide`: the card marks are
-/// removed and each fence keeps only its language.
+/// removed, each fence keeps only its language, and lines end in `\n`.
 pub fn markdown() -> String {
     let mut out = String::with_capacity(SOURCE.len());
     let mut in_block = false;
@@ -174,7 +181,7 @@ mod tests {
         let md = markdown();
         assert!(!md.contains("<!-- card"));
         assert!(!md.contains("```sh test") && !md.contains("```json mcp"));
-        assert!(md.contains(card()));
+        assert!(md.contains(&card()));
         let l = llms_txt();
         assert!(l.starts_with("# MNemo\n\n> "));
         assert_eq!(l.matches("\n# ").count(), 0, "one H1");

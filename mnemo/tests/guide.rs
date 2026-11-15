@@ -162,8 +162,10 @@ fn every_command_in_the_guide_parses() {
 #[test]
 fn the_generated_files_match() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let llms =
-        std::fs::read_to_string(root.join("llms.txt")).expect("llms.txt at the repository root");
+    // A Windows checkout may end its lines in `\r\n`.
+    let llms = std::fs::read_to_string(root.join("llms.txt"))
+        .expect("llms.txt at the repository root")
+        .replace("\r\n", "\n");
     assert!(
         llms == guide::llms_txt(),
         "llms.txt is stale: run `mnemo onboard --guide --format llms-txt > llms.txt` \
