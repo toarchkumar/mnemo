@@ -225,7 +225,10 @@ jobs:
         run: |
           $errors = $null
           $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors)
-          if ($errors) { $errors | ForEach-Object { Write-Output $_ }; throw "install.ps1 doesn't parse" }
+          if ($errors) {
+            $errors | ForEach-Object { Write-Output ("line {0}: {1}" -f $_.Extent.StartLineNumber, $_.Message) }
+            throw "install.ps1 doesn't parse"
+          }
           Write-Output "install.ps1 parses"
 
   deny:

@@ -94,10 +94,14 @@ function Install-Mnemo {
             Fail "the SHA-256 doesn't match SHA256SUMS ($got, not $want); nothing was installed"
         }
 
+        $ghReady = $false
+        if (-not $base -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+            & gh auth status *> $null
+            $ghReady = ($LASTEXITCODE -eq 0)
+        }
         if ($base) {
             Write-Output "checked the SHA-256 (a local MNEMO_INSTALL_BASE: the attestation was skipped)"
-        } elseif ((Get-Command gh -ErrorAction SilentlyContinue) -and
-                  ((& gh auth status 2>&1 | Out-Null); $LASTEXITCODE -eq 0)) {
+        } elseif ($ghReady) {
             & gh attestation verify $file --repo $repo | Out-Null
             if ($LASTEXITCODE -ne 0) { Fail "the build's attestation didn't verify; nothing was installed" }
             Write-Output "checked the SHA-256 and the build's attestation"
