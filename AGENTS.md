@@ -361,11 +361,19 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    - **Each session's hooks save its own transcript** into its own thread
      (`claude-code:<session id>`), and load the brief at session start.
      That's the only write the Planner and the Reviewers make to the brain.
-   - **Only the Worker writes facts,** with a key (the MCP `remember` tool
-     with `key`, or `test/scripts/project_memory.py remember --key`).
+   - **Only the Worker writes facts,** with a key and the brain's agent:
+     the MCP `remember` tool with `key` and `"agent_id": "cursor-agent"`,
+     or `test/scripts/project_memory.py remember --key`, which names it.
+     A key's slot is per agent, and the CLI's and the server's default
+     agent is `default`, so a write without it starts a second slot
+     instead of superseding.
    - **The Planner and the Reviewers read** with `recall` (MCP) or `mnemo
      recall --no-track`, and never call `remember`, `forget` or `essence`
      writes.
+   - **A session in a client `onboard` doesn't wire** (`reviewer-a` runs in
+     Antigravity) has no hooks. It reads through the CLI
+     (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
+     `recall` before a task, and gets its pointers relayed by the user.
 
 ### `Planner` rules
 
