@@ -541,6 +541,28 @@ pub(super) fn shown_change(
         .map(|p| named(&masked_entry(p)))
         .unwrap_or_default();
     let mut out = diff(&before, &named(&masked_entry(entry)));
+    // RB-011.2: what the replaced entry had that this one doesn't, by name
+    // only (an `env` block's names, never its values).
+    if let Some(prev) = previous.as_ref().and_then(Value::as_object) {
+        let dropped: Vec<String> = prev
+            .iter()
+            .filter(|(k, _)| entry.get(k.as_str()).is_none())
+            .filter(|(_, v)| !v.as_object().is_some_and(|m| m.is_empty()))
+            .map(|(k, v)| match v.as_object() {
+                Some(m) => format!(
+                    "its `{k}` block: {}",
+                    m.keys().cloned().collect::<Vec<_>>().join(", ")
+                ),
+                None => format!("its `{k}`"),
+            })
+            .collect();
+        if !dropped.is_empty() {
+            out.push_str(&format!(
+                "(replaces the entry, dropping {})\n",
+                dropped.join("; ")
+            ));
+        }
+    }
     let others = serde_json::from_str::<Value>(old)
         .ok()
         .and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned())

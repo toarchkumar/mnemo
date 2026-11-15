@@ -63,6 +63,17 @@ impl Brain {
     /// return each response, by position. With `embed`, the server has the
     /// test embed command.
     fn session(&self, shared: bool, embed: bool, requests: &[(&str, Value)]) -> Vec<Value> {
+        self.session_env(shared, embed, &[], requests).0
+    }
+    /// [`Brain::session`] with extra environment variables, returning the
+    /// server's stderr too.
+    fn session_env(
+        &self,
+        shared: bool,
+        embed: bool,
+        env: &[(&str, &str)],
+        requests: &[(&str, Value)],
+    ) -> (Vec<Value>, String) {
         let mut c = Command::new(env!("CARGO_BIN_EXE_mnemo"));
         c.args(["serve", "--mcp"]);
         if shared {
@@ -83,6 +94,7 @@ impl Brain {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             format!("http://{}", l.local_addr().unwrap())
         };
+        c.envs(env.iter().copied());
         c.env("MNEMO_PASSPHRASE", PASS)
             .env("MNEMO_CACHE_DIR", self.dir.path().join("cache"))
             .env("MNEMO_MODEL_URL", closed)
@@ -114,7 +126,10 @@ impl Brain {
             "{out}\n{}",
             String::from_utf8_lossy(&o.stderr)
         );
-        by_id.into_iter().map(|(_, v)| v).collect()
+        (
+            by_id.into_iter().map(|(_, v)| v).collect(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+        )
     }
 }
 
@@ -295,6 +310,68 @@ fn a_missing_key_or_an_unknown_uri_is_resource_not_found() {
                 .contains("resource not found"));
         }
         assert_eq!(rs[4]["error"]["code"], -32602, "{}", rs[4]);
+    });
+}
+
+/// RB-011.1: a key with a `%` before a character wider than a byte is
+/// just not found (it ended the server), and a panic inside a request is
+/// answered with an internal error: the server goes on after a read, and
+/// stops using the file after a tool call.
+#[test]
+fn a_bad_key_or_a_panic_doesnt_end_the_server() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        seed(&b, shared);
+        let rs = b.session(
+            shared,
+            false,
+            &[
+                read("mnemo://key/50%→60%"),
+                read("mnemo://key/a%é"),
+                read("mnemo://key/process%2Erelease"),
+            ],
+        );
+        for r in &rs[1..3] {
+            assert_eq!(r["error"]["code"], -32002, "{r}");
+        }
+        assert!(text(&rs[3]).contains("main is fast-forwarded"), "{}", rs[3]);
+
+        let (rs, err) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_DEV_MCP_PANIC", "resources/read")],
+            &[read("mnemo://about"), ("tools/list", json!({}))],
+        );
+        assert_eq!(rs[1]["error"]["code"], -32603, "{}", rs[1]);
+        assert!(rs[2]["result"]["tools"].is_array(), "{}", rs[2]);
+        assert!(
+            err.contains("internal error in resources/read; the server goes on"),
+            "{err}"
+        );
+
+        let (rs, err) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_DEV_MCP_PANIC", "tools/call")],
+            &[tool("stats", json!({})), read("mnemo://about")],
+        );
+        assert_eq!(rs[1]["error"]["code"], -32603, "{}", rs[1]);
+        assert_eq!(rs[2]["error"]["code"], -32603, "{}", rs[2]);
+        assert!(
+            rs[2]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("restart it"),
+            "{}",
+            rs[2]
+        );
+        assert!(
+            err.contains("nothing flushed after the internal error"),
+            "{err}"
+        );
+        // The file is as it was.
+        let rs = b.session(shared, false, &[read("mnemo://key/process.release")]);
+        assert!(text(&rs[1]).contains("main is fast-forwarded"));
     });
 }
 

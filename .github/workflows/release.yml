@@ -203,19 +203,13 @@ jobs:
           path: mnemo/${{ steps.stage.outputs.asset }}
 
   # --- 12.2 step 6: SHA256SUMS over the five CLI binaries, which the install
-  #     scripts check, and on a tag run their build provenance attestation,
-  #     which the scripts check with `gh attestation verify` when `gh` is
-  #     signed in. A dry run attests nothing. Only this job may write
-  #     attestations and mint the OIDC token they need.
+  #     scripts and the artifact checks use. (The attestation is the
+  #     `attest` job's, after the approval.)
   checksums:
-    name: SHA256SUMS and the attestation
+    name: SHA256SUMS
     needs: [mobile-prepare, build-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 10
@@ -235,18 +229,43 @@ jobs:
           cat SHA256SUMS
           { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Attest the binaries' build provenance (tag runs)
-        if: needs.mobile-prepare.outputs.dry_run == 'false'
-        timeout-minutes: 10
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: cli/mnemo-v*
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 10
         with:
           name: sha256sums
           path: cli/SHA256SUMS
+
+  # --- The five binaries' build provenance, which the install scripts
+  #     check with `gh attestation verify` (this workflow, at the tag) when
+  #     `gh` is signed in. Made only after the approval, so a build that
+  #     failed a check or wasn't approved carries none (attestations are
+  #     public and permanent). Tag runs only: a dry run attests nothing.
+  #     `attach` and both publish jobs wait for it, so nothing is published
+  #     unless it succeeded. Only this job may write attestations and mint
+  #     the OIDC token they need, and it builds and checks out nothing.
+  attest:
+    name: attest the binaries (tag runs)
+    needs: [mobile-prepare, approve-release]
+    if: ${{ !cancelled() && needs.approve-release.result == 'success' && needs.mobile-prepare.outputs.dry_run == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          pattern: cli-*
+          path: cli
+          merge-multiple: true
+
+      - name: Attest the binaries' build provenance
+        timeout-minutes: 10
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: cli/mnemo-v*
 
   # --- Build Python wheels for each platform via maturin-action (the
   #     `attach` job puts them on the release). The `publish-pypi` job below optionally uploads
@@ -419,6 +438,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "mnemo --version failed" }
           & $exe onboard --guide | Select-Object -First 3
 
+      # RB-011.5 item 1: Windows PowerShell 5.1, where `irm | iex` is
+      # usually typed, through `iex` as there, with the runner's `gh`, which
+      # isn't signed in: what `gh` writes to stderr must not end the script.
+      - name: The install script installs it (install.ps1 in Windows PowerShell 5.1, gh not signed in)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: powershell
+        env:
+          MNEMO_INSTALL_BASE: ${{ github.workspace }}\cli
+          MNEMO_VERSION: ${{ needs.mobile-prepare.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Output "PowerShell $($PSVersionTable.PSVersion)"
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw "not Windows PowerShell 5.1" }
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "no gh on the runner" }
+          $ErrorActionPreference = 'Continue'
+          & gh auth status *> $null
+          $signedIn = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = 'Stop'
+          if ($signedIn) { throw "gh is signed in here; this step needs one that isn't" }
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'install-home-ps51'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
+          $out = Get-Content -Raw ./repo/install.ps1 | Invoke-Expression | Out-String
+          Write-Output $out
+          if ($out -notmatch "installed .*\(mnemo $env:MNEMO_VERSION\)") { throw "not installed" }
+
       - name: The CLI fetches the model, remembers and recalls
         timeout-minutes: 10
         env:
@@ -557,14 +602,15 @@ jobs:
   #     pattern and lists them instead.
   attach:
     name: attach engine assets
-    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist]
+    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist, attest]
     if: >-
       ${{ !cancelled()
       && needs.build-cli.result == 'success'
       && needs.checksums.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.build-sdist.result == 'success'
-      && (needs.create-release.result == 'success' || needs.mobile-prepare.outputs.dry_run == 'true') }}
+      && ((needs.create-release.result == 'success' && needs.attest.result == 'success')
+          || needs.mobile-prepare.outputs.dry_run == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -618,12 +664,12 @@ jobs:
   publish-pypi:
     name: publish to PyPI
     # REL-2: after the approval, which needs every build.
-    needs: [mobile-prepare, approve-release, build-cli, build-wheels, build-sdist]
+    needs: [mobile-prepare, approve-release, attest, build-cli, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     if: >-
       ${{ !cancelled() && vars.ENABLE_PYPI_PUBLISH == 'true'
-      && (needs.approve-release.result == 'success'
+      && ((needs.approve-release.result == 'success' && needs.attest.result == 'success')
           || (needs.mobile-prepare.outputs.dry_run == 'true'
               && needs.build-cli.result == 'success'
               && needs.build-wheels.result == 'success'
@@ -684,12 +730,12 @@ jobs:
     name: publish to crates.io
     # REL-2: after the approval, which needs every build (before, only the
     # CLI builds, so a failed wheel could leave crates.io ahead of PyPI).
-    needs: [mobile-prepare, approve-release, build-cli, build-wheels, build-sdist]
+    needs: [mobile-prepare, approve-release, attest, build-cli, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     if: >-
       ${{ !cancelled() && vars.ENABLE_CRATES_PUBLISH == 'true'
-      && (needs.approve-release.result == 'success'
+      && ((needs.approve-release.result == 'success' && needs.attest.result == 'success')
           || (needs.mobile-prepare.outputs.dry_run == 'true'
               && needs.build-cli.result == 'success'
               && needs.build-wheels.result == 'success'

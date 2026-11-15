@@ -11,17 +11,19 @@
 # 4. Checks the binary's SHA-256 against SHA256SUMS. A mismatch, or no tool
 #    to check with, stops it, and nothing is installed.
 # 5. With the GitHub CLI (`gh`) installed and signed in, it also checks the
-#    build's attestation: a signature that ties the binary to this
-#    repository's release workflow. Without `gh`, it says only the SHA-256
-#    was checked.
-# 6. Installs to ~/.local/bin/mnemo (no sudo), replacing an older one in a
-#    single move.
-# 7. Prints `mnemo --version`, then the next step.
+#    build's attestation: a signature saying this repository's release
+#    workflow (.github/workflows/release.yml) built the binary at the tag of
+#    this version (refs/tags/v0.16.0). Without `gh`, or with one too old for
+#    those checks, it says only the SHA-256 was checked.
+# 6. Copies it beside ~/.local/bin/mnemo (no sudo), checks that its
+#    `--version` is the version asked for, then replaces an older one in a
+#    single move, and prints the next step.
 #
 # What the checks protect: the SHA-256 catches a corrupt or cut-short
 # download, but SHA256SUMS comes from the same release, so it can't catch a
 # release whose files were swapped. The attestation can: a swapped file has
-# none. This script itself comes from the site over HTTPS; to read it before
+# none, and an older release's file was attested for another tag. This
+# script itself comes from the site over HTTPS; to read it before
 # running it, download it first.
 #
 # MNEMO_INSTALL_BASE (for the release workflow's own check) names a local
@@ -117,14 +119,19 @@ sha256() {
     fi
 }
 
-# Check the build's attestation, when gh can.
+# Check the build's attestation for version $2, when gh can: made by this
+# repository's release workflow, at the version's tag.
 attest() {
-    if have gh && gh auth status >/dev/null 2>&1; then
-        gh attestation verify "$1" --repo "$REPO" >/dev/null ||
-            die "the build's attestation didn't verify; nothing was installed"
-        say "checked the SHA-256 and the build's attestation"
-    else
+    if ! have gh || ! gh auth status >/dev/null 2>&1; then
         say "checked the SHA-256 only (install and sign in to \`gh\` to also check the build's attestation)"
+    elif ! gh attestation verify --help 2>&1 | grep -q -- '--source-ref'; then
+        say "checked the SHA-256 only (this \`gh\` is too old to check the attestation's workflow and tag; update it)"
+    else
+        gh attestation verify "$1" --repo "$REPO" \
+            --signer-workflow "$REPO/.github/workflows/release.yml" \
+            --source-ref "refs/tags/v$2" >/dev/null ||
+            die "the build's attestation didn't verify for v$2; nothing was installed"
+        say "checked the SHA-256 and the build's attestation (the release workflow, at v$2)"
     fi
 }
 
@@ -170,19 +177,30 @@ main() {
     if [ -n "$base" ]; then
         say "checked the SHA-256 (a local MNEMO_INSTALL_BASE: the attestation was skipped)"
     else
-        attest "$tmp/$name"
+        attest "$tmp/$name" "$version"
     fi
+
 
     [ -n "${HOME:-}" ] || die "HOME isn't set"
     dir="$HOME/.local/bin"
     mkdir -p "$dir"
-    # Copy beside the target, then one move over the old one.
-    cp "$tmp/$name" "$dir/.mnemo.new.$$"
-    chmod 755 "$dir/.mnemo.new.$$"
-    mv -f "$dir/.mnemo.new.$$" "$dir/mnemo"
+    # Copy beside the target, check it, then one move over the old one.
+    staged="$dir/.mnemo.new.$$"
+    cp "$tmp/$name" "$staged"
+    chmod 755 "$staged"
+    # It must say it's the version asked for: an older release's file under
+    # this one's name would pass the checks above.
+    if ! said=$("$staged" --version); then
+        rm -f "$staged"
+        die "the downloaded mnemo didn't run; nothing was installed"
+    fi
+    if [ "$said" != "mnemo $version" ]; then
+        rm -f "$staged"
+        die "the downloaded binary says '$said', not 'mnemo $version'; nothing was installed"
+    fi
+    mv -f "$staged" "$dir/mnemo"
 
-    "$dir/mnemo" --version || die "the installed mnemo didn't run"
-    say "installed $dir/mnemo"
+    say "installed $dir/mnemo ($said)"
     case ":${PATH:-}:" in
         *":$dir:"*)
             say "Next: mnemo onboard"

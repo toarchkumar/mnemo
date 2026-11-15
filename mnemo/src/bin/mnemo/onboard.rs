@@ -139,12 +139,24 @@ fn rel(ctx: &Ctx, p: &Path) -> String {
     }
 }
 
-/// A command word, quoted when it has a space.
+/// The program word of a hook command, always quoted (RB-011.3): a hook's
+/// command is run by a shell, and a path can hold anything. On Windows it's
+/// written with `/`, which Git Bash, `cmd` and PowerShell all run, and no
+/// Windows path holds a `"`. Elsewhere `\`, `"`, `$` and `` ` `` are escaped,
+/// as POSIX `sh` reads them inside double quotes.
 fn quote(s: &str) -> String {
-    if s.contains(' ') || s.contains('"') {
-        format!("\"{}\"", s.replace('"', "\\\""))
+    if cfg!(windows) {
+        format!("\"{}\"", s.replace('\\', "/"))
     } else {
-        s.to_string()
+        let mut q = String::from("\"");
+        for c in s.chars() {
+            if matches!(c, '\\' | '"' | '$' | '`') {
+                q.push('\\');
+            }
+            q.push(c);
+        }
+        q.push('"');
+        q
     }
 }
 
@@ -175,18 +187,31 @@ fn hook_command(ctx: &Ctx, client: Client, event: &str) -> String {
     c
 }
 
-/// The first word of a command line, unquoted.
-fn first_word(cmd: &str) -> (&str, &str) {
+/// The first word of a command line, unquoted: a double-quoted word (with
+/// `sh`'s backslash escapes inside it) or one up to the first space.
+fn first_word(cmd: &str) -> (std::borrow::Cow<'_, str>, &str) {
     let cmd = cmd.trim_start();
     if let Some(rest) = cmd.strip_prefix('"') {
-        match rest.find('"') {
-            Some(i) => (&rest[..i], &rest[i + 1..]),
-            None => (rest, ""),
+        let mut word = String::new();
+        let mut chars = rest.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '"' => return (word.into(), &rest[i + 1..]),
+                '\\' => match chars.clone().next() {
+                    Some((_, n)) if matches!(n, '\\' | '"' | '$' | '`') => {
+                        word.push(n);
+                        chars.next();
+                    }
+                    _ => word.push(c),
+                },
+                c => word.push(c),
+            }
         }
+        (word.into(), "")
     } else {
         match cmd.find(' ') {
-            Some(i) => (&cmd[..i], &cmd[i..]),
-            None => (cmd, ""),
+            Some(i) => (cmd[..i].into(), &cmd[i..]),
+            None => (cmd.into(), ""),
         }
     }
 }
@@ -202,7 +227,7 @@ fn is_mnemo(program: &str) -> bool {
 /// then `hook`.
 pub fn is_our_hook(cmd: &str) -> bool {
     let (program, rest) = first_word(cmd);
-    is_mnemo(program) && rest.trim_start().starts_with("hook ")
+    is_mnemo(&program) && rest.trim_start().starts_with("hook ")
 }
 
 /// Whether an MCP entry is one `onboard` (or `mcp install`) writes: the
@@ -411,9 +436,21 @@ fn claude_local_entry(ctx: &Ctx) -> Option<Value> {
         .cloned()
 }
 
-/// The parts of an MCP entry that matter for "already right".
-fn same_server(a: &Value, b: &Value) -> bool {
-    a.get("command") == b.get("command") && a.get("args") == b.get("args")
+/// Whether an MCP entry is the one `onboard` would write, member for member
+/// (RB-011.2): an entry of ours with anything more in it, such as an `env`
+/// block, isn't "already right" and is replaced. An empty `env` or
+/// `headers` counts as none, since a client may add one.
+fn same_server(have: &Value, want: &Value) -> bool {
+    let norm = |v: &Value| -> Value {
+        let mut v = v.clone();
+        if let Some(o) = v.as_object_mut() {
+            o.retain(|k, x| {
+                !((k == "env" || k == "headers") && x.as_object().is_some_and(|m| m.is_empty()))
+            });
+        }
+        v
+    };
+    norm(have) == norm(want)
 }
 
 /// An MCP server merged into (or, on undo, out of) a JSON config file.
@@ -753,10 +790,10 @@ fn plan_exclude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
     let text = old.clone().unwrap_or_default();
     let mut lines = Vec::new();
     if !undo && ctx.scope == Scope::Local {
+        let mut merged_into = Vec::new();
         for it in items.iter() {
-            let p = match it {
-                Item::Write { path, .. } => path,
-                Item::Note(_) | Item::Remove { .. } | Item::Claude { .. } => continue,
+            let (p, created) = match it {
+                Item::Write { path, old, .. } => (path, old.is_none()),
                 _ => continue,
             };
             if !p.starts_with(&ctx.root) || p.starts_with(&ctx.common) {
@@ -765,9 +802,21 @@ fn plan_exclude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
             if project::tracked(&ctx.root, p) {
                 continue;
             }
-            if let Some(l) = project::exclude_line(&ctx.root, p) {
+            // Only the files onboard creates (RB-011.5 item 4): a file of
+            // the user's it merges into stays visible to git, with a line.
+            let Some(l) = project::exclude_line(&ctx.root, p) else {
+                continue;
+            };
+            if created {
                 lines.push(l);
+            } else if !text.lines().any(|have| have == l) {
+                merged_into.push(rel(ctx, p));
             }
+        }
+        for f in merged_into {
+            items.push(Item::Note(format!(
+                "{f} now holds a path on this machine: don't commit it"
+            )));
         }
         // Already listed, from an earlier run.
         if lines.is_empty() {
@@ -797,11 +846,23 @@ fn plan_exclude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
 /// with.
 fn check_brain(brain: &Path) -> Result<(), String> {
     use mnemo_engine::keys::{self, Resolution, Secret};
-    let unlock = format!(
-        "this brain's key isn't on this machine: run `mnemo unlock` with its recovery code \
-         (brain: {})",
-        brain.display()
-    );
+    let passphrase =
+        keys::file_info(brain).is_ok_and(|i| matches!(i.kind, keys::SecretKind::Passphrase));
+    let unlock = if passphrase {
+        // A passphrase brain has no recovery code (RB-011.5 item 8).
+        format!(
+            "this brain is opened with a passphrase, and none is available here: set \
+             MNEMO_PASSPHRASE for this command, or move the brain to a key with `mnemo rekey \
+             --new-key` (brain: {})",
+            brain.display()
+        )
+    } else {
+        format!(
+            "this brain's key isn't on this machine: run `mnemo unlock` with its recovery code \
+             (brain: {})",
+            brain.display()
+        )
+    };
     let store = keys::default_store();
     let secret = match keys::resolve(brain, store.as_deref(), keys::SERVER_COMMAND_TIMEOUT) {
         Ok(Resolution::Found(r)) => r.secret,
@@ -1028,7 +1089,14 @@ fn show(ctx: &Ctx, items: &[Item], undo: bool) {
                     continue;
                 }
                 let verb = if old.is_some() { "update" } else { "create" };
-                println!("- {verb} {}", rel(ctx, path));
+                match through_link(path) {
+                    Some(t) => println!(
+                        "- {verb} {} (through its link, in {})",
+                        rel(ctx, path),
+                        t.display()
+                    ),
+                    None => println!("- {verb} {}", rel(ctx, path)),
+                }
                 for l in shown.lines() {
                     println!("    {l}");
                 }
@@ -1040,6 +1108,15 @@ fn show(ctx: &Ctx, items: &[Item], undo: bool) {
             }
         }
     }
+}
+
+/// The file a symbolic link at `path` leads to (RB-011.5 item 3), or `None`
+/// when it isn't a link (or leads nowhere, and is then replaced).
+fn through_link(path: &Path) -> Option<PathBuf> {
+    std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|m| m.file_type().is_symlink())?;
+    std::fs::canonicalize(path).ok().map(project::plain)
 }
 
 fn shell_words(args: &[String]) -> String {
@@ -1069,8 +1146,10 @@ fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Strin
                 if old.as_deref() == Some(new.as_str()) {
                     continue;
                 }
-                mi::write_atomically(path, new)?;
-                done.push(format!("wrote: {}", path.display()));
+                // Through a symbolic link to its file, so the link stays.
+                let target = through_link(path).unwrap_or_else(|| path.clone());
+                mi::write_atomically(&target, new)?;
+                done.push(format!("wrote: {}", target.display()));
             }
             Item::Remove { path } => {
                 std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1132,6 +1211,9 @@ pub fn run(o: Opts) -> Result<(), String> {
     let ctx = context(&o)?;
     let clients = clients(&o, &ctx);
     let mut items = Vec::new();
+    if !o.undo {
+        project::refuse_link(&ctx.brain)?;
+    }
     let exists = ctx.brain.is_file();
     if !o.undo {
         if exists {

@@ -57,7 +57,10 @@ fn memory_line(m: &Memory, max: usize) -> String {
     }
     head.push_str(&format!(", {}", format_unix_date(m.created_at)));
     let one_line: String = m.content.split_whitespace().collect::<Vec<_>>().join(" ");
-    format!("{head}: {}", fit_inline(&one_line, max))
+    format!(
+        "{head}: {}",
+        guide::escape_brain(&fit_inline(&one_line, max))
+    )
 }
 
 /// `text` cut to `max` bytes at a character boundary, with `…`.
@@ -134,14 +137,22 @@ pub(super) fn resource_templates_list() -> Value {
 }
 
 /// Undo `%XX` escapes in a URI part; anything malformed is left as it is.
+/// Works on bytes, so a `%` before a character wider than a byte is just
+/// left (RB-011.1).
 fn percent_decode(s: &str) -> String {
+    fn hex(c: u8) -> Option<u8> {
+        (c as char).to_digit(16).map(|d| d as u8)
+    }
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
+        if b[i] == b'%' {
+            if let (Some(h), Some(l)) = (
+                b.get(i + 1).copied().and_then(hex),
+                b.get(i + 2).copied().and_then(hex),
+            ) {
+                out.push(h * 16 + l);
                 i += 3;
                 continue;
             }
@@ -190,11 +201,11 @@ pub(super) fn about_text(m: &mut Mnemo) -> std::result::Result<String, RpcError>
         out.push_str("\n(no briefing yet)\n");
     }
     for mem in &mems {
-        out.push_str(&format!("\n{}\n", mem.content.trim()));
+        out.push_str(&format!("\n{}\n", guide::escape_brain(mem.content.trim())));
     }
     out.push_str("\n## Project essence\n\n");
     match m.about_essence().map_err(mnemo_err)? {
-        Some(r) => out.push_str(r.trim()),
+        Some(r) => out.push_str(&guide::escape_brain(r.trim())),
         None => out.push_str("(none yet)"),
     }
     out.push('\n');
@@ -233,7 +244,7 @@ pub(super) fn key_text(m: &mut Mnemo, key: &str) -> std::result::Result<Option<S
     let mut out = format!(
         "{}\n\n## `{key}`\n\n{}\n\nWritten {}, id `{}`.\n",
         guide::FRAMING,
-        live.content.trim(),
+        guide::escape_brain(live.content.trim()),
         format_unix_date(live.created_at),
         live.id
     );
@@ -353,7 +364,10 @@ pub(super) fn session_start_text(
         None => "(none yet)".to_string(),
     };
     let mut out = head;
-    out.push_str(fit(essence.trim(), essence_room.max(64)).as_str());
+    out.push_str(&guide::escape_brain(&fit(
+        essence.trim(),
+        essence_room.max(64),
+    )));
     let memory_room = PROMPT_BYTES.saturating_sub(out.len() + tail.len() + 64);
     let (title, mems) = match task {
         Some(t) => (
@@ -413,7 +427,10 @@ pub(super) fn session_end_text(
     let render = m
         .essence(EssenceScope::Thread(thread.to_string()), room.max(256))
         .map_err(mnemo_err)?;
-    Ok(fit(&format!("{head}{}", render.trim()), PROMPT_BYTES))
+    Ok(fit(
+        &format!("{head}{}", guide::escape_brain(render.trim())),
+        PROMPT_BYTES,
+    ))
 }
 
 #[cfg(test)]
@@ -438,5 +455,12 @@ mod tests {
         assert_eq!(percent_decode("plain.key"), "plain.key");
         assert_eq!(percent_decode("bad%zz%"), "bad%zz%");
         assert_eq!(percent_decode("end%2"), "end%2");
+        // A `%` before a character wider than a byte (RB-011.1: these
+        // panicked), and escapes that make one.
+        assert_eq!(percent_decode("50%→60%"), "50%→60%");
+        assert_eq!(percent_decode("a%é"), "a%é");
+        assert_eq!(percent_decode("%😀%"), "%😀%");
+        assert_eq!(percent_decode("caf%C3%A9"), "café");
+        assert_eq!(percent_decode("bad%FF"), "bad%FF");
     }
 }

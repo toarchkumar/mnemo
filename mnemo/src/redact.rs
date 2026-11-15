@@ -6,27 +6,48 @@
 //! It's a best effort: it removes shapes it knows, each starting and ending
 //! at a word boundary and with a minimum length taken from the vendor's real
 //! format, so prose isn't redacted. Each match becomes `[redacted: <kind>]`.
-//! The shapes:
-//! - PEM private-key blocks, from the `BEGIN` line to the `END` line (a
-//!   block split across texts loses each half: from `BEGIN` to the end of
-//!   the text, and from the start of the text to `END`);
+//! It works on any text: every position it cuts at is next to an ASCII
+//! byte, so it never splits a character. The shapes:
+//! - PEM private-key blocks, from the `BEGIN` line to the `END` line. A
+//!   marker with no partner (a block split across texts) takes the text up
+//!   to the end, or from the start, only when key material is next to it (a
+//!   `Proc-Type` header, or 40 or more base64 characters on the lines
+//!   beside it); a marker only mentioned in prose loses the marker alone;
 //! - AWS access key ids: `AKIA` or `ASIA` and exactly 16 of `[A-Z0-9]`;
 //! - GitHub tokens: `ghp_`, `gho_`, `ghu_`, `ghs_` or `ghr_` and at least
 //!   36 of `[A-Za-z0-9]`, or `github_pat_` and at least 22 of
 //!   `[A-Za-z0-9_]`;
 //! - Slack tokens: `xoxa-`, `xoxb-`, `xoxp-`, `xoxr-` or `xoxs-` and at
 //!   least 10 of `[A-Za-z0-9-]`;
-//! - `sk-` API keys (including `sk-ant-` and `sk-proj-`): at least 20 of
-//!   `[A-Za-z0-9_-]` after `sk-`;
+//! - API keys: `sk-` (including `sk-ant-` and `sk-proj-`) and at least 20
+//!   of `[A-Za-z0-9_-]`; `sk_live_` or `rk_live_` and at least 20 of
+//!   `[A-Za-z0-9]`; `AIza` and at least 35 of `[A-Za-z0-9_-]`; `glpat-`
+//!   and at least 20 of `[A-Za-z0-9_-]`; `npm_` and at least 36 of
+//!   `[A-Za-z0-9]`; `hf_` and at least 30 of `[A-Za-z0-9]`;
 //! - JWTs: three base64url parts joined by dots, the first starting `eyJ`,
 //!   each at least 10 characters;
-//! - MNemo recovery codes (`MN1-…`), checked with the recovery-code parser;
-//! - the value in `NAME=value`, `NAME: value` or `"name": "value"`, where the
-//!   name ends in `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE` or `_KEY` (any
-//!   case), when the value is at least 8 characters and isn't a plain word.
-//!   A value isn't a plain word when it has a digit, has a character outside
-//!   `[A-Za-z_.-]`, or mixes upper and lower case. A value starting with `$`
-//!   or `<` is a reference or a placeholder, and stays.
+//! - MNemo recovery codes (`MN1-…`), checked with the recovery-code parser,
+//!   with hyphens, spaces or line breaks between the groups;
+//! - the value in `NAME=value`, `NAME: value` or `"name": "value"`:
+//!   - when the name ends in `PASSWORD` or `PASSPHRASE` (any case): any
+//!     value of 8 or more characters, and an unquoted one runs to the end
+//!     of the line;
+//!   - when it ends in `TOKEN`, `SECRET`, `_KEY`, `-KEY` or `APIKEY`: a
+//!     value of 8 or more characters that isn't a plain word (it has a
+//!     digit or a character outside `[A-Za-z_.-]`, or it mixes upper and
+//!     lower case and is 20 or more letters). Names whose last part before
+//!     `_KEY` or `-KEY` is `cache`, `sort`, `partition`, `primary`,
+//!     `foreign`, `unique`, `idempotency`, `dedup` or `row` are database
+//!     words, and stay;
+//!   - a value starting with `$`, `<`, `{{` or `%{` is a reference or a
+//!     placeholder, and stays;
+//! - the credential in `Authorization: <scheme> <credential>` (8 or more
+//!   characters), and after `Bearer ` (20 or more);
+//! - the word after `--passphrase` or `--password` (8 or more characters),
+//!   and after `--token` or `--key` when it's 16 or more of
+//!   `[A-Za-z0-9+/=_-]` and isn't a plain word (so a memory key like
+//!   `design.v2` or a file path stays);
+//! - the password in a URL's `scheme://user:password@`.
 
 use std::borrow::Cow;
 
@@ -69,12 +90,16 @@ pub fn add_counts(into: &mut Vec<(&'static str, usize)>, more: &[(&'static str, 
     into.sort_by_key(|(k, _)| KINDS.iter().position(|x| x == k).unwrap_or(usize::MAX));
 }
 
+type Spans = Vec<(usize, usize, &'static str)>;
+
 /// Replace every known secret shape in `text` with `[redacted: <kind>]`.
 pub fn secrets(text: &str) -> Redacted<'_> {
-    let mut spans: Vec<(usize, usize, &'static str)> = Vec::new();
+    let mut spans: Spans = Vec::new();
     pem_blocks(text, &mut spans);
     tokens(text, &mut spans);
     named_values(text, &mut spans);
+    flag_values(text, &mut spans);
+    url_passwords(text, &mut spans);
     if spans.is_empty() {
         return Redacted {
             text: Cow::Borrowed(text),
@@ -104,6 +129,19 @@ pub fn secrets(text: &str) -> Redacted<'_> {
     }
 }
 
+/// Whether `text` has `p` at byte `i`, ignoring ASCII case. Compares bytes,
+/// so `i` may be anywhere.
+fn has_at(text: &str, i: usize, p: &str) -> bool {
+    text.as_bytes()
+        .get(i..i + p.len())
+        .is_some_and(|b| b.eq_ignore_ascii_case(p.as_bytes()))
+}
+
+/// Whether `text` has `p` at byte `i`, exactly.
+fn has_exact(text: &str, i: usize, p: &str) -> bool {
+    text.as_bytes().get(i..i + p.len()) == Some(p.as_bytes())
+}
+
 const PEM_BEGIN: &str = "-----BEGIN ";
 const PEM_END: &str = "-----END ";
 const PEM_TAIL: &str = "PRIVATE KEY-----";
@@ -127,52 +165,111 @@ fn pem_marker_end(text: &str, at: usize, lead: &str) -> Option<usize> {
     Some(at + lead.len() + i + PEM_TAIL.len())
 }
 
-fn pem_blocks(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
+fn base64_line(line: &str) -> bool {
+    !line.is_empty()
+        && line
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+}
+
+/// How much key material the lines give, in base64 characters, counting
+/// whole base64 lines from the first until one isn't.
+fn key_material<'a>(lines: impl Iterator<Item = &'a str>) -> usize {
+    lines
+        .map(|l| l.trim_end_matches('\r'))
+        .take_while(|l| base64_line(l))
+        .map(str::len)
+        .sum()
+}
+
+/// Whether key material follows a BEGIN marker ending at `head_end`.
+fn material_after(text: &str, head_end: usize) -> bool {
+    let rest = &text[head_end..];
+    let Some(nl) = rest.find('\n') else {
+        return false;
+    };
+    let body = &rest[nl + 1..];
+    body.starts_with("Proc-Type:") || key_material(body.split('\n')) >= 40
+}
+
+/// Whether key material comes just before an END marker at `at`.
+fn material_before(text: &str, at: usize) -> bool {
+    let Some(head) = text[..at].strip_suffix('\n') else {
+        return false;
+    };
+    key_material(head.rsplit('\n')) >= 40
+}
+
+fn pem_blocks(text: &str, spans: &mut Spans) {
     let mut from = 0;
     let mut first_begin: Option<usize> = None;
     while let Some(i) = text[from..].find(PEM_BEGIN).map(|i| from + i) {
         if let Some(head_end) = pem_marker_end(text, i, PEM_BEGIN) {
             first_begin.get_or_insert(i);
-            // To the matching END line, else to the end of the text (the
-            // block's other half is in a later text).
-            let end = find_end_marker(text, head_end).unwrap_or(text.len());
-            spans.push((i, end, "private-key"));
-            from = end;
+            match find_end_marker(text, head_end) {
+                Some((_, end)) => {
+                    spans.push((i, end, "private-key"));
+                    from = end;
+                }
+                // No END: the block's other half is in a later text when key
+                // material follows; otherwise the marker is only mentioned.
+                None if material_after(text, head_end) => {
+                    spans.push((i, text.len(), "private-key"));
+                    from = text.len();
+                }
+                None => {
+                    spans.push((i, head_end, "private-key"));
+                    from = head_end;
+                }
+            }
         } else {
             from = i + PEM_BEGIN.len();
         }
     }
-    // An END line with no BEGIN before it: the block began in an earlier
-    // text, so everything up to it goes.
+    // END lines with no BEGIN before them: the first one's block began in an
+    // earlier text when key material comes before it.
     let before = first_begin.unwrap_or(text.len());
-    if let Some(end) = find_end_marker(&text[..before], 0) {
-        spans.push((0, end, "private-key"));
+    let mut at = 0;
+    let mut first = true;
+    while let Some((s, e)) = find_end_marker(&text[..before], at) {
+        let start = if first && material_before(text, s) {
+            0
+        } else {
+            s
+        };
+        spans.push((start, e, "private-key"));
+        first = false;
+        at = e;
     }
 }
 
-/// The index after the first private-key END marker at or after `from`.
-fn find_end_marker(text: &str, from: usize) -> Option<usize> {
+/// The first private-key END marker at or after `from`: its start, and the
+/// index after it.
+fn find_end_marker(text: &str, from: usize) -> Option<(usize, usize)> {
     let mut at = from;
     while let Some(i) = text[at..].find(PEM_END).map(|i| at + i) {
         if let Some(e) = pem_marker_end(text, i, PEM_END) {
-            return Some(e);
+            return Some((i, e));
         }
         at = i + PEM_END.len();
     }
     None
 }
 
-/// Whether the character before `i` leaves a word boundary.
+/// Whether the byte before `i` leaves a word boundary (any byte that isn't
+/// an ASCII letter, digit or `_`, including part of a wider character).
 fn boundary_before(text: &str, i: usize) -> bool {
-    text[..i]
-        .chars()
-        .next_back()
-        .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+    i == 0 || {
+        let c = text.as_bytes()[i - 1];
+        !(c.is_ascii_alphanumeric() || c == b'_')
+    }
 }
 
 /// How many bytes from `at` are in `alphabet`.
 fn run(text: &str, at: usize, alphabet: impl Fn(u8) -> bool) -> usize {
-    text.as_bytes()[at..]
+    text.as_bytes()
+        .get(at..)
+        .unwrap_or_default()
         .iter()
         .take_while(|b| alphabet(**b))
         .count()
@@ -191,7 +288,7 @@ fn word(b: u8) -> bool {
 }
 
 /// Prefix tokens: `(start, end, kind)` for each match at a word boundary.
-fn tokens(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
+fn tokens(text: &str, spans: &mut Spans) {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -208,10 +305,57 @@ fn tokens(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
     }
 }
 
+/// Prefixes followed by at least `min` bytes of an alphabet, and the kind.
+type Prefix = (&'static str, usize, fn(u8) -> bool, &'static str);
+
+const PREFIXES: [Prefix; 12] = [
+    (
+        "github_pat_",
+        22,
+        |b| b.is_ascii_alphanumeric() || b == b'_',
+        "github-token",
+    ),
+    (
+        "xoxa-",
+        10,
+        |b| b.is_ascii_alphanumeric() || b == b'-',
+        "slack-token",
+    ),
+    (
+        "xoxb-",
+        10,
+        |b| b.is_ascii_alphanumeric() || b == b'-',
+        "slack-token",
+    ),
+    (
+        "xoxp-",
+        10,
+        |b| b.is_ascii_alphanumeric() || b == b'-',
+        "slack-token",
+    ),
+    (
+        "xoxr-",
+        10,
+        |b| b.is_ascii_alphanumeric() || b == b'-',
+        "slack-token",
+    ),
+    (
+        "xoxs-",
+        10,
+        |b| b.is_ascii_alphanumeric() || b == b'-',
+        "slack-token",
+    ),
+    ("sk_live_", 20, alnum, "api-key"),
+    ("rk_live_", 20, alnum, "api-key"),
+    ("AIza", 35, word, "api-key"),
+    ("glpat-", 20, word, "api-key"),
+    ("npm_", 36, alnum, "api-key"),
+    ("hf_", 30, alnum, "api-key"),
+];
+
 /// The token starting at `i`, if one does, and where it ends.
 fn token_at(text: &str, i: usize) -> Option<(usize, &'static str)> {
-    let rest = &text[i..];
-    let starts = |p: &str| rest.len() >= p.len() && rest.as_bytes()[..p.len()] == *p.as_bytes();
+    let starts = |p: &str| has_exact(text, i, p);
     // AWS: exactly 16 after the prefix, then not another of the alphabet.
     for p in ["AKIA", "ASIA"] {
         if starts(p) {
@@ -229,17 +373,11 @@ fn token_at(text: &str, i: usize) -> Option<(usize, &'static str)> {
             }
         }
     }
-    if starts("github_pat_") {
-        let n = run(text, i + 11, |b| b.is_ascii_alphanumeric() || b == b'_');
-        if n >= 22 {
-            return Some((i + 11 + n, "github-token"));
-        }
-    }
-    for p in ["xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-"] {
+    for (p, min, alphabet, kind) in PREFIXES {
         if starts(p) {
-            let n = run(text, i + 5, |b| b.is_ascii_alphanumeric() || b == b'-');
-            if n >= 10 {
-                return Some((i + 5 + n, "slack-token"));
+            let n = run(text, i + p.len(), alphabet);
+            if n >= min {
+                return Some((i + p.len() + n, kind));
             }
         }
     }
@@ -254,14 +392,41 @@ fn token_at(text: &str, i: usize) -> Option<(usize, &'static str)> {
             return Some((end, "jwt"));
         }
     }
-    if rest.len() >= 4 && rest[..4].eq_ignore_ascii_case("MN1-") {
-        let n = run(text, i, |b| b.is_ascii_alphanumeric() || b == b'-');
-        let cand = text[i..i + n].trim_end_matches('-');
-        if crate::keys::recovery::parse(cand).is_ok() {
-            return Some((i + cand.len(), "recovery-code"));
-        }
+    if let Some(end) = recovery_code_end(text, i) {
+        return Some((end, "recovery-code"));
     }
     None
+}
+
+/// Bytes of an HTTP credential (RFC 9110's token68, and `=` padding).
+fn token68(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'+' | b'/' | b'=')
+}
+
+/// The end of a recovery code at `i`: `MN1` and 65 symbols, with up to 8
+/// separators (hyphens, spaces, line breaks) between symbols, when the
+/// parser accepts it.
+fn recovery_code_end(text: &str, i: usize) -> Option<usize> {
+    let b = text.as_bytes();
+    if !has_at(text, i, "MN1")
+        || !b
+            .get(i + 3)
+            .is_some_and(|c| *c == b'-' || c.is_ascii_whitespace())
+    {
+        return None;
+    }
+    let sep = |c: u8| c == b'-' || c.is_ascii_whitespace();
+    let mut at = i + 3;
+    let mut symbols = 0;
+    while symbols < 65 {
+        let gap = run(text, at, sep);
+        if gap > 8 || !b.get(at + gap).is_some_and(|c| c.is_ascii_alphanumeric()) {
+            return None;
+        }
+        at += gap + 1;
+        symbols += 1;
+    }
+    crate::keys::recovery::parse(&text[i..at]).ok().map(|_| at)
 }
 
 /// The end of a JWT starting at `i` (three base64url parts of 10 or more,
@@ -285,11 +450,49 @@ fn jwt_end(text: &str, i: usize) -> Option<usize> {
     Some(at)
 }
 
-const NAME_SUFFIXES: [&str; 5] = ["token", "secret", "password", "passphrase", "_key"];
+/// Names whose values are secret at any length of 8 or more.
+const PASSWORD_SUFFIXES: [&str; 2] = ["password", "passphrase"];
+/// Names whose values are secret unless they're plain words.
+const NAME_SUFFIXES: [&str; 5] = ["token", "secret", "_key", "-key", "apikey"];
+/// The last part of a `…_key` name that makes it a database or cache word.
+const KEY_STEMS: [&str; 9] = [
+    "cache",
+    "sort",
+    "partition",
+    "primary",
+    "foreign",
+    "unique",
+    "idempotency",
+    "dedup",
+    "row",
+];
+
+/// How a name's value is judged.
+#[derive(Clone, Copy, PartialEq)]
+enum Name {
+    Password,
+    Secret,
+}
+
+fn name_kind(name: &str) -> Option<Name> {
+    let lower = name.to_ascii_lowercase();
+    if PASSWORD_SUFFIXES.iter().any(|s| lower.ends_with(s)) {
+        return Some(Name::Password);
+    }
+    let s = NAME_SUFFIXES.iter().find(|s| lower.ends_with(**s))?;
+    if s.ends_with("key") && s.len() == 4 {
+        let stem = &lower[..lower.len() - 4];
+        let last = stem.rsplit(['_', '-']).next().unwrap_or("");
+        if KEY_STEMS.contains(&last) {
+            return None;
+        }
+    }
+    Some(Name::Secret)
+}
 
 /// Values of names that look secret: `NAME=value`, `NAME: value`,
-/// `"name": "value"`.
-fn named_values(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
+/// `"name": "value"`; and `Authorization: <scheme> <credential>`.
+fn named_values(text: &str, spans: &mut Spans) {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -302,13 +505,43 @@ fn named_values(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
         let name = &text[i..i + n];
         let after = i + n;
         i = after.max(i + 1);
-        let lower = name.to_ascii_lowercase();
-        if !NAME_SUFFIXES.iter().any(|s| lower.ends_with(s)) {
+        if name.eq_ignore_ascii_case("authorization") {
+            if let Some((s, e)) = authorization_value(text, after) {
+                spans.push((s, e, "secret-value"));
+                i = e;
+            }
             continue;
         }
-        if let Some((s, e)) = value_after(text, after) {
+        // `Bearer <credential>`: the credential goes, the word stays.
+        if name.eq_ignore_ascii_case("bearer") && bytes.get(after) == Some(&b' ') {
+            let s = after + run(text, after, |c| c == b' ');
+            let n = run(text, s, token68);
+            if n >= 20 && !has_exact(text, s, "eyJ") {
+                spans.push((s, s + n, "secret-value"));
+                i = s + n;
+            }
+            continue;
+        }
+        // A flag's value is `flag_values`'s (a memory key after `--key=`
+        // isn't a secret).
+        if name.starts_with('-') {
+            continue;
+        }
+        let Some(kind) = name_kind(name) else {
+            continue;
+        };
+        if let Some((s, e, quoted)) = value_after(text, after) {
+            let e = if kind == Name::Password && !quoted {
+                line_end(text, s)
+            } else {
+                e
+            };
             let v = &text[s..e];
-            if !plain(v) {
+            let secret = match kind {
+                Name::Password => v.len() >= 8 && !reference(v),
+                Name::Secret => !plain(v),
+            };
+            if secret {
                 spans.push((s, e, "secret-value"));
                 i = e;
             }
@@ -316,9 +549,31 @@ fn named_values(text: &str, spans: &mut Vec<(usize, usize, &'static str)>) {
     }
 }
 
+/// The end of the line at `s`, without trailing spaces or `\r`.
+fn line_end(text: &str, s: usize) -> usize {
+    let line = &text[s..];
+    let n = line.find('\n').unwrap_or(line.len());
+    s + line[..n].trim_end().len()
+}
+
+/// The credential after `Authorization`, ending at `at`: `: <scheme>
+/// <credential>` (or `=`, or quoted), when the credential is 8 or more.
+fn authorization_value(text: &str, at: usize) -> Option<(usize, usize)> {
+    let b = text.as_bytes();
+    let (s, _, _) = value_after(text, at)?;
+    let scheme = run(text, s, |c| c.is_ascii_alphabetic());
+    if scheme == 0 || b.get(s + scheme) != Some(&b' ') {
+        return None;
+    }
+    let c = s + scheme + run(text, s + scheme, |c| c == b' ');
+    let n = run(text, c, token68);
+    (n >= 8 && !has_exact(text, c, "eyJ")).then_some((c, c + n))
+}
+
 /// The value after a name ending at `at`: an optional closing quote, spaces,
-/// `=` or `:`, spaces, then a quoted or bare value.
-fn value_after(text: &str, at: usize) -> Option<(usize, usize)> {
+/// `=` or `:`, spaces, then a quoted or bare value. The third field says
+/// whether it was quoted.
+fn value_after(text: &str, at: usize) -> Option<(usize, usize, bool)> {
     let b = text.as_bytes();
     let mut j = at;
     if b.get(j) == Some(&b'"') || b.get(j) == Some(&b'\'') {
@@ -338,7 +593,7 @@ fn value_after(text: &str, at: usize) -> Option<(usize, usize)> {
         Some(&q) if q == b'"' || q == b'\'' => {
             let s = j + 1;
             let len = b[s..].iter().take_while(|&&c| c != q && c != b'\n').count();
-            Some((s, s + len))
+            Some((s, s + len, true))
         }
         Some(_) => {
             let len = b[j..]
@@ -347,15 +602,21 @@ fn value_after(text: &str, at: usize) -> Option<(usize, usize)> {
                     !c.is_ascii_whitespace() && !matches!(c, b',' | b';' | b'}' | b')' | b'&')
                 })
                 .count();
-            Some((j, j + len))
+            Some((j, j + len, false))
         }
         None => None,
     }
 }
 
+/// Whether a value is a reference or a placeholder (`$X`, `${x}`, `<x>`,
+/// `{{ x }}`, `%{x}`).
+fn reference(v: &str) -> bool {
+    v.starts_with('$') || v.starts_with('<') || v.starts_with("{{") || v.starts_with("%{")
+}
+
 /// Whether a value is too short or too plain to be a secret.
 fn plain(v: &str) -> bool {
-    if v.len() < 8 || v.starts_with('$') || v.starts_with('<') {
+    if v.len() < 8 || reference(v) {
         return true;
     }
     let has_digit = v.bytes().any(|c| c.is_ascii_digit());
@@ -364,7 +625,82 @@ fn plain(v: &str) -> bool {
         .any(|c| !(c.is_ascii_alphabetic() || matches!(c, b'_' | b'.' | b'-')));
     let upper = v.bytes().any(|c| c.is_ascii_uppercase());
     let lower = v.bytes().any(|c| c.is_ascii_lowercase());
-    !(has_digit || other || (upper && lower))
+    // Mixed case alone counts only at a length an identifier rarely has
+    // (`useEnvironment` stays).
+    !(has_digit || other || (upper && lower && v.len() >= 20))
+}
+
+/// The word after `--passphrase`, `--password`, `--token` or `--key`.
+fn flag_values(text: &str, spans: &mut Spans) {
+    let b = text.as_bytes();
+    let mut from = 0;
+    while let Some(i) = text[from..].find("--").map(|i| from + i) {
+        from = i + 2;
+        if !boundary_before(text, i) || (i > 0 && b[i - 1] == b'-') {
+            continue;
+        }
+        let n = run(text, i + 2, |c| c.is_ascii_alphabetic());
+        let flag = &text[i + 2..i + 2 + n];
+        let password = ["passphrase", "password"].contains(&flag);
+        if !password && flag != "token" && flag != "key" {
+            continue;
+        }
+        let mut s = i + 2 + n;
+        match b.get(s) {
+            Some(b'=') => s += 1,
+            Some(b' ') => s += run(text, s, |c| c == b' '),
+            _ => continue,
+        }
+        let (s, e) = match b.get(s) {
+            Some(&q) if q == b'"' || q == b'\'' => {
+                let len = run(text, s + 1, |c| c != q && c != b'\n');
+                (s + 1, s + 1 + len)
+            }
+            _ => (s, s + run(text, s, |c| !c.is_ascii_whitespace())),
+        };
+        let v = &text[s..e];
+        let secret = if password {
+            v.len() >= 8 && !reference(v) && !v.starts_with('-')
+        } else {
+            v.len() >= 16
+                && v.bytes().all(|c| {
+                    c.is_ascii_alphanumeric() || matches!(c, b'+' | b'/' | b'=' | b'_' | b'-')
+                })
+                && !plain(v)
+        };
+        if secret {
+            spans.push((s, e, "secret-value"));
+            from = e;
+        }
+    }
+}
+
+/// The password in `scheme://user:password@host`.
+fn url_passwords(text: &str, spans: &mut Spans) {
+    let b = text.as_bytes();
+    let mut from = 0;
+    while let Some(i) = text[from..].find("://").map(|i| from + i) {
+        from = i + 3;
+        if i == 0 || !b[i - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        let s = i + 3;
+        let n = run(text, s, |c| {
+            !c.is_ascii_whitespace()
+                && !matches!(c, b'/' | b'?' | b'#' | b'@' | b'"' | b'\'' | b'<' | b'>')
+        });
+        if b.get(s + n) != Some(&b'@') {
+            continue;
+        }
+        let Some(colon) = text[s..s + n].find(':') else {
+            continue;
+        };
+        let (ps, pe) = (s + colon + 1, s + n);
+        if pe > ps && !reference(&text[ps..pe]) {
+            spans.push((ps, pe, "secret-value"));
+            from = pe;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -509,50 +845,332 @@ mod tests {
         assert!(secrets(&pem).text.ends_with("\nafter"));
     }
 
+    const FALSE_CASES: [&str; 23] = [
+        "task-list",
+        "sk-1",
+        "the risk-assessment is done",
+        concat!("as", "k-for-help-with-this-long-name-here"),
+        "PRIMARY_KEY=id",
+        "SORT_KEY=created_at",
+        "password: hunter",
+        "the password field is required",
+        "commit 9fceb02d0ae598e95dc970b74767f19372d61af8",
+        "ULID 01M7F1G7YYRRRDBS43Y36C1QHR",
+        "uuid 123e4567-e89b-12d3-a456-426614174000",
+        "a ghp_ token goes here",
+        "eyJ alone",
+        "AKIA plus some words",
+        "AKIAIOSFODNN7EXAMPLEX is too long",
+        "MN1-0000-not-a-code",
+        "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}",
+        "API_KEY=<your key>",
+        "MNEMO_KEY_FILE=/home/me/brain.key",
+        "-----BEGIN PUBLIC KEY-----\nMFkwEwYH\n-----END PUBLIC KEY-----",
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+        "xoxb-short",
+        "sk-learn is a library",
+    ];
+
     /// None of the false cases is redacted.
     #[test]
     fn the_false_cases() {
-        let cases = [
-            "task-list",
-            "sk-1",
-            "the risk-assessment is done",
-            concat!("as", "k-for-help-with-this-long-name-here"),
-            "PRIMARY_KEY=id",
-            "SORT_KEY=created_at",
-            "password: hunter",
-            "the password field is required",
-            "commit 9fceb02d0ae598e95dc970b74767f19372d61af8",
-            "ULID 01M7F1G7YYRRRDBS43Y36C1QHR",
-            "uuid 123e4567-e89b-12d3-a456-426614174000",
-            "a ghp_ token goes here",
-            "eyJ alone",
-            "AKIA plus some words",
-            "AKIAIOSFODNN7EXAMPLEX is too long",
-            "MN1-0000-not-a-code",
-            "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}",
-            "API_KEY=<your key>",
-            "MNEMO_KEY_FILE=/home/me/brain.key",
-            "-----BEGIN PUBLIC KEY-----\nMFkwEwYH\n-----END PUBLIC KEY-----",
-            "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
-            "xoxb-short",
-            "sk-learn is a library",
-        ];
-        for c in cases {
+        for c in FALSE_CASES {
             let r = secrets(c);
             assert_eq!(r.text, c, "redacted a false case: {c}");
             assert!(r.counts.is_empty(), "{c}: {:?}", r.counts);
         }
     }
 
+    /// A line of key material, as a PEM body has (64 base64 characters).
+    fn b64_line(seed: &str) -> String {
+        seed.repeat(64).chars().take(64).collect()
+    }
+
     /// A PEM block split across two texts (two turns): each half goes.
     #[test]
     fn a_pem_block_split_across_texts() {
-        let a = format!("here it is\n-----BEGIN EC {PK}-----\nMHcCAQEEIOab");
-        let b = format!("cdEFgh12\n-----END EC {PK}-----\nthat was it");
+        let a = format!(
+            "here it is\n-----BEGIN EC {PK}-----\n{}\nMHcCAQEEIOab",
+            b64_line("MHcCAQEEIOab")
+        );
+        let b = format!(
+            "{}\ncdEFgh12\n-----END EC {PK}-----\nthat was it",
+            b64_line("cdEFgh12")
+        );
         let ra = secrets(&a);
         assert_eq!(ra.text, "here it is\n[redacted: private-key]");
         let rb = secrets(&b);
         assert_eq!(rb.text, "[redacted: private-key]\nthat was it");
+        // An encrypted key's header counts as key material.
+        let c = format!("x\n-----BEGIN RSA {PK}-----\nProc-Type: 4,ENCRYPTED\nDEK");
+        assert_eq!(secrets(&c).text, "x\n[redacted: private-key]");
+    }
+
+    /// A marker only mentioned in prose loses the marker, not the turn
+    /// (RB-011.4).
+    #[test]
+    fn a_pem_marker_in_prose_takes_only_the_marker() {
+        let begin = format!(
+            "Look for the line `-----BEGIN {PK}-----` in the file. Then tell me what \
+             follows, because the rest of this turn matters a lot."
+        );
+        assert_eq!(
+            secrets(&begin).text,
+            "Look for the line `[redacted: private-key]` in the file. Then tell me what \
+             follows, because the rest of this turn matters a lot."
+        );
+        let end = format!(
+            "A long explanation of the format comes first and it matters. The block \
+             closes with `-----END RSA {PK}-----` and that is all."
+        );
+        assert_eq!(
+            secrets(&end).text,
+            "A long explanation of the format comes first and it matters. The block \
+             closes with `[redacted: private-key]` and that is all."
+        );
+        // A short line after BEGIN isn't key material either.
+        let short = format!("-----BEGIN {PK}-----\nwhere does it go?");
+        assert_eq!(
+            secrets(&short).text,
+            "[redacted: private-key]\nwhere does it go?"
+        );
+    }
+
+    /// The shapes added for RB-011.2 (mnemo's own secrets first, then
+    /// common ones), each with its secret part gone.
+    #[test]
+    fn the_added_true_cases() {
+        let key = crate::keys::recovery::encode(&[9u8; 32]);
+        let spaced = key.replace('-', " ");
+        let groups: Vec<&str> = key.split('-').collect();
+        let wrapped = format!("{}\n{}", groups[..7].join("-"), groups[7..].join("-"));
+        let cases: Vec<(String, &str, &str)> = vec![
+            (
+                "export MNEMO_PASSPHRASE=correcthorsebattery".into(),
+                "secret-value",
+                "correcthorse",
+            ),
+            (
+                "MNEMO_PASSPHRASE=correct horse battery staple\nnext".into(),
+                "secret-value",
+                "horse battery",
+            ),
+            (
+                "mnemo init --passphrase Tr0ub4dor&3xyz".into(),
+                "secret-value",
+                "Tr0ub4dor",
+            ),
+            (
+                "tool --password=\"long enough words\"".into(),
+                "secret-value",
+                "enough",
+            ),
+            (
+                format!("gh --token {}", "a1B2c3D4".repeat(3)),
+                "secret-value",
+                "a1B2c3D4",
+            ),
+            (format!("code: {spaced}"), "recovery-code", groups[3]),
+            (format!("code:\n{wrapped}"), "recovery-code", groups[9]),
+            (
+                "Authorization: Bearer abcDEF123456ghiJKL789".into(),
+                "secret-value",
+                "abcDEF123456",
+            ),
+            (
+                "\"Authorization\": \"Basic dXNlcjpwYXNzd29yZA==\"".into(),
+                "secret-value",
+                "dXNlcjpw",
+            ),
+            (
+                "curl -H 'bearer abcDEF123456ghiJKL789xyz'".into(),
+                "secret-value",
+                "abcDEF123456",
+            ),
+            (
+                "X-Api-Key: abcDEF123456ghiJKL789".into(),
+                "secret-value",
+                "abcDEF123456",
+            ),
+            (
+                "{\"apiKey\": \"abcDEF123456ghiJKL789\"}".into(),
+                "secret-value",
+                "abcDEF123456",
+            ),
+            (
+                format!("{}_live_{}", concat!("s", "k"), "a1B2".repeat(6)),
+                "api-key",
+                "a1B2a1B2",
+            ),
+            (
+                format!("{}_live_{}", concat!("r", "k"), "Z9y8".repeat(6)),
+                "api-key",
+                "Z9y8Z9y8",
+            ),
+            (
+                format!("key={}{}", concat!("AI", "za"), "Sy_1-".repeat(7)),
+                "api-key",
+                "Sy_1-Sy_1",
+            ),
+            (
+                format!("{}-{}", concat!("gl", "pat"), "x1Y2z3".repeat(4)),
+                "api-key",
+                "x1Y2z3x1",
+            ),
+            (
+                format!("{}_{}", concat!("n", "pm"), "q7".repeat(18)),
+                "api-key",
+                "q7q7q7",
+            ),
+            (
+                format!("{}_{}", concat!("h", "f"), "AbCd".repeat(8)),
+                "api-key",
+                "AbCdAbCd",
+            ),
+            (
+                "postgres://admin:S3cr3tPassw0rd@db.example.com/app".into(),
+                "secret-value",
+                "S3cr3t",
+            ),
+        ];
+        for (text, kind, gone) in &cases {
+            let r = secrets(text);
+            assert_eq!(kinds(text), [*kind], "{text} -> {}", r.text);
+            assert!(!r.text.contains(gone), "{text} -> {}", r.text);
+        }
+        // Only the secret part goes.
+        assert_eq!(
+            secrets("Authorization: Bearer abcDEF123456ghiJKL789").text,
+            "Authorization: Bearer [redacted: secret-value]"
+        );
+        assert_eq!(
+            secrets("postgres://admin:S3cr3tPassw0rd@db.example.com/app").text,
+            "postgres://admin:[redacted: secret-value]@db.example.com/app"
+        );
+        assert_eq!(
+            secrets("mnemo init --passphrase Tr0ub4dor&3xyz now").text,
+            "mnemo init --passphrase [redacted: secret-value] now"
+        );
+    }
+
+    /// The false cases found in RB-011.4, and a near miss beside each shape
+    /// added for RB-011.2.
+    #[test]
+    fn the_added_false_cases() {
+        let cases = [
+            "cache_key: 3f9a2b7c",
+            "SORT_KEY=created_at/2024",
+            "client_secret: useEnvironment",
+            "password: \"{{ vault_db_password }}\"",
+            "PASSWORD=%{db_password}",
+            "partition_key: tenant_42",
+            "row-key: r1234567",
+            "redis_cache_key=user:42:profile",
+            "MNEMO_PASSPHRASE: set",
+            "the passphrase is set",
+            "--passphrase $PP",
+            "--password-stdin < file",
+            "--keychain on",
+            "use the --token flag",
+            "remember --key design.122-post-release-order",
+            "curl --key ~/.ssh/id_ed25519 --cert c.pem",
+            "Authorization: required",
+            "the authorization: see below",
+            "Bearer token",
+            "AIza short",
+            concat!("gl", "pat-short"),
+            "npm_install",
+            "hf_hub_download",
+            concat!("s", "k_live_short"),
+            "https://example.com:8080/path",
+            "ssh://git@github.com/owner/repo",
+            "postgres://user:${DB_PASS}@host/db",
+            "MN1 is the code's prefix",
+        ];
+        for c in cases {
+            let r = secrets(c);
+            assert_eq!(r.text, c, "redacted a false case: {c}");
+        }
+    }
+
+    /// Text that isn't ASCII, around the cases and on its own (RB-011.1:
+    /// these panicked).
+    #[test]
+    fn text_that_isnt_ascii() {
+        for t in [
+            "it’s done",
+            "don’t do that",
+            "the café is open",
+            "so—yes",
+            "a😀",
+            "ok日本語",
+            "run it ok→ done",
+            "I’m fine",
+            "MN😀",
+            "mn1-é",
+            "sk-é",
+            "eyJé",
+            "postgres://ü:é@x",
+            "--key é",
+            "Bearer 日本語",
+            "-----BEGIN PRIVATE KEY-----\né",
+        ] {
+            let _ = secrets(t);
+        }
+        // The suffix starts a line: a password's unquoted value runs to the end
+        // of its line.
+        let around = |t: &str| format!("it’s — café 日本 😀 {t}\n— ok’s 🎉");
+        for t in ["it’s done", "the café is open", "so—yes", "a😀", "ok日本語"] {
+            assert_eq!(secrets(t).text, t);
+        }
+        let hit = "id AKIAIOSFODNN7EXAMPLE here";
+        assert_eq!(
+            secrets(&around(hit)).text,
+            around("id [redacted: aws-key-id] here")
+        );
+        // The false tables, wrapped, stay as they are; the true ones are
+        // still found.
+        for c in FALSE_CASES {
+            let w = around(c);
+            assert_eq!(secrets(&w).text, w, "{c}");
+        }
+        for c in ["API_KEY=a8f3k2m9q7", "db_password: CorrectHorse"] {
+            let w = around(c);
+            assert_eq!(secrets(&w).counts, [("secret-value", 1)], "{w}");
+        }
+    }
+
+    proptest::proptest! {
+        /// No input panics, and the output differs from the input exactly
+        /// when something was counted.
+        #[test]
+        fn never_panics(parts in proptest::collection::vec(proptest::prop_oneof![
+            proptest::prelude::any::<String>(),
+            "[A-Za-z0-9]{0,40}",
+            proptest::strategy::Just("MN1-".to_string()),
+            proptest::strategy::Just("-----BEGIN PRIVATE KEY-----\n".to_string()),
+            proptest::strategy::Just("-----END RSA PRIVATE KEY-----".to_string()),
+            proptest::strategy::Just("password: ".to_string()),
+            proptest::strategy::Just("Authorization: Basic ".to_string()),
+            proptest::strategy::Just("--key ".to_string()),
+            proptest::strategy::Just("://u:".to_string()),
+            proptest::strategy::Just("@".to_string()),
+            proptest::strategy::Just("Bearer ".to_string()),
+            proptest::strategy::Just("’é😀→日".to_string()),
+            proptest::strategy::Just("sk-".to_string()),
+            proptest::strategy::Just("eyJ".to_string()),
+            proptest::strategy::Just(" \n=:\"".to_string()),
+        ], 0..24)) {
+            let text = parts.concat();
+            let r = secrets(&text);
+            proptest::prop_assert_eq!(r.text == text, r.counts.is_empty());
+        }
+
+        /// Words, spaces and punctuation outside ASCII are never redacted.
+        #[test]
+        fn prose_stays(text in "([a-z]{1,9}|[ ’—–é日本😀→“”,.!?]){0,60}") {
+            proptest::prop_assert_eq!(secrets(&text).text, text.as_str());
+        }
     }
 
     #[test]

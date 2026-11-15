@@ -368,3 +368,26 @@ fn one_environment_serves_a_key_brain_from_the_store_and_a_passphrase_brain() {
         "{err}"
     );
 }
+
+/// RB-011.2: a secret from the environment, when the brain has its own entry
+/// in the store, is named at start; with no entry, nothing is said.
+#[test]
+fn an_environment_secret_beside_a_store_entry_is_named() {
+    let e = Env::new();
+    let kb = e.path("project.mnemo");
+    assert!(e.run(&["init", "--dimensions", "4", s(&kb)], &[]).0);
+    let entry = std::fs::read_to_string(e.entry(&kb)).unwrap();
+    let hex = entry.trim().strip_prefix("key:").unwrap().to_string();
+    let (r, err) = serve_and_list(&e, &kb, &[("MNEMO_KEY", &hex)]);
+    assert!(r["result"].is_object(), "{r} {err}");
+    assert!(
+        err.contains("the secret comes from MNEMO_KEY in this server's environment, though this brain has its own entry"),
+        "{err}"
+    );
+    assert!(!err.contains(&hex), "the key is never logged: {err}");
+    // No entry: no note.
+    std::fs::remove_file(e.entry(&kb)).unwrap();
+    let (r, err) = serve_and_list(&e, &kb, &[("MNEMO_KEY", &hex)]);
+    assert!(r["result"].is_object(), "{r} {err}");
+    assert!(!err.contains("has its own entry"), "{err}");
+}

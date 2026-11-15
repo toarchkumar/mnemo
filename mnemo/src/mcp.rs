@@ -482,6 +482,22 @@ fn serve_inner<R: Read, W: Write>(
     for n in &found.notes {
         eprintln!("mnemo mcp: note: {n}");
     }
+    // A secret from the server's environment when the brain has its own
+    // entry in the key store: say so, naming the source, since a client's
+    // config (or a project's committed one) set it.
+    if !matches!(found.source, crate::keys::Source::Store(_)) {
+        if let (Some(st), Ok(info)) = (store.as_deref(), crate::keys::file_info(path)) {
+            if matches!(st.get(&info.salt), Ok(Some(_))) {
+                eprintln!(
+                    "mnemo mcp: note: the secret comes from {} in this server's environment, \
+                     though this brain has its own entry in {}; if you didn't set it, look at \
+                     this server's entry in the client's config",
+                    found.source,
+                    st.describe()
+                );
+            }
+        }
+    }
     // 12.3 step 5: the built-in model loads (or is fetched) before the file
     // is opened, so the download never holds the file's lock; and only for a
     // file of its width (RB-010.1), read from the header first.
@@ -557,6 +573,12 @@ fn serve_inner<R: Read, W: Write>(
     eprintln!("mnemo mcp: ready ({} live memories)", db.len()?);
 
     let reader = BufReader::new(reader);
+    // RB-011.1: a panic inside one request answers that request with an
+    // internal error instead of ending the server. After one inside a tool
+    // call the handle may hold a half-made change, so the server stops
+    // using it: later requests get an error, and nothing is flushed at
+    // shutdown (the file keeps its last committed state).
+    let mut broken = false;
     for line in reader.lines() {
         let line = line.map_err(MnemoError::Io)?;
         let trimmed = line.trim();
@@ -568,7 +590,35 @@ fn serve_inner<R: Read, W: Write>(
             Ok(req) => {
                 let id = req.id.clone();
                 let is_notification = id.is_none();
-                let result = handle(&mut db, &req);
+                let result = if broken {
+                    Err(RpcError::new(
+                        INTERNAL_ERROR,
+                        "an earlier tool call hit an internal error in mnemo, so this server \
+                         stopped using the file; restart it",
+                    ))
+                } else {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handle(&mut db, &req)
+                    })) {
+                        Ok(r) => r,
+                        Err(_) => {
+                            broken = req.method == "tools/call";
+                            eprintln!(
+                                "mnemo mcp: internal error in {}{}",
+                                req.method,
+                                if broken {
+                                    "; the server stops using the file"
+                                } else {
+                                    "; the server goes on"
+                                }
+                            );
+                            Err(RpcError::new(
+                                INTERNAL_ERROR,
+                                format!("internal error in mnemo while handling {}", req.method),
+                            ))
+                        }
+                    }
+                };
                 if is_notification {
                     // Per JSON-RPC 2.0: notifications get no response.
                     continue;
@@ -616,6 +666,10 @@ fn serve_inner<R: Read, W: Write>(
     // flushes now write only every so often.
     // A shared server holds nothing between calls; its last recalls'
     // statistics went with their read windows (they ride the next write).
+    if broken {
+        eprintln!("mnemo mcp: stdin closed; nothing flushed after the internal error");
+        return Ok(());
+    }
     if let ServerDb::Plain(db) = db {
         if let Err(e) = db.close() {
             eprintln!("mnemo mcp: flush on shutdown failed: {e}");
@@ -630,6 +684,12 @@ fn serve_inner<R: Read, W: Write>(
 /// Route a request to a method handler. Returns either the `result`
 /// payload for a JSON-RPC success or an [`RpcError`] for a failure.
 fn handle(db: &mut ServerDb, req: &Request) -> std::result::Result<Value, RpcError> {
+    // A dev-hooks build can be told to panic in one method, to test the
+    // server's catch (RB-011.1).
+    #[cfg(feature = "dev-hooks")]
+    if std::env::var("MNEMO_DEV_MCP_PANIC").is_ok_and(|m| m == req.method) {
+        panic!("MNEMO_DEV_MCP_PANIC");
+    }
     if req.jsonrpc != "2.0" {
         return Err(RpcError::new(
             INVALID_REQUEST,
