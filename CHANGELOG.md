@@ -20,7 +20,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
   directory with mode 0700, and refuses a symbolic link in its place.
   Outside a git repository the error says to give the path.
 - **`-C <dir>`** on every command: run as if started in `<dir>`, like
-  git's `-C`.
+  git's `-C`. When `CLAUDE_PROJECT_DIR` picks the brain and the working
+  directory is in another repository, one line on stderr names the brain
+  used (`-C .` uses the working directory's).
+- **The guide for agents (GUIDE-1, 12.2 step 2).** `mnemo onboard --guide`
+  prints how to set up a project and how to organize its memory: the
+  tools, keys, the four types, the essence, budgets, and what to save and
+  never save. It's one source (`mnemo/guide/guide.md`), compiled in, so
+  each binary carries its own. CI runs every command and MCP call in it.
+  `--format llms-txt` prints the `llms.txt` the site serves. `mnemo
+  onboard` without `--guide` exits 2 until the rest of it lands.
 - **`mcp install` with no path** writes an entry with no path in it:
   `serve --mcp --shared` for Claude Code (project and local scopes), and
   `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A user scope

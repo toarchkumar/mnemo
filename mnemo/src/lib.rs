@@ -68,6 +68,7 @@ mod embed_cmd;
 mod error;
 mod format;
 mod freelist;
+pub mod guide;
 mod ident;
 mod index;
 pub mod keys;

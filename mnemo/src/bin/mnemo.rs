@@ -96,8 +96,7 @@ fn resolve_brain_arg(cmd: &mut Command, moved: bool) -> std::result::Result<bool
     if !path.is_empty() {
         return Ok(false);
     }
-    let start = project::start_dir(moved)?;
-    let brain = project::brain_path(&start)?;
+    let brain = project::find(moved, false)?;
     if creating {
         project::create_dir(&brain)?;
     } else if !brain.is_file() {
@@ -862,6 +861,19 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Set up this project's memory for your agents (12.2, being built for
+    /// v0.16.0). `--guide` prints the guide for agents: how to set up, and
+    /// how to organize memory. It's built into this binary, so it always
+    /// matches this version.
+    Onboard {
+        /// Print only the guide, and touch nothing.
+        #[arg(long)]
+        guide: bool,
+        /// The guide's format: `markdown`, or `llms-txt` (the llms.txt shape
+        /// the site serves).
+        #[arg(long, value_enum, default_value = "markdown", requires = "guide")]
+        format: GuideFormat,
+    },
     /// MCP clients: `mcp install` adds this brain's server to one.
     Mcp {
         #[command(subcommand)]
@@ -949,6 +961,15 @@ enum EmbedderCmd {
     /// Show the built-in embedder's model, its identity, and whether it's
     /// installed (or, with `--model-dir`, what that directory holds).
     Status,
+}
+
+/// `onboard --guide`'s formats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum GuideFormat {
+    /// The guide as Markdown.
+    Markdown,
+    /// The guide in the llms.txt shape (<https://llmstxt.org/>).
+    LlmsTxt,
 }
 
 #[derive(Subcommand)]
@@ -3709,6 +3730,21 @@ fn run() -> std::result::Result<(), String> {
                 _ => return Err("--embed-cmd and --embed-name go together".into()),
             }
             .map_err(fmt)?;
+        }
+        Command::Onboard { guide, format } => {
+            if !guide {
+                // Step 5 builds the rest; until then, exit 2 and say so.
+                eprintln!(
+                    "`mnemo onboard` is being built (v0.16.0); `mnemo onboard --guide` prints \
+                     the guide"
+                );
+                std::process::exit(2);
+            }
+            let text = match format {
+                GuideFormat::Markdown => mnemo_engine::guide::markdown(),
+                GuideFormat::LlmsTxt => mnemo_engine::guide::llms_txt(),
+            };
+            print!("{text}");
         }
         Command::Embedder { cmd } => run_embedder(cmd)?,
         Command::Cache { op } => run_cache_op(op)?,

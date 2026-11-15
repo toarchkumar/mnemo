@@ -913,6 +913,12 @@ path. Commands with another positional argument after the brain (`get`,
 server, and `-C ${workspaceFolder} serve --mcp --shared` for Cursor. A
 user scope keeps the absolute path.
 
+**The guide for agents** (v0.16, GUIDE-1): `mnemo onboard --guide` prints
+how to set up a project and how to organize its memory. It's built into
+the binary, so it matches the version you run, and CI runs every command
+in it. `--format llms-txt` prints it in the llms.txt shape; the site serves
+that as `llms.txt`. The rest of `mnemo onboard` comes later in v0.16.
+
 **`-C <dir>`** (v0.16), on every command: run as if started in `<dir>`,
 like git's `-C`. Relative paths are read from it.
 
