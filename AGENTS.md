@@ -270,9 +270,9 @@ it; other roles stop and ask the user first.
 
 | Role | Startup reading list | Allowed file writes | Git commits |
 |---|---|---|---|
-| `Planner` | `AGENTS.md`, `PLAN.md`, `reviewer_notes.md`, read-only `test/project.mnemo` | `PLAN.md` (all sections except Worker `WORKLOG` entries), triage fields in `reviewer_notes.md`, root `README.md`, `index.html`, `.gitignore`, and the protocol text in `AGENTS.md` (this section + the standing MessagePack rule) | **Never commits** — hands off tracked edits via `PLANNER — HANDOFF` in `PLAN.md` |
-| `Worker` | `AGENTS.md`, `PLAN.md` (`Status`, `NEXT DISPATCH`, active spec, recent `WORKLOG`), `mnemo/README.md`, `CHANGELOG.md`, `test/project.mnemo` | Active PR code/tests/crate docs/manifests/`CHANGELOG.md`/`seed.json`, technical sections of `AGENTS.md` (as part of a PR), bottom `WORKLOG` of `PLAN.md` (append-only), `test/project.mnemo` | **Sole committer** — stages explicit paths only; commits `PLANNER — HANDOFF` files separately |
-| `Reviewer` | `AGENTS.md`, live code & `git diff`, `test/scripts/perf_*.json`, `PLAN.md`, `reviewer_notes.md`, read-only `test/project.mnemo` | `reviewer_notes.md` **only** (`Decision Ledger` + `Review Log`) | **Never commits** (read-only across tracked files, `PLAN.md`, and `test/project.mnemo`) |
+| `Planner` | `AGENTS.md`, `PLAN.md`, `reviewer_notes.md`, the project brain (read-only, `--no-track`) | `PLAN.md` (all sections except Worker `WORKLOG` entries), triage fields in `reviewer_notes.md`, root `README.md`, `index.html`, `.gitignore`, and the protocol text in `AGENTS.md` (this section + the standing MessagePack rule) | **Never commits** — hands off tracked edits via `PLANNER — HANDOFF` in `PLAN.md` |
+| `Worker` | `AGENTS.md`, `PLAN.md` (`Status`, `NEXT DISPATCH`, active spec, recent `WORKLOG`), `mnemo/README.md`, `CHANGELOG.md`, the project brain | Active PR code/tests/crate docs/manifests/`CHANGELOG.md`/`seed.json`, technical sections of `AGENTS.md` (as part of a PR), bottom `WORKLOG` of `PLAN.md` (append-only), the project brain's facts | **Sole committer** — stages explicit paths only; commits `PLANNER — HANDOFF` files separately |
+| `Reviewer` | `AGENTS.md`, live code & `git diff`, `test/scripts/perf_*.json`, `PLAN.md`, `reviewer_notes.md`, the project brain (read-only, `--no-track`) | `reviewer_notes.md` **only** (`Decision Ledger` + `Review Log`) | **Never commits** (read-only across tracked files, `PLAN.md`, and the brain's facts) |
 
 ### Running in tmux: messages carry pointers, the ledgers carry instructions (user decision 2026-11-13)
 
@@ -330,6 +330,19 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    Planner re-reads the ledger tails and carries on.
 8. **The repo is `~/Documents/GitHub/mnemo.nosync`.** Every session starts in
    it and uses absolute paths. The cloud-sync tripwire above still applies.
+9. **Every session runs `mnemo onboard`'s hooks (user decision
+   2026-11-15).**
+   - **The project brain** is `.git/mnemo/project.mnemo` (since v0.16, the
+     dogfood switch). Its key is in the user's keychain, so no session
+     handles a passphrase.
+   - **Each session's hooks save its own transcript** into its own thread
+     (`claude-code:<session id>`), and load the brief at session start.
+     That's the only write the Planner and the Reviewers make to the brain.
+   - **Only the Worker writes facts,** with a key (the MCP `remember` tool
+     with `key`, or `test/scripts/project_memory.py remember --key`).
+   - **The Planner and the Reviewers read** with `recall` (MCP) or `mnemo
+     recall --no-track`, and never call `remember`, `forget` or `essence`
+     writes.
 
 ### `Planner` rules
 
@@ -337,8 +350,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    (`Status`, `NEXT DISPATCH`, phase/PR specs) and log every dispatch,
    decision, review triage, handoff, or verification as a
    `PLANNER — PLAN | DECISION | REVIEW | HANDOFF | VERIFIED` entry in
-   `PLAN.md`'s `WORKLOG`. Inspect `test/project.mnemo` read-only
-   (`--no-track` / `read_only=True`) so you never contend for the write lock.
+   `PLAN.md`'s `WORKLOG`. Read the project brain with `recall` or `mnemo
+   recall --no-track`, and never write facts to it (tmux rule 9).
 2. **Hand off tracked-file edits (never commit directly):** You own the
    content of root `README.md`, `index.html`, `.gitignore`, and the
    protocol text in `AGENTS.md` (this "Multi-agent roles & coordination"
@@ -378,8 +391,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    `WORKER — BLOCKED` entry with exact evidence, and end the session — do
    not improvise around the plan. After completing a PR, append a
    `WORKER — DONE` entry (commit hashes, test counts, deviations) and persist
-   durable findings to `test/project.mnemo` if `test/.env` is present (note
-   in `DONE` if skipped).
+   durable findings to the project brain, each with a key (tmux rule 9;
+   note in `DONE` if skipped).
 3. **Sole committer in the shared working tree:**
    - **Stage by explicit file path only** (`git add <path>...`). Never run
      `git add -A`, `git add .`, or `git commit -a`.
@@ -413,8 +426,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
 ### `Reviewer` rules
 
 1. **Strictly read-only audit boundary:** Never edit tracked files,
-   `PLAN.md`, or `test/project.mnemo` (always open `test/project.mnemo`
-   with `read_only=True` or `--no-track`), and never run `git add` or
+   `PLAN.md`, or the project brain's facts (read it with `recall` or
+   `--no-track`; your hooks save only your transcript, tmux rule 9), and never run `git add` or
    `git commit`. Write exclusively to `reviewer_notes.md` unless the user
    explicitly asks for a doc edit and routes commit authority through a
    `Planner`/`Worker` handoff. (The `Worker` commits `reviewer_notes.md` as
