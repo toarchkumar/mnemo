@@ -183,6 +183,7 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
 | `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
+| `recent(n=20)` | The `n` most recently written live memories, newest first: facts only (no thread turns, essence items or onboarding records), nothing superseded or expired; not counted as an access (v0.16) |
 | `about_essence()` | The project essence render for the briefing (markdown), or `None` when the file has none |
 | `insert_default_manifest()` | Insert the canonical scaffold manifest (same one `mnemo init` adds); returns its id |
 | `session(agent_id)` | Begin a conversation `Session` |

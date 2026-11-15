@@ -1,16 +1,50 @@
 #!/usr/bin/env python3
-"""MNemo project memory — dogfood helper for test/project.mnemo."""
+"""MNemo project memory: the dogfood helper for this repository's brain.
+
+The brain is `.git/mnemo/project.mnemo` once the dogfood switch has moved
+it there (v0.16), else `test/project.mnemo`. `recall` and `remember` run the
+`mnemo` CLI (v0.15 or later: $MNEMO_BIN, this repo's release build, or the
+PATH's); `bootstrap`, `perf` and `info` use the Python binding. The secret
+comes from test/.env's MNEMO_PASSPHRASE when there is one, else the
+key-source chain (the keychain, after the switch).
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 TEST_ROOT = Path(__file__).resolve().parent.parent
-MNEMO_PATH = TEST_ROOT / "project.mnemo"
+REPO_ROOT = TEST_ROOT.parent
+LEGACY_PATH = TEST_ROOT / "project.mnemo"
+
+
+def default_brain() -> Path:
+    """v0.16 (12.2 step 7a): the project brain, `<git-common-dir>/mnemo/
+    project.mnemo`, once the dogfood switch has moved it there; until then
+    `test/project.mnemo`. So the script works on both sides of the move."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=TEST_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        moved = (TEST_ROOT / out).resolve() / "mnemo" / "project.mnemo"
+        if moved.is_file():
+            return moved
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return LEGACY_PATH
+
+
+MNEMO_PATH = default_brain()
 JSONL_PATH = TEST_ROOT / "project-memory.jsonl"
 SEED_PATH = Path(__file__).resolve().parent / "seed.json"
 ENV_PATH = TEST_ROOT / ".env"
@@ -40,13 +74,82 @@ def load_dotenv() -> None:
 
 
 def passphrase() -> str:
-    load_dotenv()
-    pp = os.environ.get("MNEMO_PASSPHRASE", "").strip()
+    pp = optional_passphrase()
     if not pp:
         sys.exit(
             "MNEMO_PASSPHRASE missing. Copy test/.env.example to test/.env or export it."
         )
     return pp
+
+
+def optional_passphrase() -> str | None:
+    """test/.env's passphrase, or None: after the dogfood switch the brain
+    has a generated key in the keychain, and the key-source chain finds it."""
+    load_dotenv()
+    return os.environ.get("MNEMO_PASSPHRASE", "").strip() or None
+
+
+# --- The CLI (v0.16, 12.2 step 7a) ----------------------------------------
+#
+# `recall` and `remember` are thin wrappers over the `mnemo` CLI, so the
+# dogfood path is the one the hooks and the MCP server use. The secret
+# comes from the key-source chain: test/.env's MNEMO_PASSPHRASE reaches the
+# child's environment (read here, in-process, never on a command line), and
+# after the switch the keychain holds the brain's key.
+
+MIN_CLI = (0, 15, 0)
+
+
+def cli_version(path: str) -> tuple[int, ...] | None:
+    try:
+        out = subprocess.run(
+            [path, "--version"], capture_output=True, text=True, timeout=30
+        ).stdout.split()
+        return tuple(int(x) for x in out[-1].split(".")[:3])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+_CLI: str | None = None
+
+
+def mnemo_cli() -> str:
+    """The `mnemo` to run: $MNEMO_BIN, else this repo's release build, else
+    the one on the PATH, whichever is first at v0.15 or later."""
+    global _CLI
+    if _CLI:
+        return _CLI
+    candidates = [
+        os.environ.get("MNEMO_BIN"),
+        str(REPO_ROOT / "mnemo" / "target" / "release" / "mnemo"),
+        shutil.which("mnemo"),
+    ]
+    seen = []
+    for c in candidates:
+        if not c or not Path(c).is_file():
+            continue
+        v = cli_version(c)
+        seen.append(f"{c} ({'.'.join(map(str, v)) if v else 'unknown version'})")
+        if v and v >= MIN_CLI:
+            _CLI = c
+            return c
+    sys.exit(
+        "no mnemo CLI at v0.15 or later (found: "
+        + (", ".join(seen) or "none")
+        + "). Build one: cd mnemo && cargo build --release --features keychain,embed-candle, "
+        "or set MNEMO_BIN"
+    )
+
+
+def run_cli(args: list[str]) -> str:
+    """Run the CLI and return its stdout; its notes go to stderr."""
+    load_dotenv()
+    r = subprocess.run([mnemo_cli(), *args], capture_output=True, text=True)
+    if r.stderr:
+        sys.stderr.write(r.stderr)
+    if r.returncode != 0:
+        sys.exit(r.returncode)
+    return r.stdout
 
 
 REBUILD_HINT = (
@@ -154,13 +257,15 @@ def open_db(*, create: bool = False, write: bool = True):
     mode never creates a file, so a missing brain is created first with a
     plain open."""
     mnemo = require_mnemo()
-    pp = passphrase()
+    # v0.16: test/.env's passphrase when there is one, else the key-source
+    # chain (the brain's generated key in the keychain, after the switch).
+    pp = optional_passphrase()
     if create or not MNEMO_PATH.exists():
         if not write:
             sys.exit(f"no brain at {MNEMO_PATH}")
         if MNEMO_PATH.exists() and create:
             MNEMO_PATH.unlink()
-        mnemo.open(str(MNEMO_PATH), pp, dimensions=DIMENSIONS).close()
+        mnemo.open(str(MNEMO_PATH), passphrase(), dimensions=DIMENSIONS).close()
     if write:
         db = mnemo.open(str(MNEMO_PATH), pp, shared=True)
     else:
@@ -226,35 +331,51 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
     print(f"exported vectors -> {JSONL_PATH}")
 
 
+def remember_args(
+    content: str,
+    mtype: str,
+    importance: float,
+    metadata: dict | None,
+    key: str | None,
+    supersedes: str | None = None,
+) -> list[str]:
+    """`mnemo remember`'s arguments for one fact. With a key it's the
+    keyed upsert (Phase 12.1): an identical re-write is a no-op, and a new
+    value supersedes the old one, which stays in `history --key`."""
+    a = [
+        "remember",
+        str(MNEMO_PATH),
+        "--text",
+        content,
+        "--type",
+        mtype,
+        "--importance",
+        str(importance),
+        "--agent",
+        AGENT_ID,
+    ]
+    if metadata:
+        a += ["--metadata", json.dumps(metadata)]
+    if key:
+        a += ["--key", key]
+    if supersedes:
+        a += ["--supersedes", supersedes]
+    return a
+
+
 def cmd_remember(args: argparse.Namespace) -> None:
-    db = open_db()
-    # Phase 12.1 (v0.8.0): if --key is given, take the keyed-upsert
-    # path. A repeat of an identical write is a no-op (helpful when a
-    # script re-emits the same "current X" fact), and a new value
-    # under the same key supersedes the prior record but keeps it
-    # walkable through `project_memory.py history --key`. Without
-    # --key the write stays as a plain insert so pre-12.1 callers
-    # don't change behavior.
-    result = db.remember_text(
-        args.content,
-        args.type,
-        agent_id=AGENT_ID,
-        importance=args.importance,
-        metadata=json.loads(args.metadata) if args.metadata else None,
-        key=args.key,
-        # v0.15 (12.3 step 5b): adopt an unkeyed memory as the key's first
-        # version and supersede it; only passed when given, so an older
-        # wheel without the argument still takes plain writes.
-        **({"supersedes": args.supersedes} if args.supersedes else {}),
+    # The CLI prints `id\toutcome` for a keyed write, the id for a plain one.
+    out = run_cli(
+        remember_args(
+            args.content,
+            args.type,
+            args.importance,
+            json.loads(args.metadata) if args.metadata else None,
+            args.key,
+            args.supersedes,
+        )
     )
-    db.flush()
-    db.close()
-    if isinstance(result, dict):
-        # Keyed write — print `id\toutcome` so scripts can branch on it.
-        print(f"{result['id']}\t{result['outcome']}")
-    else:
-        # Un-keyed insert — preserve the pre-12.1 stdout shape (just the ULID).
-        print(result)
+    print(out.strip())
 
 
 def cmd_remember_file(args: argparse.Namespace) -> None:
@@ -273,47 +394,55 @@ def cmd_remember_file(args: argparse.Namespace) -> None:
         facts.append(f)
     if not facts:
         sys.exit(f"{path}: no facts")
-    # One open and one model load; the handle's embedder embeds each fact
-    # before its write window.
-    db = open_db()
+    # One CLI run per fact, each its own write.
     for f in facts:
-        result = db.remember_text(
-            f["content"],
-            f.get("type", "semantic"),
-            agent_id=AGENT_ID,
-            importance=float(f.get("importance", 0.75)),
-            metadata=f.get("metadata"),
-            key=f.get("key"),
+        out = run_cli(
+            remember_args(
+                f["content"],
+                f.get("type", "semantic"),
+                float(f.get("importance", 0.75)),
+                f.get("metadata"),
+                f.get("key"),
+            )
         )
-        if isinstance(result, dict):
-            print(f"{result['id']}\t{result['outcome']}")
-        else:
-            print(result)
-    db.close()
+        print(out.strip())
 
 
 def cmd_recall(args: argparse.Namespace) -> None:
-    db = open_db(write=False)
-    # Scoring v2 (v0.7.0) made recall's own observation count toward
-    # the usage saturation term on later queries. For the dogfood
-    # runbook that reads the planner/worker coordination memories
-    # dozens of times a day, that feedback is noise, not signal:
-    # every recall would "vote for" the memories it just surfaced.
-    # Keep tracking off here — the CLI operator still gets exact
-    # scoring, but the recency / usage signals stay driven by real
-    # writes, not by how often we grep our own memory.
-    hits = db.recall_text(
+    # `--no-track`: a read that doesn't count as an access, under a shared
+    # lock, so the Planner and the Reviewers can run it (they never write).
+    # Scoring v2 counts an observed recall toward usage on later queries;
+    # for a runbook that reads the coordination memories dozens of times a
+    # day that's noise, so the dogfood recall never tracks.
+    a = [
+        "recall",
+        str(MNEMO_PATH),
+        "--text",
         args.query,
-        top_k=args.top_k,
-        agent_id=AGENT_ID,
-        memory_types=args.types.split(",") if args.types else None,
-        track_access=False,
-        # DOGFOOD-1: scope by `metadata.area`, and add BM25 keyword matching
-        # for identifiers and exact terms (a path, a version, a name).
-        filter={"metadata": {"area": args.area}} if args.area else None,
-        keywords=args.keywords,
-    )
-    db.close()
+        "--top-k",
+        str(args.top_k),
+        "--no-track",
+        "--format",
+        "json",
+        "--agent",
+        AGENT_ID,
+    ]
+    if args.types:
+        a += ["--type", args.types]
+    # DOGFOOD-1: scope by `metadata.area`, and add BM25 keyword matching
+    # for identifiers and exact terms (a path, a version, a name).
+    if args.area:
+        a += ["--filter", f"area={args.area}"]
+    if args.keywords:
+        a += ["--keywords", args.keywords]
+    out = run_cli(a)
+    hits = []
+    for h in json.loads(out).get("hits", []):
+        m = dict(h["memory"])
+        m["memory_type"] = str(m.get("memory_type", "")).lower()
+        m["score"] = h["score"]
+        m["similarity"] = h["similarity"]
+        hits.append(m)
 
     if args.format == "json":
         print(json.dumps(hits, indent=2))

@@ -83,6 +83,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
   (`{"metadata": {"_mnemo.kind": "turn"}}`, or `--filter _mnemo.kind=turn`),
   since `recall` leaves saved turns out unless asked. Turns are found by
   meaning, so it needs the built-in model.
+- **Python: `Mnemo.recent(n=20)`,** the newest live facts, as the MCP
+  resource `mnemo://recent` lists them (12.2).
+- **The dogfood helper** (`test/scripts/project_memory.py`, 12.2 step 7a):
+  - `recall` and `remember` run the `mnemo` CLI (v0.15 or later), and
+    `recall` passes `--no-track`.
+  - The brain is `.git/mnemo/project.mnemo` once it's there, else
+    `test/project.mnemo`.
+  - `test/.env`'s passphrase reaches the CLI through the key-source chain,
+    and the keychain takes over after the switch.
 - **`mcp install` with no path** now defaults to Claude Code's local
   scope, and to Cursor's project file, which it lists in
   `.git/info/exclude`.
