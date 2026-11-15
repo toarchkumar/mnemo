@@ -2084,6 +2084,21 @@ impl Mnemo {
         Ok(out)
     }
 
+    /// The `n` most recently written live memories, newest first (12.2;
+    /// what the MCP resource `mnemo://recent` lists). Facts only: no thread
+    /// turns, essence items, thread links or onboarding records, and nothing
+    /// superseded or expired. A keyed replacement counts from when it was
+    /// written; an in-place `update` keeps its `created_at`. Not counted as
+    /// an access. Each entry is a dict shaped like `recall`/`get` results.
+    #[pyo3(signature = (n = 20))]
+    fn recent(&mut self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
+        let mut out = Vec::new();
+        for m in self.rd(|db| db.recent(n))? {
+            out.push(memory_to_dict(py, &m)?);
+        }
+        Ok(out)
+    }
+
     /// The project essence for the `about` briefing (12.7d): the markdown
     /// render of the file's project-scope essence at the default budget,
     /// or `None` when there is none. `mnemo about` and MCP `about` append

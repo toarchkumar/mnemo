@@ -1417,6 +1417,25 @@ def test_about_essence():
     print("ok  about_essence (12.7d)")
 
 
+def test_recent():
+    """12.2: recent(n) lists the newest live facts, superseded and essence
+    items left out, and isn't counted as an access."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "recent.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.insert_default_manifest()
+            db.remember("first", "semantic", [1.0, 0.0, 0.0, 0.0])
+            db.remember("second", "semantic", [0.0, 1.0, 0.0, 0.0])
+            db.essence_add("conventions", "not a memory here", project=True)
+            got = [m["content"] for m in db.recent(10)]
+            assert set(got) == {"first", "second"}, got
+            assert len(db.recent(1)) == 1
+            assert all(m["access_count"] == 0 for m in db.recent())
+        finally:
+            db.close()
+    print("ok  recent (12.2)")
+
+
 def test_open_with_key():
     """PERF-1 step 7: raw-key databases."""
     key = mnemo.generate_key()
@@ -1958,6 +1977,7 @@ if __name__ == "__main__":
     test_commit_deltas_text_only_facts_use_one_embed_call()
     test_thread_export_is_ingest_shape_and_round_trips()
     test_about_essence()
+    test_recent()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()
