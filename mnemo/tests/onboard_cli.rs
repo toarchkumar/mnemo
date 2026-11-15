@@ -9,6 +9,7 @@
 //! the way `claude mcp add-json` and `claude mcp remove` do, and logs every
 //! call; nothing here runs the real `claude` or reads a real config.
 
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -32,6 +33,7 @@ fn tool_dir(name: &str) -> PathBuf {
 }
 
 /// A stub `claude`: `mcp add-json`, `mcp remove`, `plugin …`, logged.
+#[cfg(unix)]
 const STUB: &str = r#"#!/usr/bin/env python3
 import sys, json, os
 home = os.environ["HOME"]
@@ -84,6 +86,7 @@ impl Env {
     fn p(&self, rel: &str) -> PathBuf {
         self.dir.path().join(rel)
     }
+    #[cfg(unix)]
     fn root(&self) -> PathBuf {
         std::fs::canonicalize(self.p("repo")).unwrap()
     }
@@ -164,6 +167,7 @@ impl Env {
     fn brain(&self) -> PathBuf {
         self.p("repo/.git/mnemo/project.mnemo")
     }
+    #[cfg(unix)]
     fn claude_json(&self) -> Value {
         std::fs::read_to_string(self.p("home/.claude.json"))
             .ok()
