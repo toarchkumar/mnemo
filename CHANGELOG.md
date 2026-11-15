@@ -61,8 +61,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
   - In a project scope (the default inside a git work tree) it writes
     `mnemo` from the PATH and a path relative to the project root, never an
     absolute path or a command.
-  - It shows a diff with `env` values masked, asks at a terminal (or
-    `--yes`), and `--print` writes nothing.
+  - It shows only its own entry (a diff against the one it replaces, with
+    `env` and `headers` values masked) and a count of the other servers
+    left unchanged, asks at a terminal (or `--yes`), and `--print` writes
+    nothing.
   - Other servers are kept, the write is atomic, and a config it can't
     parse is left alone.
   - Claude Code goes through `claude mcp add-json` when `claude` is on the

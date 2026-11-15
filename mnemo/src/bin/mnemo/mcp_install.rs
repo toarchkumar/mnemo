@@ -437,14 +437,63 @@ fn diff(a: &str, b: &str) -> String {
     out
 }
 
-/// The masked, pretty form of a config's text, for the diff.
-fn shown(text: &str) -> String {
-    if text.trim().is_empty() {
-        return String::new();
+/// For display, `v` masked further than [`masked`]: a value after a
+/// `--passphrase` in `args`, and the user-info and query of a `url`. Used on
+/// the entry being replaced, which an older config may have written by hand.
+fn masked_entry(v: &Value) -> Value {
+    let mut v = masked(v);
+    if let Some(args) = v.get_mut("args").and_then(Value::as_array_mut) {
+        let mut after_flag = false;
+        for a in args.iter_mut() {
+            if after_flag {
+                *a = json!("••••••");
+            }
+            after_flag = a.as_str() == Some("--passphrase");
+        }
     }
-    serde_json::from_str::<Value>(text)
-        .map(|v| serde_json::to_string_pretty(&masked(&v)).unwrap())
-        .unwrap_or_default()
+    if let Some(url) = v.get_mut("url") {
+        if let Some(u) = url.as_str() {
+            let mut out = u.to_string();
+            if let Some(q) = out.find('?') {
+                out.truncate(q);
+                out.push_str("?••••••");
+            }
+            if let Some(scheme) = out.find("://") {
+                let rest = &out[scheme + 3..];
+                if let Some(at) = rest.find('@').filter(|&at| !rest[..at].contains('/')) {
+                    out = format!("{}••••••@{}", &out[..scheme + 3], &rest[at + 1..]);
+                }
+            }
+            *url = json!(out);
+        }
+    }
+    v
+}
+
+/// What `mcp install` shows (RB-010.2 Part B): only its own entry, as a diff
+/// against the entry it replaces, and how many other servers the file keeps
+/// unchanged. Nothing of another server, or of the rest of the file, is
+/// printed.
+fn shown_change(old: &str, name: &str, previous: &Option<Value>, entry: &Value) -> String {
+    let named = |v: &Value| {
+        let mut m = serde_json::Map::new();
+        m.insert(name.to_string(), v.clone());
+        serde_json::to_string_pretty(&Value::Object(m)).unwrap()
+    };
+    let before = previous
+        .as_ref()
+        .map(|p| named(&masked_entry(p)))
+        .unwrap_or_default();
+    let mut out = diff(&before, &named(&masked_entry(entry)));
+    let others = serde_json::from_str::<Value>(old)
+        .ok()
+        .and_then(|v| v.get("mcpServers").and_then(Value::as_object).cloned())
+        .map_or(0, |m| m.keys().filter(|k| k.as_str() != name).count());
+    out.push_str(&format!(
+        "({others} other server{} in the file left unchanged)\n",
+        if others == 1 { "" } else { "s" }
+    ));
+    out
 }
 
 /// Ask `question` at the terminal; `true` for yes.
@@ -600,7 +649,7 @@ pub fn run(o: Install) -> Result<(), String> {
         let (new, previous) =
             merged(&old, &o.name, &p.entry).map_err(|e| format!("{}: {e}", path.display()))?;
         println!("{client} ({} scope): {}", p.scope.word(), path.display());
-        print!("{}", diff(&shown(&old), &shown(&new)));
+        print!("{}", shown_change(&old, &o.name, &previous, &p.entry));
         if o.print {
             return Ok(());
         }

@@ -105,8 +105,10 @@ mnemo mcp install --client claude-desktop --print me.mnemo
     get the shell's PATH. That includes the path of the `mnemo` that ran
     `mcp install`, so after reinstalling `mnemo` somewhere else (a new
     virtualenv, say) run `mcp install` again.
-- **Before it writes,** it shows a diff with every `env` and `headers` value
-  masked, and asks at a terminal. `--yes` writes without asking, and
+- **Before it writes,** it shows only its own entry, as a diff against the
+  `mnemo` entry it replaces (with `env` and `headers` values masked), and
+  how many other servers it leaves unchanged; nothing else of the file is
+  printed. It asks at a terminal. `--yes` writes without asking, and
   `--print` shows it and writes nothing.
 - **How it writes:** other servers and keys are kept as they were, the
   write is atomic and keeps the file's mode, and a config it can't parse is
