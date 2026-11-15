@@ -100,7 +100,24 @@ pub fn common_dir(start: &Path) -> Result<PathBuf, String> {
     // Older git prints it relative to where it ran (`.git`, `../../.git`).
     let dir = start.join(line);
     std::fs::canonicalize(&dir)
+        .map(plain)
         .map_err(|e| format!("no project brain here: {}: {e}", dir.display()))
+}
+
+/// `p` without Windows' verbatim prefix (`\\?\C:\…` from `canonicalize`),
+/// which a client may not run a command from, and a person doesn't expect
+/// to read. A path the prefix is needed for (over 260 characters) keeps it.
+pub fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.len() < 260 && rest.as_bytes().get(1) == Some(&b':') => {
+            PathBuf::from(rest)
+        }
+        _ => p,
+    }
 }
 
 /// Create the brain's directory, mode 0700 on Unix, if it isn't there. A
@@ -221,7 +238,9 @@ pub fn toplevel(start: &Path) -> Result<PathBuf, String> {
         ));
     }
     let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string());
-    std::fs::canonicalize(&p).map_err(|e| format!("{}: {e}", p.display()))
+    std::fs::canonicalize(&p)
+        .map(plain)
+        .map_err(|e| format!("{}: {e}", p.display()))
 }
 
 /// Whether git tracks `file` (then an exclude line has no effect).
@@ -240,6 +259,22 @@ pub fn tracked(root: &Path, file: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_drops_the_verbatim_prefix() {
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\C:\x\mnemo.exe")),
+            PathBuf::from(r"C:\x\mnemo.exe")
+        );
+        assert_eq!(
+            plain(PathBuf::from(r"\\?\UNC\srv\share\a")),
+            PathBuf::from(r"\\srv\share\a")
+        );
+        assert_eq!(
+            plain(PathBuf::from("/usr/bin/mnemo")),
+            PathBuf::from("/usr/bin/mnemo")
+        );
+    }
 
     #[test]
     fn the_exclude_block_is_added_once_and_removed_whole() {

@@ -127,10 +127,16 @@ impl Item {
     }
 }
 
+/// `p` from the project's root, with `/` on every OS.
 fn rel(ctx: &Ctx, p: &Path) -> String {
-    p.strip_prefix(&ctx.root)
-        .map(|r| r.display().to_string())
-        .unwrap_or_else(|_| p.display().to_string())
+    match p.strip_prefix(&ctx.root) {
+        Ok(r) => r
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Err(_) => p.display().to_string(),
+    }
 }
 
 /// A command word, quoted when it has a space.
@@ -959,6 +965,7 @@ fn context(o: &Opts) -> Result<Ctx, String> {
     let brain = common.join(project::DIR).join(project::FILE);
     let exe = std::env::current_exe()
         .and_then(std::fs::canonicalize)
+        .map(project::plain)
         .map_err(|e| format!("can't find this mnemo's path: {e}"))?
         .to_string_lossy()
         .into_owned();
