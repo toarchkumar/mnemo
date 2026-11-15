@@ -343,9 +343,13 @@ fn outside_git_or_before_init_the_error_says_what_to_do() {
         ],
     );
     assert!(e.p("plain/here.mnemo").is_file());
-    // Commands with a positional argument after the brain keep it required.
+    // `get <ID>` looks for the project brain (v0.16.1)...
     let err = e.fails(&e.p("main"), &["get", "01M7ESWBTNXMB0KEM5XF95YGX3"]);
-    assert!(err.contains("<PATH>") || err.contains("required"), "{err}");
+    assert!(err.contains("no project brain at"), "{err}");
+    // ...and the other commands with a positional argument after the brain
+    // keep it required.
+    let err = e.fails(&e.p("main"), &["update", "01M7ESWBTNXMB0KEM5XF95YGX3"]);
+    assert!(err.contains("<ID>") || err.contains("required"), "{err}");
 }
 
 #[cfg(unix)]
@@ -601,4 +605,50 @@ fn mcp_install_with_no_path_defaults_to_this_users_scope() {
     assert!(e.p("main/.cursor/mcp.json").is_file());
     let ex = std::fs::read_to_string(e.p("main/.git/info/exclude")).unwrap();
     assert!(ex.contains("/.cursor/mcp.json"), "{ex}");
+}
+
+/// v0.16.1: `get <ID>` finds the project brain (and `get <PATH> <ID>`
+/// still works), printing the whole content; `search` and `snapshots`
+/// take no path either.
+#[test]
+fn get_search_and_snapshots_take_no_path() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let long = format!("a long memory: {}", "word ".repeat(40));
+    e.remember(&main, &[], &long);
+    let listed: Vec<Value> = e
+        .ok(&main, &["list", "--format", "jsonl"])
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let id = listed
+        .iter()
+        .find(|v| v["content"].as_str() == Some(long.as_str()))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // One argument: the id, in the project brain; the table holds it all.
+    let out = e.ok(&e.p("main/sub"), &["get", &id]);
+    assert!(out.contains(long.trim_end()), "{out}");
+    // Two: the path, then the id, as before.
+    let out = e.ok(
+        &main,
+        &["get", e.brain().to_str().unwrap(), &id, "--format", "json"],
+    );
+    assert!(out.contains(&id), "{out}");
+    // One argument that isn't an id says so.
+    let err = e.fails(&main, &["get", e.brain().to_str().unwrap()]);
+    assert!(err.contains("`get` takes `[PATH] <ID>`"), "{err}");
+    // `search` and `snapshots`, from a subdirectory.
+    let out = e.ok(
+        &e.p("main/sub"),
+        &["search", "--query", "1,1,0.5,0.25", "--top-k", "1"],
+    );
+    assert!(
+        out.contains(&id[..10]) || out.contains("a long memory"),
+        "{out}"
+    );
+    e.ok(&e.p("main/sub"), &["snapshots"]);
 }

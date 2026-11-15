@@ -8,6 +8,49 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-11-15
+
+A patch before this project moves its own memory onto v0.16. The mobile
+packages aren't published in this release: they stay at 0.16.0, which has
+the same mobile code.
+
+### Fixed
+
+- **Turns of nothing but markers crowded turn recall.** A transcript turn
+  whose content is only the markers kept for blocks that aren't stored
+  (`[thinking]`, `[tool_use name=…]`, `[tool_result ok, N bytes]`,
+  `[image]`) matched any query weakly, so a turn-filtered `recall` (for
+  example `--filter _mnemo.kind=turn`) returned mostly those. Now:
+  - such a turn is still saved, so `thread export` keeps the whole flow
+    in order, but it isn't embedded (it gets the sentinel vector and
+    `_mnemo.markers_only: true`), and `recall` never returns it;
+  - a turn with any text beside a marker stays searchable, as before;
+  - **turns saved by v0.16.0 need nothing done:** `recall` leaves out a
+    marker-only turn by its content, flag or not;
+  - a save whose new turns are all markers (a session that ended on tool
+    calls) still writes them. The library has
+    `Mnemo::ingest_thread_new_turns`, which counts the turns an ingest
+    would add, marker-only ones included.
+- **`mnemo onboard`'s human steps came before the guide,** so an agent
+  that read only the end of its output missed them (the recovery-code
+  backup above all). The guide now comes first, and the output ends with
+  the `human step:` lines. Without a terminal, a last line asks the agent
+  to pass them on to its user word for word.
+
+### Changed
+
+- **`mnemo get <ID>`** uses the project brain in a git repository, like
+  `recall`; `get <PATH> <ID>` still names a file. With one argument it must
+  be a memory id. A single `get` prints the whole content in its table
+  (`list` and `recall` still cut it). `search` and `snapshots` take no path
+  either. The commands that rewrite or replace a file (`compact`,
+  `reembed`, `restore`, `import`, `index`), and `update`, `thread start` and
+  `essence update|resolve|remove`, still need the path.
+- **The install scripts name any other `mnemo` on the PATH** after the
+  install: a shell may still run an older one from its command hash
+  (`hash -r`, or `rehash` in zsh, or a new terminal), and one earlier on
+  the PATH would run instead.
+
 ## [0.16.0] — 2026-11-15
 
 ### Added
@@ -4256,7 +4299,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/toarchkumar/mnemo/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/toarchkumar/mnemo/compare/v0.13.2...v0.14.0

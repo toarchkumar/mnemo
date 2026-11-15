@@ -950,8 +950,8 @@ cargo run --bin mnemo -- <command>
 | `list`    | Browse live memories (table / json / jsonl, filters) |
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
-| `get`     | Fetch one memory by its ULID                         |
-| `search`  | Exact nearest-neighbour search (similarity only)     |
+| `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
+| `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1) |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
@@ -959,9 +959,9 @@ cargo run --bin mnemo -- <command>
 | `reembed` | Embed every live memory again with a new embedder (`--embed-cmd`, `--embed-name`, `--embed-query`, `--embed-dims`; without `--embed-cmd`, the built-in) and record its identity: a compaction with new vectors, so an interrupted run leaves the file as it was (v0.15) |
 | `embedder install` | Fetch the built-in embedder's model (91.0 MB) into the cache directory, checking each file's SHA-256; prints the size first (v0.15) |
 | `embedder status` | The built-in embedder's model, identity and cache, and whether it's installed (v0.15) |
-| `snapshots` | List the restorable snapshots (one per flush)      |
+| `snapshots` | List the restorable snapshots (one per flush); no path needed in a git repository (v0.16.1) |
 | `restore` | Roll the database back to a past snapshot            |
-| `thread ingest` | Save a transcript into a thread's archive (idempotent per turn). `--tool-results omit` keeps only `[tool_result ok|error, N bytes]` markers, and `--redact` replaces known secret shapes (private keys, cloud and API tokens, JWTs, recovery codes, secret-looking `NAME=value`s) with `[redacted: <kind>]` (v0.16) |
+| `thread ingest` | Save a transcript into a thread's archive (idempotent per turn). `--tool-results omit` keeps only `[tool_result ok|error, N bytes]` markers, and `--redact` replaces known secret shapes (private keys, cloud and API tokens, JWTs, recovery codes, secret-looking `NAME=value`s) with `[redacted: <kind>]` (v0.16). A turn of nothing but markers (`[thinking]`, a tool call) is kept, but not embedded or recalled (v0.16.1) |
 | `onboard` | Set up the project's memory for Claude Code and Cursor: the brain (a generated key in the keychain), the model, the MCP server, the hooks and a skill or rule. Shows the plan and asks once (`--yes`, `--print`); safe to re-run; `--undo` removes what it wrote. `--guide` prints the guide (v0.16) |
 | `hook`    | The hooks `onboard` installs for Claude Code and Cursor (v0.16): `session-start` adds the guide's card, the project's notes and essence, and a short recall to the context (8,000 bytes by default, `--budget` up to 9,000); `pre-compact` and `session-end` save the transcript without tool output and with secrets redacted. Always exits 0, never prompts or downloads |
 | `demo`    | Self-contained end-to-end demonstration              |

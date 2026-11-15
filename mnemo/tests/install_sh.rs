@@ -70,9 +70,22 @@ impl Env {
         self.dir.path().join(rel)
     }
     fn run(&self, base: &str, version: &str, path_has_bin: bool) -> Output {
+        self.run_with(base, version, path_has_bin, None)
+    }
+    /// [`Env::run`], with `extra` first on the PATH.
+    fn run_with(
+        &self,
+        base: &str,
+        version: &str,
+        path_has_bin: bool,
+        extra: Option<&Path>,
+    ) -> Output {
         let mut path = String::from("/usr/bin:/bin:/usr/sbin:/sbin");
         if path_has_bin {
             path = format!("{}:{path}", self.p("home/.local/bin").display());
+        }
+        if let Some(x) = extra {
+            path = format!("{}:{path}", x.display());
         }
         Command::new("sh")
             .arg(script())
@@ -195,4 +208,32 @@ fn a_binary_of_another_version_installs_nothing() {
         .map(|d| d.unwrap().file_name())
         .collect();
     assert!(left.is_empty(), "the staged copy is removed: {left:?}");
+}
+
+/// v0.16.1: another `mnemo` on the PATH (an older install a shell may
+/// still run from its command hash, or one that comes first) gets a line
+/// naming it, with what to do; with none, there's no such line.
+#[test]
+fn another_mnemo_on_the_path_is_named() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new(false);
+    let old = e.p("old-bin");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("mnemo"), "#!/bin/sh\necho mnemo 0.12.3\n").unwrap();
+    std::fs::set_permissions(old.join("mnemo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let base = e.p("base");
+    let o = e.run_with(base.to_str().unwrap(), VERSION, true, Some(&old));
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(
+        t.contains(&format!(
+            "another mnemo is on your PATH: {}/mnemo. If `mnemo --version` doesn't say mnemo {VERSION}, run `hash -r` (zsh: `rehash`)",
+            old.display()
+        )),
+        "{t}"
+    );
+    // The installed one itself isn't named.
+    assert_eq!(t.matches("another mnemo").count(), 1, "{t}");
+    let o = e.run(base.to_str().unwrap(), VERSION, true);
+    assert!(!text(&o).contains("another mnemo"), "{}", text(&o));
 }

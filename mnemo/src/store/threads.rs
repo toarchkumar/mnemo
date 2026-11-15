@@ -13,6 +13,9 @@ pub(super) struct PendingTurn {
     /// tool-result turn. Applied to the single chunk the truncation
     /// yielded.
     pub(super) truncation: Option<(String, u64)>,
+    /// v0.16.1: only markers ([`crate::transcript::is_marker_only`]): kept,
+    /// with the sentinel vector, not embedded.
+    pub(super) markers_only: bool,
 }
 
 /// Output of `Mnemo::plan_ingest`: the turns to write, the first free
@@ -25,16 +28,22 @@ pub(super) struct IngestPlan {
 }
 
 impl IngestPlan {
-    /// Every text to embed, in write order (turns, then parts).
+    /// Every text to embed, in write order (turns, then parts). A
+    /// marker-only turn has none.
     pub(super) fn texts(&self) -> Vec<&str> {
         self.pending
             .iter()
+            .filter(|p| !p.markers_only)
             .flat_map(|p| p.parts.iter().map(String::as_str))
             .collect()
     }
 
     pub(super) fn text_count(&self) -> usize {
-        self.pending.iter().map(|p| p.parts.len()).sum()
+        self.pending
+            .iter()
+            .filter(|p| !p.markers_only)
+            .map(|p| p.parts.len())
+            .sum()
     }
 }
 
@@ -114,7 +123,9 @@ impl Mnemo {
     /// **Embedding.** An embedder must be registered
     /// ([`Mnemo::set_embedder`]); the content strings (one per
     /// resulting chunk / truncated record) are batched into a single
-    /// `embed()` call.
+    /// `embed()` call. A turn of nothing but transcript markers
+    /// ([`MNEMO_META_MARKERS_ONLY`], v0.16.1) isn't embedded: it's kept
+    /// with the sentinel vector, and `recall` never returns it.
     ///
     /// Call `self.flush()` after a successful ingest to persist.
     pub fn ingest_thread(&mut self, thread_id: &str, turns: &[ThreadTurn]) -> Result<IngestReport> {
@@ -127,17 +138,32 @@ impl Mnemo {
         }
         // Batched embed: one round trip to the embedder for the whole
         // ingest, whatever the turn count.
-        let vectors = {
+        let texts = plan.texts();
+        let vectors = if texts.is_empty() {
+            Vec::new()
+        } else {
             let embedder = self.embedder.as_ref().ok_or_else(|| {
                 MnemoError::Invalid(
                     "ingest_thread: no embedder registered on this handle; call set_embedder first"
                         .into(),
                 )
             })?;
-            embedder.embed(&plan.texts())?
+            embedder.embed(&texts)?
         };
         self.check_vectors("ingest_thread", &vectors, plan.text_count())?;
         self.apply_ingest(thread_id, plan, vectors, None)
+    }
+
+    /// v0.16.1: how many of `turns` aren't in `thread_id` yet, and would be
+    /// written by an ingest. Unlike [`Mnemo::ingest_thread_texts`], it
+    /// counts a marker-only turn, which has no text to embed. Writes
+    /// nothing.
+    pub fn ingest_thread_new_turns(
+        &mut self,
+        thread_id: &str,
+        turns: &[ThreadTurn],
+    ) -> Result<usize> {
+        Ok(self.plan_ingest(thread_id, turns)?.pending.len())
     }
 
     /// MOBILE-1a: the texts [`Mnemo::ingest_thread`] would embed for
@@ -304,6 +330,7 @@ impl Mnemo {
                 turn_id: t.turn_id.clone(),
                 role: t.role.clone(),
                 created_at: t.timestamp.unwrap_or(now),
+                markers_only: crate::transcript::is_marker_only(&t.content),
                 parts,
                 truncation,
             });
@@ -334,13 +361,18 @@ impl Mnemo {
         // gets a single `_mnemo.seq` slot, so `_mnemo.part`
         // disambiguates chunks of the same turn.
         let mut vectors = vectors.into_iter();
+        let sentinel = self.sentinel_vector();
         for p in &pending {
             let this_seq = next_seq;
             next_seq += 1;
             for (part_idx, part_text) in p.parts.iter().enumerate() {
-                let vec = vectors.next().ok_or_else(|| {
-                    MnemoError::Invalid("ingest_thread: ran out of vectors".into())
-                })?;
+                let vec = if p.markers_only {
+                    sentinel.clone()
+                } else {
+                    vectors.next().ok_or_else(|| {
+                        MnemoError::Invalid("ingest_thread: ran out of vectors".into())
+                    })?
+                };
                 let mut m =
                     Memory::new(part_text.clone(), MemoryType::Episodic, vec).with_importance(0.5);
                 if let Some(t) = ttl {
@@ -367,6 +399,10 @@ impl Mnemo {
                         MNEMO_META_PART.into(),
                         Value::Number((part_idx as u64).into()),
                     );
+                }
+                if p.markers_only {
+                    m.metadata
+                        .insert(MNEMO_META_MARKERS_ONLY.into(), Value::Bool(true));
                 }
                 if let Some((sha, len)) = &p.truncation {
                     m.metadata

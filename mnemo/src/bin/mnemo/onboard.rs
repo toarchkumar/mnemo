@@ -1274,15 +1274,23 @@ pub fn run(o: Opts) -> Result<(), String> {
         }
         apply(&ctx, &items, &mut human)?
     };
-    summary(&ctx, &o, &done, &human);
+    // The guide first, then the summary, so the output ends with the human
+    // steps: an agent that reads only the tail still sees them (v0.16.1).
     if !o.undo {
-        println!();
         print!("{}", mnemo_engine::guide::markdown());
+    }
+    let steps = summary(&ctx, &o, &done, &human);
+    if steps > 0 && !interactive() {
+        println!(
+            "mnemo: the human steps above are for the person you work for: pass them on word for \
+             word"
+        );
     }
     Ok(())
 }
 
-fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) {
+/// The summary, with the human steps last. Returns how many there were.
+fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) -> usize {
     println!();
     for d in done {
         println!("{d}");
@@ -1327,6 +1335,7 @@ fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) {
     for s in &steps {
         println!("human step: {s}");
     }
+    steps.len()
 }
 
 #[cfg(test)]

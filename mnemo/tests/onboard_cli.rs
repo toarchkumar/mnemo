@@ -422,6 +422,41 @@ fn no_recovery_code_reaches_the_output_without_a_terminal() {
         all.contains("human step: back up the recovery code"),
         "{all}"
     );
+    // v0.16.1: the output ends with the human steps (an agent that reads
+    // only the tail sees them), then the line asking it to pass them on;
+    // the guide comes before them.
+    let stdout = out(&o);
+    let lines: Vec<&str> = stdout
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let (last, steps) = lines.split_last().unwrap();
+    assert!(
+        last.starts_with("mnemo: the human steps above are for the person"),
+        "{last}"
+    );
+    let tail: Vec<&str> = steps
+        .iter()
+        .rev()
+        .take_while(|l| l.starts_with("human step: "))
+        .copied()
+        .collect();
+    assert!(tail.len() >= 2, "{lines:?}");
+    assert!(
+        tail.iter()
+            .any(|l| l.starts_with("human step: back up the recovery code")),
+        "{tail:?}"
+    );
+    let guide_at = lines
+        .iter()
+        .position(|l| *l == "# The MNemo guide")
+        .unwrap();
+    let steps_at = lines
+        .iter()
+        .position(|l| l.starts_with("human step: "))
+        .unwrap();
+    assert!(guide_at < steps_at, "the guide comes first");
     // The keychain entry's delete line names the service and the account.
     assert!(all.contains("io.github.toarchkumar.mnemo.brain"), "{all}");
 }

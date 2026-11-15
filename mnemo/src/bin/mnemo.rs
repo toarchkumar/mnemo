@@ -55,8 +55,11 @@ struct Cli {
 
 /// 12.2 step 1: the brain argument of the commands that may leave it out
 /// (an empty string when it was left out), or `None` for the others.
-/// Commands with a positional argument after the brain (`get`,
-/// `thread start`, `essence update|resolve|remove`) keep it required.
+/// `get` takes `[PATH] <ID>` ([`shift_get_args`] moves a lone ID); the
+/// other commands with a positional argument after the brain (`update`,
+/// `thread start`, `essence update|resolve|remove`) keep it required, and
+/// so do the ones that rewrite or replace the file (`compact`, `reembed`,
+/// `restore`, `import`, `index`).
 fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
     match cmd {
         Command::Init { path, .. }
@@ -71,6 +74,9 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Export { path, .. }
         | Command::Inspect { path, .. }
         | Command::Recall { path, .. }
+        | Command::Get { path, .. }
+        | Command::Search { path, .. }
+        | Command::Snapshots { path, .. }
         | Command::History { path, .. }
         | Command::Serve { path, .. }
         | Command::Mcp {
@@ -90,6 +96,24 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         } => Some(path),
         _ => None,
     }
+}
+
+/// v0.16.1: `get <ID>` is `get <project brain> <ID>`: a lone argument
+/// moves to the ID, and must be a ULID (so a path given without its ID
+/// says so, rather than being read as an id).
+fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
+    if let Command::Get { path, id, .. } = cmd {
+        if id.is_none() {
+            if parse_ulid(path).is_err() {
+                return Err(format!(
+                    "`get` takes `[PATH] <ID>`: with one argument it's the memory's id, and \
+                     {path:?} isn't one"
+                ));
+            }
+            *id = Some(std::mem::take(path));
+        }
+    }
+    Ok(())
 }
 
 /// Fill in a brain argument that was left out with the project brain.
@@ -463,7 +487,9 @@ enum Command {
     /// JSON array of floats, comma-separated floats, or whitespace /
     /// newline-separated floats — the parser auto-detects.
     Search {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.16.1).
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Query vector as comma-separated floats, e.g. `0.1,0.2,0.9`.
         /// Mutually exclusive with `--query-file`.
@@ -509,10 +535,15 @@ enum Command {
     },
     /// Fetch a single memory by its ULID.
     Get {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file, then the memory's ULID. With one
+        /// argument it's the ULID, and the brain is this project's
+        /// (`<git-common-dir>/mnemo/project.mnemo`, v0.16.1), as for
+        /// `recall`.
+        #[arg(value_name = "PATH")]
         path: String,
-        /// ULID of the memory to fetch.
-        id: String,
+        /// ULID of the memory to fetch (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
@@ -859,7 +890,9 @@ enum Command {
     },
     /// List the restorable snapshots (one per committed flush).
     Snapshots {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.16.1).
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         #[arg(long)]
         passphrase: Option<String>,
@@ -2103,7 +2136,15 @@ fn memory_to_json(m: &Memory, include_vector: bool) -> serde_json::Value {
 }
 
 /// Print a single memory in the requested format.
-fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector: bool) {
+/// `whole` prints a table row's content in full (one `get`); lists cut it
+/// at 80 characters.
+fn print_memory(
+    m: &Memory,
+    format: OutputFormat,
+    verbose: bool,
+    include_vector: bool,
+    whole: bool,
+) {
     match format {
         OutputFormat::Table => {
             let id = m.id.to_string();
@@ -2145,7 +2186,11 @@ fn print_memory(m: &Memory, format: OutputFormat, verbose: bool, include_vector:
                     m.memory_type.as_str(),
                     m.agent_id,
                     imp,
-                    truncate(&m.content, 80),
+                    if whole {
+                        m.content.clone()
+                    } else {
+                        truncate(&m.content, 80)
+                    },
                 );
             }
         }
@@ -2176,7 +2221,7 @@ fn print_memories(items: &[Memory], total: usize, format: OutputFormat, include_
             }
             println!("showing {} of {} memories", items.len(), total);
             for m in items {
-                print_memory(m, OutputFormat::Table, false, false);
+                print_memory(m, OutputFormat::Table, false, false, false);
             }
         }
         OutputFormat::Json => {
@@ -2276,6 +2321,7 @@ fn run() -> std::result::Result<(), String> {
     if let Some(dir) = &cli.dir {
         std::env::set_current_dir(dir).map_err(|e| format!("-C {}: {e}", dir.display()))?;
     }
+    shift_get_args(&mut cli.command)?;
     let project_brain = resolve_brain_arg(&mut cli.command, cli.dir.is_some())?;
     let moved = cli.dir.is_some();
     match cli.command {
@@ -3161,10 +3207,11 @@ fn run() -> std::result::Result<(), String> {
         } => {
             // `get` is a plain catalog lookup + record read — no writes.
             let pp = secret_for(&path, &pp, &None)?;
-            let ulid = parse_ulid(&id)?;
+            let ulid = parse_ulid(id.as_deref().unwrap_or_default())?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             let m = db.get(&ulid).map_err(fmt)?;
-            print_memory(&m, format, verbose, vector);
+            // One memory: its whole content, even in the table.
+            print_memory(&m, format, verbose, vector, true);
         }
         Command::List {
             path,
