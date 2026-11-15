@@ -14,8 +14,9 @@ copy the file and the memory comes with it.
 - **Memory that ranks like an agent thinks.** Four memory types (episodic,
   semantic, procedural, working), recalled on similarity, recency, importance
   and use, with per-agent scoping and expiry.
-- **Text in, text out.** Hand MNemo plain text; it calls your embedding model
-  and checks it's the model the file was built with.
+- **Text in, text out.** Hand MNemo plain text. The CLI and the Python
+  package embed it themselves with a small built-in model (v0.15), or call
+  your own model, and check it's the one the file was built with.
 - **A result cache** for LLM responses, tool outputs and API calls: exact keys
   or near-identical prompts, with namespaces, expiry and size limits.
 - **An MCP server built in**, so Claude Desktop, Cursor or any MCP client can
@@ -24,6 +25,8 @@ copy the file and the memory comes with it.
   go through a write-ahead log; recent commits are kept as restorable
   snapshots; OS file locks allow one writer and many readers, and shared
   mode (v0.14) lets several processes and agents use one file in turn.
+  A new file's key is generated and kept in the OS keychain (v0.15), so
+  there's no passphrase to put in a config file.
 
 Site: **https://toarchkumar.github.io/mnemo/**
 
@@ -32,19 +35,25 @@ Site: **https://toarchkumar.github.io/mnemo/**
 ```sh
 pip install mnemo-engine          # Python (import mnemo_engine)
 cargo add mnemo-engine            # Rust library (use mnemo_engine::...)
-cargo install mnemo-engine        # the `mnemo` CLI and MCP server
+cargo install mnemo-engine --features keychain,embed-candle   # the `mnemo` CLI and MCP server
 ```
 
-iOS and Android (from v0.12.0; current 0.14.0):
+`cargo install` without those two features builds a CLI with no OS keychain
+and no built-in embedder (the prebuilt binaries and the PyPI wheels have
+both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
+Windows (x86_64); elsewhere, pip builds from source, without the keychain
+and the built-in embedder.
+
+iOS and Android (from v0.12.0; current 0.15.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.14.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.15.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.14.0")
+implementation("io.github.toarchkumar:mnemo-android:0.15.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -59,59 +68,117 @@ If you build from crates.io on ARM yourself, see
 
 ## Quick start
 
-Python, with any embedding model:
+CLI. `init` makes a key and keeps it in your OS keychain, and the built-in
+embedder fetches its model (91 MB) once, on first use:
+
+```sh
+mnemo init agent.mnemo               # a generated key, kept in the keychain
+mnemo remember agent.mnemo --text "the user prefers dark mode"
+mnemo recall agent.mnemo --text "which theme does the user like?"
+```
+
+`mnemo embedder install` fetches the model ahead of time. To use another
+model, pass `--embed-cmd` and `--embed-name` (a reference script is in
+[`mnemo/examples/embedder_server.py`](mnemo/examples/embedder_server.py)).
+`mnemo recovery-code agent.mnemo` shows the code that opens the file on
+another machine (`mnemo unlock` there).
+
+Python:
 
 ```python
 import mnemo_engine
-from sentence_transformers import SentenceTransformer
 
-MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-model = SentenceTransformer(MODEL)
-embed = lambda texts: model.encode(texts, normalize_embeddings=True).tolist()
-
-with mnemo_engine.open("agent.mnemo", "a long passphrase", dimensions=384) as db:
-    db.set_embedder(embed, name=MODEL, dimensions=384)
+with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
+    db.use_builtin_embedder()
     db.remember_text("the user prefers dark mode", "semantic", importance=0.8)
     for hit in db.recall_text("which theme does the user like?", top_k=5):
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.11.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.15.0", "semantic", key="current-release")
 ```
 
-CLI, with any program that turns text into vectors (a reference script is in
-[`mnemo/examples/embedder_server.py`](mnemo/examples/embedder_server.py)):
+To create a file from Python, pass a passphrase and the width:
+`mnemo_engine.open("agent.mnemo", "a long passphrase", dimensions=384)`. For
+another model, `db.set_embedder(fn, name=..., dimensions=...)`.
+
+MCP, for Claude Code, Cursor or Claude Desktop:
 
 ```sh
-export MNEMO_PASSPHRASE='a long passphrase'
-mnemo init agent.mnemo --dimensions 384
-mnemo remember agent.mnemo --text "the user prefers dark mode" \
-  --embed-cmd "python3 embedder_server.py" --embed-name sentence-transformers/all-MiniLM-L6-v2
-mnemo recall agent.mnemo --text "which theme does the user like?" \
-  --embed-cmd "python3 embedder_server.py" --embed-name sentence-transformers/all-MiniLM-L6-v2
+mnemo embedder install                              # so the first start doesn't wait for the download
+mnemo mcp install --client claude-desktop agent.mnemo
 ```
 
-MCP (for example, Claude Desktop's `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "mnemo": {
-      "command": "mnemo",
-      "args": [
-        "serve", "--mcp", "/absolute/path/to/agent.mnemo",
-        "--embed-cmd", "python3 /absolute/path/to/embedder_server.py",
-        "--embed-name", "sentence-transformers/all-MiniLM-L6-v2"
-      ],
-      "env": { "MNEMO_PASSPHRASE": "your-passphrase-here" }
-    }
-  }
-}
-```
+It adds `mnemo serve --mcp --shared <file>` to the client's config, shows
+the change first, and never writes a secret: the server finds the key in
+the keychain.
 
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.15.0: no setup
+
+- **Keys you don't have to manage.** `mnemo init` generates a random key
+  and keeps it in the OS keychain (the macOS login keychain, Windows
+  Credential Manager, or Secret Service on Linux), so a brain opens with
+  no passphrase and nothing secret goes in a config file.
+  - A **recovery code** (`MN1-` and 13 groups of five) opens the file
+    anywhere: `mnemo recovery-code <file>` shows it, only to a person at a
+    terminal, and `mnemo unlock <file>` on another machine keeps it there.
+  - `rekey --new-key` moves a file to a new generated key. `MNEMO_KEY`,
+    `MNEMO_KEY_FILE` and `MNEMO_KEY_COMMAND` give the key in CI and
+    containers. Passphrases (`--ask-passphrase`, `MNEMO_PASSPHRASE`) work
+    as before.
+  - Python's `mnemo_engine.open(path)` and the MCP server find the key the
+    same way. The server logs where it came from, never the key.
+  - **What the keychain protects:** it keeps the key out of config files,
+    dotfile repositories, backups, screen shares, shell history and other
+    users' reach. It doesn't keep it from programs running as you.
+- **A built-in embedder.** The CLI, the MCP server and the Python wheels
+  embed text themselves with snowflake-arctic-embed-xs (384 dimensions,
+  Apache-2.0) in pure Rust on the CPU. Its model (91 MB) is fetched once,
+  and each file's SHA-256 is checked before every load. Recall by text with
+  it also matches the exact identifiers in a question (`snapshot_list`,
+  `store.rs`). `--embed-cmd` and `set_embedder` still use any model.
+- **`mnemo mcp install`** adds the brain's MCP server to Claude Code,
+  Cursor or Claude Desktop, in shared mode, without a secret.
+- **Better recall by text.** A recall by text also matches the text by
+  keyword (hybrid, by default), and the keyword index finds the parts of
+  names: `nosync` finds `mnemo.nosync`, `bytes` finds `max_bytes`. An
+  embedder can embed queries differently from documents
+  (`--embed-query`). `mnemo reembed` moves a file to a new model.
+- **Replace a fact you saved without a key:** `remember --key K
+  --supersedes <id>` (Python `supersedes=`, MCP `supersedes`) makes the
+  old memory the key's first version, so it leaves recall and stays in
+  history.
+- **Shared mode no longer locks out a writer.** A writer that has waited
+  500 ms gets the next turn ahead of new readers. Against 16 busy readers
+  every save got in, where v0.14 could fail one with `Locked`.
+- **Stripped release builds.** The binaries and wheels drop their debug
+  symbols. With the embedder inside, a CLI download is 9 to 13 MB (4 to
+  7 MB in v0.14).
+- The iOS and Android packages move to 0.15.0 with the engine. They don't
+  have the keychain chain or the built-in embedder (the apps keep their
+  own keys and models).
+
+**Upgrading from 0.14.x:**
+- **Building from source needs Rust 1.94 or later** (was 1.75). The
+  prebuilt binaries and wheels are unaffected.
+- **Recall by text returns different results:** it's hybrid now. Pass
+  empty keywords (`--no-keywords`, `keywords=""`) for vector-only recall.
+- **`mnemo init` generates a key and defaults to 384 dimensions.** Pass
+  `--ask-passphrase` or set `MNEMO_PASSPHRASE` for a passphrase, and
+  `--dimensions` for another model's width.
+- **Existing files keep working,** with their passphrase as before. A file
+  that records another embedder, or holds vectors and records none, isn't
+  moved to the built-in:
+  the MCP server then serves it without one (recall by keyword) and says
+  so. `mnemo reembed <file> --embed-dims 384` moves it.
+- **Key files must be yours and mode 0600 or 0400** on Unix.
+- Rust: `EmbedderIdentity` has a new `query_convention` field, and
+  `RecallRequest` has `text` and `text_keyword_weight`. See the
+  [changelog](CHANGELOG.md) for everything else.
 
 ## What's new in v0.14.0: several agents on one file
 
@@ -408,9 +475,6 @@ CLI), about 0.5 MB of it for compression.
 - **Vectors come back at half precision** from `get` and `recall` (about
   0.1% error). In Rust, create the file with
   `MnemoConfig::store_float_vectors` to keep full precision.
-- **Rust 1.75 to 1.83:** if your project depends on `mnemo-engine`, run
-  `cargo update -p jobserver --precise 0.1.34` once. Cargo before 1.84
-  doesn't choose dependency versions by Rust version.
 
 ## What's new in v0.10.0: smaller and faster
 
@@ -519,7 +583,9 @@ memories or more are indexed):
 | Disk per memory | 1.4 KB | 1.3 KB | 1.5 KB |
 
 The library adds about 2.6 MB (Python package) or 3.6 MB (CLI), stripped,
-on ARM Linux.
+on ARM Linux. With the built-in embedder (v0.15), the CLI is about 10.5 MB
+and the Python package's library about 9.6 MB there, stripped; the model
+(91 MB) is downloaded once.
 
 **On an iPhone** (v0.12.0, iPhone18,3, iOS 27, the same corpus, raw-key
 files):
@@ -580,11 +646,10 @@ in Rust. Each re-clusters the index with the new defaults.
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
 - **Shared mode has limits under heavy use.**
-  - A writer waits while other processes read. With many processes
-    reading with no pause, a save can wait out its deadline and fail
-    with `Locked`. Nothing is lost, and calling again is safe. A fix that
-    gives a waiting writer its turn comes before shared mode becomes the
-    MCP server's default.
+  - A writer waits for readers for up to about 500 ms, then gets the next
+    turn (v0.15). With eight writers saving in a loop, a read can wait
+    about a second, or about 2 s on a slow machine. The bound holds when
+    every process using the file runs v0.15 or later.
   - A compaction holds the file for its whole length: about 175 s at
     100K memories.
   - After another process writes, the next call reloads the file's

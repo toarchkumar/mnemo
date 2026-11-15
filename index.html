@@ -386,7 +386,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
   <div class="wrap hero-grid">
     <div>
       <div class="pills">
-        <span class="pill"><span class="dot"></span>v0.14.0</span>
+        <span class="pill"><span class="dot"></span>v0.15.0</span>
         <span class="pill">Apache-2.0</span>
         <span class="pill">Rust · Python · iOS · Android · CLI · MCP</span>
       </div>
@@ -520,7 +520,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <div class="head">
       <p class="eyebrow">Quick start</p>
       <h2 class="title">Memory and caching in a few lines</h2>
-      <p class="lead">The same engine behind every surface. These examples use the current release, v0.14.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
+      <p class="lead">The same engine behind every surface. These examples use the current release, v0.15.0. iOS and Android guides: <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/swift/README.md">Swift</a> and <a href="https://github.com/toarchkumar/mnemo/blob/main/mnemo/bindings/kotlin/README.md">Android</a>.</p>
     </div>
     <div class="codebox">
       <div class="codebar">
@@ -531,15 +531,9 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
         </div>
       </div>
 <pre class="code" id="code-python" role="tabpanel"><span class="k">import</span> mnemo_engine
-<span class="k">from</span> sentence_transformers <span class="k">import</span> SentenceTransformer
-
-MODEL = <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>
-model = SentenceTransformer(MODEL)
-<span class="k">def</span> <span class="f">embed</span>(texts):
-    <span class="k">return</span> model.encode(texts, normalize_embeddings=<span class="k">True</span>).tolist()
 
 <span class="k">with</span> mnemo_engine.open(<span class="s">"agent.mnemo"</span>, <span class="s">"a long passphrase"</span>, dimensions=<span class="n">384</span>) <span class="k">as</span> db:
-    db.set_embedder(embed, name=MODEL, dimensions=<span class="n">384</span>)   <span class="c"># checked against the file</span>
+    db.use_builtin_embedder()   <span class="c"># a small local model, fetched once; or set_embedder(fn, ...)</span>
 
     <span class="c"># Durable memory, plain text in and out</span>
     db.remember_text(<span class="s">"the user prefers dark mode"</span>, <span class="s">"semantic"</span>, importance=<span class="n">0.8</span>)
@@ -547,7 +541,7 @@ model = SentenceTransformer(MODEL)
         print(round(hit[<span class="s">"score"</span>], <span class="n">3</span>), hit[<span class="s">"content"</span>])
 
     <span class="c"># A fact that changes: the key replaces the old version, history is kept</span>
-    db.remember_text(<span class="s">"the current release is v0.8.0"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
+    db.remember_text(<span class="s">"the current release is v0.15.0"</span>, <span class="s">"semantic"</span>, key=<span class="s">"current-release"</span>)
 
     <span class="c"># Cache an expensive call</span>
     prompt = <span class="s">"Summarize the release notes"</span>
@@ -566,6 +560,7 @@ model = SentenceTransformer(MODEL)
     <span class="c">// Any program that turns text into vectors (see examples/embedder_server.py)</span>
     <span class="k">let</span> id = <span class="t">EmbedderIdentity</span> {
         name: <span class="s">"sentence-transformers/all-MiniLM-L6-v2"</span>.into(), dimensions: <span class="n">384</span>, normalize: <span class="k">true</span>,
+        ..Default::default()
     };
     db.set_embedder(<span class="t">EmbedCmd</span>::new(<span class="s">"python3 embedder_server.py"</span>, id)?)?;
 
@@ -580,13 +575,10 @@ model = SentenceTransformer(MODEL)
     }
     Ok(())
 }</pre>
-<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span><span class="k">export</span> MNEMO_PASSPHRASE=<span class="s">'a long passphrase'</span>        <span class="c"># never put it on the command line</span>
-
-<span class="pr">$ </span>mnemo init agent.mnemo --dimensions <span class="n">384</span>         <span class="c"># new file, self-describing from the start</span>
+<pre class="code" id="code-cli" role="tabpanel" hidden><span class="pr">$ </span>mnemo init agent.mnemo                           <span class="c"># a generated key, kept in the OS keychain</span>
 <span class="pr">$ </span>mnemo about agent.mnemo                          <span class="c"># what is this file and how do I use it?</span>
-<span class="pr">$ </span>EMB=(--embed-cmd <span class="s">"python3 embedder_server.py"</span> --embed-name sentence-transformers/all-MiniLM-L6-v2)
-<span class="pr">$ </span>mnemo remember agent.mnemo --text <span class="s">"the user prefers dark mode"</span> --importance <span class="n">0.8</span> <span class="s">"${EMB[@]}"</span>
-<span class="pr">$ </span>mnemo recall   agent.mnemo --text <span class="s">"which theme does the user like?"</span> --top-k <span class="n">5</span> <span class="s">"${EMB[@]}"</span>
+<span class="pr">$ </span>mnemo remember agent.mnemo --text <span class="s">"the user prefers dark mode"</span> --importance <span class="n">0.8</span>
+<span class="pr">$ </span>mnemo recall   agent.mnemo --text <span class="s">"which theme does the user like?"</span> --top-k <span class="n">5</span>
 
 <span class="pr">$ </span>mnemo cache put agent.mnemo --ns llm --key prompt-42 --value <span class="s">'{"answer":"..."}'</span> --content-type json --ttl <span class="n">3600</span>
 <span class="pr">$ </span>mnemo cache get agent.mnemo --ns llm --key prompt-42
@@ -594,7 +586,7 @@ model = SentenceTransformer(MODEL)
 <span class="pr">$ </span>mnemo snapshots agent.mnemo                      <span class="c"># every commit is restorable</span>
 <span class="pr">$ </span>mnemo restore agent.mnemo --to-txn <span class="n">12</span>
 
-<span class="pr">$ </span>mnemo serve --mcp agent.mnemo <span class="s">"${EMB[@]}"</span>       <span class="c"># expose it to MCP clients, text in</span></pre>
+<span class="pr">$ </span>mnemo mcp install --client claude-code agent.mnemo   <span class="c"># add it to an MCP client, no secret in the config</span></pre>
     </div>
   </div>
 </section>
@@ -729,8 +721,10 @@ AI sessions stay aligned without relying on chat history.
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped <span class="status done">v0.4 – v0.14</span></h3>
+        <h3>Shipped <span class="status done">v0.4 – v0.15</span></h3>
         <ul>
+          <li>No setup: keys generated and kept in the OS keychain, with a recovery code; a built-in local embedding model; and <code>mnemo mcp install</code> for Claude Code, Cursor and Claude Desktop</li>
+          <li>Better recall by text: keyword and meaning together by default, names found by their parts, and exact identifiers in a question matched</li>
           <li>Several agents on one file: shared mode for Rust, Python, the CLI and the MCP server, with commands that wait for a busy file instead of failing</li>
           <li>A memory inspector: open a file in your browser and see what your agents remember, with search and the history of each fact; plus a readable, git-friendly export</li>
           <li>iOS and Android packages: a Swift package and an Android library, keys in the Keychain or Keystore, and files that close safely when an app goes to the background</li>
@@ -757,8 +751,8 @@ AI sessions stay aligned without relying on chat history.
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Sharing one file, continued: writers that always get their turn, catching up on only what changed, and sharing on by default for the MCP server</li>
-          <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>), working before any embedding model is configured, with the key kept in the system keychain</li>
+          <li>One-command setup for Claude Code and Cursor (<code>mnemo onboard</code>): a brain, its MCP server and its hooks in one step</li>
+          <li>Sharing one file, continued: catching up on only what changed, and sharing on by default for the MCP server</li>
           <li>Agents coordinating on one machine: messages, tasks and claims between them</li>
         </ul>
       </div>
@@ -766,7 +760,6 @@ AI sessions stay aligned without relying on chat history.
         <h3>After that <span class="status later">planned</span></h3>
         <ul>
           <li>A faster first search after opening, by loading only what a search needs; more speedups wherever the benchmarks point</li>
-          <li>An optional built-in local embedding model, no separate program needed</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
           <li>Teams across people and machines: per-agent keys, signed authorship, and merging copies of a file</li>
           <li>Encrypted sync across machines through a relay that can't read your data, and correcting memories from the inspector</li>
@@ -812,7 +805,7 @@ AI sessions stay aligned without relying on chat history.
   var installs = {
     "pip": "pip install mnemo-engine",
     "cargo-add": "cargo add mnemo-engine",
-    "cargo-install": "cargo install mnemo-engine"
+    "cargo-install": "cargo install mnemo-engine --features keychain,embed-candle"
   };
   var itabs = document.querySelectorAll("[data-install]");
   itabs.forEach(function (b) {
