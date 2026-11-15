@@ -48,10 +48,10 @@ use crate::memory::{
     CONTINUATION_TIMELINE_ENTRIES, ESSENCE_DEFAULT_RENDER_BYTES, ESSENCE_TRANSITIONS,
     MNEMO_META_CONTINUES, MNEMO_META_INVALID_AT, MNEMO_META_KEY, MNEMO_META_KIND,
     MNEMO_META_KIND_ESSENCE, MNEMO_META_KIND_THREAD_LINK, MNEMO_META_KIND_TURN, MNEMO_META_LENGTH,
-    MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE, MNEMO_META_SECTION, MNEMO_META_SEQ,
-    MNEMO_META_SHA256, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_SUPERSEDED_BY,
-    MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID, MNEMO_META_UPDATED_AT,
-    THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
+    MNEMO_META_MARKERS_ONLY, MNEMO_META_PART, MNEMO_META_REFS, MNEMO_META_ROLE, MNEMO_META_SECTION,
+    MNEMO_META_SEQ, MNEMO_META_SHA256, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES, MNEMO_META_THREAD, MNEMO_META_TURN_ID,
+    MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
@@ -1319,6 +1319,41 @@ fn written_after_index(e: &CatalogEntry, v9: bool, index_start: u64, index_gen: 
 /// Whether a record belongs in the ANN index: facts only. Thread-archive
 /// turns, essence items and thread links are read by kind and scope, never
 /// by similarity, so they stay out (R-004.2).
+/// v0.16.1: a thread turn whose content is only transcript markers
+/// ([`MNEMO_META_MARKERS_ONLY`]), by its flag or, for one saved before the
+/// flag, by its content.
+pub(super) fn is_markers_only_turn(m: &Memory) -> bool {
+    meta_str(m, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN)
+        && (m.metadata.get(MNEMO_META_MARKERS_ONLY) == Some(&Value::Bool(true))
+            || crate::transcript::is_marker_only(&m.content))
+}
+
+#[cfg(test)]
+#[test]
+fn a_marker_only_turn_saved_before_the_flag_is_recognised_by_its_content() {
+    let turn = |content: &str| {
+        let mut m = Memory::new(content, MemoryType::Episodic, vec![1.0]);
+        m.metadata.insert(
+            MNEMO_META_KIND.into(),
+            Value::String(MNEMO_META_KIND_TURN.into()),
+        );
+        m
+    };
+    assert!(is_markers_only_turn(&turn("[thinking]")));
+    assert!(is_markers_only_turn(&turn(
+        "[tool_use name=mcp__mnemo__remember]"
+    )));
+    assert!(!is_markers_only_turn(&turn(
+        "staging-7\n[tool_use name=Bash]"
+    )));
+    // Only turns: a fact that reads like a marker is a fact.
+    assert!(!is_markers_only_turn(&Memory::new(
+        "[thinking]",
+        MemoryType::Semantic,
+        vec![1.0]
+    )));
+}
+
 fn is_ann_kind(m: &Memory) -> bool {
     !matches!(
         m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()),

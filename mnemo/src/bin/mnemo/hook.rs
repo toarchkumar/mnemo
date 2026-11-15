@@ -849,8 +849,10 @@ pub const SAVE_BATCH: usize = 50;
 fn first_new_batch(db: &mut Mnemo, thread: &str, turns: &[ThreadTurn]) -> Option<usize> {
     let mut end = SAVE_BATCH.min(turns.len());
     loop {
-        match db.ingest_thread_texts(thread, &turns[..end]) {
-            Ok(t) if t.is_empty() => {}
+        // New turns, counted whether or not they have text to embed (a
+        // marker-only turn has none, and is still kept).
+        match db.ingest_thread_new_turns(thread, &turns[..end]) {
+            Ok(0) => {}
             _ => return Some(end),
         }
         if end == turns.len() {

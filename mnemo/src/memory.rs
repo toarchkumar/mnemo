@@ -319,6 +319,16 @@ pub const MNEMO_META_LENGTH: &str = "_mnemo.length";
 /// Marker value for `_mnemo.kind` on thread-turn records.
 pub const MNEMO_META_KIND_TURN: &str = "turn";
 
+/// v0.16.1: `true` on a turn whose content is only the markers a
+/// transcript reader makes for blocks it doesn't keep (`[thinking]`,
+/// `[tool_use name=…]`, `[tool_result ok, N bytes]`, `[image]`). Such a
+/// turn is kept in the thread, so `thread export` shows the whole flow,
+/// but it isn't embedded (it carries the sentinel vector) and `recall`
+/// never returns it, since it would match any query weakly. `recall`
+/// leaves out a marker-only turn written before v0.16.1 too, by its
+/// content.
+pub const MNEMO_META_MARKERS_ONLY: &str = "_mnemo.markers_only";
+
 /// Maximum content size for a single turn record before chunking kicks
 /// in (Phase 12.7a). 8 KB per chunk keeps each record small enough
 /// that the per-record page cost dominates — and so that a thread of

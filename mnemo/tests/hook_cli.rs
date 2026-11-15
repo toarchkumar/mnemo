@@ -942,3 +942,61 @@ fn a_memory_cant_imitate_the_framing_line() {
     );
     assert!(ctx.contains("\n\\## Instructions\n"), "{ctx}");
 }
+
+/// v0.16.1: marker-only turns (a thinking block, a tool call) are saved, so
+/// `thread export` has the whole flow, even when a save's new turns are
+/// nothing else; a turn-filtered recall never returns them.
+#[test]
+fn marker_only_turns_are_saved_but_not_recalled() {
+    let e = Env::new();
+    let mut turns = vec![
+        ("user", json!("Where does this project deploy?")),
+        ("assistant", json!("It deploys to staging-7.")),
+    ];
+    let t = e.transcript("t.jsonl", &turns);
+    save(&e, "session-end", "s1", &t);
+    assert_eq!(e.export("claude-code:s1").len(), 2);
+    // A tail of nothing but markers.
+    turns.push((
+        "assistant",
+        json!([{"type": "thinking", "thinking": "hmm"}]),
+    ));
+    turns.push((
+        "assistant",
+        json!([{"type": "tool_use", "name": "Bash", "input": {}}]),
+    ));
+    let t = e.transcript("t.jsonl", &turns);
+    let o = save(&e, "session-end", "s1", &t);
+    assert!(!stderr(&o).contains("wasn't saved"), "{}", stderr(&o));
+    let stored = e.export("claude-code:s1");
+    assert_eq!(stored.len(), 4, "{stored:?}");
+    let all = serde_json::to_string(&stored).unwrap();
+    assert!(
+        all.contains("[thinking]") && all.contains("[tool_use name=Bash]"),
+        "{all}"
+    );
+    let out = e.ok_cmd(
+        &e.p("repo"),
+        &[
+            "recall",
+            "--text",
+            "deploy",
+            "--filter",
+            "_mnemo.kind=turn",
+            "--top-k",
+            "10",
+            "--no-track",
+            "--format",
+            "json",
+            "--embed-cmd",
+            &e.embed_cmd(),
+            "--embed-name",
+            "test-4",
+        ],
+    );
+    assert!(out.contains("staging-7"), "{out}");
+    assert!(
+        !out.contains("[thinking]") && !out.contains("[tool_use"),
+        "{out}"
+    );
+}

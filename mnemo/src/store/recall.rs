@@ -389,6 +389,13 @@ impl Mnemo {
             if !req.filter.is_empty() && !req.filter.matches(&m) {
                 continue;
             }
+            // v0.16.1: a turn of nothing but markers (`[thinking]`, a
+            // tool call) is never a recall hit, whatever the filter: it
+            // would match any query weakly. Its content decides, so a turn
+            // saved before v0.16.1 is left out too.
+            if is_markers_only_turn(&m) {
+                continue;
+            }
             // Phase 12.7: default-exclude the thread layers from fact
             // recall: archive turns (12.7a), essence items (12.7b; read
             // by scope through the render, not by similarity) and

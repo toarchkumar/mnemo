@@ -298,6 +298,49 @@ fn flatten_blocks(blocks: &[Value], tool_results: ToolResults) -> String {
     out
 }
 
+/// v0.16.1: whether `content` is only the markers [`flatten_blocks`] makes
+/// for blocks it doesn't keep, one per line: `[tool_use name=…]`,
+/// `[tool_result ok|error]`, `[tool_result ok|error, N bytes]`, `[image]`,
+/// or `[<type>]` for any other block type (`[thinking]`,
+/// `[redacted_thinking]`). Empty lines don't count; anything else (any
+/// text, or a tool result kept in full) does. Empty content isn't
+/// marker-only.
+pub(crate) fn is_marker_only(content: &str) -> bool {
+    let mut any = false;
+    for line in content.lines() {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        if !is_marker(l) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+fn is_marker(l: &str) -> bool {
+    let Some(inner) = l.strip_prefix('[').and_then(|r| r.strip_suffix(']')) else {
+        return false;
+    };
+    if let Some(name) = inner.strip_prefix("tool_use name=") {
+        return !name.is_empty() && !name.contains([']', '[', ' ']);
+    }
+    if let Some(rest) = inner.strip_prefix("tool_result ") {
+        let (status, size) = match rest.split_once(", ") {
+            Some((s, n)) => (s, Some(n)),
+            None => (rest, None),
+        };
+        return matches!(status, "ok" | "error")
+            && size.is_none_or(|n| {
+                n.strip_suffix(" bytes")
+                    .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+            });
+    }
+    !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+}
+
 /// Minimal ISO 8601 parser — enough for Claude Code's
 /// `"2026-11-07T01:23:45.678Z"` shape. Returns unix seconds when the
 /// string parses cleanly; `None` otherwise (the caller falls back to
@@ -337,6 +380,37 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// v0.16.1.
+    #[test]
+    fn marker_only_content() {
+        for yes in [
+            "[thinking]",
+            "[redacted_thinking]\n[tool_use name=Read]",
+            "[tool_use name=mcp__mnemo__remember]",
+            "[tool_result ok, 30 bytes]",
+            "[tool_result error]",
+            "\n[image]\n\n  [tool_result ok, 0 bytes]  \n",
+        ] {
+            assert!(is_marker_only(yes), "{yes:?}");
+        }
+        for no in [
+            "",
+            "   \n",
+            "It deploys to staging-7.\n[tool_use name=Bash]",
+            "[tool_result ok] the whole body, kept in full",
+            "[tool_result maybe, 3 bytes]",
+            "[tool_result ok, many bytes]",
+            "[Thinking]",
+            "[see the docs]",
+            "[]",
+            "[tool_use name=]",
+            "a [thinking] b",
+            "[thinking] ok",
+        ] {
+            assert!(!is_marker_only(no), "{no:?}");
+        }
+    }
 
     #[test]
     fn jsonl_generic_round_trip() {
