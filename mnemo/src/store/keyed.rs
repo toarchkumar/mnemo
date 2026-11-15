@@ -10,7 +10,16 @@ impl Mnemo {
     /// this comparison — a repeat of an identical write re-issued by an
     /// extractor must be a NOOP even if the live record already carries
     /// supersession bookkeeping from a prior op.
-    pub(super) fn is_identical_keyed_write(incoming: &Memory, live: &Memory) -> bool {
+    ///
+    /// `rounded` says the live vector was read from a v9 file's fp16 column
+    /// (FMT-9b), so it's compared with the incoming vector after the same
+    /// rounding: a real embedder's value never survives it exactly, and
+    /// before v0.16 every such re-write added a version.
+    pub(super) fn is_identical_keyed_write(
+        incoming: &Memory,
+        live: &Memory,
+        rounded: bool,
+    ) -> bool {
         if incoming.content != live.content {
             return false;
         }
@@ -20,7 +29,12 @@ impl Mnemo {
         if (incoming.importance - live.importance).abs() > f32::EPSILON {
             return false;
         }
-        if incoming.vector != live.vector {
+        let same_vector = if rounded {
+            crate::veccol::dequantize(&crate::veccol::quantize(&incoming.vector).0) == live.vector
+        } else {
+            incoming.vector == live.vector
+        };
+        if !same_vector {
             return false;
         }
         // Strip `_mnemo.*` from both sides before comparing user metadata.
@@ -90,7 +104,8 @@ impl Mnemo {
                 .ok_or_else(|| MnemoError::Invalid("key_index drift".into()))?;
             let prev_entry = self.catalog[prev_idx].clone();
             let prev_mem = self.read_memory(&prev_entry)?;
-            if Self::is_identical_keyed_write(&memory, &prev_mem) {
+            let rounded = prev_entry.v9.is_some() && !self.float_vectors();
+            if Self::is_identical_keyed_write(&memory, &prev_mem, rounded) {
                 return Ok((Ulid(prev_id_u), WriteOutcome::Unchanged));
             }
 
@@ -229,7 +244,8 @@ impl Mnemo {
             .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
         old.metadata
             .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
-        if Self::is_identical_keyed_write(&memory, &old) {
+        let rounded = old_entry.v9.is_some() && !self.float_vectors();
+        if Self::is_identical_keyed_write(&memory, &old, rounded) {
             // Adopt the old record as the slot's live record.
             self.put(old)?;
             if let Some(k) = self.key_index.as_mut() {

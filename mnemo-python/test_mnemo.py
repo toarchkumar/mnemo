@@ -1436,6 +1436,31 @@ def test_recent():
     print("ok  recent (12.2)")
 
 
+def test_identical_keyed_rewrite_is_unchanged():
+    """v0.16: re-writing a key with the same value and a real-valued vector
+    is a no-op on a v9 file (it was compared before the fp16 rounding, so
+    each such write added a version)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "same.mnemo")
+        v = [0.1, 0.2, 0.3, 0.7]
+        db = mnemo.open(path, "passphrase", dimensions=4)
+        try:
+            r1 = db.remember("the value", "semantic", v, key="fact.same")
+            r2 = db.remember("the value", "semantic", v, key="fact.same")
+            assert r1["outcome"] == "added", r1
+            assert r2 == {"id": r1["id"], "outcome": "unchanged"}, r2
+        finally:
+            db.close()
+        db = mnemo.open(path, "passphrase")
+        try:
+            r3 = db.remember("the value", "semantic", v, key="fact.same")
+            assert r3["outcome"] == "unchanged", r3
+            assert len(db.history("fact.same")) == 1
+        finally:
+            db.close()
+    print("ok  identical keyed re-write is unchanged (v0.16)")
+
+
 def test_open_with_key():
     """PERF-1 step 7: raw-key databases."""
     key = mnemo.generate_key()
@@ -1978,6 +2003,7 @@ if __name__ == "__main__":
     test_thread_export_is_ingest_shape_and_round_trips()
     test_about_essence()
     test_recent()
+    test_identical_keyed_rewrite_is_unchanged()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()
