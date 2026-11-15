@@ -25,13 +25,7 @@ use mnemo_engine::guide;
 /// or a command containing the text is skipped (with the stand-in run in its
 /// place, if there is one), and each step removes its entries. **At READY
 /// this list must be empty.**
-const PENDING_UNTIL_STEP: &[(&str, u8, Option<&str>)] = &[
-    // Step 5: `onboard` itself; until then the brain comes from `init`.
-    ("mnemo onboard --yes", 5, Some("mnemo init")),
-    ("mnemo onboard --undo", 5, None),
-    // Step 5: the plugin's skill, generated from the guide (check 5).
-    ("integrations/claude-code", 5, None),
-];
+const PENDING_UNTIL_STEP: &[(&str, u8, Option<&str>)] = &[];
 
 fn pending(text: &str) -> Option<&'static (&'static str, u8, Option<&'static str>)> {
     PENDING_UNTIL_STEP.iter().find(|(n, _, _)| text.contains(n))
@@ -184,15 +178,16 @@ fn the_generated_files_match() {
         assert!(o.status.success());
         assert_eq!(String::from_utf8(o.stdout).unwrap(), want, "{format}");
     }
-    // Until step 5, `onboard` alone says it's being built, and exits 2.
-    let o = Command::new(env!("CARGO_BIN_EXE_mnemo"))
-        .arg("onboard")
-        .env_remove("CLAUDE_PROJECT_DIR")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    assert_eq!(o.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&o.stderr).contains("onboard --guide"));
+    // The Claude Code plugin's skill (`integrations/claude-code/`).
+    let skill =
+        std::fs::read_to_string(root.join("integrations/claude-code/skills/mnemo/SKILL.md"))
+            .expect("the plugin's skill")
+            .replace("\r\n", "\n");
+    assert!(
+        skill == guide::plugin_skill_md(),
+        "the plugin's skill is stale: run `mnemo onboard --guide --format plugin-skill > \
+         integrations/claude-code/skills/mnemo/SKILL.md` from the repository root"
+    );
 }
 
 /// Every pending entry still matches something in the guide (or names the
@@ -201,7 +196,7 @@ fn the_generated_files_match() {
 fn every_pending_entry_is_still_needed() {
     for (needle, step, _) in PENDING_UNTIL_STEP {
         assert!((3..=8).contains(step), "{needle}: step {step}");
-        if *needle == "integrations/claude-code" {
+        if needle.starts_with("integrations/") {
             continue;
         }
         assert!(

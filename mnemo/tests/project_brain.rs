@@ -570,3 +570,35 @@ fn recovery_code_unlock_and_rekey_find_the_project_brain() {
     let err = e.fails(&e.p("plain"), &["recovery-code"]);
     assert!(err.contains("no project brain here"), "{err}");
 }
+
+/// 12.2 step 5 (from step 1's review): with the path left out, `mcp
+/// install` defaults to Claude Code's local scope, and to Cursor's project
+/// file, which it lists in `.git/info/exclude`.
+#[cfg(unix)]
+#[test]
+fn mcp_install_with_no_path_defaults_to_this_users_scope() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new();
+    e.init();
+    let log = e.p("claude.log");
+    let script = e.p("bin/claude");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    e.ok(
+        &e.p("main"),
+        &["mcp", "install", "--client", "claude-code", "--yes"],
+    );
+    let args = std::fs::read_to_string(&log).unwrap();
+    assert!(args.contains("--scope\nlocal\n"), "{args}");
+    e.ok(
+        &e.p("main"),
+        &["mcp", "install", "--client", "cursor", "--yes"],
+    );
+    assert!(e.p("main/.cursor/mcp.json").is_file());
+    let ex = std::fs::read_to_string(e.p("main/.git/info/exclude")).unwrap();
+    assert!(ex.contains("/.cursor/mcp.json"), "{ex}");
+}

@@ -1,0 +1,7 @@
+{
+  "name": "mnemo",
+  "description": "This project's memory: the mnemo MCP server, hooks that load and save it, and a skill on when to recall and remember",
+  "homepage": "https://toarchkumar.github.io/mnemo/",
+  "repository": "https://github.com/toarchkumar/mnemo",
+  "license": "Apache-2.0"
+}

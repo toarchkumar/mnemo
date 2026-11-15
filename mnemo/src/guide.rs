@@ -175,6 +175,57 @@ pub fn llms_full() -> String {
     markdown()
 }
 
+/// The header line on every file `mnemo onboard` writes; `onboard` and
+/// `onboard --undo` recognise their own files by it.
+pub const ONBOARD_HEADER: &str = "<!-- Written by mnemo onboard. Re-running it updates this \
+file; mnemo onboard --undo removes it. -->";
+
+/// The header on the plugin's committed skill.
+pub const PLUGIN_HEADER: &str = "<!-- Generated from the mnemo guide (mnemo onboard --guide); \
+tests/guide.rs checks that it matches. -->";
+
+/// The skill's description (its frontmatter).
+pub const SKILL_DESCRIPTION: &str = "Use the mnemo MCP tools to recall project context before \
+a task, and to save durable facts and decisions with a key.";
+
+/// The guide's layer 2 (sections 2 and 3: the tools, and organizing
+/// memory), as Markdown.
+pub fn layer_two() -> String {
+    let md = markdown();
+    let start = md.find("\n## 2.").map(|i| i + 1).unwrap_or(0);
+    let end = md.find("\n## 4.").map(|i| i + 1).unwrap_or(md.len());
+    md[start..end].trim().to_string()
+}
+
+fn skill_with(header: &str) -> String {
+    format!(
+        "---\nname: mnemo\ndescription: {SKILL_DESCRIPTION}\n---\n{header}\n\n{}\n\n{}\n",
+        card(),
+        layer_two()
+    )
+}
+
+/// `.claude/skills/mnemo/SKILL.md` as `onboard` writes it: the frontmatter
+/// (first, or Claude Code doesn't read it), the header, the card and
+/// layer 2.
+pub fn skill_md() -> String {
+    skill_with(ONBOARD_HEADER)
+}
+
+/// The plugin's `skills/mnemo/SKILL.md` (`integrations/claude-code/`).
+pub fn plugin_skill_md() -> String {
+    skill_with(PLUGIN_HEADER)
+}
+
+/// `.cursor/rules/mnemo.mdc`: always applied, so only the card.
+pub fn cursor_rule() -> String {
+    format!(
+        "---\ndescription: This project's memory, through the mnemo MCP tools\nalwaysApply: \
+true\n---\n{ONBOARD_HEADER}\n\n{}\n",
+        card()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +263,19 @@ mod tests {
             .collect();
         assert_eq!(names, ["Docs", "Optional"]);
         assert_eq!(llms_full(), md);
+    }
+
+    #[test]
+    fn the_generated_files_carry_the_card_and_their_header() {
+        let skill = skill_md();
+        assert!(skill.starts_with("---\nname: mnemo\n"), "frontmatter first");
+        assert!(skill.contains(ONBOARD_HEADER) && skill.contains(&card()));
+        assert!(skill.contains("## 2. Use the tools") && skill.contains("## 3. Organize memory"));
+        assert!(!skill.contains("## 4."));
+        let rule = cursor_rule();
+        assert!(rule.starts_with("---\n") && rule.contains("alwaysApply: true"));
+        assert!(rule.contains(ONBOARD_HEADER) && rule.contains(&card()));
+        assert!(plugin_skill_md().contains(PLUGIN_HEADER));
     }
 
     #[test]
