@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """MNemo project memory: the dogfood helper for this repository's brain.
 
-The brain is `.git/mnemo/project.mnemo` once the dogfood switch has moved
-it there (v0.16), else `test/project.mnemo`. `recall` and `remember` run the
-`mnemo` CLI (v0.15 or later: $MNEMO_BIN, this repo's release build, or the
-PATH's); `bootstrap`, `perf` and `info` use the Python binding. The secret
-comes from test/.env's MNEMO_PASSPHRASE when there is one, else the
-key-source chain (the keychain, after the switch).
+The brain is `.git/mnemo/project.mnemo` (since the v0.16 dogfood switch;
+`test/project.mnemo` is the old layout, still used where it's the only
+one). Its key is in the user's keychain, found by the key-source chain, so
+nothing here handles a passphrase. `recall` and `remember` run the `mnemo`
+CLI (v0.15 or later, able to read the keychain: $MNEMO_BIN, then each
+`mnemo` on the PATH, then this repo's release build); `perf` and `info` use
+the Python binding. Only the Worker writes facts, each with a key
+(AGENTS.md, tmux rule 9). `bootstrap` rebuilds a scratch brain from
+seed.json and refuses the project brain, which it would wipe.
 """
 
 from __future__ import annotations
@@ -74,17 +77,20 @@ def load_dotenv() -> None:
 
 
 def passphrase() -> str:
+    """A passphrase, for creating a scratch brain (`bootstrap --brain`)."""
     pp = optional_passphrase()
     if not pp:
         sys.exit(
-            "MNEMO_PASSPHRASE missing. Copy test/.env.example to test/.env or export it."
+            "MNEMO_PASSPHRASE isn't set: export one for the scratch brain. (The project "
+            "brain needs none; its key is in the keychain.)"
         )
     return pp
 
 
 def optional_passphrase() -> str | None:
-    """test/.env's passphrase, or None: after the dogfood switch the brain
-    has a generated key in the keychain, and the key-source chain finds it."""
+    """MNEMO_PASSPHRASE from the environment (or the old layout's test/.env,
+    if one is still there), else None: the project brain has a generated key
+    in the keychain, and the key-source chain finds it."""
     load_dotenv()
     return os.environ.get("MNEMO_PASSPHRASE", "").strip() or None
 
@@ -93,9 +99,9 @@ def optional_passphrase() -> str | None:
 #
 # `recall` and `remember` are thin wrappers over the `mnemo` CLI, so the
 # dogfood path is the one the hooks and the MCP server use. The secret
-# comes from the key-source chain: test/.env's MNEMO_PASSPHRASE reaches the
-# child's environment (read here, in-process, never on a command line), and
-# after the switch the keychain holds the brain's key.
+# comes from the key-source chain: the keychain holds the project brain's
+# key (a scratch brain's MNEMO_PASSPHRASE reaches the child through the
+# environment, never a command line).
 
 MIN_CLI = (0, 15, 0)
 
@@ -113,30 +119,68 @@ def cli_version(path: str) -> tuple[int, ...] | None:
 _CLI: str | None = None
 
 
+def path_clis() -> list[str]:
+    """Every `mnemo` on the PATH, in order (an older one can sit behind the
+    installed one, as ~/.cargo/bin's did)."""
+    out = []
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        c = Path(d or ".") / "mnemo"
+        if c.is_file() and os.access(c, os.X_OK) and str(c) not in out:
+            out.append(str(c))
+    return out
+
+
+def reads_the_brain(path: str) -> bool:
+    """Whether `path` can open the brain with the secret this process has.
+    The CLI lists no build features, so this asks it: `info` on the brain,
+    read-only. A build without the `keychain` feature fails on a key brain
+    with "none in this build"; that's the one failure that rules it out. A
+    scratch brain opened with MNEMO_PASSPHRASE needs no keychain, so it
+    isn't asked."""
+    if optional_passphrase() or not MNEMO_PATH.is_file():
+        return True
+    try:
+        r = subprocess.run(
+            [path, "info", str(MNEMO_PATH)], capture_output=True, text=True, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return not (r.returncode != 0 and "none in this build" in r.stderr)
+
+
 def mnemo_cli() -> str:
-    """The `mnemo` to run: $MNEMO_BIN, else this repo's release build, else
-    the one on the PATH, whichever is first at v0.15 or later."""
+    """The `mnemo` to run: the first of $MNEMO_BIN, each `mnemo` on the PATH,
+    and this repo's release build that is v0.15 or later and can read the
+    brain's key (`reads_the_brain`). The PATH's come before the repo build:
+    the installed release is the one the hooks and the MCP server run, with
+    the keychain, while a local build may lack it (a v0.15.0 one did)."""
     global _CLI
     if _CLI:
         return _CLI
     candidates = [
         os.environ.get("MNEMO_BIN"),
+        *path_clis(),
         str(REPO_ROOT / "mnemo" / "target" / "release" / "mnemo"),
-        shutil.which("mnemo"),
     ]
     seen = []
     for c in candidates:
-        if not c or not Path(c).is_file():
+        if not c or not Path(c).is_file() or any(s.startswith(c + " ") for s in seen):
             continue
         v = cli_version(c)
-        seen.append(f"{c} ({'.'.join(map(str, v)) if v else 'unknown version'})")
-        if v and v >= MIN_CLI:
-            _CLI = c
-            return c
+        label = ".".join(map(str, v)) if v else "unknown version"
+        if not v or v < MIN_CLI:
+            seen.append(f"{c} ({label}, too old)")
+            continue
+        if not reads_the_brain(c):
+            seen.append(f"{c} ({label}, no keychain in this build)")
+            continue
+        _CLI = c
+        return c
     sys.exit(
-        "no mnemo CLI at v0.15 or later (found: "
+        "no mnemo CLI at v0.15 or later that can read the brain's key (found: "
         + (", ".join(seen) or "none")
-        + "). Build one: cd mnemo && cargo build --release --features keychain,embed-candle, "
+        + "). Install one: curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh, "
+        "or build: cd mnemo && cargo build --release --features keychain,embed-candle, "
         "or set MNEMO_BIN"
     )
 
@@ -153,9 +197,9 @@ def run_cli(args: list[str]) -> str:
 
 
 REBUILD_HINT = (
-    "Rebuild it into this venv:\n"
+    "Rebuild it into this venv (with the keychain, to open the project brain):\n"
     "  cd mnemo-python && VIRTUAL_ENV=\"$(cd ../test/.venv && pwd)\" "
-    "PATH=\"$VIRTUAL_ENV/bin:$PATH\" maturin develop --release --features embed-candle"
+    "PATH=\"$VIRTUAL_ENV/bin:$PATH\" maturin develop --release --features keychain,embed-candle"
 )
 
 # DOGFOOD-1: names the newest tree's binding has. A wheel built before them
@@ -257,8 +301,8 @@ def open_db(*, create: bool = False, write: bool = True):
     mode never creates a file, so a missing brain is created first with a
     plain open."""
     mnemo = require_mnemo()
-    # v0.16: test/.env's passphrase when there is one, else the key-source
-    # chain (the brain's generated key in the keychain, after the switch).
+    # The key-source chain finds the project brain's key in the keychain;
+    # a scratch brain's passphrase comes from MNEMO_PASSPHRASE.
     pp = optional_passphrase()
     if create or not MNEMO_PATH.exists():
         if not write:
@@ -282,6 +326,12 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
     at insert time, so the JSONL is just an aid, not the input."""
     if not SEED_PATH.exists():
         sys.exit(f"seed file not found: {SEED_PATH}")
+    if not BRAIN_GIVEN or MNEMO_PATH == default_brain().resolve():
+        sys.exit(
+            f"bootstrap wipes the brain it builds, so it won't touch the project brain "
+            f"({default_brain()}). Give a scratch brain: --brain /tmp/scratch.mnemo, with "
+            "MNEMO_PASSPHRASE set for it"
+        )
     entries = json.loads(SEED_PATH.read_text(encoding="utf-8"))
     print(f"embedding {len(entries)} seed memories (dim={DIMENSIONS})...")
 
@@ -298,13 +348,17 @@ def cmd_bootstrap(_: argparse.Namespace) -> None:
         mt = entry.get("memory_type", "semantic")
         importance = float(entry.get("importance", 0.7))
         metadata = entry.get("metadata") or {}
-        mid = db.remember_text(
+        kw = {"key": entry["key"]} if entry.get("key") else {}
+        r = db.remember_text(
             content,
             mt,
             agent_id=AGENT_ID,
             importance=importance,
             metadata=metadata,
+            **kw,
         )
+        # A keyed write returns {"id", "outcome"}.
+        mid = r["id"] if isinstance(r, dict) else r
         vector = db.get(mid)["vector"]  # for the JSONL export below
         jsonl_lines.append(
             json.dumps(
@@ -381,8 +435,10 @@ def cmd_remember(args: argparse.Namespace) -> None:
 def cmd_remember_file(args: argparse.Namespace) -> None:
     """DOGFOOD-1: many facts in one process, with one model load, one
     embedding call and one open. Each line of the JSONL file is an object
-    with `content` and optionally `type`, `importance`, `metadata` and
-    `key`. Every fact is still its own write (one window each)."""
+    with `content` and optionally `type`, `importance`, `metadata`, `key`
+    and `supersedes` (with `key`: the id of an unkeyed memory this write
+    adopts and supersedes). Every fact is still its own write (one window
+    each)."""
     path = Path(args.from_file).expanduser().resolve()
     facts = []
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -403,6 +459,7 @@ def cmd_remember_file(args: argparse.Namespace) -> None:
                 float(f.get("importance", 0.75)),
                 f.get("metadata"),
                 f.get("key"),
+                f.get("supersedes"),
             )
         )
         print(out.strip())
@@ -560,17 +617,23 @@ def cmd_info(_: argparse.Namespace) -> None:
     print(f"snapshots:  {len(snaps)}")
 
 
+BRAIN_GIVEN = False
+
+
 def main() -> None:
-    global MNEMO_PATH
+    global MNEMO_PATH, BRAIN_GIVEN
     parser = argparse.ArgumentParser(description="MNemo project memory (dogfood)")
     parser.add_argument(
         "--brain",
-        help=f"the brain to use (default {MNEMO_PATH}); a scratch brain for trials. "
-        "MNEMO_PASSPHRASE in the environment overrides test/.env",
+        help=f"the brain to use (default {MNEMO_PATH}); a scratch brain for trials, "
+        "opened with MNEMO_PASSPHRASE from the environment",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_boot = sub.add_parser("bootstrap", help="Create project.mnemo from seed.json")
+    p_boot = sub.add_parser(
+        "bootstrap",
+        help="Build a scratch brain (--brain) from seed.json; never the project brain",
+    )
     p_boot.set_defaults(func=cmd_bootstrap)
 
     p_rem = sub.add_parser("remember", help="Store one new memory, or a file of them")
@@ -640,6 +703,7 @@ def main() -> None:
         parser.error("remember needs CONTENT or --from-file")
     if args.brain:
         MNEMO_PATH = Path(args.brain).expanduser().resolve()
+        BRAIN_GIVEN = True
     args.func(args)
 
 

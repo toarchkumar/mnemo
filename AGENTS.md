@@ -34,8 +34,8 @@ mnemo/              Rust core: library + CLI + integration tests
   tests/            integration + cli_smoke
   examples/         quickstart, session
 mnemo-python/       PyO3 bindings published as `mnemo-engine` on PyPI
-test/               Dogfooding sandbox (encrypted project.mnemo + helpers)
-  scripts/          project_memory.py — recall, remember, bootstrap, perf
+test/               Dogfooding helpers (the brain itself is .git/mnemo/project.mnemo)
+  scripts/          project_memory.py — recall, remember, perf, bootstrap (scratch only)
   scripts/seed.json Canonical onboarding seed (manifest + 16 orientation memories)
 index.html          Landing page
 ```
@@ -82,36 +82,59 @@ job builds `embed-candle` there. All dependency versions are pinned exactly
 
 ## Dogfood the engine on yourself
 
-This repo keeps an encrypted project memory at `test/project.mnemo`. Before
-substantive work, orient yourself from the database itself:
+This repo's project memory is its **project brain,
+`.git/mnemo/project.mnemo`** (since the v0.16 dogfood switch). Git never
+tracks it, every worktree shares it, and its generated key is in the
+user's keychain, so no session handles a passphrase. Every session runs
+`mnemo onboard`'s hooks: they load a brief (the guide's card, the project's
+notes and essence, a short recall) when a session starts, and save the
+session's transcript into its own thread (tmux rule 9).
+
+Before substantive work, orient yourself from the brain. In a git
+repository the commands take no path:
 
 ```bash
-# Engine-level: what is this file?
-mnemo about test/project.mnemo
-
-# Project-specific: pull context for the current task
-python test/scripts/project_memory.py recall "<short description of your task>"
+mnemo about                                    # what this brain holds
+mnemo recall --text "<your task in one sentence>" --no-track
 ```
 
-After learning something durable, persist it for the next session:
+Or use the MCP tools the session has (`recall`, `essence` with `op:
+"render"`), which the guide's card describes.
+
+**Only the Worker writes facts**, one per write, each with a key, so a new
+version supersedes the old one instead of sitting beside it. The brain's
+facts belong to the agent `cursor-agent`, and a key's slot is per agent, so
+a write must name it (the CLI's and the MCP server's default agent is
+`default`, which would start a second slot beside the first). The helper
+does that for you:
 
 ```bash
-python test/scripts/project_memory.py remember "<one concise fact or decision>" \
-  --type semantic|episodic|procedural --importance 0.0-1.0
+python test/scripts/project_memory.py remember "<one fact or decision>" \
+  --type episodic --key decision.<topic>
+# or several at once, from a JSON Lines file (content, type, importance,
+# metadata, key per line):
+python test/scripts/project_memory.py remember --from-file facts.jsonl
+# the CLI directly: mnemo remember --text "…" --agent cursor-agent --key …
+# the MCP tool: remember with "key" and "agent_id": "cursor-agent"
 ```
 
-One fact per `remember` call. Use `episodic` for dated events/decisions,
-`procedural` for how-to steps, `semantic` for stable facts.
+Use `episodic` for dated events and decisions, `procedural` for how-to
+steps, and `semantic` for stable facts. The Planner and the Reviewers only
+read (`recall`, `--no-track`).
 
-For performance baselines: `python test/scripts/project_memory.py perf <file.json>`
-ingests a structured measurement set as episodic memories — see
-`test/scripts/perf_v0.1.0.json` for the schema.
+`test/scripts/project_memory.py` runs the installed `mnemo` CLI (the first
+on the PATH that can read the keychain; `$MNEMO_BIN` overrides it). It also
+keeps `perf <file.json>`, which ingests a measurement set as episodic
+memories (`test/scripts/perf_v0.1.0.json` has the schema), and `bootstrap`,
+which builds a **scratch** brain from `test/scripts/seed.json` and refuses
+the project brain, since it wipes what it builds.
 
-**Never commit:** `test/.env`, `test/project.mnemo`, or any other `.mnemo`
-file. The `.gitignore` already excludes them. **The one exception:** test
-fixtures under `mnemo/tests/fixtures/`, which hold synthetic data under
-throwaway test secrets only, never real memories. `.gitignore` lets those
-through, so nobody needs `git add -f`.
+**Never commit** a `.mnemo` file (the project brain is under `.git`, so git
+can't). `test/.env` and `test/project.mnemo` are the old layout, retired at
+the switch. **The one exception:** test fixtures under
+`mnemo/tests/fixtures/`, which hold synthetic data under throwaway test
+secrets only, never real memories. `.gitignore` lets those through, so
+nobody needs `git add -f`.
 
 **If cloud sync touches the working tree:** files named like `name 2.ext`
 (a sync conflict copy), "Resource deadlock avoided" (EDEADLK), or files
@@ -270,9 +293,9 @@ it; other roles stop and ask the user first.
 
 | Role | Startup reading list | Allowed file writes | Git commits |
 |---|---|---|---|
-| `Planner` | `AGENTS.md`, `PLAN.md`, `reviewer_notes.md`, read-only `test/project.mnemo` | `PLAN.md` (all sections except Worker `WORKLOG` entries), triage fields in `reviewer_notes.md`, root `README.md`, `index.html`, `.gitignore`, and the protocol text in `AGENTS.md` (this section + the standing MessagePack rule) | **Never commits** — hands off tracked edits via `PLANNER — HANDOFF` in `PLAN.md` |
-| `Worker` | `AGENTS.md`, `PLAN.md` (`Status`, `NEXT DISPATCH`, active spec, recent `WORKLOG`), `mnemo/README.md`, `CHANGELOG.md`, `test/project.mnemo` | Active PR code/tests/crate docs/manifests/`CHANGELOG.md`/`seed.json`, technical sections of `AGENTS.md` (as part of a PR), bottom `WORKLOG` of `PLAN.md` (append-only), `test/project.mnemo` | **Sole committer** — stages explicit paths only; commits `PLANNER — HANDOFF` files separately |
-| `Reviewer` | `AGENTS.md`, live code & `git diff`, `test/scripts/perf_*.json`, `PLAN.md`, `reviewer_notes.md`, read-only `test/project.mnemo` | `reviewer_notes.md` **only** (`Decision Ledger` + `Review Log`) | **Never commits** (read-only across tracked files, `PLAN.md`, and `test/project.mnemo`) |
+| `Planner` | `AGENTS.md`, `PLAN.md`, `reviewer_notes.md`, the project brain (read-only, `--no-track`) | `PLAN.md` (all sections except Worker `WORKLOG` entries), triage fields in `reviewer_notes.md`, root `README.md`, `index.html`, `.gitignore`, and the protocol text in `AGENTS.md` (this section + the standing MessagePack rule) | **Never commits** — hands off tracked edits via `PLANNER — HANDOFF` in `PLAN.md` |
+| `Worker` | `AGENTS.md`, `PLAN.md` (`Status`, `NEXT DISPATCH`, active spec, recent `WORKLOG`), `mnemo/README.md`, `CHANGELOG.md`, the project brain | Active PR code/tests/crate docs/manifests/`CHANGELOG.md`/`seed.json`, technical sections of `AGENTS.md` (as part of a PR), bottom `WORKLOG` of `PLAN.md` (append-only), the project brain's facts | **Sole committer** — stages explicit paths only; commits `PLANNER — HANDOFF` files separately |
+| `Reviewer` | `AGENTS.md`, live code & `git diff`, `test/scripts/perf_*.json`, `PLAN.md`, `reviewer_notes.md`, the project brain (read-only, `--no-track`) | `reviewer_notes.md` **only** (`Decision Ledger` + `Review Log`) | **Never commits** (read-only across tracked files, `PLAN.md`, and the brain's facts) |
 
 ### Running in tmux: messages carry pointers, the ledgers carry instructions (user decision 2026-11-13)
 
@@ -330,6 +353,19 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    Planner re-reads the ledger tails and carries on.
 8. **The repo is `~/Documents/GitHub/mnemo.nosync`.** Every session starts in
    it and uses absolute paths. The cloud-sync tripwire above still applies.
+9. **Every session runs `mnemo onboard`'s hooks (user decision
+   2026-11-15).**
+   - **The project brain** is `.git/mnemo/project.mnemo` (since v0.16, the
+     dogfood switch). Its key is in the user's keychain, so no session
+     handles a passphrase.
+   - **Each session's hooks save its own transcript** into its own thread
+     (`claude-code:<session id>`), and load the brief at session start.
+     That's the only write the Planner and the Reviewers make to the brain.
+   - **Only the Worker writes facts,** with a key (the MCP `remember` tool
+     with `key`, or `test/scripts/project_memory.py remember --key`).
+   - **The Planner and the Reviewers read** with `recall` (MCP) or `mnemo
+     recall --no-track`, and never call `remember`, `forget` or `essence`
+     writes.
 
 ### `Planner` rules
 
@@ -337,8 +373,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    (`Status`, `NEXT DISPATCH`, phase/PR specs) and log every dispatch,
    decision, review triage, handoff, or verification as a
    `PLANNER — PLAN | DECISION | REVIEW | HANDOFF | VERIFIED` entry in
-   `PLAN.md`'s `WORKLOG`. Inspect `test/project.mnemo` read-only
-   (`--no-track` / `read_only=True`) so you never contend for the write lock.
+   `PLAN.md`'s `WORKLOG`. Read the project brain with `recall` or `mnemo
+   recall --no-track`, and never write facts to it (tmux rule 9).
 2. **Hand off tracked-file edits (never commit directly):** You own the
    content of root `README.md`, `index.html`, `.gitignore`, and the
    protocol text in `AGENTS.md` (this "Multi-agent roles & coordination"
@@ -378,8 +414,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    `WORKER — BLOCKED` entry with exact evidence, and end the session — do
    not improvise around the plan. After completing a PR, append a
    `WORKER — DONE` entry (commit hashes, test counts, deviations) and persist
-   durable findings to `test/project.mnemo` if `test/.env` is present (note
-   in `DONE` if skipped).
+   durable findings to the project brain, each with a key (tmux rule 9;
+   note in `DONE` if skipped).
 3. **Sole committer in the shared working tree:**
    - **Stage by explicit file path only** (`git add <path>...`). Never run
      `git add -A`, `git add .`, or `git commit -a`.
@@ -413,8 +449,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
 ### `Reviewer` rules
 
 1. **Strictly read-only audit boundary:** Never edit tracked files,
-   `PLAN.md`, or `test/project.mnemo` (always open `test/project.mnemo`
-   with `read_only=True` or `--no-track`), and never run `git add` or
+   `PLAN.md`, or the project brain's facts (read it with `recall` or
+   `--no-track`; your hooks save only your transcript, tmux rule 9), and never run `git add` or
    `git commit`. Write exclusively to `reviewer_notes.md` unless the user
    explicitly asks for a doc edit and routes commit authority through a
    `Planner`/`Worker` handoff. (The `Worker` commits `reviewer_notes.md` as
