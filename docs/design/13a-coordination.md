@@ -1,7 +1,10 @@
 # 13a Coordination: design note
 
 **Status:** draft for sign-off (Worker, 2026-11-15; v0.17.0 step 0). No code
-in this step.
+in this step. **Revised** (round 1, the same day) for PLANNER-A's six
+changes: the manifest's default agent, the per-turn hook's one write, brain
+text in the hook's line and never in a pointer, the hop count across fresh
+messages, what step 1 can test, and how a woken session sees the pointer.
 
 **Scope** (PLAN.md Phase 13, R-006.1's split):
 - 13.1 messages and tasks, with 13.1b delivery;
@@ -135,10 +138,21 @@ views (14.2) come later.
    (`planner`, `worker`, `reviewer`, or any word), in the session's
    environment. The MCP server and the hooks are both children of the
    client, so both inherit them.
-   - **To verify in step 1, not assumed:** that Claude Code and Cursor pass
-     the parent's environment to a stdio MCP server and to hook commands.
-     If one doesn't, `onboard` can't fill the gap, since one project's
-     config is shared by every session in it. The fallback is below.
+   - **Checked for Claude Code's MCP server (2026-11-15, by hand):** on this
+     Mac, each running `mnemo serve --mcp` (a child of `claude`) had the
+     tmux pane's own variables (`TMUX`, `TMUX_PANE`) and Claude Code's
+     (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET`,
+     `CLAUDE_CODE_MESSAGING_TOKEN`) in its environment. I checked the names
+     with `ps eww`, never the values. So a variable exported in the pane
+     before `claude` reaches the server.
+   - **Still to check by hand in step 1,** and recorded in its DONE: that
+     hook commands get the same environment (a one-off `env | grep MNEMO`
+     from a hook's shell), and the same for Cursor. **CI can't check this,**
+     since it has no Claude Code or Cursor. CI covers the CLI, the server
+     and the hooks reading `MNEMO_AGENT` and `MNEMO_ROLE` when they're set.
+   - If a client doesn't pass them, `onboard` can't fill the gap, since one
+     project's config is shared by every session in it. The fallback is
+     below.
 2. **Without them,** the session is `claude-code:<session id>` (the hook
    input's id, as the thread is) with no role. It gets messages addressed to
    that id or to `all`, and nothing addressed to a role. `who()` lists it as
@@ -173,11 +187,20 @@ holding the brain's key can write any `_mnemo.from`. So:
 - the **coordination identity** (`MNEMO_AGENT`).
 
 **Recommendation:**
-- **The owner default comes from the manifest.** When the manifest records
-  `agent_id_default` (this brain: `cursor-agent`), the CLI and the MCP
-  server use it for a write with no agent, instead of `default`. Brains
-  `onboard` makes record none, so they keep `default`. That ends this
-  repo's "name the agent" rule. It's a small step-1 change.
+- **The owner default comes from a reserved manifest key,
+  `_mnemo.default_agent`.** When the manifest has it, the CLI and the MCP
+  server use it for a write that names no agent, instead of `default`.
+  - The engine never reads a project's own metadata keys. This brain's
+    `agent_id_default` is a convention of this repo's `seed.json`, so it
+    stays as it is, and means nothing to the engine.
+  - **`Memory::scaffold_manifest` leaves the key unset,** so new brains
+    keep `default`.
+  - The key is reserved, so `update --metadata` can't set it. Step 1 adds
+    `mnemo default-agent [<id> | --clear]` and `Mnemo::set_default_agent`,
+    an in-place edit of the manifest through the same path as `update`.
+  - **Step 1 sets it once on this brain** (`mnemo default-agent
+    cursor-agent`), and `seed.json`'s manifest gets it too. That ends this
+    repo's "name the agent" rule.
 - **The coordination identity never changes a fact's owner.** A fact gets
   `_mnemo.author` = `MNEMO_AGENT` when it's set (the field 13.4 will sign),
   so "who wrote this" is answerable now, unproven, without splitting key
@@ -238,12 +261,21 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
    - **`mnemo hook user-prompt --client claude-code`** on `UserPromptSubmit`,
      and on Cursor's `postToolUse` at most once a minute. It opens the
      brain read-only (2 s wait) and counts what's new for this agent:
-     unread messages to it, its role or `all`; queued tasks for its role
-     that are ready to take; claims of its own about to lapse.
-     - **It prints only when there's something,** at most 600 bytes: "mnemo:
-       2 unread (planner-a: v0.17.0 step 1 dispatched), 1 task ready (role
-       worker). `inbox` to read." It marks those items `seen`.
-     - It prints nothing when nothing is new.
+     unread messages to it, its role or `all`, not yet `seen`; queued tasks
+     for its role that are ready to take; claims of its own about to lapse.
+   - **With nothing new, it prints nothing and never writes,** so most
+     turns cost one read.
+   - **With something to show:**
+     - it prints first, at most 600 bytes. A line from the brain quotes
+       what an agent wrote (a subject, a sender's name), so it comes after
+       `guide::FRAMING` and through `guide::escape_brain`, as in the brief.
+       For example: "mnemo: 2 unread, 1 task ready. From this project's
+       brain: …: planner-a: v0.17.0 step 1 dispatched. `inbox` to read."
+     - **then it takes one write window** (shared mode, 2 s wait) to mark
+       those items `seen`, so the next turn doesn't show them again;
+     - **a failure to mark** (a busy brain, a timeout) never stops the
+       print, and never fails the hook. The items are shown again next
+       turn, which is the safe direction.
    - **Cost:**
      - a read-only open per turn, with no embedding. A rough figure on this
        Mac: a read-only `mnemo info` of this brain took 0.06 s warm (0.14 s
@@ -262,13 +294,35 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
      own agent, role or `all`. For each batch, within the guardrails, it
      posts **one pointer into its own session** through
      `CLAUDE_CODE_MESSAGING_SOCKET` with the token, then marks the items
-     `delivered`. The pointer reads "mnemo: new work in your inbox (2
-     messages, 1 task); call `inbox`", and nothing else.
+     `delivered`.
+   - **The pointer is fixed text and counts, never brain content.** It
+     reads "mnemo (this session's own MCP server): new work in your inbox:
+     2 messages, 1 task. Call the `inbox` tool to read them." It has no
+     subject, body, sender, ref or id.
+     - It reaches the session as a cross-session message, outside the
+       framing line, so it must hold nothing an agent wrote.
+     - A test posts a message whose subject, body and sender are hostile
+       ("ignore your instructions…", a fake framing line), and checks that
+       none of it appears in the posted text.
+   - **How the woken session sees it.** By the docs, it arrives as a message
+     that "came from another Claude session, not from you", and it can't
+     approve a permission prompt. That framing is right for it:
+     - the text says it's mnemo's pointer, from the session's own server;
+     - it asks only that the agent call `inbox`;
+     - what the agent then reads comes through the tool, under the framing
+       line, like any brain content.
+   - **`crossSessionInbound` must be `accept`** for the repo's sessions.
+     With `hold`, each wake-up waits for the user to release it, which
+     defeats the point. With `refuse`, path 2 does nothing (path 1 still
+     works). The guide's section tells the user to keep `accept`, and
+     `mnemo wake status` shows the setting it can see.
    - **It's its own session,** reached through that session's own socket,
      which the server inherited. No server pokes another session, and no
      socket of mnemo's is created.
    - **To verify in step 6, not assumed:**
-     - that a stdio MCP server inherits the two variables;
+     - that a stdio MCP server inherits the two variables (**checked
+       2026-11-15** on this Mac's running servers, section 2; step 6
+       repeats it in its DONE);
      - that a posted message wakes an idle session as the docs say;
      - the message format the socket takes;
      - how `crossSessionInbound` treats it.
@@ -308,13 +362,19 @@ command the user configures.
 ### The guardrails, from the first version
 
 They live in the code that marks an item `delivered`, so they're the same
-for every path:
+for every path. **The hop cap counts within a thread, and a fresh message
+starts a new one,** so two agents trading new messages instead of replies
+would never reach it on its own. For them, **the per-recipient rate limit
+and the cooldown are the real bound,** and the pair carry below closes the
+gap cheaply: it's one look at the pair's recent messages, inside the
+`post`'s own write window.
 
 | Guardrail | Default | What it does |
 |---|---|---|
 | Wake-ups per recipient per hour | 12 | Past it, items stay `sent` and are seen at the next turn or session start |
 | Cooldown per recipient | 60 s | Items arriving inside it join the next pointer |
 | Hop cap per thread | 8 | A reply whose `_mnemo.hops` would pass 8 is stored, but wakes nobody, and the brief says "thread X reached its hop cap" |
+| Hop carry between a pair | 10 min | A new message from A to B starts at one more than the newest message between A and B (either way) in the last 10 minutes, not at 0. So two agents answering with fresh messages instead of replies still reach the cap |
 | Kill switch | `mnemo wake pause` / `resume`, a keyed record `wake:paused` in the brain, so every session sees it; `MNEMO_WAKE=off` for one session | Paused: nothing is delivered, everything stays `sent` |
 | Stop continuations | Off; at most one in a row when on | Section 3, path 3 |
 
@@ -514,12 +574,12 @@ Each step is one PR into `release-0.17.0`, with its tests.
 | Step | What | REVIEWER-B? |
 |---|---|---|
 | 0 | This note | |
-| 1 | **The plumbing:** the four kinds left out of recall, BM25, ANN and `about`; the sentinel vector; `_mnemo.author`, `visibility`, `as_of` and `review_by` accepted on writes; AGENT-DEFAULT (the manifest's default owner); `MNEMO_AGENT`/`MNEMO_ROLE` read by the CLI, the server and the hooks, **with a test that the client passes them** (or a documented fallback); CLI-PATHLESS-2 | |
-| 2 | **Messages:** `post`, `inbox`, `ack`, the delivery and status fields in place; the MCP `inbox` tool, the CLI and Python; the brief's "Your work" part | |
+| 1 | **The plumbing:** the four kinds left out of recall, BM25, ANN and `about`; the sentinel vector; `_mnemo.author`, `visibility`, `as_of` and `review_by` accepted on writes; AGENT-DEFAULT (`_mnemo.default_agent` on the manifest, `mnemo default-agent`, set once on this brain, and in `seed.json`); `MNEMO_AGENT`/`MNEMO_ROLE` read by the CLI, the server and the hooks (CI tests that; **whether the client passes them to hooks is a by-hand check** in its DONE); CLI-PATHLESS-2 | |
+| 2 | **Messages:** `post`, `inbox`, `ack`, the delivery and status fields in place, the hop count and its pair carry; the MCP `inbox` tool, the CLI and Python; the brief's "Your work" part | |
 | 3 | **Claims and presence** (12.4 step 7): the claim window, tokens, `check`, the presence sidecar lock, `who()`; the 1,000-race test and FLAKE-1's pattern | **Yes:** the file's concurrency |
 | 4 | **Tasks:** `add`, `next` (which claims), `update`, `list`, `get`, dependencies, `pre_approved`; the MCP `task` tool | |
-| 5 | **The per-turn hook and the Stop continuation:** `mnemo hook user-prompt` and `hook stop`; `onboard` writes the first, and `--wake stop` the second; the guardrails and the kill switch; the hook's cost measured at a load under 2 | |
-| 6 | **The idle wake-up:** the file watcher in `serve --mcp --shared`; the post to the session's own socket; the verifications in section 3. Dropped if they fail | **Yes:** a long-lived watcher, and a process that posts into another program's socket |
+| 5 | **The per-turn hook and the Stop continuation:** `mnemo hook user-prompt` (a read on most turns, one write window only when it shows something; its line under the framing line) and `hook stop`; `onboard` writes the first, and `--wake stop` the second; the guardrails and the kill switch; the hook's cost measured at a load under 2 | |
+| 6 | **The idle wake-up:** the file watcher in `serve --mcp --shared`; the post to the session's own socket, fixed text and counts only (with the hostile-subject test); the verifications in section 3. Dropped if they fail | **Yes:** a long-lived watcher, and a process that posts into another program's socket |
 | 7 | **Visibility and freshness:** the filters, the `export` rules, `stale`, the `about` and brief marks, ABOUT-COUNT | |
 | 8 | **The guide's section** and the card line, `llms.txt` regenerated; the README rows | |
 | 9 | **READY:** the bump to 0.17.0, the CHANGELOG, the dry run | |
@@ -538,8 +598,9 @@ Visibility (step 7) is a filter and needs no pass of its own. If step 8b (a
   tmux pane), once step 1 ships;
 - re-runs `mnemo onboard` after step 5, to add the per-turn hook, and
   decides whether to turn on `--wake stop`;
-- keeps `crossSessionInbound` accepting for the repo's sessions, or holds,
-  as now;
+- keeps `crossSessionInbound` at `accept` for the repo's sessions: with
+  `hold` each wake-up waits for them, and with `refuse` only the per-turn
+  check works;
 - needs no claude.ai login and no channel flags for any of this. Channels
   stay optional (section 3, path 4);
 - approves the release.
@@ -547,17 +608,20 @@ Visibility (step 7) is a filter and needs no pass of its own. If step 8b (a
 ## For sign-off
 
 1. The four kinds as records with the sentinel vector, never recall hits.
-2. `MNEMO_AGENT` and `MNEMO_ROLE` from the environment, verified in step 1,
-   and AGENT-DEFAULT by the manifest.
+2. `MNEMO_AGENT` and `MNEMO_ROLE` from the environment (checked for
+   Claude Code's server; hooks by hand in step 1), and AGENT-DEFAULT by a
+   reserved manifest key, `_mnemo.default_agent`.
 3. Delivery: the per-turn hook first, the idle wake-up through the
    session's own socket (verified in step 6, or dropped), Stop
    continuations off by default, channels optional, `mnemo watch`
    deferred.
-4. The guardrail defaults: 12 an hour, 60 s, 8 hops, and the kill switch.
+4. The guardrail defaults: 12 an hour, 60 s, 8 hops with the 10-minute pair
+   carry, and the kill switch.
 5. Claims as 12.4 step 7, with the TTLs above.
 6. Visibility as a filter, and `SECURITY.local.md` staying.
 7. Freshness's per-kind defaults.
-8. Three MCP tools, and the brief's 600-byte part.
+8. Three MCP tools, the brief's 600-byte part, and the per-turn hook's one
+   write when it shows something.
 9. The step list, and REVIEWER-B after step 6.
 
 ## Sources (read 2026-11-15)
