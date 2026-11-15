@@ -94,6 +94,8 @@ pub fn create_dir(brain: &Path) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("{}: {e}", dir.display())),
     }
+    // Only Unix sets a mode, so elsewhere `b` is never changed.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut b = std::fs::DirBuilder::new();
     #[cfg(unix)]
     {
