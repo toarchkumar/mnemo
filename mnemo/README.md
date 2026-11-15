@@ -1141,8 +1141,17 @@ how a raw-key v8 file becomes v9.
 - **Key files** (for `--key-file` and `MNEMO_KEY_FILE`) must be regular
   files owned by you, with no access for group or others (mode 0600 or
   0400) on Unix, as `ssh` asks of a private key. Anything else is refused,
-  naming `chmod 600 <path>`. In CI and containers, prefer `MNEMO_KEY` from
-  the platform's secret store.
+  naming `chmod 600 <path>`.
+- **In CI and containers,** prefer `MNEMO_KEY` (the recovery code or the 64
+  hex digits) from the platform's secret store: a CI secret, or a
+  Kubernetes `env.valueFrom.secretKeyRef`. A mounted key file must pass the
+  check above, owned by the user the process runs as with mode 0400 or
+  0600, and the usual mounts don't come that way: a Docker secret is owned
+  by root and readable by all, and a Kubernetes secret volume is 0644 and
+  owned by root unless set otherwise. On Docker, set the secret's `uid` and
+  `mode` (or copy it at start-up); on Kubernetes, use `defaultMode: 0400`
+  with a pod that runs as the file's owner (`runAsUser`, `fsGroup`), or an
+  init step that copies it.
 - **Passphrase KDF parameters have a floor.** The engine refuses a
   passphrase with raw-key parameters on every create and rekey, a rekey to
   a passphrase always gets at least `KdfParams::secure()`, and a file below

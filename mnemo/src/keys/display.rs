@@ -2,7 +2,10 @@
 //! shown only to a person at a terminal: stdout and stdin are terminals, no
 //! known agent-harness marker is set, and the controlling terminal opens.
 //! It's shown through the controlling terminal, after a key press, on the
-//! alternate screen, so nothing reaches stdout or stays in scrollback.
+//! alternate screen, so nothing reaches stdout or stays in scrollback. On
+//! Windows there's no alternate screen (the escapes are Unix-only), so the
+//! code stays in the console's scrollback; `init --help` and the CHANGELOG
+//! say so.
 
 use std::io::{IsTerminal, Write};
 

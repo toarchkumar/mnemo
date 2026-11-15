@@ -349,19 +349,31 @@ fn install_fetches_checks_and_then_serves_every_command() {
     assert!(top("what does `snapshot_list` return").contains("snapshot_list returns"));
     assert!(top("who approves a release").contains("approval click"));
 
-    // A changed file in the cache is refused, and `install` says so.
+    // A changed file of the right size: refused at load with the fix named,
+    // `status` says so (it hashes), and `install` replaces it (RB-010.4).
     let tok = env.installed_dir().join("tokenizer.json");
     let mut bytes = std::fs::read(&tok).unwrap();
     bytes[10] ^= 1;
     std::fs::write(&tok, &bytes).unwrap();
     let e = fails(&env.run(&["remember", p, "--text", "x"]));
-    assert!(e.contains("doesn't match its pinned SHA-256"), "{e}");
-    let e = fails(&env.run(&["embedder", "install"]));
-    assert!(e.contains("doesn't match its pinned SHA-256"), "{e}");
-    // Deleting it lets `install` fetch it again.
-    std::fs::remove_file(&tok).unwrap();
-    ok(&env.run(&["embedder", "install"]));
+    assert!(
+        e.contains("doesn't match its pinned SHA-256") && e.contains("embedder install"),
+        "{e}"
+    );
+    let t = ok(&env.run(&["embedder", "status"]));
+    assert!(
+        t.contains("installed:  no (tokenizer.json") && t.contains("doesn't match"),
+        "{t}"
+    );
+    // A dead download's leftover is removed by the next install.
+    let stale = env.installed_dir().join("config.json.999999999.part");
+    std::fs::write(&stale, b"half a file").unwrap();
+    let t = ok(&env.run(&["embedder", "install"]));
+    assert!(t.contains("installed") && !t.contains("already"), "{t}");
     assert_eq!(served.load(std::sync::atomic::Ordering::SeqCst), 4);
+    assert!(!stale.exists());
+    assert!(ok(&env.run(&["embedder", "status"])).contains("installed:  yes"));
+    ok(&env.run(&["remember", p, "--text", "x"]));
 
     // The MCP server uses it with no flags: `remember` and `recall` by text.
     let out = mcp(

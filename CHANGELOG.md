@@ -20,7 +20,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   group. `mnemo recovery-code <file>` shows a brain's code from the key
   store, only to a person at a terminal: stdout and stdin are terminals,
   no agent harness marker is set, and the code appears on the controlling
-  terminal after a key press, on the alternate screen.
+  terminal after a key press, on the alternate screen. On Windows the
+  console has no alternate screen, so the code stays in its scrollback.
 - **`mnemo rekey --new-key`** rekeys to a new generated key, keeps it in
   the key store under the new salt before the commit, and shows its code
   before the commit. `--store` keeps a new passphrase there too. The old

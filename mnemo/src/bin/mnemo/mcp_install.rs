@@ -669,6 +669,17 @@ pub fn run(o: Install) -> Result<(), String> {
     if let Some(note) = secret_note(&o.file) {
         eprintln!("note: {note}");
     }
+    // RB-010.4 item 4: the server's first start would otherwise fetch the
+    // model before it answers the client.
+    #[cfg(feature = "embed-candle")]
+    if !mnemo_engine::builtin::is_installed() {
+        eprintln!(
+            "note: the built-in embedder's model ({}) isn't in the cache yet: run `mnemo \
+             embedder install` now, or the server's first start fetches it before it answers \
+             the client",
+            mnemo_engine::builtin::human_size(mnemo_engine::builtin::download_size())
+        );
+    }
     Ok(())
 }
 

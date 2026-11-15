@@ -160,8 +160,8 @@ pub fn model_dir() -> Result<PathBuf> {
         .join(REVISION))
 }
 
-/// Whether every file is in [`model_dir`] at its pinned size. The hashes are
-/// checked when the model loads.
+/// Whether every file is in [`model_dir`] at its pinned size: the cheap
+/// check. The hashes are checked at every load, and by [`verify_installed`].
 pub fn is_installed() -> bool {
     model_dir().is_ok_and(|d| {
         FILES.iter().all(|f| {
@@ -170,17 +170,79 @@ pub fn is_installed() -> bool {
     })
 }
 
-/// Fetch whatever [`model_dir`] is missing, checking each file's size and
-/// SHA-256 before it takes its place, and return the directory. `notice`
-/// hears, before any download, what's fetched, its size, and where to.
-/// Nothing is fetched when the files are there; a file at the wrong size
-/// is fetched again.
-pub fn install(notice: &mut dyn FnMut(&str)) -> Result<PathBuf> {
+/// Whether `dir`'s copy of `f` is there at its pinned size and SHA-256.
+fn file_matches(dir: &Path, f: &ModelFile) -> Result<bool> {
+    let p = dir.join(f.name);
+    match std::fs::metadata(&p) {
+        Ok(m) if m.is_file() && m.len() == f.size => {}
+        _ => return Ok(false),
+    }
+    let mut file = std::fs::File::open(&p).map_err(|e| {
+        MnemoError::Invalid(format!(
+            "the built-in embedder can't read {}: {e}",
+            p.display()
+        ))
+    })?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| {
+        MnemoError::Invalid(format!(
+            "the built-in embedder can't read {}: {e}",
+            p.display()
+        ))
+    })?;
+    Ok(hex(&hasher.finalize()) == f.sha256)
+}
+
+/// Check every file in [`model_dir`] against its pinned size and SHA-256
+/// (`mnemo embedder status`). The error names the first file that's missing
+/// or doesn't match, and the fix.
+pub fn verify_installed() -> Result<()> {
     let dir = model_dir()?;
-    let missing: Vec<&ModelFile> = FILES
-        .iter()
-        .filter(|f| std::fs::metadata(dir.join(f.name)).map_or(true, |m| m.len() != f.size))
-        .collect();
+    for f in FILES {
+        if !dir.join(f.name).exists() {
+            return Err(MnemoError::Invalid(format!(
+                "{} isn't in {} (`mnemo embedder install` fetches it)",
+                f.name,
+                dir.display()
+            )));
+        }
+        if !file_matches(&dir, &f)? {
+            return Err(MnemoError::Invalid(format!(
+                "{} in {} doesn't match its pinned SHA-256 (`mnemo embedder install` replaces \
+                 it)",
+                f.name,
+                dir.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Fetch whatever [`model_dir`] is missing or doesn't match, checking each
+/// file's size and SHA-256 before it takes its place, and return the
+/// directory. A file there already is hashed, and replaced if it doesn't
+/// match. `notice` hears, before any download, what's fetched, its size, and
+/// where to. Nothing is fetched when every file matches.
+pub fn install(notice: &mut dyn FnMut(&str)) -> Result<PathBuf> {
+    install_with(notice, true)
+}
+
+/// [`install`], checking the files already there by size only when
+/// `hash_present` is off (the first-use path: the load that follows hashes
+/// every file anyway).
+fn install_with(notice: &mut dyn FnMut(&str), hash_present: bool) -> Result<PathBuf> {
+    let dir = model_dir()?;
+    let mut missing: Vec<&ModelFile> = Vec::new();
+    for f in &FILES {
+        let ok = if hash_present {
+            file_matches(&dir, f)?
+        } else {
+            std::fs::metadata(dir.join(f.name)).is_ok_and(|m| m.len() == f.size)
+        };
+        if !ok {
+            missing.push(f);
+        }
+    }
     if missing.is_empty() {
         return Ok(dir);
     }
@@ -196,6 +258,7 @@ pub fn install(notice: &mut dyn FnMut(&str)) -> Result<PathBuf> {
             dir.display()
         ))
     })?;
+    remove_stale_parts(&dir);
     let base = std::env::var("MNEMO_MODEL_URL")
         .ok()
         .filter(|b| !b.is_empty())
@@ -206,6 +269,39 @@ pub fn install(notice: &mut dyn FnMut(&str)) -> Result<PathBuf> {
         fetch(&url, &dir.join(f.name), f.sha256, f.size)?;
     }
     Ok(dir)
+}
+
+/// Remove the temporary files (`<name>.<pid>.part`) that downloads which
+/// never finished left in `dir`: a process that isn't running any more
+/// (Unix), or a file more than an hour old. Another process's download in
+/// progress keeps its file.
+fn remove_stale_parts(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(stem) = name.strip_suffix(".part") else {
+            continue;
+        };
+        let Some(pid) = stem
+            .rsplit_once('.')
+            .and_then(|(file, pid)| FILES.iter().any(|f| f.name == file).then_some(pid))
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+        let gone = pid != std::process::id() && !crate::shared::pid_alive(pid);
+        if gone || old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// Download `url` to `dest`, through a temporary file beside it that
@@ -228,7 +324,11 @@ pub(crate) fn fetch(url: &str, dest: &Path, sha256: &str, size: u64) -> Result<(
         .map_err(|e| fail(format!("download of {name} failed ({url}): {e}")))?;
     let tmp = dest.with_file_name(format!("{name}.{}.part", std::process::id()));
     let result = (|| {
-        let mut out = std::fs::File::create(&tmp)
+        // `create_new`: never through a link, or over another writer's file.
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
             .map_err(|e| fail(format!("download can't write {}: {e}", tmp.display())))?;
         // One byte over the size is enough to tell a too-long body.
         let mut body = resp.body_mut().with_config().limit(size + 1).reader();
@@ -314,7 +414,8 @@ impl BuiltinEmbedder {
     /// Load the model from [`model_dir`], fetching it first if it isn't
     /// there ([`install`]; `notice` hears the size before the download).
     pub fn load_or_install(notice: &mut dyn FnMut(&str)) -> Result<Self> {
-        let dir = install(notice)?;
+        // Sizes only here: the load hashes every file.
+        let dir = install_with(notice, false)?;
         Self::load_pinned(&dir)
     }
 
@@ -365,7 +466,7 @@ impl BuiltinEmbedder {
             if got != f.sha256 {
                 return Err(MnemoError::Invalid(format!(
                     "the built-in embedder's {} in {} doesn't match its pinned SHA-256 \
-                     (got {got}); delete it and run `mnemo embedder install`",
+                     (got {got}); `mnemo embedder install` replaces it",
                     f.name,
                     dir.display()
                 )));
@@ -565,6 +666,30 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(e.contains("download of x failed"), "{e}");
+    }
+
+    #[test]
+    fn only_a_finished_downloads_leftovers_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let touch = |name: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, b"x").unwrap();
+            p
+        };
+        let dead = touch("config.json.999999999.part");
+        let mine = touch(&format!("tokenizer.json.{}.part", std::process::id()));
+        let other = touch("notes.123.part");
+        let model = touch("model.safetensors");
+        #[cfg(unix)]
+        let live = touch("model.safetensors.1.part"); // pid 1 is always running
+        remove_stale_parts(dir.path());
+        #[cfg(unix)]
+        assert!(!dead.exists(), "a dead process's file stays");
+        #[cfg(not(unix))]
+        let _ = dead;
+        assert!(mine.exists() && other.exists() && model.exists());
+        #[cfg(unix)]
+        assert!(live.exists(), "a running process's download was removed");
     }
 
     #[test]
