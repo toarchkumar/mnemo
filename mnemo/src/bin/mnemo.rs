@@ -80,6 +80,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Inbox { path, .. }
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
+        | Command::Claim { brain: path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -662,6 +663,28 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// 13a (13.3): claims, so two agents don't do one thing. A claim is a
+    /// record, not a lock, and it's advisory. `take` prints a token that
+    /// `renew`, `release` and `check` need; `check` before anything
+    /// irreversible. Exits 1 when a topic is held by another agent or a
+    /// token is lost.
+    Claim {
+        #[command(subcommand)]
+        cmd: ClaimCmd,
+        #[command(flatten)]
+        who: AsArgs,
+        /// The brain's path. Left out, this project's brain.
+        #[arg(
+            long,
+            global = true,
+            value_name = "PATH",
+            default_value = "",
+            hide_default_value = true
+        )]
+        brain: String,
+        #[arg(long, global = true)]
+        passphrase: Option<String>,
+    },
     /// 13a: show, set or clear the agent a write that names none is made
     /// for (the manifest's `_mnemo.default_agent`). The CLI and the MCP
     /// server use it in place of `default`.
@@ -1183,6 +1206,37 @@ enum Command {
     Cache {
         #[command(subcommand)]
         op: CacheOp,
+    },
+}
+
+/// 13a (13.3): `mnemo claim`.
+#[derive(Subcommand)]
+enum ClaimCmd {
+    /// Claim a topic for `--ttl` (default 15m; 30s to 24h). Prints
+    /// `claimed`, the token and the expiry.
+    Take {
+        /// What you claim (one line).
+        topic: String,
+        /// The lease: seconds, or `90s`, `15m`, `2h`.
+        #[arg(long)]
+        ttl: Option<String>,
+    },
+    /// Renew your claim from now, for `--ttl` or its lease.
+    Renew {
+        topic: String,
+        token: String,
+        #[arg(long)]
+        ttl: Option<String>,
+    },
+    /// Release your claim.
+    Release { topic: String, token: String },
+    /// Whether your token still holds the topic (exit 1 when it's lost).
+    Check { topic: String, token: String },
+    /// The agents: role, tool, last active, whether their process is alive
+    /// (`unknown` without a long-lived one), and what they hold.
+    Who {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
     },
 }
 
@@ -2020,11 +2074,11 @@ pub(crate) fn env_identity() -> (Option<String>, Option<String>) {
 #[derive(clap::Args, Debug, Default)]
 struct AsArgs {
     /// The agent you are (default `MNEMO_AGENT`).
-    #[arg(long = "as", value_name = "AGENT")]
+    #[arg(long = "as", value_name = "AGENT", global = true)]
     agent: Option<String>,
     /// Your role (default `MNEMO_ROLE`): `inbox` shows what's sent to
     /// `role:<role>`.
-    #[arg(long, value_name = "ROLE")]
+    #[arg(long, value_name = "ROLE", global = true)]
     role: Option<String>,
 }
 
@@ -2047,6 +2101,23 @@ impl AsArgs {
             self.role.clone().or(env_role),
         ))
     }
+}
+
+/// 13a: a lease: seconds, or a number with `s`, `m`, `h` or `d`.
+fn parse_ttl(s: &str) -> std::result::Result<i64, String> {
+    let s = s.trim();
+    let bad = || format!("--ttl {s:?}: seconds, or 90s, 15m, 2h");
+    let (n, mult) = match s.char_indices().last() {
+        Some((i, 's')) => (&s[..i], 1),
+        Some((i, 'm')) => (&s[..i], 60),
+        Some((i, 'h')) => (&s[..i], 3_600),
+        Some((i, 'd')) => (&s[..i], 86_400),
+        _ => (s, 1),
+    };
+    n.parse::<i64>()
+        .ok()
+        .and_then(|n| n.checked_mul(mult))
+        .ok_or_else(bad)
 }
 
 /// One message as a table row: its id, sender, recipient and subject, then
@@ -3985,6 +4056,126 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
+        Command::Claim {
+            cmd,
+            who,
+            brain: path,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "claim").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent.clone());
+            }
+            let writes = matches!(
+                cmd,
+                ClaimCmd::Take { .. } | ClaimCmd::Renew { .. } | ClaimCmd::Release { .. }
+            );
+            if writes {
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
+            let ttl = |t: &Option<String>| t.as_deref().map(parse_ttl).transpose();
+            let lost = |topic: &str| {
+                format!(
+                    "lost: the claim on {topic:?} lapsed or another agent holds it; don't take                      an irreversible step on it"
+                )
+            };
+            let when = |t: i64| export::rfc3339(t);
+            let out: std::result::Result<(), String> = match &cmd {
+                ClaimCmd::Take { topic, ttl: t } => match db.claim(topic, ttl(t)?).map_err(fmt)? {
+                    mnemo_engine::ClaimOutcome::Claimed { token, expires_at } => {
+                        println!("claimed\t{token}\t{}", when(expires_at));
+                        Ok(())
+                    }
+                    mnemo_engine::ClaimOutcome::HeldBy {
+                        agent: a,
+                        expires_at,
+                    } => Err(format!(
+                        "{topic:?} is held by {a} until {}",
+                        when(expires_at)
+                    )),
+                },
+                ClaimCmd::Renew {
+                    topic,
+                    token,
+                    ttl: t,
+                } => match db.renew(topic, token, ttl(t)?).map_err(fmt)? {
+                    mnemo_engine::ClaimStatus::Held { expires_at } => {
+                        println!("held until {}", when(expires_at));
+                        Ok(())
+                    }
+                    _ => Err(lost(topic)),
+                },
+                ClaimCmd::Release { topic, token } => {
+                    match db.release(topic, token).map_err(fmt)? {
+                        mnemo_engine::ClaimStatus::Released => {
+                            println!("released");
+                            Ok(())
+                        }
+                        _ => Err(lost(topic)),
+                    }
+                }
+                ClaimCmd::Check { topic, token } => {
+                    match db.check_claim(topic, token).map_err(fmt)? {
+                        mnemo_engine::ClaimStatus::Held { expires_at } => {
+                            println!("held until {}", when(expires_at));
+                            Ok(())
+                        }
+                        _ => Err(lost(topic)),
+                    }
+                }
+                ClaimCmd::Who { format } => {
+                    let rows = db.who().map_err(fmt)?;
+                    let alive = |a: mnemo_engine::Alive| match a {
+                        mnemo_engine::Alive::Yes => "yes",
+                        mnemo_engine::Alive::No => "no",
+                        mnemo_engine::Alive::Unknown => "unknown",
+                    };
+                    let json = |p: &mnemo_engine::Presence| {
+                        serde_json::json!({
+                            "agent": p.agent, "role": p.role, "tool": p.tool,
+                            "last_active": p.last_active, "alive": alive(p.alive),
+                            "claims": p.claims,
+                        })
+                    };
+                    match format {
+                        OutputFormat::Json => println!(
+                            "{}",
+                            serde_json::Value::Array(rows.iter().map(json).collect())
+                        ),
+                        OutputFormat::Jsonl => {
+                            for p in &rows {
+                                println!("{}", json(p));
+                            }
+                        }
+                        OutputFormat::Table => {
+                            if rows.is_empty() {
+                                println!("no agents yet");
+                            }
+                            for p in &rows {
+                                println!(
+                                    "{}  role {}  {}  alive {}  last active {}{}",
+                                    p.agent,
+                                    p.role.as_deref().unwrap_or("-"),
+                                    p.tool.as_deref().unwrap_or("-"),
+                                    alive(p.alive),
+                                    when(p.last_active),
+                                    if p.claims.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!("  holds {}", p.claims.join(", "))
+                                    }
+                                );
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+            };
+            db.flush().map_err(fmt)?;
+            out?;
+        }
         Command::Post {
             to,
             subject,
@@ -4000,6 +4191,7 @@ fn run() -> std::result::Result<(), String> {
             let mut db = open_w(&path, &pp, "post").map_err(fmt)?;
             if agent.is_some() {
                 db.set_author(agent.clone());
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
             }
             let m = db
                 .post(
@@ -4027,6 +4219,10 @@ fn run() -> std::result::Result<(), String> {
             let (agent, role) = who.resolve()?;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "inbox").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent.clone());
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
             if prune {
                 let n = db.prune_messages(i64::from(days) * 86_400).map_err(fmt)?;
                 db.flush().map_err(fmt)?;
@@ -4069,11 +4265,15 @@ fn run() -> std::result::Result<(), String> {
             who,
             passphrase: pp,
         } => {
-            let (agent, _role) = who.resolve()?;
+            let (agent, role) = who.resolve()?;
             let id = id.unwrap_or_default();
             let ulid = parse_ulid(&id)?;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "ack").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent.clone());
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
             let outcome = db
                 .ack(&ulid, note.as_deref(), agent.as_deref())
                 .map_err(fmt)?;

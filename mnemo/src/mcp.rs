@@ -576,6 +576,93 @@ fn tool_inbox(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcEr
     Ok(out)
 }
 
+/// 13a (13.3): the `claim` tool: `take`, `renew`, `release`, `check` and
+/// `who`, as this server's agent.
+fn tool_claim(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let op = args.get("op").and_then(Value::as_str).unwrap_or("");
+    let bad = |m: String| RpcError::new(INVALID_PARAMS, format!("claim: {m}"));
+    let s = |k: &str| -> std::result::Result<&str, RpcError> {
+        args.get(k)
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad(format!("'{k}' is needed")))
+    };
+    let ttl = args.get("ttl").and_then(Value::as_i64);
+    let status = |st: crate::ClaimStatus| match st {
+        crate::ClaimStatus::Held { expires_at } => {
+            json!({"status": "held", "expires_at": expires_at})
+        }
+        crate::ClaimStatus::Released => json!({"status": "released"}),
+        crate::ClaimStatus::Lost => {
+            json!({"status": "lost", "note": "the claim lapsed or another agent holds it: don't take an irreversible step on it"})
+        }
+    };
+    let out = match op {
+        "take" => {
+            let o = db.claim(s("topic")?, ttl).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            match o {
+                crate::ClaimOutcome::Claimed { token, expires_at } => {
+                    json!({"status": "claimed", "token": token, "expires_at": expires_at})
+                }
+                // The holder's id is brain text: framed below.
+                crate::ClaimOutcome::HeldBy { agent, expires_at } => {
+                    return Ok(format!(
+                        "{}\n\n{}",
+                        crate::guide::FRAMING,
+                        crate::guide::escape_brain(
+                            &json!({"status": "held_by", "agent": agent, "expires_at": expires_at})
+                                .to_string()
+                        )
+                    ))
+                }
+            }
+        }
+        "renew" => {
+            let st = db.renew(s("topic")?, s("token")?, ttl).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            status(st)
+        }
+        "release" => {
+            let st = db.release(s("topic")?, s("token")?).map_err(mnemo_err)?;
+            db.flush().map_err(mnemo_err)?;
+            status(st)
+        }
+        "check" => status(
+            db.check_claim(s("topic")?, s("token")?)
+                .map_err(mnemo_err)?,
+        ),
+        "who" => {
+            let who = db.who().map_err(mnemo_err)?;
+            let rows: Vec<Value> = who
+                .iter()
+                .map(|p| {
+                    json!({
+                        "agent": p.agent, "role": p.role, "tool": p.tool,
+                        "last_active": p.last_active,
+                        "alive": match p.alive {
+                            crate::Alive::Yes => json!(true),
+                            crate::Alive::No => json!(false),
+                            crate::Alive::Unknown => json!("unknown"),
+                        },
+                        "claims": p.claims,
+                    })
+                })
+                .collect();
+            return Ok(format!(
+                "{}\n\n{}",
+                crate::guide::FRAMING,
+                crate::guide::escape_brain(&json!({"agents": rows}).to_string())
+            ));
+        }
+        other => {
+            return Err(bad(format!(
+                "unknown op '{other}' (take, renew, release, check, who)"
+            )))
+        }
+    };
+    Ok(out.to_string())
+}
+
 /// The server's embedder, as chosen at start.
 enum ServerEmbedder {
     /// None: vectors (and keywords) only.
@@ -715,9 +802,21 @@ fn serve_inner<R: Read, W: Write>(
         ),
     }
     SERVER_ROLE.with(|r| *r.borrow_mut() = role);
+    let named = agent.clone();
     match &mut db {
         ServerDb::Plain(db) => db.set_author(agent),
-        ServerDb::Shared(s) => s.set_author(agent),
+        ServerDb::Shared(s) => {
+            s.set_author(agent);
+            // 13a (13.3): a long-lived shared server holds its agent's
+            // presence lock, so `who` sees it alive and its claims can
+            // lapse early once it's gone. It never touches the brain's lock.
+            if let Some(a) = &named {
+                match s.hold_presence() {
+                    Ok(()) => eprintln!("mnemo mcp: holding {a}'s presence lock"),
+                    Err(e) => eprintln!("mnemo mcp: no presence lock for {a}: {e}"),
+                }
+            }
+        }
     }
     eprintln!("mnemo mcp: ready ({} live memories)", db.len()?);
 
@@ -974,6 +1073,21 @@ fn tools_list() -> Value {
                         "conversation": { "type": "string", "description": "post: the conversation of the message you answer." },
                         "note": { "type": "string", "description": "ack: a note kept with it." }
                     },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "claim",
+                "description": "v0.17: claims between agents working on this project, so two don't do one thing. Most work needs none: use `inbox` for what's asked of you. `op: \"take\"` claims a `topic` (one line) for `ttl` seconds (default 900, 30 to 86400) and returns a `token`, or says who holds it; `renew` and `release` need the token; `check` says whether the token still holds it (call it before anything irreversible: `lost` means someone else may have done it); `who` lists the agents, whether each one's process is alive, and what each holds. A claim is advisory: nothing refuses a write because of one.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "op": { "type": "string", "enum": ["take", "renew", "release", "check", "who"] },
+                        "topic": { "type": "string", "description": "take, renew, release, check: what's claimed." },
+                        "token": { "type": "string", "description": "renew, release, check: the token take returned." },
+                        "ttl": { "type": "integer", "description": "take, renew: the lease in seconds (30 to 86400)." }
+                    },
+                    "required": ["op"],
                     "additionalProperties": false
                 }
             },
@@ -1267,6 +1381,12 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "missing tool name"))?;
     let empty = json!({});
     let args = params.get("arguments").unwrap_or(&empty);
+    // 13a (13.3): `last_active` rides the write this call makes anyway (at
+    // most once a minute). A failure here never fails the call.
+    if !is_read_tool(name) && db.author().is_some() {
+        let role = SERVER_ROLE.with(|r| r.borrow().clone());
+        let _ = db.touch_presence(role.as_deref(), Some("mcp"));
+    }
 
     let text = match name {
         "about" => tool_about(db)?,
@@ -1274,6 +1394,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
         "inbox" => tool_inbox(db, args)?,
+        "claim" => tool_claim(db, args)?,
         "thread_ingest" => tool_thread_ingest(db, args)?,
         "thread_export" => tool_thread_export(db, args)?,
         "thread_start" => tool_thread_start(db, args)?,

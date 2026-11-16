@@ -676,3 +676,124 @@ fn the_inbox_tool_as_the_servers_agent() {
         );
     });
 }
+
+/// 13a step 3 (v0.17): the `claim` tool takes, checks, renews and releases
+/// as the server's agent; `who` lists it, alive when a shared server holds
+/// its presence lock; the tool list has `inbox` before `claim`.
+#[test]
+fn the_claim_tool_as_the_servers_agent() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-a"), ("MNEMO_ROLE", "worker")],
+            &[
+                tool(
+                    "claim",
+                    json!({"op": "take", "topic": "step 3", "ttl": 600}),
+                ),
+                tool("claim", json!({"op": "take", "topic": "step 3"})),
+                tool("claim", json!({"op": "who"})),
+                tool("claim", json!({"op": "take", "topic": "t", "ttl": 5})),
+                ("tools/list", json!({})),
+            ],
+        );
+        let taken: Value =
+            serde_json::from_str(ok(&rs[1])["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(taken["status"], "claimed", "{taken}");
+        let token = taken["token"].as_str().unwrap().to_string();
+        let again = ok(&rs[2])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            again.starts_with(guide::FRAMING) && again.contains("held_by"),
+            "{again}"
+        );
+        let who = ok(&rs[3])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let v: Value = serde_json::from_str(who.split_once("\n\n").unwrap().1).unwrap();
+        let me = &v["agents"][0];
+        assert_eq!(me["agent"], "worker-a", "{who}");
+        assert_eq!(me["claims"], json!(["step 3"]));
+        assert_eq!(me["tool"], "mcp");
+        // Only a shared server holds a presence lock.
+        assert_eq!(
+            me["alive"],
+            if shared {
+                json!(true)
+            } else {
+                json!("unknown")
+            },
+            "{who}"
+        );
+        assert!(
+            rs[4]["error"].is_object() || rs[4]["result"]["isError"] == json!(true),
+            "{}",
+            rs[4]
+        );
+        let names: Vec<String> = rs[5]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        let at = |n: &str| names.iter().position(|x| x == n).unwrap();
+        assert!(at("inbox") < at("claim"), "{names:?}");
+        // A second session as another agent: held; then the first one's
+        // token renews, checks and releases.
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-b")],
+            &[
+                tool("claim", json!({"op": "take", "topic": "step 3"})),
+                tool(
+                    "claim",
+                    json!({"op": "check", "topic": "step 3", "token": "nope"}),
+                ),
+            ],
+        );
+        assert!(ok(&rs[1])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("worker-a"));
+        assert!(ok(&rs[2])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"lost\""));
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-a")],
+            &[
+                tool(
+                    "claim",
+                    json!({"op": "renew", "topic": "step 3", "token": token}),
+                ),
+                tool(
+                    "claim",
+                    json!({"op": "check", "topic": "step 3", "token": token}),
+                ),
+                tool(
+                    "claim",
+                    json!({"op": "release", "topic": "step 3", "token": token}),
+                ),
+                tool(
+                    "claim",
+                    json!({"op": "check", "topic": "step 3", "token": token}),
+                ),
+            ],
+        );
+        for (i, want) in [(1, "held"), (2, "held"), (3, "released"), (4, "lost")] {
+            let t = ok(&rs[i])["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(t.contains(&format!("\"status\":\"{want}\"")), "{i}: {t}");
+        }
+    });
+}

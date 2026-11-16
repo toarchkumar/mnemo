@@ -10,6 +10,7 @@
 mod call;
 mod fscheck;
 mod lock;
+mod presence;
 mod sidecar;
 
 #[allow(unused_imports)]
@@ -18,6 +19,7 @@ pub use call::CancelToken;
 pub use lock::SharedOptions;
 #[allow(unused_imports)]
 pub(crate) use lock::{BrainLocks, Held, LockKind, WINDOWS_OLD_RENAME};
+pub(crate) use presence::{probe as probe_presence, PresenceLock};
 pub(crate) use sidecar::pid_alive;
 
 /// Test hooks: not a stable API.

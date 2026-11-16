@@ -62,7 +62,35 @@ Pre-1.0, the minor component carries the breaking-change signal.
     unread messages, at most 600 bytes from the recall's share, after the
     framing line and escaped like all brain text. It's left out when
     there are none.
-  - In a git repository `post`, `inbox` and `ack <ID>` take no path.
+  - In a git repository `post`, `inbox` and `ack <ID>` take no path, and
+    neither does `claim`.
+- **Claims and presence (13a step 3, 12.4's step 7).**
+  - **`mnemo claim take|renew|release|check|who`,** the MCP `claim` tool
+    (`take`, `renew`, `release`, `check`, `who`), and `Mnemo::claim`,
+    `renew`, `release`, `check_claim`, `claims`, `touch_presence` and
+    `who` (Python too). A claim is a record, not a lock, and it's
+    advisory: nothing refuses a write because of one.
+  - **Tokens:** `take` returns one, and `renew`, `release` and `check`
+    need it. They return `lost` once the claim lapsed or another agent
+    holds it, so an agent checks before anything irreversible. A topic
+    the same agent already holds is "held" too: a token can't be
+    recovered.
+  - **Leases** are 15 minutes by default, 30 s to 24 h. A clock that
+    steps back can't stretch a claim past one lease.
+  - **Presence:** `who` lists each agent's role, tool, `last_active` and
+    claims, and whether its process is alive. A `serve --mcp --shared`
+    with `MNEMO_AGENT` holds a lock on its own file in the sidecar
+    directory for its life. It's re-checked by identity on every call,
+    and it never touches the brain's lock. Without one, `alive` is
+    `unknown`. `last_active` rides a write the agent makes anyway (the
+    server's tool calls, the CLI's coordination commands), at most once
+    a minute.
+  - **The early lapse is a hint:** a claim lapses before `expires_at`
+    only when its holder held a presence lock when it claimed, and a
+    taker found that lock free twice, 10 seconds apart.
+  - **One record per topic and per agent,** changed in place, found
+    through their rows without decrypting other records (no format
+    change). `--as`, `--role` and `--brain` work after the op too.
 - **More commands take no path in a git repository:** `update <ID>`,
   `thread start <NEW>`, and `essence update|resolve|remove <ID>`, with the
   same rule as `get` (CLI-PATHLESS-2). `thread start` with one argument that

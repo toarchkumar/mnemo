@@ -234,7 +234,7 @@ mod imp {
             }
         }
 
-        pub(super) fn open_existing(&self, name: &str, write: bool) -> std::io::Result<File> {
+        pub(crate) fn open_existing(&self, name: &str, write: bool) -> std::io::Result<File> {
             let mode = if write { OFlags::RDWR } else { OFlags::RDONLY };
             let fd = rfs::openat(
                 &self.dir,
@@ -341,7 +341,7 @@ mod imp {
             }
         }
 
-        pub(super) fn open_existing(&self, name: &str, write: bool) -> std::io::Result<File> {
+        pub(crate) fn open_existing(&self, name: &str, write: bool) -> std::io::Result<File> {
             let f =
                 no_follow(OpenOptions::new().read(true).write(write)).open(self.path.join(name))?;
             check_regular(&f)?;
@@ -368,3 +368,13 @@ mod imp {
 }
 
 pub(crate) use imp::{open, pid_alive};
+
+/// The sidecar directory for `brain` if it's already there (checked as
+/// [`open`] checks it), never creating it.
+pub(crate) fn open_if_present(brain: &Path) -> Option<Sidecar> {
+    std::fs::symlink_metadata(sidecar_path(brain)).ok()?;
+    match open(brain) {
+        SidecarState::Ready(s) => Some(s),
+        SidecarState::Unavailable(_) => None,
+    }
+}

@@ -479,7 +479,15 @@ pub(super) fn row_tags(m: &Memory) -> RowV9 {
         kind,
         flags,
         memory_type: memory_type_code(m.memory_type),
-        thread_hash: meta_str(m, MNEMO_META_THREAD).map_or(0, |t| fnv1a32(&[t.as_bytes()])),
+        // 13a: a claim's or presence record's row carries the hash of its
+        // topic or agent here instead (they have no thread), so a lookup
+        // decrypts only its candidates. No format change: an older build
+        // reads it as a thread hash that its decrypted check rejects.
+        thread_hash: if kind == ROW_KIND_COORDINATION {
+            super::coordination::locator_hash(m)
+        } else {
+            meta_str(m, MNEMO_META_THREAD).map_or(0, |t| fnv1a32(&[t.as_bytes()]))
+        },
         key_hash,
         agent_hash: fnv1a32(&[m.agent_id.as_bytes()]),
         created_at: m.created_at,

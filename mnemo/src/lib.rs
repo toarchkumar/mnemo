@@ -120,6 +120,11 @@ pub use memory::{
     MNEMO_META_UPDATED_AT, TASK_TRANSITIONS, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
     THREAD_TURN_CHUNK_BYTES,
 };
+/// 13a (13.3): claims and presence.
+pub use memory::{
+    CLAIM_LAPSE_GRACE_SECS, CLAIM_TOPIC_MAX, CLAIM_TTL_DEFAULT, CLAIM_TTL_MAX, CLAIM_TTL_MIN,
+    PRESENCE_EVERY_SECS,
+};
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,
     DEFAULT_BATCH_MAX_AGE, DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,
@@ -130,7 +135,7 @@ pub use shared::{CancelToken, SharedOptions};
 #[doc(hidden)]
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
-pub use store::Message;
+pub use store::{Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence};
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
     RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,
