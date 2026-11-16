@@ -24,17 +24,24 @@ answer the question.
 
 ### Changed
 
-- **`mnemo onboard` at a terminal** groups the plan under Brain, Model,
-  Claude Code, Cursor and Git, and marks each line added, changed, removed
-  or already right (`+`, `~`, `-`, `=`), with what's already right in one
-  line per group ("the MCP server and 3 hooks"). Only hooks that change
-  are listed, and a changed skill or rule shows how many lines changed.
-  The brain's line says where its key came from ("key found in your
-  keychain", or the variable or file name that gave it), and anything that
-  needs attention is marked `!`. After the writes come a short "Done" (or
-  "Nothing to change; everything is already set up."), a pointer to `mnemo
-  onboard --guide` in place of the whole guide, and "Next": restart the
-  clients that changed, then the steps only you can do. The step to trust
+- **`mnemo onboard` at a terminal** reports each item on one line, tagged
+  as a boot log tags its lines: `[  OK   ]`, `[ ADDED ]`, `[UPDATED]`,
+  `[REMOVED]`, `[ WARN  ]`, `[FAILED ]` or `[SKIPPED]`, then the part
+  (Brain, Model, Claude Code, Cursor, Git) and what it is, with its file
+  in brackets. A tag says what happened, so before a write `onboard` shows
+  a short plan in the future tense ("Will add: …", "Will update: …",
+  "Already right: …"), asks, then shows the tags; with `--yes`, or nothing
+  to change, the tags come straight away, and `--print` shows only the
+  plan. What's already right is one line per client ("the MCP server and 3
+  hooks already right"), only hooks that change are listed, and a changed
+  skill or rule shows how many lines changed. A write that fails part-way
+  is `[FAILED ]` with the reason, and what comes after it `[SKIPPED]`. The
+  brain's line says where its key came from ("key found in your keychain",
+  or the variable or file name that gave it). After the lines come "Done:
+  N files changed." (or "Nothing to change; everything is already set
+  up."), "Next:" with the steps only you can do (restart the clients that
+  changed first), and a pointer to `mnemo onboard --guide` in place of the
+  whole guide. Only the tag's word is coloured, as systemd does it. The step to trust
   the folder is left out for Claude Code when it has recorded the folder as
   trusted (`~/.claude.json`, read only for that), and Next is left out when
   nothing is in it. Paths are relative to the repository, colour follows

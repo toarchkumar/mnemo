@@ -1100,85 +1100,118 @@ fn squash(t: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// ONBOARD-UX: at a terminal (the dev-hooks switch), the plan is grouped
-/// with each line marked, the already-right ones in one line, then a short
-/// "Done", the guide's pointer and "Next" last. No guide, no absolute
-/// paths after the header, no keychain-delete line but with `--undo`.
+/// The seven tags, as a boot log prints them.
+const TAGS: [&str; 7] = [
+    "[  OK   ]",
+    "[ ADDED ]",
+    "[UPDATED]",
+    "[REMOVED]",
+    "[ WARN  ]",
+    "[FAILED ]",
+    "[SKIPPED]",
+];
+
+/// `onboard` at a "terminal" (the dev-hooks switch), stdin closed: stdout,
+/// stderr and the exit code.
+fn at_tty(e: &Env, args: &[&str], colour: bool, envs: &[(&str, &str)]) -> (String, String, i32) {
+    let mut all = vec!["onboard"];
+    all.extend(args);
+    let mut c = e.cmd(&e.p("repo"), &all);
+    c.env("MNEMO_DEV_ONBOARD_TTY", "1");
+    if !colour {
+        c.env("NO_COLOR", "1");
+    }
+    for (k, v) in envs {
+        c.env(k, v);
+    }
+    let o = c.output().unwrap();
+    (
+        out(&o),
+        String::from_utf8_lossy(&o.stderr).into_owned(),
+        o.status.code().unwrap_or(-1),
+    )
+}
+
+/// Every line that starts with a bracket is one of the seven tags, then a
+/// section, as `[ ADDED ] Claude Code: ...`.
+fn tagged_lines(t: &str) -> Vec<&str> {
+    let lines: Vec<&str> = t.lines().filter(|l| l.starts_with('[')).collect();
+    for l in &lines {
+        let tag = &l[..9];
+        assert!(TAGS.contains(&tag), "{l}");
+        assert!(
+            [
+                "Brain: ",
+                "Model: ",
+                "Claude Code: ",
+                "Cursor: ",
+                "Git: ",
+                "Clients: "
+            ]
+            .iter()
+            .any(|s| l[10..].starts_with(s)),
+            "{l}"
+        );
+    }
+    lines
+}
+
+/// ONBOARD-UX (the tags, v0.17.1): at a terminal, one line per item tagged
+/// as a boot log tags its lines, in the past tense, with what was already
+/// right in one line per client; then "Done", "Next" and the guide's
+/// pointer. Without `--yes` the plan comes first, in the future tense and
+/// untagged. No legend, no guide, no absolute path after the header, no
+/// keychain-delete line but with `--undo`.
 #[test]
-fn at_a_terminal_the_output_is_grouped_and_short() {
+fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
     let e = Env::new();
     let root = e.root().display().to_string();
-    let run = |args: &[&str], colour: bool| -> String {
-        let mut all = vec!["onboard", "--client", "claude-code,cursor"];
-        all.extend(args);
-        let mut c = e.cmd(&e.p("repo"), &all);
-        c.env("MNEMO_DEV_ONBOARD_TTY", "1");
-        if !colour {
-            c.env("NO_COLOR", "1");
-        }
-        let o = c.output().unwrap();
-        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-        out(&o)
+    let clients = ["--client", "claude-code,cursor"];
+    let with = |extra: &[&'static str]| -> Vec<&'static str> {
+        clients.iter().chain(extra).copied().collect()
     };
-    // The first run: the brain made, each client wired.
-    let t = run(&["--yes"], false);
+    // A first run, --yes: the tags straight away.
+    let (t, err, code) = at_tty(&e, &with(&["--yes"]), false, &[]);
+    assert_eq!(code, 0, "{err}");
     let flat = squash(&t);
     assert!(
         t.starts_with("mnemo onboard: ") && t.contains("(local scope)"),
         "{t}"
     );
-    for h in [
-        "\nBrain\n",
-        "\nModel\n",
-        "\nClaude Code\n",
-        "\nCursor\n",
-        "\nGit\n",
-        "\nDone\n",
-        "\nNext\n",
+    assert!(!tagged_lines(&t).is_empty(), "{t}");
+    for want in [
+        "[ ADDED ] Brain: .git/mnemo/project.mnemo (a generated key, kept in the keychain)",
+        "[ ADDED ] Claude Code: the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks (.claude/settings.local.json)",
+        "[ ADDED ] Claude Code: the skill (.claude/skills/mnemo/SKILL.md)",
+        "[ ADDED ] Cursor: the rule (.cursor/rules/mnemo.mdc)",
+        "files changed.",
+        "Next: 1. Restart Claude Code and Cursor (or start a new session) so they load the changes.",
+        "If Claude Code or Cursor asks you to trust this folder, accept: they run the hooks only in a trusted folder.",
+        "Back up the recovery code",
     ] {
-        assert!(t.contains(h), "{h:?} in {t}");
+        assert!(flat.contains(&squash(want)), "{want:?} in {t}");
     }
-    assert!(t.find("\nDone\n") < t.find("\nNext\n"), "{t}");
-    assert!(
-        flat.contains(
-            "+ the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks, in .claude/settings.local.json"
-        ),
-        "{t}"
-    );
-    assert!(
-        flat.contains("+ the rule, in .cursor/rules/mnemo.mdc"),
-        "{t}"
-    );
-    assert!(
-        flat.contains("The guide for agents: mnemo onboard --guide"),
+    assert!(flat.contains("Done: ") && !flat.contains("Will add"), "{t}");
+    assert_eq!(
+        t.lines().rev().find(|l| !l.is_empty()),
+        Some("The guide for agents: `mnemo onboard --guide`"),
         "{t}"
     );
     assert!(!t.contains(&guide::markdown()[..120]), "no guide: {t}");
-    assert!(
-        !t.contains("human step:") && !t.contains("pass them on"),
-        "{t}"
-    );
-    assert!(!t.contains("keychain entry"), "{t}");
+    for gone in [
+        "human step:",
+        "pass them on",
+        "keychain entry",
+        "already right   ",
+        "\nBrain\n",
+    ] {
+        assert!(!t.contains(gone), "{gone:?} in {t}");
+    }
     assert!(!t.contains('\x1b'), "NO_COLOR: {t}");
     for l in t.lines().skip(1) {
         assert!(!l.contains(&root), "a path from the repository: {l}");
     }
-    // Next: restart both, then the human steps, the trust prompt among them.
-    let next = &t[t.find("\nNext\n").unwrap()..];
-    assert!(
-        squash(next).contains(
-            "1. Restart Claude Code and Cursor (or start a new session) so they load the changes."
-        ),
-        "{next}"
-    );
-    assert!(
-        squash(next).contains(
-            "If Claude Code or Cursor asks you to trust this folder, accept: they run the hooks only in a trusted folder."
-        ),
-        "no record of trust: {next}"
-    );
-    assert!(squash(next).contains("Back up the recovery code"), "{next}");
-    // A re-run with one hook gone and the skill a line behind: only those.
+    // One hook gone and the skill a line behind.
     let settings = e.p("repo/.claude/settings.local.json");
     let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     v["hooks"]
@@ -1189,40 +1222,62 @@ fn at_a_terminal_the_output_is_grouped_and_short() {
     let skill = e.p("repo/.claude/skills/mnemo/SKILL.md");
     let text = std::fs::read_to_string(&skill).unwrap();
     std::fs::write(&skill, text.replacen("\n\n", "\nan older line\n\n", 1)).unwrap();
-    let t = run(&["--yes"], false);
+    // Without --yes (and no terminal to ask at): the plan, untagged and in
+    // the future tense, then nothing written (exit 3). --print the same.
+    for (args, want_code) in [(with(&[]), 3), (with(&["--print"]), 0)] {
+        let (t, _, code) = at_tty(&e, &args, false, &[]);
+        assert_eq!(code, want_code, "{args:?}: {t}");
+        for want in [
+            "\nClaude Code\n  Will add: the UserPromptSubmit hook (.claude/settings.local.json)\n",
+            "\n  Will update: the skill (.claude/skills/mnemo/SKILL.md, +0 -1 lines)\n",
+            "\n  Already right: the MCP server (.mcp.json) and 3 hooks\n",
+            "\nNothing was written; run `mnemo onboard --yes` to write it.\n",
+        ] {
+            assert!(t.contains(want), "{want:?} in {t}");
+        }
+        assert!(tagged_lines(&t).is_empty(), "no tags before a write: {t}");
+    }
+    // --yes: only those two, in the past tense.
+    let (t, err, code) = at_tty(&e, &with(&["--yes"]), false, &[]);
+    assert_eq!(code, 0, "{err}");
     let flat = squash(&t);
     for want in [
-        "+ the UserPromptSubmit hook, in .claude/settings.local.json",
-        "~ the skill, in .claude/skills/mnemo/SKILL.md (+0 -1 lines)",
-        "= already right: the MCP server (.mcp.json) and 3 hooks",
-        "= already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule",
-        "~ .claude/settings.local.json ~ .claude/skills/mnemo/SKILL.md",
+        "[ ADDED ] Claude Code: the UserPromptSubmit hook (.claude/settings.local.json)",
+        "[UPDATED] Claude Code: the skill (.claude/skills/mnemo/SKILL.md, +0 -1 lines)",
+        "[  OK   ] Claude Code: the MCP server (.mcp.json) and 3 hooks already right",
+        "[  OK   ] Cursor: the MCP server (.cursor/mcp.json), 4 hooks and the rule already right",
+        "Done: 2 files changed.",
         "1. Restart Claude Code (or start a new session) so it loads the changes.",
     ] {
-        assert!(flat.contains(want), "{want:?} in {t}");
+        assert!(flat.contains(&squash(want)), "{want:?} in {t}");
     }
     assert!(!flat.contains("the SessionStart"), "{t}");
-    // Nothing to change: no Done, no restart. (A build with the built-in
-    // embedder plans the model's download on every run here, since the
-    // test's model URL is closed: that's then the one change.)
-    let t = run(&["--yes"], true);
-    if cfg!(feature = "embed-candle") {
-        assert!(t.contains("the built-in model ("), "{t}");
-    } else {
+    // Nothing to change: the tags straight away, in colour on the word only.
+    // (A build with the built-in embedder plans the model's download on
+    // every run here, since the tests' model URL is closed.)
+    let (t, _, _) = at_tty(&e, &with(&["--yes"]), true, &[]);
+    if !cfg!(feature = "embed-candle") {
         assert!(
-            t.contains("Nothing to change; everything is already set up."),
+            t.contains("\nNothing to change; everything is already set up.\n"),
             "{t}"
         );
-        assert!(!t.contains("\nDone"), "{t}");
+        assert!(!t.contains("Done:"), "{t}");
     }
     assert!(!t.contains("Restart"), "{t}");
     assert!(
-        t.contains("\x1b[1mBrain\x1b[0m") && t.contains("\x1b[2m=\x1b[0m"),
+        t.contains("[  \x1b[32mOK\x1b[0m   ] Brain: "),
         "colour: {t}"
     );
-    // Undo: what it removes, then what it keeps, the keychain line whole.
-    let t = run(&["--undo", "--yes"], false);
-    assert!(t.contains("\nKept\n"), "{t}");
+    // Undo: REMOVED, then what's kept, the keychain line whole.
+    let (t, err, code) = at_tty(&e, &with(&["--undo", "--yes"]), false, &[]);
+    assert_eq!(code, 0, "{err}");
+    assert!(t.contains("[REMOVED] Claude Code: .mcp.json"), "{t}");
+    assert!(
+        t.contains(
+            "\nKept: the brain, its key and the model (onboard --undo never removes them).\n"
+        ),
+        "{t}"
+    );
     let line = t
         .lines()
         .skip_while(|l| !l.contains("To delete this brain's keychain entry:"))
@@ -1240,17 +1295,53 @@ fn at_a_terminal_the_output_is_grouped_and_short() {
     );
 }
 
-/// ONBOARD-UX: a real terminal (a pty) gets the grouped view; a pipe gets
-/// v0.16.1's.
+/// ONBOARD-UX (the tags): a write that fails part-way is `[FAILED ]` with
+/// the reason, what comes after it `[SKIPPED]`, and only the clients that
+/// were written are to be restarted.
 #[cfg(unix)]
 #[test]
-fn a_real_terminal_gets_the_grouped_view() {
+fn at_a_terminal_a_failure_part_way_is_tagged() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new();
+    let cursor = e.p("repo/.cursor");
+    std::fs::create_dir_all(&cursor).unwrap();
+    std::fs::set_permissions(&cursor, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let (t, err, code) = at_tty(&e, &["--client", "claude-code,cursor", "--yes"], false, &[]);
+    std::fs::set_permissions(&cursor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Root ignores the mode; nothing to check then.
+    if code == 0 && t.contains("[ ADDED ] Cursor: the MCP server") {
+        return;
+    }
+    assert_eq!(code, 1, "{t}{err}");
+    let flat = squash(&t);
+    for want in [
+        "[ ADDED ] Claude Code: the skill (.claude/skills/mnemo/SKILL.md)",
+        "[FAILED ] Cursor: the MCP server (.cursor/mcp.json): writing .cursor/mcp.json:",
+        "[SKIPPED] Cursor: the rule (.cursor/rules/mnemo.mdc)",
+        "[SKIPPED] Git: ",
+        "1. Restart Claude Code (or start a new session) so it loads the changes.",
+    ] {
+        assert!(flat.contains(&squash(want)), "{want:?} in {t}");
+    }
+    assert!(
+        err.contains("a change failed, and the ones after it weren't made"),
+        "{err}"
+    );
+    tagged_lines(&t);
+}
+
+/// ONBOARD-UX: a real terminal (a pty), asked and answered `y`: the plan in
+/// the future tense, the question, then the tags. A pipe gets v0.16.1's.
+#[cfg(unix)]
+#[test]
+fn a_real_terminal_is_asked_then_shown_the_tags() {
     const PTY: &str = r#"
 import os, pty, sys
 pid, fd = pty.fork()
 if pid == 0:
     os.execv(sys.argv[1], sys.argv[1:])
 out = b""
+asked = False
 while True:
     try:
         d = os.read(fd, 65536)
@@ -1259,11 +1350,17 @@ while True:
     if not d:
         break
     out += d
+    if not asked and b"[y/N]" in out:
+        os.write(fd, b"y\n")
+        asked = True
 os.waitpid(pid, 0)
 sys.stdout.write(out.decode("utf-8", "replace"))
 "#;
     let e = Env::new();
-    let args = ["onboard", "--client", "cursor", "--print"];
+    // The brain first (its recovery code would need a person).
+    e.ok(&["--client", "cursor", "--yes"]);
+    std::fs::remove_file(e.p("repo/.cursor/rules/mnemo.mdc")).unwrap();
+    let args = ["onboard", "--client", "cursor"];
     let inner = e.cmd(&e.p("repo"), &args);
     let mut c = Command::new(python());
     c.arg("-c")
@@ -1278,49 +1375,42 @@ sys.stdout.write(out.decode("utf-8", "replace"))
     }
     c.env("NO_COLOR", "1").current_dir(e.p("repo"));
     let t = String::from_utf8_lossy(&c.output().unwrap().stdout).replace("\r\n", "\n");
+    let plan = t
+        .find("  Will add: the rule (.cursor/rules/mnemo.mdc)")
+        .expect(&t);
+    let ask = t
+        .find("Write these 1 change? [y/N]")
+        .or_else(|| t.find("Write these 1 changes? [y/N]"));
+    let ask = ask.unwrap_or_else(|| t.find("[y/N]").expect(&t));
+    let tag = t
+        .find("[ ADDED ] Cursor: the rule (.cursor/rules/mnemo.mdc)")
+        .expect(&t);
+    assert!(plan < ask && ask < tag, "{t}");
+    assert!(t.contains("Done: 1 file changed."), "{t}");
+    let piped = e.ok(&["--client", "cursor", "--print"]);
     assert!(
-        t.contains("\nCursor\n") && t.contains("+ the MCP server, in .cursor/mcp.json"),
-        "{t}"
-    );
-    let piped = e.ok(&args[1..]);
-    assert!(
-        !piped.contains("\nCursor\n") && piped.contains("- create .cursor/mcp.json"),
+        !piped.contains("[  OK   ]")
+            && piped.contains("- .cursor/mcp.json: the MCP server is already right"),
         "{piped}"
     );
 }
 
 /// ONBOARD-UX (before v0.17.1's tag): the brain's line says where its key
-/// came from, never the key; the legend says "needs attention"; the trust
-/// step goes where Claude Code's record says the folder is trusted, and
-/// Next goes when nothing is left in it.
+/// came from, never the key; the trust step goes where Claude Code's record
+/// says the folder is trusted, and Next goes when nothing is left in it.
 #[test]
 fn at_a_terminal_the_key_source_and_the_trust_step_are_named() {
     let e = Env::new();
     let run = |clients: &str, extra: &[(&str, &str)]| -> String {
-        let mut c = e.cmd(&e.p("repo"), &["onboard", "--client", clients, "--yes"]);
-        c.env("MNEMO_DEV_ONBOARD_TTY", "1").env("NO_COLOR", "1");
-        for (k, v) in extra {
-            c.env(k, v);
-        }
-        let o = c.output().unwrap();
-        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-        out(&o)
+        let (t, err, code) = at_tty(&e, &["--client", clients, "--yes"], false, extra);
+        assert_eq!(code, 0, "{err}");
+        t
     };
     // The first run makes the brain; the second finds its key in the store.
-    let t = run("claude-code,cursor", &[]);
-    // A "!" line (this build may have no model) is explained as "needs
-    // attention" in the legend.
-    let warned = t.lines().any(|l| l.starts_with("  ! "));
-    assert_eq!(
-        warned,
-        t.lines()
-            .any(|l| l.starts_with("  + ") && l.contains("! needs attention")),
-        "{t}"
-    );
-    assert!(!t.contains("look at this"), "{t}");
+    run("claude-code,cursor", &[]);
     let t = run("claude-code,cursor", &[]);
     assert!(
-        t.contains("= .git/mnemo/project.mnemo (key found in your keychain)"),
+        t.contains("[  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)"),
         "{t}"
     );
     // A key from the environment is named, never shown.
@@ -1338,12 +1428,12 @@ fn at_a_terminal_the_key_source_and_the_trust_step_are_named() {
         .to_string();
     let t = run("claude-code,cursor", &[("MNEMO_KEY", &hex)]);
     assert!(
-        t.contains("= .git/mnemo/project.mnemo (key from MNEMO_KEY)"),
+        t.contains("[  OK   ] Brain: .git/mnemo/project.mnemo (key from MNEMO_KEY)"),
         "{t}"
     );
     assert!(!t.contains(&hex), "the key is never shown: {t}");
-    // No record of trust: both halves (checked in the grouped test). With
-    // Claude Code's record saying trusted, only Cursor's half is left.
+    // No record of trust: both halves (checked above). With Claude Code's
+    // record saying trusted, only Cursor's half is left.
     let root = e.root().to_string_lossy().to_string();
     std::fs::write(
         e.p("home/.claude.json"),
@@ -1370,7 +1460,7 @@ fn at_a_terminal_the_key_source_and_the_trust_step_are_named() {
                 t.contains("Nothing to change; everything is already set up."),
                 "{t}"
             );
-            assert!(!t.contains("\nNext\n"), "{t}");
+            assert!(!t.contains("Next:"), "{t}");
         }
     }
     // Recorded as not trusted: Claude Code's half is back.
