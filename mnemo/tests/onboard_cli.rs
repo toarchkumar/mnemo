@@ -86,7 +86,6 @@ impl Env {
     fn p(&self, rel: &str) -> PathBuf {
         self.dir.path().join(rel)
     }
-    #[cfg(unix)]
     fn root(&self) -> PathBuf {
         std::fs::canonicalize(self.p("repo")).unwrap()
     }
