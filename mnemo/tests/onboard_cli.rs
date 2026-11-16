@@ -1171,7 +1171,12 @@ fn at_a_terminal_the_output_is_grouped_and_short() {
         ),
         "{next}"
     );
-    assert!(squash(next).contains("accept the trust prompt"), "{next}");
+    assert!(
+        squash(next).contains(
+            "If Claude Code or Cursor asks you to trust this folder, accept: they run the hooks only in a trusted folder."
+        ),
+        "no record of trust: {next}"
+    );
     assert!(squash(next).contains("Back up the recovery code"), "{next}");
     // A re-run with one hook gone and the skill a line behind: only those.
     let settings = e.p("repo/.claude/settings.local.json");
@@ -1197,10 +1202,20 @@ fn at_a_terminal_the_output_is_grouped_and_short() {
         assert!(flat.contains(want), "{want:?} in {t}");
     }
     assert!(!flat.contains("the SessionStart"), "{t}");
-    // Nothing to change: no Done, no restart.
+    // Nothing to change: no Done, no restart. (A build with the built-in
+    // embedder plans the model's download on every run here, since the
+    // test's model URL is closed: that's then the one change.)
     let t = run(&["--yes"], true);
-    assert!(t.contains("Already set up: nothing to change."), "{t}");
-    assert!(!t.contains("\nDone") && !t.contains("Restart"), "{t}");
+    if cfg!(feature = "embed-candle") {
+        assert!(t.contains("the built-in model ("), "{t}");
+    } else {
+        assert!(
+            t.contains("Nothing to change; everything is already set up."),
+            "{t}"
+        );
+        assert!(!t.contains("\nDone"), "{t}");
+    }
+    assert!(!t.contains("Restart"), "{t}");
     assert!(
         t.contains("\x1b[1mBrain\x1b[0m") && t.contains("\x1b[2m=\x1b[0m"),
         "colour: {t}"
@@ -1271,5 +1286,103 @@ sys.stdout.write(out.decode("utf-8", "replace"))
     assert!(
         !piped.contains("\nCursor\n") && piped.contains("- create .cursor/mcp.json"),
         "{piped}"
+    );
+}
+
+/// ONBOARD-UX (before v0.17.1's tag): the brain's line says where its key
+/// came from, never the key; the legend says "needs attention"; the trust
+/// step goes where Claude Code's record says the folder is trusted, and
+/// Next goes when nothing is left in it.
+#[test]
+fn at_a_terminal_the_key_source_and_the_trust_step_are_named() {
+    let e = Env::new();
+    let run = |clients: &str, extra: &[(&str, &str)]| -> String {
+        let mut c = e.cmd(&e.p("repo"), &["onboard", "--client", clients, "--yes"]);
+        c.env("MNEMO_DEV_ONBOARD_TTY", "1").env("NO_COLOR", "1");
+        for (k, v) in extra {
+            c.env(k, v);
+        }
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        out(&o)
+    };
+    // The first run makes the brain; the second finds its key in the store.
+    let t = run("claude-code,cursor", &[]);
+    // A "!" line (this build may have no model) is explained as "needs
+    // attention" in the legend.
+    let warned = t.lines().any(|l| l.starts_with("  ! "));
+    assert_eq!(
+        warned,
+        t.lines()
+            .any(|l| l.starts_with("  + ") && l.contains("! needs attention")),
+        "{t}"
+    );
+    assert!(!t.contains("look at this"), "{t}");
+    let t = run("claude-code,cursor", &[]);
+    assert!(
+        t.contains("= .git/mnemo/project.mnemo (key found in your keychain)"),
+        "{t}"
+    );
+    // A key from the environment is named, never shown.
+    let entry = std::fs::read_dir(e.p("store"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let hex = std::fs::read_to_string(entry)
+        .unwrap()
+        .trim()
+        .strip_prefix("key:")
+        .unwrap()
+        .to_string();
+    let t = run("claude-code,cursor", &[("MNEMO_KEY", &hex)]);
+    assert!(
+        t.contains("= .git/mnemo/project.mnemo (key from MNEMO_KEY)"),
+        "{t}"
+    );
+    assert!(!t.contains(&hex), "the key is never shown: {t}");
+    // No record of trust: both halves (checked in the grouped test). With
+    // Claude Code's record saying trusted, only Cursor's half is left.
+    let root = e.root().to_string_lossy().to_string();
+    std::fs::write(
+        e.p("home/.claude.json"),
+        serde_json::to_string(
+            &json!({"projects": {root.clone(): {"hasTrustDialogAccepted": true}}}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let t = run("claude-code,cursor", &[]);
+    let flat = squash(&t);
+    if cfg!(unix) {
+        assert!(
+            flat.contains(". If Cursor asks you to trust this folder, accept"),
+            "{t}"
+        );
+        assert!(!flat.contains("If Claude Code"), "{t}");
+        // Claude Code alone, trusted, nothing to change: no Next at all
+        // (but in a build whose model download is planned, as above).
+        let t = run("claude-code", &[]);
+        assert!(!t.contains("trust"), "{t}");
+        if !cfg!(feature = "embed-candle") {
+            assert!(
+                t.contains("Nothing to change; everything is already set up."),
+                "{t}"
+            );
+            assert!(!t.contains("\nNext\n"), "{t}");
+        }
+    }
+    // Recorded as not trusted: Claude Code's half is back.
+    std::fs::write(
+        e.p("home/.claude.json"),
+        serde_json::to_string(&json!({"projects": {root: {"hasTrustDialogAccepted": false}}}))
+            .unwrap(),
+    )
+    .unwrap();
+    let t = run("claude-code", &[]);
+    assert!(
+        squash(&t).contains(". If Claude Code asks you to trust this folder, accept"),
+        "{t}"
     );
 }

@@ -113,8 +113,9 @@ struct Ctx {
 enum Item {
     /// Create the brain with a generated key.
     CreateBrain,
-    /// The brain is there, and its key opens it.
-    BrainOk,
+    /// The brain is there, and its key opens it: where the key came from,
+    /// in a few words (never a key, never a path but a file's name).
+    BrainOk(String),
     /// Install the built-in model (only a build with `embed-candle` has one).
     #[cfg_attr(not(feature = "embed-candle"), allow(dead_code))]
     InstallModel(String),
@@ -178,7 +179,7 @@ impl Mark {
             Mark::Change => "change",
             Mark::Same => "already right",
             Mark::Remove => "remove",
-            Mark::Warn => "look at this",
+            Mark::Warn => "needs attention",
         }
     }
 }
@@ -215,7 +216,7 @@ impl Item {
             | Item::InstallModel(_)
             | Item::Remove { .. }
             | Item::Claude { .. } => true,
-            Item::BrainOk | Item::Note(_) | Item::Ok { .. } => false,
+            Item::BrainOk(_) | Item::Note(_) | Item::Ok { .. } => false,
         }
     }
 }
@@ -1142,9 +1143,9 @@ fn plan_exclude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
 
 // --- The brain and the model ------------------------------------------------------
 
-/// Whether the brain's key opens it here: `Ok(())`, or the message to stop
-/// with.
-fn check_brain(brain: &Path) -> Result<(), String> {
+/// Whether the brain's key opens it here: where the key came from, in a
+/// few words, or the message to stop with.
+fn check_brain(brain: &Path) -> Result<String, String> {
     use mnemo_engine::keys::{self, Resolution, Secret};
     let passphrase =
         keys::file_info(brain).is_ok_and(|i| matches!(i.kind, keys::SecretKind::Passphrase));
@@ -1164,20 +1165,50 @@ fn check_brain(brain: &Path) -> Result<(), String> {
         )
     };
     let store = keys::default_store();
-    let secret = match keys::resolve(brain, store.as_deref(), keys::SERVER_COMMAND_TIMEOUT) {
-        Ok(Resolution::Found(r)) => r.secret,
-        _ => return Err(unlock),
-    };
+    let (secret, source) =
+        match keys::resolve(brain, store.as_deref(), keys::SERVER_COMMAND_TIMEOUT) {
+            Ok(Resolution::Found(r)) => (r.secret, r.source),
+            _ => return Err(unlock),
+        };
+    let from = key_source(&source);
     let mut opts = mnemo_engine::SharedOptions::default();
     opts.deadline = std::time::Duration::from_secs(10);
     let r = match &secret {
         Secret::Passphrase(p) => mnemo_engine::Mnemo::open_read_only_waiting(brain, p, opts),
         Secret::Key(k) => mnemo_engine::Mnemo::open_read_only_waiting_with_key(brain, k, opts),
     };
-    r.map(|_| ()).map_err(|e| match e {
+    r.map(|_| from).map_err(|e| match e {
         mnemo_engine::MnemoError::Locked { .. } => format!("the brain is busy: {e}"),
         _ => unlock,
     })
+}
+
+/// Where a brain's secret came from, in a few words: never the secret, and
+/// of a key file only its name.
+fn key_source(source: &mnemo_engine::keys::Source) -> String {
+    use mnemo_engine::keys::Source;
+    match source {
+        Source::Store(_) => "key found in your keychain".into(),
+        Source::EnvKey => "key from MNEMO_KEY".into(),
+        Source::KeyFile(p) => match p.file_name() {
+            Some(n) => format!("key from the file {}", n.to_string_lossy()),
+            None => "key from MNEMO_KEY_FILE".into(),
+        },
+        Source::KeyCommand => "key from MNEMO_KEY_COMMAND".into(),
+        Source::EnvPassphrase => "passphrase from MNEMO_PASSPHRASE".into(),
+    }
+}
+
+/// Whether Claude Code has recorded this folder as trusted: `~/.claude.json`'s
+/// `projects[<root>].hasTrustDialogAccepted`, read and nothing else from the
+/// file. `None` when the file or the field is missing or unreadable.
+fn claude_trusted(ctx: &Ctx) -> Option<bool> {
+    let text = std::fs::read_to_string(ctx.home.join(".claude.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    v.get("projects")?
+        .get(ctx.root.to_string_lossy().as_ref())?
+        .get("hasTrustDialogAccepted")?
+        .as_bool()
 }
 
 /// The model's plan item.
@@ -1380,7 +1411,7 @@ fn show(ctx: &Ctx, items: &[Item], undo: bool) {
                 "- brain: create {} with a generated key, kept in the keychain",
                 rel(ctx, &ctx.brain)
             ),
-            Item::BrainOk => println!("- brain: {} (its key opens it)", rel(ctx, &ctx.brain)),
+            Item::BrainOk(_) => println!("- brain: {} (its key opens it)", rel(ctx, &ctx.brain)),
             Item::InstallModel(size) => println!("- model: install the built-in model ({size})"),
             Item::Note(n) => println!("- {n}"),
             Item::Ok { line, .. } => println!("- {line}"),
@@ -1514,10 +1545,7 @@ fn tty_lines(ctx: &Ctx, it: &Item) -> Vec<(Mark, String)> {
                 rel(ctx, &ctx.brain)
             ),
         )],
-        Item::BrainOk => vec![(
-            Mark::Same,
-            format!("{} (its key opens it)", rel(ctx, &ctx.brain)),
-        )],
+        Item::BrainOk(from) => vec![(Mark::Same, format!("{} ({from})", rel(ctx, &ctx.brain)))],
         Item::InstallModel(size) => {
             vec![(Mark::Add, format!("the built-in model ({size} download)"))]
         }
@@ -1614,7 +1642,15 @@ fn show_tty(ctx: &Ctx, items: &[Item], sections: &[(Section, usize)], undo: bool
 
 /// After the writes, for a person at a terminal: what was done, the guide's
 /// pointer, then the next steps, the human steps last.
-fn summary_tty(ctx: &Ctx, o: &Opts, done: &[Done], human: &[String], restart: &[&str], pen: &Pen) {
+fn summary_tty(
+    ctx: &Ctx,
+    o: &Opts,
+    done: &[Done],
+    human: &[String],
+    restart: &[&str],
+    clients: &[Client],
+    pen: &Pen,
+) {
     let tty: Vec<&(Mark, String)> = done.iter().flat_map(|d| d.tty.iter()).collect();
     if !tty.is_empty() {
         println!("{}", pen.heading("Done"));
@@ -1677,7 +1713,11 @@ fn summary_tty(ctx: &Ctx, o: &Opts, done: &[Done], human: &[String], restart: &[
             }
         ));
     }
-    steps.extend(human_steps(o, human).iter().map(|s| sentence(s)));
+    steps.extend(person_steps(o, human).iter().map(|s| sentence(s)));
+    steps.extend(trust_step(ctx, clients));
+    if steps.is_empty() {
+        return;
+    }
     println!();
     println!("{}", pen.heading("Next"));
     for (i, s) in steps.iter().enumerate() {
@@ -1807,7 +1847,7 @@ fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Done>
                     done.push(Done::new(format!("Claude Code: {what}"), shown));
                 }
             }
-            Item::BrainOk | Item::Note(_) | Item::Ok { .. } => {}
+            Item::BrainOk(_) | Item::Note(_) | Item::Ok { .. } => {}
         }
     }
     Ok(done)
@@ -1846,8 +1886,8 @@ pub fn run(o: Opts) -> Result<(), String> {
     let mut sections = vec![(Section::Brain, 0)];
     if !o.undo {
         if exists {
-            check_brain(&ctx.brain)?;
-            items.push(Item::BrainOk);
+            let from = check_brain(&ctx.brain)?;
+            items.push(Item::BrainOk(from));
         } else {
             items.push(Item::CreateBrain);
         }
@@ -1908,7 +1948,7 @@ pub fn run(o: Opts) -> Result<(), String> {
                 (true, false) => "nothing to remove",
                 (false, false) => "already set up",
                 (true, true) => "Nothing to remove.",
-                (false, true) => "Already set up: nothing to change.",
+                (false, true) => "Nothing to change; everything is already set up.",
             }
         );
         Vec::new()
@@ -1935,7 +1975,7 @@ pub fn run(o: Opts) -> Result<(), String> {
     if person {
         // ONBOARD-UX: a person gets the guide's pointer, not the guide.
         let restart: &[&str] = if done.is_empty() { &[] } else { &restart };
-        summary_tty(&ctx, &o, &done, &human, restart, &pen);
+        summary_tty(&ctx, &o, &done, &human, restart, &clients, &pen);
         return Ok(());
     }
     // The guide first, then the summary, so the output ends with the human
@@ -1982,8 +2022,22 @@ fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) -> usize {
     steps.len()
 }
 
-/// The steps only the person can do, the trust prompt last.
+/// The steps only the person can do, the trust prompt last (an agent's
+/// view; a person's view words the trust step by what's known).
 fn human_steps(o: &Opts, human: &[String]) -> Vec<String> {
+    let mut steps = person_steps(o, human);
+    if !o.undo {
+        steps.push(
+            "Claude Code and Cursor run hooks only in a trusted workspace: accept the trust \
+             prompt when you open this project"
+                .into(),
+        );
+    }
+    steps
+}
+
+/// The person's steps but the trust prompt.
+fn person_steps(o: &Opts, human: &[String]) -> Vec<String> {
     let mut steps: Vec<String> = human.to_vec();
     if !o.undo {
         if o.no_model {
@@ -2001,13 +2055,33 @@ fn human_steps(o: &Opts, human: &[String]) -> Vec<String> {
                     .into(),
             );
         }
-        steps.push(
-            "Claude Code and Cursor run hooks only in a trusted workspace: accept the trust \
-             prompt when you open this project"
-                .into(),
-        );
     }
     steps
+}
+
+/// ONBOARD-UX: the trust step for the clients wired here, only where it may
+/// be needed. Claude Code's half goes when its record says the folder is
+/// trusted; Cursor keeps no such record we know of.
+fn trust_step(ctx: &Ctx, clients: &[Client]) -> Option<String> {
+    let mut who = Vec::new();
+    if clients.contains(&Client::ClaudeCode) && claude_trusted(ctx) != Some(true) {
+        who.push("Claude Code");
+    }
+    if clients.contains(&Client::Cursor) {
+        who.push("Cursor");
+    }
+    match who.as_slice() {
+        [] => None,
+        [one] => Some(format!(
+            "If {one} asks you to trust this folder, accept: it runs the hooks only in a \
+             trusted folder."
+        )),
+        _ => Some(
+            "If Claude Code or Cursor asks you to trust this folder, accept: they run the hooks \
+             only in a trusted folder."
+                .into(),
+        ),
+    }
 }
 
 #[cfg(test)]

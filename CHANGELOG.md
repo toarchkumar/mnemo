@@ -29,12 +29,18 @@ answer the question.
   or already right (`+`, `~`, `-`, `=`), with what's already right in one
   line per group ("the MCP server and 3 hooks"). Only hooks that change
   are listed, and a changed skill or rule shows how many lines changed.
-  After the writes come a short "Done", a pointer to `mnemo onboard
-  --guide` in place of the whole guide, and "Next": restart the clients
-  that changed, then the steps only you can do. Paths are relative to the
-  repository, colour follows `NO_COLOR`, and the line that deletes the
-  brain's keychain entry is shown only with `--undo`. Run by an agent (no
-  terminal), the output is unchanged.
+  The brain's line says where its key came from ("key found in your
+  keychain", or the variable or file name that gave it), and anything that
+  needs attention is marked `!`. After the writes come a short "Done" (or
+  "Nothing to change; everything is already set up."), a pointer to `mnemo
+  onboard --guide` in place of the whole guide, and "Next": restart the
+  clients that changed, then the steps only you can do. The step to trust
+  the folder is left out for Claude Code when it has recorded the folder as
+  trusted (`~/.claude.json`, read only for that), and Next is left out when
+  nothing is in it. Paths are relative to the repository, colour follows
+  `NO_COLOR`, and the line that deletes the brain's keychain entry is shown
+  only with `--undo`. Run by an agent (no terminal), the output is
+  unchanged.
 - **The per-turn line asks for only what it counts:** `inbox` for
   messages, `task` with `next` for a ready task, and a task update to renew
   a claim about to lapse.
