@@ -406,17 +406,25 @@ command the user configures.
 They live in the code that marks an item `delivered`, so they're the same
 for every path. **The hop cap counts within a thread, and a fresh message
 starts a new one,** so two agents trading new messages instead of replies
-would never reach it on its own. For them, **the per-recipient rate limit
-and the cooldown are the real bound,** and the pair carry below closes the
-gap cheaply: it's one look at the pair's recent messages, inside the
-`post`'s own write window.
+would never reach it on its own. For them, **the pair burst limit below is
+the bound** (revised at step 3, PLANNER-A's DECISION):
+- **Runaway loops are fast, and working exchanges are minutes apart.** The
+  first version carried a hop count between a pair for 10 minutes, so a
+  slow exchange kept climbing as long as each message came within 10
+  minutes of the last. This project's own Planner and Worker trade a
+  DISPATCH and a DONE every 5 to 15 minutes for hours. Under a cap of 8,
+  wake-ups would stop after about four rounds.
+- **So the pair limit counts a burst:** messages between the two, either
+  way, in the last 10 minutes.
+- `_mnemo.hops` and its carry (step 2) stay stored, as information. Step 5
+  enforces this table.
 
 | Guardrail | Default | What it does |
 |---|---|---|
 | Wake-ups per recipient per hour | 12 | Past it, items stay `sent` and are seen at the next turn or session start |
 | Cooldown per recipient | 60 s | Items arriving inside it join the next pointer |
-| Hop cap per thread | 8 | A reply whose `_mnemo.hops` would pass 8 is stored, but wakes nobody, and the brief says "thread X reached its hop cap" |
-| Hop carry between a pair | 10 min | A new message from A to B starts at one more than the newest message between A and B (either way) in the last 10 minutes, not at 0. So two agents answering with fresh messages instead of replies still reach the cap |
+| Hop cap per thread | 8 | For explicit replies (`--conversation`): a reply whose `_mnemo.hops` would pass 8 is stored, but wakes nobody, and the brief says "thread X reached its hop cap" |
+| Pair burst | 8 in 10 min | A message wakes nobody when its two agents have exchanged 8 or more messages, either way, in the last 10 minutes. It's stored and seen at the next turn or session start. A loop is fast; a working exchange, minutes apart, never reaches it |
 | Kill switch | `mnemo wake pause` / `resume`, a keyed record `wake:paused` in the brain, so every session sees it; `MNEMO_WAKE=off` for one session | Paused: nothing is delivered, everything stays `sent` |
 | Stop continuations | Off; at most one in a row when on | Section 3, path 3 |
 
@@ -464,6 +472,17 @@ So the item stays open, unchanged, and it stays held in its file.
 **`who()`** returns, for each `presence:<agent>` record: the agent, role,
 tool, `last_active`, and `alive` from the sidecar lock probe. Agents with no
 long-lived process (the CLI, reviewer-a) show `alive: unknown`.
+
+**As built (step 3):**
+- The presence lock is `presence.<16 hex of SHA-256(agent)>.lock`, directly
+  in the sidecar directory (12.4 wrote `presence/<hash>.lock`). The flat
+  name needs no subdirectory to create and check.
+- A probe that finds the file missing, the directory missing, or the name
+  naming another file after it locked says `unknown`, never "not alive".
+- A claim's or presence record's v9 row carries a hash of its topic or
+  agent in the thread-hash field, so a lookup decrypts only its candidates.
+  That's no format change: an older build reads it as a thread hash that
+  its decrypted check rejects.
 
 **No lock across a turn.** A claim is a record, not a lock.
 - **The brain's OS lock is held only inside one call's window,** as 12.4
