@@ -376,6 +376,47 @@ pub const MNEMO_META_REVIEW_BY: &str = "_mnemo.review_by";
 /// [`crate::Mnemo::set_default_agent`]; a new brain's manifest has none.
 pub const MNEMO_META_DEFAULT_AGENT: &str = "_mnemo.default_agent";
 
+/// 13a (13.1): a message's recipient: an agent id, `role:<role>`, or `all`.
+pub const MNEMO_META_TO: &str = "_mnemo.to";
+/// 13a (13.1): a message's sender, as it said (unproven until 13b).
+pub const MNEMO_META_FROM: &str = "_mnemo.from";
+/// 13a (13.1): the conversation a message belongs to, so replies share its
+/// hop count. Not `_mnemo.thread`, which names a thread archive.
+pub const MNEMO_META_CONVERSATION: &str = "_mnemo.conversation";
+/// 13a (13.1b): a message's hop count within its conversation (and its
+/// pair, for 10 minutes), for the wake-up hop cap.
+pub const MNEMO_META_HOPS: &str = "_mnemo.hops";
+/// 13a (13.1b): `sent`, `delivered`, `seen` or `done`.
+pub const MNEMO_META_DELIVERY: &str = "_mnemo.delivery";
+/// 13a: when a message was acked, in unix seconds (for pruning).
+pub const MNEMO_META_ACKED_AT: &str = "_mnemo.acked_at";
+/// 13a (13.1b): the delivery states, in order.
+pub mod delivery {
+    /// Written, not yet delivered by a wake-up.
+    pub const SENT: &str = "sent";
+    /// A wake-up reached the recipient's session.
+    pub const DELIVERED: &str = "delivered";
+    /// Shown to the recipient (the inbox, the per-turn hook).
+    pub const SEEN: &str = "seen";
+    /// Acked.
+    pub const DONE: &str = "done";
+}
+/// 13a: a message's status: `unread` until acked.
+pub const MESSAGE_UNREAD: &str = "unread";
+/// 13a: a message's status once acked.
+pub const MESSAGE_ACKED: &str = "acked";
+/// 13a: a message body's limit, in bytes; a bigger one belongs in a fact,
+/// named in `refs`.
+pub const MESSAGE_BODY_MAX: usize = 8 * 1024;
+/// 13a: a subject's limit, in bytes (one line).
+pub const MESSAGE_SUBJECT_MAX: usize = 200;
+/// 13a: a new message between the same two parties within this many seconds
+/// carries their last hop count on (the pair carry).
+pub const MESSAGE_PAIR_CARRY_SECS: i64 = 600;
+/// 13a: acked messages older than this are dropped by `compact` and
+/// `prune_messages` (30 days).
+pub const MESSAGE_ACKED_KEEP_SECS: i64 = 30 * 86_400;
+
 /// The visibility levels (13.5).
 pub const VISIBILITY_LEVELS: [&str; 3] = ["public", "team", "private"];
 

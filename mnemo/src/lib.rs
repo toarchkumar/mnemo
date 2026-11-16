@@ -100,6 +100,12 @@ pub use memory::{
     MNEMO_META_KIND_CLAIM, MNEMO_META_KIND_MESSAGE, MNEMO_META_KIND_PRESENCE, MNEMO_META_KIND_TASK,
     MNEMO_META_REVIEW_BY, MNEMO_META_VISIBILITY, VISIBILITY_LEVELS,
 };
+/// 13a (13.1): messages between agents.
+pub use memory::{
+    delivery, MESSAGE_ACKED, MESSAGE_ACKED_KEEP_SECS, MESSAGE_BODY_MAX, MESSAGE_PAIR_CARRY_SECS,
+    MESSAGE_SUBJECT_MAX, MESSAGE_UNREAD, MNEMO_META_ACKED_AT, MNEMO_META_CONVERSATION,
+    MNEMO_META_DELIVERY, MNEMO_META_FROM, MNEMO_META_HOPS, MNEMO_META_TO,
+};
 pub use memory::{
     status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind, EssenceScope,
     EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, KeyedMemory, Memory,
@@ -124,6 +130,7 @@ pub use shared::{CancelToken, SharedOptions};
 #[doc(hidden)]
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
+pub use store::Message;
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
     RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,

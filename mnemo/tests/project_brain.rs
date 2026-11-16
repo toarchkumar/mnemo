@@ -830,3 +830,82 @@ fn default_agent_author_freshness_and_more_commands_without_a_path() {
         .contains("updated"));
     assert!(e.ok(&main, &["default-agent"]).contains("(none"));
 }
+
+/// 13a step 2 (v0.17): `post`, `inbox` and `ack`, as an agent given by
+/// `--as`/`--role` or by `MNEMO_AGENT`/`MNEMO_ROLE`; listing marks seen;
+/// `ack <ID>` takes no path; `inbox --prune`.
+#[test]
+fn post_inbox_and_ack_as_an_agent() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let out = e.ok(
+        &main,
+        &[
+            "post",
+            "worker-a",
+            "step 2 dispatched",
+            "--body",
+            "messages",
+            "--as",
+            "planner-a",
+        ],
+    );
+    let (id, hop) = out.trim().split_once('\t').unwrap();
+    assert_eq!(hop, "hop 0");
+    e.ok(
+        &main,
+        &["post", "role:worker", "for any worker", "--as", "planner-a"],
+    );
+    // `--as` and `--role`, then the same from the environment.
+    let t = e.ok(
+        &e.p("main/sub"),
+        &["inbox", "--as", "worker-a", "--role", "worker"],
+    );
+    assert!(
+        t.contains("planner-a -> worker-a")
+            && t.contains("step 2 dispatched")
+            && t.contains("    messages"),
+        "{t}"
+    );
+    assert!(t.contains("for any worker"), "{t}");
+    let o = e
+        .cmd(&main, &["inbox", "--format", "json"])
+        .env("MNEMO_AGENT", "worker-a")
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v.as_array().unwrap().len(),
+        1,
+        "no role: only what's to worker-a: {v}"
+    );
+    assert_eq!(v[0]["delivery"], "seen", "listing marked it seen: {v}");
+    // Ack with no path, as worker-a.
+    assert_eq!(
+        e.ok(&main, &["ack", id, "--note", "on it", "--as", "worker-a"])
+            .trim(),
+        format!("{id}\tacked")
+    );
+    assert_eq!(e.ok(&main, &["ack", id]).trim(), format!("{id}\tunchanged"));
+    let t = e.ok(&main, &["inbox", "--as", "worker-a"]);
+    assert!(t.contains("no messages"), "{t}");
+    assert!(e
+        .ok(&main, &["inbox", "--as", "worker-a", "--all"])
+        .contains("[acked]"));
+    // Prune what's acked (none older than 30 days yet).
+    assert_eq!(
+        e.ok(&main, &["inbox", "--prune"]).trim(),
+        "pruned 0 acked messages"
+    );
+    // Bad input.
+    assert!(e
+        .fails(&main, &["post", "worker a", "s"])
+        .contains("isn't an address"));
+    assert!(e
+        .fails(&main, &["inbox", "--as", "bad name"])
+        .contains("--as"));
+    // Anonymous: only `all`, with a note.
+    let o = e.run(&main, &["inbox"]);
+    assert!(String::from_utf8_lossy(&o.stderr).contains("only messages to `all`"));
+}

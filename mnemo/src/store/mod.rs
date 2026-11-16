@@ -54,7 +54,9 @@ use crate::memory::{
     MNEMO_META_UPDATED_AT, THREAD_TOOL_RESULT_TRUNCATE_BYTES, THREAD_TURN_CHUNK_BYTES,
 };
 pub(crate) use crate::memory::{
-    is_caller_key, is_coordination, MNEMO_META_AUTHOR, MNEMO_META_DEFAULT_AGENT,
+    is_caller_key, is_coordination, MNEMO_META_ACKED_AT, MNEMO_META_AUTHOR,
+    MNEMO_META_CONVERSATION, MNEMO_META_DEFAULT_AGENT, MNEMO_META_DELIVERY, MNEMO_META_FROM,
+    MNEMO_META_HOPS, MNEMO_META_TO,
 };
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
@@ -64,6 +66,7 @@ use crate::result_cache::{
 use crate::text;
 use crate::veccol;
 use crate::wal;
+pub use coordination::Message;
 
 mod ann;
 mod cache_api;

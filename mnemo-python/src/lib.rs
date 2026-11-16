@@ -578,6 +578,24 @@ fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEss
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
+/// 13a: a message as a dict.
+fn message_dict(py: Python<'_>, m: &mnemo_core::Message) -> PyResult<PyObject> {
+    let d = PyDict::new_bound(py);
+    d.set_item("id", m.id.to_string())?;
+    d.set_item("to", &m.to)?;
+    d.set_item("from", &m.from)?;
+    d.set_item("subject", &m.subject)?;
+    d.set_item("body", &m.body)?;
+    d.set_item("refs", m.refs.clone())?;
+    d.set_item("conversation", &m.conversation)?;
+    d.set_item("hops", m.hops)?;
+    d.set_item("status", &m.status)?;
+    d.set_item("delivery", &m.delivery)?;
+    d.set_item("created_at", m.created_at)?;
+    d.set_item("acked_at", m.acked_at)?;
+    Ok(d.into_any().unbind())
+}
+
 /// 13a: the caller keys (visibility, `review_by`, `as_of`), checked.
 fn fresh_keys(
     visibility: Option<String>,
@@ -2316,6 +2334,83 @@ impl Mnemo {
             Handle::Shared(s) => s.set_author(name),
         }
         Ok(())
+    }
+
+    /// 13a (13.1): post a message to `to` (an agent id, `role:<role>`, or
+    /// `all`). The sender is `sender`, else this handle's author
+    /// (`set_author`). Returns a dict with `id`, `conversation`, `hops`.
+    #[pyo3(signature = (to, subject, body="", *, refs=None, conversation=None, sender=None, role=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn post(
+        &mut self,
+        py: Python<'_>,
+        to: String,
+        subject: String,
+        body: &str,
+        refs: Option<Vec<String>>,
+        conversation: Option<String>,
+        sender: Option<String>,
+        role: Option<String>,
+    ) -> PyResult<PyObject> {
+        let body = body.to_string();
+        let refs = refs.unwrap_or_default();
+        let m = self.wr(move |db| {
+            db.post(
+                &to,
+                &subject,
+                &body,
+                &refs,
+                conversation.as_deref(),
+                sender.as_deref(),
+                role.as_deref(),
+            )
+        })?;
+        message_dict(py, &m)
+    }
+
+    /// 13a (13.1): the messages for `agent`, its `role` or everyone, oldest
+    /// first, leaving out its own; with `unread_only` (the default) only
+    /// those not yet acked. Reads only: `mark_seen` records that they were
+    /// shown. A list of dicts.
+    #[pyo3(signature = (agent=None, role=None, *, unread_only=true))]
+    fn inbox(
+        &mut self,
+        py: Python<'_>,
+        agent: Option<String>,
+        role: Option<String>,
+        unread_only: bool,
+    ) -> PyResult<Vec<PyObject>> {
+        let msgs = self.rd(move |db| db.inbox(agent.as_deref(), role.as_deref(), unread_only))?;
+        msgs.iter().map(|m| message_dict(py, m)).collect()
+    }
+
+    /// 13a (13.1b): mark these message ids `seen`. Returns how many changed.
+    fn mark_seen(&mut self, ids: Vec<String>) -> PyResult<usize> {
+        let ids = ids
+            .iter()
+            .map(|i| Ulid::from_string(i).map_err(|_| PyValueError::new_err(format!("invalid ULID '{i}'"))))
+            .collect::<PyResult<Vec<_>>>()?;
+        self.wr(move |db| db.mark_seen(&ids))
+    }
+
+    /// 13a (13.1): ack a message, with an optional note. Returns `"acked"`
+    /// or `"unchanged"`.
+    #[pyo3(signature = (id, note=None, *, by=None))]
+    fn ack(&mut self, id: &str, note: Option<String>, by: Option<String>) -> PyResult<&'static str> {
+        let ulid = Ulid::from_string(id)
+            .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
+        let o = self.wr(move |db| db.ack(&ulid, note.as_deref(), by.as_deref()))?;
+        Ok(match o {
+            mnemo_core::WriteOutcome::Unchanged => "unchanged",
+            _ => "acked",
+        })
+    }
+
+    /// 13a: delete messages acked more than `days` days ago (default 30).
+    /// Returns how many went.
+    #[pyo3(signature = (days=30))]
+    fn prune_messages(&mut self, days: u32) -> PyResult<usize> {
+        self.wr(move |db| db.prune_messages(i64::from(days) * 86_400))
     }
 
     /// 13a: the agent the manifest names for a write that names none

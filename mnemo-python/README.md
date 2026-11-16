@@ -203,6 +203,9 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `set_max_snapshots(max)` | Override the snapshot-manifest retention cap (default 256; `0` disables) |
 | `set_vector_cache_budget(bytes)` | v9 files: keep the fp16 vector column in memory while it takes at most `bytes` (default 96 MiB, about 125K vectors at 384 dims); above it recall reads vectors through the page cache (less memory, slower recall). This handle only |
 | `set_author(name)` | v0.17: stamp `_mnemo.author` = `name` on each new record this handle writes (`None` stops it). This handle only |
+| `post(to, subject, body="", *, refs=None, conversation=None, sender=None, role=None)` | v0.17: post a message to an agent id, `role:<role>` or `all`, from `sender` (else `set_author`'s). Returns a dict (`id`, `to`, `from`, `subject`, `body`, `refs`, `conversation`, `hops`, `status`, `delivery`, `created_at`, `acked_at`) |
+| `inbox(agent=None, role=None, *, unread_only=True)` | v0.17: the messages for `agent`, its `role` or everyone, oldest first, never its own; a list of the same dicts. It only reads: `mark_seen(ids)` records that they were shown |
+| `ack(id, note=None, *, by=None)`, `prune_messages(days=30)` | v0.17: ack a message (`"acked"` or `"unchanged"`); delete those acked more than `days` ago (returns how many) |
 | `default_agent()`, `set_default_agent(agent)` | v0.17: the agent the manifest names for a write that names none (`_mnemo.default_agent`), or `None`; set it, or clear it with `None` (returns `"updated"` or `"unchanged"`) |
 | `set_turn_compress_after(secs)` | v9 files: compress thread turns once they're older than `secs` (default 7 days; `0` compresses at write). This handle only |
 | `memories()` | Enumerate every live (non-deleted, non-expired) memory as a list of dicts |

@@ -481,6 +481,10 @@ impl Mnemo {
             if m.is_expired(now) {
                 continue;
             }
+            // 13a (R-010.8): a message acked more than 30 days ago.
+            if super::coordination::compact_drops(&m, now) {
+                continue;
+            }
             // A file from before the zero-vector rule (Phase 3 PR 10a) can
             // hold all-zero vectors. A legacy onboarding or manifest memory
             // gets the sentinel unit vector a current manifest has, so it
