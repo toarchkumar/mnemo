@@ -8,6 +8,46 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-11-16
+
+A patch: `mnemo onboard` reads clearly at a terminal, and the keychain
+question macOS asks after an upgrade is explained. There's no format or
+behaviour change. The mobile packages aren't published in this release:
+they stay at 0.17.0, which has the same mobile code.
+
+**Upgrading on macOS:** the first time a new `mnemo` reads a brain's key,
+macOS asks whether it may use the keychain item. It ties the item to the
+program that reads it, and each release is a new program to it. Run `mnemo
+info` in a terminal once after upgrading, and choose **Always Allow**:
+"Allow" asks again on every run, and the hooks and the MCP server can't
+answer the question.
+
+### Changed
+
+- **`mnemo onboard` at a terminal** groups the plan under Brain, Model,
+  Claude Code, Cursor and Git, and marks each line added, changed, removed
+  or already right (`+`, `~`, `-`, `=`), with what's already right in one
+  line per group ("the MCP server and 3 hooks"). Only hooks that change
+  are listed, and a changed skill or rule shows how many lines changed.
+  After the writes come a short "Done", a pointer to `mnemo onboard
+  --guide` in place of the whole guide, and "Next": restart the clients
+  that changed, then the steps only you can do. Paths are relative to the
+  repository, colour follows `NO_COLOR`, and the line that deletes the
+  brain's keychain entry is shown only with `--undo`. Run by an agent (no
+  terminal), the output is unchanged.
+- **The per-turn line asks for only what it counts:** `inbox` for
+  messages, `task` with `next` for a ready task, and a task update to renew
+  a claim about to lapse.
+- **The install scripts' notes** are on short lines: what was found, then
+  what to do. On macOS, an upgrade ends with the keychain note above.
+
+### Fixed
+
+- **A keychain that refused the key was reported as a missing key** (run
+  `mnemo unlock`). The hooks and the MCP server now say the keychain held
+  it back, and how to allow it. One that's still waiting after 3 seconds,
+  most likely on its question, is reported on stderr.
+
 ## [0.17.0] — 2026-11-15
 
 **Agents working together on one machine (13a):** shared memory and
