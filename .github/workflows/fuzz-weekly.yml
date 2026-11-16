@@ -64,3 +64,31 @@ jobs:
           name: fuzz-crashes-${{ matrix.target }}
           path: mnemo/fuzz/artifacts/${{ matrix.target }}/
           if-no-files-found: ignore
+
+  # 13a step 3: 12.4's 1,000-round claim race (two processes, one winner
+  # per round). A push runs 200 rounds; macOS's full fsync makes 1,000
+  # take about 80 s, so they run here weekly, and on demand.
+  claim-race:
+    name: claim-race (1,000 rounds, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: claim-race
+
+      - name: The claim race, 1,000 rounds
+        working-directory: mnemo
+        env:
+          MNEMO_STRESS: "1"
+        run: cargo test --features failpoints --test claims two_processes_race -- --nocapture

@@ -1,8 +1,14 @@
 //! 13a step 3 (v0.17): claims and presence (13.3, 12.4's step 7): the
 //! lease, tokens and `Lost`, the early lapse as a hint, presence locks and
 //! `who()`, no lock on the brain between calls, and 12.4's race: two
-//! processes claim the same topics 1,000 times, and exactly one wins each,
-//! while other threads spawn children (FLAKE-1's pattern).
+//! processes claim the same topics in lockstep, and exactly one wins each,
+//! while another thread in each spawns children (FLAKE-1's pattern).
+//!
+//! **12.4's "1,000-race test" runs weekly and on demand, not on every
+//! push:** each round is two durable commits, and macOS's full fsync makes
+//! 1,000 rounds take about 80 s. So a normal run races 200 rounds, and
+//! `MNEMO_STRESS=1` races 1,000 (`fuzz-weekly.yml`'s `claim-race` job, on
+//! Linux and macOS). `CL_RACE_ROUNDS` sets any other count.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -401,16 +407,16 @@ fn claims_child() {
 
 #[cfg(unix)]
 #[test]
-fn two_processes_race_for_1000_claims_and_exactly_one_wins_each() {
+fn two_processes_race_for_claims_and_exactly_one_wins_each() {
     let dir = tempfile::tempdir().unwrap();
     let p = brain(dir.path());
-    // 12.4's 1,000 rounds (`CL_RACE_ROUNDS` overrides it for a quick run).
-    // Each is two durable commits, so on macOS, whose full fsync is slow,
-    // this test takes a minute or more.
+    // 200 rounds, or 12.4's 1,000 under MNEMO_STRESS=1 (see the module
+    // doc); CL_RACE_ROUNDS sets any other count.
+    let stress = std::env::var("MNEMO_STRESS").as_deref() == Ok("1");
     let rounds: usize = std::env::var("CL_RACE_ROUNDS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(1_000);
+        .unwrap_or(if stress { 1_000 } else { 200 });
     let exe = std::env::current_exe().unwrap();
     let out = |a: &str| dir.path().join(format!("{a}.log"));
     let children: Vec<_> = [("worker-a", "worker-b"), ("worker-b", "worker-a")]
