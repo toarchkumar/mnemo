@@ -578,6 +578,20 @@ fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEss
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
+/// 13a: a claim status as a dict.
+fn claim_status(py: Python<'_>, st: mnemo_core::ClaimStatus) -> PyResult<PyObject> {
+    let d = PyDict::new_bound(py);
+    match st {
+        mnemo_core::ClaimStatus::Held { expires_at } => {
+            d.set_item("status", "held")?;
+            d.set_item("expires_at", expires_at)?;
+        }
+        mnemo_core::ClaimStatus::Released => d.set_item("status", "released")?,
+        mnemo_core::ClaimStatus::Lost => d.set_item("status", "lost")?,
+    }
+    Ok(d.into_any().unbind())
+}
+
 /// 13a: a message as a dict.
 fn message_dict(py: Python<'_>, m: &mnemo_core::Message) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
@@ -2404,6 +2418,107 @@ impl Mnemo {
             mnemo_core::WriteOutcome::Unchanged => "unchanged",
             _ => "acked",
         })
+    }
+
+    /// 13a (13.3): claim `topic` for this handle's author (`set_author`)
+    /// for `ttl` seconds (default 900; 30 to 86400). Returns a dict:
+    /// `{"status": "claimed", "token", "expires_at"}` or
+    /// `{"status": "held_by", "agent", "expires_at"}`.
+    #[pyo3(signature = (topic, ttl=None))]
+    fn claim(&mut self, py: Python<'_>, topic: String, ttl: Option<i64>) -> PyResult<PyObject> {
+        let o = self.wr(move |db| db.claim(&topic, ttl))?;
+        let d = PyDict::new_bound(py);
+        match o {
+            mnemo_core::ClaimOutcome::Claimed { token, expires_at } => {
+                d.set_item("status", "claimed")?;
+                d.set_item("token", token)?;
+                d.set_item("expires_at", expires_at)?;
+            }
+            mnemo_core::ClaimOutcome::HeldBy { agent, expires_at } => {
+                d.set_item("status", "held_by")?;
+                d.set_item("agent", agent)?;
+                d.set_item("expires_at", expires_at)?;
+            }
+        }
+        Ok(d.into_any().unbind())
+    }
+
+    /// 13a (13.3): renew a claim from now. Returns `{"status": "held",
+    /// "expires_at"}` or `{"status": "lost"}`.
+    #[pyo3(signature = (topic, token, ttl=None))]
+    fn renew(
+        &mut self,
+        py: Python<'_>,
+        topic: String,
+        token: String,
+        ttl: Option<i64>,
+    ) -> PyResult<PyObject> {
+        let st = self.wr(move |db| db.renew(&topic, &token, ttl))?;
+        claim_status(py, st)
+    }
+
+    /// 13a (13.3): release a claim: `{"status": "released"}` or `"lost"`.
+    fn release(&mut self, py: Python<'_>, topic: String, token: String) -> PyResult<PyObject> {
+        let st = self.wr(move |db| db.release(&topic, &token))?;
+        claim_status(py, st)
+    }
+
+    /// 13a (13.3): whether `token` still holds `topic`: `{"status":
+    /// "held", "expires_at"}` or `{"status": "lost"}`. Check before
+    /// anything irreversible.
+    fn check_claim(&mut self, py: Python<'_>, topic: String, token: String) -> PyResult<PyObject> {
+        let st = self.rd(move |db| db.check_claim(&topic, &token))?;
+        claim_status(py, st)
+    }
+
+    /// 13a (13.3): the live claims: dicts with `topic`, `holder`,
+    /// `expires_at`, `lease`.
+    fn claims(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let cs = self.rd(|db| db.claims())?;
+        cs.iter()
+            .map(|c| {
+                let d = PyDict::new_bound(py);
+                d.set_item("topic", &c.topic)?;
+                d.set_item("holder", &c.holder)?;
+                d.set_item("expires_at", c.expires_at)?;
+                d.set_item("lease", c.lease)?;
+                Ok(d.into_any().unbind())
+            })
+            .collect()
+    }
+
+    /// 13a (13.3): record this handle's author as active (its presence
+    /// record's `last_active`, at most once a minute). Returns whether it
+    /// wrote.
+    #[pyo3(signature = (role=None, tool=None))]
+    fn touch_presence(&mut self, role: Option<String>, tool: Option<String>) -> PyResult<bool> {
+        self.wr(move |db| db.touch_presence(role.as_deref(), tool.as_deref()))
+    }
+
+    /// 13a (13.3): the agents, most recently active first: dicts with
+    /// `agent`, `role`, `tool`, `last_active`, `alive` (`True`, `False` or
+    /// `None` for unknown) and `claims`.
+    fn who(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let ps = self.rd(|db| db.who())?;
+        ps.iter()
+            .map(|p| {
+                let d = PyDict::new_bound(py);
+                d.set_item("agent", &p.agent)?;
+                d.set_item("role", p.role.clone())?;
+                d.set_item("tool", p.tool.clone())?;
+                d.set_item("last_active", p.last_active)?;
+                d.set_item(
+                    "alive",
+                    match p.alive {
+                        mnemo_core::Alive::Yes => Some(true),
+                        mnemo_core::Alive::No => Some(false),
+                        mnemo_core::Alive::Unknown => None,
+                    },
+                )?;
+                d.set_item("claims", p.claims.clone())?;
+                Ok(d.into_any().unbind())
+            })
+            .collect()
     }
 
     /// 13a: delete messages acked more than `days` days ago (default 30).

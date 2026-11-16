@@ -267,6 +267,8 @@ pub struct SharedMnemo {
     embedder: Option<Arc<dyn Embedder>>,
     /// 13a: the author stamped on new records, kept across reloads.
     author: Option<String>,
+    /// 13a (13.3): the author's presence lock, held for the handle's life.
+    presence: Option<crate::shared::PresenceLock>,
     reloads: u64,
     /// What the last [`SharedMnemo::rekey`] couldn't scrub.
     rekey_cleanup: Option<String>,
@@ -295,6 +297,7 @@ impl SharedMnemo {
             delta: AccessDelta::default(),
             embedder: None,
             author: None,
+            presence: None,
             reloads: 0,
             rekey_cleanup: None,
         };
@@ -329,6 +332,25 @@ impl SharedMnemo {
             db.author = author.clone();
         }
         self.author = author;
+    }
+
+    /// 13a (13.3): hold this handle's author's presence lock for the
+    /// handle's life, in the sidecar directory, so [`Mnemo::who`] sees the
+    /// agent as alive and its claims may lapse early once its process is
+    /// gone. Only a long-lived process should (the MCP server); a hook or a
+    /// CLI call never does. It never touches the brain's own lock. Needs an
+    /// author ([`SharedMnemo::set_author`]) and a usable sidecar directory.
+    pub fn hold_presence(&mut self) -> Result<()> {
+        let agent = self.author.clone().ok_or_else(|| {
+            MnemoError::Invalid("a presence lock needs an agent (set_author)".into())
+        })?;
+        let lock = crate::shared::PresenceLock::take(&self.path, &agent)
+            .map_err(|e| MnemoError::Invalid(format!("can't take the presence lock: {e}")))?;
+        self.presence = Some(lock);
+        if let Some(db) = self.db.as_mut() {
+            db.presence_held = true;
+        }
+        Ok(())
     }
 
     /// Attach an embedder (as [`Mnemo::set_embedder`]). It's kept across
@@ -453,6 +475,10 @@ impl SharedMnemo {
     /// One window: lock, catch up, run, unlock. One [`Call`], so one
     /// deadline and one cancel token, covers every lock it takes.
     fn window<R>(&mut self, kind: LockKind, run: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        // 13a: the presence lock re-checked by identity on every call.
+        if let Some(p) = self.presence.as_mut() {
+            p.refresh();
+        }
         let mut call = Call::new(self.opts.deadline, self.opts.cancel.as_ref());
         let mut lock = kind;
         let held = loop {
@@ -597,6 +623,7 @@ impl SharedMnemo {
             new.embedder = Some(e.clone());
         }
         new.author = self.author.clone();
+        new.presence_held = self.presence.is_some();
         new.shared = true;
         self.stamp = Some(Stamp::of(new.pager.file(), &new.header));
         self.db = Some(new);

@@ -66,7 +66,7 @@ use crate::result_cache::{
 use crate::text;
 use crate::veccol;
 use crate::wal;
-pub use coordination::Message;
+pub use coordination::{Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence};
 
 mod ann;
 mod cache_api;
@@ -1139,6 +1139,13 @@ pub struct Mnemo {
     /// 13a: stamped as `_mnemo.author` on each new record this handle
     /// writes ([`Mnemo::set_author`]).
     author: Option<String>,
+    /// 13a (13.3): this handle's process holds the author's presence lock
+    /// (a shared handle's [`SharedMnemo::hold_presence`]), so its claims
+    /// may lapse early when it dies.
+    presence_held: bool,
+    /// 13a: seconds added to the clock coordination reads (tests only, via
+    /// a dev-hooks setter).
+    clock_offset: i64,
     /// FMT-9 (a): the committed free list (v9; always empty on v8). Pages
     /// allocated from it since the last commit are already removed.
     free: FreeList,

@@ -83,7 +83,11 @@ which would leak into shell history and process listings). Tools exposed:
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`, and since v0.17 `inbox` (messages between agents:
 `list`, `read`, `post`, `ack`, as the server's `MNEMO_AGENT` and
-`MNEMO_ROLE`). Every mutation flushes before returning.
+`MNEMO_ROLE`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
+`serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
+in the sidecar directory for its life, so `who` sees it alive; it never
+holds the brain's lock between calls. Every mutation flushes before
+returning.
 
 With no `--embed-cmd`, the server embeds `text` with the built-in embedder
 (v0.15; see "The built-in embedder" below), loaded once at start. On a
@@ -956,6 +960,9 @@ cargo run --bin mnemo -- <command>
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |
 | `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
 | `ack [PATH] <ID>` | Ack a message (`unread` to `acked`), with `--note`; `--as` (v0.17) |
+| `claim take <TOPIC> [--ttl 15m]` | Claim a topic so two agents don't do one thing (advisory: a record, not a lock). Prints `claimed`, a token and the expiry; exits 1 when another agent (or another session of yours) holds it. Leases are 30s to 24h, 15m by default. `--as`, `--role`, `--brain` (v0.17) |
+| `claim renew\|release\|check <TOPIC> <TOKEN>` | Renew (from now, `--ttl` or the lease), release, or check a claim; exits 1 with `lost` when it lapsed or another agent holds it. Check before anything irreversible (v0.17) |
+| `claim who` | The agents: role, tool, last active, whether the process is alive (`unknown` without a long-lived `serve --mcp --shared`), and the topics each holds; `--format` (v0.17) |
 | `default-agent` | Show, set (`--set <id>`) or clear (`--clear`) the agent a write that names none is made for, kept on the manifest (`_mnemo.default_agent`); the CLI and the MCP server use it in place of `default` (v0.17) |
 | `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1) |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
@@ -979,7 +986,7 @@ take no path, and use the repository's brain,
 `recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
 and `essence render|add|append`. Since v0.16.1 `get <ID>`, `search` and
 `snapshots` do too, and since v0.17 `update <ID>`, `thread start <NEW>`,
-`essence update|resolve|remove <ID>`, `default-agent`, `post`, `inbox` and `ack <ID>`. Every worktree of the repository shares
+`essence update|resolve|remove <ID>`, `default-agent`, `post`, `inbox`, `ack <ID>` and `claim`. Every worktree of the repository shares
 it, git never tracks it, and `init` creates its directory with mode 0700.
 It's found from `-C <dir>`, else `CLAUDE_PROJECT_DIR` (when Claude Code
 sets it), else the working directory. Outside a git repository, give the

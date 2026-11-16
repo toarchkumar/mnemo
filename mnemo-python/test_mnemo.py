@@ -1461,6 +1461,39 @@ def test_identical_keyed_rewrite_is_unchanged():
     print("ok  identical keyed re-write is unchanged (v0.16)")
 
 
+def test_claims_and_presence():
+    """v0.17 (13a step 3): claim, renew, release, check_claim, claims,
+    touch_presence and who."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "c.mnemo"), "passphrase", dimensions=4)
+        try:
+            try:
+                db.claim("t")
+                raise AssertionError("a claim without an agent was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+            db.set_author("worker-a")
+            c = db.claim("PLAN.md tail", ttl=600)
+            assert c["status"] == "claimed" and len(c["token"]) == 32, c
+            tok = c["token"]
+            db.set_author("worker-b")
+            h = db.claim("PLAN.md tail")
+            assert h["status"] == "held_by" and h["agent"] == "worker-a", h
+            assert db.check_claim("PLAN.md tail", "nope") == {"status": "lost"}
+            assert db.check_claim("PLAN.md tail", tok)["status"] == "held"
+            assert db.renew("PLAN.md tail", tok, 120)["status"] == "held"
+            assert [x["holder"] for x in db.claims()] == ["worker-a"]
+            assert db.touch_presence("worker", "python") is True
+            assert db.touch_presence("worker", "python") is False
+            w = db.who()
+            assert w[0]["agent"] == "worker-b" and w[0]["alive"] is None and w[0]["tool"] == "python", w
+            assert db.release("PLAN.md tail", tok) == {"status": "released"}
+            assert db.release("PLAN.md tail", tok) == {"status": "lost"}
+            assert db.claims() == []
+        finally:
+            db.close()
+
+
 def test_messages_post_inbox_ack():
     """v0.17 (13a step 2): post, inbox (by id, role, all; never one's own),
     mark_seen, ack, the hop count, and prune_messages."""
@@ -2078,6 +2111,7 @@ if __name__ == "__main__":
     test_identical_keyed_rewrite_is_unchanged()
     test_author_default_agent_and_freshness()
     test_messages_post_inbox_ack()
+    test_claims_and_presence()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()

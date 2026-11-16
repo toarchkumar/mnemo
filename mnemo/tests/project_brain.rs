@@ -909,3 +909,90 @@ fn post_inbox_and_ack_as_an_agent() {
     let o = e.run(&main, &["inbox"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("only messages to `all`"));
 }
+
+/// 13a step 3 (v0.17): `mnemo claim take|renew|release|check|who`, as an
+/// agent given by `--as` (after the op too) or `MNEMO_AGENT`; held and
+/// lost exit 1.
+#[test]
+fn claim_take_renew_release_check_and_who() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let out = e.ok(
+        &main,
+        &[
+            "claim",
+            "take",
+            "PLAN.md tail",
+            "--ttl",
+            "10m",
+            "--as",
+            "worker-a",
+            "--role",
+            "worker",
+        ],
+    );
+    let parts: Vec<&str> = out.trim().split('\t').collect();
+    assert_eq!(parts[0], "claimed", "{out}");
+    let token = parts[1].to_string();
+    assert_eq!(token.len(), 32);
+    // Another agent: held, exit 1.
+    let err = e.fails(
+        &main,
+        &["claim", "--as", "worker-b", "take", "PLAN.md tail"],
+    );
+    assert!(err.contains("is held by worker-a until"), "{err}");
+    // From the environment.
+    let o = e
+        .cmd(&main, &["claim", "check", "PLAN.md tail", &token])
+        .env("MNEMO_AGENT", "worker-a")
+        .output()
+        .unwrap();
+    assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).starts_with("held until"));
+    assert!(e
+        .ok(
+            &main,
+            &["claim", "renew", "PLAN.md tail", &token, "--ttl", "90s"]
+        )
+        .starts_with("held until"));
+    assert!(e
+        .fails(&main, &["claim", "check", "PLAN.md tail", "0123"])
+        .contains("lost"));
+    let v: Value =
+        serde_json::from_str(&e.ok(&main, &["claim", "who", "--format", "json"])).unwrap();
+    let a = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["agent"] == "worker-a")
+        .unwrap()
+        .clone();
+    assert_eq!(a["alive"], "unknown", "the CLI holds no presence lock: {v}");
+    assert_eq!(a["role"], "worker");
+    assert_eq!(a["tool"], "cli");
+    assert_eq!(a["claims"], serde_json::json!(["PLAN.md tail"]));
+    assert_eq!(
+        e.ok(&main, &["claim", "release", "PLAN.md tail", &token])
+            .trim(),
+        "released"
+    );
+    assert!(e
+        .fails(&main, &["claim", "release", "PLAN.md tail", &token])
+        .contains("lost"));
+    // Bad input, and no agent.
+    assert!(e
+        .fails(
+            &main,
+            &["claim", "take", "t", "--ttl", "5s", "--as", "worker-a"]
+        )
+        .contains("ttl"));
+    assert!(e
+        .fails(
+            &main,
+            &["claim", "take", "t", "--ttl", "soon", "--as", "worker-a"]
+        )
+        .contains("--ttl"));
+    let o = e.run(&main, &["claim", "take", "t"]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("needs an agent"));
+}

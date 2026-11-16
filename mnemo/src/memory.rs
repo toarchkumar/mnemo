@@ -390,6 +390,44 @@ pub const MNEMO_META_HOPS: &str = "_mnemo.hops";
 pub const MNEMO_META_DELIVERY: &str = "_mnemo.delivery";
 /// 13a: when a message was acked, in unix seconds (for pruning).
 pub const MNEMO_META_ACKED_AT: &str = "_mnemo.acked_at";
+/// 13a (13.3): a claim's topic.
+pub const MNEMO_META_TOPIC: &str = "_mnemo.topic";
+/// 13a (13.3): the agent holding a claim.
+pub const MNEMO_META_HOLDER: &str = "_mnemo.holder";
+/// 13a (13.3): a claim's token; `renew`, `release` and `check` need it.
+pub const MNEMO_META_CLAIM_TOKEN: &str = "_mnemo.claim_token";
+/// 13a (13.3): when a claim lapses, in unix seconds.
+pub const MNEMO_META_EXPIRES_AT: &str = "_mnemo.expires_at";
+/// 13a (13.3): a claim's lease, in seconds.
+pub const MNEMO_META_LEASE: &str = "_mnemo.lease";
+/// 13a (13.3): whether the holder had a presence lock when it claimed (the
+/// early lapse applies only then).
+pub const MNEMO_META_HOLDER_LOCK: &str = "_mnemo.holder_lock";
+/// 13a (13.3): when a taker first found the holder not alive.
+pub const MNEMO_META_DEAD_SEEN_AT: &str = "_mnemo.dead_seen_at";
+/// 13a (13.3): a presence record's agent.
+pub const MNEMO_META_AGENT: &str = "_mnemo.agent";
+/// 13a (13.3): the tool a presence record's agent runs in (`mcp`, `cli`).
+pub const MNEMO_META_TOOL: &str = "_mnemo.tool";
+/// 13a (13.3): when the agent last wrote, in unix seconds.
+pub const MNEMO_META_LAST_ACTIVE: &str = "_mnemo.last_active";
+/// 13a (13.3): whether the agent's process holds a presence lock, so `who`
+/// can probe it.
+pub const MNEMO_META_PRESENCE_LOCK: &str = "_mnemo.presence_lock";
+/// 13a (13.3): a claim's default lease (15 minutes).
+pub const CLAIM_TTL_DEFAULT: i64 = 15 * 60;
+/// 13a (13.3): a claim's shortest lease.
+pub const CLAIM_TTL_MIN: i64 = 30;
+/// 13a (13.3): a claim's longest lease (24 hours).
+pub const CLAIM_TTL_MAX: i64 = 24 * 3600;
+/// 13a (13.3): the most often `last_active` is written.
+pub const PRESENCE_EVERY_SECS: i64 = 60;
+/// 13a (13.3): how long a holder must be seen not alive, twice, before its
+/// claim lapses early.
+pub const CLAIM_LAPSE_GRACE_SECS: i64 = 10;
+/// 13a (13.3): a topic's limit, in bytes (one line).
+pub const CLAIM_TOPIC_MAX: usize = 200;
+
 /// 13a (13.1b): the delivery states, in order.
 pub mod delivery {
     /// Written, not yet delivered by a wake-up.
