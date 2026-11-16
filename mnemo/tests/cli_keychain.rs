@@ -391,3 +391,20 @@ fn an_environment_secret_beside_a_store_entry_is_named() {
     assert!(r["result"].is_object(), "{r} {err}");
     assert!(!err.contains("has its own entry"), "{err}");
 }
+
+/// KEYCHAIN-REPROMPT: a keychain that refuses the key stops the server with
+/// what to do.
+#[test]
+fn a_refusing_keychain_stops_the_server_with_what_to_do() {
+    let e = Env::new();
+    let kb = e.path("project.mnemo");
+    assert!(e.run(&["init", "--dimensions", "4", s(&kb)], &[]).0);
+    std::fs::remove_file(e.entry(&kb)).unwrap();
+    std::fs::create_dir(e.entry(&kb)).unwrap();
+    let (r, err) = serve_and_list(&e, &kb, &[]);
+    assert!(r.is_null(), "{r}");
+    assert!(
+        err.contains("(reading): ") && err.contains("choose Always Allow"),
+        "{err}"
+    );
+}

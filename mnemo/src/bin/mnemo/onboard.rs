@@ -118,19 +118,93 @@ enum Item {
     /// Install the built-in model (only a build with `embed-candle` has one).
     #[cfg_attr(not(feature = "embed-candle"), allow(dead_code))]
     InstallModel(String),
-    /// A note in the plan (already right, skipped, left alone).
+    /// A note in the plan (skipped, left alone, an error): one to look at.
     Note(String),
-    /// Write (or create) a file.
+    /// Something already right: `line` for an agent, `what` (a short noun
+    /// phrase) for a person at a terminal.
+    Ok { line: String, what: String },
+    /// Write (or create) a file. `tty` is what a person at a terminal sees.
     Write {
         path: PathBuf,
         old: Option<String>,
         new: String,
         shown: String,
+        tty: Vec<(Mark, String)>,
     },
     /// Delete a file `onboard` wrote.
     Remove { path: PathBuf },
-    /// Run the `claude` CLI in the project's root.
-    Claude { args: Vec<String>, what: String },
+    /// Run the `claude` CLI in the project's root. `tty`: what a person at a
+    /// terminal sees (none for the first half of a replacement).
+    Claude {
+        args: Vec<String>,
+        what: String,
+        tty: Option<(Mark, String)>,
+    },
+}
+
+/// ONBOARD-UX: how a plan line is marked at a terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    Add,
+    Change,
+    Same,
+    Remove,
+    Warn,
+}
+
+impl Mark {
+    fn sign(self) -> char {
+        match self {
+            Mark::Add => '+',
+            Mark::Change => '~',
+            Mark::Same => '=',
+            Mark::Remove => '-',
+            Mark::Warn => '!',
+        }
+    }
+    /// The ANSI colour of its sign.
+    fn colour(self) -> &'static str {
+        match self {
+            Mark::Add => "32",
+            Mark::Change => "33",
+            Mark::Same => "2",
+            Mark::Remove => "31",
+            Mark::Warn => "35",
+        }
+    }
+    fn legend(self) -> &'static str {
+        match self {
+            Mark::Add => "add",
+            Mark::Change => "change",
+            Mark::Same => "already right",
+            Mark::Remove => "remove",
+            Mark::Warn => "look at this",
+        }
+    }
+}
+
+/// ONBOARD-UX: the plan's groups at a terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Section {
+    Brain,
+    Model,
+    ClaudeCode,
+    Cursor,
+    Git,
+    Other,
+}
+
+impl Section {
+    fn title(self) -> &'static str {
+        match self {
+            Section::Brain => "Brain",
+            Section::Model => "Model",
+            Section::ClaudeCode => "Claude Code",
+            Section::Cursor => "Cursor",
+            Section::Git => "Git",
+            Section::Other => "Clients",
+        }
+    }
 }
 
 impl Item {
@@ -141,7 +215,7 @@ impl Item {
             | Item::InstallModel(_)
             | Item::Remove { .. }
             | Item::Claude { .. } => true,
-            Item::BrainOk | Item::Note(_) => false,
+            Item::BrainOk | Item::Note(_) | Item::Ok { .. } => false,
         }
     }
 }
@@ -501,24 +575,32 @@ fn plan_server_file(ctx: &Ctx, path: &Path, entry: &Value, undo: bool, items: &m
                 old,
                 new,
                 format!("- the {NAME} server\n"),
+                vec![(Mark::Remove, format!("the MCP server, in {label}"))],
             )),
             Err(e) => items.push(Item::Note(format!("{label}: {e}"))),
         }
         return;
     }
     if existing.as_ref().is_some_and(|e| same_server(e, entry)) {
-        return items.push(Item::Note(format!(
-            "{label}: the MCP server is already right"
-        )));
+        return items.push(Item::Ok {
+            line: format!("{label}: the MCP server is already right"),
+            what: format!("the MCP server ({label})"),
+        });
     }
     match mi::merged(&text, NAME, entry) {
         Ok((new, previous)) => {
             let shown = mi::shown_change(&text, NAME, &previous, entry);
+            let mark = if existing.is_some() {
+                Mark::Change
+            } else {
+                Mark::Add
+            };
             items.push(Item::Write {
                 path: path.to_path_buf(),
                 old,
                 new,
                 shown,
+                tty: vec![(mark, format!("the MCP server, in {label}"))],
             });
         }
         Err(e) => items.push(Item::Note(format!("{label}: {e}"))),
@@ -526,7 +608,13 @@ fn plan_server_file(ctx: &Ctx, path: &Path, entry: &Value, undo: bool, items: &m
 }
 
 /// On undo, a file left as an empty object is removed (onboard made it).
-fn remove_or_write(path: &Path, old: Option<String>, new: String, shown: String) -> Item {
+fn remove_or_write(
+    path: &Path,
+    old: Option<String>,
+    new: String,
+    shown: String,
+    tty: Vec<(Mark, String)>,
+) -> Item {
     let empty = serde_json::from_str::<Value>(&new)
         .ok()
         .and_then(|v| v.as_object().map(|o| o.is_empty()))
@@ -541,6 +629,7 @@ fn remove_or_write(path: &Path, old: Option<String>, new: String, shown: String)
             old,
             new,
             shown,
+            tty,
         }
     }
 }
@@ -629,23 +718,144 @@ fn plan_hooks_file(ctx: &Ctx, client: Client, path: &Path, undo: bool, items: &m
         } else {
             new
         };
-        items.push(remove_or_write(path, old, new, "- mnemo's hooks\n".into()));
+        items.push(remove_or_write(
+            path,
+            old,
+            new,
+            "- mnemo's hooks\n".into(),
+            vec![(Mark::Remove, format!("mnemo's hooks, in {label}"))],
+        ));
         return;
     }
     if old.as_deref() == Some(new.as_str()) {
-        return items.push(Item::Note(format!("{label}: the hooks are already right")));
+        return items.push(Item::Ok {
+            line: format!("{label}: the hooks are already right"),
+            what: hooks_count(ours.len()),
+        });
     }
     let shown = shown_hooks(&hooks, &ours);
+    let tty = hook_changes(&hooks, &ours, &label);
     items.push(Item::Write {
         path: path.to_path_buf(),
         old,
         new,
         shown,
+        tty,
     });
 }
 
+fn hooks_count(n: usize) -> String {
+    format!("{n} hook{}", if n == 1 { "" } else { "s" })
+}
+
+/// Our handlers in a `hooks` object, in either client's shape: (event,
+/// command, timeout).
+fn our_hooks(hooks: &Option<Value>) -> Vec<(String, String, Option<u64>)> {
+    let mut out = Vec::new();
+    let Some(Value::Object(o)) = hooks else {
+        return out;
+    };
+    for (event, arr) in o {
+        for g in arr.as_array().into_iter().flatten() {
+            let handlers: Vec<&Value> = match g.get("hooks").and_then(Value::as_array) {
+                Some(hs) => hs.iter().collect(),
+                None => vec![g],
+            };
+            for h in handlers {
+                if let Some(c) = h.get("command").and_then(Value::as_str) {
+                    if is_our_hook(c) {
+                        let t = h.get("timeout").and_then(Value::as_u64);
+                        out.push((event.clone(), c.to_string(), t));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// ONBOARD-UX: each of our hooks marked added, changed, already right or
+/// removed, with the already-right ones counted in one line.
+fn hook_changes(
+    old_hooks: &Option<Value>,
+    ours: &[(String, String, u64)],
+    label: &str,
+) -> Vec<(Mark, String)> {
+    let had = our_hooks(old_hooks);
+    let (mut added, mut changed) = (Vec::new(), Vec::new());
+    let mut same = 0;
+    for (event, cmd, timeout) in ours {
+        let before: Vec<_> = had.iter().filter(|(e, _, _)| e == event).collect();
+        if before
+            .iter()
+            .any(|(_, c, t)| c == cmd && *t == Some(*timeout))
+        {
+            same += 1;
+        } else if before.is_empty() {
+            added.push(event.clone());
+        } else {
+            changed.push(event.clone());
+        }
+    }
+    let mut gone: Vec<String> = had
+        .iter()
+        .filter(|(e, _, _)| !ours.iter().any(|(o, _, _)| o == e))
+        .map(|(e, _, _)| e.clone())
+        .collect();
+    gone.sort_unstable();
+    gone.dedup();
+    // One line per mark: "the A, B and C hooks, in <file>".
+    let mut out = Vec::new();
+    for (mark, events) in [
+        (Mark::Add, added),
+        (Mark::Change, changed),
+        (Mark::Remove, gone),
+    ] {
+        if !events.is_empty() {
+            let noun = if events.len() == 1 { "hook" } else { "hooks" };
+            out.push((
+                mark,
+                format!("the {} {noun}, in {label}", and_list(&events)),
+            ));
+        }
+    }
+    if out.is_empty() {
+        // Only the rest of the file changed (Cursor's `version`, say).
+        out.push((Mark::Change, label.to_string()));
+    }
+    if same > 0 {
+        out.push((Mark::Same, hooks_count(same)));
+    }
+    out
+}
+
+/// Lines added and removed between `old` and `new` (a longest common
+/// subsequence of lines; the files are a few hundred lines at most).
+fn line_changes(old: &str, new: &str) -> (usize, usize) {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+    let mut row = vec![0usize; b.len() + 1];
+    for x in &a {
+        let mut diag = 0;
+        for (j, y) in b.iter().enumerate() {
+            let up = row[j + 1];
+            row[j + 1] = if x == y { diag + 1 } else { up.max(row[j]) };
+            diag = up;
+        }
+    }
+    let common = row[b.len()];
+    (b.len() - common, a.len() - common)
+}
+
 /// A generated file (the skill, the Cursor rule).
-fn plan_generated(ctx: &Ctx, path: &Path, content: String, undo: bool, items: &mut Vec<Item>) {
+fn plan_generated(
+    ctx: &Ctx,
+    path: &Path,
+    content: String,
+    what: &str,
+    undo: bool,
+    items: &mut Vec<Item>,
+) {
     let label = rel(ctx, path);
     let old = match read(path) {
         Ok(o) => o,
@@ -662,16 +872,28 @@ fn plan_generated(ctx: &Ctx, path: &Path, content: String, undo: bool, items: &m
         (Some(_), true, true) => items.push(Item::Remove {
             path: path.to_path_buf(),
         }),
-        (Some(t), true, false) if *t == content => {
-            items.push(Item::Note(format!("{label}: already right")))
-        }
+        (Some(t), true, false) if *t == content => items.push(Item::Ok {
+            line: format!("{label}: already right"),
+            what: what.to_string(),
+        }),
         (_, _, false) => {
             let lines = content.lines().count();
+            let tty = match &old {
+                None => (Mark::Add, format!("{what}, in {label}")),
+                Some(o) => {
+                    let (added, removed) = line_changes(o, &content);
+                    (
+                        Mark::Change,
+                        format!("{what}, in {label} (+{added} -{removed} lines)"),
+                    )
+                }
+            };
             items.push(Item::Write {
                 path: path.to_path_buf(),
                 old: old.clone(),
                 new: content,
                 shown: format!("+ the guide's card ({lines} lines)\n"),
+                tty: vec![tty],
             });
         }
     }
@@ -702,19 +924,22 @@ fn plan_claude_local(ctx: &Ctx, claude: &Path, undo: bool, items: &mut Vec<Item>
             items.push(Item::Claude {
                 args: remove,
                 what: "remove the MCP server (local scope)".into(),
+                tty: Some((Mark::Remove, "the MCP server (local scope)".into())),
             });
         }
         return;
     }
     if existing.as_ref().is_some_and(|e| same_server(e, &entry)) {
-        return items.push(Item::Note(
-            "Claude Code (local scope): the MCP server is already right".into(),
-        ));
+        return items.push(Item::Ok {
+            line: "Claude Code (local scope): the MCP server is already right".into(),
+            what: "the MCP server (local scope)".into(),
+        });
     }
     if existing.is_some() {
         items.push(Item::Claude {
             args: remove,
             what: "replace the MCP server (local scope): remove the old one".into(),
+            tty: None,
         });
     }
     let json = serde_json::to_string(&entry).unwrap();
@@ -728,6 +953,11 @@ fn plan_claude_local(ctx: &Ctx, claude: &Path, undo: bool, items: &mut Vec<Item>
             "local".into(),
         ],
         what: "add the MCP server (local scope)".into(),
+        tty: Some(if existing.is_some() {
+            (Mark::Change, "the MCP server (local scope)".into())
+        } else {
+            (Mark::Add, "the MCP server (local scope)".into())
+        }),
     });
 }
 
@@ -766,9 +996,18 @@ fn plan_claude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
         } else {
             "install the mnemo plugin (its MCP server, hooks and skill)"
         };
+        let tty = if undo {
+            (Mark::Remove, "the mnemo plugin".to_string())
+        } else {
+            (
+                Mark::Add,
+                "the mnemo plugin (its MCP server, hooks and skill)".to_string(),
+            )
+        };
         return items.push(Item::Claude {
             args,
             what: what.into(),
+            tty: Some(tty),
         });
     }
     // The MCP server.
@@ -799,6 +1038,7 @@ fn plan_claude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
         ctx,
         &ctx.root.join(".claude/skills/mnemo/SKILL.md"),
         mnemo_engine::guide::skill_md(),
+        "the skill",
         undo,
         items,
     );
@@ -823,6 +1063,7 @@ fn plan_cursor(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
         ctx,
         &ctx.root.join(".cursor/rules/mnemo.mdc"),
         mnemo_engine::guide::cursor_rule(),
+        "the rule",
         undo,
         items,
     );
@@ -877,11 +1118,25 @@ fn plan_exclude(ctx: &Ctx, undo: bool, items: &mut Vec<Item>) {
     } else {
         lines.iter().map(|l| format!("+ {l}\n")).collect()
     };
+    let label = rel(ctx, &path);
+    let tty = if undo {
+        (Mark::Remove, format!("mnemo onboard's block in {label}"))
+    } else {
+        (
+            Mark::Add,
+            format!(
+                "{} file{} left out of git, in {label}",
+                lines.len(),
+                if lines.len() == 1 { "" } else { "s" }
+            ),
+        )
+    };
     items.push(Item::Write {
         path,
         old,
         new,
         shown,
+        tty: vec![tty],
     });
 }
 
@@ -940,7 +1195,10 @@ fn plan_model(no_model: bool, undo: bool, items: &mut Vec<Item>) {
                     .into(),
             ));
         } else if builtin::is_installed() {
-            items.push(Item::Note("model: installed".into()));
+            items.push(Item::Ok {
+                line: "model: installed".into(),
+                what: "the built-in model is installed".into(),
+            });
         } else {
             items.push(Item::InstallModel(builtin::human_size(
                 builtin::download_size(),
@@ -961,7 +1219,7 @@ fn plan_model(no_model: bool, undo: bool, items: &mut Vec<Item>) {
 /// Create the brain with a generated key in the keychain, and show its
 /// recovery code under the display rule. Returns whether the code was
 /// shown and confirmed.
-fn create_brain(brain: &Path, human: &mut Vec<String>) -> Result<(), String> {
+fn create_brain(brain: &Path, shown: &str, human: &mut Vec<String>) -> Result<(), String> {
     use mnemo_engine::keys;
     use mnemo_engine::{Memory, MnemoConfig};
     let store = keys::default_store().ok_or_else(no_keychain)?;
@@ -986,7 +1244,7 @@ fn create_brain(brain: &Path, human: &mut Vec<String>) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "created {} with a generated key, kept in {}",
-        label,
+        shown,
         store.describe()
     );
     let code = keys::recovery::encode(&key);
@@ -1125,11 +1383,13 @@ fn show(ctx: &Ctx, items: &[Item], undo: bool) {
             Item::BrainOk => println!("- brain: {} (its key opens it)", rel(ctx, &ctx.brain)),
             Item::InstallModel(size) => println!("- model: install the built-in model ({size})"),
             Item::Note(n) => println!("- {n}"),
+            Item::Ok { line, .. } => println!("- {line}"),
             Item::Write {
                 path,
                 old,
                 new,
                 shown,
+                ..
             } => {
                 if old.as_deref() == Some(new.as_str()) {
                     continue;
@@ -1148,12 +1408,296 @@ fn show(ctx: &Ctx, items: &[Item], undo: bool) {
                 }
             }
             Item::Remove { path } => println!("- remove {}", rel(ctx, path)),
-            Item::Claude { args, what } => {
+            Item::Claude { args, what, .. } => {
                 // The entry carries no secret; its env (none) is masked anyway.
                 println!("- Claude Code: {what}: claude {}", shell_words(args));
             }
         }
     }
+}
+
+// --- At a terminal (ONBOARD-UX) ------------------------------------------------------
+
+/// Whether a person reads the output: stdout is a terminal. (A dev-hooks
+/// build takes `MNEMO_DEV_ONBOARD_TTY` for tests.) Without one, the output
+/// is v0.16.1's, for an agent: the plan, the guide, the human steps last.
+fn at_terminal() -> bool {
+    #[cfg(feature = "dev-hooks")]
+    if std::env::var_os("MNEMO_DEV_ONBOARD_TTY").is_some() {
+        return true;
+    }
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+/// Colour at a terminal, unless `NO_COLOR` is set (and not empty) or the
+/// terminal is `dumb`.
+fn use_colour() -> bool {
+    std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
+        && std::env::var("TERM").map_or(true, |t| t != "dumb")
+}
+
+/// How a person's view is drawn.
+struct Pen {
+    colour: bool,
+}
+
+impl Pen {
+    fn paint(&self, code: &str, text: &str) -> String {
+        if self.colour {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+    fn heading(&self, t: &str) -> String {
+        self.paint("1", t)
+    }
+    fn mark(&self, m: Mark) -> String {
+        self.paint(m.colour(), &m.sign().to_string())
+    }
+    /// `text` after `lead`, wrapped at 80 columns with a hanging indent.
+    /// A command in backticks is never split, so it copies whole.
+    fn line(&self, lead: &str, lead_width: usize, text: &str) -> String {
+        let room = 80usize.saturating_sub(lead_width).max(30);
+        let mut words: Vec<String> = Vec::new();
+        let mut open = false;
+        for w in text.split_whitespace() {
+            match words.last_mut() {
+                Some(last) if open => {
+                    last.push(' ');
+                    last.push_str(w);
+                }
+                _ => words.push(w.to_string()),
+            }
+            if w.matches('`').count() % 2 == 1 {
+                open = !open;
+            }
+        }
+        let mut out = String::new();
+        let mut cur = String::new();
+        for w in &words {
+            if !cur.is_empty() && cur.chars().count() + 1 + w.chars().count() > room {
+                out.push_str(&cur);
+                out.push('\n');
+                out.push_str(&" ".repeat(lead_width));
+                cur.clear();
+            }
+            if !cur.is_empty() {
+                cur.push(' ');
+            }
+            cur.push_str(w);
+        }
+        out.push_str(&cur);
+        format!("{lead}{out}")
+    }
+    fn marked(&self, m: Mark, text: &str) -> String {
+        self.line(&format!("  {} ", self.mark(m)), 4, text)
+    }
+}
+
+/// `p` with the home directory as `~`.
+fn tilde(ctx: &Ctx, p: &Path) -> String {
+    match p.strip_prefix(&ctx.home) {
+        Ok(r) => format!("~/{}", r.display()),
+        Err(_) => p.display().to_string(),
+    }
+}
+
+/// What a person sees for one item.
+fn tty_lines(ctx: &Ctx, it: &Item) -> Vec<(Mark, String)> {
+    match it {
+        Item::CreateBrain => vec![(
+            Mark::Add,
+            format!(
+                "{}, with a generated key kept in the keychain",
+                rel(ctx, &ctx.brain)
+            ),
+        )],
+        Item::BrainOk => vec![(
+            Mark::Same,
+            format!("{} (its key opens it)", rel(ctx, &ctx.brain)),
+        )],
+        Item::InstallModel(size) => {
+            vec![(Mark::Add, format!("the built-in model ({size} download)"))]
+        }
+        // The Model heading already says it.
+        Item::Note(n) => vec![(
+            Mark::Warn,
+            n.strip_prefix("model: ").unwrap_or(n).to_string(),
+        )],
+        Item::Ok { what, .. } => vec![(Mark::Same, what.clone())],
+        Item::Write { old, new, tty, .. } => {
+            if old.as_deref() == Some(new.as_str()) {
+                Vec::new()
+            } else {
+                tty.clone()
+            }
+        }
+        Item::Remove { path } => vec![(Mark::Remove, rel(ctx, path))],
+        Item::Claude { tty, .. } => tty.iter().cloned().collect(),
+    }
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn and_list(parts: &[String]) -> String {
+    match parts {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The plan, grouped, for a person at a terminal.
+fn show_tty(ctx: &Ctx, items: &[Item], sections: &[(Section, usize)], undo: bool, pen: &Pen) {
+    println!(
+        "{} {} ({} scope)",
+        pen.heading(if undo {
+            "mnemo onboard --undo:"
+        } else {
+            "mnemo onboard:"
+        }),
+        tilde(ctx, &ctx.root),
+        ctx.scope.word()
+    );
+    let mut used = Vec::new();
+    for (i, (section, start)) in sections.iter().enumerate() {
+        let end = sections.get(i + 1).map_or(items.len(), |(_, e)| *e);
+        let lines: Vec<(Mark, String)> = items[*start..end]
+            .iter()
+            .flat_map(|it| tty_lines(ctx, it))
+            .collect();
+        if lines.is_empty() {
+            continue;
+        }
+        println!();
+        println!("{}", pen.heading(section.title()));
+        let mut same = Vec::new();
+        for (m, t) in &lines {
+            if !used.contains(m) {
+                used.push(*m);
+            }
+            match (m, section) {
+                // A section of one thing says it plainly.
+                (Mark::Same, Section::Brain | Section::Model) => {
+                    println!("{}", pen.marked(*m, t))
+                }
+                (Mark::Same, _) => same.push(t.clone()),
+                _ => println!("{}", pen.marked(*m, t)),
+            }
+        }
+        if !same.is_empty() {
+            println!(
+                "{}",
+                pen.marked(Mark::Same, &format!("already right: {}", and_list(&same)))
+            );
+        }
+    }
+    let order = [
+        Mark::Add,
+        Mark::Change,
+        Mark::Remove,
+        Mark::Same,
+        Mark::Warn,
+    ];
+    let legend: Vec<String> = order
+        .iter()
+        .filter(|m| used.contains(m))
+        .map(|m| format!("{} {}", pen.mark(*m), m.legend()))
+        .collect();
+    if !legend.is_empty() {
+        println!();
+        println!("  {}", legend.join("   "));
+    }
+    println!();
+}
+
+/// After the writes, for a person at a terminal: what was done, the guide's
+/// pointer, then the next steps, the human steps last.
+fn summary_tty(ctx: &Ctx, o: &Opts, done: &[Done], human: &[String], restart: &[&str], pen: &Pen) {
+    let tty: Vec<&(Mark, String)> = done.iter().flat_map(|d| d.tty.iter()).collect();
+    if !tty.is_empty() {
+        println!("{}", pen.heading("Done"));
+        for (m, t) in tty {
+            println!("{}", pen.marked(*m, t));
+        }
+    }
+    println!();
+    println!("The brain: {}", rel(ctx, &ctx.brain));
+    if o.undo {
+        println!();
+        println!("{}", pen.heading("Kept"));
+        println!(
+            "{}",
+            pen.line(
+                "  ",
+                2,
+                "The brain, its key and the model: onboard --undo never removes them."
+            )
+        );
+        println!(
+            "{}",
+            pen.line(
+                "  ",
+                2,
+                &format!(
+                    "To delete the brain (its memories go with it): remove {}",
+                    rel(ctx, &ctx.brain)
+                )
+            )
+        );
+        #[cfg(feature = "embed-candle")]
+        if let Ok(d) = mnemo_engine::builtin::cache_dir() {
+            println!(
+                "{}",
+                pen.line(
+                    "  ",
+                    2,
+                    &format!("To delete the model: remove {}", tilde(ctx, &d))
+                )
+            );
+        }
+        if let Some(line) = keychain_delete_line(&ctx.brain) {
+            // A command on a line of its own, never wrapped.
+            println!("  To delete this brain's keychain entry:");
+            println!("    {line}");
+        }
+        return;
+    }
+    println!("The guide for agents: mnemo onboard --guide");
+    let mut steps: Vec<String> = Vec::new();
+    if !restart.is_empty() {
+        steps.push(format!(
+            "Restart {} (or start a new session) so {} the changes.",
+            and_list(&restart.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
+            if restart.len() == 1 {
+                "it loads"
+            } else {
+                "they load"
+            }
+        ));
+    }
+    steps.extend(human_steps(o, human).iter().map(|s| sentence(s)));
+    println!();
+    println!("{}", pen.heading("Next"));
+    for (i, s) in steps.iter().enumerate() {
+        let lead = format!("  {}. ", i + 1);
+        let w = lead.len();
+        println!("{}", pen.line(&lead, w, s));
+    }
+}
+
+/// A step as a sentence: a capital first, a full stop last.
+fn sentence(s: &str) -> String {
+    let mut c = s.chars();
+    let mut out: String = match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => return String::new(),
+    };
+    if !out.ends_with('.') {
+        out.push('.');
+    }
+    out
 }
 
 /// The file a symbolic link at `path` leads to (RB-011.5 item 3), or `None`
@@ -1178,14 +1722,40 @@ fn shell_words(args: &[String]) -> String {
         .join(" ")
 }
 
-/// Do the plan. Returns the human steps.
-fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<String>, String> {
+/// One thing done: the line an agent reads, and what a person sees.
+struct Done {
+    plain: String,
+    tty: Vec<(Mark, String)>,
+}
+
+impl Done {
+    fn new(plain: String, tty: Vec<(Mark, String)>) -> Done {
+        Done { plain, tty }
+    }
+}
+
+/// Do the plan. Returns what was done; the human steps go in `human`.
+fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Done>, String> {
     let mut done = Vec::new();
     for it in items {
+        // What a person sees: the plan's lines, less what was already right.
+        let shown: Vec<(Mark, String)> = tty_lines(ctx, it)
+            .into_iter()
+            .filter(|(m, _)| *m != Mark::Same && *m != Mark::Warn)
+            .collect();
         match it {
             Item::CreateBrain => {
-                create_brain(&ctx.brain, human)?;
-                done.push(format!("created: {}", ctx.brain.display()));
+                // A person sees the path from the repository (ONBOARD-UX).
+                let shown = if at_terminal() {
+                    rel(ctx, &ctx.brain)
+                } else {
+                    ctx.brain.display().to_string()
+                };
+                create_brain(&ctx.brain, &shown, human)?;
+                done.push(Done::new(
+                    format!("created: {}", ctx.brain.display()),
+                    vec![(Mark::Add, rel(ctx, &ctx.brain))],
+                ));
             }
             Item::InstallModel(_) => install_model(human, &mut done),
             Item::Write { path, old, new, .. } => {
@@ -1195,7 +1765,15 @@ fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Strin
                 // Through a symbolic link to its file, so the link stays.
                 let target = through_link(path).unwrap_or_else(|| path.clone());
                 mi::write_atomically(&target, new)?;
-                done.push(format!("wrote: {}", target.display()));
+                let mark = if old.is_some() {
+                    Mark::Change
+                } else {
+                    Mark::Add
+                };
+                done.push(Done::new(
+                    format!("wrote: {}", target.display()),
+                    vec![(mark, rel(ctx, path))],
+                ));
             }
             Item::Remove { path } => {
                 std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1209,9 +1787,9 @@ fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Strin
                     }
                     dir = d.parent();
                 }
-                done.push(format!("removed: {}", path.display()));
+                done.push(Done::new(format!("removed: {}", path.display()), shown));
             }
-            Item::Claude { args, what } => {
+            Item::Claude { args, what, .. } => {
                 let claude = mi::on_path("claude").ok_or("`claude` isn't on the PATH")?;
                 let out = std::process::Command::new(claude)
                     .args(args)
@@ -1226,20 +1804,23 @@ fn apply(ctx: &Ctx, items: &[Item], human: &mut Vec<String>) -> Result<Vec<Strin
                         shell_words(args)
                     ));
                 } else {
-                    done.push(format!("Claude Code: {what}"));
+                    done.push(Done::new(format!("Claude Code: {what}"), shown));
                 }
             }
-            Item::BrainOk | Item::Note(_) => {}
+            Item::BrainOk | Item::Note(_) | Item::Ok { .. } => {}
         }
     }
     Ok(done)
 }
 
-fn install_model(human: &mut Vec<String>, done: &mut Vec<String>) {
+fn install_model(human: &mut Vec<String>, done: &mut Vec<Done>) {
     #[cfg(feature = "embed-candle")]
     {
         match mnemo_engine::builtin::install(&mut |m| eprintln!("{m}")) {
-            Ok(_) => done.push("model: installed".into()),
+            Ok(_) => done.push(Done::new(
+                "model: installed".into(),
+                vec![(Mark::Add, "the built-in model".into())],
+            )),
             Err(e) => human.push(format!(
                 "the model couldn't be downloaded ({e}): recall is keyword-only and the hooks \
                  save nothing until `mnemo embedder install` works"
@@ -1261,6 +1842,8 @@ pub fn run(o: Opts) -> Result<(), String> {
         project::refuse_link(&ctx.brain)?;
     }
     let exists = ctx.brain.is_file();
+    // Where each group starts, for a person's view.
+    let mut sections = vec![(Section::Brain, 0)];
     if !o.undo {
         if exists {
             check_brain(&ctx.brain)?;
@@ -1269,8 +1852,10 @@ pub fn run(o: Opts) -> Result<(), String> {
             items.push(Item::CreateBrain);
         }
     }
+    sections.push((Section::Model, items.len()));
     plan_model(o.no_model, o.undo, &mut items);
     if clients.is_empty() {
+        sections.push((Section::Other, items.len()));
         items.push(Item::Note(
             "no client found (Claude Code or Cursor): nothing to wire. Pass --client \
              claude-code,cursor to wire one anyway"
@@ -1279,24 +1864,51 @@ pub fn run(o: Opts) -> Result<(), String> {
     }
     for c in &clients {
         match c {
-            Client::ClaudeCode => plan_claude(&ctx, o.undo, &mut items),
-            Client::Cursor => plan_cursor(&ctx, o.undo, &mut items),
+            Client::ClaudeCode => {
+                sections.push((Section::ClaudeCode, items.len()));
+                plan_claude(&ctx, o.undo, &mut items)
+            }
+            Client::Cursor => {
+                sections.push((Section::Cursor, items.len()));
+                plan_cursor(&ctx, o.undo, &mut items)
+            }
         }
     }
+    sections.push((Section::Git, items.len()));
     plan_exclude(&ctx, o.undo, &mut items);
-    show(&ctx, &items, o.undo);
+    let person = at_terminal();
+    let pen = Pen {
+        colour: person && use_colour(),
+    };
+    if person {
+        show_tty(&ctx, &items, &sections, o.undo, &pen);
+    } else {
+        show(&ctx, &items, o.undo);
+    }
     let changes = items.iter().filter(|i| i.is_change()).count();
     if o.print {
         return Ok(());
     }
+    // The clients whose files change: a person is asked to restart them.
+    let restart: Vec<&str> = sections
+        .iter()
+        .enumerate()
+        .filter(|(i, (sec, start))| {
+            let end = sections.get(i + 1).map_or(items.len(), |(_, e)| *e);
+            matches!(sec, Section::ClaudeCode | Section::Cursor)
+                && items[*start..end].iter().any(Item::is_change)
+        })
+        .map(|(_, (sec, _))| sec.title())
+        .collect();
     let mut human = Vec::new();
     let done = if changes == 0 {
         println!(
             "{}",
-            if o.undo {
-                "nothing to remove"
-            } else {
-                "already set up"
+            match (o.undo, person) {
+                (true, false) => "nothing to remove",
+                (false, false) => "already set up",
+                (true, true) => "Nothing to remove.",
+                (false, true) => "Already set up: nothing to change.",
             }
         );
         Vec::new()
@@ -1320,11 +1932,18 @@ pub fn run(o: Opts) -> Result<(), String> {
         }
         apply(&ctx, &items, &mut human)?
     };
+    if person {
+        // ONBOARD-UX: a person gets the guide's pointer, not the guide.
+        let restart: &[&str] = if done.is_empty() { &[] } else { &restart };
+        summary_tty(&ctx, &o, &done, &human, restart, &pen);
+        return Ok(());
+    }
     // The guide first, then the summary, so the output ends with the human
     // steps: an agent that reads only the tail still sees them (v0.16.1).
     if !o.undo {
         print!("{}", mnemo_engine::guide::markdown());
     }
+    let done: Vec<String> = done.into_iter().map(|d| d.plain).collect();
     let steps = summary(&ctx, &o, &done, &human);
     if steps > 0 && !interactive() {
         println!(
@@ -1342,7 +1961,6 @@ fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) -> usize {
         println!("{d}");
     }
     println!("brain: {}", ctx.brain.display());
-    let mut steps: Vec<String> = human.to_vec();
     if o.undo {
         println!("kept: the brain, its key and the model; onboard --undo never removes them");
         println!(
@@ -1353,7 +1971,21 @@ fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) -> usize {
         if let Ok(d) = mnemo_engine::builtin::cache_dir() {
             println!("to delete the model: remove {}", d.display());
         }
-    } else {
+    }
+    let steps = human_steps(o, human);
+    if let Some(line) = keychain_delete_line(&ctx.brain) {
+        println!("to delete this brain's keychain entry: {line}");
+    }
+    for s in &steps {
+        println!("human step: {s}");
+    }
+    steps.len()
+}
+
+/// The steps only the person can do, the trust prompt last.
+fn human_steps(o: &Opts, human: &[String]) -> Vec<String> {
+    let mut steps: Vec<String> = human.to_vec();
+    if !o.undo {
         if o.no_model {
             steps.push(
                 "the hooks save transcripts only once the model is installed: run `mnemo \
@@ -1375,13 +2007,7 @@ fn summary(ctx: &Ctx, o: &Opts, done: &[String], human: &[String]) -> usize {
                 .into(),
         );
     }
-    if let Some(line) = keychain_delete_line(&ctx.brain) {
-        println!("to delete this brain's keychain entry: {line}");
-    }
-    for s in &steps {
-        println!("human step: {s}");
-    }
-    steps.len()
+    steps
 }
 
 #[cfg(test)]

@@ -155,7 +155,9 @@ function Install-Mnemo {
         # instead of this one when it comes first.
         foreach ($other in @(Get-Command mnemo -All -CommandType Application -ErrorAction SilentlyContinue)) {
             if ($other.Source -and ($other.Source -ne $dest)) {
-                Write-Output "another mnemo is on your PATH: $($other.Source). If ``mnemo --version`` doesn't say mnemo $version in a new terminal, remove that one or put $dir first on your PATH"
+                Write-Output "another mnemo is on your PATH: $($other.Source)"
+                Write-Output "  If ``mnemo --version`` doesn't say mnemo $version in a new terminal,"
+                Write-Output "  remove that one, or put $dir first on your PATH."
             }
         }
         $onPath = ($env:PATH -split ';') -contains $dir

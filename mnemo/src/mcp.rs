@@ -818,21 +818,32 @@ fn serve_inner<R: Read, W: Write>(
 ) -> Result<()> {
     use crate::keys::{Resolution, Secret};
     let store = crate::keys::default_store();
-    let found =
-        match crate::keys::resolve(path, store.as_deref(), crate::keys::SERVER_COMMAND_TIMEOUT)? {
-            Resolution::Found(r) => r,
-            Resolution::NoSource { notes, .. } => {
-                for n in &notes {
-                    eprintln!("mnemo mcp: note: {n}");
-                }
-                return Err(MnemoError::Invalid(format!(
-                    "no secret for {}: set MNEMO_PASSPHRASE, MNEMO_KEY, MNEMO_KEY_FILE or \
+    let waiting =
+        crate::keys::SlowStoreNote::after(crate::keys::SLOW_STORE_NOTE_AFTER, "mnemo mcp: ");
+    let resolved =
+        crate::keys::resolve(path, store.as_deref(), crate::keys::SERVER_COMMAND_TIMEOUT);
+    drop(waiting);
+    let resolved = resolved.map_err(|e| {
+        if crate::keys::is_store_error(&e) {
+            MnemoError::Invalid(format!("{e}; {}", crate::keys::KEYCHAIN_ALLOW_HINT))
+        } else {
+            e
+        }
+    })?;
+    let found = match resolved {
+        Resolution::Found(r) => r,
+        Resolution::NoSource { notes, .. } => {
+            for n in &notes {
+                eprintln!("mnemo mcp: note: {n}");
+            }
+            return Err(MnemoError::Invalid(format!(
+                "no secret for {}: set MNEMO_PASSPHRASE, MNEMO_KEY, MNEMO_KEY_FILE or \
                  MNEMO_KEY_COMMAND in the server's environment, or keep its key in the keychain \
                  (`mnemo init`, `mnemo unlock`); the server never prompts",
-                    path.display()
-                )));
-            }
-        };
+                path.display()
+            )));
+        }
+    };
     for n in &found.notes {
         eprintln!("mnemo mcp: note: {n}");
     }
