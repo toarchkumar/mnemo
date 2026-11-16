@@ -58,6 +58,16 @@ impl Mnemo {
     /// the catalog's rows and decrypts only the records it returns (on v9),
     /// and doesn't count as an access.
     pub fn recent(&mut self, n: usize) -> Result<Vec<Memory>> {
+        self.recent_in(n, crate::memory::VisibilitySet::DEFAULT)
+    }
+
+    /// 13a (13.5): [`Mnemo::recent`] with the visibility levels it shows
+    /// (`recent` itself shows public and team).
+    pub fn recent_in(
+        &mut self,
+        n: usize,
+        visibility: crate::memory::VisibilitySet,
+    ) -> Result<Vec<Memory>> {
         let now = crate::memory::now_secs();
         let mut rows: Vec<(i64, CatalogEntry)> = Vec::new();
         let mut unrowed: Vec<CatalogEntry> = Vec::new();
@@ -67,6 +77,7 @@ impl Mnemo {
                     if r.kind != ROW_KIND_FACT
                         || r.flags & ROW_SUPERSEDED != 0
                         || (r.flags & ROW_HAS_TTL != 0 && now >= r.expires_at)
+                        || !super::records::row_visible(r.kind, r.flags, visibility)
                         || self.superseded.as_ref().is_some_and(|s| s.contains(&e.id))
                     {
                         continue;
@@ -83,6 +94,7 @@ impl Mnemo {
                 && !m.metadata.contains_key(MNEMO_META_KIND)
                 && !is_onboarding(m)
                 && !m.is_expired(now)
+                && visibility.shows(m)
         };
         let mut out = Vec::new();
         for (_, e) in rows {
@@ -196,6 +208,19 @@ impl Mnemo {
         top_k: usize,
         metric: Metric,
     ) -> Result<Vec<(Memory, f32)>> {
+        self.search_in(query, top_k, metric, crate::memory::VisibilitySet::DEFAULT)
+    }
+
+    /// 13a (RB-013.2): [`Mnemo::search`] with the visibility levels it shows
+    /// (`search` itself shows public and team). Coordination records
+    /// (messages, tasks, claims, presence) are never results.
+    pub fn search_in(
+        &mut self,
+        query: &[f32],
+        top_k: usize,
+        metric: Metric,
+        visibility: crate::memory::VisibilitySet,
+    ) -> Result<Vec<(Memory, f32)>> {
         if query.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -213,7 +238,7 @@ impl Mnemo {
         let mut scored: Vec<(Memory, f32)> = Vec::new();
         for e in &entries {
             let m = self.read_memory(e)?;
-            if m.is_expired(now) {
+            if m.is_expired(now) || is_coordination(&m) || !visibility.shows(&m) {
                 continue;
             }
             let sim = memory::similarity(metric, query, &m.vector);
@@ -496,7 +521,7 @@ impl Mnemo {
                     continue;
                 }
             }
-            if !super::records::row_visible(r.flags, req.visibility) {
+            if !super::records::row_visible(r.kind, r.flags, req.visibility) {
                 continue;
             }
             if matches!(
@@ -555,6 +580,11 @@ impl Mnemo {
             }
             // A row written before its visibility bit existed.
             if !req.visibility.shows(&m) {
+                continue;
+            }
+            // RB-013.1: a coordination record an older build re-tagged as
+            // a fact is never a hit.
+            if is_coordination(&m) {
                 continue;
             }
             out.push(RecallResult {

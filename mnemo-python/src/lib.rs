@@ -2436,10 +2436,14 @@ impl Mnemo {
 
     /// 13a (13.6): the stale records, oldest first: dicts with `id`, `what`
     /// (`essence state`, `task active`, `message unread`, `fact`, ...),
-    /// `since`, `text` and `whose`.
-    fn stale(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    /// `since`, `text`, `whose` and `visibility`. Private records only when
+    /// `visibility` asks (`["private"]`, `["all"]`).
+    #[pyo3(signature = (*, visibility=None))]
+    fn stale(&mut self, py: Python<'_>, visibility: Option<Vec<String>>) -> PyResult<Vec<PyObject>> {
+        let vis = vis_arg(visibility)?;
         let rows = self.rd(|db| db.stale())?;
         rows.iter()
+            .filter(|r| vis.shows_level(&r.visibility))
             .map(|r| {
                 let d = PyDict::new_bound(py);
                 d.set_item("id", r.id.to_string())?;
@@ -2447,6 +2451,7 @@ impl Mnemo {
                 d.set_item("since", r.since)?;
                 d.set_item("text", &r.text)?;
                 d.set_item("whose", r.whose.clone())?;
+                d.set_item("visibility", &r.visibility)?;
                 Ok(d.into_any().unbind())
             })
             .collect()
