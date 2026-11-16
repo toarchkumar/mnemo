@@ -130,12 +130,20 @@ fn a_good_binary_is_installed_and_the_next_line_works_before_the_path_is_fixed()
         t.contains(&format!("Next: {} onboard", full.display())),
         "{t}"
     );
+    // A first install: no keychain note.
+    assert!(!t.contains("Always Allow"), "{t}");
     // Again, with the directory on the PATH: replaced in place, "Next:
     // mnemo onboard".
     let o = e.run(base.to_str().unwrap(), VERSION, true);
     let t = text(&o);
     assert!(o.status.success(), "{t}");
     assert!(t.contains("Next: mnemo onboard"), "{t}");
+    // An upgrade: on macOS, the keychain asks once (KEYCHAIN-REPROMPT).
+    assert_eq!(
+        t.contains("macOS asks once.\nChoose Always Allow"),
+        cfg!(target_os = "macos"),
+        "{t}"
+    );
     // Nothing left beside it (the staged copy was moved into place).
     let left: Vec<_> = std::fs::read_dir(e.p("home/.local/bin"))
         .unwrap()
@@ -227,11 +235,19 @@ fn another_mnemo_on_the_path_is_named() {
     assert!(o.status.success(), "{t}");
     assert!(
         t.contains(&format!(
-            "another mnemo is on your PATH: {}/mnemo. If `mnemo --version` doesn't say mnemo {VERSION}, run `hash -r` (zsh: `rehash`)",
+            "another mnemo is on your PATH: {}/mnemo\n  If `mnemo --version` doesn't say mnemo {VERSION}, run `hash -r`\n  (zsh: `rehash`) or open a new terminal.\n  If it still doesn't, remove that one, or put ",
             old.display()
         )),
         "{t}"
     );
+    // What to do is on short lines of its own (ONBOARD-UX); only a path
+    // makes one longer.
+    for l in t
+        .lines()
+        .filter(|l| l.starts_with("  ") && !l.contains('/'))
+    {
+        assert!(l.chars().count() <= 72, "{l}");
+    }
     // The installed one itself isn't named.
     assert_eq!(t.matches("another mnemo").count(), 1, "{t}");
     let o = e.run(base.to_str().unwrap(), VERSION, true);

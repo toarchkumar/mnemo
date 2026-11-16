@@ -399,12 +399,26 @@ const NO_KEY: &str = "mnemo: this brain's key isn't available here (`mnemo unloc
 const BUSY: &str = "mnemo: the brain was busy; call the `about` tool";
 const BAD_ID: &str = "mnemo: the session id isn't one this hook accepts";
 
-/// The brain's secret from the key sources, never a prompt.
+/// The brain's secret from the key sources, never a prompt. A keychain
+/// that refuses, or keeps it waiting, is named (KEYCHAIN-REPROMPT), apart
+/// from a key that isn't there.
 fn secret(path: &Path) -> Result<Secret, String> {
     use mnemo_engine::keys::{self, Resolution};
     let store = keys::default_store();
-    match keys::resolve(path, store.as_deref(), keys::SERVER_COMMAND_TIMEOUT) {
+    let waiting = keys::SlowStoreNote::after(keys::SLOW_STORE_NOTE_AFTER, "mnemo: ");
+    let r = keys::resolve(path, store.as_deref(), keys::SERVER_COMMAND_TIMEOUT);
+    drop(waiting);
+    match r {
         Ok(Resolution::Found(r)) => Ok(r.secret),
+        Err(e) if keys::is_store_error(&e) => {
+            let note = format!(
+                "mnemo: the keychain didn't give this brain's key ({}); {}",
+                one_line(&e.to_string()),
+                keys::KEYCHAIN_ALLOW_HINT
+            );
+            eprintln!("{note}");
+            Err(note)
+        }
         _ => Err(NO_KEY.into()),
     }
 }
@@ -988,10 +1002,31 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
             "claims lapsing soon",
         ));
     }
+    // What to call, for only what the counts hold (ONBOARD-UX).
+    let mut calls = Vec::new();
+    let it = |k: usize, one: &'static str, many: &'static str| if k == 1 { one } else { many };
+    if !work.messages.is_empty() {
+        calls.push(format!(
+            "Call `inbox` to read {}.",
+            it(work.messages.len(), "it", "them")
+        ));
+    }
+    if !work.tasks.is_empty() {
+        calls.push(format!(
+            "Call `task` with `next` to take {}.",
+            it(work.tasks.len(), "it", "one")
+        ));
+    }
+    if !work.lapsing.is_empty() {
+        calls.push(format!(
+            "Update the task with `task` to renew {}.",
+            it(work.lapsing.len(), "its claim", "their claims")
+        ));
+    }
     let head = format!(
-        "mnemo: new for you: {}. Call `inbox` or `task` (with `next`, or an update to renew a \
-         claim).\n{}",
+        "mnemo: new for you: {}. {}\n{}",
         counts.join(", "),
+        calls.join(" "),
         guide::FRAMING
     );
     let mut items: Vec<String> = Vec::new();
@@ -1445,6 +1480,49 @@ pub fn redaction_note(counts: &[(&'static str, usize)]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ONBOARD-UX: the per-turn line asks for only what its counts hold.
+    #[test]
+    fn the_turn_line_names_only_what_is_new() {
+        let msg = |s: &str| mnemo_engine::Message {
+            id: ulid::Ulid::nil(),
+            to: "worker-a".into(),
+            from: "user".into(),
+            subject: s.into(),
+            body: String::new(),
+            refs: Vec::new(),
+            conversation: String::new(),
+            hops: 0,
+            status: "open".into(),
+            delivery: String::new(),
+            created_at: 0,
+            acked_at: None,
+        };
+        let claim = mnemo_engine::Claim {
+            topic: "task:ship".into(),
+            holder: "worker-a".into(),
+            expires_at: 600,
+            lease: 900,
+        };
+        let head = |w: &mnemo_engine::NewWork| turn_text(w, 0).lines().next().unwrap().to_string();
+        let w = mnemo_engine::NewWork {
+            messages: vec![msg("hello")],
+            ..Default::default()
+        };
+        assert_eq!(
+            head(&w),
+            "mnemo: new for you: 1 message. Call `inbox` to read it."
+        );
+        let w = mnemo_engine::NewWork {
+            lapsing: vec![claim.clone(), claim],
+            ..Default::default()
+        };
+        assert_eq!(
+            head(&w),
+            "mnemo: new for you: 2 claims lapsing soon. Update the task with `task` to renew \
+             their claims."
+        );
+    }
 
     #[test]
     fn session_ids() {

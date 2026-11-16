@@ -146,7 +146,10 @@ others() {
     for d in ${PATH:-}; do
         d=${d%/}
         [ -n "$d" ] && [ "$d" != "${1%/}" ] && [ -x "$d/mnemo" ] && [ ! -d "$d/mnemo" ] || continue
-        say "another mnemo is on your PATH: $d/mnemo. If \`mnemo --version\` doesn't say mnemo $2, run \`hash -r\` (zsh: \`rehash\`) or open a new terminal, and if it still doesn't, remove that one or put $1 first on your PATH"
+        say "another mnemo is on your PATH: $d/mnemo"
+        say "  If \`mnemo --version\` doesn't say mnemo $2, run \`hash -r\`"
+        say "  (zsh: \`rehash\`) or open a new terminal."
+        say "  If it still doesn't, remove that one, or put $1 first on your PATH."
     done
     set +f
     IFS=$old_ifs
@@ -202,6 +205,8 @@ main() {
     mkdir -p "$dir"
     # Copy beside the target, check it, then one move over the old one.
     staged="$dir/.mnemo.new.$$"
+    upgrade=
+    [ -e "$dir/mnemo" ] && upgrade=1
     cp "$tmp/$name" "$staged"
     chmod 755 "$staged"
     # It must say it's the version asked for: an older release's file under
@@ -228,6 +233,16 @@ main() {
             say "Next: $dir/mnemo onboard"
             ;;
     esac
+    keychain_note "$upgrade"
+}
+
+# macOS ties a keychain item to the program that reads it, and each release
+# is a new program to it: the first read after an upgrade asks once.
+keychain_note() {
+    [ -n "$1" ] && [ "$(uname -s)" = Darwin ] || return 0
+    say ""
+    say "The first time this mnemo reads a brain's key, macOS asks once."
+    say "Choose Always Allow: the hooks and the MCP server can't answer it."
 }
 
 main "$@"

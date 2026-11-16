@@ -1286,7 +1286,10 @@ fn the_per_turn_hook_shows_new_work_once() {
     );
     let t = turn(&e, input, WORKER);
     assert!(
-        t.starts_with("mnemo: new for you: 2 messages, 1 task ready."),
+        t.starts_with(
+            "mnemo: new for you: 2 messages, 1 task ready. Call `inbox` to read them. Call \
+             `task` with `next` to take it.\n"
+        ),
         "{t}"
     );
     let framing = t.find(guide::FRAMING).unwrap();
@@ -1699,4 +1702,84 @@ fn rb012_6_old_turn_stamps_are_removed_at_session_start() {
         stamps,
         "the old one went, the fresh one stayed"
     );
+}
+
+/// KEYCHAIN-REPROMPT: a keychain that refuses the key is named, apart from
+/// a key that isn't there, and one that keeps the hook waiting is said on
+/// stderr. (The dev-hooks store: its entry made a directory refuses; a
+/// delay stands in for an open permission dialog.)
+#[test]
+fn a_keychain_that_refuses_or_waits_is_named() {
+    let e = Env::bare();
+    let store = e.p("store");
+    std::fs::create_dir_all(&store).unwrap();
+    let repo = e.p("repo");
+    let brain = repo.join(".git/mnemo/project.mnemo");
+    std::fs::create_dir_all(brain.parent().unwrap()).unwrap();
+    let o = e
+        .cmd(
+            &repo,
+            &["init", "--dimensions", "4", brain.to_str().unwrap()],
+        )
+        .env("MNEMO_DEV_KEYSTORE", &store)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let entry = std::fs::read_dir(&store)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let input = json!({"session_id": "s-1", "cwd": repo, "source": "startup"});
+    let start = |envs: &[(&str, &str)]| {
+        let mut all = vec![("MNEMO_DEV_KEYSTORE", store.to_str().unwrap())];
+        all.extend(envs);
+        let o = e.hook_env(
+            &repo,
+            &["session-start", "--client", "claude-code"],
+            &input.to_string(),
+            &all,
+        );
+        let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+        (
+            v["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            String::from_utf8_lossy(&o.stderr).to_string(),
+        )
+    };
+    // Slow, then given: the note on stderr, and the brief as usual.
+    let (ctx, err) = start(&[("MNEMO_DEV_KEYSTORE_DELAY_MS", "3600")]);
+    assert!(
+        err.contains("mnemo: still waiting for the keychain: if the keychain asked"),
+        "{err}"
+    );
+    assert!(err.contains("choose Always Allow"), "{err}");
+    assert!(!ctx.contains("didn't give"), "{ctx}");
+    // Quick: no note.
+    let (_, err) = start(&[]);
+    assert!(!err.contains("still waiting"), "{err}");
+    // Refused: named, with what to do, in the context and on stderr.
+    let key = std::fs::read(&entry).unwrap();
+    std::fs::remove_file(&entry).unwrap();
+    std::fs::create_dir(&entry).unwrap();
+    let (ctx, err) = start(&[]);
+    for t in [&ctx, &err] {
+        assert!(
+            t.contains("mnemo: the keychain didn't give this brain's key (")
+                && t.contains("run `mnemo info` in a terminal and choose Always Allow"),
+            "{t}"
+        );
+    }
+    // Not there: the old note (unlock).
+    std::fs::remove_dir(&entry).unwrap();
+    let (ctx, _) = start(&[]);
+    assert!(
+        ctx.contains("`mnemo unlock`") && !ctx.contains("Always Allow"),
+        "{ctx}"
+    );
+    std::fs::write(&entry, key).unwrap();
 }

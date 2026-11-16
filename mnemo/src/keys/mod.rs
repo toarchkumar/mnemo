@@ -207,6 +207,14 @@ impl KeyStore for DirKeyStore {
     }
 
     fn get(&self, salt: &[u8; SALT_LEN]) -> Result<Option<StoredSecret>> {
+        // A keychain that keeps a reader waiting (an open permission
+        // dialog), for KEYCHAIN-REPROMPT's note.
+        if let Some(ms) = std::env::var("MNEMO_DEV_KEYSTORE_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
         match std::fs::read_to_string(self.entry(salt)) {
             Ok(text) => StoredSecret::decode(Zeroizing::new(text).trim_end()).map(Some),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -511,6 +519,60 @@ pub fn run_key_command(cmd: &str, timeout: Duration) -> Result<Zeroizing<[u8; 32
 pub const CLI_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 /// The key command's timeout in the MCP server, which has no terminal.
 pub const SERVER_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// What to do when the keychain held the key back (KEYCHAIN-REPROMPT): macOS
+/// ties a keychain item to the program that reads it, so the first read by
+/// a new mnemo (after each upgrade) asks, and a hook or server can't answer.
+pub const KEYCHAIN_ALLOW_HINT: &str = "if the keychain asked whether this mnemo may use the \
+     brain's key, run `mnemo info` in a terminal and choose Always Allow (macOS asks once after \
+     each upgrade)";
+
+/// Whether an error from [`resolve`] came from the key store itself (a
+/// refusal or a failure, never a missing entry, which is
+/// [`Resolution::NoSource`]).
+pub fn is_store_error(e: &MnemoError) -> bool {
+    let t = e.to_string();
+    t.contains(" (reading): ")
+        || t.contains(" (opening it): ")
+        || t.contains(" (opening an entry): ")
+}
+
+/// A note on stderr when the key store hasn't answered within `after`: a
+/// keychain asking whether this program may read the key blocks until
+/// someone answers it (KEYCHAIN-REPROMPT). Dropping the guard cancels it.
+pub struct SlowStoreNote {
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SlowStoreNote {
+    /// Print `prefix` and the waiting note after `after`, unless dropped
+    /// first.
+    pub fn after(after: Duration, prefix: &str) -> SlowStoreNote {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let seen = done.clone();
+        let prefix = prefix.to_string();
+        // A sleeping thread doesn't keep the process alive.
+        let _ = std::thread::Builder::new()
+            .name("mnemo-keychain-note".into())
+            .spawn(move || {
+                std::thread::sleep(after);
+                if !seen.load(Ordering::SeqCst) {
+                    eprintln!("{prefix}still waiting for the keychain: {KEYCHAIN_ALLOW_HINT}");
+                }
+            });
+        SlowStoreNote { done }
+    }
+}
+
+impl Drop for SlowStoreNote {
+    fn drop(&mut self) {
+        self.done.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// How long a hook or server waits for the key store before saying so.
+pub const SLOW_STORE_NOTE_AFTER: Duration = Duration::from_secs(3);
 
 /// Where a secret came from.
 #[derive(Clone, Debug, PartialEq, Eq)]

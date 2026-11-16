@@ -86,7 +86,6 @@ impl Env {
     fn p(&self, rel: &str) -> PathBuf {
         self.dir.path().join(rel)
     }
-    #[cfg(unix)]
     fn root(&self) -> PathBuf {
         std::fs::canonicalize(self.p("repo")).unwrap()
     }
@@ -1094,4 +1093,183 @@ fn the_per_turn_hook_and_wake_stop() {
             assert!(!e.read(f).contains(" hook "), "{f}: {}", e.read(f));
         }
     }
+}
+
+/// Whitespace collapsed, so a wrapped line reads as one.
+fn squash(t: &str) -> String {
+    t.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// ONBOARD-UX: at a terminal (the dev-hooks switch), the plan is grouped
+/// with each line marked, the already-right ones in one line, then a short
+/// "Done", the guide's pointer and "Next" last. No guide, no absolute
+/// paths after the header, no keychain-delete line but with `--undo`.
+#[test]
+fn at_a_terminal_the_output_is_grouped_and_short() {
+    let e = Env::new();
+    let root = e.root().display().to_string();
+    let run = |args: &[&str], colour: bool| -> String {
+        let mut all = vec!["onboard", "--client", "claude-code,cursor"];
+        all.extend(args);
+        let mut c = e.cmd(&e.p("repo"), &all);
+        c.env("MNEMO_DEV_ONBOARD_TTY", "1");
+        if !colour {
+            c.env("NO_COLOR", "1");
+        }
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        out(&o)
+    };
+    // The first run: the brain made, each client wired.
+    let t = run(&["--yes"], false);
+    let flat = squash(&t);
+    assert!(
+        t.starts_with("mnemo onboard: ") && t.contains("(local scope)"),
+        "{t}"
+    );
+    for h in [
+        "\nBrain\n",
+        "\nModel\n",
+        "\nClaude Code\n",
+        "\nCursor\n",
+        "\nGit\n",
+        "\nDone\n",
+        "\nNext\n",
+    ] {
+        assert!(t.contains(h), "{h:?} in {t}");
+    }
+    assert!(t.find("\nDone\n") < t.find("\nNext\n"), "{t}");
+    assert!(
+        flat.contains(
+            "+ the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks, in .claude/settings.local.json"
+        ),
+        "{t}"
+    );
+    assert!(
+        flat.contains("+ the rule, in .cursor/rules/mnemo.mdc"),
+        "{t}"
+    );
+    assert!(
+        flat.contains("The guide for agents: mnemo onboard --guide"),
+        "{t}"
+    );
+    assert!(!t.contains(&guide::markdown()[..120]), "no guide: {t}");
+    assert!(
+        !t.contains("human step:") && !t.contains("pass them on"),
+        "{t}"
+    );
+    assert!(!t.contains("keychain entry"), "{t}");
+    assert!(!t.contains('\x1b'), "NO_COLOR: {t}");
+    for l in t.lines().skip(1) {
+        assert!(!l.contains(&root), "a path from the repository: {l}");
+    }
+    // Next: restart both, then the human steps, the trust prompt among them.
+    let next = &t[t.find("\nNext\n").unwrap()..];
+    assert!(
+        squash(next).contains(
+            "1. Restart Claude Code and Cursor (or start a new session) so they load the changes."
+        ),
+        "{next}"
+    );
+    assert!(squash(next).contains("accept the trust prompt"), "{next}");
+    assert!(squash(next).contains("Back up the recovery code"), "{next}");
+    // A re-run with one hook gone and the skill a line behind: only those.
+    let settings = e.p("repo/.claude/settings.local.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    v["hooks"]
+        .as_object_mut()
+        .unwrap()
+        .remove("UserPromptSubmit");
+    std::fs::write(&settings, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    let skill = e.p("repo/.claude/skills/mnemo/SKILL.md");
+    let text = std::fs::read_to_string(&skill).unwrap();
+    std::fs::write(&skill, text.replacen("\n\n", "\nan older line\n\n", 1)).unwrap();
+    let t = run(&["--yes"], false);
+    let flat = squash(&t);
+    for want in [
+        "+ the UserPromptSubmit hook, in .claude/settings.local.json",
+        "~ the skill, in .claude/skills/mnemo/SKILL.md (+0 -1 lines)",
+        "= already right: the MCP server (.mcp.json) and 3 hooks",
+        "= already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule",
+        "~ .claude/settings.local.json ~ .claude/skills/mnemo/SKILL.md",
+        "1. Restart Claude Code (or start a new session) so it loads the changes.",
+    ] {
+        assert!(flat.contains(want), "{want:?} in {t}");
+    }
+    assert!(!flat.contains("the SessionStart"), "{t}");
+    // Nothing to change: no Done, no restart.
+    let t = run(&["--yes"], true);
+    assert!(t.contains("Already set up: nothing to change."), "{t}");
+    assert!(!t.contains("\nDone") && !t.contains("Restart"), "{t}");
+    assert!(
+        t.contains("\x1b[1mBrain\x1b[0m") && t.contains("\x1b[2m=\x1b[0m"),
+        "colour: {t}"
+    );
+    // Undo: what it removes, then what it keeps, the keychain line whole.
+    let t = run(&["--undo", "--yes"], false);
+    assert!(t.contains("\nKept\n"), "{t}");
+    let line = t
+        .lines()
+        .skip_while(|l| !l.contains("To delete this brain's keychain entry:"))
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        [
+            "security delete-generic-password",
+            "cmdkey /delete:",
+            "secret-tool clear"
+        ]
+        .iter()
+        .any(|c| line.trim_start().starts_with(c)),
+        "{t}"
+    );
+}
+
+/// ONBOARD-UX: a real terminal (a pty) gets the grouped view; a pipe gets
+/// v0.16.1's.
+#[cfg(unix)]
+#[test]
+fn a_real_terminal_gets_the_grouped_view() {
+    const PTY: &str = r#"
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], sys.argv[1:])
+out = b""
+while True:
+    try:
+        d = os.read(fd, 65536)
+    except OSError:
+        break
+    if not d:
+        break
+    out += d
+os.waitpid(pid, 0)
+sys.stdout.write(out.decode("utf-8", "replace"))
+"#;
+    let e = Env::new();
+    let args = ["onboard", "--client", "cursor", "--print"];
+    let inner = e.cmd(&e.p("repo"), &args);
+    let mut c = Command::new(python());
+    c.arg("-c")
+        .arg(PTY)
+        .arg(env!("CARGO_BIN_EXE_mnemo"))
+        .args(args);
+    c.env_clear();
+    for (k, v) in inner.get_envs() {
+        if let Some(v) = v {
+            c.env(k, v);
+        }
+    }
+    c.env("NO_COLOR", "1").current_dir(e.p("repo"));
+    let t = String::from_utf8_lossy(&c.output().unwrap().stdout).replace("\r\n", "\n");
+    assert!(
+        t.contains("\nCursor\n") && t.contains("+ the MCP server, in .cursor/mcp.json"),
+        "{t}"
+    );
+    let piped = e.ok(&args[1..]);
+    assert!(
+        !piped.contains("\nCursor\n") && piped.contains("- create .cursor/mcp.json"),
+        "{piped}"
+    );
 }
