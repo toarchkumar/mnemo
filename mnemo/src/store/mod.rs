@@ -67,8 +67,8 @@ use crate::text;
 use crate::veccol;
 use crate::wal;
 pub use coordination::{
-    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, NewWork, Presence, Task,
-    TaskOutcome, TaskSpec, TaskTaken, Wake,
+    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
+    Stale, Task, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
 
 mod ann;
@@ -501,6 +501,9 @@ pub struct RecallRequest {
     /// below `top_k`, Phase 12.1's widen-then-exact-scan logic kicks
     /// in so the result still carries up to `top_k` correct hits.
     pub filter: Filter,
+    /// 13a (13.5): the visibility levels recall returns: public and team by
+    /// default; private only when asked ([`RecallRequest::visibility`]).
+    pub visibility: crate::memory::VisibilitySet,
     /// Phase 12.8 post-scoring budget: stop adding hits once the UTF-8
     /// bytes of their `content` fields (not the serialized record
     /// body) would exceed this many bytes. `None` (default) means no
@@ -564,6 +567,7 @@ impl RecallRequest {
             n_rerank: None,
             track_access: true,
             filter: Filter::default(),
+            visibility: crate::memory::VisibilitySet::DEFAULT,
             max_bytes: None,
             keywords: None,
             text: None,
@@ -572,6 +576,13 @@ impl RecallRequest {
             bm25_k1: 1.2,
             bm25_b: 0.75,
         }
+    }
+
+    /// 13a (13.5): the visibility levels to return (private records only
+    /// when the set includes them).
+    pub fn visibility(mut self, v: crate::memory::VisibilitySet) -> Self {
+        self.visibility = v;
+        self
     }
 
     /// FMT-9d (v9 files): a keyword-only request: BM25 over `keywords`

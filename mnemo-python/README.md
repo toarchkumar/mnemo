@@ -179,10 +179,11 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | Method | Purpose |
 |---|---|
 | `remember(content, memory_type, vector, *, agent_id, importance, session_id, ttl_secs, shared, metadata, key, supersedes, visibility, review_by, as_of)` | Store a memory; returns its id. **v0.17:** `visibility` (`"public"`, `"team"`, `"private"`), `review_by` and `as_of` (unix seconds), also on `remember_text`, `update` and `update_text`. With `key`, a keyed write that supersedes the key's live record (returns `{"id", "outcome"}`). **`supersedes` (v0.15, with `key`):** the id of a memory written without a key, which becomes the key's first version and is superseded; matching content adopts it as is (`"updated"`) |
-| `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True, n_probe=None, n_rerank=None)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall). `n_probe` / `n_rerank` (PR ANN-1): per-query ANN tuning — `None` uses the index's build-time defaults (ANN-1 auto-formulas: `(partitions+1)/2` and `500`) |
+| `recall(query, top_k=10, memory_types=None, agent_id=None, track_access=True, n_probe=None, n_rerank=None, …, visibility=None)` | Multi-signal ranked retrieval. `track_access=False` skips access-stat updates (fully read-only recall). `n_probe` / `n_rerank` (PR ANN-1): per-query ANN tuning — `None` uses the index's build-time defaults (ANN-1 auto-formulas: `(partitions+1)/2` and `500`) |
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
-| `about()` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first |
+| `about(*, visibility=None)` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first. v0.17: private entries only when `visibility` asks (`["private"]`, `["all"]`) |
+| `stale()`, `kind_counts()` | v0.17: the stale records (`id`, `what`, `since`, `text`, `whose`), oldest first; the live records by kind (`facts`, `turns`, `essence`, `coordination`) |
 | `recent(n=20)` | The `n` most recently written live memories, newest first: facts only (no thread turns, essence items or onboarding records), nothing superseded or expired; not counted as an access (v0.16) |
 | `about_essence()` | The project essence render for the briefing (markdown), or `None` when the file has none |
 | `insert_default_manifest()` | Insert the canonical scaffold manifest (same one `mnemo init` adds); returns its id |
@@ -204,7 +205,7 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `set_vector_cache_budget(bytes)` | v9 files: keep the fp16 vector column in memory while it takes at most `bytes` (default 96 MiB, about 125K vectors at 384 dims); above it recall reads vectors through the page cache (less memory, slower recall). This handle only |
 | `set_author(name)` | v0.17: stamp `_mnemo.author` = `name` on each new record this handle writes (`None` stops it). This handle only |
 | `post(to, subject, body="", *, refs=None, conversation=None, sender=None, role=None)` | v0.17: post a message to an agent id, `role:<role>` or `all`, from `sender` (else `set_author`'s). Returns a dict (`id`, `to`, `from`, `subject`, `body`, `refs`, `conversation`, `hops`, `status`, `delivery`, `created_at`, `acked_at`) |
-| `inbox(agent=None, role=None, *, unread_only=True)` | v0.17: the messages for `agent`, its `role` or everyone, oldest first, never its own; a list of the same dicts. It only reads: `mark_seen(ids)` records that they were shown |
+| `inbox(agent=None, role=None, *, unread_only=True, visibility=None)` | v0.17: the messages for `agent`, its `role` or everyone, oldest first, never its own; a list of the same dicts. It only reads: `mark_seen(ids)` records that they were shown |
 | `ack(id, note=None, *, by=None)`, `prune_messages(days=30)` | v0.17: ack a message (`"acked"` or `"unchanged"`); delete those acked more than `days` ago (returns how many) |
 | `task_add(title, body="", *, role=None, after=None, pre_approved=False, slug=None)` | v0.17: queue a task, created by `set_author`'s agent; a slug that exists updates it in place. Returns `{"slug", "status", "outcome"}` |
 | `task_next(role=None)` | v0.17: take the oldest task for `role` whose `after` tasks are done, or one whose owner's claim lapsed: `{"task", "token", "expires_at", "reclaimed_from"}`, or `None` |

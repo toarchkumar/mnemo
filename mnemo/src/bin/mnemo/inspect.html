@@ -159,6 +159,7 @@ function memoryCard(m) {
   if (m.key) tags.push(el("span", { class: "tag mono" }, "key " + m.key));
   if (m.thread) tags.push(el("span", { class: "tag mono" }, "thread " + m.thread));
   if (m.kind) tags.push(el("span", { class: "tag" }, m.kind));
+  if (m.private) tags.push(el("span", { class: "tag" }, "private"));
   if (m.superseded_by) tags.push(el("span", {}, "superseded " + when(m.invalid_at)));
   if (m.score != null) tags.push(el("span", {}, "score " + m.score.toFixed(2)));
   tags.push(el("span", {}, when(m.created_at)), el("span", {}, "importance " + m.importance));

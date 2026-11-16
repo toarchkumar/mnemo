@@ -319,9 +319,27 @@ impl Mnemo {
         role: Option<&str>,
         unread_only: bool,
     ) -> Result<Vec<Message>> {
+        self.inbox_in(
+            agent,
+            role,
+            unread_only,
+            crate::memory::VisibilitySet::DEFAULT,
+        )
+    }
+
+    /// 13a (13.5): [`Mnemo::inbox`] with the visibility levels it shows
+    /// (`inbox` itself shows public and team).
+    pub fn inbox_in(
+        &mut self,
+        agent: Option<&str>,
+        role: Option<&str>,
+        unread_only: bool,
+        visibility: crate::memory::VisibilitySet,
+    ) -> Result<Vec<Message>> {
         Ok(self
             .messages()?
             .iter()
+            .filter(|m| visibility.shows(m))
             .filter_map(Message::from_memory)
             .filter(|m| m.is_for(agent, role))
             .filter(|m| !unread_only || m.status == crate::memory::MESSAGE_UNREAD)
@@ -1649,7 +1667,11 @@ impl Mnemo {
     /// 13a (13.1b): whether wake-ups are paused (the kill switch): who
     /// paused them and when.
     pub fn wake_paused(&mut self) -> Result<Option<(String, i64)>> {
-        let Some(m) = self.about()?.into_iter().find(is_manifest) else {
+        let Some(m) = self
+            .about_in(crate::memory::VisibilitySet::ALL)?
+            .into_iter()
+            .find(is_manifest)
+        else {
             return Ok(None);
         };
         Ok(m.metadata.get(MNEMO_META_WAKE_PAUSED).map(|v| {
@@ -1670,7 +1692,11 @@ impl Mnemo {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
-        let Some(mut m) = self.about()?.into_iter().find(is_manifest) else {
+        let Some(mut m) = self
+            .about_in(crate::memory::VisibilitySet::ALL)?
+            .into_iter()
+            .find(is_manifest)
+        else {
             return Err(MnemoError::Invalid(
                 "this brain has no manifest to record the pause on".into(),
             ));
@@ -1815,5 +1841,116 @@ impl Mnemo {
             tasks: tasks.len(),
             messages: messages.len(),
         })
+    }
+}
+
+// --- 13a step 7: freshness (13.6) --------------------------------------------
+
+/// 13a (13.6): one stale record ([`Mnemo::stale`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stale {
+    /// The record's id.
+    pub id: Ulid,
+    /// What it is: `essence state`, `essence next`, `essence open`, `task
+    /// active`, `task blocked`, `message unread`, or `fact` (past its
+    /// `review_by`).
+    pub what: String,
+    /// When it went stale, in unix seconds.
+    pub since: i64,
+    /// Its first line (a task's title, a message's subject).
+    pub text: String,
+    /// Whose it is: a task's owner, a message's recipient, else its author.
+    pub whose: Option<String>,
+}
+
+impl Mnemo {
+    /// 13a (13.6): every record that's stale now
+    /// ([`crate::memory::stale_since`]), oldest first: past its `review_by`,
+    /// or older than its kind's default (essence `state` and `next` 14
+    /// days, `open` 30, an `active` task with no update 3, a `blocked` one
+    /// 7, an unread message 3). Reads only the rows that can be (essence,
+    /// coordination, and those with a `review_by`).
+    pub fn stale(&mut self) -> Result<Vec<Stale>> {
+        use super::records::{ROW_KIND_ESSENCE, ROW_REVIEW};
+        let now = self.coordination_now();
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter(|e| {
+                e.v9.is_none_or(|r| {
+                    r.kind == ROW_KIND_ESSENCE
+                        || r.kind == ROW_KIND_COORDINATION
+                        || r.flags & ROW_REVIEW != 0
+                })
+            })
+            .cloned()
+            .collect();
+        let mut out = Vec::new();
+        for e in entries {
+            let m = self.read_memory(&e)?;
+            let Some(since) = crate::memory::stale_since(&m, now) else {
+                continue;
+            };
+            let s = |k: &str| meta_string(&m, k);
+            let kind = s(MNEMO_META_KIND);
+            let what = match kind.as_deref() {
+                Some("essence") => format!(
+                    "essence {}",
+                    s(crate::memory::MNEMO_META_SECTION).unwrap_or_default()
+                ),
+                Some(k @ ("task" | "message")) => {
+                    format!("{k} {}", s(MNEMO_META_STATUS).unwrap_or_default())
+                }
+                Some(k) => k.to_string(),
+                None => "fact".to_string(),
+            };
+            let whose = match kind.as_deref() {
+                Some("task") => s(MNEMO_META_OWNER),
+                Some("message") => s(MNEMO_META_TO),
+                _ => s(crate::memory::MNEMO_META_AUTHOR),
+            };
+            out.push(Stale {
+                id: m.id,
+                what,
+                since,
+                text: m.content.lines().next().unwrap_or("").to_string(),
+                whose,
+            });
+        }
+        out.sort_by_key(|x| (x.since, x.id.0));
+        Ok(out)
+    }
+}
+
+/// 13a (ABOUT-COUNT): the live records by what they are.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KindCounts {
+    /// Facts and onboarding records (what recall and `about` read).
+    pub facts: usize,
+    /// Thread turns and thread links.
+    pub turns: usize,
+    /// Essence items.
+    pub essence: usize,
+    /// Messages, tasks, claims and presence records.
+    pub coordination: usize,
+}
+
+impl Mnemo {
+    /// 13a (ABOUT-COUNT): how many live records of each kind, from the
+    /// catalog's rows (a v8 file's records have none and count as facts).
+    /// Superseded versions count too, as in [`Mnemo::len`].
+    pub fn kind_counts(&self) -> KindCounts {
+        use super::records::{ROW_KIND_ESSENCE, ROW_KIND_THREAD_LINK, ROW_KIND_TURN};
+        let mut c = KindCounts::default();
+        for e in self.catalog.iter().filter(|e| !e.deleted) {
+            match e.v9.map(|r| r.kind) {
+                Some(ROW_KIND_TURN | ROW_KIND_THREAD_LINK) => c.turns += 1,
+                Some(ROW_KIND_ESSENCE) => c.essence += 1,
+                Some(ROW_KIND_COORDINATION) => c.coordination += 1,
+                _ => c.facts += 1,
+            }
+        }
+        c
     }
 }

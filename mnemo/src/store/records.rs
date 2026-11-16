@@ -407,6 +407,24 @@ impl RecPages {
 pub(super) const ROW_SUPERSEDED: u8 = 1;
 pub(super) const ROW_HAS_TTL: u8 = 2;
 pub(super) const ROW_SHARED: u8 = 4;
+/// 13a (13.5): `_mnemo.visibility = private` (new bits of the same byte, so
+/// no format change: an older build ignores them).
+pub(super) const ROW_PRIVATE: u8 = 8;
+/// 13a (13.5): `_mnemo.visibility = public`. Neither bit: team.
+pub(super) const ROW_PUBLIC: u8 = 16;
+/// 13a (13.6): the record has `_mnemo.review_by`, so `stale` reads it.
+pub(super) const ROW_REVIEW: u8 = 32;
+
+/// 13a (13.5): whether a row's visibility bits are in `v`.
+pub(super) fn row_visible(flags: u8, v: crate::memory::VisibilitySet) -> bool {
+    if flags & ROW_PRIVATE != 0 {
+        v.private
+    } else if flags & ROW_PUBLIC != 0 {
+        v.public
+    } else {
+        v.team
+    }
+}
 /// FMT-9e: a thread turn whose record compression is settled: stored as
 /// a zstd frame, or tried and not worth it. Unsettled turns are plain and
 /// get compressed once they're older than the handle's
@@ -467,6 +485,14 @@ pub(super) fn row_tags(m: &Memory) -> RowV9 {
     }
     if m.scope == Scope::Shared {
         flags |= ROW_SHARED;
+    }
+    match crate::memory::visibility_of(m) {
+        "private" => flags |= ROW_PRIVATE,
+        "public" => flags |= ROW_PUBLIC,
+        _ => {}
+    }
+    if m.metadata.contains_key(crate::memory::MNEMO_META_REVIEW_BY) {
+        flags |= ROW_REVIEW;
     }
     let key_hash = meta_str(m, MNEMO_META_KEY).map_or(0, |k| {
         let slot = Mnemo::key_slot_for(m, k);

@@ -15,13 +15,17 @@ pub(super) fn status_of(m: &Memory) -> Option<&str> {
 /// Phase 12.7b helper: render one essence item as a markdown bullet.
 /// Timeline entries get a date tag; section items get `[open]` /
 /// `[resolved]` so the reader can scan active work quickly.
-fn render_essence_item(section: EssenceSection, m: &Memory) -> String {
+fn render_essence_item(section: EssenceSection, m: &Memory, now: i64) -> String {
     if section == EssenceSection::Timeline {
         let date = format_unix_date(m.created_at);
         format!("- [{date}] {}\n", m.content)
     } else {
         let status = status_of(m).unwrap_or(essence_status::OPEN);
-        format!("- [{status}] {}\n", m.content)
+        // 13a (13.6): an item past its review date, or its section's age.
+        let stale = crate::memory::stale_since(m, now)
+            .map(|t| format!(" [stale since {}]", format_unix_date(t)))
+            .unwrap_or_default();
+        format!("- [{status}] {}{stale}\n", m.content)
     }
 }
 
@@ -288,6 +292,7 @@ impl Mnemo {
         // Collect every live essence record for this scope.
         // R-004.2: only the essence items, from the handle caches.
         let entries = self.essence_entries()?;
+        let now = memory::now_secs();
         let mut by_section: std::collections::BTreeMap<&'static str, Vec<Memory>> =
             std::collections::BTreeMap::new();
         for section in EssenceSection::render_order() {
@@ -311,6 +316,10 @@ impl Mnemo {
                 (EssenceScope::Project, Some(_)) => false,
             };
             if !matches_scope {
+                continue;
+            }
+            // 13a (13.5): the render shows public and team items.
+            if !crate::memory::VisibilitySet::DEFAULT.shows(&m) {
                 continue;
             }
             let section_str = m
@@ -405,7 +414,7 @@ impl Mnemo {
             let mut used = 0usize;
             let mut rendered = 0usize;
             for item in items {
-                let line = render_essence_item(*section, item);
+                let line = render_essence_item(*section, item, now);
                 if used + line.len() > budget {
                     break;
                 }

@@ -83,11 +83,11 @@ which would leak into shell history and process listings). Tools exposed:
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`, and since v0.17 `inbox` (messages between agents:
 `list`, `read`, `post`, `ack`, as the server's `MNEMO_AGENT` and
-`MNEMO_ROLE`), `task` (the shared work queue: `next`, `update`, `add`,
+`MNEMO_ROLE`; `visibility` for private ones), `task` (the shared work queue: `next`, `update`, `add`,
 `list`, `get`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
 `serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
 in the sidecar directory for its life, so `who` sees it alive; it never
-holds the brain's lock between calls. Every mutation flushes before
+holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Every mutation flushes before
 returning.
 
 With no `--embed-cmd`, the server embeds `text` with the built-in embedder
@@ -951,15 +951,15 @@ cargo run --bin mnemo -- <command>
 | `unlock`  | Keep a brain's key in this machine's keychain, from its recovery code (read from a prompt or stdin) (v0.15) |
 | `mcp install` | Add the brain's MCP server (`serve --mcp --shared`) to Claude Code, Cursor or Claude Desktop, with no secret and a diff first (v0.15) |
 | `info`    | Print statistics (including ANN index shape)         |
-| `about`   | Self-describing briefing — print onboarding memories |
+| `about`   | Self-describing briefing — print onboarding memories. Since v0.17 its header counts facts, turns, essence items and coordination records apart, an entry past its review date is marked `[stale since <date>]`, and private entries show only with `--visibility private` (or `all`) |
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters) |
-| `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output |
+| `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
 | `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |
-| `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
+| `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too, `--visibility` for private ones; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
 | `ack [PATH] <ID>` | Ack a message (`unread` to `acked`), with `--note`; `--as` (v0.17) |
 | `task add <TITLE> [--for <role>]` | Queue a task for a role (`--for`; any role without it), with `--body`, `--after <slugs>`, `--pre-approved`, `--slug`. Prints its slug and `added`, `updated` (the slug existed) or `unchanged` (v0.17) |
 | `task next` | Take the oldest task for your role (`--role`, else `MNEMO_ROLE`) whose `--after` tasks are done, or one whose owner's 2 h claim lapsed. Prints the slug, the claim token, the expiry and the title; exits 1 when there's nothing to take (v0.17) |
@@ -970,7 +970,8 @@ cargo run --bin mnemo -- <command>
 | `claim who` | The agents: role, tool, last active, whether the process is alive (`unknown` without a long-lived `serve --mcp --shared`), and the topics each holds; `--format` (v0.17) |
 | `default-agent` | Show, set (`--set <id>`) or clear (`--clear`) the agent a write that names none is made for, kept on the manifest (`_mnemo.default_agent`); the CLI and the MCP server use it in place of `default` (v0.17) |
 | `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1) |
-| `recall`  | Multi-signal ranked retrieval (sim + recency + …)    |
+| `recall`  | Multi-signal ranked retrieval (sim + recency + …). Since v0.17 private records only with `--visibility private` (or `all`) |
+| `stale [PATH] [--mine]` | The stale records, oldest first: past their `review_by`, or older than their kind's default (essence `state` and `next` 14 days, `open` 30; an `active` task with no update 3 days, a `blocked` one 7; an unread message 3). `--mine` keeps yours (`--as`, else `MNEMO_AGENT`) (v0.17) |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |

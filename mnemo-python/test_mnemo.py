@@ -1461,6 +1461,34 @@ def test_identical_keyed_rewrite_is_unchanged():
     print("ok  identical keyed re-write is unchanged (v0.16)")
 
 
+def test_visibility_freshness_and_counts():
+    """v0.17 (13a step 7): private records only when asked, stale(), and
+    kind_counts()."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "v.mnemo"), "passphrase", dimensions=4)
+        try:
+            v = [1.0, 0.0, 0.0, 0.0]
+            db.remember("shown", "semantic", v)
+            db.remember("hidden", "semantic", v, visibility="private")
+            db.remember("to review", "semantic", [0.0, 1.0, 0.0, 0.0], review_by=1600000000)
+            got = [h["content"] for h in db.recall(v, top_k=5)]
+            assert "hidden" not in got and "shown" in got, got
+            got = [h["content"] for h in db.recall(v, top_k=5, visibility=["all"])]
+            assert "hidden" in got, got
+            st = db.stale()
+            assert [x["text"] for x in st] == ["to review"] and st[0]["what"] == "fact", st
+            c = db.kind_counts()
+            assert c == {"facts": 3, "turns": 0, "essence": 0, "coordination": 0}, c
+            assert db.about(visibility=["all"]) == db.about()
+            try:
+                db.recall(v, visibility=["secret"])
+                raise AssertionError("a bad level was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+        finally:
+            db.close()
+
+
 def test_tasks():
     """v0.17 (13a step 4): task_add, task_next, task_update, tasks,
     task_get, with after, pre_approved and a lost owner."""
@@ -2149,6 +2177,7 @@ if __name__ == "__main__":
     test_messages_post_inbox_ack()
     test_claims_and_presence()
     test_tasks()
+    test_visibility_freshness_and_counts()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()

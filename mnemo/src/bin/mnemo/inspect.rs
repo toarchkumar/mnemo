@@ -177,6 +177,10 @@ fn memory_json(m: &Memory) -> Value {
     if let Some(t) = m.metadata.get(MNEMO_META_INVALID_AT) {
         r.insert("invalid_at".into(), t.clone());
     }
+    // 13a (13.5): the inspector shows every level, private ones badged.
+    if mnemo_engine::visibility_of(m) == "private" {
+        r.insert("private".into(), json!(true));
+    }
     if let Some(s) = &m.session_id {
         r.insert("session".into(), json!(s));
     }
@@ -211,7 +215,7 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
     let stats = db.stats().map_err(e)?;
     let summary = db.stats_summary();
     let identity = db.embedder_identity().map_err(e)?;
-    let briefing = db.about().map_err(e)?;
+    let briefing = db.about_in(mnemo_engine::VisibilitySet::ALL).map_err(e)?;
     // A file from before EMBED-ID-1 records no identity; its manifest may
     // still name the embedder.
     let manifest_embedder = briefing

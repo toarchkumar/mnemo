@@ -64,6 +64,35 @@ Pre-1.0, the minor component carries the breaking-change signal.
     there are none.
   - In a git repository `post`, `inbox` and `ack <ID>` take no path, and
     neither do `claim` and `task`.
+- **Visibility and freshness (13a step 7).**
+  - **`_mnemo.visibility` is now a filter.** Private records are left out
+    of recall (every path, the ANN and keywords too), `about`, the inbox,
+    the essence render and the brief unless asked: `--visibility
+    private|all` on `recall`, `about` and `inbox`, `"visibility"` on the
+    MCP `recall`, `about` and `inbox`, and `visibility=` in Python
+    (`RecallRequest::visibility`, `about_in`, `inbox_in`,
+    `VisibilitySet`).
+    - `export` leaves them out with a stderr count, unless `--visibility
+      all`, which says it included them. `--git` never writes them.
+    - `inspect` shows them with a "private" badge.
+    - It's a filter, not a security boundary: everyone holding the key
+      reads every record.
+    - A private record's row carries a new bit, so recall skips it before
+      decrypting. No format change.
+  - **Freshness:** `Mnemo::stale` and `mnemo stale [--mine]` (the MCP
+    `about` with `stale: true`, Python `stale()`) list what's past its
+    `review_by` or older than its kind's default:
+    - essence `state` and `next` after 14 days, `open` after 30;
+    - an `active` task after 3 days with no update, a `blocked` one
+      after 7;
+    - an unread message after 3 days;
+    - a fact never, unless it has a `review_by`.
+  - **Where staleness shows:** `about` and the essence render mark stale
+    items `[stale since <date>]`, and the brief counts the session's
+    agent's own.
+  - **`about` counts the file's records by kind** (facts, turns, essence,
+    coordination) in its header and its JSON, and `Mnemo::kind_counts`
+    (Python too). The MCP `about`'s array keeps its shape.
 - **The per-turn hook, the Stop continuation and the wake-up guardrails
   (13a step 5).**
   - **`mnemo hook user-prompt`** runs on Claude Code's

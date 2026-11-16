@@ -376,6 +376,188 @@ pub const MNEMO_META_REVIEW_BY: &str = "_mnemo.review_by";
 /// [`crate::Mnemo::set_default_agent`]; a new brain's manifest has none.
 pub const MNEMO_META_DEFAULT_AGENT: &str = "_mnemo.default_agent";
 
+/// 13a (13.5): a record's visibility level: `_mnemo.visibility`, or `team`
+/// when it has none. A filter, not a security boundary: everyone holding
+/// the key reads every record.
+pub fn visibility_of(m: &Memory) -> &str {
+    match m
+        .metadata
+        .get(MNEMO_META_VISIBILITY)
+        .and_then(|v| v.as_str())
+    {
+        Some(v @ ("public" | "team" | "private")) => v,
+        _ => "team",
+    }
+}
+
+/// 13a (13.5): which visibility levels a read shows. By default public and
+/// team; private only when asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisibilitySet {
+    /// Show `public` records.
+    pub public: bool,
+    /// Show `team` records (and those with no level).
+    pub team: bool,
+    /// Show `private` records.
+    pub private: bool,
+}
+
+impl Default for VisibilitySet {
+    fn default() -> Self {
+        VisibilitySet::DEFAULT
+    }
+}
+
+impl VisibilitySet {
+    /// Public and team: what every read shows unless asked.
+    pub const DEFAULT: VisibilitySet = VisibilitySet {
+        public: true,
+        team: true,
+        private: false,
+    };
+    /// Every level.
+    pub const ALL: VisibilitySet = VisibilitySet {
+        public: true,
+        team: true,
+        private: true,
+    };
+
+    /// From a list of levels (`public`, `team`, `private`) or `all`, as a
+    /// surface's `--visibility` or `"visibility"` names them.
+    pub fn parse<S: AsRef<str>>(levels: &[S]) -> crate::Result<VisibilitySet> {
+        let mut v = VisibilitySet {
+            public: false,
+            team: false,
+            private: false,
+        };
+        for l in levels {
+            for part in l
+                .as_ref()
+                .split(',')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            {
+                match part {
+                    "public" => v.public = true,
+                    "team" => v.team = true,
+                    "private" => v.private = true,
+                    "all" => v = VisibilitySet::ALL,
+                    other => {
+                        return Err(crate::MnemoError::Invalid(format!(
+                            "{other:?} isn't a visibility level: public, team, private or all"
+                        )))
+                    }
+                }
+            }
+        }
+        if !(v.public || v.team || v.private) {
+            return Ok(VisibilitySet::DEFAULT);
+        }
+        Ok(v)
+    }
+
+    /// Whether a record's level is in the set.
+    pub fn shows(&self, m: &Memory) -> bool {
+        self.shows_level(visibility_of(m))
+    }
+
+    /// Whether a level is in the set.
+    pub fn shows_level(&self, level: &str) -> bool {
+        match level {
+            "public" => self.public,
+            "private" => self.private,
+            _ => self.team,
+        }
+    }
+}
+
+/// 13a: `YYYY-MM-DD` (UTC) for unix seconds.
+pub fn date_of(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// 13a (13.6): the per-kind freshness defaults, in seconds.
+pub mod stale_after {
+    /// An essence `state` or `next` item.
+    pub const ESSENCE_STATE_NEXT: i64 = 14 * 86_400;
+    /// An essence `open` item.
+    pub const ESSENCE_OPEN: i64 = 30 * 86_400;
+    /// An `active` task with no update.
+    pub const TASK_ACTIVE: i64 = 3 * 86_400;
+    /// A `blocked` task.
+    pub const TASK_BLOCKED: i64 = 7 * 86_400;
+    /// An `unread` message.
+    pub const MESSAGE_UNREAD: i64 = 3 * 86_400;
+}
+
+/// 13a (13.6): when a record went stale at `now`, if it has: past its
+/// `_mnemo.review_by` (which, when set, decides alone), or older than its
+/// kind's default (`stale_after`) measured from `_mnemo.as_of`, else its
+/// last edit, else `created_at`. A fact with no `review_by`, a claim, a
+/// presence record and a resolved or superseded item are never stale.
+pub fn stale_since(m: &Memory, now: i64) -> Option<i64> {
+    if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+        return None;
+    }
+    let num = |k: &str| m.metadata.get(k).and_then(|v| v.as_i64());
+    if let Some(r) = num(MNEMO_META_REVIEW_BY) {
+        return (now >= r).then_some(r);
+    }
+    let base = num(MNEMO_META_AS_OF)
+        .or_else(|| num(MNEMO_META_UPDATED_AT))
+        .unwrap_or(m.created_at);
+    let s = |k: &str| m.metadata.get(k).and_then(|v| v.as_str());
+    let after = match s(MNEMO_META_KIND) {
+        Some(MNEMO_META_KIND_ESSENCE) => {
+            if s(MNEMO_META_STATUS) == Some(status::RESOLVED) {
+                return None;
+            }
+            match s(MNEMO_META_SECTION) {
+                Some("state" | "next") => stale_after::ESSENCE_STATE_NEXT,
+                Some("open") => stale_after::ESSENCE_OPEN,
+                _ => return None,
+            }
+        }
+        Some(MNEMO_META_KIND_TASK) => {
+            let last = m
+                .metadata
+                .get(MNEMO_META_STATUS_HISTORY)
+                .and_then(|h| h.as_array())
+                .and_then(|h| h.last())
+                .and_then(|e| e.get("at"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(m.created_at);
+            let after = match s(MNEMO_META_STATUS) {
+                Some("active") => stale_after::TASK_ACTIVE,
+                Some("blocked") => stale_after::TASK_BLOCKED,
+                _ => return None,
+            };
+            let t = last + after;
+            return (now >= t).then_some(t);
+        }
+        Some(MNEMO_META_KIND_MESSAGE) => {
+            if s(MNEMO_META_STATUS) != Some(MESSAGE_UNREAD) {
+                return None;
+            }
+            let t = m.created_at + stale_after::MESSAGE_UNREAD;
+            return (now >= t).then_some(t);
+        }
+        _ => return None,
+    };
+    let t = base + after;
+    (now >= t).then_some(t)
+}
+
 /// 13a (13.1): a message's recipient: an agent id, `role:<role>`, or `all`.
 pub const MNEMO_META_TO: &str = "_mnemo.to";
 /// 13a (13.1): a message's sender, as it said (unproven until 13b).
