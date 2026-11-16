@@ -5,12 +5,15 @@
 //! crash-and-reclaim test with a real process killed mid-task.
 
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(unix)]
+use mnemo_engine::task_status;
 use mnemo_engine::{
-    task_status, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, SharedOptions,
-    TaskOutcome, TaskSpec, WriteOutcome, TASK_CLAIM_TTL,
+    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, SharedOptions, TaskOutcome,
+    TaskSpec, WriteOutcome, TASK_CLAIM_TTL,
 };
 
 const PW: &str = "tasks-test-passphrase";
