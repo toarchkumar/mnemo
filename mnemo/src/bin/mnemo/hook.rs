@@ -462,11 +462,15 @@ fn embedder(
 // --- session-start -----------------------------------------------------------------
 
 /// The parts' shares of what's left after the card and the framing line:
-/// the project notes, the project essence, the thread essence, the recall.
-const SHARES: [usize; 4] = [800, 2_400, 1_600, 2_000];
+/// the project notes, the project essence, the thread essence, "Your work"
+/// (13a; its 600 come from the recall's share), the recall.
+const SHARES: [usize; 5] = [800, 2_400, 1_600, 600, 1_400];
+
+/// 13a: "Your work" at most.
+pub const YOUR_WORK_MAX: usize = 600;
 
 /// What `session-start` adds to the context: the card and the framing line,
-/// then up to four parts, each first given its share of what's left
+/// then up to five parts, each first given its share of what's left
 /// ([`SHARES`]), then what the others didn't use, in order.
 pub fn session_start(o: &Opts, input: &Value) -> String {
     let started = Instant::now();
@@ -524,6 +528,9 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
             }
         }
         parts.push(("This session's thread", t4));
+        // 5. Your work (13a): the unread messages for this session's agent,
+        // its role or everyone. Their senders and subjects are brain text.
+        parts.push(("Your work", your_work(&mut db)));
         let width = db.dimensions();
         let identity = db.embedder_identity().ok().flatten();
         (essence, width, identity)
@@ -573,7 +580,11 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
         left -= more;
     }
     let mut out = head;
-    for (((title, body), a), last) in parts.iter().zip(&alloc).zip([false, false, false, true]) {
+    for (((title, body), a), last) in parts
+        .iter()
+        .zip(&alloc)
+        .zip([false, false, false, false, true])
+    {
         if body.is_empty() || *a <= section(title) + 16 {
             continue;
         }
@@ -603,6 +614,38 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
         );
     }
     fit(&out, budget.max(card.len() + guide::FRAMING.len() + 2))
+}
+
+/// 13a: "Your work": how many messages are unread for this session's agent
+/// (`MNEMO_AGENT`), its role (`MNEMO_ROLE`) or everyone, then the newest
+/// few, sender and subject, escaped as brain text. At most
+/// [`YOUR_WORK_MAX`] bytes; empty when there's nothing.
+fn your_work(db: &mut Mnemo) -> String {
+    let (agent, role) = super::env_identity();
+    let Ok(msgs) = db.inbox(agent.as_deref(), role.as_deref(), true) else {
+        return String::new();
+    };
+    if msgs.is_empty() {
+        return String::new();
+    }
+    let n = msgs.len();
+    let mut out = format!(
+        "{n} unread message{} (call `inbox` to read {}):",
+        if n == 1 { "" } else { "s" },
+        if n == 1 { "it" } else { "them" }
+    );
+    for m in msgs.iter().rev() {
+        let line = format!(
+            "\n- {}: {}",
+            guide::escape_brain(&one_line(&m.from)),
+            guide::escape_brain(&one_line(&m.subject))
+        );
+        if out.len() + line.len() > YOUR_WORK_MAX {
+            break;
+        }
+        out.push_str(&line);
+    }
+    fit_plain(&out, YOUR_WORK_MAX)
 }
 
 /// The recall's query: the branch, the last three commit subjects, and the

@@ -77,6 +77,9 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Get { path, .. }
         | Command::Update { path, .. }
         | Command::DefaultAgent { path, .. }
+        | Command::Inbox { path, .. }
+        | Command::Ack { path, .. }
+        | Command::Post { brain: path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -114,6 +117,7 @@ fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
     let (name, path, id, ulid) = match cmd {
         Command::Get { path, id, .. } => ("get", path, id, true),
         Command::Update { path, id, .. } => ("update", path, id, true),
+        Command::Ack { path, id, .. } => ("ack", path, id, true),
         Command::Essence {
             cmd:
                 EssenceCmd::Update { path, id, .. }
@@ -584,6 +588,77 @@ enum Command {
         /// Include the embedding vector (json only; tables always omit it).
         #[arg(long)]
         vector: bool,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// 13a (13.1): post a message to an agent (`worker-a`), a role
+    /// (`role:worker`) or everyone (`all`). It's information, never
+    /// authority. Prints its id and hop count.
+    Post {
+        /// An agent id, `role:<role>`, or `all`.
+        to: String,
+        /// One line.
+        subject: String,
+        /// The body (at most 8 KB; a longer one belongs in a fact, named in
+        /// `--refs`).
+        #[arg(long, default_value = "")]
+        body: String,
+        /// Record ids, a PR number, an entry's title (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        refs: Vec<String>,
+        /// The conversation this replies in (from the message you answer).
+        #[arg(long)]
+        conversation: Option<String>,
+        #[command(flatten)]
+        who: AsArgs,
+        /// The brain's path. Left out, this project's brain.
+        #[arg(
+            long,
+            value_name = "PATH",
+            default_value = "",
+            hide_default_value = true
+        )]
+        brain: String,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// 13a (13.1): your messages: those to you, your role or everyone, not
+    /// yet acked (`--all` for every one). Listing marks them seen.
+    Inbox {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        /// Acked ones too.
+        #[arg(long)]
+        all: bool,
+        /// Delete messages acked more than `--days` (default 30) days ago,
+        /// and list nothing.
+        #[arg(long)]
+        prune: bool,
+        /// With `--prune`: how old an acked message must be.
+        #[arg(long, default_value_t = 30, requires = "prune")]
+        days: u32,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+        #[command(flatten)]
+        who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// 13a (13.1): ack a message (`unread → acked`), with an optional note.
+    Ack {
+        /// Path to the `.mnemo` file, then the message's ULID. With one
+        /// argument it's the ULID, and the brain is this project's.
+        #[arg(value_name = "PATH")]
+        path: String,
+        /// The message's ULID (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        #[command(flatten)]
+        who: AsArgs,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -1917,7 +1992,7 @@ fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mn
 /// 13a: this process's agent id and role, from `MNEMO_AGENT` and
 /// `MNEMO_ROLE` (each 1 to 64 of letters, digits, `.`, `_`, `-`). One that
 /// isn't valid is left out, with a note on stderr the first time.
-fn env_identity() -> (Option<String>, Option<String>) {
+pub(crate) fn env_identity() -> (Option<String>, Option<String>) {
     static NOTED: std::sync::Once = std::sync::Once::new();
     let read = |name: &str| -> Option<String> {
         let v = std::env::var(name).ok()?;
@@ -1938,6 +2013,73 @@ fn env_identity() -> (Option<String>, Option<String>) {
         }
     };
     (read("MNEMO_AGENT"), read("MNEMO_ROLE"))
+}
+
+/// 13a (R-010.9): who a coordination command runs as. Each falls back to
+/// `MNEMO_AGENT` and `MNEMO_ROLE`.
+#[derive(clap::Args, Debug, Default)]
+struct AsArgs {
+    /// The agent you are (default `MNEMO_AGENT`).
+    #[arg(long = "as", value_name = "AGENT")]
+    agent: Option<String>,
+    /// Your role (default `MNEMO_ROLE`): `inbox` shows what's sent to
+    /// `role:<role>`.
+    #[arg(long, value_name = "ROLE")]
+    role: Option<String>,
+}
+
+impl AsArgs {
+    /// The agent and role, checked.
+    fn resolve(&self) -> std::result::Result<(Option<String>, Option<String>), String> {
+        let (env_agent, env_role) = env_identity();
+        let check = |flag: &str, v: &Option<String>| -> std::result::Result<(), String> {
+            match v {
+                Some(x) if !mnemo_engine::valid_agent_id(x) => Err(format!(
+                    "{flag} {x:?}: 1 to 64 of letters, digits, '.', '_' and '-'"
+                )),
+                _ => Ok(()),
+            }
+        };
+        check("--as", &self.agent)?;
+        check("--role", &self.role)?;
+        Ok((
+            self.agent.clone().or(env_agent),
+            self.role.clone().or(env_role),
+        ))
+    }
+}
+
+/// One message as a table row: its id, sender, recipient and subject, then
+/// its body, indented.
+fn print_message(m: &mnemo_engine::Message) {
+    println!(
+        "{}  {} -> {}  [{}{}]  {}",
+        m.id,
+        m.from,
+        m.to,
+        m.status,
+        if m.hops > 0 {
+            format!(", hop {}", m.hops)
+        } else {
+            String::new()
+        },
+        m.subject
+    );
+    for l in m.body.lines() {
+        println!("    {l}");
+    }
+    if !m.refs.is_empty() {
+        println!("    refs: {}", m.refs.join(", "));
+    }
+}
+
+fn message_json(m: &mnemo_engine::Message) -> serde_json::Value {
+    serde_json::json!({
+        "id": m.id.to_string(), "to": m.to, "from": m.from, "subject": m.subject,
+        "body": m.body, "refs": m.refs, "conversation": m.conversation, "hops": m.hops,
+        "status": m.status, "delivery": m.delivery, "created_at": m.created_at,
+        "acked_at": m.acked_at,
+    })
 }
 
 /// 13a: visibility and freshness on a write (`remember`, `update`).
@@ -3842,6 +3984,105 @@ fn run() -> std::result::Result<(), String> {
                      budget or smaller --top-k to see more)"
                 );
             }
+        }
+        Command::Post {
+            to,
+            subject,
+            body,
+            refs,
+            conversation,
+            who,
+            brain: path,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "post").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent.clone());
+            }
+            let m = db
+                .post(
+                    &to,
+                    &subject,
+                    &body,
+                    &refs,
+                    conversation.as_deref(),
+                    agent.as_deref(),
+                    role.as_deref(),
+                )
+                .map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            println!("{}\thop {}", m.id, m.hops);
+        }
+        Command::Inbox {
+            path,
+            all,
+            prune,
+            days,
+            format,
+            who,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "inbox").map_err(fmt)?;
+            if prune {
+                let n = db.prune_messages(i64::from(days) * 86_400).map_err(fmt)?;
+                db.flush().map_err(fmt)?;
+                println!("pruned {n} acked message{}", if n == 1 { "" } else { "s" });
+                return Ok(());
+            }
+            if agent.is_none() && role.is_none() {
+                eprintln!("mnemo: no MNEMO_AGENT or --as: showing only messages to `all`");
+            }
+            let msgs = db
+                .inbox(agent.as_deref(), role.as_deref(), !all)
+                .map_err(fmt)?;
+            let unseen: Vec<mnemo_engine::Ulid> = msgs.iter().map(|m| m.id).collect();
+            db.mark_seen(&unseen).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::Value::Array(msgs.iter().map(message_json).collect())
+                ),
+                OutputFormat::Jsonl => {
+                    for m in &msgs {
+                        println!("{}", message_json(m));
+                    }
+                }
+                OutputFormat::Table => {
+                    if msgs.is_empty() {
+                        println!("no messages");
+                    }
+                    for m in &msgs {
+                        print_message(m);
+                    }
+                }
+            }
+        }
+        Command::Ack {
+            path,
+            id,
+            note,
+            who,
+            passphrase: pp,
+        } => {
+            let (agent, _role) = who.resolve()?;
+            let id = id.unwrap_or_default();
+            let ulid = parse_ulid(&id)?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "ack").map_err(fmt)?;
+            let outcome = db
+                .ack(&ulid, note.as_deref(), agent.as_deref())
+                .map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            let s = match outcome {
+                mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                _ => "acked",
+            };
+            println!("{id}\t{s}");
         }
         Command::DefaultAgent {
             path,

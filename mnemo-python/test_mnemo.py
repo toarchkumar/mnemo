@@ -1461,6 +1461,37 @@ def test_identical_keyed_rewrite_is_unchanged():
     print("ok  identical keyed re-write is unchanged (v0.16)")
 
 
+def test_messages_post_inbox_ack():
+    """v0.17 (13a step 2): post, inbox (by id, role, all; never one's own),
+    mark_seen, ack, the hop count, and prune_messages."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "m.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.set_author("planner-a")
+            a = db.post("worker-a", "step 2", "messages", refs=["PR 106"])
+            assert a["from"] == "planner-a" and a["hops"] == 0 and a["status"] == "unread"
+            b = db.post("role:worker", "for any worker")
+            db.post("all", "worker-a's own", sender="worker-a")
+            got = [m["id"] for m in db.inbox("worker-a", "worker")]
+            assert got == [a["id"], b["id"]], got
+            assert db.mark_seen([a["id"]]) == 1
+            r = db.post("planner-a", "re: step 2", conversation=a["conversation"], sender="worker-a")
+            assert r["hops"] == 1
+            assert db.ack(a["id"], "on it", by="worker-a") == "acked"
+            assert db.ack(a["id"]) == "unchanged"
+            assert [m["id"] for m in db.inbox("worker-a", "worker")] == [b["id"]]
+            acked = [m for m in db.inbox("worker-a", unread_only=False) if m["id"] == a["id"]][0]
+            assert acked["status"] == "acked" and acked["delivery"] == "done" and acked["acked_at"]
+            assert db.prune_messages() == 0
+            try:
+                db.post("worker a", "bad")
+                raise AssertionError("an invalid address was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+        finally:
+            db.close()
+
+
 def test_author_default_agent_and_freshness():
     """v0.17 (13a step 1): set_author stamps _mnemo.author on new records;
     the manifest's default agent; visibility, review_by and as_of."""
@@ -2046,6 +2077,7 @@ if __name__ == "__main__":
     test_recent()
     test_identical_keyed_rewrite_is_unchanged()
     test_author_default_agent_and_freshness()
+    test_messages_post_inbox_ack()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()

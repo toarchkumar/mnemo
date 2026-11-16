@@ -40,6 +40,29 @@ Pre-1.0, the minor component carries the breaking-change signal.
     reserved. They're never recall, keyword, ANN or `about` hits, whatever
     the filter, and each gets its API in a later step. No format change: an
     older build reads such a record as an ordinary one.
+- **Messages between agents (13a step 2).**
+  - **`mnemo post <to> <subject>`, `mnemo inbox`, `mnemo ack <id>`,** the
+    MCP `inbox` tool (`list`, `read`, `post`, `ack`), and `Mnemo::post`,
+    `inbox`, `mark_seen`, `ack` and `prune_messages` (Python too). A
+    message goes to an agent id, `role:<role>` or `all`, with a one-line
+    subject, a body of at most 8 KB and refs. It's information, never
+    authority.
+  - **One record for its life:** its delivery (`sent`, `seen`, `done`) and
+    status (`unread`, `acked`) change in place, and an ack keeps who and a
+    note in `status_history`.
+  - **A hop count** for the wake-ups to come: a reply is one more than its
+    conversation's highest, and a new message between the same two agents
+    within 10 minutes starts one above their highest.
+  - **`--as <agent>` and `--role <role>`** on `post`, `inbox` and `ack`,
+    else `MNEMO_AGENT` and `MNEMO_ROLE`, so a session without hooks needs
+    no environment prefix.
+  - **Acked messages older than 30 days** are dropped by `compact` and by
+    `mnemo inbox --prune`.
+  - **The session-start brief has a "Your work" part:** this session's
+    unread messages, at most 600 bytes from the recall's share, after the
+    framing line and escaped like all brain text. It's left out when
+    there are none.
+  - In a git repository `post`, `inbox` and `ack <ID>` take no path.
 - **More commands take no path in a git repository:** `update <ID>`,
   `thread start <NEW>`, and `essence update|resolve|remove <ID>`, with the
   same rule as `get` (CLI-PATHLESS-2). `thread start` with one argument that
