@@ -54,6 +54,36 @@ fn key_of(m: &Memory) -> Option<&str> {
     m.metadata.get(MNEMO_META_KEY).and_then(Value::as_str)
 }
 
+fn kind_of(m: &Memory) -> Option<&str> {
+    m.metadata.get(MNEMO_META_KIND).and_then(Value::as_str)
+}
+
+/// A task's slug.
+fn task_slug(m: &Memory) -> Option<&str> {
+    (kind_of(m) == Some("task"))
+        .then(|| m.metadata.get("_mnemo.slug").and_then(Value::as_str))
+        .flatten()
+}
+
+/// A task set `done` more than [`mnemo_engine::TASK_DONE_EXPORT_KEEP_SECS`]
+/// ago (by its last history entry).
+fn done_long_ago(m: &Memory, now: i64) -> bool {
+    if task_slug(m).is_none()
+        || m.metadata.get("_mnemo.status").and_then(Value::as_str) != Some("done")
+    {
+        return false;
+    }
+    let at = m
+        .metadata
+        .get("_mnemo.status_history")
+        .and_then(Value::as_array)
+        .and_then(|h| h.last())
+        .and_then(|e| e.get("at"))
+        .and_then(Value::as_i64)
+        .unwrap_or(m.created_at);
+    now - at > mnemo_engine::TASK_DONE_EXPORT_KEEP_SECS
+}
+
 fn is_turn(m: &Memory) -> bool {
     m.metadata.get(MNEMO_META_KIND).and_then(Value::as_str) == Some(MNEMO_META_KIND_TURN)
 }
@@ -62,6 +92,18 @@ fn is_turn(m: &Memory) -> bool {
 /// (ULIDs sort by creation time); with it, keyed memories come first in key
 /// order, then the rest, each by id.
 pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
+    // 13a: claims and presence lapse and change every minute: never
+    // exported. With `--git`, messages are a channel (what they decided
+    // lands in a task or a fact), and tasks done more than 30 days ago
+    // are history.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    all.retain(|m| !matches!(kind_of(m), Some("claim" | "presence")));
+    if o.git {
+        all.retain(|m| kind_of(m) != Some("message"));
+        all.retain(|m| !done_long_ago(m, now));
+    }
     if let Some(ts) = &o.types {
         all.retain(|m| ts.contains(&m.memory_type));
     }
@@ -70,10 +112,19 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
     }
     if o.git {
         all.retain(|m| !is_turn(m));
+        // Keyed memories in key order, then tasks in slug order, then the
+        // rest, each by id.
         all.sort_by(|a, b| {
             let ka = key_of(a);
             let kb = key_of(b);
-            (ka.is_none(), ka, a.id).cmp(&(kb.is_none(), kb, b.id))
+            let (ta, tb) = (task_slug(a), task_slug(b));
+            (ka.is_none(), ka, ta.is_none(), ta, a.id).cmp(&(
+                kb.is_none(),
+                kb,
+                tb.is_none(),
+                tb,
+                b.id,
+            ))
         });
     } else {
         all.sort_by_key(|m| m.id);
@@ -191,7 +242,13 @@ fn record(m: &Memory, git: bool) -> Map<String, Value> {
         r.insert("access_count".into(), Value::from(m.access_count));
     }
     if !m.metadata.is_empty() {
-        r.insert("metadata".into(), Value::Object(m.metadata.clone()));
+        let mut meta = m.metadata.clone();
+        if git {
+            // 13a: a task's delivery changes when it's seen; leave it out
+            // so the export only changes with the task.
+            meta.remove("_mnemo.delivery");
+        }
+        r.insert("metadata".into(), Value::Object(meta));
     }
     r.insert("content".into(), Value::String(m.content.clone()));
     r

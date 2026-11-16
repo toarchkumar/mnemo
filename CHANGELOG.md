@@ -63,7 +63,34 @@ Pre-1.0, the minor component carries the breaking-change signal.
     framing line and escaped like all brain text. It's left out when
     there are none.
   - In a git repository `post`, `inbox` and `ack <ID>` take no path, and
-    neither does `claim`.
+    neither do `claim` and `task`.
+- **Tasks (13a step 4): the work queue agents share.**
+  - **`mnemo task add|next|update|list|get`,** the MCP `task` tool
+    (listed before `inbox` and `claim`), and `Mnemo::task_add`,
+    `task_next`, `task_update`, `tasks`, `task` and `ready_tasks`
+    (Python too).
+  - **A task:** a title and body, a role that may take it, `after`
+    (slugs it waits for) and `pre_approved`. It's one record for its
+    life, changed in place, with its changes in `status_history`.
+  - **`next` takes the oldest `queued` task for a role** whose `after`
+    tasks are all `done`, claims `task:<slug>` for 2 hours, and sets
+    `active` and the owner. Failing that, it takes back an `active` task
+    whose owner's claim lapsed, naming the old owner in the history.
+  - **`update`:** the owner moves the task to `ready`, `blocked`,
+    `queued` (handing it back; new since 12.7's table) or `active`
+    again, and may add notes, each renewing its claim.
+    - An owner whose task was taken back gets `lost`, so a worker that
+      wakes up late can't overwrite the new owner's work.
+    - `ready → done` is the creator's call, unless the task is
+      `pre_approved`.
+    - Anyone may requeue a task whose claim has lapsed.
+  - **The session-start brief's "Your work"** also lists the tasks ready
+    for the session's role, and its own task claims lapsing within 15
+    minutes, within the same 600 bytes.
+  - **`export`:** claims and presence never go out. `--git` also leaves
+    out messages and tasks done more than 30 days ago, puts tasks after
+    the keyed memories in slug order, and leaves out a task's delivery
+    state, so it changes only with the task.
 - **Claims and presence (13a step 3, 12.4's step 7).**
   - **`mnemo claim take|renew|release|check|who`,** the MCP `claim` tool
     (`take`, `renew`, `release`, `check`, `who`), and `Mnemo::claim`,

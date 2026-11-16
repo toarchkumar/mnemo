@@ -428,6 +428,26 @@ pub const CLAIM_LAPSE_GRACE_SECS: i64 = 10;
 /// 13a (13.3): a topic's limit, in bytes (one line).
 pub const CLAIM_TOPIC_MAX: usize = 200;
 
+/// 13a (13.1): a task's slug, its name (`step-4-tasks`).
+pub const MNEMO_META_SLUG: &str = "_mnemo.slug";
+/// 13a (13.1): the agent that took a task (`Mnemo::task_next`).
+pub const MNEMO_META_OWNER: &str = "_mnemo.owner";
+/// 13a (13.1): the agent that added a task; `ready → done` is its call.
+pub const MNEMO_META_CREATOR: &str = "_mnemo.creator";
+/// 13a (13.1): the slugs of the tasks a task waits for.
+pub const MNEMO_META_AFTER: &str = "_mnemo.after";
+/// 13a (13.1): the owner may go from `ready` to `done` without a sign-off.
+pub const MNEMO_META_PRE_APPROVED: &str = "_mnemo.pre_approved";
+/// 13a (13.1): a task's claim lease (2 hours), renewed by its owner's
+/// updates.
+pub const TASK_CLAIM_TTL: i64 = 2 * 3600;
+/// 13a: a slug's limit (it's 1 to 64 of `a-z`, `0-9`, `.`, `_`, `-`).
+pub const TASK_SLUG_MAX: usize = 64;
+/// 13a: the brief warns about an own task's claim that lapses within this.
+pub const TASK_CLAIM_WARN_SECS: i64 = 15 * 60;
+/// 13a: `export --git` leaves out tasks done more than this ago (30 days).
+pub const TASK_DONE_EXPORT_KEEP_SECS: i64 = 30 * 86_400;
+
 /// 13a (13.1b): the delivery states, in order.
 pub mod delivery {
     /// Written, not yet delivered by a wake-up.
@@ -708,16 +728,33 @@ pub mod status {
     pub const RESOLVED: &str = "resolved";
 }
 
-/// Task transition table (declared for Phase 13; currently unused
-/// in the engine). `queued → active → ready → done | blocked`,
-/// with `blocked → active` as the only back-edge.
+/// Task transition table (13a step 4, `Mnemo::task_update`).
+/// `queued → active → ready → done`, or `active → blocked`; the back
+/// edges are `blocked → active` and (R-010.7) `active → queued`, for an
+/// owner handing a task back or anyone requeueing an abandoned one.
+/// `queued → active` happens only through `Mnemo::task_next`.
 pub const TASK_TRANSITIONS: &[(&str, &str)] = &[
     ("queued", "active"),
     ("active", "ready"),
     ("active", "blocked"),
     ("blocked", "active"),
+    ("active", "queued"),
     ("ready", "done"),
 ];
+
+/// 13a (13.1): the task statuses.
+pub mod task_status {
+    /// Waiting for an agent of its role to take it.
+    pub const QUEUED: &str = "queued";
+    /// Taken: its owner holds its claim.
+    pub const ACTIVE: &str = "active";
+    /// Its owner finished; waiting for its creator's `done`.
+    pub const READY: &str = "ready";
+    /// Done.
+    pub const DONE: &str = "done";
+    /// Its owner is stuck.
+    pub const BLOCKED: &str = "blocked";
+}
 
 /// Finding transition table (declared for Phase 13; currently unused
 /// in the engine). `open → {accepted | deferred | rejected |

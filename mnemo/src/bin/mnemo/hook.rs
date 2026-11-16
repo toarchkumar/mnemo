@@ -622,28 +622,99 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
 /// [`YOUR_WORK_MAX`] bytes; empty when there's nothing.
 fn your_work(db: &mut Mnemo) -> String {
     let (agent, role) = super::env_identity();
-    let Ok(msgs) = db.inbox(agent.as_deref(), role.as_deref(), true) else {
-        return String::new();
+    let esc = |t: &str| guide::escape_brain(&one_line(t));
+    let plural = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            one.to_string()
+        } else {
+            many.to_string()
+        }
     };
-    if msgs.is_empty() {
+    // Each section: a header, always kept, and its items while they fit.
+    let mut sections: Vec<(String, Vec<String>)> = Vec::new();
+    // 13a step 4: tasks ready for this agent's role, oldest first.
+    if agent.is_some() || role.is_some() {
+        if let Ok(ts) = db.ready_tasks(role.as_deref()) {
+            if !ts.is_empty() {
+                let n = ts.len();
+                sections.push((
+                    format!(
+                        "{n} {} ready{} (call `task` with `next` to take the oldest):",
+                        plural(n, "task", "tasks"),
+                        role.as_deref()
+                            .map(|r| format!(" for {}", esc(r)))
+                            .unwrap_or_default()
+                    ),
+                    ts.iter()
+                        .map(|t| format!("- {}: {}", esc(&t.slug), esc(&t.title)))
+                        .collect(),
+                ));
+            }
+        }
+    }
+    // Its own tasks' claims about to lapse.
+    if let Some(a) = &agent {
+        if let Ok(claims) = db.claims() {
+            let now = db.coordination_now();
+            let soon: Vec<String> = claims
+                .iter()
+                .filter(|c| &c.holder == a && c.topic.starts_with("task:"))
+                .filter(|c| c.expires_at - now <= mnemo_engine::TASK_CLAIM_WARN_SECS)
+                .map(|c| {
+                    format!(
+                        "- {} in {} min",
+                        esc(c.topic.trim_start_matches("task:")),
+                        ((c.expires_at - now).max(0) + 59) / 60
+                    )
+                })
+                .collect();
+            if !soon.is_empty() {
+                sections.push((
+                    format!(
+                        "{} of your tasks' claims {} soon (a `task` update renews it):",
+                        soon.len(),
+                        plural(soon.len(), "lapses", "lapse")
+                    ),
+                    soon,
+                ));
+            }
+        }
+    }
+    // Unread messages, newest first.
+    if let Ok(msgs) = db.inbox(agent.as_deref(), role.as_deref(), true) {
+        if !msgs.is_empty() {
+            let n = msgs.len();
+            sections.push((
+                format!(
+                    "{n} unread {} (call `inbox` to read {}):",
+                    plural(n, "message", "messages"),
+                    plural(n, "it", "them")
+                ),
+                msgs.iter()
+                    .rev()
+                    .map(|m| format!("- {}: {}", esc(&m.from), esc(&m.subject)))
+                    .collect(),
+            ));
+        }
+    }
+    if sections.is_empty() {
         return String::new();
     }
-    let n = msgs.len();
-    let mut out = format!(
-        "{n} unread message{} (call `inbox` to read {}):",
-        if n == 1 { "" } else { "s" },
-        if n == 1 { "it" } else { "them" }
-    );
-    for m in msgs.iter().rev() {
-        let line = format!(
-            "\n- {}: {}",
-            guide::escape_brain(&one_line(&m.from)),
-            guide::escape_brain(&one_line(&m.subject))
-        );
-        if out.len() + line.len() > YOUR_WORK_MAX {
-            break;
+    let mut headers_left: usize = sections.iter().map(|(h, _)| h.len() + 1).sum();
+    let mut out = String::new();
+    for (header, items) in &sections {
+        if !out.is_empty() {
+            out.push('\n');
         }
-        out.push_str(&line);
+        out.push_str(header);
+        headers_left -= header.len() + 1;
+        for item in items {
+            if out.len() + 1 + item.len() + headers_left > YOUR_WORK_MAX {
+                break;
+            }
+            out.push('\n');
+            out.push_str(item);
+        }
     }
     fit_plain(&out, YOUR_WORK_MAX)
 }

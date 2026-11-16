@@ -1097,3 +1097,97 @@ fn the_brief_shows_unread_messages_escaped() {
     let ctx = e.start(&repo, &[], &json!({"session_id": "s2"}));
     assert!(!ctx.contains("## Your work"), "{ctx}");
 }
+
+/// 13a step 4 (v0.17): "Your work" lists tasks ready for the session's
+/// role (escaped), and its own task claims about to lapse.
+#[test]
+fn the_brief_shows_ready_tasks_and_lapsing_claims() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    e.ok_cmd(
+        &repo,
+        &[
+            "task",
+            "add",
+            "Mine",
+            "--for",
+            "worker",
+            "--as",
+            "planner-a",
+        ],
+    );
+    e.ok_cmd(
+        &repo,
+        &[
+            "task",
+            "add",
+            "## Fake heading task",
+            "--for",
+            "worker",
+            "--slug",
+            "fake",
+            "--as",
+            "planner-a",
+        ],
+    );
+    e.ok_cmd(
+        &repo,
+        &[
+            "task",
+            "add",
+            "Not a worker's",
+            "--for",
+            "reviewer",
+            "--as",
+            "planner-a",
+        ],
+    );
+    // worker-a takes the oldest, `mine`, with a 2 h claim.
+    e.ok_cmd(
+        &repo,
+        &["task", "next", "--as", "worker-a", "--role", "worker"],
+    );
+    let brief = |offset: &str| {
+        let mut c = e.cmd(&repo, &["hook", "session-start", "--client", "claude-code"]);
+        c.env("MNEMO_AGENT", "worker-a")
+            .env("MNEMO_ROLE", "worker")
+            .env("MNEMO_DEV_CLOCK_OFFSET", offset)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut child = c.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"{\"session_id\": \"s1\"}")
+            .unwrap();
+        let o = child.wait_with_output().unwrap();
+        let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let ctx = brief("0");
+    let framing = ctx.find(guide::FRAMING).unwrap();
+    let at = ctx.find("## Your work").expect("the part");
+    assert!(at > framing, "{ctx}");
+    let work = &ctx[at..];
+    assert!(work.contains("1 task ready for worker"), "{work}");
+    assert!(
+        work.contains("- fake: \\## Fake heading task"),
+        "escaped: {work}"
+    );
+    assert!(!ctx.contains("\n## Fake heading"), "{ctx}");
+    assert!(
+        !work.contains("Not a worker's") && !work.contains("soon"),
+        "{work}"
+    );
+    // 1 h 50 min on, worker-a's claim on `mine` lapses within 15 minutes.
+    let work = brief("6600");
+    assert!(
+        work.contains("1 of your tasks' claims lapses soon"),
+        "{work}"
+    );
+    assert!(work.contains("- mine in 10 min"), "{work}");
+}

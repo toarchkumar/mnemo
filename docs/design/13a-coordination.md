@@ -129,6 +129,23 @@ CHANGELOG says to upgrade every session's `mnemo` together.
 - **`ready` waits for the task's creator to set `done`,** unless
   `pre_approved`. That's today's "READY before tagging".
 
+**As built (step 4):**
+- **The slug is `_mnemo.slug`, not a `_mnemo.key` slot.** It's found
+  through the row hash, as claims are (section 4's "As built"), so a task
+  never enters the keyed index or `history --key`. A re-add with the same
+  slug updates the title, body, role, `after` and `pre_approved` in place.
+- **Who may do what:**
+  - its owner moves it from `active` or `blocked`, and adds notes;
+  - its creator sets `done` and adds notes at any status;
+  - anyone requeues an abandoned task;
+  - `queued → active` happens only through `next`.
+- **An owner's update** renews its claim:
+  - with a token, the claim must be that token's;
+  - an owner whose claim lapsed with nobody else taking it carries on,
+    and takes the claim again;
+  - `ready`, `done` and `queued` release it.
+- **`after`** names slugs, which must exist when the task is added.
+
 ### Claims and presence
 
 As 12.4 designed them ("Claims and presence", with its step 7 rework), with

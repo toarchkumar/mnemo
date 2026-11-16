@@ -996,3 +996,137 @@ fn claim_take_renew_release_check_and_who() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("needs an agent"));
 }
+
+/// 13a step 4 (v0.17): `mnemo task add|next|update|list|get` with `--as`,
+/// `--role` and `--for`; nothing to take and lost exit 1; `export --git`
+/// keeps tasks in slug order and leaves out messages, claims and presence.
+#[test]
+fn task_add_next_update_list_get_and_the_git_export() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    assert_eq!(
+        e.ok(
+            &main,
+            &[
+                "task",
+                "add",
+                "Step 4: tasks",
+                "--for",
+                "worker",
+                "--as",
+                "planner-a"
+            ]
+        )
+        .trim(),
+        "step-4-tasks\tadded"
+    );
+    assert_eq!(
+        e.ok(
+            &main,
+            &[
+                "task",
+                "add",
+                "Alpha",
+                "--for",
+                "reviewer",
+                "--slug",
+                "a-review",
+                "--as",
+                "planner-a"
+            ]
+        )
+        .trim(),
+        "a-review\tadded"
+    );
+    assert!(e
+        .fails(&main, &["task", "add", "x", "--after", "nope"])
+        .contains("no task"));
+    let out = e.ok(
+        &main,
+        &["task", "next", "--as", "worker-a", "--role", "worker"],
+    );
+    let parts: Vec<&str> = out.trim().split('\t').collect();
+    assert_eq!(
+        (parts[0], parts[3]),
+        ("step-4-tasks", "Step 4: tasks"),
+        "{out}"
+    );
+    let token = parts[1].to_string();
+    assert!(e
+        .fails(
+            &main,
+            &["task", "next", "--as", "worker-b", "--role", "worker"]
+        )
+        .contains("nothing to take"));
+    assert!(e
+        .fails(
+            &main,
+            &[
+                "task",
+                "update",
+                "step-4-tasks",
+                "--status",
+                "ready",
+                "--as",
+                "worker-b"
+            ]
+        )
+        .contains("lost"));
+    assert_eq!(
+        e.ok(
+            &main,
+            &[
+                "task",
+                "update",
+                "step-4-tasks",
+                "--status",
+                "ready",
+                "--note",
+                "PR 108",
+                "--token",
+                &token,
+                "--as",
+                "worker-a"
+            ]
+        )
+        .trim(),
+        "step-4-tasks\tready"
+    );
+    let t = e.ok(&main, &["task", "list"]);
+    assert!(
+        t.contains("step-4-tasks  [ready, worker-a]  Step 4: tasks  (for worker)"),
+        "{t}"
+    );
+    let g = e.ok(&main, &["task", "get", "step-4-tasks"]);
+    assert!(g.contains("active -> ready by worker-a: PR 108"), "{g}");
+    let v: Value = serde_json::from_str(&e.ok(
+        &main,
+        &["task", "list", "--for", "reviewer", "--format", "json"],
+    ))
+    .unwrap();
+    assert_eq!(v.as_array().unwrap().len(), 1);
+    // The git export: tasks by slug; no message, claim or presence.
+    e.ok(
+        &main,
+        &["post", "worker-a", "a message", "--as", "planner-a"],
+    );
+    e.ok(&main, &["claim", "take", "a topic", "--as", "worker-a"]);
+    let x = e.ok(&main, &["export", "--git", "--format", "jsonl"]);
+    let kinds: Vec<String> = x
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| v["metadata"]["_mnemo.kind"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(kinds, ["task", "task"], "{x}");
+    let slugs: Vec<String> = x
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| v["metadata"]["_mnemo.slug"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(slugs, ["a-review", "step-4-tasks"]);
+    assert!(!x.contains("_mnemo.delivery"), "{x}");
+    // The plain export keeps the message, still without claims or presence.
+    let x = e.ok(&main, &["export", "--format", "jsonl"]);
+    assert!(x.contains("\"message\"") && !x.contains("\"claim\"") && !x.contains("\"presence\""));
+}
