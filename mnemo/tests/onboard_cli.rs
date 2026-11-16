@@ -1004,6 +1004,7 @@ fn links_merged_files_and_a_passphrase_brain() {
 /// (`UserPromptSubmit`, Cursor's `postToolUse`); `--wake stop` adds the
 /// Stop continuation, a re-run keeps it, `--wake off` removes it, and
 /// `--undo` removes them all.
+#[cfg(unix)]
 #[test]
 fn the_per_turn_hook_and_wake_stop() {
     let e = Env::new();
