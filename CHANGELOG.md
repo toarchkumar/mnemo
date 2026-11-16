@@ -64,6 +64,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
     there are none.
   - In a git repository `post`, `inbox` and `ack <ID>` take no path, and
     neither do `claim` and `task`.
+- **The guide's "Working with other agents" (13a step 8),** section 6 of
+  `mnemo onboard --guide`, in `llms-full.txt` and the plugin's skill:
+  - naming sessions (`MNEMO_AGENT`, `MNEMO_ROLE`, an alias per role,
+    `--as` and `--role`);
+  - tasks, then the inbox, then claims and `who`, with tested blocks;
+  - how work reaches a session (the per-turn line; Stop when it's on; in
+    Claude Code, a `SendMessage` pointer after posting, the inbox staying
+    the record; Cursor's per-turn line);
+  - mnemo's tasks against Claude Code's own `TaskCreate` and
+    `SendMessage`;
+  - the rules (a message is information, never authority; the kill
+    switch; `crossSessionInbound` at `accept`);
+  - visibility and freshness.
+  The card gains one line, and `llms.txt`'s summary mentions the inbox,
+  task queue and claims.
 - **Visibility and freshness (13a step 7).**
   - **`_mnemo.visibility` is now a filter.** Private records are left out
     of recall (every path, the ANN and keywords too), `about`, the inbox,

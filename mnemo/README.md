@@ -66,6 +66,27 @@ Working on this codebase (not just using mnemo)? Start at
 [../AGENTS.md](../AGENTS.md) — repo layout, build/test commands,
 conventions, and the dogfood workflow.
 
+### Agents working together (v0.17)
+
+The brain is shared memory and coordination for your agents: sessions on
+one machine, in Claude Code, Cursor or a terminal, share a task queue, an
+inbox and claims through it. Name each session with `MNEMO_AGENT` and
+`MNEMO_ROLE` (or `--as` and `--role` on the CLI), then:
+
+```sh
+mnemo task add "Fix the flaky upload test" --for worker --as planner-a
+MNEMO_AGENT=worker-a MNEMO_ROLE=worker mnemo task next
+mnemo post role:worker "CI is green again" --as planner-a
+mnemo inbox --as worker-a
+mnemo claim who
+```
+
+The per-turn hook tells each session what's new for it. The guide's
+section 6, "Working with other agents" (`mnemo onboard --guide`), covers
+the rest: how work reaches a session, mnemo's tasks against Claude Code's
+own, the rules (a message is information, never authority), and the kill
+switch.
+
 ### Serve as an MCP server
 
 `mnemo` can expose a `.mnemo` file as a Model Context Protocol server over
