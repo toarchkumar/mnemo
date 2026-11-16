@@ -503,6 +503,8 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
         Ok(p) => p,
         Err(note) => return note,
     };
+    // RB-012.6 item 2: per-turn stamps a session left 30 days ago.
+    mnemo_engine::sidecar_notes::prune(&path, "hook.turn.", Duration::from_secs(30 * 86_400));
     let s = match secret(&path) {
         Ok(s) => s,
         Err(note) => return note,
@@ -1115,15 +1117,14 @@ fn user_prompt(o: &Opts, input: &Value) {
             sh.write(|db| db.mark_shown(&work))
                 .map_err(|e| one_line(&e.to_string()))
         });
-        match marked {
-            // Its own write changed the file: stamp what it left.
-            Ok(()) => file_after = Mnemo::file_stamp(&path),
-            Err(e) => {
-                eprintln!(
-                    "mnemo: what this turn showed wasn't marked seen ({e}); it shows again next turn"
-                );
-                file_after = None;
-            }
+        // RB-012.5: a turn that showed something writes no stamp, so a
+        // commit that landed while it showed and marked is seen by the next
+        // turn (which takes the slow path once, then stamps as usual).
+        file_after = None;
+        if let Err(e) = marked {
+            eprintln!(
+                "mnemo: what this turn showed wasn't marked seen ({e}); it shows again next turn"
+            );
         }
     }
     if let (Some(n), Some(f)) = (&name, file_after) {

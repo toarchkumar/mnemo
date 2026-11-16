@@ -149,7 +149,7 @@ pub use shared::{sidecar_notes, CancelToken, SharedOptions};
 pub use store::BudgetReport;
 pub use store::{
     slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
-    Stale, Task, TaskOutcome, TaskSpec, TaskTaken, Wake,
+    Stale, Task, TaskClaim, TaskLost, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,

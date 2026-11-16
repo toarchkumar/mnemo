@@ -2542,8 +2542,9 @@ impl Mnemo {
     }
 
     /// 13a (13.1): move a task along or add a note: `{"outcome":
-    /// "updated", "task": {...}}` or `{"outcome": "lost"}` when another
-    /// agent took it back.
+    /// "updated", "task": {...}}`, with `token`, `expires_at` and `retaken`
+    /// when the owner holds the claim after it; or `{"outcome": "lost",
+    /// "reason": "taken_back" | "other_token"}`.
     #[pyo3(signature = (slug, status=None, note=None, *, token=None))]
     fn task_update(
         &mut self,
@@ -2558,11 +2559,26 @@ impl Mnemo {
         })?;
         let d = PyDict::new_bound(py);
         match o {
-            mnemo_core::TaskOutcome::Updated(t) => {
+            mnemo_core::TaskOutcome::Updated(t, claim) => {
                 d.set_item("outcome", "updated")?;
                 d.set_item("task", task_dict(py, &t)?)?;
+                // RB-012.1: the claim the owner now holds.
+                if let Some(c) = claim {
+                    d.set_item("token", c.token)?;
+                    d.set_item("expires_at", c.expires_at)?;
+                    d.set_item("retaken", c.retaken)?;
+                }
             }
-            mnemo_core::TaskOutcome::Lost => d.set_item("outcome", "lost")?,
+            mnemo_core::TaskOutcome::Lost(why) => {
+                d.set_item("outcome", "lost")?;
+                d.set_item(
+                    "reason",
+                    match why {
+                        mnemo_core::TaskLost::TakenBack => "taken_back",
+                        mnemo_core::TaskLost::OtherToken => "other_token",
+                    },
+                )?;
+            }
         }
         Ok(d.into_any().unbind())
     }

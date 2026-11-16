@@ -486,6 +486,12 @@ pub fn date_of(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// 13a: `YYYY-MM-DD HH:MM UTC` for unix seconds.
+pub fn date_time_of(secs: i64) -> String {
+    let r = secs.rem_euclid(86_400);
+    format!("{} {:02}:{:02} UTC", date_of(secs), r / 3600, r % 3600 / 60)
+}
+
 /// 13a (13.6): the per-kind freshness defaults, in seconds.
 pub mod stale_after {
     /// An essence `state` or `next` item.
@@ -648,6 +654,9 @@ pub const HOP_CAP: u64 = 8;
 pub const MNEMO_META_WAKE_PAUSED: &str = "_mnemo.wake_paused";
 /// 13a (13.1b): a presence record's recent wake-up times (the last hour).
 pub const MNEMO_META_WAKES: &str = "_mnemo.wakes";
+/// 13a (RB-012.6 item 4): the agents a message to a role or everyone, or a
+/// role's task, has been shown to.
+pub const MNEMO_META_SEEN_BY: &str = "_mnemo.seen_by";
 /// 13a (13.1b): the claim expiry its holder was last warned about.
 pub const MNEMO_META_WARNED_EXPIRY: &str = "_mnemo.warned_expiry";
 
@@ -933,8 +942,9 @@ pub mod status {
 
 /// Task transition table (13a step 4, `Mnemo::task_update`).
 /// `queued → active → ready → done`, or `active → blocked`; the back
-/// edges are `blocked → active` and (R-010.7) `active → queued`, for an
-/// owner handing a task back or anyone requeueing an abandoned one.
+/// edges are `blocked → active` and (R-010.7, RB-012.3) `active → queued`
+/// and `blocked → queued`, for an owner handing a task back or anyone
+/// requeueing an abandoned one.
 /// `queued → active` happens only through `Mnemo::task_next`.
 pub const TASK_TRANSITIONS: &[(&str, &str)] = &[
     ("queued", "active"),
@@ -942,6 +952,7 @@ pub const TASK_TRANSITIONS: &[(&str, &str)] = &[
     ("active", "blocked"),
     ("blocked", "active"),
     ("active", "queued"),
+    ("blocked", "queued"),
     ("ready", "done"),
 ];
 

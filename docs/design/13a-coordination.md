@@ -146,6 +146,28 @@ CHANGELOG says to upgrade every session's `mnemo` together.
   - `ready`, `done` and `queued` release it.
 - **`after`** names slugs, which must exist when the task is added.
 
+**Revised for RB-012** (REVIEWER-B's scoped pass):
+- **The token after a lapse (RB-012.1).** With a token and no live claim,
+  the task carries on when the token is the lapsed claim's (the record
+  keeps it) and the caller still owns the task. Then the claim is taken
+  again with a new token.
+  - **`Lost(TakenBack)`:** a token from anyone who isn't the owner, or a
+    live claim someone else holds.
+  - **`Lost(OtherToken)`:** a token that isn't the claim's.
+  - **`task_update` returns the claim the owner now holds** (`TaskClaim`:
+    token, expiry, `retaken`), in the CLI, MCP and Python.
+  - **`next` offers the caller its own lapsed task first,** then the
+    ready queued tasks, then other owners' lapsed ones.
+- **Re-adds (RB-012.2).** A re-add of a `done` slug is refused with a
+  free slug (`<slug>-2`). Only the creator changes a definition; an
+  identical re-add stays `unchanged`. `task add` prints the status with
+  the outcome.
+- **Blocked tasks (RB-012.3).** `blocked → queued` follows `active →
+  queued`'s rule, and `next` takes back a lapsed blocked task.
+- **Cycles and live requeues (RB-012.6 items 5 and 6).** An `after` that
+  closes a cycle is refused. A third party's requeue of a task whose
+  claim is live says whose it is and until when.
+
 ### Claims and presence
 
 As 12.4 designed them ("Claims and presence", with its step 7 rework), with
@@ -461,6 +483,23 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
 - **`onboard --wake stop|off`:** left out, a re-run keeps the Stop hook if
   an earlier run wrote it.
 
+**Revised for RB-012:**
+- **A turn that showed something writes no stamp (RB-012.5).** A commit
+  that landed while it marked is seen by the next turn, which takes the
+  slow path once and then stamps. That closes the race REVIEWER-B
+  measured at 5 in 40.
+- **Seen per agent (RB-012.6 item 4; this closes SEEN-PER-AGENT).** A
+  message to a role or `all`, and a role's ready task, are new to each
+  agent until it has been shown them (`_mnemo.seen_by`). A message to an
+  agent by id keeps its delivery field. `wake()` skips a task the agent
+  has seen.
+- **The git-free lookup asks git (RB-012.6 item 1)** when `GIT_DIR`,
+  `GIT_COMMON_DIR`, `GIT_WORK_TREE`, `GIT_CEILING_DIRECTORIES` or
+  `GIT_DISCOVERY_ACROSS_FILESYSTEM` is set, and when a directory on the
+  way up looks like a bare repository.
+- **Stamps older than 30 days are removed** at session start (RB-012.6
+  item 2).
+
 4. **Channels (optional; not a step).** If mnemo's plugin is ever on the
    allowlist, `serve --mcp` declares `claude/channel` and sends the same
    pointer. Until then nothing in the release depends on it.
@@ -559,6 +598,20 @@ long-lived process (the CLI, reviewer-a) show `alive: unknown`.
   agent in the thread-hash field, so a lookup decrypts only its candidates.
   That's no format change: an older build reads it as a thread hash that
   its decrypted check rejects.
+
+**Revised for RB-012:**
+- **Presence (RB-012.4):** only a process holding the presence lock
+  writes `_mnemo.presence_lock` and `tool`. Another process of the same
+  agent (the CLI) moves `last_active` alone, so `who` keeps saying
+  alive.
+- **The probe in a claim's window (RB-012.6 item 3)** tries once, with no
+  retry. A wrong "alive" only delays a lapse that needs two looks anyway.
+  `who` keeps the retry.
+  - **Measured at a load near 6:** with the retry, `task next` facing 3
+    and 6 live workers took 79.3 and 167.1 ms (20 ms per holder, inside
+    the exclusive window).
+  - **Without it, at a load near 3:** 1.4 and 1.5 ms, and a `claim` on a
+    held topic 0.4 to 0.7 ms.
 
 **No lock across a turn.** A claim is a record, not a lock.
 - **The brain's OS lock is held only inside one call's window,** as 12.4

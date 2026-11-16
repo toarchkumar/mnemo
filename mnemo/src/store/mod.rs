@@ -68,7 +68,7 @@ use crate::veccol;
 use crate::wal;
 pub use coordination::{
     slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
-    Stale, Task, TaskOutcome, TaskSpec, TaskTaken, Wake,
+    Stale, Task, TaskClaim, TaskLost, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
 
 mod ann;

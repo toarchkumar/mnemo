@@ -319,3 +319,38 @@ fn new_work_is_shown_once_and_a_lapsing_claim_once_per_expiry() {
         1
     );
 }
+
+/// RB-012.6 item 4 (SEEN-PER-AGENT): a message to a role or everyone, and
+/// a role's ready task, are new to each agent until it has been shown them.
+#[test]
+fn broadcasts_and_role_tasks_are_seen_per_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir, true);
+    task(&mut db, "For any worker", false);
+    db.post(
+        "role:worker",
+        "to the role",
+        "",
+        &[],
+        None,
+        Some("planner-a"),
+        None,
+    )
+    .unwrap();
+    db.post("all", "to everyone", "", &[], None, Some("planner-a"), None)
+        .unwrap();
+    db.post("worker-a", "to a", "", &[], None, Some("planner-a"), None)
+        .unwrap();
+    let shown = |db: &mut Mnemo, who: &str| {
+        db.set_author(Some(who.into()));
+        let w = db.new_work(Some(who), Some("worker")).unwrap();
+        let n = (w.messages.len(), w.tasks.len());
+        db.mark_shown(&w).unwrap();
+        n
+    };
+    assert_eq!(shown(&mut db, "worker-a"), (3, 1));
+    assert_eq!(shown(&mut db, "worker-a"), (0, 0));
+    // worker-b still sees the broadcasts and the role's task.
+    assert_eq!(shown(&mut db, "worker-b"), (2, 1));
+    assert_eq!(shown(&mut db, "worker-b"), (0, 0));
+}

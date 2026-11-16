@@ -19,7 +19,9 @@ pub use call::CancelToken;
 pub use lock::SharedOptions;
 #[allow(unused_imports)]
 pub(crate) use lock::{BrainLocks, Held, LockKind, WINDOWS_OLD_RENAME};
-pub(crate) use presence::{probe as probe_presence, PresenceLock};
+pub(crate) use presence::{
+    probe as probe_presence, probe_once as probe_presence_once, PresenceLock,
+};
 pub use sidecar::notes as sidecar_notes;
 pub(crate) use sidecar::pid_alive;
 

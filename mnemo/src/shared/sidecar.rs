@@ -429,6 +429,41 @@ pub mod notes {
         open_if_present(&brain)?.read_note(name)
     }
 
+    /// Remove the notes named `prefix*` last written more than `older_than`
+    /// ago; returns how many went. Best effort.
+    pub fn prune(brain: &Path, prefix: &str, older_than: std::time::Duration) -> usize {
+        if !ok_name(prefix) {
+            return 0;
+        }
+        let Some(brain) = std::fs::canonicalize(brain).ok() else {
+            return 0;
+        };
+        let Some(side) = open_if_present(&brain) else {
+            return 0;
+        };
+        let Ok(entries) = std::fs::read_dir(side.path()) else {
+            return 0;
+        };
+        let now = std::time::SystemTime::now();
+        let mut n = 0;
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(prefix) || !ok_name(&name) {
+                continue;
+            }
+            let old = e
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age > older_than);
+            if old && side.remove(&name).is_ok() {
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// Write a note (creating the checked directory if needed).
     pub fn write(brain: &Path, name: &str, line: &str) -> std::io::Result<()> {
         if !ok_name(name) || line.contains('\n') || line.len() > 500 {

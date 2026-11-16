@@ -133,7 +133,7 @@ fn add_next_update_list_and_get() {
     assert!(matches!(
         db.task_update("step-1-the-plumbing", None, Some("halfway"), None)
             .unwrap(),
-        TaskOutcome::Updated(_)
+        TaskOutcome::Updated(..)
     ));
     assert!(matches!(
         db.task_update(
@@ -143,18 +143,18 @@ fn add_next_update_list_and_get() {
             Some(&t.token)
         )
         .unwrap(),
-        TaskOutcome::Updated(_)
+        TaskOutcome::Updated(..)
     ));
     assert!(matches!(
         db.task_update("step-1-the-plumbing", Some("active"), None, None)
             .unwrap(),
-        TaskOutcome::Updated(_)
+        TaskOutcome::Updated(..)
     ));
     // A wrong token is Lost; a skipped transition is refused.
     assert_eq!(
         db.task_update("step-1-the-plumbing", Some("ready"), None, Some("nope"))
             .unwrap(),
-        TaskOutcome::Lost
+        TaskOutcome::Lost(mnemo_engine::TaskLost::OtherToken)
     );
     assert!(matches!(
         db.task_update("step-1-the-plumbing", Some("done"), None, None),
@@ -165,7 +165,7 @@ fn add_next_update_list_and_get() {
     assert_eq!(
         db.task_update("step-1-the-plumbing", Some("ready"), None, None)
             .unwrap(),
-        TaskOutcome::Lost
+        TaskOutcome::Lost(mnemo_engine::TaskLost::TakenBack)
     );
     assert!(matches!(
         db.task_update("step-2", Some("active"), None, None),
@@ -173,7 +173,7 @@ fn add_next_update_list_and_get() {
     ));
     // ready waits for its creator's done.
     as_agent(&mut db, "worker-a");
-    let TaskOutcome::Updated(r) = db
+    let TaskOutcome::Updated(r, _) = db
         .task_update("step-1-the-plumbing", Some("ready"), None, None)
         .unwrap()
     else {
@@ -192,7 +192,7 @@ fn add_next_update_list_and_get() {
         Err(MnemoError::Invalid(e)) if e.contains("creator")
     ));
     as_agent(&mut db, "planner-a");
-    let TaskOutcome::Updated(d) = db
+    let TaskOutcome::Updated(d, _) = db
         .task_update("step-1-the-plumbing", Some("done"), Some("merged"), None)
         .unwrap()
     else {
@@ -240,11 +240,11 @@ fn add_next_update_list_and_get() {
     assert!(matches!(
         db.task_update("small-fix", Some("done"), None, None)
             .unwrap(),
-        TaskOutcome::Updated(_)
+        TaskOutcome::Updated(..)
     ));
     // The owner hands step 2 back (R-010.7): queued, no owner, claim gone.
     as_agent(&mut db, "worker-a");
-    let TaskOutcome::Updated(q) = db
+    let TaskOutcome::Updated(q, _) = db
         .task_update("step-2", Some("queued"), Some("handing back"), None)
         .unwrap()
     else {
@@ -293,8 +293,14 @@ fn a_lapsed_owner_is_reclaimed_and_its_late_update_is_lost() {
         db.task_next(Some("worker")).unwrap().unwrap().task.slug,
         "later"
     );
-    // Two hours on: worker-a's claim lapsed; worker-b takes step 4 back.
+    // Two hours on: both claims lapsed. worker-b gets its own task back
+    // first (RB-012.1), then takes step 4 back from worker-a.
     db.__set_clock_offset_for_testing(TASK_CLAIM_TTL + 1);
+    let own = db.task_next(Some("worker")).unwrap().unwrap();
+    assert_eq!(
+        (own.task.slug.as_str(), own.reclaimed_from.as_deref()),
+        ("later", None)
+    );
     let b = db.task_next(Some("worker")).unwrap().unwrap();
     assert_eq!(b.task.slug, a.task.slug);
     assert_eq!(b.reclaimed_from.as_deref(), Some("worker-a"));
@@ -308,7 +314,7 @@ fn a_lapsed_owner_is_reclaimed_and_its_late_update_is_lost() {
     for tk in [None, Some(a.token.as_str())] {
         assert_eq!(
             db.task_update("step-4", Some("ready"), None, tk).unwrap(),
-            TaskOutcome::Lost
+            TaskOutcome::Lost(mnemo_engine::TaskLost::TakenBack)
         );
     }
     assert_eq!(
@@ -322,7 +328,7 @@ fn a_lapsed_owner_is_reclaimed_and_its_late_update_is_lost() {
     assert!(matches!(
         db.task_update("later", None, Some("still on it"), None)
             .unwrap(),
-        TaskOutcome::Updated(_)
+        TaskOutcome::Updated(..)
     ));
     assert!(db
         .claims()
@@ -332,7 +338,7 @@ fn a_lapsed_owner_is_reclaimed_and_its_late_update_is_lost() {
     // An abandoned task can be requeued by anyone once its claim lapsed.
     db.__set_clock_offset_for_testing(5 * TASK_CLAIM_TTL);
     as_agent(&mut db, "planner-a");
-    let TaskOutcome::Updated(q) = db
+    let TaskOutcome::Updated(q, _) = db
         .task_update("step-4", Some("queued"), Some("abandoned"), None)
         .unwrap()
     else {
@@ -437,10 +443,10 @@ fn a_crashed_owners_task_is_reclaimed_and_it_cant_overwrite_the_new_owner() {
             Some(&a_token)
         )
         .unwrap(),
-        TaskOutcome::Lost
+        TaskOutcome::Lost(mnemo_engine::TaskLost::TakenBack)
     );
     as_agent(&mut db, "worker-b");
-    let TaskOutcome::Updated(r) = db
+    let TaskOutcome::Updated(r, _) = db
         .task_update("step-4", Some("ready"), None, Some(&t.token))
         .unwrap()
     else {
@@ -450,4 +456,207 @@ fn a_crashed_owners_task_is_reclaimed_and_it_cant_overwrite_the_new_owner() {
         (r.status.as_str(), r.owner.as_deref()),
         (task_status::READY, Some("worker-b"))
     );
+}
+
+// --- RB-012 -------------------------------------------------------------------
+
+fn claim_of(o: &TaskOutcome) -> mnemo_engine::TaskClaim {
+    match o {
+        TaskOutcome::Updated(_, Some(c)) => c.clone(),
+        other => panic!("no claim: {other:?}"),
+    }
+}
+
+/// RB-012.1: an owner whose claim lapsed, passing its token, carries on
+/// (nobody took the task), and the update returns the claim it now holds;
+/// `next` offers it its own task back; after another agent took the task
+/// (and handed it back), the old token is `Lost`, taken back.
+#[test]
+fn rb012_1_a_lapsed_owner_with_its_token_carries_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_add(&spec("Fix the upload test", Some("worker"), &[]))
+        .unwrap();
+    db.task_add(&spec("Second", Some("worker"), &[])).unwrap();
+    as_agent(&mut db, "worker-a");
+    let a = db.task_next(Some("worker")).unwrap().unwrap();
+    // A renewing note returns the same token, renewed.
+    let c = claim_of(
+        &db.task_update("fix-the-upload-test", None, Some("working"), Some(&a.token))
+            .unwrap(),
+    );
+    assert_eq!((c.token.as_str(), c.retaken), (a.token.as_str(), false));
+    assert!(c.expires_at >= a.expires_at);
+    // Two hours and a minute on: nobody took it. With its token, it
+    // carries on, and takes the claim again with a new token.
+    db.__set_clock_offset_for_testing(TASK_CLAIM_TTL + 61);
+    let c = claim_of(
+        &db.task_update("fix-the-upload-test", None, Some("back"), Some(&a.token))
+            .unwrap(),
+    );
+    assert!(c.retaken && c.token != a.token, "{c:?}");
+    // The old token is now the other session's: OtherToken.
+    assert_eq!(
+        db.task_update("fix-the-upload-test", None, Some("x"), Some(&a.token))
+            .unwrap(),
+        TaskOutcome::Lost(mnemo_engine::TaskLost::OtherToken)
+    );
+    // `next` offers an owner its own lapsed task back first.
+    db.__set_clock_offset_for_testing(3 * TASK_CLAIM_TTL);
+    let again = db.task_next(Some("worker")).unwrap().unwrap();
+    assert_eq!(again.task.slug, "fix-the-upload-test");
+    assert!(again.reclaimed_from.is_none());
+    // Another agent takes it back after a lapse and hands it back:
+    // worker-a's token is Lost, taken back.
+    db.__set_clock_offset_for_testing(5 * TASK_CLAIM_TTL);
+    as_agent(&mut db, "worker-b");
+    // The queued one first, then the lapsed one, taken back.
+    assert_eq!(
+        db.task_next(Some("worker")).unwrap().unwrap().task.slug,
+        "second"
+    );
+    let b = db.task_next(Some("worker")).unwrap().unwrap();
+    assert_eq!(
+        (b.task.slug.as_str(), b.reclaimed_from.as_deref()),
+        ("fix-the-upload-test", Some("worker-a"))
+    );
+    db.task_update(
+        "fix-the-upload-test",
+        Some("queued"),
+        Some("not mine"),
+        Some(&b.token),
+    )
+    .unwrap();
+    as_agent(&mut db, "worker-a");
+    assert_eq!(
+        db.task_update(
+            "fix-the-upload-test",
+            Some("ready"),
+            None,
+            Some(&again.token)
+        )
+        .unwrap(),
+        TaskOutcome::Lost(mnemo_engine::TaskLost::TakenBack)
+    );
+}
+
+/// RB-012.2: a `done` slug's re-add is refused with a free slug to use;
+/// only the creator changes a task's definition.
+#[test]
+fn rb012_2_a_done_slug_and_a_strangers_re_add_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_add(&spec("Bump the version", Some("worker"), &[]))
+        .unwrap();
+    db.task_add(&TaskSpec {
+        slug: Some("bump-the-version-2".into()),
+        ..spec("taken", None, &[])
+    })
+    .unwrap();
+    as_agent(&mut db, "worker-a");
+    db.task_next(Some("worker")).unwrap();
+    db.task_update("bump-the-version", Some("ready"), None, None)
+        .unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_update("bump-the-version", Some("done"), None, None)
+        .unwrap();
+    let err = db
+        .task_add(&TaskSpec {
+            body: "again".into(),
+            ..spec("Bump the version", Some("worker"), &[])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("bump-the-version is done; give a new slug (bump-the-version-3?)"),
+        "{err}"
+    );
+    // An identical re-add is still `unchanged`.
+    let (t, o) = db
+        .task_add(&spec("Bump the version", Some("worker"), &[]))
+        .unwrap();
+    assert_eq!((o, t.status.as_str()), (WriteOutcome::Unchanged, "done"));
+    // Another agent can't turn on pre_approved, or change anything else.
+    db.task_add(&spec("Ship it", Some("worker"), &[])).unwrap();
+    as_agent(&mut db, "worker-a");
+    let err = db
+        .task_add(&TaskSpec {
+            pre_approved: true,
+            ..spec("Ship it", Some("worker"), &[])
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("that slug is planner-a's task; it wasn't changed"),
+        "{err}"
+    );
+    assert!(!db.task("ship-it").unwrap().unwrap().pre_approved);
+}
+
+/// RB-012.3: a blocked task whose owner is gone is requeued by anyone
+/// after the lapse, and `next` takes a lapsed blocked task back.
+/// RB-012.6 items 5 and 6: an `after` cycle; a third party's requeue of a
+/// task whose claim is live.
+#[test]
+fn rb012_3_blocked_tasks_cycles_and_a_live_requeue() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    db.task_add(&spec("Blocked one", Some("worker"), &[]))
+        .unwrap();
+    db.task_add(&spec("Blocked two", Some("worker"), &[]))
+        .unwrap();
+    as_agent(&mut db, "worker-b");
+    db.task_next(Some("worker")).unwrap();
+    db.task_update("blocked-one", Some("blocked"), Some("waiting on CI"), None)
+        .unwrap();
+    db.task_next(Some("worker")).unwrap();
+    db.task_update("blocked-two", Some("blocked"), None, None)
+        .unwrap();
+    // Its claim is live: a third party's requeue says so.
+    as_agent(&mut db, "planner-a");
+    let err = db
+        .task_update("blocked-one", Some("queued"), None, None)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("is worker-b's, and its claim is live until"),
+        "{err}"
+    );
+    // Lapsed: anyone requeues it, and `next` takes the other back.
+    db.__set_clock_offset_for_testing(TASK_CLAIM_TTL + 61);
+    let TaskOutcome::Updated(q, _) = db
+        .task_update("blocked-one", Some("queued"), Some("abandoned"), None)
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!((q.status.as_str(), q.owner.as_deref()), ("queued", None));
+    as_agent(&mut db, "worker-a");
+    let t = db.task_next(Some("worker")).unwrap().unwrap();
+    assert_eq!(
+        (t.task.slug.as_str(), t.reclaimed_from.as_deref()),
+        ("blocked-one", None),
+        "queued first"
+    );
+    let t = db.task_next(Some("worker")).unwrap().unwrap();
+    assert_eq!(
+        (t.task.slug.as_str(), t.reclaimed_from.as_deref()),
+        ("blocked-two", Some("worker-b"))
+    );
+    assert_eq!(t.task.status, "active");
+    // An `after` that closes a cycle.
+    as_agent(&mut db, "planner-a");
+    db.task_add(&spec("A", None, &[])).unwrap();
+    db.task_add(&spec("B", None, &["a"])).unwrap();
+    let err = db
+        .task_add(&spec("A", None, &["b"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("wait for itself"), "{err}");
 }
