@@ -50,6 +50,27 @@ The scaffold tells the next agent what to do: replace it with one that
 records your real embedder and conventions. See the [main README](../mnemo/README.md#self-describing-databases)
 for the full pattern.
 
+### Agents working together (v0.17)
+
+A brain is also shared memory and coordination for several agents: a
+task queue, an inbox and claims. Name the handle's agent with
+`set_author`, then:
+
+```python
+db.set_author("planner-a")
+db.task_add("Fix the flaky upload test", role="worker")
+db.post("role:worker", "CI is green again")
+
+db.set_author("worker-a")
+taken = db.task_next("worker")          # {"task": ..., "token": ..., ...}
+for m in db.inbox("worker-a", "worker"):
+    print(m["from"], m["subject"])
+db.task_update(taken["task"]["slug"], "ready", token=taken["token"])
+```
+
+The guide (`mnemo onboard --guide`, section 6) has the rules and the
+rest, and the [API](#api) table lists every method.
+
 ## Install
 
 The published wheel is the normal install path — nothing to build:

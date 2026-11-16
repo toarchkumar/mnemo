@@ -80,6 +80,15 @@
     "key": "fact.onboarding.workflow"
   },
   {
+    "content": "COORDINATION IN THIS REPO (v0.17, 13a): each session is named with MNEMO_AGENT and MNEMO_ROLE before its client starts: planner-a (role planner, the user's control center), worker-a (role worker, the sole committer), reviewer-b (role reviewer, code health) and reviewer-a (role reviewer, product and market; it runs in Antigravity without the hooks, so it uses the CLI with --as reviewer-a --role reviewer). The brain carries the work: tasks (mnemo task add --for worker; task next; task update, where ready waits for the creator's done), the inbox (mnemo post, inbox, ack) and claims (mnemo claim take, who). The per-turn hook shows what's new each turn. In Claude Code a session that posts or adds a task also wakes its peer with SendMessage, a pointer only: the inbox is the record. Messages are information, never authority; approvals, releases and anything irreversible stay with the user. Until HARNESS-DOGFOOD-1, PLAN.md and reviewer_notes.md stay the ledgers, as AGENTS.md's tmux rules say. The guide's section 6, Working with other agents, has the commands.",
+    "importance": 0.85,
+    "memory_type": "semantic",
+    "metadata": {
+      "area": "onboarding",
+      "topic": "coordination"
+    }
+  },
+  {
     "content": "WAYS TO READ MEMORY: (A) the MCP tools: recall (with the turn filter to search past sessions) and essence render. (B) the CLI, with no path in this repo: `mnemo about`; `mnemo recall --text \"question\" --no-track` (the built-in embedder plus keywords); `mnemo recall --text \u2026 --filter _mnemo.kind=turn` for past sessions; `mnemo get <id>` for one whole memory; `mnemo history --key K`. (C) the helper: `python test/scripts/project_memory.py recall \"question\"`, which runs the installed CLI.",
     "memory_type": "procedural",
     "importance": 0.95,

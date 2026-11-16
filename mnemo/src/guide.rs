@@ -169,9 +169,10 @@ const FRAMING_WORDS: &str = "From this project's brain";
 
 /// The one-line summary `llms.txt` opens with.
 pub const SUMMARY: &str = "MNemo is an encrypted, single-file memory for AI agents. \
-One `.mnemo` file per project holds memories, keyed facts with their history, and the \
-working state of tasks, and its MCP server gives them to Claude Code, Cursor and other \
-clients. Everything runs on your machine.";
+One `.mnemo` file per project holds memories, keyed facts with their history, the working \
+state of tasks, and an inbox, task queue and claims for agents working together, and its \
+MCP server gives them to Claude Code, Cursor and other clients. Everything runs on your \
+machine.";
 
 /// Where the site serves the whole guide.
 pub const FULL_URL: &str = "https://toarchkumar.github.io/mnemo/llms-full.txt";
@@ -190,7 +191,7 @@ pub fn llms_txt() -> String {
     out.push_str("\n\n## Docs\n\n");
     out.push_str(&format!(
         "- [The MNemo guide]({FULL_URL}): setting up a project, the MCP tools, keys, the \
-essence, and what to save\n"
+essence, what to save, and working with other agents\n"
     ));
     out.push_str(
         "- [The engine's README](https://github.com/toarchkumar/mnemo/blob/main/mnemo/README.md): \
