@@ -345,7 +345,28 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
        turn) is checked in that stamp first, before anything else.
    - **The brief** gets a "Your work" part (section 7) with the same counts
      at session start.
-2. **The idle wake-up through the session's own socket (Claude Code; step 6).**
+2. **The idle wake-up through the session's own socket (Claude Code; step
+   6). Dropped at step 6, by this note's rule; carried as WAKE-SOCKET.**
+   - **Why:** of the four checks, the first passed. The stdio MCP server
+     does inherit `CLAUDE_CODE_MESSAGING_SOCKET` and
+     `CLAUDE_CODE_MESSAGING_TOKEN`.
+   - **The second failed:** the cross-session messaging page documents
+     the socket, the token and the first line,
+     `{"type":"auth","token":"<token>"}`, but not the line that carries
+     the message. Neither do the variables' entries, the hooks reference
+     or the mods API (read 2026-11-15).
+   - So nothing was posted on a guess, and v0.17.0 ships paths 1 and 3.
+   - **WAKE-SOCKET** (LOW, checked at each minor release) brings it back
+     when Claude Code documents that line, or another way for a session's
+     own child to start a turn. `Mnemo::wake` (the guardrails, `delivered`)
+     and `Mnemo::file_stamp` (a cheap poll) are ready for it.
+   - **Meanwhile, in Claude Code, an agent that posts can wake its peer
+     itself** with the client's own cross-session messaging
+     (`SendMessage`), as this repo's sessions do. The inbox stays the
+     record, and the client's message is only the pointer. Cursor relies
+     on the per-turn hook. Step 8's guide section says both.
+
+   The design below is what it would have been.
    - Each session's `serve --mcp --shared` watches the brain (12.4's "13.1b
      wake-ups": kqueue, inotify or `ReadDirectoryChangesW`, plus a 30 s stamp
      poll).
@@ -576,6 +597,24 @@ agree with your view, for four reasons:
 
 Until then the gitignored file stays the place.
 
+**As built (step 7):**
+- **`VisibilitySet`** is the levels a read shows: public and team by
+  default. The surfaces take a list (`--visibility private,team`, `all`).
+  `--visibility private` shows only private records, and `all` shows
+  every level.
+- **A private record's v9 row carries `ROW_PRIVATE`** (and a public one
+  `ROW_PUBLIC`), new bits of the flags byte. So recall's row-only path
+  skips it before decrypting, and an older build ignores the bits. The
+  decrypting paths check the record too.
+- **The engine's own lookups see every level:** the manifest for the
+  default agent and the kill switch, and the embedder's identity. A
+  private manifest still works.
+- **The essence render and the brief** show public and team, and take no
+  flag. `inspect` shows everything, with a "private" badge.
+- **`export`** says on stderr how many private records it left out, or
+  included with `all`. `--git` never writes them, and never writes
+  messages, claims or presence either (step 4).
+
 ## 6. Freshness (13.6)
 
 - **`_mnemo.as_of`** (unix seconds): when the content was true. It
@@ -604,6 +643,23 @@ Until then the gitignored file stays the place.
   - `mnemo stale` and the MCP `about` with `{"stale": true}` list them.
 - **Setting it:** `remember --review-by 30d` and `--as-of <date>`, and the
   same on `update`, the MCP tools and Python.
+
+**As built (step 7):**
+- **`stale_since(m, now)`:** an explicit `review_by` decides alone. A
+  future one means the record isn't stale, whatever its age. Otherwise
+  it's the kind's default from `as_of`, else `_mnemo.updated_at`, else
+  `created_at`.
+  - A task's age runs from its last history entry.
+  - A resolved essence item and a superseded record are never stale.
+- **`Mnemo::stale()` reads only essence and coordination rows, and those
+  with a new `ROW_REVIEW` bit** (a `review_by`), not the whole file.
+- **"Yours" (the brief's count, `mnemo stale --mine`):** a task's owner, a
+  message's recipient, else the record's `_mnemo.author`. Essence items
+  have no role, so "its role's essence items" became "the essence items
+  it wrote".
+- **ABOUT-COUNT:** `Mnemo::kind_counts()` counts from the rows, like
+  `len()`: facts with onboarding, turns with thread links, essence,
+  coordination.
 
 ## 7. The surfaces
 
