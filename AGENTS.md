@@ -361,15 +361,24 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    - **Each session's hooks save its own transcript** into its own thread
      (`claude-code:<session id>`), and load the brief at session start.
      That's the only write the Planner and the Reviewers make to the brain.
-   - **Only the Worker writes facts,** with a key and the brain's agent:
-     the MCP `remember` tool with `key` and `"agent_id": "cursor-agent"`,
-     or `test/scripts/project_memory.py remember --key`, which names it.
-     A key's slot is per agent, and the CLI's and the server's default
-     agent is `default`, so a write without it starts a second slot
-     instead of superseding.
-   - **The Planner and the Reviewers read** with `recall` (MCP) or `mnemo
-     recall --no-track`, and never call `remember`, `forget` or `essence`
-     writes.
+   - **Each session is named before its client starts** (user decision
+     2026-11-16): `export MNEMO_AGENT=<name> MNEMO_ROLE=<role>`, then
+     `claude --remote-control --resume <its conversation id>`. The names
+     are `planner-a` (`planner`), `worker-a` (`worker`), `reviewer-b` and
+     `reviewer-a` (`reviewer`). Resuming by id keeps a session on its own
+     conversation.
+   - **Only the Worker writes facts,** each with a key (the MCP `remember`
+     tool with `key`, or `test/scripts/project_memory.py remember --key`).
+     The brain's default agent (`mnemo default-agent`, `cursor-agent`)
+     gives every such write the right slot, so no write names the agent.
+   - **Every session may use the coordination records** (user decision
+     2026-11-16): read and `ack` its own inbox, `post` messages, and take,
+     renew and release claims. Until HARNESS-DOGFOOD-1's Run 1, the
+     ledgers and the `SendMessage` pointers stay the authority, and the
+     inbox runs beside them.
+   - **The Planner and the Reviewers read facts** with `recall` (MCP) or
+     `mnemo recall --no-track`, and never call `remember`, `update`,
+     `forget` or `essence` writes.
    - **A session in a client `onboard` doesn't wire** (`reviewer-a` runs in
      Antigravity) has no hooks. It reads through the CLI
      (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
