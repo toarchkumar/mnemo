@@ -25,6 +25,10 @@ copy the file and the memory comes with it.
   repository one brain, wires Claude Code and Cursor to it, and adds hooks
   that load the memory when a session starts and save the session before
   it's compacted or ends.
+- **Agents coordinate through it (v0.17).** Several sessions on one
+  machine, in Claude Code, Cursor or a terminal, share a task queue with
+  dependencies, an inbox and claims, in the same encrypted file. You run
+  the agents; they remember and coordinate through MNemo.
 - **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM; commits
   go through a write-ahead log; recent commits are kept as restorable
   snapshots; OS file locks allow one writer and many readers, and shared
@@ -73,16 +77,16 @@ both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
 Windows (x86_64); elsewhere, pip builds from source, without the keychain
 and the built-in embedder.
 
-iOS and Android (from v0.12.0; current 0.16.0):
+iOS and Android (from v0.12.0; current 0.17.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.16.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.17.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.16.0")
+implementation("io.github.toarchkumar:mnemo-android:0.17.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -137,7 +141,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.16.1", "semantic", key="current-release")
+    db.remember_text("the current release is v0.17.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -158,6 +162,64 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.17.0: several agents, one brain
+
+**Multiple agents, one brain: an inbox, a dependency task queue and
+expiring claims, all in the same encrypted file.** It's shared memory and
+coordination for your agents on one machine, and it's free.
+
+- **Name each session** with `MNEMO_AGENT` and `MNEMO_ROLE`, for example
+  `alias claude-worker='MNEMO_AGENT=worker-a MNEMO_ROLE=worker claude'`.
+  From a shell, `--as` and `--role` do the same.
+- **Tasks:** `mnemo task add` with the role that may take it and the tasks
+  it waits for (`--after`). `mnemo task next` gives a worker the oldest
+  ready task and claims it, so two workers never take the same one. A
+  task whose worker went quiet is taken back once its claim lapses, and
+  `ready` waits for the task's creator to say `done`.
+- **The inbox:** `mnemo post` to an agent, a role or everyone, then
+  `mnemo inbox` and `mnemo ack`. A message is information, never
+  authority.
+- **Claims and presence:** `mnemo claim take` says "I'm doing this", for
+  15 minutes by default, and `mnemo claim who` lists the agents, whether
+  each one is running, and what each holds.
+- **Work reaches a session:**
+  - each turn, a short line says what's new for you, and nothing when
+    nothing is (about 3 ms on an unchanged turn);
+  - `mnemo onboard --wake stop` lets a session keep going for a
+    pre-approved task or a message to it by name, off by default;
+  - limits stop agents waking each other in a loop, and `mnemo wake
+    pause` stops it outright.
+  - In Claude Code, an agent can nudge a peer with `SendMessage` after it
+    posts; the inbox stays the record.
+- **The same through MCP** (the `task`, `inbox` and `claim` tools), Python
+  and Rust. The guide's new section, "Working with other agents"
+  (`mnemo onboard --guide`), has the details.
+- **Visibility and freshness:**
+  - `--visibility private` keeps a record out of recall, the brief and
+    exports unless asked for. It's a filter, not access control: everyone
+    with the brain's key can read every record;
+  - `--review-by 30d` and `mnemo stale` find what has gone stale;
+  - `mnemo about` counts facts, saved turns and coordination records
+    apart.
+- **`mnemo default-agent`** sets the agent a write is made for when it
+  names none. `update`, `thread start`, `essence update|resolve|remove`
+  and the new coordination commands take no path in a git repository.
+- The iOS and Android packages move to 0.17.0 with the engine.
+
+**Upgrading from 0.16.x:**
+- **Upgrade every session's `mnemo` together.** There's no format change,
+  but an older build doesn't know the new records or levels:
+  - it shows private records, and lists messages and tasks as ordinary
+    facts;
+  - its write to a private fact's key makes the new version visible;
+  - its writes carry no author.
+  - If it compacts a v0.17 brain, v0.17 still finds the tasks, messages
+    and claims, says so, and a v0.17 `mnemo compact` re-tags them.
+
+  The [changelog](CHANGELOG.md) has the details.
+- **Rust:** `MemoryPatch` has a new field; build it with
+  `..Default::default()`.
 
 ## What's new in v0.16.1: cleaner session search
 
@@ -760,6 +822,12 @@ in Rust. Each re-clusters the index with the new defaults.
   `thread forget` removes them.
 - **The hooks are untested on Windows,** and saved turns are found by
   meaning only (they aren't in the keyword index yet).
+- **MNemo doesn't wake an idle session itself.** Work reaches a session at
+  its next turn, or through the Stop hook when it's on. In Claude Code, an
+  agent wakes a peer with `SendMessage`. Waking from MNemo's side waits for
+  Claude Code to document how a session's own tools can start a turn.
+- **Visibility isn't access control yet.** Everyone with the brain's key
+  can read every record, whatever its level, until per-agent keys.
 - **Version history has no limit yet.** Every keyed replacement keeps the
   old version, so a key that changes very often grows the file. A
   per-key retention setting is planned.
