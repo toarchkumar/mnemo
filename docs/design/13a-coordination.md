@@ -402,6 +402,44 @@ The client docs were read on 2026-11-15; they change, so the URLs are under
      `loop_limit` its own.
    - **Off by default** (`onboard --wake stop` writes it). An agent kept
      going without its user's turn is the behaviour most likely to surprise.
+**As built (step 5):**
+- **The per-turn hook's cost, measured.** On an 11,000-record scratch brain
+  with a key file, before the fast path, an unchanged turn took 22.8 ms
+  median against `mnemo --version`'s 3.4 to 3.8 ms, at a load of 4.4.
+  - On this repo's brain, the installed `mnemo info` (the keychain read
+    and a read-only open) took 67 ms against 5 ms, at a load of 4.6.
+  - Both are over R-010.6's threshold, so the fast path went in.
+  - **With it:** 3.4 ms median against `--version`'s 3.3 to 4.1 ms, at a
+    load of 3.2. A turn after another agent's post took 33 ms and showed
+    it.
+- **The fast path's stamp** is `hook.turn.<hash of client, session, agent
+  and role>` in the sidecar directory. It holds the check's time, when a
+  task claim of the agent's next needs a warning, and `Mnemo::file_stamp`.
+  - `file_stamp` is page 0's seal read without the key, plus the file's
+    identity, length and modification time, so a write the seal doesn't
+    cover yet changes it too.
+  - **It also finds the brain without running git**
+    (`project::common_dir_fast`: a `.git` directory, or a `gitdir:` file
+    with a worktree's `commondir`). `git rev-parse` was 14 of the first
+    version's 18.5 ms. Any `GIT_DIR` or anything unusual falls back to git.
+  - After its own mark it stamps the file as its write left it. A foreign
+    commit in that instant shows at the next change or session start, the
+    safe direction.
+- **The guardrails govern wake-ups only** (`Mnemo::wake`, the one place
+  that marks an item `delivered`). The per-turn hook and the brief show
+  an agent's work in a turn it's already in, so the limits, the pause and
+  the burst never hide work there. That matches the table: "items stay
+  `sent` and are seen at the next turn or session start".
+- **The kill switch is `_mnemo.wake_paused` on the manifest** (who and
+  when), not a keyed `wake:paused` record, the same way the default agent
+  is kept. A brain without a manifest can't be paused, and says so.
+- **The Stop reason holds no slug:** "mnemo: 1 pre-approved task ready
+  for you (call `task` with `next`)", plus a line saying what it reads
+  there is information. The slug is brain text, and a Stop reason reaches
+  the model outside the framing line.
+- **`onboard --wake stop|off`:** left out, a re-run keeps the Stop hook if
+  an earlier run wrote it.
+
 4. **Channels (optional; not a step).** If mnemo's plugin is ever on the
    allowlist, `serve --mcp` declares `claude/channel` and sends the same
    pointer. Until then nothing in the release depends on it.
