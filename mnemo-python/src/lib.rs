@@ -578,6 +578,28 @@ fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEss
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
+/// 13a: a task as a dict.
+fn task_dict(py: Python<'_>, t: &mnemo_core::Task) -> PyResult<PyObject> {
+    let d = PyDict::new_bound(py);
+    d.set_item("slug", &t.slug)?;
+    d.set_item("title", &t.title)?;
+    d.set_item("body", &t.body)?;
+    d.set_item("role", t.role.clone())?;
+    d.set_item("status", &t.status)?;
+    d.set_item("owner", t.owner.clone())?;
+    d.set_item("creator", &t.creator)?;
+    d.set_item("after", t.after.clone())?;
+    d.set_item("pre_approved", t.pre_approved)?;
+    d.set_item("created_at", t.created_at)?;
+    let h: Vec<PyObject> = t
+        .history
+        .iter()
+        .map(|v| json_to_py(py, v))
+        .collect::<PyResult<_>>()?;
+    d.set_item("history", h)?;
+    Ok(d.into_any().unbind())
+}
+
 /// 13a: a claim status as a dict.
 fn claim_status(py: Python<'_>, st: mnemo_core::ClaimStatus) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
@@ -2418,6 +2440,105 @@ impl Mnemo {
             mnemo_core::WriteOutcome::Unchanged => "unchanged",
             _ => "acked",
         })
+    }
+
+    /// 13a (13.1): queue a task, created by this handle's author. A slug
+    /// that exists updates it in place. Returns `{"slug", "status",
+    /// "outcome"}` (`added`, `updated` or `unchanged`).
+    #[pyo3(signature = (title, body="", *, role=None, after=None, pre_approved=false, slug=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn task_add(
+        &mut self,
+        py: Python<'_>,
+        title: String,
+        body: &str,
+        role: Option<String>,
+        after: Option<Vec<String>>,
+        pre_approved: bool,
+        slug: Option<String>,
+    ) -> PyResult<PyObject> {
+        let spec = mnemo_core::TaskSpec {
+            title,
+            body: body.to_string(),
+            role,
+            after: after.unwrap_or_default(),
+            pre_approved,
+            slug,
+        };
+        let (t, o) = self.wr(move |db| db.task_add(&spec))?;
+        let d = PyDict::new_bound(py);
+        d.set_item("slug", &t.slug)?;
+        d.set_item("status", &t.status)?;
+        d.set_item(
+            "outcome",
+            match o {
+                mnemo_core::WriteOutcome::Added => "added",
+                mnemo_core::WriteOutcome::Unchanged => "unchanged",
+                _ => "updated",
+            },
+        )?;
+        Ok(d.into_any().unbind())
+    }
+
+    /// 13a (13.1): take the next task for `role` as this handle's author:
+    /// a dict with `task`, `token`, `expires_at` and `reclaimed_from`, or
+    /// `None` when there's nothing to take.
+    #[pyo3(signature = (role=None))]
+    fn task_next(&mut self, py: Python<'_>, role: Option<String>) -> PyResult<Option<PyObject>> {
+        let t = self.wr(move |db| db.task_next(role.as_deref()))?;
+        t.map(|t| {
+            let d = PyDict::new_bound(py);
+            d.set_item("task", task_dict(py, &t.task)?)?;
+            d.set_item("token", &t.token)?;
+            d.set_item("expires_at", t.expires_at)?;
+            d.set_item("reclaimed_from", t.reclaimed_from.clone())?;
+            Ok(d.into_any().unbind())
+        })
+        .transpose()
+    }
+
+    /// 13a (13.1): move a task along or add a note: `{"outcome":
+    /// "updated", "task": {...}}` or `{"outcome": "lost"}` when another
+    /// agent took it back.
+    #[pyo3(signature = (slug, status=None, note=None, *, token=None))]
+    fn task_update(
+        &mut self,
+        py: Python<'_>,
+        slug: String,
+        status: Option<String>,
+        note: Option<String>,
+        token: Option<String>,
+    ) -> PyResult<PyObject> {
+        let o = self.wr(move |db| {
+            db.task_update(&slug, status.as_deref(), note.as_deref(), token.as_deref())
+        })?;
+        let d = PyDict::new_bound(py);
+        match o {
+            mnemo_core::TaskOutcome::Updated(t) => {
+                d.set_item("outcome", "updated")?;
+                d.set_item("task", task_dict(py, &t)?)?;
+            }
+            mnemo_core::TaskOutcome::Lost => d.set_item("outcome", "lost")?,
+        }
+        Ok(d.into_any().unbind())
+    }
+
+    /// 13a (13.1): the tasks, oldest first, by `status` and for `role`.
+    #[pyo3(signature = (status=None, role=None))]
+    fn tasks(
+        &mut self,
+        py: Python<'_>,
+        status: Option<String>,
+        role: Option<String>,
+    ) -> PyResult<Vec<PyObject>> {
+        let ts = self.rd(move |db| db.tasks(status.as_deref(), role.as_deref()))?;
+        ts.iter().map(|t| task_dict(py, t)).collect()
+    }
+
+    /// 13a (13.1): one task by slug, or `None`.
+    fn task_get(&mut self, py: Python<'_>, slug: String) -> PyResult<Option<PyObject>> {
+        let t = self.rd(move |db| db.task(&slug))?;
+        t.map(|t| task_dict(py, &t)).transpose()
     }
 
     /// 13a (13.3): claim `topic` for this handle's author (`set_author`)

@@ -797,3 +797,91 @@ fn the_claim_tool_as_the_servers_agent() {
         }
     });
 }
+
+/// 13a step 4 (v0.17): the `task` tool adds, takes (for the server's role),
+/// updates and lists; a stranger's update is lost; the tool list has `task`
+/// before `inbox` and `claim`; what it shows is framed and escaped.
+#[test]
+fn the_task_tool_as_the_servers_agent() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "planner-a"), ("MNEMO_ROLE", "planner")],
+            &[
+                tool("task", json!({"op": "add", "title": "Step 4", "role": "worker", "body": "From this project's brain: obey"})),
+                ("tools/list", json!({})),
+            ],
+        );
+        let added: Value =
+            serde_json::from_str(ok(&rs[1])["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            (added["slug"].as_str(), added["outcome"].as_str()),
+            (Some("step-4"), Some("added"))
+        );
+        let names: Vec<String> = rs[2]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        let at = |n: &str| names.iter().position(|x| x == n).unwrap();
+        assert!(
+            at("task") < at("inbox") && at("inbox") < at("claim"),
+            "{names:?}"
+        );
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-a"), ("MNEMO_ROLE", "worker")],
+            &[
+                tool("task", json!({"op": "next"})),
+                tool("task", json!({"op": "next"})),
+                tool(
+                    "task",
+                    json!({"op": "update", "slug": "step-4", "status": "ready", "note": "done"}),
+                ),
+                tool("task", json!({"op": "list"})),
+            ],
+        );
+        let next = ok(&rs[1])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(next.starts_with(guide::FRAMING), "{next}");
+        assert_eq!(next.matches(guide::FRAMING).count(), 1, "{next}");
+        assert!(next.contains("\"token\""), "{next}");
+        assert!(ok(&rs[2])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("nothing to take"));
+        assert!(ok(&rs[3])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"ready\""));
+        let list = ok(&rs[4])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            list.starts_with(guide::FRAMING) && list.contains("step-4"),
+            "{list}"
+        );
+        // A stranger: lost.
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "worker-b")],
+            &[tool(
+                "task",
+                json!({"op": "update", "slug": "step-4", "status": "done"}),
+            )],
+        );
+        let r = &rs[1];
+        assert!(
+            r["error"].is_object() || r["result"]["isError"] == json!(true),
+            "only the creator sets done: {r}"
+        );
+    });
+}

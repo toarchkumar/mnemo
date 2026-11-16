@@ -66,7 +66,10 @@ use crate::result_cache::{
 use crate::text;
 use crate::veccol;
 use crate::wal;
-pub use coordination::{Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence};
+pub use coordination::{
+    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence, Task, TaskOutcome,
+    TaskSpec, TaskTaken,
+};
 
 mod ann;
 mod cache_api;

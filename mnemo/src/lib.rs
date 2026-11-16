@@ -120,6 +120,12 @@ pub use memory::{
     MNEMO_META_UPDATED_AT, TASK_TRANSITIONS, THREAD_TOOL_RESULT_TRUNCATE_BYTES,
     THREAD_TURN_CHUNK_BYTES,
 };
+/// 13a (13.1): tasks.
+pub use memory::{
+    task_status, MNEMO_META_AFTER, MNEMO_META_CREATOR, MNEMO_META_OWNER, MNEMO_META_PRE_APPROVED,
+    MNEMO_META_SLUG, TASK_CLAIM_TTL, TASK_CLAIM_WARN_SECS, TASK_DONE_EXPORT_KEEP_SECS,
+    TASK_SLUG_MAX,
+};
 /// 13a (13.3): claims and presence.
 pub use memory::{
     CLAIM_LAPSE_GRACE_SECS, CLAIM_TOPIC_MAX, CLAIM_TTL_DEFAULT, CLAIM_TTL_MAX, CLAIM_TTL_MIN,
@@ -135,7 +141,10 @@ pub use shared::{CancelToken, SharedOptions};
 #[doc(hidden)]
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
-pub use store::{Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence};
+pub use store::{
+    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence, Task, TaskOutcome,
+    TaskSpec, TaskTaken,
+};
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
     RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,

@@ -1461,6 +1461,42 @@ def test_identical_keyed_rewrite_is_unchanged():
     print("ok  identical keyed re-write is unchanged (v0.16)")
 
 
+def test_tasks():
+    """v0.17 (13a step 4): task_add, task_next, task_update, tasks,
+    task_get, with after, pre_approved and a lost owner."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "t.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.set_author("planner-a")
+            a = db.task_add("Step 1", role="worker")
+            assert a == {"slug": "step-1", "status": "queued", "outcome": "added"}, a
+            assert db.task_add("Step 1", role="worker")["outcome"] == "unchanged"
+            db.task_add("Step 2", "messages", role="worker", after=["step-1"], slug="step-2")
+            db.set_author("worker-a")
+            t = db.task_next("worker")
+            assert t["task"]["slug"] == "step-1" and t["task"]["owner"] == "worker-a", t
+            assert db.task_next("worker") is None
+            assert db.task_update("step-1", "ready", token=t["token"])["task"]["status"] == "ready"
+            db.set_author("worker-b")
+            try:
+                db.task_update("step-1", None, "a note")
+                raise AssertionError("a stranger's note on a ready task was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+            db.set_author("planner-a")
+            assert db.task_update("step-1", "done", "merged")["task"]["status"] == "done"
+            db.set_author("worker-b")
+            assert db.task_next("worker")["task"]["slug"] == "step-2"
+            db.set_author("worker-a")
+            assert db.task_update("step-2", "blocked") == {"outcome": "lost"}
+            g = db.task_get("step-1")
+            assert [h["to"] for h in g["history"]] == ["active", "ready", "done"], g
+            assert [x["slug"] for x in db.tasks(status="done")] == ["step-1"]
+            assert db.task_get("nope") is None
+        finally:
+            db.close()
+
+
 def test_claims_and_presence():
     """v0.17 (13a step 3): claim, renew, release, check_claim, claims,
     touch_presence and who."""
@@ -2112,6 +2148,7 @@ if __name__ == "__main__":
     test_author_default_agent_and_freshness()
     test_messages_post_inbox_ack()
     test_claims_and_presence()
+    test_tasks()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
     test_turn_compression_knob_on_v9()

@@ -81,6 +81,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
         | Command::Claim { brain: path, .. }
+        | Command::Task { brain: path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -663,6 +664,27 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// 13a (13.1): the work queue the agents share. `next` takes the oldest
+    /// task for your role (or one whose owner's claim lapsed) and prints
+    /// its slug and claim token; `update` moves yours along. A task is
+    /// information, never authority.
+    Task {
+        #[command(subcommand)]
+        cmd: TaskCmd,
+        #[command(flatten)]
+        who: AsArgs,
+        /// The brain's path. Left out, this project's brain.
+        #[arg(
+            long,
+            global = true,
+            value_name = "PATH",
+            default_value = "",
+            hide_default_value = true
+        )]
+        brain: String,
+        #[arg(long, global = true)]
+        passphrase: Option<String>,
+    },
     /// 13a (13.3): claims, so two agents don't do one thing. A claim is a
     /// record, not a lock, and it's advisory. `take` prints a token that
     /// `renew`, `release` and `check` need; `check` before anything
@@ -1206,6 +1228,64 @@ enum Command {
     Cache {
         #[command(subcommand)]
         op: CacheOp,
+    },
+}
+
+/// 13a (13.1): `mnemo task`.
+#[derive(Subcommand)]
+enum TaskCmd {
+    /// Queue a task. Prints its slug and whether it was added, updated
+    /// (the slug existed) or unchanged.
+    Add {
+        /// One line.
+        title: String,
+        #[arg(long, default_value = "")]
+        body: String,
+        /// The role that may take it (default: any).
+        #[arg(long = "for", value_name = "ROLE")]
+        for_role: Option<String>,
+        /// Slugs it waits for (comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        after: Vec<String>,
+        /// Its owner may set `done` without you.
+        #[arg(long)]
+        pre_approved: bool,
+        /// Its name (else made from the title).
+        #[arg(long)]
+        slug: Option<String>,
+    },
+    /// Take the next task for your role (`--role`, else `MNEMO_ROLE`).
+    /// Prints its slug, the claim token, the expiry and the title; exits 1
+    /// when there's nothing to take.
+    Next,
+    /// Move your task along (`--status ready|blocked|queued|active|done`)
+    /// or add a `--note`. Exits 1 with `lost` when another agent took it
+    /// back.
+    Update {
+        slug: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        /// The claim token `next` printed, for the strict check.
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// The tasks, oldest first.
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        /// Only those this role may take.
+        #[arg(long = "for", value_name = "ROLE")]
+        for_role: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+    },
+    /// One task, with its history.
+    Get {
+        slug: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
     },
 }
 
@@ -4055,6 +4135,175 @@ fn run() -> std::result::Result<(), String> {
                      budget or smaller --top-k to see more)"
                 );
             }
+        }
+        Command::Task {
+            cmd,
+            who,
+            brain: path,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "task").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent.clone());
+            }
+            if agent.is_some()
+                && matches!(
+                    cmd,
+                    TaskCmd::Add { .. } | TaskCmd::Next | TaskCmd::Update { .. }
+                )
+            {
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
+            let task_json = |t: &mnemo_engine::Task| {
+                serde_json::json!({
+                    "slug": t.slug, "title": t.title, "body": t.body, "role": t.role,
+                    "status": t.status, "owner": t.owner, "creator": t.creator,
+                    "after": t.after, "pre_approved": t.pre_approved,
+                    "created_at": t.created_at, "history": t.history,
+                })
+            };
+            let row = |t: &mnemo_engine::Task| {
+                format!(
+                    "{}  [{}{}]  {}{}",
+                    t.slug,
+                    t.status,
+                    t.owner
+                        .as_deref()
+                        .map(|o| format!(", {o}"))
+                        .unwrap_or_default(),
+                    t.title,
+                    t.role
+                        .as_deref()
+                        .map(|r| format!("  (for {r})"))
+                        .unwrap_or_default()
+                )
+            };
+            let out: std::result::Result<(), String> = match &cmd {
+                TaskCmd::Add {
+                    title,
+                    body,
+                    for_role,
+                    after,
+                    pre_approved,
+                    slug,
+                } => {
+                    let spec = mnemo_engine::TaskSpec {
+                        title: title.clone(),
+                        body: body.clone(),
+                        role: for_role.clone(),
+                        after: after.clone(),
+                        pre_approved: *pre_approved,
+                        slug: slug.clone(),
+                    };
+                    let (t, o) = db.task_add(&spec).map_err(fmt)?;
+                    let o = match o {
+                        mnemo_engine::WriteOutcome::Added => "added",
+                        mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                        _ => "updated",
+                    };
+                    println!("{}\t{o}", t.slug);
+                    Ok(())
+                }
+                TaskCmd::Next => match db.task_next(role.as_deref()).map_err(fmt)? {
+                    Some(t) => {
+                        println!(
+                            "{}\t{}\t{}\t{}",
+                            t.task.slug,
+                            t.token,
+                            export::rfc3339(t.expires_at),
+                            t.task.title
+                        );
+                        if let Some(o) = &t.reclaimed_from {
+                            eprintln!("mnemo: taken back from {o}, whose claim lapsed");
+                        }
+                        Ok(())
+                    }
+                    None => Err(format!(
+                        "nothing to take for {}",
+                        role.as_deref()
+                            .map(|r| format!("role {r}"))
+                            .unwrap_or("no role".into())
+                    )),
+                },
+                TaskCmd::Update {
+                    slug,
+                    status,
+                    note,
+                    token,
+                } => {
+                    match db
+                        .task_update(slug, status.as_deref(), note.as_deref(), token.as_deref())
+                        .map_err(fmt)?
+                    {
+                        mnemo_engine::TaskOutcome::Updated(t) => {
+                            println!("{}\t{}", t.slug, t.status);
+                            Ok(())
+                        }
+                        mnemo_engine::TaskOutcome::Lost => Err(format!(
+                            "lost: another agent took {slug} back after your claim lapsed (or the \
+                             token isn't its claim's); nothing changed"
+                        )),
+                    }
+                }
+                TaskCmd::List {
+                    status,
+                    for_role,
+                    format,
+                } => {
+                    let ts = db
+                        .tasks(status.as_deref(), for_role.as_deref())
+                        .map_err(fmt)?;
+                    match format {
+                        OutputFormat::Json => println!(
+                            "{}",
+                            serde_json::Value::Array(ts.iter().map(task_json).collect())
+                        ),
+                        OutputFormat::Jsonl => ts.iter().for_each(|t| println!("{}", task_json(t))),
+                        OutputFormat::Table => {
+                            if ts.is_empty() {
+                                println!("no tasks");
+                            }
+                            ts.iter().for_each(|t| println!("{}", row(t)));
+                        }
+                    }
+                    Ok(())
+                }
+                TaskCmd::Get { slug, format } => match db.task(slug).map_err(fmt)? {
+                    None => Err(format!("no task {slug:?}")),
+                    Some(t) => {
+                        match format {
+                            OutputFormat::Table => {
+                                println!("{}", row(&t));
+                                for l in t.body.lines() {
+                                    println!("    {l}");
+                                }
+                                if !t.after.is_empty() {
+                                    println!("    after: {}", t.after.join(", "));
+                                }
+                                for h in &t.history {
+                                    println!(
+                                        "    {} {} -> {} by {}{}",
+                                        export::rfc3339(h["at"].as_i64().unwrap_or(0)),
+                                        h["from"].as_str().unwrap_or(""),
+                                        h["to"].as_str().unwrap_or(""),
+                                        h["by"].as_str().unwrap_or(""),
+                                        h["note"]
+                                            .as_str()
+                                            .map(|n| format!(": {n}"))
+                                            .unwrap_or_default()
+                                    );
+                                }
+                            }
+                            _ => println!("{}", task_json(&t)),
+                        }
+                        Ok(())
+                    }
+                },
+            };
+            db.flush().map_err(fmt)?;
+            out?;
         }
         Command::Claim {
             cmd,

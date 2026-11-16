@@ -83,7 +83,8 @@ which would leak into shell history and process listings). Tools exposed:
 `cache_put`, `cache_get`, `cache_stats`, `cache_put_semantic`,
 `cache_get_semantic`, and since v0.17 `inbox` (messages between agents:
 `list`, `read`, `post`, `ack`, as the server's `MNEMO_AGENT` and
-`MNEMO_ROLE`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
+`MNEMO_ROLE`), `task` (the shared work queue: `next`, `update`, `add`,
+`list`, `get`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
 `serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
 in the sidecar directory for its life, so `who` sees it alive; it never
 holds the brain's lock between calls. Every mutation flushes before
@@ -960,6 +961,10 @@ cargo run --bin mnemo -- <command>
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |
 | `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
 | `ack [PATH] <ID>` | Ack a message (`unread` to `acked`), with `--note`; `--as` (v0.17) |
+| `task add <TITLE> [--for <role>]` | Queue a task for a role (`--for`; any role without it), with `--body`, `--after <slugs>`, `--pre-approved`, `--slug`. Prints its slug and `added`, `updated` (the slug existed) or `unchanged` (v0.17) |
+| `task next` | Take the oldest task for your role (`--role`, else `MNEMO_ROLE`) whose `--after` tasks are done, or one whose owner's 2 h claim lapsed. Prints the slug, the claim token, the expiry and the title; exits 1 when there's nothing to take (v0.17) |
+| `task update <SLUG> [--status S] [--note N] [--token T]` | Move your task along: `ready` when finished (its creator sets `done`, unless it's `--pre-approved`), `blocked`, `queued` to hand it back, `active` again. Each renews your claim. Exits 1 with `lost` when another agent took it back (v0.17) |
+| `task list [--status S] [--for <role>]`, `task get <SLUG>` | The tasks, oldest first; one with its history; `--format` (v0.17) |
 | `claim take <TOPIC> [--ttl 15m]` | Claim a topic so two agents don't do one thing (advisory: a record, not a lock). Prints `claimed`, a token and the expiry; exits 1 when another agent (or another session of yours) holds it. Leases are 30s to 24h, 15m by default. `--as`, `--role`, `--brain` (v0.17) |
 | `claim renew\|release\|check <TOPIC> <TOKEN>` | Renew (from now, `--ttl` or the lease), release, or check a claim; exits 1 with `lost` when it lapsed or another agent holds it. Check before anything irreversible (v0.17) |
 | `claim who` | The agents: role, tool, last active, whether the process is alive (`unknown` without a long-lived `serve --mcp --shared`), and the topics each holds; `--format` (v0.17) |
@@ -986,7 +991,7 @@ take no path, and use the repository's brain,
 `recall`, `history`, `serve`, `mcp install`, `thread ingest|export|forget`
 and `essence render|add|append`. Since v0.16.1 `get <ID>`, `search` and
 `snapshots` do too, and since v0.17 `update <ID>`, `thread start <NEW>`,
-`essence update|resolve|remove <ID>`, `default-agent`, `post`, `inbox`, `ack <ID>` and `claim`. Every worktree of the repository shares
+`essence update|resolve|remove <ID>`, `default-agent`, `post`, `inbox`, `ack <ID>`, `task` and `claim`. Every worktree of the repository shares
 it, git never tracks it, and `init` creates its directory with mode 0700.
 It's found from `-C <dir>`, else `CLAUDE_PROJECT_DIR` (when Claude Code
 sets it), else the working directory. Outside a git repository, give the
