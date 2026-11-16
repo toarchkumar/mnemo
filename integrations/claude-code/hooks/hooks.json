@@ -20,6 +20,13 @@
           { "type": "command", "command": "mnemo hook session-end --client claude-code", "timeout": 30 }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "mnemo hook user-prompt --client claude-code", "timeout": 10 }
+        ]
+      }
     ]
   }
 }

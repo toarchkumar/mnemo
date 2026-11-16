@@ -205,6 +205,35 @@ fn identity(_file: &File) -> Option<(u64, u64)> {
     None
 }
 
+impl Mnemo {
+    /// 13a (R-010.6): a stamp of the file's committed state, read without
+    /// the key and without a lock: page 0's seal, with the file's identity,
+    /// length and modification time (so a write the seal doesn't cover yet,
+    /// like a WAL a crash left, changes it too). Two equal stamps mean
+    /// nothing was committed between them. `None` when it can't be read (a
+    /// page 0 torn by a write in progress, say): then read the file.
+    pub fn file_stamp(path: &Path) -> Option<String> {
+        let mut f = File::open(path).ok()?;
+        let page = read_page0(&mut f).ok()?;
+        let h = Header::from_page(&page).ok()?;
+        let (nonce, tag) = (h.seal_nonce?, h.seal_tag?);
+        let m = f.metadata().ok()?;
+        let mtime = m
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let id = identity(&f).map_or("-".to_string(), |(d, i)| format!("{d}.{i}"));
+        Some(format!(
+            "{}{}.{id}.{}.{mtime}",
+            hex(&nonce),
+            hex(&tag),
+            m.len()
+        ))
+    }
+}
+
 fn read_page0(file: &mut File) -> std::io::Result<[u8; PAGE_SIZE]> {
     let mut page = [0u8; PAGE_SIZE];
     file.seek(SeekFrom::Start(0))?;

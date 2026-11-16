@@ -1524,3 +1524,296 @@ impl Mnemo {
         )))
     }
 }
+
+// --- 13a step 5: what's new for an agent, and the wake-up guardrails ---------
+
+use crate::memory::{
+    HOP_CAP, MNEMO_META_WAKES, MNEMO_META_WAKE_PAUSED, MNEMO_META_WARNED_EXPIRY, PAIR_BURST,
+    PAIR_BURST_SECS, TASK_CLAIM_WARN_SECS, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
+};
+
+/// 13a (13.1b): what's new for an agent since it was last shown
+/// ([`Mnemo::new_work`]), for the per-turn hook.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NewWork {
+    /// Unread messages to it, its role or everyone, not yet `seen`.
+    pub messages: Vec<Message>,
+    /// Tasks ready for its role, not yet `seen`.
+    pub tasks: Vec<Task>,
+    /// Its own task claims lapsing within
+    /// [`crate::memory::TASK_CLAIM_WARN_SECS`], not yet warned about at this
+    /// expiry.
+    pub lapsing: Vec<Claim>,
+}
+
+impl NewWork {
+    /// Whether there's nothing.
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty() && self.tasks.is_empty() && self.lapsing.is_empty()
+    }
+}
+
+/// 13a (13.1b): what [`Mnemo::wake`] decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wake {
+    /// Wake the agent for these, now marked `delivered`: how many
+    /// pre-approved tasks and messages addressed to it by id.
+    Now {
+        /// Pre-approved tasks ready for its role.
+        tasks: usize,
+        /// Messages to it by id.
+        messages: usize,
+    },
+    /// Nothing that may wake it.
+    Nothing,
+    /// Something waits, but a guardrail holds it (its items stay `sent`,
+    /// and are seen at the next turn or session start).
+    Held(&'static str),
+}
+
+impl Mnemo {
+    /// 13a (13.1b): what's new for `agent` (and `role`) since it was last
+    /// shown. Reads only; [`Mnemo::mark_shown`] records that it was.
+    pub fn new_work(&mut self, agent: Option<&str>, role: Option<&str>) -> Result<NewWork> {
+        let now = self.coordination_now();
+        let unseen =
+            |d: &str| d == crate::memory::delivery::SENT || d == crate::memory::delivery::DELIVERED;
+        let messages = self
+            .inbox(agent, role, true)?
+            .into_iter()
+            .filter(|m| unseen(&m.delivery))
+            .collect();
+        let mut tasks = Vec::new();
+        for t in self.ready_tasks(role)? {
+            let m = self.get(&t.id)?;
+            if meta_string(&m, MNEMO_META_DELIVERY).is_none_or(|d| unseen(&d)) {
+                tasks.push(t);
+            }
+        }
+        let mut lapsing = Vec::new();
+        if let Some(a) = agent {
+            for m in self.coordination_records(MNEMO_META_KIND_CLAIM, None)? {
+                let topic = meta_string(&m, MNEMO_META_TOPIC).unwrap_or_default();
+                if !topic.starts_with("task:")
+                    || meta_string(&m, MNEMO_META_HOLDER).as_deref() != Some(a)
+                    || !is_live(&m, now)
+                {
+                    continue;
+                }
+                let e = effective_expiry(&m, now).unwrap_or(now);
+                if e - now <= TASK_CLAIM_WARN_SECS
+                    && meta_i64(&m, MNEMO_META_WARNED_EXPIRY) != Some(e)
+                {
+                    lapsing.push(Claim {
+                        topic,
+                        holder: a.to_string(),
+                        expires_at: e,
+                        lease: meta_i64(&m, MNEMO_META_LEASE).unwrap_or(CLAIM_TTL_DEFAULT),
+                    });
+                }
+            }
+        }
+        Ok(NewWork {
+            messages,
+            tasks,
+            lapsing,
+        })
+    }
+
+    /// 13a (13.1b): record that `work` was shown: its messages and tasks
+    /// `seen`, its lapsing claims warned about at their expiry. In place.
+    pub fn mark_shown(&mut self, work: &NewWork) -> Result<()> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let ids: Vec<Ulid> = work.messages.iter().map(|m| m.id).collect();
+        self.mark_seen(&ids)?;
+        for t in &work.tasks {
+            let mut m = self.get(&t.id)?;
+            m.metadata.insert(
+                MNEMO_META_DELIVERY.into(),
+                Value::String(crate::memory::delivery::SEEN.into()),
+            );
+            self.put(m)?;
+        }
+        for c in &work.lapsing {
+            if let Some(mut m) = self.find_claim(&c.topic)? {
+                m.metadata
+                    .insert(MNEMO_META_WARNED_EXPIRY.into(), Value::from(c.expires_at));
+                self.put(m)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 13a (13.1b): whether wake-ups are paused (the kill switch): who
+    /// paused them and when.
+    pub fn wake_paused(&mut self) -> Result<Option<(String, i64)>> {
+        let Some(m) = self.about()?.into_iter().find(is_manifest) else {
+            return Ok(None);
+        };
+        Ok(m.metadata.get(MNEMO_META_WAKE_PAUSED).map(|v| {
+            (
+                v.get("by")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                v.get("at").and_then(Value::as_i64).unwrap_or(0),
+            )
+        }))
+    }
+
+    /// 13a (13.1b): pause (`true`) or resume wake-ups for every session
+    /// of this brain, on the manifest. Paused, nothing wakes anyone: items
+    /// stay `sent`, and the per-turn hook and the brief still show them.
+    pub fn set_wake_paused(&mut self, paused: bool) -> Result<WriteOutcome> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let Some(mut m) = self.about()?.into_iter().find(is_manifest) else {
+            return Err(MnemoError::Invalid(
+                "this brain has no manifest to record the pause on".into(),
+            ));
+        };
+        if m.metadata.contains_key(MNEMO_META_WAKE_PAUSED) == paused {
+            return Ok(WriteOutcome::Unchanged);
+        }
+        if paused {
+            let mut v = Map::new();
+            v.insert(
+                "by".into(),
+                Value::String(self.author.clone().unwrap_or_else(|| "anonymous".into())),
+            );
+            v.insert("at".into(), Value::from(self.coordination_now()));
+            m.metadata
+                .insert(MNEMO_META_WAKE_PAUSED.into(), Value::Object(v));
+        } else {
+            m.metadata.remove(MNEMO_META_WAKE_PAUSED);
+        }
+        self.put(m)?;
+        Ok(WriteOutcome::Updated)
+    }
+
+    /// 13a (13.1b): the wake-up guardrails, in the one place that marks an
+    /// item `delivered`. For `agent` (and `role`), the items that may wake
+    /// it: pre-approved tasks ready for its role, and messages addressed to
+    /// it by id (never to its role or `all`), still `sent`. Then:
+    /// - **paused** (the kill switch): [`Wake::Held`];
+    /// - **an explicit reply past the hop cap** ([`crate::memory::HOP_CAP`])
+    ///   or **a pair in a burst** ([`crate::memory::PAIR_BURST`] messages
+    ///   either way in [`crate::memory::PAIR_BURST_SECS`]) wakes nobody;
+    /// - **the recipient's rate** ([`crate::memory::WAKE_PER_HOUR`]) and
+    ///   **cooldown** ([`crate::memory::WAKE_COOLDOWN_SECS`]), from its
+    ///   presence record's `_mnemo.wakes`.
+    ///
+    /// On [`Wake::Now`] the items are marked `delivered` and the wake-up is
+    /// recorded on the recipient's presence record, in place.
+    pub fn wake(&mut self, agent: &str, role: Option<&str>) -> Result<Wake> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let now = self.coordination_now();
+        let sent = crate::memory::delivery::SENT;
+        let mut tasks = Vec::new();
+        for t in self.ready_tasks(role)? {
+            let m = self.get(&t.id)?;
+            if t.pre_approved && meta_string(&m, MNEMO_META_DELIVERY).as_deref() == Some(sent) {
+                tasks.push(t.id);
+            }
+        }
+        let all_msgs: Vec<Message> = self
+            .messages()?
+            .iter()
+            .filter_map(Message::from_memory)
+            .collect();
+        let candidates: Vec<&Message> = all_msgs
+            .iter()
+            .filter(|m| m.to == agent && m.from != agent)
+            .filter(|m| m.status == crate::memory::MESSAGE_UNREAD && m.delivery == sent)
+            .collect();
+        if tasks.is_empty() && candidates.is_empty() {
+            return Ok(Wake::Nothing);
+        }
+        if self.wake_paused()?.is_some() {
+            return Ok(Wake::Held("paused"));
+        }
+        let burst = |a: &str, b: &str| {
+            all_msgs
+                .iter()
+                .filter(|m| now - m.created_at <= PAIR_BURST_SECS)
+                .filter(|m| (m.from == a && m.to == b) || (m.from == b && m.to == a))
+                .count()
+                >= PAIR_BURST
+        };
+        let mut reason = None;
+        let messages: Vec<Ulid> = candidates
+            .iter()
+            .filter(|m| {
+                let reply = m.conversation != m.id.to_string();
+                if reply && m.hops > HOP_CAP {
+                    reason = Some("the thread reached its hop cap");
+                    return false;
+                }
+                if burst(&m.from, &m.to) {
+                    reason = Some("a burst of messages between two agents");
+                    return false;
+                }
+                true
+            })
+            .map(|m| m.id)
+            .collect();
+        if tasks.is_empty() && messages.is_empty() {
+            return Ok(Wake::Held(reason.unwrap_or("a guardrail")));
+        }
+        // The recipient's rate and cooldown, from its presence record.
+        let presence = self
+            .coordination_records(MNEMO_META_KIND_PRESENCE, Some(agent))?
+            .into_iter()
+            .next();
+        let mut wakes: Vec<i64> = presence
+            .as_ref()
+            .and_then(|m| m.metadata.get(MNEMO_META_WAKES))
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default();
+        wakes.retain(|t| now - t < 3600 && *t <= now);
+        if wakes.len() >= WAKE_PER_HOUR {
+            return Ok(Wake::Held("the hourly limit of wake-ups"));
+        }
+        if wakes.iter().any(|t| now - t < WAKE_COOLDOWN_SECS) {
+            return Ok(Wake::Held("the cooldown between wake-ups"));
+        }
+        wakes.push(now);
+        let delivered = Value::String(crate::memory::delivery::DELIVERED.into());
+        for id in tasks.iter().chain(messages.iter()) {
+            let mut m = self.get(id)?;
+            m.metadata
+                .insert(MNEMO_META_DELIVERY.into(), delivered.clone());
+            self.put(m)?;
+        }
+        let w = Value::Array(wakes.into_iter().map(Value::from).collect());
+        match presence {
+            Some(mut m) => {
+                m.metadata.insert(MNEMO_META_WAKES.into(), w);
+                self.put(m)?;
+            }
+            None => {
+                let mut meta = Map::new();
+                meta.insert(MNEMO_META_AGENT.into(), Value::String(agent.to_string()));
+                meta.insert(MNEMO_META_LAST_ACTIVE.into(), Value::from(0));
+                meta.insert(MNEMO_META_PRESENCE_LOCK.into(), Value::Bool(false));
+                meta.insert(MNEMO_META_WAKES.into(), w);
+                self.put_coordination_with_id(
+                    Ulid::new(),
+                    MNEMO_META_KIND_PRESENCE,
+                    format!("presence {agent}"),
+                    meta,
+                )?;
+            }
+        }
+        Ok(Wake::Now {
+            tasks: tasks.len(),
+            messages: messages.len(),
+        })
+    }
+}

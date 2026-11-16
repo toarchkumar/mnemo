@@ -82,6 +82,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Post { brain: path, .. }
         | Command::Claim { brain: path, .. }
         | Command::Task { brain: path, .. }
+        | Command::Wake { brain: path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -664,6 +665,27 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// 13a (13.1b): the wake-up kill switch for every session of this
+    /// brain: `pause`, `resume`, or `status` (also `MNEMO_WAKE` and the
+    /// `crossSessionInbound` settings it can see). Paused, nothing wakes an
+    /// agent; the per-turn hook and the brief still show its work.
+    Wake {
+        #[command(subcommand)]
+        cmd: WakeCmd,
+        #[command(flatten)]
+        who: AsArgs,
+        /// The brain's path. Left out, this project's brain.
+        #[arg(
+            long,
+            global = true,
+            value_name = "PATH",
+            default_value = "",
+            hide_default_value = true
+        )]
+        brain: String,
+        #[arg(long, global = true)]
+        passphrase: Option<String>,
+    },
     /// 13a (13.1): the work queue the agents share. `next` takes the oldest
     /// task for your role (or one whose owner's claim lapsed) and prints
     /// its slug and claim token; `update` moves yours along. A task is
@@ -1123,6 +1145,12 @@ enum Command {
         /// Remove what onboard wrote (never the brain, its key or the model).
         #[arg(long)]
         undo: bool,
+        /// 13a: `stop` writes the Stop continuation (an agent finishing a
+        /// turn is kept going for a pre-approved task or a message to it by
+        /// id; off by default); `off` removes it. Left out, a re-run keeps
+        /// what an earlier one chose.
+        #[arg(long, value_enum)]
+        wake: Option<onboard::Wake>,
         /// Install the Claude Code plugin instead of writing the hooks and
         /// the skill (from your own terminal: Claude Code ignores `-y` when
         /// an agent runs it).
@@ -1229,6 +1257,46 @@ enum Command {
         #[command(subcommand)]
         op: CacheOp,
     },
+}
+
+/// 13a (13.1b): `mnemo wake`.
+#[derive(Subcommand)]
+enum WakeCmd {
+    /// Pause wake-ups for every session of this brain.
+    Pause,
+    /// Resume them.
+    Resume,
+    /// Whether they're paused, whether `MNEMO_WAKE` turns them off here, and
+    /// the `crossSessionInbound` settings found.
+    Status,
+}
+
+/// 13a: the `crossSessionInbound` values in Claude Code's settings files
+/// (the user's and this project's), as `(file, value)`.
+fn cross_session_inbound(dir: &std::path::Path) -> Vec<(String, String)> {
+    fn find(v: &serde_json::Value) -> Option<String> {
+        match v {
+            serde_json::Value::Object(o) => o
+                .get("crossSessionInbound")
+                .and_then(|x| x.as_str().map(str::to_string))
+                .or_else(|| o.values().find_map(find)),
+            _ => None,
+        }
+    }
+    let mut files = Vec::new();
+    if let Some(h) = std::env::var_os("HOME") {
+        files.push(std::path::PathBuf::from(h).join(".claude/settings.json"));
+    }
+    files.push(dir.join(".claude/settings.json"));
+    files.push(dir.join(".claude/settings.local.json"));
+    files
+        .into_iter()
+        .filter_map(|f| {
+            let text = std::fs::read_to_string(&f).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+            Some((f.display().to_string(), find(&v)?))
+        })
+        .collect()
 }
 
 /// 13a (13.1): `mnemo task`.
@@ -4136,6 +4204,61 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
+        Command::Wake {
+            cmd,
+            who,
+            brain: path,
+            passphrase: pp,
+        } => {
+            let (agent, _) = who.resolve()?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "wake").map_err(fmt)?;
+            if agent.is_some() {
+                db.set_author(agent);
+            }
+            match cmd {
+                WakeCmd::Pause | WakeCmd::Resume => {
+                    let pause = matches!(cmd, WakeCmd::Pause);
+                    let o = db.set_wake_paused(pause).map_err(fmt)?;
+                    db.flush().map_err(fmt)?;
+                    let word = if pause { "paused" } else { "resumed" };
+                    match o {
+                        mnemo_engine::WriteOutcome::Unchanged => {
+                            println!("wake-ups were already {word}")
+                        }
+                        _ => println!("wake-ups {word} for every session of this brain"),
+                    }
+                }
+                WakeCmd::Status => {
+                    match db.wake_paused().map_err(fmt)? {
+                        Some((by, at)) => {
+                            println!("wake-ups: paused (by {by}, {})", export::rfc3339(at))
+                        }
+                        None => println!("wake-ups: on"),
+                    }
+                    if std::env::var("MNEMO_WAKE").is_ok_and(|v| v.eq_ignore_ascii_case("off")) {
+                        println!("MNEMO_WAKE=off: this session wakes for nothing");
+                    }
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let dir = project::toplevel(&cwd).unwrap_or(cwd);
+                    let found = cross_session_inbound(&dir);
+                    if found.is_empty() {
+                        println!(
+                            "crossSessionInbound: not set in the settings files found (keep it \
+                             `accept` for this project's sessions)"
+                        );
+                    }
+                    for (f, v) in found {
+                        let note = if v == "accept" {
+                            ""
+                        } else {
+                            " (wake-ups through a session's socket need `accept`)"
+                        };
+                        println!("crossSessionInbound: {v} in {f}{note}");
+                    }
+                }
+            }
+        }
         Command::Task {
             cmd,
             who,
@@ -4836,6 +4959,7 @@ fn run() -> std::result::Result<(), String> {
             no_model,
             undo,
             plugin,
+            wake,
         } => {
             if !guide {
                 return onboard::run(onboard::Opts {
@@ -4848,6 +4972,7 @@ fn run() -> std::result::Result<(), String> {
                     undo,
                     plugin,
                     moved,
+                    wake,
                 });
             }
             let text = match format {

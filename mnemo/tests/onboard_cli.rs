@@ -999,3 +999,99 @@ fn links_merged_files_and_a_passphrase_brain() {
         "{err}"
     );
 }
+
+/// 13a step 5 (v0.17): onboard writes the per-turn hook for both clients
+/// (`UserPromptSubmit`, Cursor's `postToolUse`); `--wake stop` adds the
+/// Stop continuation, a re-run keeps it, `--wake off` removes it, and
+/// `--undo` removes them all.
+#[cfg(unix)]
+#[test]
+fn the_per_turn_hook_and_wake_stop() {
+    let e = Env::new();
+    e.stub_claude();
+    e.ok(&["--client", "claude-code,cursor", "--no-model", "--yes"]);
+    let claude =
+        || -> Value { serde_json::from_str(&e.read("repo/.claude/settings.local.json")).unwrap() };
+    let cursor = || -> Value { serde_json::from_str(&e.read("repo/.cursor/hooks.json")).unwrap() };
+    let c = claude();
+    let h = &c["hooks"]["UserPromptSubmit"][0]["hooks"][0];
+    assert!(
+        h["command"]
+            .as_str()
+            .unwrap()
+            .ends_with("hook user-prompt --client claude-code"),
+        "{c}"
+    );
+    assert_eq!(h["timeout"], 10);
+    assert!(
+        c["hooks"].get("Stop").is_none(),
+        "Stop is off by default: {c}"
+    );
+    let u = cursor();
+    assert!(u["hooks"]["postToolUse"][0]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("hook user-prompt --client cursor"));
+    assert!(u["hooks"].get("stop").is_none());
+    // --wake stop adds it, for both.
+    e.ok(&[
+        "--client",
+        "claude-code,cursor",
+        "--no-model",
+        "--yes",
+        "--wake",
+        "stop",
+    ]);
+    assert!(claude()["hooks"]["Stop"][0]["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("hook stop --client claude-code"));
+    assert!(cursor()["hooks"]["stop"][0]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("hook stop --client cursor"));
+    // A re-run without --wake keeps it, and changes nothing.
+    let before = (
+        e.read("repo/.claude/settings.local.json"),
+        e.read("repo/.cursor/hooks.json"),
+    );
+    let text = e.ok(&["--client", "claude-code,cursor", "--no-model", "--yes"]);
+    assert!(text.contains("already set up"), "{text}");
+    assert_eq!(
+        (
+            e.read("repo/.claude/settings.local.json"),
+            e.read("repo/.cursor/hooks.json")
+        ),
+        before
+    );
+    // --wake off removes the Stop hook only.
+    e.ok(&[
+        "--client",
+        "claude-code,cursor",
+        "--no-model",
+        "--yes",
+        "--wake",
+        "off",
+    ]);
+    assert!(claude()["hooks"].get("Stop").is_none());
+    assert!(cursor()["hooks"].get("stop").is_none());
+    assert!(claude()["hooks"].get("UserPromptSubmit").is_some());
+    // Undo removes every hook of ours.
+    e.ok(&[
+        "--client",
+        "claude-code,cursor",
+        "--yes",
+        "--wake",
+        "stop",
+        "--no-model",
+    ]);
+    e.ok(&["--client", "claude-code,cursor", "--undo", "--yes"]);
+    for f in [
+        "repo/.claude/settings.local.json",
+        "repo/.cursor/hooks.json",
+    ] {
+        if e.p(f).exists() {
+            assert!(!e.read(f).contains(" hook "), "{f}: {}", e.read(f));
+        }
+    }
+}

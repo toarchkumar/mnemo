@@ -58,6 +58,8 @@ pub struct Opts {
     pub undo: bool,
     pub plugin: bool,
     pub moved: bool,
+    /// `None`: keep what an earlier run chose.
+    pub wake: Option<Wake>,
 }
 
 /// The MCP server's name in every client.
@@ -65,18 +67,34 @@ const NAME: &str = "mnemo";
 /// The plugin and its marketplace (`.claude-plugin/marketplace.json`).
 const PLUGIN: &str = "mnemo@mnemo-engine";
 const MARKETPLACE: &str = "toarchkumar/mnemo";
-/// The hook timeouts written into the configs, in seconds.
-const TIMEOUTS: [(&str, &str, u64); 3] = [
+/// The hook timeouts written into the configs, in seconds. 13a adds the
+/// per-turn hook (`user-prompt`), and `stop` when `--wake stop` asks for it.
+const TIMEOUTS: [(&str, &str, u64); 5] = [
     ("session-start", "SessionStart", 15),
     ("pre-compact", "PreCompact", 30),
     ("session-end", "SessionEnd", 30),
+    ("user-prompt", "UserPromptSubmit", 10),
+    ("stop", "Stop", 10),
 ];
-/// Cursor's names for the same events.
-const CURSOR_EVENTS: [(&str, &str); 3] = [
+/// Cursor's names for the same events (its per-turn hook is
+/// `postToolUse`, which the hook gates to once a minute).
+const CURSOR_EVENTS: [(&str, &str); 5] = [
     ("session-start", "sessionStart"),
     ("pre-compact", "preCompact"),
     ("session-end", "sessionEnd"),
+    ("user-prompt", "postToolUse"),
+    ("stop", "stop"),
 ];
+
+/// 13a: `onboard --wake`: whether the Stop continuation is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Wake {
+    /// Write the Stop hook: an agent finishing a turn is kept going for a
+    /// pre-approved task or a message to it by id.
+    Stop,
+    /// Don't (remove it if an earlier run wrote it).
+    Off,
+}
 
 /// What a run knows about the project.
 struct Ctx {
@@ -88,6 +106,7 @@ struct Ctx {
     scope: Scope,
     budget: Option<usize>,
     plugin: bool,
+    wake: Option<Wake>,
 }
 
 /// One thing the plan does (or found already right).
@@ -538,11 +557,37 @@ fn plan_hooks_file(ctx: &Ctx, client: Client, path: &Path, undo: bool, items: &m
         Ok(h) => h,
         Err(e) => return items.push(Item::Note(format!("{label}: {e}"))),
     };
+    // The Stop continuation: as `--wake` says, else as an earlier run left
+    // it (our `hook stop` already in the file).
+    let has_stop = hooks.as_ref().is_some_and(|h| {
+        let mut found = false;
+        let mut walk = vec![h];
+        while let Some(v) = walk.pop() {
+            match v {
+                Value::Object(o) => {
+                    if let Some(c) = o.get("command").and_then(Value::as_str) {
+                        found |=
+                            is_our_hook(c) && first_word(c).1.trim_start().starts_with("hook stop");
+                    }
+                    walk.extend(o.values());
+                }
+                Value::Array(a) => walk.extend(a.iter()),
+                _ => {}
+            }
+        }
+        found
+    });
+    let stop = match ctx.wake {
+        Some(Wake::Stop) => true,
+        Some(Wake::Off) => false,
+        None => has_stop,
+    };
     let ours: Vec<(String, String, u64)> = if undo {
         Vec::new()
     } else {
         TIMEOUTS
             .iter()
+            .filter(|(event, _, _)| *event != "stop" || stop)
             .map(|(event, claude_event, timeout)| {
                 let name = match client {
                     Client::ClaudeCode => claude_event.to_string(),
@@ -1039,6 +1084,7 @@ fn context(o: &Opts) -> Result<Ctx, String> {
         scope: o.scope,
         budget: o.hook_budget.map(|b| b.min(super::hook::BUDGET_MAX)),
         plugin: o.plugin,
+        wake: o.wake,
     })
 }
 

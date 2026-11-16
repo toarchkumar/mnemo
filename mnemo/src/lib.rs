@@ -131,19 +131,23 @@ pub use memory::{
     CLAIM_LAPSE_GRACE_SECS, CLAIM_TOPIC_MAX, CLAIM_TTL_DEFAULT, CLAIM_TTL_MAX, CLAIM_TTL_MIN,
     PRESENCE_EVERY_SECS,
 };
+/// 13a (13.1b): the wake-up guardrails.
+pub use memory::{
+    HOP_CAP, MNEMO_META_WAKE_PAUSED, PAIR_BURST, PAIR_BURST_SECS, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
+};
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,
     DEFAULT_BATCH_MAX_AGE, DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,
     DEFAULT_SEMANTIC_THRESHOLD,
 };
 pub use session::{Role, Session, Turn};
-pub use shared::{CancelToken, SharedOptions};
+pub use shared::{sidecar_notes, CancelToken, SharedOptions};
 #[doc(hidden)]
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
 pub use store::{
-    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, Presence, Task, TaskOutcome,
-    TaskSpec, TaskTaken,
+    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, NewWork, Presence, Task,
+    TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
