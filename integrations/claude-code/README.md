@@ -8,6 +8,10 @@ This plugin gives Claude Code a project's memory, from a `mnemo` brain:
 - **The hooks** (`hooks/hooks.json`):
   - `mnemo hook session-start` adds the guide's card, the project's
     essence and a short recall to the session's context.
+  - `mnemo hook user-prompt` (v0.17) shows what's new for the session's
+    `MNEMO_AGENT` at each turn: unread messages, tasks ready for its
+    role, its claims about to lapse. It prints nothing without
+    `MNEMO_AGENT` or `MNEMO_ROLE`, or when nothing changed;
   - `mnemo hook pre-compact` and `mnemo hook session-end` save the
     transcript, without tool output and with known secret shapes
     redacted.

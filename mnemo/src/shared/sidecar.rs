@@ -116,6 +116,43 @@ impl Sidecar {
         result
     }
 
+    /// 13a: a hook's note, `hook.*` (at most 512 bytes, one line).
+    pub(crate) fn read_note(&self, name: &str) -> Option<String> {
+        let mut f = self.open_existing(name, false).ok()?;
+        let mut buf = vec![0u8; 512];
+        let n = f.read(&mut buf).ok()?;
+        buf.truncate(n);
+        Some(
+            String::from_utf8_lossy(&buf)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+        )
+    }
+
+    /// 13a: replace a hook's note, by a new temp name and a rename.
+    pub(crate) fn write_note(&self, name: &str, line: &str) -> std::io::Result<()> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let tmp = format!(
+            "{name}.{}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        let result = (|| {
+            let mut f = self.create_new(&tmp)?;
+            f.write_all(line.as_bytes())?;
+            f.write_all(b"\n")?;
+            drop(f);
+            self.rename(&tmp, name)
+        })();
+        if result.is_err() {
+            let _ = self.remove(&tmp);
+        }
+        result
+    }
+
     /// Remove `lock-info` (best effort: a hint, not a lock).
     pub(crate) fn remove_lock_info(&self) {
         let _ = self.remove(LOCK_INFO);
@@ -368,6 +405,42 @@ mod imp {
 }
 
 pub(crate) use imp::{open, pid_alive};
+
+/// 13a: the hooks' small notes in a brain's sidecar directory (the
+/// per-session stamps): names start with `hook.` and are 1 to 80 of
+/// `a-z0-9.-`, so they never collide with the lock files.
+pub mod notes {
+    use super::*;
+
+    fn ok_name(name: &str) -> bool {
+        name.starts_with("hook.")
+            && name.len() <= 80
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+    }
+
+    /// A note's line, if the directory and the note are there.
+    pub fn read(brain: &Path, name: &str) -> Option<String> {
+        if !ok_name(name) {
+            return None;
+        }
+        let brain = std::fs::canonicalize(brain).ok()?;
+        open_if_present(&brain)?.read_note(name)
+    }
+
+    /// Write a note (creating the checked directory if needed).
+    pub fn write(brain: &Path, name: &str, line: &str) -> std::io::Result<()> {
+        if !ok_name(name) || line.contains('\n') || line.len() > 500 {
+            return Err(std::io::Error::other("not a hook note"));
+        }
+        let brain = std::fs::canonicalize(brain)?;
+        match open(&brain) {
+            SidecarState::Ready(s) => s.write_note(name, line),
+            SidecarState::Unavailable(why) => Err(std::io::Error::other(why)),
+        }
+    }
+}
 
 /// The sidecar directory for `brain` if it's already there (checked as
 /// [`open`] checks it), never creating it.

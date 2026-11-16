@@ -20,6 +20,7 @@ pub use lock::SharedOptions;
 #[allow(unused_imports)]
 pub(crate) use lock::{BrainLocks, Held, LockKind, WINDOWS_OLD_RENAME};
 pub(crate) use presence::{probe as probe_presence, PresenceLock};
+pub use sidecar::notes as sidecar_notes;
 pub(crate) use sidecar::pid_alive;
 
 /// Test hooks: not a stable API.

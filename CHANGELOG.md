@@ -64,6 +64,42 @@ Pre-1.0, the minor component carries the breaking-change signal.
     there are none.
   - In a git repository `post`, `inbox` and `ack <ID>` take no path, and
     neither do `claim` and `task`.
+- **The per-turn hook, the Stop continuation and the wake-up guardrails
+  (13a step 5).**
+  - **`mnemo hook user-prompt`** runs on Claude Code's
+    `UserPromptSubmit`, and on Cursor's `postToolUse` at most once a
+    minute per session.
+    - **What it shows:** what's new for the session's `MNEMO_AGENT` and
+      `MNEMO_ROLE`: unread messages, tasks ready for the role, and its
+      task claims lapsing within 15 minutes. It comes after the framing
+      line, escaped, at most 600 bytes.
+    - **Then it marks them seen,** so the next turn is quiet. A failed
+      mark never stops the print.
+    - **An unchanged turn reads only page 0:** a per-session stamp in the
+      sidecar directory keeps the file's seal, so there's no keychain
+      read and no open. Finding the brain doesn't run git either.
+    - **The cost:** 3.4 ms median on an 11,000-record brain, against
+      `mnemo --version`'s 3.3 to 4.1 ms. Without the stamp it was 22.8
+      ms with a key file.
+  - **`mnemo hook stop`**, the Stop continuation, is off by default.
+    `onboard --wake stop` writes it, and `--wake off` removes it.
+    - It keeps an agent going only for a pre-approved task for its role
+      or a message to it by id.
+    - It's never twice in a row (`stop_hook_active`, Cursor's
+      `loop_count`), and never with `MNEMO_WAKE=off`.
+    - Its reason is fixed text and counts, never brain content.
+  - **The guardrails,** in `Mnemo::wake`, the one place that marks an
+    item `delivered`:
+    - 12 wake-ups per agent an hour, 60 s apart;
+    - none for a burst of 8 messages between two agents in 10 minutes;
+    - none for an explicit reply past 8 hops;
+    - and the kill switch: `mnemo wake pause|resume|status`, kept on the
+      manifest. `status` also shows the `crossSessionInbound` settings it
+      finds.
+  - `Mnemo::new_work`, `mark_shown`, `wake`, `wake_paused`,
+    `set_wake_paused` and `file_stamp`, and `sidecar_notes`.
+  - **`onboard`** writes the per-turn hook for both clients, and the
+    Claude Code plugin's `hooks.json` has it too.
 - **Tasks (13a step 4): the work queue agents share.**
   - **`mnemo task add|next|update|list|get`,** the MCP `task` tool
     (listed before `inbox` and `claim`), and `Mnemo::task_add`,

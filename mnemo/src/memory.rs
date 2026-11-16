@@ -448,6 +448,27 @@ pub const TASK_CLAIM_WARN_SECS: i64 = 15 * 60;
 /// 13a: `export --git` leaves out tasks done more than this ago (30 days).
 pub const TASK_DONE_EXPORT_KEEP_SECS: i64 = 30 * 86_400;
 
+/// 13a (13.1b): the wake-up guardrails. At most this many wake-ups per
+/// recipient per hour; past it, items stay `sent` and are seen at the next
+/// turn or session start.
+pub const WAKE_PER_HOUR: usize = 12;
+/// 13a (13.1b): a recipient's cooldown between wake-ups, in seconds.
+pub const WAKE_COOLDOWN_SECS: i64 = 60;
+/// 13a (13.1b): a message wakes nobody when its two agents have exchanged
+/// this many messages, either way, in the last [`PAIR_BURST_SECS`].
+pub const PAIR_BURST: usize = 8;
+/// 13a (13.1b): the pair burst's window (10 minutes).
+pub const PAIR_BURST_SECS: i64 = 600;
+/// 13a (13.1b): an explicit reply whose hop count passes this wakes nobody.
+pub const HOP_CAP: u64 = 8;
+/// 13a (13.1b): the kill switch, on the manifest: `{"by", "at"}` while
+/// wake-ups are paused.
+pub const MNEMO_META_WAKE_PAUSED: &str = "_mnemo.wake_paused";
+/// 13a (13.1b): a presence record's recent wake-up times (the last hour).
+pub const MNEMO_META_WAKES: &str = "_mnemo.wakes";
+/// 13a (13.1b): the claim expiry its holder was last warned about.
+pub const MNEMO_META_WARNED_EXPIRY: &str = "_mnemo.warned_expiry";
+
 /// 13a (13.1b): the delivery states, in order.
 pub mod delivery {
     /// Written, not yet delivered by a wake-up.

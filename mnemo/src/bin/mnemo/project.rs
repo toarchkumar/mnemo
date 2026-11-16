@@ -85,6 +85,39 @@ pub fn refuse_link(brain: &Path) -> Result<(), String> {
 }
 
 /// The git common dir of the repository `start` is in, absolute.
+/// 13a (R-010.6): the git common directory found without running git, for
+/// the per-turn hook, which runs on every turn: the nearest `.git` above
+/// `start` that's a directory (a repository), or a `gitdir: ` file (a
+/// worktree or a submodule), following a worktree's `commondir`. `None`
+/// for anything else (a `GIT_DIR` or `GIT_COMMON_DIR` in the environment,
+/// a `.git` it can't read): then [`common_dir`] asks git.
+pub fn common_dir_fast(start: &Path) -> Option<PathBuf> {
+    if std::env::var_os("GIT_DIR").is_some() || std::env::var_os("GIT_COMMON_DIR").is_some() {
+        return None;
+    }
+    let mut d = Some(start);
+    while let Some(dir) = d {
+        let dot = dir.join(".git");
+        match std::fs::symlink_metadata(&dot) {
+            Ok(m) if m.is_dir() => return Some(dot),
+            Ok(m) if m.is_file() => {
+                let text = std::fs::read_to_string(&dot).ok()?;
+                let gitdir = text.trim_end().strip_prefix("gitdir: ")?;
+                let gitdir = dir.join(gitdir);
+                return match std::fs::read_to_string(gitdir.join("commondir")) {
+                    Ok(c) => Some(gitdir.join(c.trim_end())),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(gitdir),
+                    Err(_) => None,
+                };
+            }
+            Ok(_) => return None,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => d = dir.parent(),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 pub fn common_dir(start: &Path) -> Result<PathBuf, String> {
     let out = Command::new("git")
         .args(["rev-parse", "--git-common-dir"])
