@@ -4470,7 +4470,7 @@ fn run() -> std::result::Result<(), String> {
                         mnemo_engine::WriteOutcome::Unchanged => "unchanged",
                         _ => "updated",
                     };
-                    println!("{}\t{o}", t.slug);
+                    println!("{}\t{o}\t{}", t.slug, t.status);
                     Ok(())
                 }
                 TaskCmd::Next => match db.task_next(role.as_deref()).map_err(fmt)? {
@@ -4504,14 +4504,41 @@ fn run() -> std::result::Result<(), String> {
                         .task_update(slug, status.as_deref(), note.as_deref(), token.as_deref())
                         .map_err(fmt)?
                     {
-                        mnemo_engine::TaskOutcome::Updated(t) => {
-                            println!("{}\t{}", t.slug, t.status);
+                        mnemo_engine::TaskOutcome::Updated(t, claim) => {
+                            match claim {
+                                // RB-012.1: the claim the owner now holds.
+                                Some(c) => {
+                                    println!(
+                                        "{}\t{}\t{}\t{}",
+                                        t.slug,
+                                        t.status,
+                                        c.token,
+                                        export::rfc3339(c.expires_at)
+                                    );
+                                    if c.retaken {
+                                        eprintln!(
+                                            "mnemo: your claim had lapsed and nobody took {}, so \
+                                             it's yours again, with a new token",
+                                            t.slug
+                                        );
+                                    }
+                                }
+                                None => println!("{}\t{}", t.slug, t.status),
+                            }
                             Ok(())
                         }
-                        mnemo_engine::TaskOutcome::Lost => Err(format!(
-                            "lost: another agent took {slug} back after your claim lapsed (or the \
-                             token isn't its claim's); nothing changed"
-                        )),
+                        mnemo_engine::TaskOutcome::Lost(mnemo_engine::TaskLost::TakenBack) => {
+                            Err(format!(
+                                "lost: another agent took {slug} back after your claim lapsed; \
+                                 nothing changed"
+                            ))
+                        }
+                        mnemo_engine::TaskOutcome::Lost(mnemo_engine::TaskLost::OtherToken) => {
+                            Err(format!(
+                                "lost: that token isn't {slug}'s claim's (another session of \
+                                 yours may hold it); nothing changed"
+                            ))
+                        }
                     }
                 }
                 TaskCmd::List {

@@ -659,10 +659,19 @@ fn tool_task(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcErr
                 .map_err(mnemo_err)?;
             db.flush().map_err(mnemo_err)?;
             match o {
-                crate::TaskOutcome::Updated(t) => {
-                    json!({"outcome": "updated", "slug": t.slug, "status": t.status}).to_string()
+                crate::TaskOutcome::Updated(t, claim) => {
+                    let mut v = json!({"outcome": "updated", "slug": t.slug, "status": t.status});
+                    if let Some(c) = claim {
+                        v["token"] = json!(c.token);
+                        v["expires_at"] = json!(c.expires_at);
+                        if c.retaken {
+                            v["note"] = json!("your claim had lapsed and nobody took the task, so it's yours again, with a new token");
+                        }
+                    }
+                    v.to_string()
                 }
-                crate::TaskOutcome::Lost => json!({"outcome": "lost", "note": "another agent took this task back after your claim lapsed (or the token isn't its claim's): nothing changed; don't carry on with it"}).to_string(),
+                crate::TaskOutcome::Lost(crate::TaskLost::TakenBack) => json!({"outcome": "lost", "reason": "taken_back", "note": "another agent took this task back after your claim lapsed: nothing changed; don't carry on with it"}).to_string(),
+                crate::TaskOutcome::Lost(crate::TaskLost::OtherToken) => json!({"outcome": "lost", "reason": "other_token", "note": "that token isn't this task's claim's (another session of yours may hold it): nothing changed"}).to_string(),
             }
         }
         "list" => {

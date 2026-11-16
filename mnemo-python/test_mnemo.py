@@ -1504,6 +1504,8 @@ def test_tasks():
             t = db.task_next("worker")
             assert t["task"]["slug"] == "step-1" and t["task"]["owner"] == "worker-a", t
             assert db.task_next("worker") is None
+            n = db.task_update("step-1", None, "going", token=t["token"])
+            assert n["token"] == t["token"] and n["retaken"] is False and n["expires_at"], n
             assert db.task_update("step-1", "ready", token=t["token"])["task"]["status"] == "ready"
             db.set_author("worker-b")
             try:
@@ -1516,9 +1518,9 @@ def test_tasks():
             db.set_author("worker-b")
             assert db.task_next("worker")["task"]["slug"] == "step-2"
             db.set_author("worker-a")
-            assert db.task_update("step-2", "blocked") == {"outcome": "lost"}
+            assert db.task_update("step-2", "blocked") == {"outcome": "lost", "reason": "taken_back"}
             g = db.task_get("step-1")
-            assert [h["to"] for h in g["history"]] == ["active", "ready", "done"], g
+            assert [h["to"] for h in g["history"]] == ["active", "active", "ready", "done"], g
             assert [x["slug"] for x in db.tasks(status="done")] == ["step-1"]
             assert db.task_get("nope") is None
         finally:

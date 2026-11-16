@@ -147,6 +147,34 @@ fn valid_address(to: &str) -> bool {
             .is_some_and(crate::memory::valid_agent_id)
 }
 
+/// 13a (RB-012.6 item 4): the agents a broadcast message or a role's task
+/// has been shown to (`_mnemo.seen_by`).
+fn seen_by(m: &Memory) -> Vec<String> {
+    m.metadata
+        .get(crate::memory::MNEMO_META_SEEN_BY)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Add `agent` to a record's `_mnemo.seen_by`; `false` when it was there.
+fn add_seen_by(m: &mut Memory, agent: &str) -> bool {
+    let mut v = seen_by(m);
+    if v.iter().any(|a| a == agent) {
+        return false;
+    }
+    v.push(agent.to_string());
+    m.metadata.insert(
+        crate::memory::MNEMO_META_SEEN_BY.into(),
+        Value::Array(v.into_iter().map(Value::String).collect()),
+    );
+    true
+}
+
 impl Mnemo {
     /// Every live coordination record of `kind`, in catalog order; with a
     /// `locator` (a claim's topic, a presence record's agent), only that
@@ -358,6 +386,7 @@ impl Mnemo {
             let Some(msg) = Message::from_memory(&m) else {
                 continue;
             };
+            let mut dirty = false;
             if msg.delivery == crate::memory::delivery::SENT
                 || msg.delivery == crate::memory::delivery::DELIVERED
             {
@@ -365,6 +394,16 @@ impl Mnemo {
                     MNEMO_META_DELIVERY.into(),
                     Value::String(crate::memory::delivery::SEEN.into()),
                 );
+                dirty = true;
+            }
+            // RB-012.6 item 4: a message to a role or everyone is seen per
+            // agent (this handle's author).
+            if msg.to == "all" || msg.to.starts_with("role:") {
+                if let Some(a) = self.author.clone() {
+                    dirty |= add_seen_by(&mut m, &a);
+                }
+            }
+            if dirty {
                 self.put(m)?;
                 changed += 1;
             }
@@ -706,7 +745,7 @@ impl Mnemo {
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 if had_lock && holder != agent {
-                    match crate::shared::probe_presence(&self.path, &holder) {
+                    match crate::shared::probe_presence_once(&self.path, &holder) {
                         Some(false) => match meta_i64(&m, MNEMO_META_DEAD_SEEN_AT) {
                             Some(t) if now - t >= CLAIM_LAPSE_GRACE_SECS => lapse = true,
                             Some(_) => {}
@@ -874,18 +913,36 @@ impl Mnemo {
             .next();
         let role_v = role.map(|r| Value::String(r.to_string()));
         let tool_v = tool.map(|t| Value::String(t.to_string()));
+        // RB-012.4: only a process holding the presence lock writes the
+        // lock flag and the tool; another (the CLI, beside a server that
+        // holds it) moves `last_active` alone.
+        let defer = !self.presence_held
+            && existing.as_ref().is_some_and(|m| {
+                m.metadata
+                    .get(MNEMO_META_PRESENCE_LOCK)
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
         if let Some(m) = &existing {
             let fresh = meta_i64(m, MNEMO_META_LAST_ACTIVE)
                 .is_some_and(|t| now >= t && now - t < PRESENCE_EVERY_SECS);
-            let same = m.metadata.get(crate::memory::MNEMO_META_ROLE) == role_v.as_ref()
-                && m.metadata.get(MNEMO_META_TOOL) == tool_v.as_ref()
-                && m.metadata
-                    .get(MNEMO_META_PRESENCE_LOCK)
-                    .and_then(Value::as_bool)
-                    == Some(self.presence_held);
+            let same = defer
+                || (m.metadata.get(crate::memory::MNEMO_META_ROLE) == role_v.as_ref()
+                    && m.metadata.get(MNEMO_META_TOOL) == tool_v.as_ref()
+                    && m.metadata
+                        .get(MNEMO_META_PRESENCE_LOCK)
+                        .and_then(Value::as_bool)
+                        == Some(self.presence_held));
             if fresh && same {
                 return Ok(false);
             }
+        }
+        if defer {
+            let mut m = existing.expect("checked");
+            m.metadata
+                .insert(MNEMO_META_LAST_ACTIVE.into(), Value::from(now));
+            self.put(m)?;
+            return Ok(true);
         }
         let mut meta = existing
             .as_ref()
@@ -1094,15 +1151,38 @@ pub struct TaskTaken {
     pub reclaimed_from: Option<String>,
 }
 
+/// 13a (13.1): the claim an owner holds after a [`Mnemo::task_update`]
+/// (RB-012.1), so it always has the current token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskClaim {
+    /// The `task:<slug>` claim's token.
+    pub token: String,
+    /// When it lapses unless an update renews it.
+    pub expires_at: i64,
+    /// The claim had lapsed and nobody took the task, so the owner took
+    /// the claim again (with a new token).
+    pub retaken: bool,
+}
+
+/// 13a (13.1): why a [`Mnemo::task_update`] changed nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskLost {
+    /// Another agent took the task back after the caller's claim lapsed.
+    TakenBack,
+    /// The token isn't the task's claim's (another session of the same
+    /// agent may hold it).
+    OtherToken,
+}
+
 /// 13a (13.1): what [`Mnemo::task_update`] did.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskOutcome {
-    /// Changed (or a note added), and the owner's claim renewed.
-    Updated(Box<Task>),
-    /// The caller isn't its owner any more (another agent took it back
-    /// after its claim lapsed), or the token isn't the claim's: nothing
-    /// changed.
-    Lost,
+    /// Changed (or a note added). For the owner, the claim it now holds:
+    /// renewed, or taken again after a lapse; `None` when the change
+    /// released it (`ready`, `done`, `queued`) or wasn't the owner's.
+    Updated(Box<Task>, Option<TaskClaim>),
+    /// Nothing changed: don't carry on with it.
+    Lost(TaskLost),
 }
 
 /// The slug a title gives: lower case, runs of anything but `a-z0-9`
@@ -1262,11 +1342,35 @@ impl Mnemo {
             );
         };
         if let Some(mut m) = self.task_record(&slug)? {
+            let t = Task::from_memory(&m).expect("a task");
             let mut meta = m.metadata.clone();
             set(&mut meta);
             if meta == m.metadata && m.content == content {
-                let t = Task::from_memory(&m).expect("a task");
                 return Ok((t, WriteOutcome::Unchanged));
+            }
+            // RB-012.2: a finished task is never reopened by a re-add, and
+            // only its creator changes what a task is.
+            if t.status == task_status::DONE {
+                let mut n = 2;
+                while self.task_record(&format!("{slug}-{n}"))?.is_some() {
+                    n += 1;
+                }
+                return Err(MnemoError::Invalid(format!(
+                    "{slug} is done; give a new slug ({slug}-{n}?)"
+                )));
+            }
+            let caller = self.author.clone().unwrap_or_else(|| "anonymous".into());
+            if caller != t.creator {
+                return Err(MnemoError::Invalid(format!(
+                    "that slug is {}'s task; it wasn't changed",
+                    t.creator
+                )));
+            }
+            // RB-012.6 item 5: an `after` that closes a cycle.
+            if self.closes_cycle(&slug, &spec.after)? {
+                return Err(MnemoError::Invalid(format!(
+                    "after: that would make {slug} wait for itself, through the tasks it waits for"
+                )));
             }
             m.metadata = meta;
             m.content = content;
@@ -1293,6 +1397,30 @@ impl Mnemo {
         let id = self.put_coordination_with_id(Ulid::new(), MNEMO_META_KIND_TASK, content, meta)?;
         let t = Task::from_memory(&self.get(&id)?).expect("a task");
         Ok((t, WriteOutcome::Added))
+    }
+
+    /// Whether `slug` waiting for `after` closes a cycle: a task in `after`
+    /// that waits (through its own `after`, transitively) for `slug`.
+    fn closes_cycle(&mut self, slug: &str, after: &[String]) -> Result<bool> {
+        let all: std::collections::HashMap<String, Vec<String>> = self
+            .task_records(None)?
+            .iter()
+            .filter_map(Task::from_memory)
+            .map(|t| (t.slug, t.after))
+            .collect();
+        let mut stack: Vec<&str> = after.iter().map(String::as_str).collect();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(s) = stack.pop() {
+            if s == slug {
+                return Ok(true);
+            }
+            if seen.insert(s.to_string()) {
+                if let Some(next) = all.get(s) {
+                    stack.extend(next.iter().map(String::as_str));
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Append a `status_history` entry.
@@ -1337,16 +1465,25 @@ impl Mnemo {
         let agent = self.claim_agent()?;
         let now = self.coordination_now();
         let ready: Vec<Ulid> = self.ready_tasks(role)?.iter().map(|t| t.id).collect();
-        let active: Vec<Ulid> = self
-            .tasks(Some(task_status::ACTIVE), None)?
-            .into_iter()
-            .filter(|t| t.for_role(role) && t.owner.as_deref() != Some(agent.as_str()))
-            .map(|t| t.id)
+        // Taken tasks (`active`, or `blocked`: RB-012.3) for the role. The
+        // caller's own come first (RB-012.1): a worker whose claim lapsed
+        // gets its own task back before anything new. `claim()` decides
+        // which are free.
+        let taken: Vec<Task> = self
+            .task_records(None)?
+            .iter()
+            .filter_map(Task::from_memory)
+            .filter(|t| t.status == task_status::ACTIVE || t.status == task_status::BLOCKED)
+            .filter(|t| t.for_role(role))
             .collect();
-        for (id, back) in ready
-            .into_iter()
-            .map(|i| (i, false))
-            .chain(active.into_iter().map(|i| (i, true)))
+        let (own, others): (Vec<&Task>, Vec<&Task>) = taken
+            .iter()
+            .partition(|t| t.owner.as_deref() == Some(agent.as_str()));
+        for (id, back) in own
+            .iter()
+            .map(|t| (t.id, true))
+            .chain(ready.into_iter().map(|i| (i, false)))
+            .chain(others.iter().map(|t| (t.id, true)))
         {
             let mut m = self.get(&id)?;
             let t = Task::from_memory(&m).expect("a task");
@@ -1359,11 +1496,21 @@ impl Mnemo {
             // again before changing it.
             m = self.get(&id)?;
             let old = t.owner.clone();
-            if back {
+            let own = old.as_deref() == Some(agent.as_str());
+            if back && own {
+                Self::task_history(
+                    &mut m,
+                    &t.status,
+                    task_status::ACTIVE,
+                    &agent,
+                    now,
+                    &[("note", "taken again after its claim lapsed")],
+                );
+            } else if back {
                 let from = old.clone().unwrap_or_default();
                 Self::task_history(
                     &mut m,
-                    task_status::ACTIVE,
+                    &t.status,
                     task_status::ACTIVE,
                     &agent,
                     now,
@@ -1391,7 +1538,7 @@ impl Mnemo {
                 task,
                 token,
                 expires_at,
-                reclaimed_from: if back { old } else { None },
+                reclaimed_from: if back && !own { old } else { None },
             }));
         }
         Ok(None)
@@ -1431,6 +1578,11 @@ impl Mnemo {
         if status.is_none() && note.is_none() {
             return Err(MnemoError::Invalid("give a status or a note".into()));
         }
+        // A token says the caller thinks the task is its own: when it isn't
+        // any more, that's the answer, whatever the change asked for.
+        if token.is_some() && t.owner.as_deref() != Some(agent.as_str()) {
+            return Ok(TaskOutcome::Lost(TaskLost::TakenBack));
+        }
         let changing = to != t.status;
         if changing && !TASK_TRANSITIONS.contains(&(t.status.as_str(), to.as_str())) {
             return Err(MnemoError::Invalid(format!(
@@ -1446,11 +1598,10 @@ impl Mnemo {
         let topic = task_topic(slug);
         let claim = self.find_claim(&topic)?;
         let live = claim.as_ref().filter(|c| is_live(c, now));
-        let held_by_owner = live.is_some_and(|c| {
-            meta_string(c, MNEMO_META_HOLDER) == t.owner
-                && token
-                    .is_none_or(|tk| meta_string(c, MNEMO_META_CLAIM_TOKEN).as_deref() == Some(tk))
-        });
+        let claim_token = claim
+            .as_ref()
+            .and_then(|c| meta_string(c, MNEMO_META_CLAIM_TOKEN));
+        let held_by_owner = live.is_some_and(|c| meta_string(c, MNEMO_META_HOLDER) == t.owner);
         let is_owner = t.owner.as_deref() == Some(agent.as_str());
         let is_creator = t.creator == agent;
         // Who may do this.
@@ -1463,8 +1614,17 @@ impl Mnemo {
                 )));
             }
             false
-        } else if changing && to == task_status::QUEUED && !is_owner && live.is_none() {
-            false // requeueing an abandoned task
+        } else if changing && to == task_status::QUEUED && !is_owner {
+            // Requeueing an abandoned task: anyone's, once its claim lapsed.
+            if let Some(c) = live {
+                return Err(MnemoError::Invalid(format!(
+                    "{slug} is {}'s, and its claim is live until {}; only its owner can hand \
+                     it back before then",
+                    t.owner.as_deref().unwrap_or("its owner"),
+                    crate::memory::date_time_of(effective_expiry(c, now).unwrap_or(now))
+                )));
+            }
+            false
         } else if t.status == task_status::DONE || (!changing && t.status == task_status::READY) {
             // A note on a finished task: its creator's or owner's.
             if !(is_creator || is_owner) {
@@ -1481,18 +1641,27 @@ impl Mnemo {
             false
         } else {
             if !is_owner {
-                return Ok(TaskOutcome::Lost);
+                return Ok(TaskOutcome::Lost(TaskLost::TakenBack));
             }
             true
         };
-        // The owner's claim: theirs and live, else lost to someone else, or
-        // lapsed with nobody else holding it (then taken again).
+        // The owner's claim (RB-012.1):
+        // - live and its own: a given token must be the claim's;
+        // - live and someone else's: taken back;
+        // - lapsed: a given token must be the lapsed claim's (the record
+        //   keeps it), else another session took it in between; then the
+        //   owner carries on and takes the claim again.
         let mut renew_token = None;
         if by_owner {
+            let token_ok = token.is_none_or(|tk| claim_token.as_deref() == Some(tk));
+            if live.is_some() && !held_by_owner {
+                return Ok(TaskOutcome::Lost(TaskLost::TakenBack));
+            }
+            if !token_ok {
+                return Ok(TaskOutcome::Lost(TaskLost::OtherToken));
+            }
             if held_by_owner {
-                renew_token = live.and_then(|c| meta_string(c, MNEMO_META_CLAIM_TOKEN));
-            } else if live.is_some() || token.is_some() {
-                return Ok(TaskOutcome::Lost);
+                renew_token = claim_token.clone();
             }
         }
         let mut m = m;
@@ -1510,6 +1679,7 @@ impl Mnemo {
         self.put(m)?;
         let releases =
             [task_status::READY, task_status::DONE, task_status::QUEUED].contains(&to.as_str());
+        let mut held: Option<TaskClaim> = None;
         match (releases, by_owner, renew_token) {
             (true, _, Some(tk)) => {
                 self.release(&topic, &tk)?;
@@ -1529,17 +1699,35 @@ impl Mnemo {
                 }
             }
             (false, true, Some(tk)) => {
-                self.renew(&topic, &tk, Some(TASK_CLAIM_TTL))?;
+                if let ClaimStatus::Held { expires_at } =
+                    self.renew(&topic, &tk, Some(TASK_CLAIM_TTL))?
+                {
+                    held = Some(TaskClaim {
+                        token: tk,
+                        expires_at,
+                        retaken: false,
+                    });
+                }
             }
             (false, true, None) => {
-                // Lapsed, and nobody else took it: the owner takes it again.
-                self.claim(&topic, Some(TASK_CLAIM_TTL))?;
+                // Lapsed, and nobody else took it: the owner takes it again,
+                // and gets the new token.
+                if let ClaimOutcome::Claimed { token, expires_at } =
+                    self.claim(&topic, Some(TASK_CLAIM_TTL))?
+                {
+                    held = Some(TaskClaim {
+                        token,
+                        expires_at,
+                        retaken: true,
+                    });
+                }
             }
             (false, false, _) => {}
         }
-        Ok(TaskOutcome::Updated(Box::new(
-            Task::from_memory(&self.get(&id)?).expect("a task"),
-        )))
+        Ok(TaskOutcome::Updated(
+            Box::new(Task::from_memory(&self.get(&id)?).expect("a task")),
+            held,
+        ))
     }
 }
 
@@ -1562,6 +1750,9 @@ pub struct NewWork {
     /// [`crate::memory::TASK_CLAIM_WARN_SECS`], not yet warned about at this
     /// expiry.
     pub lapsing: Vec<Claim>,
+    /// The agent it was read for: [`Mnemo::mark_shown`] records this agent
+    /// as having seen the broadcasts and the role's tasks.
+    pub agent: Option<String>,
 }
 
 impl NewWork {
@@ -1596,15 +1787,28 @@ impl Mnemo {
         let now = self.coordination_now();
         let unseen =
             |d: &str| d == crate::memory::delivery::SENT || d == crate::memory::delivery::DELIVERED;
-        let messages = self
-            .inbox(agent, role, true)?
-            .into_iter()
-            .filter(|m| unseen(&m.delivery))
-            .collect();
+        // RB-012.6 item 4: a message to the agent by id is new until it's
+        // seen; one to a role or everyone, and a role's task, until this
+        // agent has been shown it (`_mnemo.seen_by`).
+        let mut messages = Vec::new();
+        for msg in self.inbox(agent, role, true)? {
+            let broadcast = msg.to == "all" || msg.to.starts_with("role:");
+            let new = match (broadcast, agent) {
+                (true, Some(a)) => !seen_by(&self.get(&msg.id)?).iter().any(|s| s == a),
+                _ => unseen(&msg.delivery),
+            };
+            if new {
+                messages.push(msg);
+            }
+        }
         let mut tasks = Vec::new();
         for t in self.ready_tasks(role)? {
             let m = self.get(&t.id)?;
-            if meta_string(&m, MNEMO_META_DELIVERY).is_none_or(|d| unseen(&d)) {
+            let new = match agent {
+                Some(a) => !seen_by(&m).iter().any(|s| s == a),
+                None => meta_string(&m, MNEMO_META_DELIVERY).is_none_or(|d| unseen(&d)),
+            };
+            if new {
                 tasks.push(t);
             }
         }
@@ -1635,6 +1839,7 @@ impl Mnemo {
             messages,
             tasks,
             lapsing,
+            agent: agent.map(str::to_string),
         })
     }
 
@@ -1645,14 +1850,29 @@ impl Mnemo {
             return Err(MnemoError::ReadOnly);
         }
         let ids: Vec<Ulid> = work.messages.iter().map(|m| m.id).collect();
-        self.mark_seen(&ids)?;
+        // Seen by the agent the work was read for.
+        let who = work.agent.clone().or_else(|| self.author.clone());
+        let author = std::mem::replace(&mut self.author, who.clone());
+        let r = self.mark_seen(&ids);
+        self.author = author;
+        r?;
         for t in &work.tasks {
             let mut m = self.get(&t.id)?;
-            m.metadata.insert(
-                MNEMO_META_DELIVERY.into(),
-                Value::String(crate::memory::delivery::SEEN.into()),
-            );
-            self.put(m)?;
+            match who.clone() {
+                // Seen by this agent; the task stays new to the others.
+                Some(a) => {
+                    if add_seen_by(&mut m, &a) {
+                        self.put(m)?;
+                    }
+                }
+                None => {
+                    m.metadata.insert(
+                        MNEMO_META_DELIVERY.into(),
+                        Value::String(crate::memory::delivery::SEEN.into()),
+                    );
+                    self.put(m)?;
+                }
+            }
         }
         for c in &work.lapsing {
             if let Some(mut m) = self.find_claim(&c.topic)? {
@@ -1743,7 +1963,10 @@ impl Mnemo {
         let mut tasks = Vec::new();
         for t in self.ready_tasks(role)? {
             let m = self.get(&t.id)?;
-            if t.pre_approved && meta_string(&m, MNEMO_META_DELIVERY).as_deref() == Some(sent) {
+            if t.pre_approved
+                && meta_string(&m, MNEMO_META_DELIVERY).as_deref() == Some(sent)
+                && !seen_by(&m).iter().any(|s| s == agent)
+            {
                 tasks.push(t.id);
             }
         }

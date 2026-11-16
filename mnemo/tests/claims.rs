@@ -479,3 +479,73 @@ fn two_processes_race_for_claims_and_exactly_one_wins_each() {
         a_wins
     );
 }
+
+/// RB-012.4: a CLI-style handle (no presence lock) beside the agent's
+/// server moves `last_active` only: `who` still says alive, through `mcp`.
+#[test]
+fn rb012_4_a_cli_call_beside_the_server_keeps_it_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut server = shared(&p, "worker-a");
+    server.hold_presence().unwrap();
+    server
+        .write(|db| db.touch_presence(Some("worker"), Some("mcp")))
+        .unwrap();
+    let mut cli = Mnemo::open(&p, PW).unwrap();
+    cli.set_author(Some("worker-a".into()));
+    cli.__set_clock_offset_for_testing(120);
+    assert!(cli.touch_presence(Some("worker"), Some("cli")).unwrap());
+    cli.close().unwrap();
+    let mut db = Mnemo::open(&p, PW).unwrap();
+    let w = db.who().unwrap();
+    let a = w.iter().find(|x| x.agent == "worker-a").unwrap();
+    assert_eq!(
+        (a.alive, a.tool.as_deref()),
+        (Alive::Yes, Some("mcp")),
+        "{a:?}"
+    );
+    assert!(a.last_active > 0);
+}
+
+/// RB-012.6 item 8: the holder comes back between the two looks: the
+/// claim holds, and once it's gone again two new looks are needed.
+#[test]
+fn rb012_6_the_holder_restarting_between_looks_keeps_its_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = brain(dir.path());
+    let mut a = shared(&p, "worker-a");
+    a.hold_presence().unwrap();
+    token(a.write(|db| db.claim("t", None)).unwrap());
+    drop(a);
+    let mut b = Mnemo::open(&p, PW).unwrap();
+    b.set_author(Some("worker-b".into()));
+    // First look: gone, recorded.
+    assert!(matches!(
+        b.claim("t", None).unwrap(),
+        ClaimOutcome::HeldBy { .. }
+    ));
+    b.close().unwrap();
+    // worker-a restarts.
+    let mut a2 = shared(&p, "worker-a");
+    a2.hold_presence().unwrap();
+    let mut b = Mnemo::open(&p, PW).unwrap();
+    b.set_author(Some("worker-b".into()));
+    b.__set_clock_offset_for_testing(11);
+    assert!(
+        matches!(b.claim("t", None).unwrap(), ClaimOutcome::HeldBy { .. }),
+        "alive again: held"
+    );
+    b.close().unwrap();
+    drop(a2);
+    // Gone again: the earlier look was cleared, so this is a first look...
+    let mut b = Mnemo::open(&p, PW).unwrap();
+    b.set_author(Some("worker-b".into()));
+    b.__set_clock_offset_for_testing(22);
+    assert!(matches!(
+        b.claim("t", None).unwrap(),
+        ClaimOutcome::HeldBy { .. }
+    ));
+    // ...and ten seconds later the second.
+    b.__set_clock_offset_for_testing(33);
+    token(b.claim("t", None).unwrap());
+}

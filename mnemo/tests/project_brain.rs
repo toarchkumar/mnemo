@@ -1019,7 +1019,7 @@ fn task_add_next_update_list_get_and_the_git_export() {
             ]
         )
         .trim(),
-        "step-4-tasks\tadded"
+        "step-4-tasks\tadded\tqueued"
     );
     assert_eq!(
         e.ok(
@@ -1037,7 +1037,7 @@ fn task_add_next_update_list_get_and_the_git_export() {
             ]
         )
         .trim(),
-        "a-review\tadded"
+        "a-review\tadded\tqueued"
     );
     assert!(e
         .fails(&main, &["task", "add", "x", "--after", "nope"])
@@ -1239,4 +1239,108 @@ fn visibility_freshness_and_the_about_counts_on_the_cli() {
         .ok(&main, &["stale", "--mine", "--as", "worker-a"])
         .contains("nothing stale"));
     assert!(e.fails(&main, &["stale", "--mine"]).contains("--as"));
+}
+
+/// RB-012.1 and .2 on the CLI: an update prints the claim it holds; a
+/// `done` slug's re-add and a stranger's are refused with their messages.
+#[test]
+fn rb012_task_update_prints_its_claim_and_re_adds_are_refused() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    e.ok(
+        &main,
+        &[
+            "task",
+            "add",
+            "Bump the version",
+            "--for",
+            "worker",
+            "--as",
+            "planner-a",
+        ],
+    );
+    let out = e.ok(
+        &main,
+        &["task", "next", "--as", "worker-a", "--role", "worker"],
+    );
+    let token = out.split('\t').nth(1).unwrap().to_string();
+    let up = e.ok(
+        &main,
+        &[
+            "task",
+            "update",
+            "bump-the-version",
+            "--note",
+            "going",
+            "--token",
+            &token,
+            "--as",
+            "worker-a",
+        ],
+    );
+    let f: Vec<&str> = up.trim().split('\t').collect();
+    assert_eq!(
+        (f[0], f[1], f[2]),
+        ("bump-the-version", "active", token.as_str()),
+        "{up}"
+    );
+    assert!(f[3].ends_with('Z'), "{up}");
+    // A stranger's re-add.
+    let err = e.fails(
+        &main,
+        &[
+            "task",
+            "add",
+            "Bump the version",
+            "--pre-approved",
+            "--as",
+            "worker-a",
+        ],
+    );
+    assert!(
+        err.contains("that slug is planner-a's task; it wasn't changed"),
+        "{err}"
+    );
+    // Done, then re-added.
+    e.ok(
+        &main,
+        &[
+            "task",
+            "update",
+            "bump-the-version",
+            "--status",
+            "ready",
+            "--as",
+            "worker-a",
+        ],
+    );
+    e.ok(
+        &main,
+        &[
+            "task",
+            "update",
+            "bump-the-version",
+            "--status",
+            "done",
+            "--as",
+            "planner-a",
+        ],
+    );
+    let err = e.fails(
+        &main,
+        &[
+            "task",
+            "add",
+            "Bump the version",
+            "--body",
+            "again",
+            "--as",
+            "planner-a",
+        ],
+    );
+    assert!(
+        err.contains("bump-the-version is done; give a new slug (bump-the-version-2?)"),
+        "{err}"
+    );
 }

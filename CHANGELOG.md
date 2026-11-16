@@ -106,7 +106,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
       mark never stops the print.
     - **An unchanged turn reads only page 0:** a per-session stamp in the
       sidecar directory keeps the file's seal, so there's no keychain
-      read and no open. Finding the brain doesn't run git either.
+      read and no open. Finding the brain doesn't run git either, unless
+      git's discovery variables or a bare repository on the way up would
+      make git answer differently.
     - **The cost:** 3.4 ms median on an 11,000-record brain, against
       `mnemo --version`'s 3.3 to 4.1 ms. Without the stamp it was 22.8
       ms with a key file.
@@ -139,16 +141,29 @@ Pre-1.0, the minor component carries the breaking-change signal.
     life, changed in place, with its changes in `status_history`.
   - **`next` takes the oldest `queued` task for a role** whose `after`
     tasks are all `done`, claims `task:<slug>` for 2 hours, and sets
-    `active` and the owner. Failing that, it takes back an `active` task
-    whose owner's claim lapsed, naming the old owner in the history.
+    `active` and the owner. Failing that, it takes back an `active` or
+    `blocked` task whose owner's claim lapsed, naming the old owner in
+    the history. A caller's own lapsed task comes back to it first.
   - **`update`:** the owner moves the task to `ready`, `blocked`,
-    `queued` (handing it back; new since 12.7's table) or `active`
-    again, and may add notes, each renewing its claim.
+    `queued` (handing it back, from `active` or `blocked`; new since
+    12.7's table) or `active` again, and may add notes, each renewing its
+    claim.
+    - **The update returns the claim the owner now holds** (its token and
+      expiry). After a lapse nobody acted on, the owner carries on and
+      takes the claim again with a new token, with or without its old
+      token.
     - An owner whose task was taken back gets `lost`, so a worker that
-      wakes up late can't overwrite the new owner's work.
+      wakes up late can't overwrite the new owner's work. A token that
+      isn't the claim's is `lost` too, and says so.
     - `ready → done` is the creator's call, unless the task is
       `pre_approved`.
     - Anyone may requeue a task whose claim has lapsed.
+    - **A re-add of a `done` slug is refused,** with a free slug to use,
+      and only a task's creator changes its title, body, role, `after` or
+      `pre_approved`. An `after` that closes a cycle is refused.
+  - **Seen per agent:** a message to a role or `all`, and a role's ready
+    task, stay new on each agent's per-turn line until that agent has
+    been shown them (`_mnemo.seen_by`).
   - **The session-start brief's "Your work"** also lists the tasks ready
     for the session's role, and its own task claims lapsing within 15
     minutes, within the same 600 bytes.

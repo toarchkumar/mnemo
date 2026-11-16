@@ -92,11 +92,26 @@ pub fn refuse_link(brain: &Path) -> Result<(), String> {
 /// for anything else (a `GIT_DIR` or `GIT_COMMON_DIR` in the environment,
 /// a `.git` it can't read): then [`common_dir`] asks git.
 pub fn common_dir_fast(start: &Path) -> Option<PathBuf> {
-    if std::env::var_os("GIT_DIR").is_some() || std::env::var_os("GIT_COMMON_DIR").is_some() {
-        return None;
+    // RB-012.6 item 1: anything that changes how git discovers a
+    // repository goes to git.
+    for v in [
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_WORK_TREE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    ] {
+        if std::env::var_os(v).is_some() {
+            return None;
+        }
     }
     let mut d = Some(start);
     while let Some(dir) = d {
+        // A directory that looks like a bare repository: git would stop
+        // here, so let it answer.
+        if dir.join("HEAD").is_file() && dir.join("objects").is_dir() && dir.join("refs").is_dir() {
+            return None;
+        }
         let dot = dir.join(".git");
         match std::fs::symlink_metadata(&dot) {
             Ok(m) if m.is_dir() => return Some(dot),

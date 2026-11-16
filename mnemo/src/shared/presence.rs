@@ -134,10 +134,23 @@ impl PresenceLock {
 /// file, no sidecar directory, or a file that changed under the probe).
 /// Never creates anything.
 pub(crate) fn probe(brain: &Path, agent: &str) -> Option<bool> {
+    probe_with(brain, agent, true)
+}
+
+/// [`probe`] without the retry: a refused lock is "alive" at once. For a
+/// claim's early lapse inside a write window (RB-012.6 item 3): there a
+/// wrong "alive" only delays a lapse that already needs two looks 10 s
+/// apart, and the retry's 20 ms sleep would hold the brain's lock once per
+/// live holder.
+pub(crate) fn probe_once(brain: &Path, agent: &str) -> Option<bool> {
+    probe_with(brain, agent, false)
+}
+
+fn probe_with(brain: &Path, agent: &str, retry: bool) -> Option<bool> {
     let brain = std::fs::canonicalize(brain).ok()?;
     let side = sidecar::open_if_present(&brain)?;
     let name = file_name(agent);
-    for attempt in 0..2 {
+    for attempt in 0..(1 + usize::from(retry)) {
         let f = side.open_existing(&name, true).ok()?;
         match FileExt::try_lock_exclusive(&f) {
             Ok(()) => {
@@ -150,7 +163,7 @@ pub(crate) fn probe(brain: &Path, agent: &str) -> Option<bool> {
                 drop(held);
                 return (mine.is_some() && mine == named).then_some(false);
             }
-            Err(_) if attempt == 0 => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) if attempt == 0 && retry => std::thread::sleep(Duration::from_millis(20)),
             Err(_) => return Some(true),
         }
     }

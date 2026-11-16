@@ -1583,3 +1583,120 @@ fn the_brief_counts_stale_items_of_yours() {
         "{b}"
     );
 }
+
+/// The `hook.turn.*` stamps in the brain's sidecar directory.
+fn turn_stamps(e: &Env) -> Vec<String> {
+    let side = PathBuf::from(format!("{}.mnemo-shared", e.brain().display()));
+    std::fs::read_dir(side)
+        .map(|d| {
+            d.flatten()
+                .map(|x| x.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.starts_with("hook.turn."))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// RB-012.5: a turn that showed something writes no stamp, so a commit
+/// that landed while it marked is seen; the next (quiet) turn stamps.
+#[test]
+fn rb012_5_a_turn_that_showed_something_writes_no_stamp() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    e.ok_cmd(&repo, &["post", "worker-a", "first", "--as", "planner-a"]);
+    let input = r#"{"session_id": "s9"}"#;
+    assert!(turn(&e, input, WORKER).contains("first"));
+    assert!(turn_stamps(&e).is_empty(), "{:?}", turn_stamps(&e));
+    assert_eq!(turn(&e, input, WORKER), "");
+    assert_eq!(turn_stamps(&e).len(), 1);
+}
+
+/// RB-012.6 item 1: where git would answer differently, the per-turn hook
+/// asks git: a bare repository inside the work tree, and
+/// `GIT_CEILING_DIRECTORIES`.
+#[test]
+fn rb012_6_the_fast_lookup_defers_to_git_where_it_differs() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    e.ok_cmd(
+        &repo,
+        &[
+            "post",
+            "worker-a",
+            "in the outer brain",
+            "--as",
+            "planner-a",
+        ],
+    );
+    // A bare repository inside the work tree: git says it's its own
+    // repository, which has no brain, so the hook shows nothing.
+    let bare = e.p("repo/inner.git");
+    let o = Command::new("git")
+        .args(["init", "-q", "--bare"])
+        .arg(&bare)
+        .env("HOME", e.p("home"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    let o = e.hook_env(
+        &bare,
+        &["user-prompt", "--client", "claude-code"],
+        r#"{"session_id": "b1"}"#,
+        WORKER,
+    );
+    assert!(
+        o.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    // A ceiling at the repository: git finds no repository from a subfolder.
+    std::fs::create_dir_all(e.p("repo/sub")).unwrap();
+    let mut env = WORKER.to_vec();
+    let ceiling = repo.display().to_string();
+    env.push(("GIT_CEILING_DIRECTORIES", &ceiling));
+    let o = e.hook_env(
+        &e.p("repo/sub"),
+        &["user-prompt", "--client", "claude-code"],
+        r#"{"session_id": "c1"}"#,
+        &env,
+    );
+    assert!(
+        o.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&o.stdout)
+    );
+    // The same subfolder without the ceiling: the outer brain.
+    let o = e.hook_env(
+        &e.p("repo/sub"),
+        &["user-prompt", "--client", "claude-code"],
+        r#"{"session_id": "c2"}"#,
+        WORKER,
+    );
+    assert!(String::from_utf8_lossy(&o.stdout).contains("in the outer brain"));
+}
+
+/// RB-012.6 item 2: session-start removes stamps older than 30 days.
+#[test]
+fn rb012_6_old_turn_stamps_are_removed_at_session_start() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    assert_eq!(turn(&e, r#"{"session_id": "s1"}"#, WORKER), "");
+    let stamps = turn_stamps(&e);
+    assert_eq!(stamps.len(), 1);
+    let side = PathBuf::from(format!("{}.mnemo-shared", e.brain().display()));
+    let old = side.join("hook.turn.0123456789abcdef");
+    std::fs::write(&old, "v1 0 0 x\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86_400))
+        .unwrap();
+    let _ = e.start(&repo, &[], &json!({"session_id": "s2"}));
+    assert_eq!(
+        turn_stamps(&e),
+        stamps,
+        "the old one went, the fresh one stayed"
+    );
+}
