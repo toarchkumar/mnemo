@@ -342,7 +342,7 @@ everyone (`all`). It's kept until it's acked:
 ```sh
 mnemo post worker-a "The release notes can wait for the fix" --body "Take them after it's done." --as planner-a
 mnemo inbox --as worker-a
-id=$(mnemo post role:worker "CI is green again" --as planner-a | cut -f1)
+read -r id _ < <(mnemo post role:worker "CI is green again" --as planner-a)
 mnemo ack "$id" --note "thanks" --as worker-a
 ```
 
