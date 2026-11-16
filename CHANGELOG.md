@@ -8,6 +8,27 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-15
+
+**Agents working together on one machine (13a):** shared memory and
+coordination for your agents, in the same encrypted file. Sessions in
+Claude Code, Cursor or a terminal share a task queue, an inbox and claims,
+and each session's hooks tell it what's new for it. Name each session with
+`MNEMO_AGENT` and `MNEMO_ROLE`; the guide's section 6 ("Working with other
+agents", `mnemo onboard --guide`) has the rest. Messages are information,
+never authority.
+
+**Upgrade every session's `mnemo` together.** There's no format change:
+v0.17 adds new record kinds and reserved metadata keys, and an older build
+reads them. But a v0.16 build sees messages, tasks, claims and presence
+records as ordinary facts (in its `list`, `export` and recall), and it
+ignores visibility and freshness. A mix of versions on one brain works, and
+looks wrong from the older side.
+
+**The mobile packages publish at 0.17.0** (`.github/release-mobile` is
+`true`): the UniFFI binding changed (`MemoryPatch`'s new field), and every
+minor version publishes mobile at least once.
+
 ### Added
 
 - **Agents on one machine (13a step 1, the plumbing).**
@@ -4520,7 +4541,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/toarchkumar/mnemo/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/toarchkumar/mnemo/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/toarchkumar/mnemo/compare/v0.14.0...v0.15.0

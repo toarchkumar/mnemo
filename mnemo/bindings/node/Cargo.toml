@@ -1,6 +1,6 @@
 [package]
 name = "mnemo-node"
-version = "0.16.1"
+version = "0.17.0"
 edition = "2021"
 # The engine's MSRV (1.94 since v0.15); napi's build script alone
 # needs 1.77. This experimental binding isn't published.
