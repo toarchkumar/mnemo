@@ -704,6 +704,34 @@ fn your_work(db: &mut Mnemo) -> String {
             }
         }
     }
+    // 13a (13.6): its stale items (its tasks, messages to it, what it
+    // wrote), counted, with the oldest few.
+    if let Some(a) = &agent {
+        if let Ok(rows) = db.stale() {
+            let mine: Vec<String> = rows
+                .iter()
+                .filter(|r| r.whose.as_deref() == Some(a.as_str()))
+                .map(|r| {
+                    format!(
+                        "- {} since {}: {}",
+                        esc(&r.what),
+                        mnemo_engine::date_of(r.since),
+                        esc(&r.text)
+                    )
+                })
+                .collect();
+            if !mine.is_empty() {
+                sections.push((
+                    format!(
+                        "{} stale {} of yours (`mnemo stale --mine` lists them):",
+                        mine.len(),
+                        plural(mine.len(), "item", "items")
+                    ),
+                    mine,
+                ));
+            }
+        }
+    }
     // Unread messages, newest first.
     if let Ok(msgs) = db.inbox(agent.as_deref(), role.as_deref(), true) {
         if !msgs.is_empty() {

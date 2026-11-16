@@ -218,7 +218,7 @@ impl Mnemo {
         Option<usize>,
         Option<embed::EmbedderIdentity>,
     )> {
-        let onboarding = self.about()?;
+        let onboarding = self.about_in(crate::memory::VisibilitySet::ALL)?;
         let mut on_manifest: Option<embed::EmbedderIdentity> = None;
         let mut upsert_target: Option<usize> = None;
         for (i, m) in onboarding.iter().enumerate() {

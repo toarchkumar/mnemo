@@ -78,6 +78,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Update { path, .. }
         | Command::DefaultAgent { path, .. }
         | Command::Inbox { path, .. }
+        | Command::Stale { path, .. }
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
         | Command::Claim { brain: path, .. }
@@ -564,6 +565,10 @@ enum Command {
         /// Print only the manifest memory (topic=manifest), no other onboarding entries.
         #[arg(long)]
         manifest_only: bool,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         /// Unlock with a raw key (32 bytes, or 64 hex digits) instead of a
         /// passphrase.
         #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
@@ -634,6 +639,10 @@ enum Command {
         /// Acked ones too.
         #[arg(long)]
         all: bool,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         /// Delete messages acked more than `--days` (default 30) days ago,
         /// and list nothing.
         #[arg(long)]
@@ -660,6 +669,26 @@ enum Command {
         id: Option<String>,
         #[arg(long)]
         note: Option<String>,
+        #[command(flatten)]
+        who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// 13a (13.6): the stale records, oldest first: past their review date,
+    /// or older than their kind's default (essence `state` and `next` 14
+    /// days, `open` 30; an `active` task with no update 3, a `blocked` one
+    /// 7; an unread message 3). `--mine` keeps yours (`--as`, else
+    /// `MNEMO_AGENT`).
+    Stale {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        /// Only those that are yours: your tasks, your messages, what you
+        /// wrote.
+        #[arg(long)]
+        mine: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
         #[command(flatten)]
         who: AsArgs,
         #[arg(long)]
@@ -807,6 +836,10 @@ enum Command {
         /// unchanged file always exports to the same bytes.
         #[arg(long)]
         git: bool,
+        /// 13a: `all` includes private records (a stderr line says so);
+        /// `--git` never does. Default public and team.
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         /// Write to this file instead of stdout. It's replaced whole (a new
         /// file renamed over it), and owner-only on Unix even if it existed
         /// with a wider mode.
@@ -894,6 +927,10 @@ enum Command {
         no_keywords: bool,
         #[arg(long, default_value_t = 10)]
         top_k: usize,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
@@ -3613,14 +3650,18 @@ fn run() -> std::result::Result<(), String> {
             path,
             format,
             manifest_only,
+            visibility,
             key_file,
             passphrase: pp,
         } => {
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             let secret = secret_for(&path, &pp, &key_file)?;
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
-            let mut entries = db.about().map_err(fmt)?;
+            let counts = db.kind_counts();
+            let now = db.coordination_now();
+            let mut entries = db.about_in(vis).map_err(fmt)?;
             // 12.7d: the project essence follows the manifest and the
             // onboarding memories (skipped with --manifest-only).
             let essence = if manifest_only {
@@ -3660,6 +3701,12 @@ fn run() -> std::result::Result<(), String> {
                             "format_version": stats.format_version,
                             "upgrade_hint": upgrade_hint(&path, stats.format_version),
                             "memories": stats.memories,
+                            "counts": {
+                                "facts": counts.facts,
+                                "turns": counts.turns,
+                                "essence": counts.essence,
+                                "coordination": counts.coordination,
+                            },
                             "dimensions": stats.dimensions,
                             "file_bytes": stats.file_bytes,
                             "encrypted": stats.encrypted,
@@ -3681,9 +3728,13 @@ fn run() -> std::result::Result<(), String> {
                 OutputFormat::Table => {
                     // One-line stats header — what kind of file you're looking at.
                     println!(
-                        "# {}  ({} memories · {}-dim · {} · {} snapshots{})",
+                        "# {}  ({} memories: {} facts, {} turns, {} essence, {} coordination · {}-dim · {} · {} snapshots{})",
                         path,
                         stats.memories,
+                        counts.facts,
+                        counts.turns,
+                        counts.essence,
+                        counts.coordination,
                         stats.dimensions,
                         if stats.encrypted {
                             "encrypted"
@@ -3741,6 +3792,13 @@ fn run() -> std::result::Result<(), String> {
                                 format!("(importance={:.2})", m.importance)
                             } else {
                                 format!("[{}]  (importance={:.2})", topic, m.importance)
+                            };
+                            // 13a (13.6): past its review date.
+                            let head = match mnemo_engine::stale_since(m, now) {
+                                Some(t) => {
+                                    format!("{head}  [stale since {}]", mnemo_engine::date_of(t))
+                                }
+                                None => head,
                             };
                             println!();
                             println!("### {head}");
@@ -3843,6 +3901,7 @@ fn run() -> std::result::Result<(), String> {
             r#type,
             agent,
             git,
+            visibility,
             output,
             key_file,
             passphrase: pp,
@@ -3865,8 +3924,40 @@ fn run() -> std::result::Result<(), String> {
                 format_version: summary.format_version,
                 dimensions: summary.dimensions,
             };
-            let all = db.memories().map_err(fmt)?;
+            let mut all = db.memories().map_err(fmt)?;
             drop(db);
+            // 13a (13.5): private records only when asked, never with --git.
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
+            let vis = if git {
+                mnemo_engine::VisibilitySet {
+                    private: false,
+                    ..vis
+                }
+            } else {
+                vis
+            };
+            let before = all.len();
+            let private = all
+                .iter()
+                .filter(|m| mnemo_engine::visibility_of(m) == "private")
+                .count();
+            all.retain(|m| vis.shows(m));
+            if vis.private && private > 0 {
+                eprintln!(
+                    "mnemo: the export includes {private} private record{}",
+                    if private == 1 { "" } else { "s" }
+                );
+            } else if private > 0 && before != all.len() {
+                eprintln!(
+                    "mnemo: {private} private record{} left out{}",
+                    if private == 1 { " was" } else { "s were" },
+                    if git {
+                        " (`--git` never writes them)"
+                    } else {
+                        " (`--visibility all` includes them)"
+                    }
+                );
+            }
             let opts = export::ExportOptions {
                 format,
                 git,
@@ -3946,6 +4037,7 @@ fn run() -> std::result::Result<(), String> {
             keywords,
             no_keywords,
             top_k,
+            visibility,
             format,
             r#type,
             agent,
@@ -4134,7 +4226,10 @@ fn run() -> std::result::Result<(), String> {
             };
 
             let metric = parse_metric(&metric)?;
-            let mut req = RecallRequest::new(q).top_k(top_k).metric(metric);
+            let mut req = RecallRequest::new(q)
+                .top_k(top_k)
+                .metric(metric)
+                .visibility(mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?);
             if let Some(k) = keyword {
                 req = req.keywords(k);
             }
@@ -4202,6 +4297,55 @@ fn run() -> std::result::Result<(), String> {
                     "(truncated: hits dropped by --max-bytes; rerun with a larger \
                      budget or smaller --top-k to see more)"
                 );
+            }
+        }
+        Command::Stale {
+            path,
+            mine,
+            format,
+            who,
+            passphrase: pp,
+        } => {
+            let (agent, _) = who.resolve()?;
+            if mine && agent.is_none() {
+                return Err("--mine needs --as or MNEMO_AGENT".into());
+            }
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_ro(&path, &pp).map_err(fmt)?;
+            let mut rows = db.stale().map_err(fmt)?;
+            if mine {
+                rows.retain(|r| r.whose == agent);
+            }
+            let json = |r: &mnemo_engine::Stale| {
+                serde_json::json!({
+                    "id": r.id.to_string(), "what": r.what, "since": r.since,
+                    "text": r.text, "whose": r.whose,
+                })
+            };
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::Value::Array(rows.iter().map(json).collect())
+                ),
+                OutputFormat::Jsonl => rows.iter().for_each(|r| println!("{}", json(r))),
+                OutputFormat::Table => {
+                    if rows.is_empty() {
+                        println!("nothing stale");
+                    }
+                    for r in &rows {
+                        println!(
+                            "{}  {}  stale since {}{}  {}",
+                            r.id,
+                            r.what,
+                            mnemo_engine::date_of(r.since),
+                            r.whose
+                                .as_deref()
+                                .map(|w| format!(" ({w})"))
+                                .unwrap_or_default(),
+                            r.text
+                        );
+                    }
+                }
             }
         }
         Command::Wake {
@@ -4582,6 +4726,7 @@ fn run() -> std::result::Result<(), String> {
         Command::Inbox {
             path,
             all,
+            visibility,
             prune,
             days,
             format,
@@ -4605,7 +4750,12 @@ fn run() -> std::result::Result<(), String> {
                 eprintln!("mnemo: no MNEMO_AGENT or --as: showing only messages to `all`");
             }
             let msgs = db
-                .inbox(agent.as_deref(), role.as_deref(), !all)
+                .inbox_in(
+                    agent.as_deref(),
+                    role.as_deref(),
+                    !all,
+                    mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?,
+                )
                 .map_err(fmt)?;
             let unseen: Vec<mnemo_engine::Ulid> = msgs.iter().map(|m| m.id).collect();
             db.mark_seen(&unseen).map_err(fmt)?;

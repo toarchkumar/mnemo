@@ -1130,3 +1130,113 @@ fn task_add_next_update_list_get_and_the_git_export() {
     let x = e.ok(&main, &["export", "--format", "jsonl"]);
     assert!(x.contains("\"message\"") && !x.contains("\"claim\"") && !x.contains("\"presence\""));
 }
+
+/// 13a step 7 (v0.17): `--visibility` on recall, `about` and `export`
+/// (`all` with a stderr line; never under `--git`); `about`'s header
+/// counts kinds apart and marks a stale entry; `mnemo stale [--mine]`.
+#[test]
+fn visibility_freshness_and_the_about_counts_on_the_cli() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let embed = format!("{} \"{}\"", python(), e.p("embed.py").display());
+    let remember = |text: &str, extra: &[&str]| -> String {
+        let mut a = vec![
+            "remember",
+            "--text",
+            text,
+            "--embed-cmd",
+            &embed,
+            "--embed-name",
+            "test-4",
+        ];
+        a.extend(extra);
+        e.ok(&main, &a).trim().to_string()
+    };
+    remember("staging seven is the deploy target", &[]);
+    remember("staging seven is secret", &["--visibility", "private"]);
+    remember(
+        "an onboarding note to review",
+        &[
+            "--metadata",
+            r#"{"area": "onboarding"}"#,
+            "--review-by",
+            "2020-01-02",
+        ],
+    );
+    // Recall: private only when asked.
+    let r = e.ok(
+        &main,
+        &["recall", "--keywords", "staging seven", "--format", "json"],
+    );
+    assert!(
+        r.contains("deploy target") && !r.contains("is secret"),
+        "{r}"
+    );
+    let r = e.ok(
+        &main,
+        &[
+            "recall",
+            "--keywords",
+            "staging seven",
+            "--visibility",
+            "all",
+            "--format",
+            "json",
+        ],
+    );
+    assert!(r.contains("is secret"), "{r}");
+    assert!(e
+        .fails(
+            &main,
+            &["recall", "--keywords", "x", "--visibility", "hidden"]
+        )
+        .contains("visibility level"));
+    // Export: left out with a line; included with `all` and a line; never
+    // with --git.
+    let o = e.run(&main, &["export", "--format", "jsonl"]);
+    assert!(!String::from_utf8_lossy(&o.stdout).contains("is secret"));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("1 private record was left out"));
+    let o = e.run(
+        &main,
+        &["export", "--format", "jsonl", "--visibility", "all"],
+    );
+    assert!(String::from_utf8_lossy(&o.stdout).contains("is secret"));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("includes 1 private record"));
+    let o = e.run(
+        &main,
+        &[
+            "export",
+            "--git",
+            "--format",
+            "jsonl",
+            "--visibility",
+            "all",
+        ],
+    );
+    assert!(!String::from_utf8_lossy(&o.stdout).contains("is secret"));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--git` never writes them"));
+    // About: the counts, and the stale mark.
+    e.ok(&main, &["post", "worker-a", "hello", "--as", "planner-a"]);
+    let a = e.ok(&main, &["about"]);
+    assert!(
+        a.contains("facts, 0 turns, 0 essence, ") && a.contains(" coordination"),
+        "{a}"
+    );
+    assert!(a.contains("[stale since 2020-01-02]"), "{a}");
+    let v: Value = serde_json::from_str(&e.ok(&main, &["about", "--format", "json"])).unwrap();
+    assert!(
+        v["stats"]["counts"]["coordination"].as_u64().unwrap() >= 1,
+        "{v}"
+    );
+    // mnemo stale, and --mine.
+    let s = e.ok(&main, &["stale"]);
+    assert!(
+        s.contains("fact  stale since 2020-01-02") && s.contains("an onboarding note to review"),
+        "{s}"
+    );
+    assert!(e
+        .ok(&main, &["stale", "--mine", "--as", "worker-a"])
+        .contains("nothing stale"));
+    assert!(e.fails(&main, &["stale", "--mine"]).contains("--as"));
+}

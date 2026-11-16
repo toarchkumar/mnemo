@@ -501,7 +501,12 @@ fn tool_inbox(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcEr
         "list" => {
             let all = args.get("all").and_then(Value::as_bool).unwrap_or(false);
             let msgs = db
-                .inbox(agent.as_deref(), role.as_deref(), !all)
+                .inbox_in(
+                    agent.as_deref(),
+                    role.as_deref(),
+                    !all,
+                    visibility_arg(args)?,
+                )
                 .map_err(mnemo_err)?;
             let ids: Vec<crate::Ulid> = msgs.iter().map(|m| m.id).collect();
             db.mark_seen(&ids).map_err(mnemo_err)?;
@@ -1103,10 +1108,13 @@ fn tools_list() -> Value {
         "tools": [
             {
                 "name": "about",
-                "description": "Read-only briefing for this .mnemo file: manifest scaffold plus any memories tagged as onboarding, then the project essence (conventions, decisions, open items) as a final `{kind: \"essence\", render}` element when the file has one. Run this first to learn how the file expects to be used.",
+                "description": "Read-only briefing for this .mnemo file: manifest scaffold plus any memories tagged as onboarding, then the project essence (conventions, decisions, open items) as a final `{kind: \"essence\", render}` element when the file has one. Run this first to learn how the file expects to be used. v0.17: `stale: true` lists the records that are stale instead (past their review date, or older than their kind's default); private records show only with `visibility`.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "stale": { "type": "boolean", "description": "List the stale records instead of the briefing." },
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "The visibility levels shown (default public and team)." }
+                    },
                     "additionalProperties": false
                 }
             },
@@ -1186,6 +1194,7 @@ fn tools_list() -> Value {
                     "properties": {
                         "op": { "type": "string", "enum": ["list", "read", "post", "ack"], "default": "list" },
                         "all": { "type": "boolean", "description": "list: acked messages too." },
+                        "visibility": { "type": "array", "items": { "type": "string" }, "description": "list: the visibility levels shown (default public and team)." },
                         "id": { "type": "string", "description": "read, ack: the message's id." },
                         "to": { "type": "string", "description": "post: an agent id, role:<role>, or all." },
                         "subject": { "type": "string", "description": "post: one line, at most 200 bytes." },
@@ -1354,6 +1363,7 @@ fn tools_list() -> Value {
                         "keywords": { "type": "string", "description": "Identifiers or exact terms to match (a version, a PR number, a function name). With `text`, they replace the text for keyword matching; \"\" turns keyword matching off. Needs a v9 file." },
                         "text": { "type": "string", "description": "Query text; embedded by the server's registered embedder. Mutually exclusive with `query`." },
                         "top_k": { "type": "integer", "default": 10 },
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team; private only when asked)." },
                         "types": { "type": "array", "items": { "type": "string" } },
                         "agent": { "type": "string" },
                         "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" },
@@ -1510,7 +1520,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
     }
 
     let text = match name {
-        "about" => tool_about(db)?,
+        "about" => tool_about(db, args)?,
         "remember" => tool_remember(db, args)?,
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
@@ -1703,9 +1713,55 @@ fn mnemo_err(e: MnemoError) -> RpcError {
     RpcError::new(INTERNAL_ERROR, e.to_string())
 }
 
-fn tool_about(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
-    let mems = db.about().map_err(mnemo_err)?;
-    let mut arr: Vec<Value> = mems.iter().map(memory_to_json).collect();
+/// 13a (13.5): a tool's `visibility` argument (an array, or one string).
+fn visibility_arg(args: &Value) -> std::result::Result<crate::VisibilitySet, RpcError> {
+    let levels: Vec<String> = match args.get("visibility") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        Some(_) => {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                "'visibility' is a list of levels: public, team, private, all",
+            ))
+        }
+    };
+    crate::VisibilitySet::parse(&levels).map_err(|e| RpcError::new(INVALID_PARAMS, e.to_string()))
+}
+
+fn tool_about(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let vis = visibility_arg(args)?;
+    // 13a (13.6): the stale records.
+    if args.get("stale").and_then(Value::as_bool).unwrap_or(false) {
+        let rows: Vec<Value> = db
+            .stale()
+            .map_err(mnemo_err)?
+            .iter()
+            .filter(|r| vis.private || db.get(&r.id).map(|m| vis.shows(&m)).unwrap_or(true))
+            .map(|r| {
+                json!({
+                    "id": r.id.to_string(), "what": r.what, "since": r.since,
+                    "since_date": crate::date_of(r.since), "text": r.text, "whose": r.whose,
+                })
+            })
+            .collect();
+        return Ok(serde_json::to_string_pretty(&rows).unwrap_or_else(|_| "[]".into()));
+    }
+    let mems = db.about_in(vis).map_err(mnemo_err)?;
+    let now = db.coordination_now();
+    let mut arr: Vec<Value> = mems
+        .iter()
+        .map(|m| {
+            let mut v = memory_to_json(m);
+            if let (Some(t), Some(o)) = (crate::stale_since(m, now), v.as_object_mut()) {
+                o.insert("stale_since".into(), json!(crate::date_of(t)));
+            }
+            v
+        })
+        .collect();
     // Phase 12.7d: the project essence follows the manifest and the
     // onboarding memories, as one tagged element.
     if let Some(render) = db.about_essence().map_err(mnemo_err)? {
@@ -2571,6 +2627,9 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     let has_max_bytes = args.get("max_bytes").is_some();
     if let Some(n) = args.get("max_bytes").and_then(|v| v.as_u64()) {
         req = req.max_bytes(n as usize);
+    }
+    if args.get("visibility").is_some() {
+        req = req.visibility(visibility_arg(args)?);
     }
 
     let resp = db.recall_budgeted(&req).map_err(mnemo_err)?;

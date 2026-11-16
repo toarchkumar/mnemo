@@ -100,6 +100,8 @@ pub use memory::{
     MNEMO_META_KIND_CLAIM, MNEMO_META_KIND_MESSAGE, MNEMO_META_KIND_PRESENCE, MNEMO_META_KIND_TASK,
     MNEMO_META_REVIEW_BY, MNEMO_META_VISIBILITY, VISIBILITY_LEVELS,
 };
+/// 13a (13.5, 13.6): visibility and freshness.
+pub use memory::{date_of, stale_after, stale_since, visibility_of, VisibilitySet};
 /// 13a (13.1): messages between agents.
 pub use memory::{
     delivery, MESSAGE_ACKED, MESSAGE_ACKED_KEEP_SECS, MESSAGE_BODY_MAX, MESSAGE_PAIR_CARRY_SECS,
@@ -146,8 +148,8 @@ pub use shared::{sidecar_notes, CancelToken, SharedOptions};
 #[cfg(feature = "dev-hooks")]
 pub use store::BudgetReport;
 pub use store::{
-    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, Message, NewWork, Presence, Task,
-    TaskOutcome, TaskSpec, TaskTaken, Wake,
+    slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
+    Stale, Task, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,

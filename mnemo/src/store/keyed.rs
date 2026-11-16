@@ -53,12 +53,16 @@ impl Mnemo {
     /// MCP server use it in place of `default`; the engine's own default is
     /// unchanged.
     pub fn default_agent(&mut self) -> Result<Option<String>> {
-        Ok(self.about()?.into_iter().find(is_manifest).and_then(|m| {
-            m.metadata
-                .get(MNEMO_META_DEFAULT_AGENT)
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        }))
+        Ok(self
+            .about_in(crate::memory::VisibilitySet::ALL)?
+            .into_iter()
+            .find(is_manifest)
+            .and_then(|m| {
+                m.metadata
+                    .get(MNEMO_META_DEFAULT_AGENT)
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            }))
     }
 
     /// 13a (AGENT-DEFAULT): set (or with `None`, clear) the manifest's
@@ -77,7 +81,11 @@ impl Mnemo {
                 )));
             }
         }
-        let Some(mut m) = self.about()?.into_iter().find(is_manifest) else {
+        let Some(mut m) = self
+            .about_in(crate::memory::VisibilitySet::ALL)?
+            .into_iter()
+            .find(is_manifest)
+        else {
             return Err(MnemoError::Invalid(
                 "this brain has no manifest to record a default agent on".into(),
             ));

@@ -885,3 +885,64 @@ fn the_task_tool_as_the_servers_agent() {
         );
     });
 }
+
+/// 13a step 7 (v0.17): the MCP `about` keeps its shape, and lists stale
+/// records with `stale: true`; `recall` leaves private records
+/// out unless `visibility` asks.
+#[test]
+fn about_counts_stale_and_recall_visibility_over_mcp() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let (rs, _) = b.session_env(
+            shared,
+            true,
+            &[("MNEMO_AGENT", "worker-a")],
+            &[
+                tool("remember", json!({"content": "The deploy target is staging seven.", "memory_type": "semantic", "visibility": "private"})),
+                tool("remember", json!({"content": "Review this note.", "memory_type": "semantic", "review_by": 1_600_000_000})),
+                tool("about", json!({})),
+                tool("about", json!({"stale": true})),
+                tool("recall", json!({"keywords": "staging seven", "top_k": 5})),
+                tool("recall", json!({"keywords": "staging seven", "top_k": 5, "visibility": ["all"]})),
+                tool("about", json!({"visibility": ["nope"]})),
+            ],
+        );
+        let about: Value =
+            serde_json::from_str(ok(&rs[3])["content"][0]["text"].as_str().unwrap()).unwrap();
+        // The briefing's shape is unchanged (the essence, when there is
+        // one, stays the last element); the counts are the CLI's.
+        assert!(
+            about
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|m| m["kind"] != "counts"),
+            "{about}"
+        );
+        let stale: Value =
+            serde_json::from_str(ok(&rs[4])["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert!(
+            stale
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["text"] == "Review this note." && s["since_date"] == "2020-09-13"),
+            "{stale}"
+        );
+        let hidden = ok(&rs[5])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!hidden.contains("staging seven"), "{hidden}");
+        let shown = ok(&rs[6])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(shown.contains("staging seven"), "{shown}");
+        assert!(
+            rs[7]["error"].is_object() || rs[7]["result"]["isError"] == json!(true),
+            "{}",
+            rs[7]
+        );
+    });
+}

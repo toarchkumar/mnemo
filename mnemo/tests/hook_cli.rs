@@ -1536,3 +1536,50 @@ fn user_prompt_and_stop_exit_0_on_bad_input() {
         }
     }
 }
+
+/// 13a step 7 (v0.17): the brief counts this agent's stale items.
+#[test]
+fn the_brief_counts_stale_items_of_yours() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    e.ok_cmd(
+        &repo,
+        &[
+            "task",
+            "add",
+            "Long running",
+            "--for",
+            "worker",
+            "--as",
+            "planner-a",
+        ],
+    );
+    e.ok_cmd(
+        &repo,
+        &["task", "next", "--as", "worker-a", "--role", "worker"],
+    );
+    let brief = |offset: &str| {
+        let o = e.hook_env(
+            &repo,
+            &["session-start", "--client", "claude-code"],
+            r#"{"session_id": "s1"}"#,
+            &[
+                ("MNEMO_AGENT", "worker-a"),
+                ("MNEMO_ROLE", "worker"),
+                ("MNEMO_DEV_CLOCK_OFFSET", offset),
+            ],
+        );
+        let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+        v["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(!brief("0").contains("stale"));
+    // Four days on, with no update: its active task is stale.
+    let b = brief("345600");
+    assert!(
+        b.contains("1 stale item of yours") && b.contains("- task active since "),
+        "{b}"
+    );
+}

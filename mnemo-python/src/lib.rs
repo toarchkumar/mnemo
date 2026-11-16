@@ -578,6 +578,11 @@ fn essence_scope_from(thread: Option<String>, project: bool) -> PyResult<CoreEss
 }
 
 /// Phase 12.1: write-outcome enum → stable Python string.
+/// 13a (13.5): a `visibility` argument (levels, or `all`).
+fn vis_arg(v: Option<Vec<String>>) -> PyResult<mnemo_core::VisibilitySet> {
+    mnemo_core::VisibilitySet::parse(&v.unwrap_or_default()).map_err(to_py)
+}
+
 /// 13a: a task as a dict.
 fn task_dict(py: Python<'_>, t: &mnemo_core::Task) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
@@ -1737,7 +1742,7 @@ impl Mnemo {
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
                         filter=None, max_bytes=None, keywords=None,
-                        keyword_weight=None))]
+                        keyword_weight=None, visibility=None))]
     fn recall_text(
         slf: Py<Self>,
         py: Python<'_>,
@@ -1752,6 +1757,7 @@ impl Mnemo {
         max_bytes: Option<usize>,
         keywords: Option<String>,
         keyword_weight: Option<f32>,
+        visibility: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
         // PY-1 (R-001.11): take `slf: Py<Self>` so the Python-level
         // borrow drops before the embedder callback runs — same
@@ -1767,7 +1773,9 @@ impl Mnemo {
                 PyRuntimeError::new_err("embedder returned no vector for the query text")
             })?
         };
+        let vis = vis_arg(visibility)?;
         let mut req = RecallRequest::new(vector)
+            .visibility(vis)
             .text(query)
             .top_k(top_k)
             .track_access(track_access);
@@ -1855,7 +1863,7 @@ impl Mnemo {
     #[pyo3(signature = (query, top_k=10, memory_types=None, agent_id=None,
                         track_access=true, n_probe=None, n_rerank=None,
                         filter=None, max_bytes=None, keywords=None,
-                        keyword_weight=None))]
+                        keyword_weight=None, visibility=None))]
     fn recall(
         &mut self,
         py: Python<'_>,
@@ -1870,10 +1878,12 @@ impl Mnemo {
         max_bytes: Option<usize>,
         keywords: Option<String>,
         keyword_weight: Option<f32>,
+        visibility: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
         let mut req = RecallRequest::new(query)
             .top_k(top_k)
-            .track_access(track_access);
+            .track_access(track_access)
+            .visibility(vis_arg(visibility)?);
         if let Some(t) = keywords {
             req = req.keywords(t);
         }
@@ -2176,9 +2186,11 @@ impl Mnemo {
     /// any other conventions the file's author chose to record — all without
     /// needing any external documentation. Each entry is returned as a dict
     /// matching the shape of `recall`/`get` results.
-    fn about(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+    #[pyo3(signature = (*, visibility=None))]
+    fn about(&mut self, py: Python<'_>, visibility: Option<Vec<String>>) -> PyResult<Vec<PyObject>> {
+        let vis = vis_arg(visibility)?;
         let mut out = Vec::new();
-        for m in self.rd(|db| db.about())? {
+        for m in self.rd(move |db| db.about_in(vis))? {
             out.push(memory_to_dict(py, &m)?);
         }
         Ok(out)
@@ -2408,16 +2420,48 @@ impl Mnemo {
     /// first, leaving out its own; with `unread_only` (the default) only
     /// those not yet acked. Reads only: `mark_seen` records that they were
     /// shown. A list of dicts.
-    #[pyo3(signature = (agent=None, role=None, *, unread_only=true))]
+    #[pyo3(signature = (agent=None, role=None, *, unread_only=true, visibility=None))]
     fn inbox(
         &mut self,
         py: Python<'_>,
         agent: Option<String>,
         role: Option<String>,
         unread_only: bool,
+        visibility: Option<Vec<String>>,
     ) -> PyResult<Vec<PyObject>> {
-        let msgs = self.rd(move |db| db.inbox(agent.as_deref(), role.as_deref(), unread_only))?;
+        let vis = vis_arg(visibility)?;
+        let msgs = self.rd(move |db| db.inbox_in(agent.as_deref(), role.as_deref(), unread_only, vis))?;
         msgs.iter().map(|m| message_dict(py, m)).collect()
+    }
+
+    /// 13a (13.6): the stale records, oldest first: dicts with `id`, `what`
+    /// (`essence state`, `task active`, `message unread`, `fact`, ...),
+    /// `since`, `text` and `whose`.
+    fn stale(&mut self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let rows = self.rd(|db| db.stale())?;
+        rows.iter()
+            .map(|r| {
+                let d = PyDict::new_bound(py);
+                d.set_item("id", r.id.to_string())?;
+                d.set_item("what", &r.what)?;
+                d.set_item("since", r.since)?;
+                d.set_item("text", &r.text)?;
+                d.set_item("whose", r.whose.clone())?;
+                Ok(d.into_any().unbind())
+            })
+            .collect()
+    }
+
+    /// 13a (ABOUT-COUNT): the live records by kind: a dict with `facts`,
+    /// `turns`, `essence` and `coordination`.
+    fn kind_counts(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let c = self.rd(|db| Ok(db.kind_counts()))?;
+        let d = PyDict::new_bound(py);
+        d.set_item("facts", c.facts)?;
+        d.set_item("turns", c.turns)?;
+        d.set_item("essence", c.essence)?;
+        d.set_item("coordination", c.coordination)?;
+        Ok(d.into_any().unbind())
     }
 
     /// 13a (13.1b): mark these message ids `seen`. Returns how many changed.

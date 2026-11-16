@@ -121,6 +121,12 @@ impl Mnemo {
     /// always comes first; everything else follows in `importance` descending,
     /// then `created_at` ascending for deterministic results.
     pub fn about(&mut self) -> Result<Vec<Memory>> {
+        self.about_in(crate::memory::VisibilitySet::DEFAULT)
+    }
+
+    /// 13a (13.5): [`Mnemo::about`] with the visibility levels it shows
+    /// (`about` itself shows public and team).
+    pub fn about_in(&mut self, visibility: crate::memory::VisibilitySet) -> Result<Vec<Memory>> {
         // Phase 12.1: drop records that have been superseded by a newer
         // keyed write. They still live in snapshot history and
         // `history(key)` — just not here.
@@ -137,6 +143,7 @@ impl Mnemo {
             if !m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)
                 && is_onboarding(&m)
                 && !is_coordination(&m)
+                && visibility.shows(&m)
             {
                 out.push(m);
             }
@@ -386,6 +393,9 @@ impl Mnemo {
                     continue;
                 }
             }
+            if !req.visibility.shows(&m) {
+                continue;
+            }
             // Phase 12.6: pre-scoring filter (session_id + metadata
             // conditions). Cheap when `req.filter.is_empty()`; the
             // filter struct's `matches` is a short-circuit AND.
@@ -486,6 +496,9 @@ impl Mnemo {
                     continue;
                 }
             }
+            if !super::records::row_visible(r.flags, req.visibility) {
+                continue;
+            }
             if matches!(
                 r.kind,
                 ROW_KIND_TURN | ROW_KIND_ESSENCE | ROW_KIND_THREAD_LINK | ROW_KIND_COORDINATION
@@ -539,6 +552,10 @@ impl Mnemo {
                 if !(m.agent_id == *agent || m.scope == Scope::Shared) {
                     continue;
                 }
+            }
+            // A row written before its visibility bit existed.
+            if !req.visibility.shows(&m) {
+                continue;
             }
             out.push(RecallResult {
                 memory: m,
