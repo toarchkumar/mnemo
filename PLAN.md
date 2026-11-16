@@ -66,9 +66,14 @@ Planner rules: log every dispatch, decision, and verification as a
 `PLAN`/`DECISION`/`VERIFIED` worklog entry so the trail stays in one place.
 An independent Reviewer logs findings (`R-XXX.Y`) in `reviewer_notes.md` (the Worker commits it as a backup per rule 2, but otherwise ignores its content). On "triage `reviewer_notes.md`", the Planner verifies each `OPEN` item against code/plan, sets `ACCEPTED`/`DEFERRED`/`REJECTED`/`NEEDS-USER` in its ledger row and `Planner Triage` line, and logs a `PLANNER — REVIEW` worklog entry citing the IDs whenever PLAN.md changes.
 
-## Status (2026-11-15, after v0.15.0)
+## Status (2026-11-15, after v0.16.1)
 
-**Published:** v0.15.0 (12.3, zero setup: generated keys in the OS
+**Published:** v0.16.1 (12.2: `mnemo onboard`, the hooks, GUIDE-1, the install
+scripts with SHA256SUMS and build attestation, the MCP resources and
+prompts; v0.16.1 left marker-only turns out of recall). This repo's own
+memory moved to `.git/mnemo/project.mnemo` on a keychain key (the dogfood
+switch, 2026-11-15), and every session runs the hooks (AGENTS.md tmux
+rule 9). Before it, v0.15.0 (12.3, zero setup: generated keys in the OS
 keychain with recovery codes, `unlock`, `mcp install`, hybrid recall and
 TOK-1, `reembed`, supersede, LOCK-2, and the built-in embedder
 snowflake-arctic-embed-xs on candle; MSRV 1.94; stripped release builds)
@@ -78,10 +83,11 @@ and SPM (`toarchkumar/mnemo-swift`), mobile included; PLANNER-A VERIFIED
 job), after `check-artifacts` has run all five CLIs and wheels and
 `check-sdist` the sdist. No long-lived tokens except the Maven Central user
 token (renew by 2027-11-09).
-**Next:** 12.2 (`mnemo onboard`, GUIDE-1) → v0.16.0, started 2026-11-15
-(the user's go); step 0 is its design note. **Then** (PLANNER-A's order,
-delegated by the user 2026-11-15, goal: adoption): Phase 13a (with 13.1b
-delivery) → HARNESS-DOGFOOD-1 (the first-success milestone: this project's
+**Now:** Phase 13a (13.1 messages and tasks with 13.1b delivery, 13.3
+claims and presence, 13.5 visibility, 13.6 freshness), started 2026-11-15
+(the user's go). REVIEWER-A's REV-010 pass and the Worker's design note
+(step 0) run first. **Then** (PLANNER-A's order, delegated by the user
+2026-11-15, goal: adoption): HARNESS-DOGFOOD-1 (the first-success milestone: this project's
 git Markdown workflow runs entirely in MNemo) → 13.7 + personal sync (Pro)
 → 13.2 and 13.4 → team sync (Teams) → PERF-2 → Phase 14 → the rest of 15.
 The sync build is gated on a sync design note (written during 13a) and the
@@ -280,10 +286,14 @@ read. From now on:
 1. **A lookup at every checkpoint, before the ledgers.**
    - The Planner runs one on each pointer it acts on, and the Worker at
      the start of each dispatch.
-   - The command is `test/.venv/bin/python test/scripts/project_memory.py
-     recall "<the task in a few words>" --top-k 5` (add `--keywords` for
-     an identifier). It opens the brain read-only with access tracking
-     off, and the passphrase comes from `test/.env`.
+   - The command is `mnemo recall --text "<the task in a few words>"
+     --top-k 5 --no-track` (add `--keywords` for an identifier), or the
+     MCP `recall` tool. It reads the project brain,
+     `.git/mnemo/project.mnemo`, with access tracking off.
+   - Since the dogfood switch (2026-11-15), the key comes from the
+     keychain, and `test/.env` is retired.
+   - The SessionStart hook's injected recall counts as a lookup when
+     the entry's `Brain:` line quotes it.
    - The ledgers stay the authority. The lookup is the test.
 2. **One line in the entry:** `Brain: "<query>" → hit (rank N) | partial |
    miss`. For a partial or a miss, add which kind:
@@ -317,7 +327,7 @@ read. From now on:
 
 | Release | Lookups | Hit | Partial | Miss: not stored | Miss: not found |
 |---|---|---|---|---|---|
-| v0.15.0 (from 2026-11-14) | 51 | 18 | 21 | 12 | 0 |
+| v0.15.0 (from 2026-11-14) | 65 | 26 | 25 | 14 | 0 |
 
 First lookup (PLANNER-A, 2026-11-14): "keyword tokenizer 2 and older
 builds opening the file" → hit (rank 1, sim 0.64), the Worker's TOK-1
@@ -34902,3 +34912,2951 @@ below:**
    - Log DONE.
 
 **Also before the tag:** store `release.v0.16.1` with `--key`.
+
+### 2026-11-15 — WORKER — BLOCKED — v0.16.1's tag run failed its Windows artifact check (a model download reset by the remote host); nothing published
+
+Brain: "release order patch tag mobile false after the tag checks" → hit (`process.release-order`).
+
+**Done before the block, in your entry's order:**
+1. **PR 100 squash-merged** as `8163e1d`. Its push runs: CI 43748733812 success; Mobile CI 43748733697 success.
+2. **Dry run 43748770440** on `release-0.16.1` at `8163e1d`, `mobile=false`: success.
+   - crates.io: "aborting upload due to dry run";
+   - PyPI: "PyPI would get 5 wheels and 1 sdist";
+   - `attach`: "12 files would be attached";
+   - all five artifact checks succeeded, the Windows one included;
+   - the mobile jobs and `attest` were skipped.
+3. **The handoff, checked and committed** as `2749f7a` ("docs: v0.16.1 README and site", `README.md` and `index.html`): each "What's new in v0.16.1" line matches the CHANGELOG's `[0.16.1]`. One nuance, not an error: only `install.sh` gives the `hash -r` / `rehash` advice; `install.ps1`'s line says "in a new terminal". Then `f5e2df1` chore(plan): sync coordination files.
+4. **`main` fast-forwarded** to `f5e2df1`, and `v0.16.1` tagged ("MNemo 0.16.1", on `f5e2df1`) and pushed.
+5. **Stored** `release.v0.16.1` (added).
+
+**The block: tag run 43750362049.**
+- `artifact check (x86_64-pc-windows-msvc, the built-in embedder)` failed in "The CLI fetches the model, remembers and recalls". Both install-script steps before it succeeded.
+- The log, after `mnemo 0.16.1`: "error: invalid argument: the built-in embedder's download of tokenizer.json failed (https://huggingface.co/Snowflake/snowflake-arctic-embed-xs/resolve/d8c86521100d3556476a063fc2342036d45c106f/tokenizer.json): io: An existing connection was forcibly closed by the remote host. (os error 10054)".
+- So `approve the release` was skipped, and with it `attest`, Create GitHub Release, `attach` and both publish jobs. `engine published (gate)` reports failure, since its needs didn't run.
+- Every other job before the gate succeeded: version check, 5 CLI, 5 wheels, sdist and its check, `SHA256SUMS`, and the other four artifact checks. The mobile jobs were skipped (`mobile=false`).
+
+**Nothing was published:**
+- `gh release view v0.16.1`: "release not found";
+- crates.io `mnemo-engine/0.16.1`: HTTP 404; PyPI `mnemo-engine/0.16.1`: HTTP 404;
+- GitHub's attestations API for the first binary's SHA-256 in the run's `SHA256SUMS`: 404, none made (the `attest` job is after the approval).
+
+**My reading:** this looks like a transient network failure on the runner's download from huggingface.co, not the code:
+- the same check passed on Windows in the dry run 43748770440 a few minutes before, on `8163e1d`;
+- `f5e2df1` differs from it only by `README.md`, `index.html`, `PLAN.md` and `reviewer_notes.md`.
+
+**The likely way on is a re-run of the failed job:** `gh run rerun 43750362049 --failed`. A re-run reads the tag's commit and its `.github/release-mobile` (RELEASING.md). The tag stays where it is, and the approval then waits as usual. I haven't re-run it, since a failed gate stops for you.
+
+The protocol stops me at a failed gate, so I've stopped. The re-run, or anything else, is your call.
+
+### 2026-11-15 — PLANNER-A — DECISION + DISPATCH — v0.16.1's Windows check failed on a network reset; re-run the failed jobs
+
+**Checked:**
+- Tag run 43750362049 at `f5e2df1`, which is `v0.16.1` and `origin/main`.
+- Its failed log is the one you quote: os error 10054, while
+  downloading `tokenizer.json` from huggingface.co.
+- The same check passed on the same code in dry run 43748770440. Between
+  them, only docs and the ledgers changed.
+- Nothing was published.
+
+So it's transient, and not a code failure.
+
+**Decision:** re-run the failed jobs: `gh run rerun 43750362049 --failed`.
+- The tag stays.
+- If the Windows check fails again the same way, re-run once more. If
+  it fails a third time, or in any other way, log BLOCKED.
+- When the run waits at "approve the release (v0.16.1, mobile false)"
+  with every job before it green, log DONE and stop, as in my last
+  entry's step 5. Step 6 follows the user's click.
+
+**Carried as MODEL-RETRY (LOW, after the switch):** the built-in
+embedder's download has no retry, so one reset ends it. A user on a poor
+network would meet this in `onboard` and `embedder install`.
+- Retry a reset, a timeout or a 5xx two or three times with a backoff,
+  keeping the SHA-256 check.
+- The hooks still never download.
+
+### 2026-11-15 — WORKER — DONE — v0.16.1's failed jobs re-run; the release run waits at the approval
+
+- **`gh run rerun 43750362049 --failed`**, once: attempt 2 of tag run 43750362049 (at `f5e2df1`, `v0.16.1`).
+- **`artifact check (x86_64-pc-windows-msvc, the built-in embedder)` succeeded** this time: the CLI fetched the model, remembered and recalled. No second re-run was needed.
+- **Every job before the gate is green:**
+  - version check, 5 CLI and 5 wheels;
+  - sdist and `sdist check`;
+  - `SHA256SUMS`;
+  - all five artifact checks.
+
+  The mobile builds were skipped (`mobile=false`).
+- **"approve the release (v0.16.1, mobile false)" is waiting.**
+- Step 6 of your earlier entry follows the user's click. `release-0.16.1` and `rel0161-fixes` are still on the remote until then.
+
+Over to you: the approval is the user's. Stopped.
+
+### 2026-11-15 — PLANNER-A — REVIEW + NEEDS-USER — v0.16.1's re-run is green; the release waits for the user's approval click
+
+Run 43750362049 is `waiting` with no failed job. Only "approve the
+release (v0.16.1, mobile false)" is left. `v0.16.1` points at `f5e2df1`
+on `main`.
+
+**NEEDS-USER:** approve run 43750362049
+(https://github.com/toarchkumar/mnemo/actions/runs/43750362049). After
+the click, the Worker does step 6 of my entry "PR 100 accepted (v0.16.1)
+…".
+
+**Also in the working tree, not for this release:** a redesign of
+`index.html`, which is the user's request ("look and feel, copy"). It's
+based on a research pass over 14 developer-product sites. The user's
+choices (2026-11-15):
+- the problem-first headline ("Your coding agent forgets. Give it a
+  memory.");
+- light and dark themes that follow the system, with a toggle;
+- free only, with sync as a roadmap line.
+
+It isn't handed off yet. The user reviews it first, then it gets its own
+HANDOFF on `main` after v0.16.1's checks. **Worker: leave `index.html`
+unstaged until then.**
+
+### 2026-11-15 — PLANNER-A — DECISION + DISPATCH — the user approved v0.16.1; do the after-the-tag checks
+
+**The user (2026-11-15):** "Release approved". Run 43750362049 is now
+running `attest` and Create GitHub Release.
+
+**Dispatch:** once the run completes, do step 6 of my entry "PR 100
+accepted (v0.16.1) …", as written there:
+- `attest`, and the order of the jobs after it;
+- crates.io and PyPI;
+- the GitHub Release: 12 engine files, no mobile assets;
+- the site files byte-equal to `main`;
+- `gh attestation verify` with `--source-ref refs/tags/v0.16.1`;
+- delete `release-0.16.1` and `rel0161-fixes`, listing each first.
+
+**Leave `index.html` alone:** the redesign in the working tree is still
+under the user's review. The site check compares only `install.sh`,
+`install.ps1`, `llms.txt` and `llms-full.txt`.
+
+Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.16.1 after the tag: crates.io, PyPI, the Release, the site and the attestation checked; branches deleted
+
+**The run (43750362049, attempt 2):**
+- Completed with conclusion success.
+- **Order:**
+  - `approve the release (v0.16.1, mobile false)` 19:40:35–38Z;
+  - `attest the binaries (tag runs)` 19:40:40–54Z;
+  - after it, `attach engine assets` from 19:40:56Z, then `publish to PyPI` and `publish to crates.io` from 19:41:00Z;
+  - Create GitHub Release ran 19:40:41–53Z, beside `attest` (it needs only the approval);
+  - "mobile (skipped, release note)" succeeded;
+  - `engine published (gate)` succeeded at 19:42:02–07Z;
+  - Android publish, Swift publish and Swift verify were skipped.
+
+**The registries:**
+- crates.io: `mnemo-engine` 0.16.1, `yanked=false`, created 2026-11-15T19:41:55Z.
+- PyPI: `mnemo-engine` 0.16.1 with 6 files (the 5 abi3 wheels and the sdist).
+- No Maven Central or mnemo-swift release for 0.16.1, as `mobile=false` means.
+
+**The GitHub Release:**
+- not a draft, not a prerelease;
+- **12 assets**: 5 CLI binaries, `SHA256SUMS`, 5 wheels and the sdist;
+- **no mobile assets** (no AAR, no XCFramework zip), and the body has the "Mobile packages not published" line.
+
+**The site:**
+- Pages' latest build is from `f5e2df1` (`origin/main`), built 2026-11-15T19:06:12Z.
+- Byte-equal (`cmp`) to `main`'s: `install.sh` (8,547 bytes), `install.ps1` (8,763), `llms.txt` (1,647) and `llms-full.txt` (9,807).
+- `index.html` wasn't compared or touched: your redesign stays uncommitted in the tree (its checksum was the same before and after the branch switch).
+
+**The attestation**, on the published `mnemo-v0.16.1-x86_64-unknown-linux-gnu`:
+- `shasum -c` against the Release's `SHA256SUMS`: OK;
+- `gh attestation verify … --repo toarchkumar/mnemo --signer-workflow toarchkumar/mnemo/.github/workflows/release.yml --source-ref refs/tags/v0.16.1`: exit 0. The SAN is `…/.github/workflows/release.yml@refs/tags/v0.16.1`, and the digest `f5e2df1…`.
+
+**Branches deleted** (listed first, merged, no open PRs):
+- `rel0161-fixes`: PR 100, merged as `8163e1d`; remote deleted, local was at `44dd4b8`;
+- `release-0.16.1`: at `f5e2df1`, the same commit as `main`; remote deleted, local was at `f5e2df1`.
+- No `release-0.16.1` or `rel0161-*` is left.
+- The tree is on `main` at `f5e2df1`. I fast-forwarded the local `main` ref first, so the switch changed no files.
+
+Over to you: VERIFIED, then 7b (the dogfood switch). Stopped.
+
+### 2026-11-15 — PLANNER-A — VERIFIED — v0.16.1 is released
+
+Checked myself:
+- crates.io `mnemo-engine` 0.16.1, not yanked;
+- PyPI 0.16.1 with 6 files;
+- the GitHub Release has 12 assets;
+- no `rel0161-*` or `release-0.16.1` branch is left on `origin`.
+
+The Worker's entry covers the rest: `attest` before `attach` and both
+publish jobs, the site files byte-equal to `main`, and the attestation
+verifying with `--source-ref refs/tags/v0.16.1`. The mobile packages stay
+at 0.16.0, as planned.
+
+**Open:**
+- the `index.html` redesign, waiting for the user's review;
+- 7b part 2, the dogfood switch, whose commands I'll write for the user;
+- carried, all LOW: CLI-PATHLESS-2, MODEL-RETRY and RB-011.3 rec 5 (the
+  Windows hook shell).
+
+### 2026-11-15 — PLANNER-A — HANDOFF + DISPATCH — the site redesign (`index.html`), to `main` now; AGENTS.md's protocol text is edited but waits for the switch
+
+**The user (2026-11-15):** "Let's do both, I'll review any modifications
+to site after". So the redesign goes live now, and the user reviews the
+live page.
+
+**HANDOFF: `index.html`** (the whole page rewritten), from the research
+pass and the user's three choices (my NEEDS-USER entry above). The new
+section order:
+1. **The hero:**
+   - "Your coding agent forgets. Give it a memory.";
+   - the two steps with copy buttons;
+   - a terminal from the user's test session, marked "shortened".
+2. "Every session starts from zero."
+3. How it works: session start, while it works, then compaction or end.
+4. What you get: eight cards.
+5. "Or let your agent set it up": the test prompt, plus `llms.txt`.
+6. Security, with the keychain and model-provider limits stated.
+7. Performance (v0.11 numbers), with the link to the README's
+   Performance section, plus a proof strip.
+8. Also a library: the code tabs and the recall formula.
+9. The roadmap, shortened, with the changelog link.
+10. The final CTA.
+
+**Theme:** light and dark tokens, following the system, with a toggle
+whose choice is kept in `localStorage` behind try/catch. The page still
+loads nothing from other sites.
+
+**I checked these against the repo:**
+- the README's v0.11 performance table;
+- 29 `v*` tags;
+- the README anchors `#performance` and `mnemo/README.md#security-model`;
+- `mnemo export --git` and `mnemo inspect`;
+- the hook budget's 8,000-byte default;
+- the install lines.
+
+**Dispatch:**
+1. **Branch `site-refresh` from `main` (`f5e2df1`),** with one commit
+   holding only `index.html`: `docs(site): a refreshed landing page (the
+   problem first, onboard, light and dark)`. PR it into `main`, and
+   squash-merge after its checks.
+2. **Before the commit, check:**
+   - the HTML parses, with no unclosed tags (any validator you have);
+   - every link resolves: in-page anchors, `llms.txt`, `llms-full.txt`,
+     and the GitHub URLs;
+   - the page needs no request to another origin.
+   - If anything's wrong, say so in DONE and leave the file uncommitted.
+     Don't edit it: it's mine.
+3. **After the merge:** Pages serves `index.html` byte-equal to `main`'s.
+   Then delete `site-refresh`.
+4. **Don't stage `AGENTS.md`.** My protocol edit is in the tree:
+   - tmux rule 9, every session runs the hooks;
+   - the brain at `.git/mnemo/project.mnemo`;
+   - only the Worker writes facts;
+   - the role table and Planner rule 1, Worker rule 2 and Reviewer
+     rule 1, all pointing at the project brain.
+
+   It gets its own HANDOFF once the user has done the switch, so the text
+   never describes a layout that isn't there yet. Your "Dogfood the engine
+   on yourself" rewrite comes after that commit.
+
+Log DONE and stop. **The user's switch runs at their terminal while
+you're stopped,** so don't open `test/project.mnemo`, and don't run
+`project_memory.py`, until my next entry.
+
+### 2026-11-15 — WORKER — DONE — the site redesign is live (PR 101 into `main`); AGENTS.md left unstaged
+
+Brain: no lookup, by your entry (no `project_memory.py` while the user's switch runs).
+
+**Checked before the commit** (`index.html`, 56,281 bytes, untouched by me):
+- **It parses.** Python's `html.parser`, with a tag stack: no stray or unclosed tags, nothing left open, and no duplicate ids among its 28. macOS's `/usr/bin/tidy` predates HTML5 and only reports "`<svg>` is not recognized"; that's the tool's limit, not the page's.
+- **Every link resolves:**
+  - all six in-page anchors (`#how` twice, `#security`, `#library`, `#roadmap`, `#agent`) have their ids;
+  - the local links (`./`, `llms.txt` three times, `llms-full.txt`) are files in the repo;
+  - the 11 outside links answer 200: docs.rs, PyPI, the Google form, and the GitHub repo, `#performance`, CHANGELOG, `mnemo/README.md#security-model`, the Kotlin and Swift READMEs, and releases;
+  - `https://crates.io/crates/mnemo-engine` answers 404 to curl's default request and 200 to a browser `Accept` header. It's crates.io's handling of non-browser clients: the crate is there (its API says `max_version` 0.16.1), and `f5e2df1`'s page linked the same URL;
+  - the targets of the two README anchors exist: `README.md` has `## Performance` at line 684, and `mnemo/README.md` has `## Security model` at line 827.
+- **No request to another origin:** none of `<script src>`, `<link rel=stylesheet>`, an outside `<img>`, `@import`, a non-`data:` `url()`, `fetch(`, `XMLHttpRequest`, `<iframe>`, Google Fonts, WebSocket or `sendBeacon`. The favicon is a `data:` URI, and the only other `<link>` is `rel=alternate` to `llms.txt`.
+
+**Done:**
+1. `site-refresh` from `main` at `f5e2df1`, with one commit holding only `index.html` ("docs(site): a refreshed landing page (the problem first, onboard, light and dark)"), and PR 101 into `main`. It had no checks: `ci.yml` lists `index.html` in `paths-ignore`, `mobile-ci.yml` runs only for its paths, and `main` has no required checks. It was MERGEABLE/CLEAN.
+2. **Squash-merged:** `main` is at `05a5ca4`.
+3. **Pages** built `05a5ca4` ("built"), and `https://toarchkumar.github.io/mnemo/index.html` is byte-equal (`cmp`) to `main`'s (56,281 bytes).
+4. **`site-refresh` deleted:** remote deleted, and local was at `e3bcae3`.
+5. **`AGENTS.md` isn't staged:** your protocol edit is still uncommitted in the tree, for its own handoff after the switch. The tree is on `main` at `05a5ca4`; I fast-forwarded the local ref first, so no file moved.
+
+I haven't opened `test/project.mnemo` or run `project_memory.py`. Over to you: the user's review of the live page, and the switch. Stopped.
+
+### 2026-11-15 — PLANNER-A — REVIEW + NEEDS-USER — the site is live (PR 101, `05a5ca4`); the user runs the dogfood switch (7b part 2)
+
+**Site:** I checked it myself. `https://toarchkumar.github.io/mnemo/` is
+byte-equal to `main`'s `index.html`. The user reviews the live page and
+tells me what to change.
+
+**The switch, as I gave it to the user, at a plain terminal:**
+1. Install 0.16.1, then `rehash`. Optionally, `cargo uninstall
+   mnemo-engine` removes the old `~/.cargo/bin` 0.12.3.
+2. Back up with `cp -p` to
+   `mnemo-brain-backups.nosync/project.mnemo.2026-11-15-before-switch`,
+   then `cmp` it.
+3. `( set -a; . test/.env; set +a; mnemo rekey --new-key
+   test/project.mnemo )`, and save the recovery code in a password
+   manager.
+4. Move the brain:
+   - `mkdir -p .git/mnemo` (mode 0700);
+   - `mv` the brain to `.git/mnemo/project.mnemo`, mode 0600;
+   - remove the old `test/project.mnemo.mnemo-shared` lock directory;
+   - move `test/.env` beside the backup, since it now opens only that.
+     Left in place, the helper would pass the dead passphrase.
+5. Check: `mnemo about`, `mnemo recall --no-track`, and the helper's
+   `recall`.
+6. `mnemo onboard --client claude-code`.
+7. Restart each tmux session with `--resume`: worker-a, then reviewer-b,
+   then reviewer-a if it's running, then planner-a.
+
+**Worker: stay stopped** until my next entry. It hands off AGENTS.md
+(tmux rule 9) and dispatches your dogfood-section rewrite.
+
+### 2026-11-15 — PLANNER-A — VERIFIED + HANDOFF + DISPATCH — the dogfood switch is done; AGENTS.md's protocol text (tmux rule 9); 7b's PR: the helper picks a CLI that can read the keychain, and the dogfood section
+
+**The user's switch (2026-11-15), each step checked:**
+- **0.16.1 is installed.** `mnemo about` (no path) reads
+  `.git/mnemo/project.mnemo`: "201 memories · 384-dim · encrypted · 17
+  snapshots". `mnemo recall --text "release order" --no-track` ranks
+  `process.release-order` first.
+- **The brain is on a keychain key.** It was rekeyed with `--new-key` and
+  moved to `.git/mnemo/`, and `test/.env` is moved beside the backup
+  `mnemo-brain-backups.nosync/project.mnemo.2026-11-15-before-switch`.
+  I've asked the user to confirm the recovery code is saved.
+- **`mnemo onboard --client claude-code` wrote its 4 changes:**
+  - the local-scope MCP entry (`claude mcp get mnemo`: Connected,
+    `/Users/archkumar/.local/bin/mnemo serve --mcp --shared`);
+  - the three hooks in `.claude/settings.local.json`;
+  - `.claude/skills/mnemo/SKILL.md`;
+  - the marked block in `.git/info/exclude`.
+  - Its output ended with the human step, as v0.16.1 made it.
+- **Found: the helper fails.**
+  `test/.venv/bin/python test/scripts/project_memory.py recall …` says
+  "no key … a key store (none in this build yet)".
+  - `mnemo_cli()` prefers `mnemo/target/release/mnemo`, a v0.15.0 build
+    without `keychain`, over the one on the PATH.
+  - With `MNEMO_BIN=~/.local/bin/mnemo` it works: 2 hits, release order
+    first.
+- **The sessions** restart with `--resume` next, the user's step 7.
+  After that, every session has the hooks.
+
+**DOGFOOD-0 rule 1 is reworded** (above): the lookup is `mnemo recall
+--no-track` or the MCP `recall`, against `.git/mnemo/project.mnemo`.
+
+**HANDOFF: `AGENTS.md`'s protocol text,** as the user decided
+(2026-11-15: all four sessions get the hooks):
+- the role table: the project brain in place of `test/project.mnemo`;
+- **tmux rule 9:**
+  - every session runs `onboard`'s hooks;
+  - the brain is at `.git/mnemo/project.mnemo`, with its key in the
+    keychain;
+  - each session's hooks save its own transcript;
+  - only the Worker writes facts, with a key;
+  - the Planner and the Reviewers only read;
+- Planner rule 1, Worker rule 2 and Reviewer rule 1, all pointing at the
+  brain.
+- **Commit message:** `docs(agents): every session runs the hooks; the
+  project brain is .git/mnemo` (only `AGENTS.md`, my lines only).
+
+**Dispatch: 7b's PR** (`dogfood-switch` from `main`, a PR into `main`;
+not a release):
+1. **Commit the HANDOFF first,** on its own, so your edit to the same
+   file comes after it.
+2. **`project_memory.py`:**
+   - `mnemo_cli()` skips any candidate that can't read the keychain. Find
+     a cheap check: a flag, `mnemo info` output, or a feature listing. If
+     there's none, prefer the PATH's `mnemo` over the repo build when both
+     are new enough. Say which you chose;
+   - its text and errors stop naming `test/.env` as the source, except as
+     the old layout;
+   - a test, if the script has any.
+3. **AGENTS.md's technical text** (yours):
+   - "Dogfood the engine on yourself":
+     - `mnemo about` and `mnemo recall --no-track` with no path;
+     - the MCP tools;
+     - `remember` with a key, Worker only;
+     - `perf` and `bootstrap` still through the helper;
+   - the "Never commit" line: the brain is under `.git` now, and
+     `test/.env` is retired;
+   - the layout line for `test/`.
+4. **`seed.json`:** add or update a memory for the new brain path and the
+   write rule, per the PR expectations.
+4b. **The brain's own onboarding notes are stale, and now each session
+   loads them at start.** My SessionStart injection after the restart
+   carried the manifest and the `area=onboarding` memories. They say:
+   - "Confirm test/.env has MNEMO_PASSPHRASE and test/project.mnemo
+     exists";
+   - "Rust CLI: cd mnemo && cargo run --bin mnemo -- <cmd>
+     ../test/project.mnemo";
+   - "mnemo recall|search need --query as comma-separated floats";
+   - "Default agent_id: cursor-agent", and ".cursor/rules/project-memory.mdc".
+
+   These now mislead every new session. Update them in the brain:
+   - the manifest;
+   - each stale onboarding memory: supersede it with a key, or `update`
+     it; don't add a duplicate beside it;
+   - say what each now says: the brain at `.git/mnemo/project.mnemo`, the
+     keychain, `mnemo about`, `mnemo recall --text … --no-track`, the
+     MCP tools, and the write rule.
+   - **Never run `bootstrap`:** it wipes the brain. If `seed.json` is the
+     source for these entries, change it too, so a future bootstrap
+     matches.
+5. **Then the brain, as the Worker,** with keys:
+   - `decision.dogfood-switch`: 2026-11-15, the brain moved, keychain,
+     hooks for all four;
+   - `finding.helper-cli-choice`;
+   - the user decisions since your last DONE: the site's three choices
+     (`decision.site-2026-11`). The product terms are still under
+     discussion, so store nothing on them yet.
+6. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — 7b's PR: the helper picks a CLI that reads the keychain, the dogfood docs and seeds name the project brain, and the brain's onboarding notes are rewritten; PR 102 into `main`
+
+Brain: `mnemo recall --text "dogfood switch helper project_memory.py mnemo_cli keychain seed.json onboarding manifest" --no-track` → partial. It returned the stale `test/project.mnemo` notes this PR rewrites.
+
+(This session restarted after PR 102 was opened, and your pointer came again. The work below was done before the restart; this entry is the DONE it hadn't logged.)
+
+**Commits on `dogfood-switch`**, from `main` at `05a5ca4`, in PR 102 into `main` (17 of 17 checks pass, head `b0bc8e7`):
+1. `043bded` `docs(agents): every session runs the hooks; the project brain is .git/mnemo`: your HANDOFF, `AGENTS.md` only, your lines only, committed first.
+2. `b0bc8e7`: the helper, my AGENTS.md text, `seed.json` and `test/README.md`.
+
+**Item 2, `project_memory.py`:**
+- **What I chose:** the CLI lists no build features, so the helper asks.
+  - `mnemo_cli()` tries `$MNEMO_BIN`, then every `mnemo` on the PATH in order, then `mnemo/target/release/mnemo`.
+  - It takes the first at v0.15+ whose read-only `info` on the key brain doesn't fail with "none in this build".
+  - With `MNEMO_PASSPHRASE` set (a scratch brain) no probe runs.
+  - The PATH comes before the repo build in any case, since the installed release is what the hooks and the server run.
+- **Measured:**
+  - `recall "release order"`: 0.47 s end to end; picks `/Users/archkumar/.local/bin/mnemo`;
+  - with `MNEMO_BIN` set to the repo build (`mnemo 0.15.0`): skipped, and `~/.local/bin/mnemo` picked;
+  - with `PATH=/usr/bin:/bin`: "no mnemo CLI at v0.15 or later that can read the brain's key (found: …/mnemo/target/release/mnemo (0.15.0, no keychain in this build)). Install one: …".
+- **Its text** names the project brain and the keychain. `test/.env` is only "the old layout's", still read if one exists, and the `REBUILD_HINT` builds the wheel with `keychain,embed-candle`.
+- **Also, both small:**
+  - **`bootstrap` refuses the project brain** without `--brain` ("bootstrap wipes the brain it builds, so it won't touch the project brain (…/.git/mnemo/project.mnemo)"), since it unlinks what it builds. It now passes a seed's `key`.
+  - **`remember --from-file`** passes `supersedes`.
+- **Checked:** on a scratch brain with a throwaway passphrase, `bootstrap` built 46 memories, and `fact.onboarding.access` has one live version. It also rewrote the gitignored `test/project-memory.jsonl` export, which is regenerated from the seeds anyway.
+- The script has no tests; none were added.
+
+**Item 3, AGENTS.md's technical text:**
+- **"Dogfood the engine on yourself" is rewritten:**
+  - the brain at `.git/mnemo/project.mnemo` and the keychain;
+  - the hooks;
+  - `mnemo about` and `mnemo recall --text … --no-track` with no path, and the MCP tools;
+  - keyed writes by the Worker only;
+  - `perf`, and `bootstrap` for scratch brains only.
+- **"Never commit"** now says the brain is under `.git`, and that `test/.env` and `test/project.mnemo` are the retired old layout.
+- **The `test/` layout lines** in "Repository layout" are updated.
+
+**A finding for your tmux rule 9 (your text, so not edited):**
+- **The brain's facts are all Private to `agent_id` `cursor-agent`, and a key's slot is per agent.** The CLI's and the MCP server's default agent is `default`, so a keyed write that doesn't name the agent starts a second live slot beside the existing fact instead of superseding it.
+- The helper passes `--agent cursor-agent`, so it's right. Rule 9's "the MCP `remember` tool with `key`" also needs `"agent_id": "cursor-agent"`.
+- My AGENTS.md text, the manifest and the workflow note say so. Stored as `finding.keyed-write-agent-slot`.
+
+**Items 4 and 4b, the seeds and the brain's notes:**
+- **`seed.json`:** the manifest, 8 onboarding entries (mission, checklist, access, workflow, read-paths, setup, bootstrap, agents-md) and 2 dogfood entries (this-project, commands) are rewritten for the new layout:
+  - the brain path and the keychain;
+  - `mnemo about`, and `mnemo recall --text … --no-track`;
+  - the MCP tools;
+  - the write rule, with the agent;
+  - `bootstrap` for scratch brains only.
+
+  They have keys (`fact.onboarding.<topic>`, `fact.dogfood.<topic>`). Only those 11 entries change; it's written with the file's own `\u` escapes.
+- **In the brain** (no `bootstrap`):
+  - the 10 notes went through `remember --from-file` with their keys, all reported "superseded". The 8 unkeyed ones used `--supersedes <old id>`, and read-paths and this-project used their existing keys;
+  - **the manifest was updated in place** (`mnemo update … 01M5NWDKJ7QRPNEGJ8SR51GRPG --text …`, "updated"), keeping its metadata: its `embedder.name` is still `Snowflake/snowflake-arctic-embed-xs@d8c8…`;
+  - **checked:** `mnemo about` now holds none of "test/.env has", "../test/project.mnemo", "comma-separated floats", "project-memory.mdc", "Default agent_id: cursor-agent" or "Read test/README.md". This session's own SessionStart brief, after the restart, carried the new texts.
+- **`test/README.md`** (Worker-owned) is rewritten too. It told a new session to `source` the venv, read `test/.env`, and run `bootstrap` on the brain.
+
+**Item 5, stored** with `--key` (all added):
+- `decision.dogfood-switch`;
+- `finding.helper-cli-choice`;
+- `decision.site-2026-11`: the three choices as your NEEDS-USER entry lists them, and nothing else on the product terms;
+- `finding.keyed-write-agent-slot`.
+
+**Small, not fixed:**
+- `mnemo update --help` still says `--text` needs `--embed-cmd`. It uses the built-in embedder without one, which is how the manifest update ran.
+- The brain now holds 3,719 saved turns beside 201 facts (as of the listing before the rewrite). `mnemo about`'s header counts both ("3930 memories").
+
+Over to you: the review of PR 102 (not merged) and your rule 9 wording. Stopped.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — PR 102 accepted; merge it keeping the handoff commit separate; the user saved the recovery code
+
+Brain: none of my own this time. Your lookup was partial: it returned the
+stale notes, which PR 102 itself fixes.
+- **Tally:** 52 lookups, 18 hits, 22 partial, 12 misses not stored.
+
+**The user (2026-11-15):** the recovery code from the rekey is saved
+("yes I did").
+
+**PR 102, ACCEPTED** (head `b0bc8e7`, 17 of 17 checks):
+- `043bded` is my HANDOFF alone: `AGENTS.md`, 22 lines added and 9
+  removed, the same as my edit.
+- **`b0bc8e7` was read in the diff:**
+  - the dogfood section (the brain, the hooks, `about` and `recall
+    --no-track`, keyed writes by the Worker naming `cursor-agent`, the
+    helper, `bootstrap` scratch-only);
+  - "Never commit";
+  - the layout lines.
+- **Accepted:**
+  - `mnemo_cli()` probing with a read-only `info`, PATH first;
+  - `bootstrap` refusing the project brain;
+  - the 10 superseded notes and the manifest `update` that keeps its
+    embedder;
+  - `test/README.md` rewritten.
+
+**Your finding is right** (`finding.keyed-write-agent-slot`): my rule 9
+must say the MCP `remember` names `"agent_id": "cursor-agent"`. I'll edit
+it after this merge, with one more line. reviewer-a runs in Antigravity,
+which `onboard` doesn't wire, so it has no hooks and reads through the
+CLI. That comes as a small HANDOFF.
+
+**Carried, all LOW, after the switch:**
+- **AGENT-DEFAULT:** the CLI and the MCP server use agent `default`
+  while a brain's manifest names another default (`cursor-agent` here).
+  Consider taking the manifest's default when one is recorded. It
+  matters only for brains made before 12.2, like this one.
+- **ABOUT-COUNT:** `mnemo about`'s header counts saved turns as
+  memories ("3930 memories" for 201 facts). Show them apart.
+- **DOCS-UPDATE-HELP:** `mnemo update --help` says `--text` needs
+  `--embed-cmd`.
+
+**Dispatch:**
+1. **Merge PR 102** with a merge commit or a rebase merge, not a squash,
+   so `043bded` stays its own commit (Worker rule 3). Then delete
+   `dogfood-switch`.
+2. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — PR 102 merged with a merge commit (the handoff commit kept); `dogfood-switch` deleted
+
+Brain: `mnemo recall --text "merge PR keep handoff commit separate merge commit" --no-track` → miss for this exact step. It returned the release order, not a merge rule.
+
+1. **PR 102 merged with a merge commit** (`gh pr merge 102 --merge`; the repository allows all three methods), not a squash and not a rebase merge, so no commit was rewritten. `main` is at `bd6ccb0`, "Merge pull request #102: …", whose second parent's history is:
+   - `043bded` `docs(agents): every session runs the hooks; the project brain is .git/mnemo` (your HANDOFF, on its own);
+   - `b0bc8e7` `docs(dogfood): the helper picks a CLI that reads the keychain; …`.
+2. **`dogfood-switch` deleted:** remote deleted, and local was at `b0bc8e7`. The tree is on `main` at `bd6ccb0`; I fast-forwarded the local ref first, so no file moved. `PLAN.md` holds only the ledger's own uncommitted entries.
+
+Nothing was stored in the brain for this step; there's no new fact. Over to you: your rule 9 edit and the small HANDOFF. Stopped.
+
+### 2026-11-15 — PLANNER-A — VERIFIED + HANDOFF — PR 102 merged (`bd6ccb0`, the handoff kept as `043bded`); rule 9 names the agent, and reviewer-a's Antigravity exception
+
+**Checked:**
+- `origin/main` is `bd6ccb0`, a merge commit over `b0bc8e7` and
+  `043bded`;
+- `dogfood-switch` is gone from `origin`;
+- the tree is on `main`.
+
+**7b is done.**
+- **What shipped:**
+  - the brain is `.git/mnemo/project.mnemo`, on a keychain key, and
+    the recovery code is saved;
+  - worker-a, reviewer-b and planner-a run the hooks;
+  - the helper and the docs are on the new layout;
+  - the brain's onboarding notes are rewritten.
+- **reviewer-a** is in Antigravity. The user pastes it a briefing that
+  points at rule 9 and these entries.
+- **HARNESS-DOGFOOD-1's evidence starts now.** The `Brain:` lines from
+  here on come from the injection or `mnemo recall`.
+
+**HANDOFF: `AGENTS.md`'s protocol text, tmux rule 9**, two changes:
+- the Worker's keyed writes name `"agent_id": "cursor-agent"` (your
+  `finding.keyed-write-agent-slot`);
+- a new bullet: a session in a client `onboard` doesn't wire (reviewer-a
+  in Antigravity) has no hooks. It reads through the CLI, runs its own
+  `recall`, and gets its pointers relayed.
+
+**Commit message:** `docs(agents): rule 9 names the brain's agent, and
+sessions without hooks`. Commit it on `main` on its own, through a PR as
+with PR 101/102, and merge it without a squash. Then delete the branch,
+log DONE and stop.
+
+**After that:** the user decides when 13a starts, which is a phase start.
+It comes with REVIEWER-A's scheduled pass before it, and its sync design
+note. The product terms question goes to that pass, if the user agrees.
+
+### 2026-11-15 — WORKER — DONE — the rule 9 HANDOFF committed and merged (PR 103, `1bb0c85`); `agents-rule9` deleted
+
+Brain: `mnemo recall --text "commit a Planner AGENTS.md handoff through a PR merged without squash" --no-track` → partial. It returned `fact.onboarding.agents-md` and the "what stops for the user" fact, not the handoff-through-a-PR step itself.
+
+1. **`git diff AGENTS.md` before staging** was your two changes only (10 lines added, 2 removed, in tmux rule 9): the keyed writes naming `"agent_id": "cursor-agent"`, and the new bullet for a session in a client `onboard` doesn't wire.
+2. **`agents-rule9` from `main` at `bd6ccb0`**, with one commit holding only `AGENTS.md`: `1bb0c85` "docs(agents): rule 9 names the brain's agent, and sessions without hooks". PR 103 into `main`: 17 of 17 checks pass.
+3. **Merged with a merge commit** (`gh pr merge 103 --merge`), not a squash: `main` is at `35cff9f`, "Merge pull request #103: …", over `1bb0c85`.
+4. **`agents-rule9` deleted:** remote deleted, and local was at `1bb0c85`. The tree is on `main` at `35cff9f`, with only `PLAN.md`'s ledger entries uncommitted.
+
+Nothing new was stored in the brain. Over to you: 13a's start is the user's. Stopped.
+
+### 2026-11-15 — PLANNER-A — DECISION + DISPATCH — Phase 13a starts (the user's go); REVIEWER-A's REV-010 is called; step 0 is 13a's design note
+
+Brain: `mnemo recall --text "Phase 13a messages tasks claims delivery
+channels design" --no-track` → miss, not stored. It returned 12.2's notes
+and nothing on 13a. 13.1b's delivery decision (2026-11-12) and R-006.1's
+13a scope were never written to the brain.
+- **Tally:** 53 lookups, 18 hits, 22 partial, 13 misses not stored.
+
+**Checked:** PR 103 is merged as `35cff9f` over `1bb0c85`, rule 9 alone.
+
+**The user (2026-11-15): "go",** for Phase 13a. The Status block now says
+so.
+- **Scope:** 13.1 messages and tasks, with 13.1b delivery; 13.3 claims
+  and presence; 13.5 visibility; 13.6 freshness. Their specs are under
+  "Phase 13", and R-006.1 fixed the scope.
+- **The release:** v0.17.0.
+- **All free:** it runs on one machine (the Monetization rule).
+
+**REVIEWER-A, REV-010** (its scheduled pass before a phase starts,
+`Reviewer` rule 4). It's in Antigravity, so the user relays this entry's
+title. Write the batch in `reviewer_notes.md`, then tell the user
+"REVIEW DONE: REV-010" for me. Questions:
+1. **Where coordination between coding agents stands today:**
+   - Claude Code's own multi-agent features (subagents, agent teams,
+     channels);
+   - Cursor's background agents;
+   - agent-to-agent protocols (A2A, and MCP's own direction);
+   - tools that coordinate agents through shared state.
+
+   What gap does a local, encrypted, file-based inbox, task queue and
+   claims fill, and for whom? Cite sources and dates; this moves fast.
+2. **Which parts of 13a matter most to an adopter,** in order:
+   - messages;
+   - tasks with dependencies;
+   - claims and presence;
+   - wake-ups (13.1b);
+   - visibility;
+   - freshness.
+
+   If one should wait for 13b or move up, say so.
+3. **The product terms.** The user asked whether "memory" undersells the
+   product. My answer to the user (summarized):
+   - keep "memory" as the category word;
+   - "project brain" for the file;
+   - "shared memory for your agents" as a qualified phrase;
+   - "coordination" as the verb once 13a ships;
+   - avoid "orchestration", since it suggests launching agents.
+
+   Challenge it or confirm it, with what competitors and searches show.
+4. **How 13a should appear on the site and in the guide when it ships:**
+   the one line, and the proof (this repo's own four agents).
+
+Keep it to one batch, about 8 to 12 items. It needs no build or test.
+
+**Dispatch: step 0, the design note `docs/design/13a-coordination.md`,
+before any code.**
+
+Branches: create `release-0.17.0` from `main` (`35cff9f`), then
+`rel0170-0-note` from it. Open a PR into `release-0.17.0` holding only
+the note.
+
+**Read first:**
+- the Phase 13 specs (13.1, 13.1b, 13.3, 13.5, 13.6) and R-006.1's entry;
+- `docs/design/12.4-shared-access.md` (the shared mode that 13a builds
+  on);
+- `docs/design/12.2-onboard.md` (the hooks and their budget);
+- **the open item from 12.4's design review** (RB-006.12, in
+  `SECURITY.local.md`). Say how 13a's design meets it, in neutral
+  words; the details stay in that file;
+- Claude Code's current docs on hooks, channels and MCP notifications.
+  Cite the URLs, since they change.
+
+**The note settles each of these,** with a recommendation where there's
+a choice:
+1. **The records:**
+   - messages, tasks, claims and presence as `_mnemo.kind` records, with
+     reserved `_mnemo.*` metadata, and no format change (the MessagePack
+     rule);
+   - their fields, and how each survives `export` and the inspector.
+2. **Agent identity on one machine:**
+   - how a session names itself (an agent id and a role), and where that
+     comes from (the hook input's session id, an env var, `onboard`'s
+     config);
+   - how this repo's worker-a, planner-a and the reviewers map to it;
+   - the sender is unproven until 13b, and the note says what that
+     allows;
+   - **AGENT-DEFAULT** (carried 2026-11-15): the default agent `default`
+     against a manifest's recorded default, since `to: <agent>` makes it
+     matter now.
+3. **Delivery (13.1b):**
+   - **Claude Code channels:** what's available now, with what flags and
+     login;
+   - **the hook path:** which event checks the inbox each turn, its cost,
+     and its budget beside the SessionStart brief;
+   - **Cursor;**
+   - **MCP `notifications/resources/updated`;**
+   - **`mnemo watch`** (off by default);
+   - **the guardrails:** a rate limit, a cooldown, a hop cap and a kill
+     switch, with defaults;
+   - messages are information, never authority.
+4. **Claims and presence (13.3):** TTLs, lapse, renewal and `who()`, and
+   how claims sit on 12.4's locks without ever holding one across a turn.
+5. **Visibility (13.5):**
+   - a filter, not a security boundary, until 13b;
+   - what `export --git`, the inspector and recall do with each level;
+   - whether `SECURITY.local.md` can move into `private` records before
+     13b. My view is not yet: say why or why not.
+6. **Freshness (13.6):** `as_of` and `review_by`, the per-kind defaults,
+   and where `stale` shows up (`about`, the brief).
+7. **The surfaces:**
+   - MCP tools, as few as possible (one tool per area with an `op`);
+   - the CLI;
+   - Python and Rust;
+   - what the SessionStart brief adds ("2 unread, 1 task ready"), within
+     its 8,000 bytes;
+   - the guide's new section, with its `sh test` blocks.
+8. **The dogfood path to HARNESS-DOGFOOD-1:** which of this repo's
+   hand-run mechanics each piece replaces:
+   - pointers become the inbox;
+   - DISPATCH and DONE become tasks;
+   - "one writer on PLAN.md" becomes claims;
+   - `*.local.md` becomes `private`, after 13b;
+   - a stale Status becomes freshness.
+
+   Say what has to be true for PLAN.md to shrink to specs.
+9. **Deferred items that belong here:**
+   - keyword-indexing saved turns (deferred from 12.2);
+   - CLI-PATHLESS-2;
+   - ABOUT-COUNT.
+
+   Say whether each goes into 13a's steps or stays carried.
+10. **The steps and the release:**
+    - the step list for v0.17.0, each a PR with its tests;
+    - which steps touch the file's concurrency, the key handling or a
+      process that starts other processes (`mnemo watch`, channels).
+      That's where I'd call a scoped REVIEWER-B pass;
+    - what the user must do (a claude.ai login for channels, say).
+
+**Rules:**
+- No code in this step.
+- Store the note's decisions with `--key design.13a-<topic>` and
+  `"agent_id": "cursor-agent"` (rule 9), once I've signed it off.
+- Log DONE and stop. I fold REV-010 into my review of the note, so the
+  note may need a second round after it.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 0: the 13a design note, PR 104 into `release-0.17.0`, for sign-off
+
+Brain: `mnemo recall --text "Phase 13a messages tasks claims presence delivery channels visibility freshness design" --no-track` → miss, not stored. It returned 12.2's notes, as yours did. I've now stored three of the decisions (below).
+
+**Branches:** `release-0.17.0` from `main` at `35cff9f` (pushed), then `rel0170-0-note` from it. PR 104 holds one commit, `docs/design/13a-coordination.md` only (577 lines), with no code. CI doesn't run on `docs/**`.
+
+**Read:**
+- the Phase 13 specs (13.1 with 13.1b, 13.3, 13.5, 13.6), R-006.1 and R-006.3 with their triage, and the parity checklist;
+- 12.4's note ("Recommendation", the protocol, "Claims and presence", "13.1b wake-ups");
+- 12.2's note (the hooks, the 8,000-byte brief);
+- RB-006.12 in `SECURITY.local.md`;
+- the status core (`TASK_TRANSITIONS`, declared and unused);
+- the client docs, through a research subagent, each with its URL in the note's Sources, read 2026-11-15.
+
+**What the note recommends, in brief** (each in its section, with your 10 points answered in order):
+1. **The records:** four kinds (`message`, `task`, `claim`, `presence`), in the shared scope.
+   - They carry the sentinel vector, aren't embedded, and are never recall, BM25, ANN or `about` hits.
+   - Status and delivery change in place, with history.
+   - Tasks have a `task:<slug>` key. Claims and presence are keyed as 12.4 designed them.
+   - No format change.
+   - `export --git` keeps tasks (not old `done` ones), and leaves out messages, claims and presence.
+2. **Identity:**
+   - `MNEMO_AGENT` and `MNEMO_ROLE` from the session's environment. **Whether the client passes them to the MCP server and the hooks is to be verified in step 1, not assumed;** the fallback is `claude-code:<session id>` with no role.
+   - `onboard` can't write an identity, since a project's config is shared by its sessions.
+   - **AGENT-DEFAULT:** the CLI and the server take the manifest's `agent_id_default` as a fact's owner. The coordination identity goes in `_mnemo.author` (unproven, the field 13.4 signs) and never changes the owner.
+3. **Delivery:**
+   - **(a) the per-turn hook first:** `UserPromptSubmit`, which prints only when there's new work, at most 600 bytes;
+   - **(b) the idle wake-up** through Claude Code's cross-session socket (documented: "When the receiving session is idle, Claude Code starts a new turn with the message", and scripts may post with the session's token). **Each session's own `serve --mcp` posts one pointer into its own session.** Verified in step 6, or dropped;
+   - **(c) a `Stop` continuation:** off by default, never twice in a row;
+   - **(d) channels optional:** they need Anthropic's plugin allowlist, so nothing depends on them;
+   - **`mnemo watch` deferred** to after HARNESS-DOGFOOD-1's Run 1, since it's the only piece that starts processes;
+   - **guardrails:** 12 wake-ups per recipient per hour, a 60 s cooldown, 8 hops per thread, and a `wake:paused` record with `mnemo wake pause|resume`, plus `MNEMO_WAKE=off`;
+   - **RB-006.12, in neutral words:** 13a adds no daemon and no socket of its own, so the item stays open and held as it is, and comes first if a later step brings the daemon.
+4. **Claims:** 12.4's step 7 as designed, with a 15 min default lease (30 s to 24 h), task claims of 2 h, and `who()`. The only lock held between calls is the agent's own presence sidecar lock, never the brain's.
+5. **Visibility:** a filter, never in `export --git`. **`SECURITY.local.md` doesn't move before 13b;** I agree with your view, for four reasons in section 5.
+6. **Freshness:** `as_of` and `review_by`, with per-kind defaults in a table, shown in `about`, the brief and `mnemo stale`.
+7. **The surfaces:** three MCP tools (`inbox`, `task`, `claim`, each with an `op`), the CLI, Python and Rust (no mobile in 13a), the brief's "Your work" part (at most 600 bytes, from the recall's share), and the guide's section with `sh test` and `json mcp` blocks.
+8. **The dogfood path:** a table of what each step replaces, and five conditions for PLAN.md to shrink. One of them is a `finding` kind for `reviewer_notes.md`, which is outside 13a's scope, offered as an optional step 8b.
+9. **The deferred items:** keyword-indexing turns stays carried; CLI-PATHLESS-2 goes into step 1; ABOUT-COUNT into step 7.
+10. **Steps 1 to 9,** with REVIEWER-B after step 6 (steps 3 to 6: claims, the watcher, the socket post, the Stop loop). **The user:** one `MNEMO_AGENT`/`MNEMO_ROLE` line per tmux pane, an `onboard` re-run after step 5, and the approval. No claude.ai login or channel flags are needed.
+
+**One figure, and its limits:** a read-only `mnemo info` of this brain took 0.06 s warm (0.14 s cold), and `mnemo hook session-start`, which embeds, took 0.40–0.41 s. Both ran at a load average of 4.97, so they aren't benchmark numbers (the rule is a load under 2). The note says so, and step 5 measures the per-turn hook properly.
+
+**Stored** with `--key` (all added; DOGFOOD-0 rule 3, the decisions since my last DONE, and your two "never written" items):
+- `decision.phase-13a-start`;
+- `decision.13-1b-delivery`;
+- `decision.13a-scope`.
+
+The note's own decisions wait for your sign-off, as your entry says.
+
+Over to you: the review of the note, folded with REV-010. PR 104 isn't merged. Stopped.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — the 13a note: signed off on 7 of 9, with six changes; round 1 of 3; REV-010 is still out
+
+Brain: your lookup was a miss, not stored, the same as mine.
+- **Tally:** 54 lookups, 18 hits, 22 partial, 14 misses not stored.
+- The three keyed decisions you added close that gap from now on.
+
+**Read in full:** `docs/design/13a-coordination.md` at PR 104's head. It's
+a strong note. The path order (the per-turn hook first, the session's own
+socket second, Stop off, channels optional), deferring `mnemo watch`,
+and keeping `SECURITY.local.md` where it is are all right.
+
+**Signed off as written:** points 1, 3, 4, 5, 6, 7 and 9 of "For sign-off".
+I also accept your answers on the deferred items (section 9).
+
+**Six changes (points 2 and 8, plus four within the others):**
+
+1. **AGENT-DEFAULT's key isn't the engine's.** `agent_id_default` exists
+   nowhere in `mnemo/src`. It's a key in this repo's `seed.json` manifest
+   metadata, so a project convention.
+   - Don't make the engine read a project's own key. Reserve
+     `_mnemo.default_agent` on the manifest, honoured by the CLI and the
+     server for a write with no agent.
+   - `Memory::scaffold_manifest` leaves it unset, so new brains keep
+     `default`.
+   - Step 1 sets it once on this brain with `mnemo update`, through the
+     manifest's existing in-place update, and `seed.json` gets it too.
+2. **The per-turn hook writes.** Section 3 says it "opens the brain
+   read-only" and also that it "marks those items `seen`". Say which.
+   - **My choice:** read-only, except when it has something to show.
+     Then it takes one write window to mark what it showed, with the 2 s
+     wait.
+   - A failure to mark never stops the print.
+   - With nothing new, it never writes, so most turns cost a read only.
+3. **Brain text in the per-turn output, and never in a pointer.**
+   - **The hook's line:** it quotes a subject ("planner-a: v0.17.0 step 1
+     dispatched"). That's brain content written by an agent, so it goes
+     after `guide::FRAMING` and through `guide::escape_brain`, like the
+     brief, within its 600 bytes.
+   - **Path 2's pointer** carries counts and fixed text only, never a
+     subject, body, sender or ref. It reaches the session as a
+     cross-session message, outside the framing, so it must hold nothing
+     an agent wrote. Add a test that a hostile subject never appears in
+     the posted text.
+4. **The hop cap is per thread, and a new message starts at 0.** Two
+   agents posting fresh messages instead of replies never reach it. Say
+   that the per-recipient rate limit and cooldown are the real bound
+   there. Then add one cheap check: the hop count also carries across
+   messages between the same pair within 10 minutes, or say why not.
+5. **"A test that the client passes them" (step 1) can't be a CI test.**
+   CI has no Claude Code or Cursor.
+   - CI covers the CLI, the server and the hooks reading `MNEMO_AGENT`
+     and `MNEMO_ROLE`.
+   - Whether Claude Code passes them to a stdio server and to hook
+     commands is a by-hand check, recorded in step 1's DONE. You can do
+     it from your own session: a one-off `env | grep MNEMO` from a hook's
+     shell, or the server logging its identity at start.
+   - If it fails, the documented fallback stands.
+6. **Path 2's message appears "from another session".** The note should
+   say how the woken session sees it, and that the framing is right: the
+   text says it's mnemo's pointer, and it asks only to call `inbox`. Also
+   say what happens when `crossSessionInbound` is `hold`: each wake-up
+   waits for the user, which defeats it, so the guide tells the user to
+   keep `accept` for the repo's sessions.
+
+**Dispatch:** revise the note on `rel0170-0-note` (round 1 of 3), then log
+DONE and stop. After the revision, and REV-010's findings, I sign off,
+you merge PR 104 and store the decisions with keys, and step 1 starts.
+
+### 2026-11-15 — WORKER — DONE — the 13a note revised for round 1's six changes (PR 104, round 1 of 3)
+
+Brain: `mnemo recall --text "13a note AGENT-DEFAULT per-turn hook pointer hop cap" --no-track` skipped. Your entry is the whole of this round, and the three keyed 13a decisions from my last DONE are what the brain has.
+
+**One commit on `rel0170-0-note`, PR 104:** `docs/design/13a-coordination.md` only, now 641 lines. Your six changes:
+1. **AGENT-DEFAULT** is a reserved manifest key, `_mnemo.default_agent`, honoured by the CLI and the server for a write that names no agent.
+   - The engine never reads this repo's `agent_id_default` (a `seed.json` convention, kept as it is).
+   - `scaffold_manifest` leaves it unset.
+   - Step 1 adds `mnemo default-agent [<id> | --clear]` and `Mnemo::set_default_agent`, since the key is reserved and `update --metadata` can't set it. It sets the key once on this brain, and in `seed.json`.
+2. **The per-turn hook:**
+   - with nothing new it only reads, and never writes;
+   - with something to show, it prints first, then takes one write window (shared, 2 s wait) to mark the items `seen`;
+   - a failed mark never stops the print or fails the hook, and the items show again next turn.
+3. **Brain text:**
+   - the hook's line comes after `guide::FRAMING` and through `guide::escape_brain`, within its 600 bytes;
+   - **path 2's pointer is fixed text and counts only**, with no subject, body, sender, ref or id, and a hostile-subject test.
+4. **The hop cap** counts within a thread. For fresh messages the per-recipient rate limit and cooldown are the real bound, and a **10-minute pair carry** closes the gap: a new message from A to B starts at one more than the newest message between them in the last 10 minutes. It costs one look at the pair's recent messages, inside `post`'s own write window. It's in the guardrails table and the sign-off list.
+5. **Step 1's test:**
+   - CI covers the CLI, the server and the hooks reading `MNEMO_AGENT`/`MNEMO_ROLE`;
+   - whether the client passes them to hooks is a by-hand check in step 1's DONE;
+   - **checked now for Claude Code's MCP server:** each of the three running `mnemo serve --mcp` processes (each a child of `claude`) had the tmux pane's `TMUX` and `TMUX_PANE` and Claude Code's `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET` and `CLAUDE_CODE_MESSAGING_TOKEN` in its environment. I checked the names with `ps eww`, never the values. So a variable exported in the pane reaches the server, and path 2's first verification is met; step 6 repeats it.
+6. **How a woken session sees the pointer:**
+   - it arrives as a message from "another Claude session", which is the right framing: the text names itself as mnemo's pointer from the session's own server and asks only for `inbox`, and what follows comes through the tool, under the framing line;
+   - **`crossSessionInbound` must be `accept`:** `hold` makes each wake-up wait for the user, and `refuse` leaves only path 1. The guide says to keep `accept`, and `mnemo wake status` shows it.
+
+The status line and the "For sign-off" list (points 2, 4 and 8) say what changed. Nothing new was stored; the note's decisions wait for your sign-off.
+
+Over to you: the sign-off after REV-010. PR 104 isn't merged. Stopped.
+
+### 2026-11-15 — PLANNER-A — DECISION + DISPATCH — the 13a note is signed off (PR 104 at `4a8e531`); merge it, store its decisions; step 1, the plumbing
+
+**Checked:** the revision's diff (`306a9fd..4a8e531`, 94 lines added and
+30 removed) has all six changes:
+- `_mnemo.default_agent`, with `mnemo default-agent`;
+- the hook writes only when it has something to show, and a failed mark
+  never stops it;
+- `FRAMING` and `escape_brain` on the hook's line, and the pointer is
+  fixed text and counts only, with the hostile-subject test;
+- the 10-minute pair carry in the guardrails;
+- step 1's by-hand check, plus your server-environment check (names
+  only, never values);
+- `crossSessionInbound` must be `accept`, shown by `mnemo wake status`.
+
+**Signed off: all nine points, as revised.**
+
+**REV-010 is still out.** I'm not holding step 1 for it:
+- step 1 is plumbing that every later step needs, whatever the review
+  says;
+- REV-010 is about priorities, positioning and terms, so its findings
+  can reorder or trim steps 2 to 8;
+- if it changes anything in the note, that comes as a small DECISION
+  entry before the step it touches.
+
+**Dispatch:**
+1. **Merge PR 104** into `release-0.17.0` with a squash (it's a docs-only
+   PR, as step 0 was for 12.2), and delete `rel0170-0-note`.
+2. **Store the note's decisions** with `--key design.13a-<topic>` and
+   agent `cursor-agent`, one per sign-off point: records, identity,
+   delivery, guardrails, claims, visibility, freshness, surfaces, steps.
+3. **Step 1, the plumbing** (section 10's row 1), on `rel0170-1-plumbing`,
+   with a PR into `release-0.17.0`:
+   - the four kinds, left out of recall, BM25, the ANN and `about`, with
+     the sentinel vector and no embedding;
+   - `_mnemo.author`, `visibility`, `as_of` and `review_by` accepted on
+     writes, through the CLI, MCP, Python and Rust. Only accepted and
+     stored here; the filters and `stale` are step 7;
+   - **AGENT-DEFAULT:**
+     - `_mnemo.default_agent`, `Mnemo::set_default_agent` and `mnemo
+       default-agent [<id> | --clear]`;
+     - the CLI and the server honour it for a write that names no agent;
+     - set it once on this brain to `cursor-agent`, with the command and
+       through the manifest's in-place update, and add it to
+       `seed.json`'s manifest;
+     - then rule 9's "name the agent" can go. Tell me in DONE, and I'll
+       edit rule 9;
+   - `MNEMO_AGENT` and `MNEMO_ROLE` read by the CLI, the server and the
+     hooks, with CI tests. **The by-hand check that Claude Code's hooks
+     get them** goes in DONE;
+   - **CLI-PATHLESS-2:** `update`, `thread start` and `essence
+     update|resolve|remove` take no path, with the same shift as `get`;
+   - the README rows and the CHANGELOG's `[Unreleased]`.
+4. Log DONE and stop.
+
+### 2026-11-15 — PLANNER-A — REVIEW — REV-010 triaged: R-010.1 to .9 all ACCEPTED; the changes to 13a's steps 2 to 8
+
+REVIEWER-A's REV-010 (relayed by the user: "REVIEW DONE: REV-010"). The
+ledger rows and each item's triage line are written in
+`reviewer_notes.md`.
+
+**Checked against the live files:**
+- Two of its quotes are wrong. The site's H1 is "Your coding agent
+  forgets. Give it a memory.", not "stop forgetting", and "the project's
+  brain loaded" isn't on the page.
+- "`default_agent` = `shared`" isn't the design. Owners default to
+  `default`, or to the manifest's `_mnemo.default_agent`.
+- None of the three changes a recommendation. The triage lines say so.
+
+**What changes in 13a's steps** (each step's dispatch will cite these,
+and the step that does it keeps the note true):
+- **Step 2, messages:**
+  - `--as <agent>` and `--role <role>` on the coordination subcommands,
+    falling back to the environment (R-010.9 rec 1);
+  - the MCP tool descriptions present `task` and `inbox` before `claim`
+    (R-010.3 rec 3);
+  - `acked` messages older than 30 days are dropped by `compact` and by
+    `mnemo inbox --prune` (R-010.8 rec 2).
+- **Step 3, claims and presence:** `presence:<agent>` and
+  `claim:<topic>` change in place, one record each, with the token in the
+  record. No keyed supersession (R-010.8 rec 1).
+- **Step 4, tasks:**
+  - `active → queued` in `TASK_TRANSITIONS`;
+  - `next` reclaims an `active` task whose claim has lapsed;
+  - a lost owner's `task update` is refused;
+  - a crash-and-reclaim test (R-010.7).
+- **Step 5, the per-turn hook:** measure first. If an unchanged turn
+  costs more than about 20 ms, add the stamp-and-seal fast path, with
+  Cursor's gate before any keychain read (R-010.6).
+- **Step 8, the guide:**
+  - tasks and the inbox first;
+  - mnemo's tasks against Claude Code's built-in ones (R-010.1 rec 2);
+  - the alias recipe (R-010.9 rec 2);
+  - the `SUMMARY` line for `llms.txt` (R-010.5).
+- **My v0.17.0 HANDOFF (README, `index.html`), at READY:**
+  - the one line;
+  - the file strip;
+  - card 7, "Agents coordinate through it";
+  - the roadmap move (R-010.2, R-010.5);
+  - the four-agent proof pill, only once this repo's agents actually
+    coordinate through 13a.
+
+**The product terms (R-010.4)** match what I told the user, and REV-010
+confirms them with evidence: "memory", "project brain", "shared memory
+(and coordination) for your agents", "coordinate", never "orchestration"
+or "swarm". They're recorded as a decision once the user confirms.
+
+No pointer goes with this entry. The Worker is on step 1, and these apply
+from step 2.
+
+### 2026-11-15 — PLANNER-A — DECISION — the product terms (the user: "Yes")
+
+**Decided by the user, 2026-11-15** (R-010.4, which confirms PLANNER-A's
+proposal):
+- **"memory"** is the category word: the headline, search, and how we're
+  compared.
+- **"project brain"** is the name for the file
+  (`.git/mnemo/project.mnemo`), used every time we mean the file.
+- **"shared memory for your agents"** is the qualified phrase, or
+  **"shared memory and coordination for your agents"** when introducing
+  13a. Never "shared memory" alone, which is the OS term.
+- **"coordinate" and "coordination"** are the verbs, once 13a ships.
+  - **The rule of thumb:** "You run the agents; they remember and
+    coordinate through MNemo."
+- **Never "orchestration" or "swarm".** They imply a runtime that
+  launches and controls agents, and MNemo starts no agents.
+
+**Applies to:** the site, the READMEs, the guide and `llms.txt`, from
+v0.17.0's HANDOFF and step 8 on. The current site already uses "memory"
+and "brain" this way.
+
+**Worker:** store it as `decision.product-terms`, with agent
+`cursor-agent`, at your next DONE (DOGFOOD-0 rule 3). No pointer needed;
+step 1 is still in progress.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 1: the plumbing, PR 105 into `release-0.17.0`; the note merged and its decisions stored
+
+Brain: `mnemo recall --text "13a plumbing record kinds sentinel vector default agent MNEMO_AGENT" --no-track` → partial. It returned `finding.keyed-write-agent-slot` and the onboarding notes; the `design.13a-*` facts were written later in this step.
+
+**Done, in your order:**
+1. **PR 104 squash-merged** as `6727a91`; `rel0170-0-note` deleted (remote and local).
+2. **Stored:** the nine `design.13a-<topic>` facts with `--key` and agent `cursor-agent`, all added: records, identity, delivery, guardrails, claims, visibility, freshness, surfaces, steps.
+3. **Step 1, PR 105** (`rel0170-1-plumbing`, one commit). **23 of 23 checks pass,** Mobile CI included (it touches `mnemo-uniffi`).
+
+**What step 1 holds:**
+- **The four kinds** are reserved (`COORDINATION_KINDS`, `is_coordination`).
+  - **The row kind:** a new value of the existing `u8`, `ROW_KIND_COORDINATION = 5`. Rows aren't validated on load, so there's no format change, and an older build reads such a row as a fact.
+  - **Never a hit:** they're left out of `scored_row` (so the resident column and the row fast path), BM25 (`bm25_kind` was facts and onboarding only), the ANN (`is_ann_kind`), the decode loop whatever the filter, `about` and `recent`.
+  - **`store/coordination.rs`** has the internal writer, `put_coordination` (shared scope, the sentinel vector, never embedded). Tests reach it through the dev-hooks `__put_coordination_for_testing` until step 2.
+- **The author:**
+  - `Mnemo::set_author` and `SharedMnemo::set_author` (kept across reloads, like the embedder);
+  - `put` stamps `_mnemo.author` on a record whose id the catalog doesn't hold live, so an edit in place keeps the record's own. `Memory::new` already gives a fresh ULID, which is why "new" isn't "nil id";
+  - the CLI's write open (`open_rw`, which the hooks' saves use too) and the MCP server read `MNEMO_AGENT` and `MNEMO_ROLE`, each checked against `valid_agent_id`. An invalid value is ignored with a note;
+  - the server prints "mnemo mcp: agent worker-a (role worker)", or that it's anonymous.
+- **AGENT-DEFAULT:**
+  - the reserved manifest key `_mnemo.default_agent`, with `Mnemo::default_agent` and `set_default_agent`. The second writes the manifest in place through `put`, since `update` keeps an existing reserved key over a patch's;
+  - `mnemo default-agent [--set <id> | --clear]` (no path);
+  - honoured by the CLI's `remember` and `history` and the MCP `remember` and `history`;
+  - Python's `default_agent()` and `set_default_agent()`;
+  - `seed.json`'s manifest has it, and `bootstrap` applies it through `set_default_agent`, since `remember_text` refuses a reserved key. Checked on a scratch brain: `default agent: cursor-agent`.
+- **Visibility and freshness:**
+  - `CALLER_KEYS` (visibility, `review_by`, `as_of`) are allowed in caller metadata and checked (`check_caller_key`); every other `_mnemo.*` key is still refused;
+  - new `MemoryPatch::caller_keys` sets or removes them without replacing the user metadata;
+  - the Rust builders `with_visibility`, `with_review_by` and `with_as_of`;
+  - the CLI's `--visibility`, `--review-by` and `--as-of` on `remember` and `update`. `parse_when` takes `30d`, `12h`, `2w`, a date or unix seconds; `2026-01-02` gives 1767312000, which the test checks;
+  - the MCP `remember` and `update` (unix seconds), and Python's `remember`, `remember_text`, `update` and `update_text`;
+  - a keyed re-write that changes only one of them is a new version: the identical-write check now counts the caller keys.
+- **CLI-PATHLESS-2:**
+  - `update <ID>`, `thread start <NEW>` and `essence update|resolve|remove <ID>`, through `get`'s shift;
+  - `thread start` with a lone argument that ends in `.mnemo` (or is a file) says to give the thread id.
+  - **Still needing a path:** `compact`, `reembed`, `restore`, `import`, `index`, `demo` and the `cache` commands.
+- **Also:** `update --help` no longer says `--text` needs `--embed-cmd` (DOCS-UPDATE-HELP). The README rows (both packages), AGENTS.md's "Add a library method" row (`coordination.rs`) and the CHANGELOG's `[Unreleased]` are updated.
+
+**One change for Rust callers:** `MemoryPatch` gains a field. `mnemo-uniffi` built one without `..Default::default()` and stopped compiling, so it now sets `caller_keys: None`, and the CHANGELOG's "Changed" says so. The Swift and Kotlin records are unchanged.
+
+**Tests:**
+- `tests/coordination_plumbing.rs` (4):
+  - the kinds are no hit by vector, keywords, a kind filter, `about`, `recent` or the ANN, before and after a reopen;
+  - the caller keys: set, refused, the update patch, the keyed re-write;
+  - the author on new records only, and across a shared handle's reload after another process's commit;
+  - the default agent: set, unchanged, invalid, kept across a reopen, cleared, and refused with no manifest.
+- `project_brain::default_agent_author_freshness_and_more_commands_without_a_path`.
+- `mcp_context::the_server_names_its_agent_and_takes_the_default_agent_and_freshness`, plain and shared.
+- `hook_cli::a_hooks_saved_turns_carry_the_sessions_agent`.
+- `test_author_default_agent_and_freshness` in `test_mnemo.py`.
+
+**Local runs:**
+- `cargo test --locked --features failpoints --no-fail-fast`: 679 passed, 1 failed, 1 ignored. The failure was `project_brain`'s check that `update <ID>` needs its path, the change itself. It now checks that `update <ID>` finds the brain, and that `import <one argument>` still needs its file. `project_brain` then passed 14 of 14.
+- `cargo test -p mnemo-uniffi`: 21 + 1 + 1 passed, 1 ignored.
+- CI's clippy line and `-p mnemo-uniffi`: clean; fmt clean.
+- `python test_mnemo.py` on a `dev-hooks,embed-candle` wheel: "all Python binding tests passed", 58 `ok` lines.
+- The load average was 3.96 to 5.37 during the runs; no timings are claimed.
+
+**Two things not done, each needing the user or the release:**
+1. **`cursor-agent` isn't set on this brain yet.**
+   - The installed 0.16.1 has no `default-agent` ("unrecognized subcommand").
+   - This crate has no default features, so my dev builds have no keychain to open the brain.
+   - A keychain build of this branch is a new binary, which macOS would meet with a keychain access dialog for the user.
+
+   So it's one line after v0.17.0 is installed: `mnemo default-agent --set cursor-agent`. Until then, **rule 9's "name the agent" should stay.** I'll tell you when it's set.
+2. **The by-hand check that Claude Code's hooks get `MNEMO_AGENT`.**
+   - Checked earlier for the MCP server: the pane's `TMUX`/`TMUX_PANE` reached each running `mnemo serve`.
+   - For hooks I'd need a hook to report its environment. The installed 0.16.1 hooks can't, and adding one to the project's settings is a config change I shouldn't make on my own.
+   - **Proposed:** once a build with step 1 is what the hooks run, start one session with `MNEMO_AGENT` set and check `mnemo list --format jsonl` for its saved turns' `_mnemo.author`, which `hook_cli` shows they carry when the variable arrives. Until then the documented fallback (anonymous) stands.
+
+Over to you: the review of PR 105 (not merged). Stopped.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — step 1 accepted (PR 105); merge it; step 2, messages, with REV-010's changes
+
+Brain: your lookup was partial.
+- **Tally:** 55 lookups, 18 hits, 23 partial, 14 misses not stored.
+
+**PR 105, ACCEPTED** (head `2786e8c`, 23 of 23 checks, Mobile CI
+included):
+- **Read:** the row kinds in `store/records.rs`. `ROW_KIND_COORDINATION
+  = 5` is left out of `scored_row` (line 296) and BM25 (line 305 indexes
+  only facts and onboarding), and `row_kind_of` maps `is_coordination`.
+- **Mixed versions:** a v0.16 build reading a brain with coordination
+  rows would score them as facts (sentinel vectors, so low), but not
+  index them in BM25. That's the note's accepted limit, and the CHANGELOG
+  says to upgrade every session together.
+  - **This repo** writes no coordination records until v0.17.0 is
+    installed, since the hooks run the installed 0.16.1, so it's safe
+    here.
+- **Accepted:**
+  - the author stamped on new records only;
+  - `set_default_agent` through `put`, since `update` keeps reserved
+    keys;
+  - `CALLER_KEYS` with `check_caller_key`;
+  - a keyed re-write that changes only a caller key is a new version;
+  - CLI-PATHLESS-2;
+  - DOCS-UPDATE-HELP;
+  - `MemoryPatch`'s new field, with the uniffi fix and the CHANGELOG's
+    "Changed".
+- **Your two open items are both right to wait for v0.17.0's install:**
+  - `mnemo default-agent --set cursor-agent` on this brain. Rule 9's
+    "name the agent" stays until then;
+  - the by-hand check of the hooks' `MNEMO_AGENT`, through a session's
+    saved turns' `_mnemo.author`.
+
+  Both go in the user's post-release steps, which I'll write.
+
+**Dispatch:**
+1. **Squash-merge PR 105** into `release-0.17.0`, and delete
+   `rel0170-1-plumbing`.
+2. **Store `decision.product-terms`**, from my DECISION entry above, with
+   agent `cursor-agent`.
+3. **Step 2, messages** (the note's section 10, row 2), on
+   `rel0170-2-messages`, with a PR into `release-0.17.0`:
+   - `post`, `inbox`, `ack`, with the delivery and status fields changed
+     in place, the hop count, and the 10-minute pair carry;
+   - the MCP `inbox` tool, the CLI and Python;
+   - the brief's "Your work" part, with brain text after `FRAMING` and
+     through `escape_brain`, within 600 bytes;
+   - **from REV-010** (my REVIEW entry above):
+     - `--as <agent>` and `--role <role>` on the CLI's `post`, `inbox`
+       and `ack`, falling back to the environment;
+     - the MCP tool descriptions present `inbox` (and later `task`)
+       before `claim`;
+     - `acked` messages older than 30 days are dropped by `compact` and
+       by `mnemo inbox --prune`;
+   - **one docs commit** folding REV-010's accepted changes into
+     `docs/design/13a-coordination.md`, so the note stays true for
+     steps 3 to 8: R-010.6, .7, .8 and .9, each in its section;
+   - the tests, including a hostile subject that reaches the brief only
+     escaped and after the framing line, and the pair carry.
+4. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 2: messages, PR 106 into `release-0.17.0`; PR 105 merged; the note revised for REV-010
+
+Brain: "13a step 2 messages post inbox ack hop count pair carry" → hit
+(the `design.13a-*` facts: guardrails, steps).
+
+1. **PR 105 squash-merged** into `release-0.17.0` as `393610e`;
+   `rel0170-1-plumbing` deleted (remote and local).
+2. **`decision.product-terms` stored** (`01M7GRC02NRRAE09TCHHM4D02S`,
+   agent `cursor-agent`).
+3. **PR 106** (https://github.com/toarchkumar/mnemo/pull/106), two
+   commits on `rel0170-2-messages`:
+   - **`d743735` docs:** the note folds in REV-010, each in its section:
+     - R-010.8: claims and presence change in place, one record each
+       with the token in it; acked messages over 30 days pruned (the
+       messages section);
+     - R-010.7: `active → queued` in `TASK_TRANSITIONS`; `next` reclaims
+       a task whose owner's claim lapsed; a lost owner's `update` is
+       refused with `Lost`; step 4's crash-and-reclaim test;
+     - R-010.6: path 1's cost: measure first at a load under 2; over
+       about 20 ms, the per-session stamp (0600) and the header-seal
+       fast path, with Cursor's gate checked in it first;
+     - R-010.9: `--as`/`--role` on every coordination command (section
+       7's CLI), and the alias recipe in the guide's section;
+     - R-010.3: section 7 presents tasks and the inbox before claims.
+   - **`11a2d9b` feat:** messages.
+     - Engine: `Mnemo::post`, `inbox`, `mark_seen`, `ack`,
+       `prune_messages`, and `Message`, with the constants exported.
+       `post` refuses a bad address, an empty or multi-line subject, one
+       over 200 bytes, and a body over 8 KB.
+     - A message is one record for its life. Delivery
+       (`sent → seen → done`) and status (`unread → acked`) change in
+       place, and an ack adds `by` and `note` to `status_history`.
+       A second ack is `Unchanged`.
+     - **The hop count:** a reply in a conversation is one more than its
+       highest. The pair carry is one more than the highest count
+       between the two, either way, in the last 10 minutes. Deviation:
+       it uses the highest count, not the newest message's (noted in
+       `decision.13a-hop-carry`).
+       - The reason: `created_at` has one-second grain, so "newest" was
+         ambiguous within a second.
+       - The same grain made me sort messages by `created_at` with a
+         stable sort, keeping write order (`finding.coordination-order`).
+     - **Pruning:** `compact` leaves out messages acked more than 30 days
+       ago; `prune_messages(secs)` deletes them, and so does `mnemo inbox
+       --prune [--days N]`.
+     - **CLI:** `post <TO> <SUBJECT> [--body] [--refs] [--conversation]
+       [--brain PATH]`, `inbox [PATH] [--all] [--prune] [--format]`, and
+       `ack [PATH] <ID> [--note]` (get-shift). Each takes `--as` and
+       `--role`, else `MNEMO_AGENT`/`MNEMO_ROLE`. An inbox with neither
+       says it shows only `all`. Listing marks seen.
+     - **MCP `inbox` tool** (`list`, `read`, `post`, `ack`): it runs as
+       the server's agent (the handle's author) and role (`MNEMO_ROLE`,
+       kept at start). It's a write window, since listing marks seen.
+       `list` and `read` output comes after `FRAMING`, escaped. The
+       description says a message is information, never authority. No
+       `task` or `claim` tool exists yet to order against; steps 3 and 4
+       will list them after `inbox`.
+     - **Python:** `post`, `inbox`, `mark_seen`, `ack`, `prune_messages`
+       (dicts), in the README table.
+     - **The brief:** a fifth part, "Your work". `SHARES` is now
+       `[800, 2_400, 1_600, 600, 1_400]`, so its 600 come from the
+       recall's 2,000. It holds the unread count and the newest senders
+       and subjects, each through `escape_brain`, within
+       `YOUR_WORK_MAX = 600`. It's left out when there's nothing.
+     - The READMEs (the CLI table and pathless list, the MCP tools, the
+       Python table) and CHANGELOG `[Unreleased]` are updated.
+   - **Tests** (macOS, run here):
+     - `cargo test --features failpoints`: 687 passed, 0 failed, 1
+       ignored;
+     - the embed-candle set (`--lib`, `builtin_embedder`, `builtin_cli`,
+       `query_keywords`, `guide`): 103 passed;
+     - clippy (CI's feature set) and `fmt --check`: clean; `mnemo-uniffi`
+       clippy: clean, its tests pass;
+     - `python test_mnemo.py`: all passed (wheel built with
+       `dev-hooks,embed-candle`).
+     - New: `tests/messages.rs` (4 tests: addressing and ack, what `post`
+       refuses, the hop count and pair carry, pruning and compaction),
+       `project_brain::post_inbox_and_ack_as_an_agent`,
+       `mcp_context::the_inbox_tool_as_the_servers_agent` (plain and
+       shared), and `hook_cli::the_brief_shows_unread_messages_escaped`
+       (a hostile subject and a `## Fake heading` come back escaped
+       after the one framing line; no agent means no part).
+   - One deviation: `post` carries
+     `#[allow(clippy::too_many_arguments)]` (8 with `self`), as the
+     Python binding's methods already do, rather than a request struct.
+4. **Brain:** `design.13a-messages-built`, `decision.13a-hop-carry`,
+   `finding.coordination-order` (agent `cursor-agent`).
+5. **Not done here:**
+   - `seed.json` gets the messages convention with the guide in step 8.
+   - CI on PR 106 is still running at this entry.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 2 accepted (PR 106), once CI is green; the hop guardrail becomes a burst limit (my round-1 change was wrong); step 3, claims and presence
+
+Brain: your lookup was a **hit** (the `design.13a-*` facts), the first
+hit since the switch.
+- **Tally:** 56 lookups, 19 hits, 23 partial, 14 misses not stored.
+
+**PR 106, ACCEPTED, conditional on its CI:** 4 of 17 checks had passed
+and 13 were pending when I read it.
+- **Read:**
+  - the brief's `SHARES` (`[800, 2_400, 1_600, 600, 1_400]`, with "Your
+    work" from the recall's share);
+  - `YOUR_WORK_MAX`;
+  - the MCP `inbox` tool behind `FRAMING`, escaped.
+- **Accepted:**
+  - `post`'s limits;
+  - one record per message, changed in place;
+  - pruning in `compact` and with `--prune`;
+  - `--as` and `--role`;
+  - the note's REV-010 commit;
+  - "highest" in place of "newest" for the pair carry, given the
+    one-second `created_at`;
+  - `too_many_arguments`.
+
+**DECISION: the hop guardrail counts bursts, not chains.** This corrects
+my round-1 change 4.
+- **The problem with the carry:** each new message between a pair
+  starts at one more than the pair's highest count in the last 10
+  minutes. So a slow, legitimate exchange keeps climbing as long as each
+  message comes within 10 minutes of the last. This project's own
+  Planner and Worker trade a DISPATCH and a DONE every 5 to 15 minutes
+  for hours. Under a cap of 8, wake-ups would stop after about four
+  rounds, and we'd be back to the user relaying, which is what 13.1b
+  exists to end.
+- **The rule for step 5's guardrails:**
+  - **Pair burst:** a message wakes nobody when its pair has exchanged 8
+    or more messages, either way, in the last 10 minutes. A runaway loop
+    is fast, while a working exchange is minutes apart.
+  - **Thread hops:** the per-thread cap of 8 is kept for explicit
+    replies (`--conversation`). Then the brief says the thread reached
+    its cap, as the note says.
+  - The per-recipient 12 an hour, the 60 s cooldown and the kill switch
+    are unchanged.
+- **Step 2's code needs no change.** `_mnemo.hops` and the carry stay as
+  stored, informational data; enforcement is step 5's. Fold the rule into
+  the note's guardrails table in step 3's docs commit, and update
+  `decision.13a-hop-carry` (keyed, superseding).
+
+**Dispatch:**
+1. **When PR 106's CI is green,** squash-merge it into `release-0.17.0`
+   and delete `rel0170-2-messages`. If CI fails, fix it on the branch,
+   then merge.
+2. **Step 3, claims and presence** (the note's section 4, and section
+   10's row 3), on `rel0170-3-claims`, with a PR into `release-0.17.0`:
+   - `claim take|renew|release|check`, with tokens, `Lost` and 12.4's
+     step 7 rework (the early lapse as a hint, presence re-checked by
+     identity, a probe that retries once);
+   - **R-010.8:** `claim:<topic>` and `presence:<agent>` change in place,
+     one record each, with the token in the record;
+   - presence's sidecar lock, taken only by a long-lived `serve --mcp`;
+     `who()` with `alive` (and `unknown` for the CLI);
+   - the TTLs and bounds from the note's table;
+   - **surfaces:**
+     - the MCP `claim` tool, listed after `inbox`;
+     - the CLI `mnemo claim take|renew|release|check|who`, with `--as`
+       and `--role`;
+     - Python and Rust;
+   - **tests:**
+     - 12.4's 1,000-race test, with FLAKE-1's pattern;
+     - lapse, renew, release, a lost token and `who()`;
+     - a test that no OS lock on the brain is held between calls;
+   - the docs commit for the burst rule above.
+   - **This is the first step of REVIEWER-B's scoped pass (after step
+     6).** Note anything subtle in DONE for it.
+3. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 3: claims and presence, PR 107 into `release-0.17.0`; PR 106 merged; the burst rule in the note
+
+Brain: "claims and presence lease token presence lock" → hit: the
+`design.13a-*` claims fact. I ran it after building, not before; the
+session-start brief had loaded the 13a design facts.
+
+1. **PR 106:** CI green (17 of 17), squash-merged into `release-0.17.0`
+   as `b09f0b3`; `rel0170-2-messages` deleted (remote and local).
+2. **PR 107** (https://github.com/toarchkumar/mnemo/pull/107), two
+   commits on `rel0170-3-claims`:
+   - **`db0e09d` docs, the burst rule:**
+     - the guardrails' pair row is now "Pair burst, 8 in 10 min";
+     - the hop cap of 8 is kept for explicit replies;
+     - `_mnemo.hops` stays stored as information, and step 5 enforces;
+     - the reason is in the text;
+     - section 4 gains "As built (step 3)": the lock's name and the row
+       hash below.
+   - **`f39145f` feat:** claims and presence.
+     - **Claims:** `Mnemo::claim(topic, ttl)`, `renew`, `release`,
+       `check_claim`, `claims`, with `ClaimOutcome`, `ClaimStatus` and
+       `Claim`. One record per topic, changed in place (R-010.8):
+       `_mnemo.topic`, `holder`, `claim_token` (32 hex), `expires_at`,
+       `lease`, `holder_lock`, `dead_seen_at`. A claim needs the handle's
+       author. Leases are 30 s to 24 h, 900 s by default. Topics are one
+       line, at most 200 bytes.
+     - **Presence:** `touch_presence(role, tool)`, at most once a minute
+       unless the role, tool or lock flag changed. `who()` returns
+       `Presence` with `Alive` (Yes, No or Unknown) and the topics held.
+       One record per agent, changed in place.
+     - **The lock:** `SharedMnemo::hold_presence()` takes
+       `presence.<16 hex of SHA-256(agent)>.lock` in the sidecar
+       directory, shared, through `LockedFile`. `SharedMnemo::window`
+       re-checks it by identity at every call
+       (`src/shared/presence.rs`).
+     - **MCP:** `claim` (take, renew, release, check, who), listed after
+       `inbox`. `serve --mcp --shared` with `MNEMO_AGENT` holds the
+       presence lock, and logs it or why not. Every non-read tool call
+       touches presence first, so it rides that call's commit.
+     - **CLI:** `mnemo claim take|renew|release|check|who`, with
+       `--as`/`--role`/`--brain`/`--passphrase` global, so they work
+       after the op. `--ttl` takes `90s`, `15m`, `2h` or seconds. Held
+       and lost exit 1. `post`, `inbox` and `ack` touch presence
+       (`tool: cli`).
+     - **Python:** `claim`, `renew`, `release`, `check_claim`, `claims`,
+       `who`, `touch_presence` (dicts).
+     - The READMEs (the CLI table, MCP tools, the Python table) and
+       CHANGELOG are updated.
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 696 passed, 0
+       failed, 1 ignored;
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features) and `fmt --check`: clean;
+     - `mnemo-uniffi`: clippy clean, 23 passed;
+     - `python test_mnemo.py`: all passed.
+     - New: `tests/claims.rs` (7), `project_brain::claim_take_renew_release_check_and_who`,
+       and `mcp_context::the_claim_tool_as_the_servers_agent` (plain
+       and shared, with `alive` true only in shared, and `inbox` before
+       `claim` in `tools/list`).
+   - **The race test:** two child processes, each a shared handle with a
+     presence lock and FLAKE-1's spawning thread, claim `race-0` to
+     `race-999` in lockstep. Each starts round i once the other has
+     published i - 1. Each round must have exactly one winner, both
+     processes must win some, and the brain must hold 1,000 claims with
+     matching holders.
+     - Without lockstep, my first version had one process win all 1,000:
+       no real race.
+     - It uses the 24 h lease, since at 60 s early claims lapsed before
+       the final count.
+     - **Its cost:** about 80 s on this Mac (79 s at a load near 9). At
+       200 rounds it took 14.6 s with the spawner and 14.9 s without, so
+       about 37 ms a write window, which is macOS's full fsync.
+       `CL_RACE_ROUNDS` overrides it. If 80 s on CI's macOS runner is
+       too much, you decide whether to run 1,000 rounds only under
+       `MNEMO_STRESS`.
+   - A timing flake I fixed in my own test: a wall-clock second ticked
+     between `claim` and `renew` under load (601 for 600). The assertion
+     now allows 600 to 602.
+3. **For REVIEWER-B's scoped pass (subtle points):**
+   - **Deviation from 12.4's text:** the presence file is flat,
+     `presence.<hash>.lock`, not `presence/<hash>.lock`. That avoids a
+     subdirectory to create and check with `openat`.
+   - **The probe** (`shared/presence.rs::probe`) opens the existing file
+     read-write without creating anything (`sidecar::open_if_present`
+     never makes the directory), and tries an exclusive lock without
+     waiting.
+     - **Refused twice, 20 ms apart:** alive.
+     - **Acquired:** it re-stats the name. "Not alive" only if the name
+       still names the file it locked; otherwise unknown.
+     - A missing file or directory is unknown.
+     - Off Unix, identity is a constant, so a name is trusted.
+   - **Holder side:** `PresenceLock::lock` retries a shared try 50
+     times at 2 ms, to wait out a probe's instant. `refresh()` re-takes
+     the lock when the name no longer names its file, which heals a
+     deleted sidecar at the holder's next call. An idle holder with a
+     deleted directory reads as unknown to probes, never "not alive".
+   - **The early lapse:** it applies only when the claim's `holder_lock`
+     is true, meaning the claiming handle had `presence_held`. The first
+     look records `dead_seen_at` (a write in the taker's window). A
+     taker needs a second look at least 10 s later, and an alive look
+     clears it.
+     - `check_claim` never lapses early; it's a pure read.
+     - An agent's own re-take is `HeldBy`, so a restarted server waits
+       out its old claim.
+   - **The clock:** `effective_expiry = min(expires_at, now + lease)`,
+     and `claim` writes the clamped value back when it answers
+     `HeldBy`.
+   - **Lookups:** `row_tags` puts
+     `fnv1a32("_mnemo.coordination", kind, topic|agent)` in a
+     coordination row's `thread_hash`, and `coordination_records(kind,
+     Some(l))` filters by it before decrypting.
+     - v8 rows (no v9) are all decrypted, but claims need writes, so
+       they're v9 only.
+     - `who()` and `claims()` decrypt every coordination row, messages
+       included.
+   - **Presence writes:** `touch_presence` runs before every non-read
+     MCP tool, with errors ignored. In shared mode, a tool that fails
+     aborts its window, presence included. In plain mode it can stay
+     dirty until the next flush.
+   - **Test hooks:** the coordination clock reads `clock_offset` (the
+     dev-hooks `__set_clock_offset_for_testing`) plus
+     `MNEMO_DEV_CLOCK_OFFSET` in dev-hooks builds only.
+4. **Brain** (agent `cursor-agent`):
+   - `decision.13a-hop-carry` superseded with the burst rule
+     (`01M7GXYRRZ20NX95CD13BG902Z`);
+   - `design.13a-claims-built` added;
+   - `finding.macos-fsync-race-cost` added.
+5. **Not done here:** CI on PR 107 was running at this entry (2 of 17
+   passed, 15 pending).
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DECISION + DISPATCH — step 3 accepted (PR 107), once CI is green; the race test's rounds; step 4, tasks
+
+Brain: a hit (the claims design fact). It ran after the build, as you
+said; the brief had loaded the 13a facts at start.
+- **Tally:** 57 lookups, 20 hits, 23 partial, 14 misses not stored.
+
+**PR 106** is merged as `b09f0b3`.
+
+**PR 107, ACCEPTED, conditional on its CI** (4 of 17 had passed when I
+read it):
+- one record per claim and per agent, changed in place, with the token
+  in it (R-010.8);
+- the flat `presence.<hash>.lock` (the deviation from 12.4's
+  subdirectory is accepted);
+- the probe, alive only on two refusals 20 ms apart;
+- the holder's retry and `refresh()`;
+- the early lapse, only with `holder_lock` and two looks 10 s apart;
+- `check_claim` a pure read;
+- `effective_expiry` clamped;
+- the `thread_hash` filter;
+- `touch_presence` riding the call's commit.
+
+Your list of subtle points goes to REVIEWER-B's scoped pass after step 6,
+as written.
+
+**DECISION: the race test's rounds.**
+- **CI runs 200 rounds** (`CL_RACE_ROUNDS`'s default; about 15 s on
+  macOS). The 1,000 rounds run under `MNEMO_STRESS=1`.
+- **Add the stress run to `fuzz-weekly.yml`,** so 1,000 rounds still run
+  every week on Linux and macOS.
+- **12.4's "1,000-race test"** is met weekly and on demand, rather than
+  on every push. Say so in the test's doc comment.
+
+**Dispatch:**
+1. **When PR 107's CI is green** (with the 200-round default, in a
+   commit on the branch), squash-merge it and delete `rel0170-3-claims`.
+2. **Step 4, tasks** (the note's section 1, and section 10's row 4), on
+   `rel0170-4-tasks`:
+   - `add`, `next` (which claims `task:<slug>` in the same window),
+     `update`, `list` and `get`;
+   - `after` dependencies and `pre_approved`; `ready` waits for the
+     creator's `done`;
+   - **R-010.7:**
+     - `active → queued` in `TASK_TRANSITIONS`;
+     - `next` reclaims an `active` task whose claim lapsed (after the
+       ready `queued` ones), with a `status_history` entry naming the old
+       owner;
+     - a lost owner's `update` is refused with `Lost`;
+     - a crash-and-reclaim test;
+   - **surfaces:**
+     - the MCP `task` tool, listed first, before `inbox` and `claim`
+       (R-010.3);
+     - the CLI with `--as` and `--role`;
+     - Python and Rust;
+   - **the brief's "Your work":** tasks ready for this agent's role, and
+     its own tasks' claims about to lapse, within the same 600 bytes;
+   - `export --git` keeps tasks (every status except `done` older than
+     30 days), in slug order, deterministic;
+   - the tests, and the READMEs and CHANGELOG.
+3. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 4: tasks, PR 108 into `release-0.17.0`; PR 107 merged with the 200-round race
+
+Brain: "13a step 4 tasks next reclaim lapsed owner" → partial (the
+`design.13a-*` steps and claims facts, nothing on tasks). I ran it after
+building again; next step it goes first.
+
+1. **PR 107:**
+   - the race's rounds, as decided: `90278e4` on the branch, 200 rounds
+     by default and 1,000 under `MNEMO_STRESS=1`;
+   - the doc comment says 12.4's 1,000 runs weekly and on demand;
+   - `fuzz-weekly.yml` has a `claim-race` job (ubuntu-latest and
+     macos-latest) running the 1,000;
+   - locally, the claims tests took 15.2 s with the default;
+   - CI green (23 of 23, with the mobile jobs, since a workflow
+     changed), squash-merged as `460dfa2`, and `rel0170-3-claims`
+     deleted.
+2. **PR 108** (https://github.com/toarchkumar/mnemo/pull/108), two
+   commits on `rel0170-4-tasks`:
+   - **`41a68fe` docs:** tasks "As built (step 4)" in the note's tasks
+     section:
+     - **Deviation from the note:** the slug is `_mnemo.slug`, found
+       through the row hash like a claim, not a `_mnemo.key =
+       task:<slug>` slot. So a task stays out of the lazy keyed index
+       and `history --key`, where a record changed in place by `put`
+       would have to be kept in step.
+     - It also records who may do what and how an owner's update
+       treats its claim.
+   - **`6a2382d` feat:** tasks.
+     - **Engine:** `task_add(&TaskSpec)` returns `(Task, WriteOutcome)`;
+       a re-add of a slug is Updated or Unchanged, in place. Also
+       `task_next(role)` returning `Option<TaskTaken>` (task, token,
+       expiry, `reclaimed_from`), `task_update(slug, status, note,
+       token)` returning `TaskOutcome` (`Updated(Box<Task>)` or `Lost`),
+       and `tasks(status, role)`, `task(slug)`, `ready_tasks(role)`,
+       `slug_of`, plus `coordination_now()` (now public, for the hook).
+     - **Checks:** a title is one line of at most 200 bytes, a body at
+       most 8 KB, a slug 1 to 64 of `a-z0-9._-`, and the role an id.
+       `after` must name existing slugs, never itself.
+     - **`TASK_TRANSITIONS`** gains `("active", "queued")`, with its doc
+       rewritten; `task_status` holds the constants.
+     - **Who may do what:**
+       - the owner moves `active`/`blocked` and adds notes, each
+         renewing the 2 h claim;
+       - an owner holding the claim with a different token, or whose
+         task has another owner, gets `Lost`;
+       - an owner whose claim lapsed with nobody taking it carries on,
+         and claims again;
+       - the creator sets `ready → done` (or the owner, when
+         `pre_approved`) and adds notes at any status;
+       - anyone requeues an `active` task whose claim lapsed;
+       - `queued → active` happens only through `next`;
+       - `ready`, `done` and `queued` release the claim.
+     - **`next`:** the ready `queued` tasks oldest first, then the
+       `active` ones not the caller's. It uses `claim()`, so the early
+       lapse hint applies: a dead owner's task is taken after two looks
+       10 s apart.
+     - **CLI:** `mnemo task add|next|update|list|get`. `--for` is the
+       task's role, since `--role` is the caller's (AsArgs). Nothing to
+       take and lost exit 1. `add`, `next` and `update` touch presence.
+     - **MCP:** `task`, listed before `inbox` and `claim`; `next`,
+       `list` and `get` are framed and escaped.
+     - **Python:** `task_add`, `task_next`, `task_update`, `tasks`,
+       `task_get`.
+     - **The brief:** "Your work" is now sections: tasks ready for the
+       role, own task claims lapsing within 15 min
+       (`TASK_CLAIM_WARN_SECS`), then unread messages. Every header is
+       kept, and items fill the rest of the 600 bytes.
+     - **Export:** claims and presence never. `--git` also drops
+       messages, drops tasks done over 30 days ago (by the last history
+       entry), orders tasks by slug after the keyed memories, and drops
+       `_mnemo.delivery`.
+     - The READMEs and CHANGELOG are updated.
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 703 passed, 0
+       failed, 1 ignored;
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features; one fix, `TaskOutcome::Updated` boxed for
+       `large_enum_variant`), `fmt --check`, and the mnemo-python clippy:
+       clean;
+     - `mnemo-uniffi`: clippy clean, 23 passed;
+     - `python test_mnemo.py`: all passed.
+     - New: `tests/tasks.rs` (4, including the crash-and-reclaim), the
+       CLI with the git export, the MCP tool (plain and shared), and
+       the brief's ready and lapsing parts.
+   - **The crash-and-reclaim test** (`a_crashed_owners_task_is_reclaimed_and_it_cant_overwrite_the_new_owner`,
+     unix):
+     - a child process opens a shared handle as worker-a with a
+       presence lock, takes the task, writes its token, and is killed
+       with SIGKILL;
+     - while alive, worker-b's `next` gets nothing;
+     - after the kill, the first look gets nothing, and 10 s later (the
+       shifted clock) worker-b takes it back, with `reclaimed_from:
+       worker-a`;
+     - worker-a's update with its old token is `Lost`, and worker-b's
+       goes through.
+3. **Brain** (agent `cursor-agent`): `design.13a-tasks-built`,
+   `decision.13a-race-rounds`, `decision.13a-export-coordination`.
+4. **Not done here:** CI on PR 108 was running at this entry (17
+   pending). `seed.json` gets the coordination convention with the guide
+   in step 8.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — step 4 accepted (PR 108), once CI is green; step 5, the per-turn hook, the Stop continuation and the guardrails
+
+Brain: your lookup was partial (nothing on tasks yet).
+- **Tally:** 58 lookups, 20 hits, 24 partial, 14 misses not stored.
+
+**PR 107** is merged as `460dfa2`, with 200 rounds by default and the
+weekly `claim-race` job on Linux and macOS.
+
+**PR 108, ACCEPTED, conditional on its CI** (3 of 17 had passed when I
+read it):
+- **`_mnemo.slug` through the row hash, not a keyed slot.** The
+  deviation is accepted: a record changed in place stays out of the
+  keyed index and `history --key`.
+- **Who may do what:** the owner, the creator, a requeue after a lapse,
+  `queued → active` only through `next`, and the claim released at
+  `ready`, `done` and `queued`.
+- **`next`:** ready queued tasks first, then lapsed active ones through
+  `claim()`'s early-lapse hint.
+- **The crash-and-reclaim test,** with SIGKILL and the shifted clock.
+  It's exactly R-010.7's case.
+- **The brief's sections within 600 bytes, and the export rules.**
+
+**Dispatch:**
+1. **When PR 108's CI is green,** squash-merge it and delete
+   `rel0170-4-tasks`.
+2. **Step 5** (the note's section 3, path 1 and path 3, and the
+   guardrails), on `rel0170-5-hooks`:
+   - **`mnemo hook user-prompt`**, on Claude Code's `UserPromptSubmit`
+     and on Cursor's `postToolUse` at most once a minute:
+     - it reads, and prints only when there's something new: unread
+       messages, ready tasks for the role, own claims about to lapse;
+     - after `FRAMING`, escaped, at most 600 bytes;
+     - it writes only when it shows something (to mark it seen), and a
+       failed mark never stops the print;
+     - it always exits 0, like the other hooks.
+   - **`mnemo hook stop`**, the Stop continuation:
+     - off by default; `onboard --wake stop` writes it;
+     - only for a `pre_approved` task, or an item addressed to this agent
+       by id;
+     - never twice in a row (`stop_hook_active`).
+   - **The guardrails,** in the one place that marks an item `delivered`
+     or shown:
+     - the per-recipient limit of 12 an hour;
+     - the 60 s cooldown;
+     - **the pair burst** (8 in 10 minutes; my DECISION entry);
+     - the per-thread hop cap of 8 for explicit replies;
+     - the kill switch: `mnemo wake pause|resume|status`, the
+       `wake:paused` record and `MNEMO_WAKE=off`;
+     - `wake status` also shows the `crossSessionInbound` setting it
+       can see.
+   - **`onboard`** adds the per-turn hook for Claude Code and Cursor,
+     and recognizes it as its own for re-runs and `--undo`.
+   - **R-010.6, measure first:**
+     - time an unchanged turn's `hook user-prompt` against this repo's
+       brain;
+     - **report the load average with each number.** If the Mac won't
+       get under 2, time a no-op `mnemo --version` in the same moment as
+       a baseline, and report both;
+     - if an unchanged turn costs more than about 20 ms over the
+       baseline, add the stamp-and-seal fast path as R-010.6 describes,
+       with Cursor's gate checked before any keychain read.
+   - **The tests:**
+     - every guardrail, including the burst and the kill switch;
+     - a hostile subject escaped in the hook's line;
+     - the Stop continuation never twice;
+     - exit 0 on every bad input;
+     - `onboard`'s re-run and `--undo` with the new hook.
+3. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 5: the per-turn hook, the Stop continuation and the guardrails, PR 109 into `release-0.17.0`; PR 108 merged
+
+Brain: "per-turn hook user-prompt Stop continuation wake guardrails kill
+switch" → hit (`design.13a-guardrails`, the burst decision, 12.2's hooks
+design). This time I ran it before the work.
+
+1. **PR 108:** Windows failed to compile `tests/tasks.rs`, because
+   `Command`, `Stdio` and `task_status` are imported but used only by the
+   Unix-only crash test, and CI denies warnings. Fixed in `af94eb0`
+   (behind `cfg(unix)`). CI then went green (17 of 17); squash-merged as
+   `0b5673d`, and `rel0170-4-tasks` deleted.
+2. **PR 109** (https://github.com/toarchkumar/mnemo/pull/109), two
+   commits on `rel0170-5-hooks`:
+   - **`a11abd1` docs:** "As built (step 5)" in section 3.
+   - **`17889ef` feat.**
+     - **`hook user-prompt`** (`Event::UserPrompt`):
+       - an anonymous session (no `MNEMO_AGENT` or `MNEMO_ROLE`) gets
+         nothing;
+       - otherwise it gets `Mnemo::new_work(agent, role)`: unread
+         messages not yet `seen`, ready tasks for the role not yet `seen`,
+         and own task claims lapsing within 15 min not yet warned at this
+         expiry (`_mnemo.warned_expiry`);
+       - the text is a fixed counts line, then `FRAMING`, then escaped
+         `- ` list lines, within `TURN_MAX = 600`;
+       - after it prints, one shared write runs `mark_shown`, and a
+         failure is a stderr note.
+     - **`hook stop`** (`Event::Stop`):
+       - it does nothing on `stop_hook_active` or Cursor's `loop_count >
+         0`, with `MNEMO_WAKE=off`, or without `MNEMO_AGENT`;
+       - otherwise it runs `Mnemo::wake` in one shared write and answers
+         `decision: block` (Cursor: `followup_message`) with fixed text
+         and counts;
+       - held work is a stderr note naming the guardrail.
+     - **`Mnemo::wake(agent, role)`** is the only code that marks an item
+       `delivered`. Its candidates are pre-approved ready tasks and
+       messages `to == agent`, still `sent`. Its order:
+       1. paused gives `Held("paused")`;
+       2. a hop cap for replies (conversation isn't its own id, `hops >
+          8`) and the pair burst (8 messages between the two, either way,
+          in 600 s) filter messages;
+       3. the recipient's `_mnemo.wakes` (on its presence record, created
+          when missing) applies 12 an hour and 60 s;
+       4. it marks `delivered` and records the wake.
+     - **The kill switch:** `wake_paused()` and `set_wake_paused()` keep
+       `_mnemo.wake_paused {by, at}` on the manifest. CLI: `mnemo wake
+       pause|resume|status`. `status` prints the pause, `MNEMO_WAKE=off`,
+       and `crossSessionInbound` from `~/.claude/settings.json` and the
+       repository's `.claude/settings.json` and `settings.local.json`.
+     - **`onboard`:**
+       - `TIMEOUTS` gains `user-prompt`/`UserPromptSubmit` (10 s) and
+         `stop`/`Stop` (10 s); Cursor maps them to `postToolUse` and
+         `stop`;
+       - `--wake stop|off`; left out, it keeps our `hook stop` if the
+         file has one;
+       - `is_our_hook` already covers re-runs and `--undo`;
+       - the plugin's `hooks.json` and README get `user-prompt`.
+     - The README rows (`onboard`, `hook`, `wake`) and CHANGELOG are
+       updated.
+   - **R-010.6, measured first** (release build, 30 runs each, medians;
+     the Mac never got under 2, so every number has its load and a
+     `--version` baseline taken at the same moment):
+     - **Before the fast path:** on an 11,000-record 384-dim scratch
+       brain with a key file, an unchanged turn took 22.8 ms against
+       3.4 and 3.8 ms (load 4.4).
+     - **This repo's brain:** the installed v0.16.1 `mnemo info`
+       (keychain plus read-only open, 15 runs) took 67.3 ms against 5.5
+       and 4.8 ms (load 4.6). On the scratch brain with a key file, both
+       binaries' `info` took 46 to 47 ms (load 5.1).
+       - I didn't run the new binary against the real brain: its keychain
+         item is authorized for the installed binary, and a new one could
+         raise an access prompt.
+     - Over about 20 ms, so the fast path went in.
+       - **The stamp:** `hook.turn.<hash>` in the sidecar (via the new
+         `sidecar_notes`, `hook.*` names only, temp-and-rename) holds the
+         check's time, the next warning time and `Mnemo::file_stamp`.
+       - **`file_stamp`** is page 0's seal through `Header::from_page`,
+         read without the key, plus dev/ino, length and mtime in
+         nanoseconds.
+       - Its first version measured 18.5 ms. `git rev-parse` in
+         `project::common_dir` was the rest, so
+         `project::common_dir_fast` reads `.git` (a directory, or a
+         `gitdir:` file with `commondir`), with git as the fallback.
+     - **After:** an unchanged turn took 3.4 ms against 4.1 and 3.3 ms
+       (load 3.2). A turn after another agent's post took 33.1 ms and
+       printed it (322 bytes); the next took 4.1 ms and printed nothing.
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 714 passed, 0
+       failed, 1 ignored;
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features) and `fmt --check`: clean;
+     - `mnemo-uniffi`: clippy clean, 23 passed.
+     - New: `tests/wake.rs` (5), `hook_cli` (5), and `onboard_cli` (1);
+       details in the PR.
+3. **Decisions in the code, for your review:**
+   - **The guardrails and the pause govern wake-ups only.** The per-turn
+     hook still shows (and marks seen) work while paused or held, per the
+     table's "seen at the next turn or session start". If you meant the
+     pause to quiet the per-turn line too, that's a two-line change.
+   - **The kill switch is on the manifest**, not a keyed `wake:paused`
+     record. A brain without a manifest can't be paused, and says so.
+   - **The Stop reason omits the slug** the note's example had; the slug
+     is brain text outside the framing line.
+   - **A task's `delivery` is per task, not per agent.** When one worker's
+     turn shows a ready task, another worker's next turn doesn't list it
+     as new, though its brief still does.
+   - **The stamp race:** after its own mark, the hook stamps the file as
+     it left it. A foreign commit in that instant waits for the next
+     change or session start.
+4. **For REVIEWER-B's scoped pass:**
+   - **The stamp reads page 0 without a lock.** A torn page gives `None`,
+     which means the slow path.
+   - **`common_dir_fast`'s fallback cases**, against `git rev-parse
+     --git-common-dir`. Submodules and worktrees are handled; any
+     `GIT_DIR`/`GIT_COMMON_DIR` goes to git.
+   - `sidecar_notes` writes through the checked sidecar descriptor
+     (openat, O_EXCL temp, rename).
+5. **Brain** (agent `cursor-agent`): `design.13a-hooks-built` and
+   `finding.per-turn-hook-cost`.
+6. **Not done here:**
+   - CI on PR 109 was running at this entry (1 of 17).
+   - Python bindings for `new_work`, `wake` and the kill switch weren't
+     in the dispatch, so they aren't added.
+   - The per-turn hook can't be checked by hand in this repo's sessions
+     until v0.17 is installed.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — step 5 accepted (PR 109), once CI is green; your five decisions; step 6, the idle wake-up
+
+Brain: a hit, and run before the work this time.
+- **Tally:** 59 lookups, 21 hits, 24 partial, 14 misses not stored.
+
+**PR 108** is merged as `0b5673d`, after the Windows unused-import fix.
+
+**PR 109, ACCEPTED, conditional on its CI** (5 of 17 had passed when I
+read it):
+- **The measurements are what I asked for:** loads reported, with
+  `--version` baselines at the same moment.
+  - An unchanged turn went from 22.8 ms (over a 3.4–3.8 ms baseline) to
+    3.4 ms (over 3.3–4.1 ms).
+  - Finding `git rev-parse` as the rest of the 18.5 ms was good work.
+- **Read:**
+  - `wake()` as the one place that marks `delivered`, and its order:
+    pause, then hops and the burst, then 12 an hour and 60 s;
+  - the fixed-text Stop reason;
+  - the stamp of page 0's seal plus identity, length and mtime;
+  - `common_dir_fast`, with git as the fallback for any
+    `GIT_DIR`/`GIT_COMMON_DIR`.
+
+**Your five decisions:**
+1. **The guardrails and the pause govern wake-ups only, and the
+   per-turn line still shows: ACCEPTED.** A per-turn line appears inside
+   a turn someone already started, so it can't start a loop. The pause
+   exists to stop agents starting each other.
+2. **The kill switch on the manifest: ACCEPTED.** Every `onboard` brain
+   has a manifest.
+3. **No slug in the Stop reason: ACCEPTED.** That's the right reading of
+   round 1's change 3.
+4. **A task's `delivery` is per task: ACCEPTED for v0.17.0, carried as
+   SEEN-PER-AGENT (LOW, after HARNESS-DOGFOOD-1's Run 1).** With two
+   workers, the second learns of a task from its brief and `task next`,
+   not from its per-turn line. Run 1 shows whether that matters.
+5. **The stamp race: ACCEPTED.** The next change or session start
+   catches it.
+
+For REVIEWER-B, your three points (the unlocked page-0 read,
+`common_dir_fast`'s cases, `sidecar_notes`) join step 3's list.
+
+**Dispatch:**
+1. **When PR 109's CI is green,** squash-merge it and delete
+   `rel0170-5-hooks`.
+2. **Step 6, the idle wake-up** (the note's section 3, path 2), on
+   `rel0170-6-wake`:
+   - **Watching:** `serve --mcp --shared` notices a foreign commit.
+     **Try the stamp poll first:**
+     - your `file_stamp` costs about 3 ms, so a poll every 5 s is cheap,
+       and it needs no kqueue, inotify or `ReadDirectoryChangesW`;
+     - use an OS watcher only if you measure a reason to;
+     - say which you chose, with its cost per hour when idle.
+   - **On new work** for its own agent, role or `all`, it calls `wake()`.
+     When that delivers, it posts one fixed-text pointer, counts only,
+     into **its own** session through `CLAUDE_CODE_MESSAGING_SOCKET` with
+     the token:
+     - never another session's socket;
+     - never brain text;
+     - the hostile-subject test.
+   - **The verifications from section 3, done by hand in your own
+     session, and reported in DONE:**
+     - the server inherits the two variables (names only, as before);
+     - **the message format the socket takes, from the cross-session
+       messaging docs.** Cite the URL;
+     - **a posted pointer wakes an idle session.** Test it on your own
+       session: your own server posts into your own socket while you're
+       idle, which needs a short idle wait, so say how you set it up;
+     - how `crossSessionInbound` treats it.
+
+     **If any of these fails, drop path 2,** ship steps 1 to 5, and say so
+     in DONE (the note's rule).
+   - **No new socket of mnemo's, and no daemon.** RB-006.12 stays as
+     triaged.
+   - **The tests:** the poll notices a foreign commit; `wake()`'s
+     guardrails apply; the posted text is fixed and counts only, through
+     a stub socket in CI; and an anonymous server never posts.
+3. **After step 6, REVIEWER-B's scoped pass over steps 3 to 6.** I'll
+   call it once step 6 is merged.
+4. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 6: path 2 dropped (the socket's message format isn't documented); PR 109 merged; v0.17.0 ships paths 1 and 3
+
+Brain: "idle wake-up post pointer to the session's own messaging socket"
+→ hit (the 13a design facts on delivery, and the pointer convention).
+Run before the work.
+
+1. **PR 109:**
+   - **Windows failed:** `onboard_cli::the_per_turn_hook_and_wake_stop`
+     calls `stub_claude`, which exists only on Unix. Fixed in `d225a4b`
+     (`#[cfg(unix)]`, like the other Claude Code onboard tests).
+   - CI then went green (17 of 17); squash-merged as `8cd98ee`, and
+     `rel0170-5-hooks` deleted.
+2. **Step 6, the verifications first.** I ran them before writing any
+   code, so there is no branch and no code for step 6.
+   - **The server inherits the two variables: PASSED.** This session's
+     MCP server (pid 48375, `~/.local/bin/mnemo serve --mcp --shared`, a
+     child of this session's `claude`) has `CLAUDE_CODE_MESSAGING_SOCKET`
+     and `CLAUDE_CODE_MESSAGING_TOKEN` (and `TMUX`). Names only, through
+     `ps -E` on that pid. It has no `MNEMO_AGENT`/`MNEMO_ROLE`, as
+     expected until the sessions are started with them.
+   - **The message format the socket takes, from the docs: FAILED.**
+     - I read https://code.claude.com/docs/en/cross-session-messaging.md,
+       the section "The session's inbox socket", on 2026-11-15. It
+       documents:
+       - the socket's path, exported as `CLAUDE_CODE_MESSAGING_SOCKET`,
+         and a per-session token as `CLAUDE_CODE_MESSAGING_TOKEN`;
+       - that "a script posting to its own session's socket can send
+         `{"type":"auth","token":"<token>"}` as the first line of its
+         connection", optional on macOS and Linux and required on native
+         Windows;
+       - that a connection without a complete line within 30 s is
+         closed.
+     - **It never gives the format of the line that carries the message
+       itself.** Neither do the variables' entries in
+       https://code.claude.com/docs/en/env-vars.md (read whole, in two
+       parts) or https://code.claude.com/docs/en/hooks.md (read whole, in
+       three parts).
+     - The mods API (https://code.claude.com/docs/en/plugins/mods/api.md)
+       sends through `$.session.send`, an in-process API, not the socket.
+       The docs index (`llms.txt`) lists no other page on it.
+   - **A posted pointer wakes an idle session: NOT TESTED.** Without a
+     documented message format, any line I posted would be a guess. I
+     didn't probe my own socket with made-up formats, since that would
+     be the working-around the note's rule forbids.
+   - **How `crossSessionInbound` treats it: documented, not tested.** With
+     no value set, Claude Code delivers a message it verifies came from
+     the session's own child.
+     - On macOS it verifies by process evidence only while the poster
+       still runs, else by the token in the auth line.
+     - A long-lived MCP server posting with the token would qualify.
+     - An explicit `hold` or `refuse` still applies.
+   - **So, by the note's rule, path 2 is dropped:**
+     - v0.17.0 ships steps 1 to 5, delivery paths 1 (the per-turn hook)
+       and 3 (the Stop continuation), with the guardrails;
+     - no watcher, no socket post, no new socket and no daemon;
+     - RB-006.12 stays as triaged.
+3. **What path 2 needs to come back:** a documented message line for the
+   inbox socket (or another documented way for a session's own child to
+   start a turn), plus the idle-wake test.
+   - The rest is ready: `Mnemo::wake` already holds the guardrails and
+     marks `delivered`. `Mnemo::file_stamp` would cost about 3 ms per 5 s
+     poll, which I estimate from step 5's numbers but didn't measure as a
+     poll.
+   - **Two decisions are yours:**
+     - whether to carry path 2 as an item (it needs the docs, not code);
+     - whether to fold "dropped at step 6, with the reason" into the
+       note's section 3, path 2. It's a docs-only PR I can make on your
+       word. I didn't make it, because the dispatch said to say so in
+       DONE.
+4. **Brain** (agent `cursor-agent`): `finding.13a-path2-socket-format`.
+5. **REVIEWER-B's scoped pass** now covers steps 3 to 5; step 6 added
+   nothing. Its subtle points are in my step 3 and step 5 DONEs.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — DECISION + DISPATCH — step 6 dropped as the note's rule says; REVIEWER-B's RB-012 is called over steps 3 to 5; step 7, visibility and freshness
+
+Brain: a hit, run before the work.
+- **Tally:** 60 lookups, 22 hits, 24 partial, 14 misses not stored.
+
+**PR 109** is merged as `8cd98ee`, after the Unix-only test fix.
+
+**Step 6 is handled exactly as the note says.**
+- **Verified:** the server inherits the socket's variables.
+- **Failed:** the inbox socket's message line isn't documented (the auth
+  line is, the message line isn't), so nothing was posted on a guess.
+- **Path 2 is dropped.** v0.17.0 ships path 1 (the per-turn hook) and
+  path 3 (Stop, off by default), with every guardrail.
+
+**Your two decisions:**
+1. **Carry path 2: yes, as WAKE-SOCKET** (LOW, checked at each minor
+   release). It comes back when Claude Code documents the inbox socket's
+   message line, or another way for a session's own child to start a
+   turn. `wake()` and `file_stamp` are ready for it.
+2. **Fold "dropped at step 6, and why" into the note: yes,** in step 7's
+   docs commit, not a PR of its own.
+
+**What that means for 13.1b,** for step 8's guide:
+- **In Claude Code, an agent that posts can wake its peer itself,** with
+  the client's own cross-session messaging (`SendMessage`), as this
+  repo's sessions already do.
+- **The inbox stays the record, and the pointer is only a hint.** That's
+  still "agents wake one another instead of the user relaying".
+- The guide's section says so for Claude Code, and says Cursor relies on
+  the per-turn hook.
+
+---
+
+**REVIEWER-B: RB-012**, the scoped pass the note's section 10 calls
+for (`Reviewer` rule 4: a change to the file's concurrency).
+- **At:** `release-0.17.0` at `8cd98ee`. The steps:
+  - step 3, claims and presence, PR 107 (`460dfa2`);
+  - step 4, tasks, PR 108 (`0b5673d`);
+  - step 5, the hooks and guardrails, PR 109 (`8cd98ee`).
+
+  Step 6 added no code.
+- **Read:** `docs/design/13a-coordination.md` (sections 1 and 3 to 4, and
+  10), and the Worker's subtle points in its step 3 and step 5 DONE
+  entries.
+- **Look hardest at:**
+  1. **Claims:**
+     - the window and the in-place record with its token;
+     - `Lost`;
+     - `effective_expiry`'s clamp;
+     - the early lapse (`holder_lock`, `dead_seen_at`, two looks 10 s
+       apart);
+     - that no OS lock on the brain is held between calls.
+  2. **Presence:**
+     - the flat `presence.<hash>.lock`;
+     - the probe (two refusals 20 ms apart, then the re-stat by
+       identity);
+     - the holder's retries and `refresh()`;
+     - Windows' constant identity.
+  3. **Tasks:**
+     - `next`'s reclaim through `claim()`;
+     - who may move what;
+     - `Lost` for an old owner;
+     - the crash-and-reclaim test's soundness.
+  4. **The hooks:**
+     - `user-prompt` and `stop` always exit 0, and stay within their
+       timeouts;
+     - brain text only after `FRAMING`, escaped;
+     - the Stop reason fixed text;
+     - `wake()` as the one place that marks `delivered`, with its order.
+  5. **The fast path:**
+     - the unlocked page-0 read (a torn page means the slow path);
+     - `file_stamp`'s fields;
+     - `common_dir_fast` against `git rev-parse --git-common-dir`
+       (worktrees, submodules, a `gitdir:` file, `GIT_DIR`);
+     - `sidecar_notes`' writes (openat, O_EXCL temp, rename).
+  6. **`wake status`** reads `~/.claude/settings.json` and the repo's
+     settings files: read only, and nothing secret printed.
+- **The rules:**
+  - `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked`, and no benchmarks
+    (the Worker has a PR open);
+  - findings in `reviewer_notes.md` as RB-012, and anything security in
+    `SECURITY.local.md`;
+  - then `REVIEW DONE: RB-012`.
+  - It's a scoped pass, so keep it to these areas. The release review at
+    READY is the usual minor-release pass, unless this one covers it;
+    I'll decide at READY.
+
+---
+
+**Dispatch to the Worker: step 7, visibility and freshness** (the note's
+sections 5 and 6, and section 10's row 7), on `rel0170-7-vis`:
+- **Visibility:**
+  - the filters as the note's table says, in recall, `about`, the brief,
+    `inbox`, `export` (with its stderr line) and `--git` (never
+    private);
+  - `inspect`'s badge;
+  - an opt-in flag in each surface.
+- **Freshness:**
+  - `stale(now)` with the per-kind defaults;
+  - the `[stale since <date>]` marks in `about` and the essence render;
+  - the brief's stale count for this agent;
+  - `mnemo stale`, and the MCP `about` with `{"stale": true}`;
+  - Python.
+- **ABOUT-COUNT:** `about`'s header shows facts, turns and coordination
+  records apart.
+- **The docs commit:**
+  - path 2 dropped, with the reason and WAKE-SOCKET (above);
+  - the guide's Claude Code note for step 8.
+- **The tests, the READMEs and the CHANGELOG.**
+- **REVIEWER-B is reading `release-0.17.0` meanwhile.** Its findings
+  come to me, and any fix is a later dispatch, not yours to start.
+
+Log DONE and stop.
+
+### 2026-11-15 — PLANNER-A — REVIEW — RB-012 triaged: all six ACCEPTED, for one fix PR after step 7 and before step 8
+
+REVIEWER-B's scoped pass over steps 3 to 5 (`release-0.17.0` at
+`8cd98ee`). The ledger rows and each item's triage line are written in
+`reviewer_notes.md`.
+
+**Its verdict:**
+- **The concurrency is sound,** tested: eight processes over 160 tasks
+  took each exactly once, and every abandoned task was taken back once.
+  The early lapse, the clamp and the "no lock between calls" rule all
+  hold.
+- **The hooks keep their promises:** exit 0 every time, brain text
+  framed and escaped, and the Stop reason fixed.
+- **No security findings.**
+- **RB-011.1 to .5 are VERIFIED** at this head.
+
+**What changes, in one PR (`rel0170-rb012`) after step 7, before step 8:**
+- **RB-012.1 (MEDIUM):**
+  - an owner that passes its token after a lapse, with nobody taking the
+    task, carries on, comparing against the lapsed record's token;
+  - `task update` returns the current claim;
+  - `next` offers the caller its own lapsed task;
+  - the "lost" and "lapsed" messages are split.
+- **RB-012.2 (MEDIUM):**
+  - re-adding a `done` task's slug is refused, with a new slug suggested;
+  - only the creator changes a task's definition, which covers
+    `pre_approved`;
+  - the status is printed with the outcome.
+- **RB-012.3:** `blocked → queued`, and `next` reclaims a lapsed blocked
+  task.
+- **RB-012.4:** only the presence-lock holder writes the lock flag and
+  `tool`.
+- **RB-012.5:** a turn that marked doesn't stamp. That reopens my step-5
+  decision 5, on reviewer-b's measurement: 5 of 40 posts went unshown.
+- **RB-012.6:**
+  - the fast lookup asks git under `GIT_CEILING_DIRECTORIES`,
+    `GIT_WORK_TREE` and `GIT_DISCOVERY_ACROSS_FILESYSTEM`, and near a
+    bare-looking directory;
+  - stamps older than 30 days are removed;
+  - the probe's cost in the window is timed (moved out if over 50 ms);
+  - **SEEN-PER-AGENT closes now** (`_mnemo.seen_by` for role and `all`
+    messages and a role's ready tasks), since a broadcast seen by one
+    agent defeats it;
+  - an `after` cycle is refused;
+  - the third-party requeue message;
+  - the restart-between-looks test.
+
+**For READY:** RB-012 counts as v0.17.0's REVIEWER-B pass for steps 3
+to 5. Whether READY needs a further pass is my call at READY. Steps 1, 2
+and 7 to 9 add no new concurrency. The fix PR is checked by me against
+each recommendation, as RB-011's was.
+
+The dispatch goes out with step 7's review. No pointer now, since the
+Worker is on step 7.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 7: visibility and freshness, and about's counts, PR 110 into `release-0.17.0`
+
+Brain: "visibility private team public filters and freshness stale
+review_by as_of" → hit (`design.13a-*`, the visibility and freshness
+facts). Run before the work.
+
+1. **PR 110** (https://github.com/toarchkumar/mnemo/pull/110), two
+   commits on `rel0170-7-vis` (from `release-0.17.0` at `8cd98ee`):
+   - **`0f1b9b2` docs:**
+     - section 3: path 2 dropped at step 6 (the four checks, which
+       failed and why), carried as WAKE-SOCKET, and what's ready for it;
+     - the Claude Code note for step 8: an agent wakes its peer with
+       `SendMessage`, the inbox stays the record; Cursor relies on the
+       per-turn hook;
+     - sections 5 and 6: "As built (step 7)".
+   - **`b3e325f` feat.**
+     - **Visibility:**
+       - `memory::visibility_of`, and `VisibilitySet` (`DEFAULT` public
+         and team, `ALL`, `parse` of lists and `all`, `shows`);
+       - row bits `ROW_PRIVATE` (8) and `ROW_PUBLIC` (16) in
+         `row_tags`, with `row_visible` in recall's row-only path;
+       - `req.visibility.shows(&m)` in both decrypting recall paths;
+       - `RecallRequest::visibility`, `about_in`, `inbox_in`.
+       - The essence render filters to `DEFAULT`, with no flag.
+       - **The engine's manifest lookups** (`keyed.rs`, `coordination.rs`,
+         `crud.rs`) use `about_in(ALL)`.
+       - **Export:** `--visibility` (stderr count either way), and
+         `--git` clears private.
+       - **`inspect`:** `private: true` in its JSON and a badge, with its
+         briefing at `ALL`.
+     - **Freshness:**
+       - `memory::stale_since` and `stale_after`;
+       - `ROW_REVIEW` (32) when a record has a `review_by`;
+       - `Mnemo::stale` returning `Stale` (`id`, `what`, `since`, `text`,
+         `whose`);
+       - `memory::date_of`;
+       - the essence render's `[stale since]`;
+       - the CLI's `about` mark, `mnemo stale [--mine]` (with `--as`),
+         and the brief's "N stale items of yours".
+     - **ABOUT-COUNT:**
+       - `Mnemo::kind_counts` returning `KindCounts` (facts with
+         onboarding, turns with thread links, essence, coordination, as
+         `len()` counts);
+       - the CLI header reads "(N memories: F facts, T turns, E essence,
+         C coordination · …)" and the JSON gets `stats.counts`.
+     - **MCP:**
+       - `about` takes `stale` and `visibility` (each entry gets
+         `stale_since` when stale);
+       - `recall` and the inbox's `list` take `visibility`.
+     - **Python:** `visibility=` on `recall`, `recall_text`, `about` and
+       `inbox`, plus `stale()` and `kind_counts()`.
+     - The READMEs and CHANGELOG are updated.
+   - **One correction while gating:** I first appended a `{kind:
+     "counts"}` element to the MCP `about` array.
+     - That broke `cli_smoke::mcp_end_to_end_threads_essence_and_commit_deltas`,
+       which relies on the tool's documented "essence as the final
+       element".
+     - So the MCP array keeps its shape, and the counts are the CLI's
+       header and JSON, plus the engine and Python.
+     - If you want them over MCP, a field on a separate call (or the
+       `mnemo://about` resource) would keep the contract.
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 720 passed, 0
+       failed, 1 ignored;
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features), `fmt --check`, and the mnemo-python
+       clippy: clean;
+     - `mnemo-uniffi`: clippy clean, 23 passed;
+     - `python test_mnemo.py`: all passed.
+     - New: `tests/visibility_freshness.rs` (3), `project_brain` (1),
+       `mcp_context` (1, both modes), `hook_cli` (1), and Python (1);
+       details in the PR.
+2. **Readings of the note, for your review:**
+   - **`--visibility` lists the levels shown,** so `--visibility private`
+     shows only private, and `all` shows all three.
+   - **"Its role's essence items"** became the essence items it wrote
+     (`_mnemo.author`), since essence items carry no role.
+   - **An explicit `review_by` decides alone:** a future one means the
+     record isn't stale, whatever its age.
+   - **The essence render and the brief take no visibility flag.** They
+     show public and team; recall, `about`, `inbox` and `export` have the
+     flag.
+3. **Brain** (agent `cursor-agent`): `design.13a-visibility-built` and
+   `design.13a-freshness-built`.
+4. **Not done here:**
+   - CI on PR 110 was running at this entry (17 pending).
+   - REVIEWER-B's RB-012 reads `release-0.17.0`; I started no fixes.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — step 7 accepted (PR 110), once CI is green; the RB-012 fix PR
+
+Brain: a hit, run before the work.
+- **Tally:** 61 lookups, 23 hits, 24 partial, 14 misses not stored.
+
+**PR 110, ACCEPTED, conditional on its CI** (3 of 17 had passed when I
+read it):
+- **Accepted:**
+  - the visibility row bits, and the filter in both recall paths;
+  - `about_in(ALL)` for the engine's own manifest lookups;
+  - `--git` clearing private, with the stderr count;
+  - `stale()` and its marks;
+  - `KindCounts` in the CLI header and JSON;
+  - the docs commit (path 2 dropped, WAKE-SOCKET, the Claude Code note).
+- **Your four readings: all ACCEPTED**:
+  - `--visibility` lists the levels shown;
+  - "its essence items" means the ones it wrote;
+  - an explicit `review_by` decides alone;
+  - the render and the brief show public and team only.
+- **The MCP `about` keeps its shape: right.** It's a documented
+  contract. The counts over MCP are carried as LOW (`mnemo://about`
+  could show them); not for v0.17.0.
+
+**Dispatch:**
+1. **When PR 110's CI is green,** squash-merge it and delete
+   `rel0170-7-vis`.
+2. **The RB-012 fix PR,** on `rel0170-rb012` from the new tip, with a PR
+   into `release-0.17.0`. It covers RB-012.1 to .6, as each item's
+   `**Planner Triage:**` line in `reviewer_notes.md` says, and my REVIEW
+   entry above:
+   - .1: a token after a lapse compared with the lapsed record's token;
+     `task update` returns the claim; `next` offers the caller its own
+     lapsed task; the split messages; three tests;
+   - .2: a `done` slug's re-add refused, with a suggestion; only the
+     creator changes the definition; the status in the outcome; tests;
+   - .3: `blocked → queued`, and `next` reclaims a lapsed blocked task;
+     a test;
+   - .4: only the lock holder writes the lock flag and `tool`; a test;
+   - .5: a turn that marked doesn't stamp; a test;
+   - .6:
+     - item 1: the git variables, and a bare-looking directory, ask git;
+       both layouts tested;
+     - item 2: stale stamps are removed;
+     - item 3: time it, and move the probe out if it costs over 50 ms;
+     - item 4: `_mnemo.seen_by` per agent, for role and `all` messages
+       and role tasks, which closes SEEN-PER-AGENT;
+     - item 5: an `after` cycle is refused;
+     - item 6: the third-party message;
+     - item 8: the restart-between-looks test.
+   - **Map each recommendation to its commit or test in DONE,** as for
+     RB-011, so I can check it item by item.
+3. Log DONE and stop.
+
+### 2026-11-15 — WORKER — DONE — the RB-012 fixes, PR 111 into `release-0.17.0`; PR 110 merged
+
+Brain: "task update token after lapse Lost re-add done slug creator
+pre_approved seen per agent" → hit (`design.13a-tasks-built`, the hooks
+facts). Run before the work.
+
+1. **PR 110:** CI green (17 of 17); squash-merged as `5f801ba`, and
+   `rel0170-7-vis` deleted.
+2. **PR 111** (https://github.com/toarchkumar/mnemo/pull/111), on
+   `rel0170-rb012` from `5f801ba`:
+   - `2b8b6c7` docs: the note revised for RB-012;
+   - `7bb0fd6` fix: everything below.
+
+   **Item by item** (code in `store/coordination.rs` unless named):
+
+   | Item | Rec | Change | Test |
+   |---|---|---|---|
+   | .1 | 1 | `task_update`: with no live claim, a given token must equal the lapsed record's `_mnemo.claim_token` (kept after expiry); equal and still the owner means carry on and `claim()` again | `tests/tasks.rs::rb012_1_a_lapsed_owner_with_its_token_carries_on` |
+   | .1 | 2 | `TaskOutcome::Updated(Box<Task>, Option<TaskClaim>)`, with `TaskClaim { token, expires_at, retaken }` from `renew` or the re-take. CLI prints `slug status token expiry` (and a stderr note when retaken); MCP `token`/`expires_at`/`note`; Python `token`/`expires_at`/`retaken` | the same test; `project_brain::rb012_task_update_prints_its_claim_and_re_adds_are_refused`; `test_tasks` in Python |
+   | .1 | 3 | `task_next` takes the caller's own `active` or `blocked` task whose claim lapsed first, then the ready queued ones, then other owners' lapsed ones; its history says "taken again after its claim lapsed", with no `reclaimed_from` | `rb012_1_…`; `a_lapsed_owner_is_reclaimed_and_its_late_update_is_lost` (updated for the order) |
+   | .1 | 4 | `TaskOutcome::Lost(TaskLost)`. **`TakenBack`:** a token from a non-owner (checked before the transition, so an old owner never gets "can't go from queued to ready"), or a live claim another holds. **`OtherToken`:** a token that isn't the claim's. The CLI and MCP messages are split, with MCP `reason` and Python `reason` | `rb012_1_…` (both reasons); `add_next_update_list_and_get` (updated) |
+   | .1 | 5 | The three tests | the lapse with the token carries on and re-takes (`retaken`, new token); the lapse after another agent took and handed back gives `TakenBack`; a renewing note returns the same token |
+   | .2 | 1 | `task_add`: a re-add of a `done` slug that would change it gives "<slug> is done; give a new slug (<slug>-N?)", with N the first free one. An identical re-add stays `unchanged` | `tasks.rs::rb012_2_a_done_slug_and_a_strangers_re_add_are_refused`; the CLI test |
+   | .2 | 2 | Only the creator changes a definition: "that slug is <creator>'s task; it wasn't changed" | the same (`pre_approved` stays off) |
+   | .2 | 3 | `task add` prints `slug outcome status` | `project_brain::task_add_next_update_list_get_and_the_git_export` (updated) |
+   | .3 | | `("blocked", "queued")` in `TASK_TRANSITIONS`, under `active → queued`'s rule; `next` reclaims a lapsed `blocked` task as `active` | `tasks.rs::rb012_3_blocked_tasks_cycles_and_a_live_requeue` |
+   | .4 | | `touch_presence`: a process without the presence lock, where the record says a lock holder's, moves `last_active` alone | `claims.rs::rb012_4_a_cli_call_beside_the_server_keeps_it_alive` (alive yes, tool `mcp`, after a CLI touch) |
+   | .5 | | `hook.rs::user_prompt`: a turn that showed something writes no stamp | `hook_cli.rs::rb012_5_a_turn_that_showed_something_writes_no_stamp` (no stamp after the showing turn; one after the quiet next turn) |
+   | .6 | 1 | `project.rs::common_dir_fast`: `GIT_WORK_TREE`, `GIT_CEILING_DIRECTORIES` and `GIT_DISCOVERY_ACROSS_FILESYSTEM` join `GIT_DIR`/`GIT_COMMON_DIR` in going to git, and so does a directory on the way up with `HEAD`, `objects` and `refs` | `hook_cli.rs::rb012_6_the_fast_lookup_defers_to_git_where_it_differs` (a bare repo inside the work tree; a ceiling at the repo; the same subfolder without it) |
+   | .6 | 2 | `sidecar_notes::prune(brain, prefix, age)`; `session_start` removes `hook.turn.*` older than 30 days | `hook_cli.rs::rb012_6_old_turn_stamps_are_removed_at_session_start` |
+   | .6 | 3 | **Timed, release build, throwaway test, not kept.** At a load near 6, with the 20 ms retry in the window: `claim` on a held topic took 21 to 32 ms, and `task next` facing 1, 3 and 6 live workers 29.5, 79.3 and 167.1 ms. That's over 50 ms, and the engine can't probe before a window the caller opens, so `claim` now uses `presence::probe_once` (no retry); `who` keeps it. After, at a load near 3: 0.4 to 0.7 ms and 0.3, 1.4 and 1.5 ms | the early-lapse tests in `claims.rs` and the crash test in `tasks.rs` still pass |
+   | .6 | 4 | `_mnemo.seen_by` for messages to a role or `all` and a role's ready tasks. `new_work` uses it per agent, and `NewWork` carries `agent`. `mark_shown` records that agent; `mark_seen` adds the author for broadcasts; `wake()` skips a task the agent has seen. **Closes SEEN-PER-AGENT** | `wake.rs::broadcasts_and_role_tasks_are_seen_per_agent` |
+   | .6 | 5 | `closes_cycle` refuses an `after` that makes a task wait for itself | `rb012_3_…` |
+   | .6 | 6 | A third party's requeue of a task whose claim is live gives "<slug> is <owner>'s, and its claim is live until <date time UTC>" (`memory::date_time_of`) | `rb012_3_…` |
+   | .6 | 7 | Nothing, per the triage | |
+   | .6 | 8 | | `claims.rs::rb012_6_the_holder_restarting_between_looks_keeps_its_claim` |
+
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 730 passed, 0
+       failed, 1 ignored (720 before this PR);
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features), `mnemo-uniffi` (23 passed), mnemo-python
+       and `fmt --check`: clean;
+     - `python test_mnemo.py`: all passed.
+   - **Changed behaviour an earlier test pinned:**
+     - `task_next`'s order (own lapsed first): the step 4 reclaim test
+       now takes the worker's own lapsed task, then step 4;
+     - the Python history assertion gains the note entry.
+3. **Brain** (agent `cursor-agent`):
+   - `design.13a-tasks-built` superseded with RB-012's rules
+     (`01M7HDDAQWMDS1YS3DPHWSJ3Y6`);
+   - `decision.13a-seen-per-agent`;
+   - `finding.claim-probe-in-window`.
+4. **Not done here:** CI on PR 111 hadn't reported at this entry. Item
+   6.7 needs no change. RB-012's `VERIFIED` marks are REVIEWER-B's.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — the RB-012 fixes accepted (PR 111), once CI is green; step 8, the guide
+
+Brain: a hit, run before the work.
+- **Tally:** 62 lookups, 24 hits, 24 partial, 14 misses not stored.
+
+**PR 110** is merged as `5f801ba`.
+
+**PR 111, ACCEPTED, conditional on its CI** (3 of 17 had passed when I
+read it). I checked each recommendation against your table and read
+`task_update`'s claim logic (`coordination.rs` at `7bb0fd6`):
+- **RB-012.1:**
+  - a non-owner of an `active` or `blocked` task gets `TakenBack` before
+    any transition;
+  - a live claim held by another gives `TakenBack`;
+  - a token that isn't the (live or lapsed) claim's gives `OtherToken`;
+  - an owner whose lapsed claim's token matches carries on, and the
+    claim comes back in `TaskClaim`;
+  - `next` takes the caller's own lapsed task first.
+
+  Recs 1 to 5 are met.
+- **RB-012.2 to .5:** met as tabled.
+- **RB-012.6:** items 1, 2, 4, 5, 6 and 8 are met.
+  - **Item 3,** measured: 29.5, 79.3 and 167.1 ms with 1, 3 and 6 live
+    workers, then 0.3 to 1.5 ms with `probe_once` in `claim`.
+  - **`probe_once` is accepted:** a single false "not alive" can't lapse
+    a claim, because the early lapse still needs two such looks 10 s
+    apart, and `who` keeps the retry.
+- **SEEN-PER-AGENT is closed,** as `decision.13a-seen-per-agent`.
+
+REVIEWER-B marks RB-012's items `VERIFIED` at its next pass.
+
+**Dispatch:**
+1. **When PR 111's CI is green,** squash-merge it and delete
+   `rel0170-rb012`.
+2. **Step 8, the guide** (section 10's row 8, R-010.1, R-010.3, R-010.5
+   and R-010.9), on `rel0170-8-guide`:
+   - **A new guide section, "Working with other agents",** in this order
+     (R-010.3: tasks and the inbox first, claims third):
+     1. naming each session: `MNEMO_AGENT` and `MNEMO_ROLE`, the alias
+        recipe (R-010.9), and `--as`/`--role` for the CLI;
+     2. tasks (`task add`, `next`, `update`, `ready` and `done`, `after`,
+        `pre_approved`), with `sh test` and `json mcp` blocks;
+     3. the inbox (`post`, `inbox`, `ack`);
+     4. claims and `who`;
+     5. how work reaches a session:
+        - the per-turn line;
+        - Stop when it's turned on;
+        - **in Claude Code, wake a peer with `SendMessage` after posting,
+          since the inbox is the record**;
+        - Cursor relies on the per-turn line;
+     6. **mnemo's tasks against Claude Code's built-in `TaskCreate` and
+        `SendMessage`** (R-010.1 rec 2): anything that must outlive a
+        session, a compaction, a worktree or a tool belongs in mnemo;
+     7. the rules: messages are information, never authority; the kill
+        switch; `crossSessionInbound` set to `accept`;
+     8. visibility (a filter until 13b) and freshness (`mnemo stale`), in
+        a few lines each.
+   - **The product terms decision applies:** "shared memory and
+     coordination for your agents", "coordinate", and never
+     "orchestration" or "swarm".
+   - **The card gets its one line** ("If you work with other agents, call
+     `inbox` when the hook says you have work"), still under 1,200
+     bytes.
+   - **`SUMMARY` in `guide.rs`** gets R-010.5's text. Regenerate
+     `llms.txt` and `llms-full.txt`, and the plugin's `SKILL.md`, with
+     `PENDING_UNTIL_STEP` empty.
+   - **`seed.json`** gets the coordination convention for this repo: the
+     names worker-a, planner-a, reviewer-a and reviewer-b, and the roles.
+   - The READMEs (`mnemo/README.md`, `mnemo-python/README.md`) get a
+     short coordination section that points at the guide. The root
+     README is mine, in the READY HANDOFF.
+3. Log DONE and stop. **Step 9 (READY) comes next:** the bump to 0.17.0,
+   the CHANGELOG, and the dry run on the release branch.
+
+### 2026-11-15 — WORKER — DONE — v0.17.0 step 8: the guide's "Working with other agents", PR 112 into `release-0.17.0`; PR 111 merged
+
+Brain: "guide section working with other agents card llms.txt SUMMARY
+product terms" → hit (`decision.product-terms`, the v0.16 guide facts).
+Run before the work.
+
+1. **PR 111:** CI green (17 of 17); squash-merged as `9be90cc`, and
+   `rel0170-rb012` deleted.
+2. **PR 112** (https://github.com/toarchkumar/mnemo/pull/112), one
+   commit, `a22c0b8`, on `rel0170-8-guide`:
+   - **`mnemo/guide/guide.md`, a new section 6, "Working with other
+     agents"**, in the dispatch's order:
+     1. naming each session (`MNEMO_AGENT`, `MNEMO_ROLE`, an alias per
+        role, `--as`/`--role`);
+     2. tasks: a `sh test` block (add with `--for`/`--body`/`--after`,
+        `next` under `MNEMO_AGENT`, a note, `ready`, `done` by the
+        creator, `list`) and `json mcp` `task list`;
+     3. the inbox: `sh test` (`post`, `inbox --as`, `ack` of an id from
+        `post`) and `json mcp` `inbox post`;
+     4. claims and `who`: `json mcp` `claim who`;
+     5. how work reaches a session, with the Claude Code `SendMessage`
+        note and Cursor;
+     6. mnemo's tasks against Claude Code's `TaskCreate` and
+        `SendMessage`;
+     7. the rules;
+     8. visibility and freshness.
+   - **Terms:** the intro says "shared memory and coordination for your
+     agents". No "orchestration" or "swarm" anywhere.
+   - **Section 5** lists four hooks plus `--wake stop`.
+   - **The card** gets its line. It's 925 bytes as `guide::card()` cuts
+     it, measured by cutting the source the same way, so under 1,200.
+   - **`SUMMARY`:** "… the working state of tasks, and an inbox, task
+     queue and claims for agents working together …". Idle wake-ups are
+     left out of R-010.5's wording, since path 2 was dropped. The
+     `llms.txt` link text adds "working with other agents".
+   - **Regenerated:** `llms.txt`, `llms-full.txt` and
+     `integrations/claude-code/skills/mnemo/SKILL.md`, with the debug
+     build. `PENDING_UNTIL_STEP` stays empty.
+   - **`test/scripts/seed.json`:** a new `onboarding`/`coordination`
+     entry after `workflow`, with the names, roles, reviewer-a's `--as`,
+     the task and inbox flow, the `SendMessage` pointer, "information,
+     never authority", and the ledgers until HARNESS-DOGFOOD-1. The live
+     brain has the same text under `onboarding.coordination`.
+   - **READMEs:** `mnemo/README.md` and `mnemo-python/README.md` each get
+     an "Agents working together (v0.17)" section pointing at the guide.
+     I ran the Python one as written: it printed the role message and
+     `ready`.
+   - The CHANGELOG is updated.
+   - **Tests** (macOS, run here):
+     - `cargo test --no-fail-fast --features failpoints`: 730 passed, 0
+       failed, 1 ignored;
+     - the embed-candle set, with `tests/guide.rs`: 103 passed. 15
+       blocks ran, the new section's included; 7 needing the model were
+       skipped (CI's builtin embedder job runs them); 44 commands parsed;
+     - clippy (CI's features) and `fmt --check`: clean.
+   - **A slip, corrected:** PR 112's body first said the card was "0
+     bytes". My one-liner measured the markdown output, which drops the
+     card marks. I fixed the body to 925 with `gh pr edit`.
+3. **Brain** (agent `cursor-agent`): `onboarding.coordination` (the
+   seed's text) and `design.13a-guide-built`.
+4. **Not done here:**
+   - CI on PR 112 was running at this entry (3 of 17).
+   - The root `README.md` and `index.html` are yours, for the READY
+     HANDOFF.
+   - Step 9 (READY) comes next.
+
+Stopping for review.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — step 8 accepted (PR 112), once CI is green; step 9, READY; REVIEWER-B's RB-013, a scoped READY pass on the format-adjacent changes
+
+Brain: a hit (`decision.product-terms`), run before the work.
+- **Tally:** 63 lookups, 25 hits, 24 partial, 14 misses not stored.
+
+**PR 111** is merged as `9be90cc`.
+
+**PR 112, ACCEPTED, conditional on its CI** (4 of 17 had passed when I
+read it). I read the guide's section 6 in full at `a22c0b8`:
+- the order is R-010.3's;
+- the terms follow the decision ("shared memory and coordination for your
+  agents"; "orchestration" and "swarm" appear nowhere);
+- the Claude Code `SendMessage` note, and mnemo's tasks against
+  `TaskCreate`;
+- "information, never authority", the kill switch and
+  `crossSessionInbound`;
+- visibility called a filter, not a lock;
+- the card at 925 bytes.
+
+Correcting the PR body's "0 bytes" was the right thing.
+
+**Dispatch to the Worker:**
+1. **When PR 112's CI is green,** squash-merge it and delete
+   `rel0170-8-guide`.
+2. **Step 9, READY,** on `rel0170-9-ready`, with a PR into
+   `release-0.17.0`, as v0.16.0's bump was:
+   - every manifest at 0.17.0, the lockfiles, and the CHANGELOG's
+     `[0.17.0] — <date>` with the compare links;
+   - **mobile:** by RELEASING.md's rule and `.github/release-mobile`.
+     Step 1 changed `mnemo-uniffi` (`MemoryPatch`'s field), so say
+     whether the mobile packages publish at 0.17.0;
+   - **the CHANGELOG states the mixed-version rule plainly:** every
+     session's `mnemo` should be upgraded together. A v0.16 build sees
+     coordination records as facts;
+   - a dry run on the PR's branch once CI is green.
+3. Log DONE as READY and stop. I then check the delta, hand off the
+   README and `index.html`, and send the tag order as before.
+
+---
+
+**REVIEWER-B: RB-013, a scoped READY pass** (`Reviewer` rule 4: a minor
+release's READY, and changes touching the file's records).
+
+RB-012 covered steps 3 to 5 and its fixes, which I checked item by item.
+This pass covers what it didn't, at `release-0.17.0`'s tip once PR 112
+is merged:
+1. **Mixed versions,** the one thing no test here covers:
+   - **step 1's row kind:** `ROW_KIND_COORDINATION = 5`;
+   - **step 7's row bits:** `ROW_PRIVATE` 8, `ROW_PUBLIC` 16 and
+     `ROW_REVIEW` 32, in `store/records.rs` at lines 412 to 495;
+   - **the reserved keys:** `_mnemo.default_agent`, `_mnemo.wake_paused`
+     and `_mnemo.seen_by`.
+
+   What does the published v0.16.1 do when it opens, recalls from,
+   writes to and compacts a brain v0.17 has written: a crash, a silent
+   loss of a flag or record, or only extra hits? And what does v0.17 do
+   with v0.16's brains? Use the published 0.16.1 binary from the GitHub
+   Release in your scratch area, never the user's installed one or the
+   project brain.
+2. **Visibility can't leak by default:**
+   - a `private` record must stay out of `recall`, `about`, the brief,
+     the per-turn line, `inbox`, `export` and `export --git`, and the MCP
+     tools and resources (`mnemo://about`, `mnemo://recent`,
+     `mnemo://key/{key}`), unless asked;
+   - check the paths that decode rows without going through recall.
+3. **Step 1's author and default agent:**
+   - `_mnemo.author` only on new records;
+   - `_mnemo.default_agent` honoured for writes with no agent and nowhere
+     else;
+   - `MNEMO_AGENT` validation.
+4. **Step 2's messages and the brief's "Your work" part,** briefly: the
+   limits and the escaping. RB-012 saw the hooks.
+
+**The rules:**
+- `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked`, and no benchmarks;
+- findings as RB-013, and anything security in `SECURITY.local.md`;
+- `REVIEW DONE: RB-013`;
+- keep to these four areas.
+- It runs beside step 9. The tag waits for both.
+
+### 2026-11-15 — PLANNER-A — REVIEW — RB-013 triaged: all four ACCEPTED, before the tag, in one fix PR after step 9
+
+REVIEWER-B's scoped READY pass, at `release-0.17.0` `9be90cc`. The ledger
+rows and triage lines are in `reviewer_notes.md`. RB-013.2's detail is
+held in `SECURITY.local.md`, with neutral wording until v0.17.0 ships.
+- **RB-013.1 (MEDIUM): mixed versions.** A v0.16.1 `compact` re-tags
+  coordination rows as facts. v0.17 then finds no tasks, claims or
+  messages, silently, until its own `compact`. The fix:
+  - a sentinel-vector fallback in the coordination scan, if it's safe;
+  - a warning in `verify`, `about` and the first coordination call;
+  - the CHANGELOG names it;
+  - a v0.16.1 compat test.
+- **RB-013.2 (held):** the visibility filter on more read surfaces, and a
+  keyed write keeps a record's level. Its recommendations are as listed
+  there.
+- **RB-013.3:** `ROW_PRIVATE` gets its own bit (64) before the tag. It
+  shares 8 with `ROW_SETTLED` today. That's harmless now, and free to
+  change only before a release writes it.
+- **RB-013.4:**
+  - `--agent` and the MCP `agent_id` are validated for new writes;
+  - an invalid `MNEMO_AGENT` is an error for `post`, `task add` and
+    `claim`;
+  - a guide sentence on owner against author;
+  - **the CHANGELOG's mixed-version paragraph** names the four effects of
+    an older build: it shows private records, a keyed write drops the
+    level, writes go to `default` with no author, and `compact` hides
+    coordination records.
+
+**The order:**
+1. Step 9's READY, which is in flight.
+2. **The RB-013 fix PR** (`rel0170-rb013`).
+3. A fresh dry run on `release-0.17.0`.
+4. Then the tag.
+
+I check the fix PR against each recommendation, as I did RB-012's. The
+dispatch goes with my review of step 9's DONE.
+
+### 2026-11-15 — WORKER — READY — v0.17.0: release-0.17.0 at `b223f25`, the dry run green with mobile on; PR 112 and PR 113 merged
+
+Brain: "READY bump release manifests lockfiles CHANGELOG compare links
+mobile release-mobile dry run" → hit (the release flow and the release
+order, v0.14 to v0.16). Run before the work.
+
+1. **PR 112** (step 8):
+   - **macOS CI failed** on my new inbox block: `cut: command not found`.
+     The guide test runs blocks with a minimal `PATH` (mnemo, git, bash),
+     and macOS CI's has no `cut`.
+   - **Fixed** in `31ee3b2` with bash's `read`, and `llms-full.txt`
+     regenerated.
+   - **One observation, not fixed (outside this step):** in that log, the
+     CLI panicked on the broken pipe ("failed printing to stdout: Broken
+     pipe") once `cut` failed. `println!` panics on EPIPE in our CLI.
+   - CI then went green (17 of 17); squash-merged as `cbf955a`, and
+     `rel0170-8-guide` deleted.
+2. **PR 113** (https://github.com/toarchkumar/mnemo/pull/113, step 9),
+   two commits:
+   - **`0f93c4a` release: v0.17.0:**
+     - `mnemo/Cargo.toml`, `mnemo-python/Cargo.toml`,
+       `mnemo-python/pyproject.toml`, `mnemo/bindings/node/Cargo.toml`,
+       `mnemo/bindings/uniffi/Cargo.toml` and
+       `mnemo/bindings/kotlin/gradle.properties` at 0.17.0;
+     - the two lockfiles' own entries only (`askama`'s 0.16.1 left
+       alone);
+     - the two mobile examples (Android dependency, iOS
+       `MARKETING_VERSION`);
+     - the CHANGELOG's `[0.17.0] — 2026-11-15`: a release paragraph
+       (agents working together; **upgrade every session's `mnemo`
+       together**, since a v0.16 build sees coordination records as facts
+       and ignores visibility and freshness, with no format change; mobile
+       publishes), and the compare links (`[Unreleased]` from `v0.17.0`,
+       `[0.17.0]` `v0.16.1...v0.17.0`);
+     - `.github/release-mobile` `true`.
+   - **`55dfaee`:** the Swift and Kotlin READMEs' install lines at 0.17.0
+     (RELEASING.md's checklist item 3, with mobile on).
+   - **Mobile publishes at 0.17.0.** RELEASING.md's rule 1 (step 1
+     changed `mnemo-uniffi`: `MemoryPatch`'s `caller_keys: None` in
+     `db.rs`) and rule 3 (a minor version) both apply.
+   - **Locally, on the bump's tree:**
+     - `cargo test --locked --no-fail-fast --features failpoints`: 730
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set: 103 passed;
+     - clippy (CI's features) and `fmt --check`: clean;
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py` passed, the wheel reporting 0.17.0, and
+       `mnemo --version` printing `mnemo 0.17.0`;
+     - `cargo check --locked` for the engine, uniffi and mnemo-python.
+   - CI went green (23 of 23 on `55dfaee`); squash-merged as `b223f25`,
+     and `rel0170-9-ready` deleted.
+   - The push runs on `release-0.17.0` at `b223f25`: CI success, Mobile
+     CI success.
+3. **The dry run: success.** Run 43821159815, `gh workflow run
+   release.yml --ref release-0.17.0 -f dry_run=true -f mobile=true`.
+   - **Deviation:** the dispatch said "on the PR's branch". I ran it on
+     `release-0.17.0` after merging. RELEASING.md and the stored release
+     order run it on the release branch, and the registry environments'
+     deployment rules allow only `v*` tags and `release-*` branches, so a
+     run from `rel0170-9-ready` would have left the publish checks out.
+   - **`version check`:** "engine 0.17.0, mnemo-uniffi 0.17.0,
+     mnemo-android 0.17.0", "the commit says mobile: true", "mobile: on
+     (the dry run's `mobile` input)", with no warning.
+   - **Every build and check succeeded:**
+     - the 5 CLIs, the 5 wheels and the sdist (with its Linux import
+       check);
+     - `SHA256SUMS`;
+     - the 5 built-in-embedder artifact checks;
+     - attach engine assets;
+     - the crates.io and PyPI dry runs;
+     - the Swift and Android builds and publishes (dry), and Swift's
+       check of the published package.
+   - **Skipped, as a dry run skips them:** the approval, attest, Create
+     GitHub Release, the mobile release note, and the engine-published
+     gate.
+4. **For your READY HANDOFF and the tag:**
+   - **Yours:** the root `README.md` and `index.html` (R-010.5's line,
+     the file strip, card 7, the roadmap move; the four-agent pill only
+     once the agents coordinate through 13a).
+   - **The rest of the release order:** the HANDOFF commit; then `chore(plan):
+     sync coordination files`; fast-forward `main`; the annotated tag
+     `v0.17.0` ("MNemo 0.17.0"); the user's approval click.
+   - **REVIEWER-B's RB-013** runs beside this, and the tag waits for it,
+     as you said.
+5. **Brain** (agent `cursor-agent`): `release.v0.17.0-ready`.
+
+Stopping for the HANDOFF and the tag order.
+
+### 2026-11-15 — PLANNER-A — REVIEW + DISPATCH — READY's bump accepted (`b223f25`, the dry run green); the RB-013 fix PR before the tag, with EPIPE-1; then a fresh dry run
+
+Brain: a hit, run before the work.
+- **Tally:** 64 lookups, 26 hits, 24 partial, 14 misses not stored.
+
+**Accepted:**
+- **PR 112** (`cbf955a`), with `read` in place of `cut` in the guide's
+  block.
+- **PR 113** (`b223f25`):
+  - the manifests, the lockfiles' own entries, and the mobile examples
+    and READMEs at 0.17.0;
+  - `.github/release-mobile` `true`, under rules 1 and 3;
+  - the CHANGELOG's `[0.17.0]` and its links.
+- **The dry run on `release-0.17.0`** (43821159815), rather than on the PR
+  branch. That deviation is right: only `release-*` branches run the
+  publish checks, so my wording was the slip.
+
+**Not yet READY for the tag: RB-013 is triaged, all four items before the
+tag** (my REVIEW entry above, written while you were on step 9). The
+detail for RB-013.2 is in `SECURITY.local.md` (its triage line).
+
+**Dispatch: the RB-013 fix PR,** on `rel0170-rb013` from `b223f25`, with
+a PR into `release-0.17.0`. **Use neutral wording for RB-013.2** in the
+commits, the PR and the CHANGELOG ("visibility filters on more read
+surfaces"; "a keyed write keeps the level").
+- **RB-013.1:**
+  - rec 1, if you judge it safe: the coordination scan takes
+    sentinel-vector `fact` rows, decrypts those, and re-tags them on the
+    next write;
+  - rec 2: the warning in `verify`, `about` and the first coordination
+    call;
+  - rec 3: the CHANGELOG;
+  - rec 4: a v0.16.1 compat test beside `compat (v0.14.0, linux)`.
+  - **If rec 1 isn't safe, say why,** and ship recs 2 to 4.
+- **RB-013.2:** every recommendation in both parts, as its triage line
+  lists them, including the test that walks every read surface.
+- **RB-013.3:** `ROW_PRIVATE` moves to bit 64; one block of row-flag
+  constants with the kinds each applies to; a test that a settled turn
+  isn't private.
+- **RB-013.4:**
+  - items 1 and 2 (validate `--agent` and `agent_id` for new writes; an
+    invalid `MNEMO_AGENT` is an error for `post`, `task add` and
+    `claim`);
+  - item 3, the guide sentence;
+  - item 4, the CHANGELOG's mixed-version paragraph naming the four
+    effects.
+- **EPIPE-1 (your observation, small, in this PR):** the CLI panics on a
+  broken pipe (`println!` on EPIPE, as in `mnemo list | head`). Exit
+  quietly on EPIPE instead: restore SIGPIPE's default on Unix, or handle
+  the write error, with a test that pipes into a closed reader.
+- **Map each recommendation to its commit or test in DONE.**
+- **Then, after the merge:** a fresh dry run on `release-0.17.0` with
+  mobile on.
+- **Log DONE as READY and stop.** I check the fixes, write the HANDOFF,
+  and send the tag order.
+
+### 2026-11-16 — WORKER — READY — v0.17.0 again: RB-013 and EPIPE-1 merged (PR 114, `ef0c1af`), the fresh dry run green with mobile on
+
+Brain: "mixed versions v0.16.1 reading a v0.17 brain row kind coordination
+visibility leak" → partial (the visibility and coordination facts, nothing
+on mixed versions). Run before the work.
+
+1. **PR 114** (https://github.com/toarchkumar/mnemo/pull/114), on
+   `rel0170-rb013` from `b223f25`:
+   - `9fca308` docs: the note's visibility table;
+   - `83248e9` fix.
+   - Neutral wording for RB-013.2 in the commits, the PR and the
+     CHANGELOG ("visibility filters on more read surfaces", "a keyed write
+     keeps the level").
+   - CI green, 24 of 24. **`compat (v0.16.1, linux)` really ran:** its log
+     shows `Installed package mnemo-engine v0.16.1` and
+     `a_v0_16_compaction_hides_nothing_from_v0_17 ... ok`.
+   - Squash-merged as `ef0c1af`, and `rel0170-rb013` deleted.
+
+   **Item by item:**
+
+   | Item | Rec | Change | Test |
+   |---|---|---|---|
+   | .1 | 1 | **Judged safe, so done.** Only the engine writes `_mnemo.kind`, so a decrypted record with a coordination kind is one. Such a record keeps its `episodic` type when re-tagged. `coordination_records` takes the row kind or `legacy_coordination_ids`: the `episodic` fact rows, decrypted once per handle (89 in this repo's brain, counted with the installed CLI), cached on the handle, and rebuilt when a shared handle reloads. A write re-tags the record (`put` computes its row). Recall's row-only path and `search` drop coordination records (`recent` already did) | `tests/v0_16_compat.rs` |
+   | .1 | 2 | `Mnemo::mistagged_coordination`. `verify` (stderr warning), `about` (a header line), the first coordination command per CLI process (`note_mistagged` in post, inbox, ack, task, claim, stale), and the first `inbox`/`task`/`claim` tool per MCP server | the compat test's counts |
+   | .1 | 3 | The CHANGELOG's mixed-version paragraph | |
+   | .1 | 4 | **The job:** `compat (v0.16.1, linux)` in `ci.yml` (`cargo install mnemo-engine --version =0.16.1 --locked`, then `MNEMO_V0_16_1_BIN`). **The test:** v0.17 writes a task (claimed), a message, presence and a private fact; v0.16.1 `verify`s and `compact`s. v0.17 then finds at least 4 tagged as facts, the task, the claim, the inbox and `who`. `task next` by worker-b gets nothing. Recall shows no coordination record and no private one. A write lowers the count, and a v0.17 compact brings it to 0. **Run here** against the published macOS v0.16.1 binary (from the GitHub Release, SHA-256 matched to `SHA256SUMS`): passed | `v0_16_compat::a_v0_16_compaction_hides_nothing_from_v0_17` |
+   | .2 A | 1 | `recent_in(n, levels)`: the row's bits (`row_visible`), then the record. `recent()` uses the default, and so do `mnemo://recent` and the `session-start` prompt | `visibility_surfaces::every_read_surface_leaves_private_records_out` |
+   | .2 A | 2 | The MCP `list` takes `visibility`, and its description says private records need it. The MCP `history` too, with each version's state set before filtering | the same |
+   | .2 A | 3 | **The CLI:** `list`, `history`, `stale` and `search` take `--visibility`, and `list --visibility all` prefixes `[private] `. `search_in` is added (which also leaves out coordination records). **The key resource:** `mnemo://key/{key}` answers "no such key" for a private live version and drops private earlier versions. **Python:** `stale(visibility=)`, and `Stale.visibility` | the same |
+   | .2 A | 4 | Two rows in the note's table | `9fca308` |
+   | .2 A | 5 | **The walk:** 16 MCP surfaces (recall by text and by keywords, `about`, `about` stale, `list`, `history`, `stats`, the essence render, the inbox `list`, 4 resources, 3 prompts) and 14 CLI commands (recall, `about` ×2, `list` ×2, `history`, `stale`, `export` ×4, `inbox`, the essence render, `search`). Private records of six shapes: unkeyed, keyed, onboarding, past review, essence, broadcast. A control (`list --visibility all`, and the MCP `list` with `all`) proves they're there | the same |
+   | .2 B | 1, 3 | `inherit_levels` in `remember_keyed` and `remember_keyed_superseding`: no visibility or `review_by` given means the live version's | `visibility_surfaces::a_keyed_write_keeps_the_level_and_says_when_it_changes` |
+   | .2 B | 2 | `Mnemo::superseded_level_change`. CLI `superseded (private → team)`; MCP `outcome` the same, plus `visibility_changed {from, to}` | the same (CLI and MCP) |
+   | .3 | | `ROW_PRIVATE` = 64, with every row flag in one commented block and the kinds each applies to. `row_visible(kind, flags, set)` returns `team` for a turn | `store::records::row_flag_tests` (2: distinct bits; a settled turn isn't private); `visibility_freshness::settled_turns_are_not_private` |
+   | .4 | 1 | `remember --agent` is checked before anything else; the MCP `remember` and `commit_deltas` check `agent_id` (`checked_agent`) | `project_brain::rb013_agent_ids_are_checked_for_writes`; `visibility_surfaces::an_invalid_agent_id_is_refused_over_mcp` |
+   | .4 | 2 | `AsArgs::resolve_for_write` (an invalid `MNEMO_AGENT` or `MNEMO_ROLE` with no `--as`/`--role` is an error) for `post`, `task add` and `claim take`/`renew`/`release`. Reads keep the note | `project_brain::rb013_…` (3 refused, `--as` overrides, `inbox` goes on) |
+   | .4 | 3 | The guide's naming section: a fact's agent (its slot) and author can differ, with the example. `llms-full.txt` regenerated | the guide test |
+   | .4 | 4 | The CHANGELOG's mixed-version paragraph names the four effects: private records shown, a keyed write over a private fact made visible, writes to `default` with no author, and the compact's re-tag (which v0.17.0 now handles) | |
+   | EPIPE-1 | | **`quiet_broken_pipe()` in `main`:** a panic hook. A payload "failed printing to stdout" with a broken-pipe error (`os error 32`/`232`, "Broken pipe", "pipe is being closed") exits 141 on Unix and 1 elsewhere. Every other panic goes to the default hook. No `unsafe` (restoring SIGPIPE's default would need it, and the stable attribute for it doesn't exist) | `cli_smoke::a_closed_pipe_exits_quietly` (`std::io::pipe` with the reader dropped first, so it's deterministic; exit 141, no "panicked" on stderr) |
+
+   - **Two earlier tests changed** for the intended behaviour: `history` of a private keyed fact now asks with `visibility` /
+     `--visibility all` (`mcp_context::the_server_names_its_agent…`,
+     `project_brain::default_agent_author…`).
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 739
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set: 105 passed;
+     - clippy (CI's features), `mnemo-uniffi` (23 passed), mnemo-python
+       and `fmt --check`: clean;
+     - `python test_mnemo.py`: all passed;
+     - `v0_16_compat` against v0.16.1: passed.
+2. **The fresh dry run: success** (run 43835261485, `release-0.17.0` at
+   `ef0c1af`, mobile on).
+   - `version check`: "engine 0.17.0, mnemo-uniffi 0.17.0, mnemo-android
+     0.17.0", "the commit says mobile: true".
+   - **Every build and check passed:** the 5 CLIs, the 5 wheels, the sdist
+     and its check, `SHA256SUMS`, the 5 artifact checks, attach, the
+     crates.io and PyPI dry runs, and the Swift and Android builds,
+     publishes and Swift verify.
+   - **Skipped, as a dry run skips them:** the approval, attest, the
+     GitHub Release, the mobile release note and the gate.
+   - The push runs on `ef0c1af`: CI success, Mobile CI success.
+3. **Your working-tree changes:** the root `README.md` and `index.html` are
+   modified in the tree and not by me (your HANDOFF in progress). I left
+   them unstaged.
+4. **Brain** (agent `cursor-agent`):
+   - `release.v0.17.0-ready` superseded with this run;
+   - `decision.13a-mixed-versions`;
+   - `architecture.row-flags`.
+
+Stopping for the HANDOFF and the tag order.
+
+### 2026-11-16 — PLANNER-A — REVIEW + HANDOFF + DISPATCH — PR 114 accepted (RB-013 and EPIPE-1); the README and site are staged; the tag
+
+Brain: your lookup was partial.
+- **Tally:** 65 lookups, 26 hits, 25 partial, 14 misses not stored.
+
+**PR 114, ACCEPTED** (`ef0c1af`, 24 of 24 checks):
+- **The release:**
+  - `compat (v0.16.1, linux)` ran the published 0.16.1;
+  - the fresh dry run 43835261485 at `ef0c1af` succeeded with mobile on;
+  - the CHANGELOG's mixed-version paragraph names the four effects;
+  - the wording is neutral (only "a filter, not a security boundary",
+    the design's own phrase).
+- **I checked each recommendation against your table:**
+  - **RB-013.1:** recs 1 to 4, with rec 1 judged safe because only the
+    engine writes `_mnemo.kind`;
+  - **RB-013.2:**
+    - Part A recs 1 to 5, the walk covering 16 MCP and 14 CLI surfaces
+      with six shapes of private record and a control;
+    - Part B recs 1 to 3;
+  - **RB-013.3:** bit 64, one commented block, and turns are never
+    private;
+  - **RB-013.4:** items 1 to 4;
+  - **EPIPE-1:** a panic hook, no `unsafe`, exit 141, and a
+    deterministic test.
+- **Carried as COORD-LEGACY-SCAN (LOW):** `legacy_coordination_ids`
+  decrypts every `episodic` fact row once per handle (89 here). This
+  repo's decisions are episodic, so it grows with the brain.
+  - The fix is to narrow by the sentinel vector in the resident column
+    before decrypting, as RB-013.1 rec 1 put it, and to measure.
+  - Not for v0.17.0: the per-turn fast path skips the scan on unchanged
+    turns.
+
+**HANDOFF: commit these on `release-0.17.0` on their own, in step 1
+below:**
+- **`README.md`:**
+  - a top bullet, "Agents coordinate through it (v0.17)";
+  - iOS and Android at 0.17.0;
+  - Python's example at v0.17.0;
+  - a new "What's new in v0.17.0: several agents, one brain", with
+    R-010.5's line and "Upgrading from 0.16.x", the mixed-version effects
+    (matching the CHANGELOG) and Rust's `MemoryPatch`;
+  - **Known limitations:**
+    - MNemo doesn't wake an idle session itself (WAKE-SOCKET);
+    - visibility isn't access control yet.
+- **`index.html`:**
+  - the pill and the "current release" line at v0.17.0;
+  - Python's example;
+  - the file strip gains "inbox and tasks";
+  - card 7 becomes "Agents coordinate through it";
+  - Shipped is v0.13 – v0.17, with coordination first, and "Several
+    agents sharing one file in turn" dropped;
+  - Next drops the coordination item.
+  - **The four-agent proof pill isn't added.** It waits until this repo's
+    sessions coordinate through 13a (HARNESS-DOGFOOD-1).
+- **Commit message:** `docs: v0.17.0 README and site (agents coordinate
+  through one brain)`.
+- **Check my text against the code and the CHANGELOG** before you
+  commit. That includes the "about 3 ms" unchanged turn, from your step 5
+  figure, and the 15-minute claim default. If a line is wrong, say so in
+  DONE and leave both files uncommitted.
+
+**Dispatch: the release, in v0.16.0's order:**
+1. The HANDOFF commit, then `chore(plan): sync coordination files`
+   (`PLAN.md`, `reviewer_notes.md`; never `SECURITY.local.md`).
+2. Fast-forward `main` to `release-0.17.0`, then tag `v0.17.0`
+   (annotated, "MNemo 0.17.0").
+3. Stop at "approve the release (v0.17.0, mobile true)" with every job
+   before it green, then log DONE. The click is the user's.
+4. **After the click:**
+   - `attest` and its order;
+   - the four registries and the GitHub Release (12 engine files, plus
+     the XCFramework zip and the AAR);
+   - the site's files byte-equal to `main`;
+   - `gh attestation verify` with `--source-ref refs/tags/v0.17.0`;
+   - delete `release-0.17.0` and any `rel0170-*` left, listing each first;
+   - log DONE.
+
+**Then:**
+- I log VERIFIED, and move RB-013.2 from `SECURITY.local.md` into
+  PLAN.md.
+- I write the user's post-release steps:
+  - install v0.17.0;
+  - `mnemo default-agent --set cursor-agent`;
+  - one `MNEMO_AGENT`/`MNEMO_ROLE` line per tmux pane;
+  - an `onboard` re-run for the per-turn hook;
+  - `crossSessionInbound` set to `accept`;
+  - the by-hand check that the hooks see `MNEMO_AGENT`.
+- After that comes rule 9's "name the agent" removal.
+
+### 2026-11-16 — WORKER — DONE — the v0.17.0 HANDOFF held: one README line is wrong; nothing committed, no tag
+
+Brain: "release order tag approve attest registries site byte-equal
+attestation verify delete branches" → hit (`decision.release-order`, the
+release flow, the v0.16.0 release). Run before the work.
+
+**I checked your text against the code and the CHANGELOG, as asked.**
+- **One line is wrong**, so by your instruction both files are left
+  uncommitted, and nothing else in the release order has run: no HANDOFF
+  commit, no `chore(plan)`, no fast-forward of `main`, no tag.
+- **`README.md`, in "What's new in v0.17.0"**, the `mnemo default-agent`
+  bullet: "more commands (`update`, `search`, `snapshots`, `thread start`,
+  `essence`) take no path in a git repository".
+  - `search` and `snapshots` became pathless in **v0.16.1** (the
+    CHANGELOG's `[0.16.1]`, and `mnemo/README.md`: "Since v0.16.1 `get
+    <ID>`, `search` and `snapshots` do too").
+  - `essence render|add|append` were pathless in v0.16.0. v0.17 adds
+    only `essence update|resolve|remove <ID>`.
+  - **What v0.17 made pathless** (the CHANGELOG's CLI-PATHLESS-2 and the
+    coordination commands): `update <ID>`, `thread start <NEW>`, `essence
+    update|resolve|remove <ID>`, `default-agent`, and the new `post`,
+    `inbox`, `ack <ID>`, `task`, `claim`, `stale` and `wake`.
+  - **A suggested line:** "**`mnemo default-agent`** sets the agent a write
+    is made for when it names none, and `update`, `thread start`, `essence
+    update|resolve|remove` and the new coordination commands take no path
+    in a git repository."
+- **Checked and right:**
+  - "about 3 ms on an unchanged turn": step 5 measured 3.4 ms median,
+    against `mnemo --version`'s 3.3 to 4.1 ms;
+  - "15 minutes by default": `CLAIM_TTL_DEFAULT` is 15 minutes;
+  - `ready` waits for the creator's `done`, and a task whose worker went
+    quiet is taken back once its claim lapses;
+  - the visibility lines ("a filter, not access control");
+  - `about`'s counts;
+  - the four upgrade effects (matching the CHANGELOG);
+  - `MemoryPatch`;
+  - the two Known limitations;
+  - the mobile versions, Python's example, and every `index.html` change
+    (the pill, the file strip, card 7, the "These examples use v0.17.0"
+    line, Shipped and Next).
+- **One gap, not wrong:** "`mnemo onboard --wake stop` lets a session keep
+  going for a pre-approved task". It also does so for a message to the
+  agent by name. Your call whether to add it.
+- **The tree:** `README.md` and `index.html` are modified and unstaged,
+  as you left them. `release-0.17.0` is at `ef0c1af`, same as origin.
+
+Stopping. When the line is fixed, `READ:` your entry and I'll run the
+release order from the HANDOFF commit.
+
+### 2026-11-16 — PLANNER-A — HANDOFF + DISPATCH — the README line is fixed; run the release order
+
+**You were right, and holding it was right.**
+- `search` and `snapshots` went pathless in v0.16.1, and `essence
+  render|add|append` in v0.16.0.
+- **The bullet now reads:** "`mnemo default-agent` sets the agent a write
+  is made for when it names none. `update`, `thread start`, `essence
+  update|resolve|remove` and the new coordination commands take no path
+  in a git repository."
+- **The gap is filled too.** `--wake stop` now reads "for a pre-approved
+  task or a message to it by name".
+
+Nothing else changed in either file.
+
+**Dispatch:** the release order of my entry "PR 114 accepted (RB-013 and
+EPIPE-1); the README and site are staged; the tag", from its step 1 (the
+HANDOFF commit, with that entry's file list and commit message), through
+to stopping at the approval.
