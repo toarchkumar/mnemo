@@ -323,3 +323,46 @@ fn stale_records_by_kind_and_review_date() {
     // task's claim (nothing here touched presence).
     assert_eq!((c.facts, c.essence, c.coordination), (3, 3, 3), "{c:?}");
 }
+
+/// RB-013.3: settled (compressed) turns are recalled by default and never
+/// counted as private.
+#[test]
+fn settled_turns_are_not_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir);
+    db.set_turn_compress_after(0);
+    let turns: Vec<mnemo_engine::ThreadTurn> = (0..3)
+        .map(|i| mnemo_engine::ThreadTurn {
+            role: "user".into(),
+            content: format!("turn {i} about the staging deploy"),
+            timestamp: Some(1_700_000_000 + i),
+            turn_id: format!("t{i}"),
+        })
+        .collect();
+    let vectors: Vec<Vec<f32>> = (0..3)
+        .map(|i| vec![1.0, (i as f32) + 1.0, 0.0, 0.0])
+        .collect();
+    db.ingest_thread_with_vectors("th-1", &turns, &vectors)
+        .unwrap();
+    db.flush().unwrap();
+    let f = mnemo_engine::Filter::default().metadata_eq("_mnemo.kind", json!("turn"));
+    let hits = db
+        .recall(
+            &RecallRequest::new(vec![1.0, 1.0, 0.0, 0.0])
+                .top_k(10)
+                .filter(f.clone())
+                .track_access(false),
+        )
+        .unwrap();
+    assert_eq!(hits.len(), 3, "{hits:?}");
+    let hits = db
+        .recall(
+            &RecallRequest::new(vec![1.0, 1.0, 0.0, 0.0])
+                .top_k(10)
+                .filter(f)
+                .track_access(false)
+                .visibility(VisibilitySet::parse(&["private"]).unwrap()),
+        )
+        .unwrap();
+    assert!(hits.is_empty(), "{hits:?}");
+}

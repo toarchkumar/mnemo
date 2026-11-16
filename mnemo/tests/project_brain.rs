@@ -734,10 +734,19 @@ fn default_agent_author_freshness_and_more_commands_without_a_path() {
         (review - now - 30 * 86_400).abs() < 120,
         "{review} vs {now}"
     );
-    // `history` with no --agent finds it under the default agent.
+    // `history` with no --agent finds it under the default agent (it's
+    // private, so it's asked for).
     let h = e.ok(
         &main,
-        &["history", "--key", "fact.deploy", "--format", "json"],
+        &[
+            "history",
+            "--key",
+            "fact.deploy",
+            "--visibility",
+            "all",
+            "--format",
+            "json",
+        ],
     );
     assert!(h.contains("staging-7"), "{h}");
     // Bad values are refused before anything is written.
@@ -1343,4 +1352,49 @@ fn rb012_task_update_prints_its_claim_and_re_adds_are_refused() {
         err.contains("bump-the-version is done; give a new slug (bump-the-version-2?)"),
         "{err}"
     );
+}
+
+/// RB-013.4: `remember --agent` is checked like every agent id, and an
+/// invalid `MNEMO_AGENT` is an error for `post`, `task add` and the claim
+/// writes (reads go on, with a note).
+#[test]
+fn rb013_agent_ids_are_checked_for_writes() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    for bad in ["two words", "a/b", &"x".repeat(65)] {
+        let err = e.fails(&main, &["remember", "--text", "x", "--agent", bad]);
+        assert!(
+            err.contains("--agent") && err.contains("1 to 64"),
+            "{bad:?}: {err}"
+        );
+    }
+    let run = |args: &[&str]| {
+        e.cmd(&main, args)
+            .env("MNEMO_AGENT", "two words")
+            .output()
+            .unwrap()
+    };
+    for args in [
+        &["post", "planner-a", "hello"][..],
+        &["task", "add", "A task"][..],
+        &["claim", "take", "a topic"][..],
+    ] {
+        let o = run(args);
+        assert!(!o.status.success(), "{args:?} went on");
+        assert!(
+            String::from_utf8_lossy(&o.stderr).contains("MNEMO_AGENT isn't"),
+            "{args:?}"
+        );
+    }
+    // `--as` overrides the bad variable; a read goes on with a note.
+    let o = e
+        .cmd(&main, &["post", "planner-a", "hello", "--as", "worker-a"])
+        .env("MNEMO_AGENT", "two words")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let o = run(&["inbox"]);
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("it's ignored"));
 }

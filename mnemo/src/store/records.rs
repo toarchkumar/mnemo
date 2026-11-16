@@ -404,19 +404,37 @@ impl RecPages {
     }
 }
 
-pub(super) const ROW_SUPERSEDED: u8 = 1;
-pub(super) const ROW_HAS_TTL: u8 = 2;
-pub(super) const ROW_SHARED: u8 = 4;
-/// 13a (13.5): `_mnemo.visibility = private` (new bits of the same byte, so
-/// no format change: an older build ignores them).
-pub(super) const ROW_PRIVATE: u8 = 8;
-/// 13a (13.5): `_mnemo.visibility = public`. Neither bit: team.
-pub(super) const ROW_PUBLIC: u8 = 16;
-/// 13a (13.6): the record has `_mnemo.review_by`, so `stale` reads it.
-pub(super) const ROW_REVIEW: u8 = 32;
+// --- A v9 row's flags byte ---------------------------------------------------
+// One bit each, never shared. New bits are no format change: an older build
+// ignores a bit it doesn't know (RB-013.3: before v0.17.0 the private bit
+// was 8, the settled bit too; no released build wrote it there).
 
-/// 13a (13.5): whether a row's visibility bits are in `v`.
-pub(super) fn row_visible(flags: u8, v: crate::memory::VisibilitySet) -> bool {
+/// Any kind: superseded by a newer keyed version (`_mnemo.superseded_by`).
+pub(super) const ROW_SUPERSEDED: u8 = 1;
+/// Any kind: the record has a TTL (`expires_at` is set).
+pub(super) const ROW_HAS_TTL: u8 = 2;
+/// Any kind: shared scope.
+pub(super) const ROW_SHARED: u8 = 4;
+/// FMT-9e, thread turns only: the turn's record compression is settled:
+/// stored as a zstd frame, or tried and not worth it. Unsettled turns are
+/// plain and get compressed once they're older than the handle's
+/// `turn_compress_after` (see [`Mnemo::set_turn_compress_after`]).
+pub(super) const ROW_SETTLED: u8 = 8;
+/// 13a (13.5), any kind but a turn: `_mnemo.visibility = public`. Neither
+/// this nor [`ROW_PRIVATE`]: team.
+pub(super) const ROW_PUBLIC: u8 = 16;
+/// 13a (13.6), any kind: the record has `_mnemo.review_by`, so `stale`
+/// reads it.
+pub(super) const ROW_REVIEW: u8 = 32;
+/// 13a (13.5), any kind but a turn: `_mnemo.visibility = private`.
+pub(super) const ROW_PRIVATE: u8 = 64;
+
+/// 13a (13.5): whether a row's visibility bits are in `v`. A turn is never
+/// private here (its rows carry no visibility bits), whatever its flags.
+pub(super) fn row_visible(kind: u8, flags: u8, v: crate::memory::VisibilitySet) -> bool {
+    if kind == ROW_KIND_TURN {
+        return v.team;
+    }
     if flags & ROW_PRIVATE != 0 {
         v.private
     } else if flags & ROW_PUBLIC != 0 {
@@ -425,11 +443,7 @@ pub(super) fn row_visible(flags: u8, v: crate::memory::VisibilitySet) -> bool {
         v.team
     }
 }
-/// FMT-9e: a thread turn whose record compression is settled: stored as
-/// a zstd frame, or tried and not worth it. Unsettled turns are plain and
-/// get compressed once they're older than the handle's
-/// `turn_compress_after` (see [`Mnemo::set_turn_compress_after`]).
-pub(super) const ROW_SETTLED: u8 = 8;
+
 pub(super) const ROW_KIND_FACT: u8 = 0;
 pub(super) const ROW_KIND_TURN: u8 = 1;
 pub(super) const ROW_KIND_ESSENCE: u8 = 2;
@@ -1737,4 +1751,44 @@ impl Mnemo {
     }
 
     // --- public CRUD ------------------------------------------------------
+}
+
+#[cfg(test)]
+mod row_flag_tests {
+    use super::*;
+    use crate::memory::VisibilitySet;
+
+    /// RB-013.3: every row flag is a bit of its own.
+    #[test]
+    fn the_flags_are_distinct_bits() {
+        let all = [
+            ROW_SUPERSEDED,
+            ROW_HAS_TTL,
+            ROW_SHARED,
+            ROW_SETTLED,
+            ROW_PUBLIC,
+            ROW_REVIEW,
+            ROW_PRIVATE,
+        ];
+        for (i, a) in all.iter().enumerate() {
+            assert_eq!(a.count_ones(), 1, "{a}");
+            for b in &all[i + 1..] {
+                assert_eq!(a & b, 0, "{a} and {b} share a bit");
+            }
+        }
+    }
+
+    /// RB-013.3: a settled turn isn't private, and neither is a fact whose
+    /// row has the settled bit.
+    #[test]
+    fn a_settled_turn_is_not_private() {
+        let d = VisibilitySet::DEFAULT;
+        let only_private = VisibilitySet::parse(&["private"]).unwrap();
+        assert!(row_visible(ROW_KIND_TURN, ROW_SETTLED, d));
+        assert!(!row_visible(ROW_KIND_TURN, ROW_SETTLED, only_private));
+        assert!(row_visible(ROW_KIND_TURN, ROW_SETTLED | ROW_PRIVATE, d));
+        assert!(row_visible(ROW_KIND_FACT, ROW_SETTLED, d));
+        assert!(!row_visible(ROW_KIND_FACT, ROW_PRIVATE, d));
+        assert!(row_visible(ROW_KIND_FACT, ROW_PRIVATE, only_private));
+    }
 }

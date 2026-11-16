@@ -238,6 +238,13 @@ pub(super) fn key_text(m: &mut Mnemo, key: &str) -> std::result::Result<Option<S
     if chain.is_empty() {
         chain = m.history_in(key, KeyScope::Shared).map_err(mnemo_err)?;
     }
+    // RB-013.2: a resource can't ask for private records. A private live
+    // version reads as no such key; private earlier versions are left out.
+    let shown = crate::VisibilitySet::DEFAULT;
+    if chain.first().is_some_and(|m| !shown.shows(m)) {
+        return Ok(None);
+    }
+    chain.retain(|m| shown.shows(m));
     let Some((live, earlier)) = chain.split_first() else {
         return Ok(None);
     };

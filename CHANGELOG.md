@@ -19,11 +19,19 @@ agents", `mnemo onboard --guide`) has the rest. Messages are information,
 never authority.
 
 **Upgrade every session's `mnemo` together.** There's no format change:
-v0.17 adds new record kinds and reserved metadata keys, and an older build
-reads them. But a v0.16 build sees messages, tasks, claims and presence
-records as ordinary facts (in its `list`, `export` and recall), and it
-ignores visibility and freshness. A mix of versions on one brain works, and
-looks wrong from the older side.
+v0.17 adds new record kinds, row bits and reserved metadata keys, and each
+build opens, writes and compacts the other's brain. But a v0.16 build:
+- **shows private records** in its recall, `list` and `export` (it doesn't
+  know the levels), and lists messages, tasks, claims and presence records
+  as ordinary facts;
+- **makes the next version of a private keyed fact visible** when it writes
+  that key (it has no level to keep);
+- **writes to the agent `default`,** not the brain's default agent, and
+  stamps no author;
+- **re-tags every message, task, claim and presence record as a fact when
+  it compacts.** v0.17.0 still finds and uses them, and `verify`, `about`
+  and the first coordination command say so; a v0.17 `mnemo compact`
+  re-tags them.
 
 **The mobile packages publish at 0.17.0** (`.github/release-mobile` is
 `true`): the UniFFI binding changed (`MemoryPatch`'s new field), and every
@@ -239,16 +247,34 @@ minor version publishes mobile at least once.
   same rule as `get` (CLI-PATHLESS-2). `thread start` with one argument that
   looks like a brain's path says to give the thread id.
 
+- **Visibility filters on more read surfaces:** `list`, `history`,
+  `stale` and `search` take `--visibility` (public and team by default),
+  and so do the MCP `list` and `history`. `list --visibility all` marks
+  private rows. The `mnemo://recent` and `mnemo://key/{key}` resources
+  and the `session-start` prompt show public and team records only.
+  `Mnemo::recent_in` and `search_in` take the levels too.
+
 ### Changed
 
 - **Rust: `MemoryPatch` has a new field, `caller_keys`.** A patch written
   with `..Default::default()` is unaffected. One that names every field
   needs `caller_keys: None`.
+- **A keyed write keeps the level:** a `remember` with a key that gives no
+  visibility (or no review date) takes the live version's. One that gives
+  another level changes it, and its outcome says so (`superseded (private
+  → team)`; MCP `visibility_changed`).
+- **Agent ids are checked on new writes:** `remember --agent` and the MCP
+  `agent_id` take 1 to 64 of letters, digits, `.`, `_` and `-`, like
+  `--as`. An invalid `MNEMO_AGENT` (or `MNEMO_ROLE`) is an error for
+  `post`, `task add` and the claim writes; reads go on with a note.
+- `Mnemo::search` leaves out coordination records.
 
 ### Fixed
 
 - **`mnemo update --help`** said `--text` needs `--embed-cmd`. Without one it
   uses the built-in embedder.
+- **A closed pipe** (`mnemo list | head`) no longer makes the CLI panic: it
+  exits quietly, with 141 on Unix, as a process stopped by SIGPIPE does.
 
 ## [0.16.1] — 2026-11-15
 

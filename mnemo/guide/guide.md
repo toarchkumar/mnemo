@@ -302,6 +302,12 @@ alias claude-worker='MNEMO_AGENT=worker-a MNEMO_ROLE=worker claude'
 From a shell, or a session without the hooks, `--as` and `--role` say the
 same thing: `mnemo inbox --as reviewer-a`.
 
+A fact's agent and its author can differ. The agent is the fact's slot
+(`--agent`, else the brain's default agent), and the author is the
+session that wrote it (`MNEMO_AGENT`). With the default agent `worker-a`
+and `MNEMO_AGENT=worker-b`, a plain `remember` writes `worker-a`'s fact,
+written by `worker-b`.
+
 ### Tasks: the shared queue
 
 A task has a title, the role that may take it, the tasks it waits for

@@ -2290,3 +2290,28 @@ fn rekey_notes_the_data_key_and_rotate_rewrites_it() {
     let (status, _, _) = run_cli(&["info", p], "second-passphrase");
     assert!(!status.success(), "the old passphrase must not open it");
 }
+
+/// EPIPE-1: output into a pipe whose reader is gone (`mnemo list | head`)
+/// exits quietly, as a SIGPIPE would, not with a panic.
+#[test]
+fn a_closed_pipe_exits_quietly() {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args(["onboard", "--guide"])
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .stdin(std::process::Stdio::null())
+        .stdout(writer)
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(
+        !err.contains("panicked") && !err.contains("failed printing"),
+        "{err}"
+    );
+    #[cfg(unix)]
+    assert_eq!(o.status.code(), Some(141), "{err}");
+    #[cfg(not(unix))]
+    assert_eq!(o.status.code(), Some(1), "{err}");
+}

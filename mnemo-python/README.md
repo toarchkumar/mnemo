@@ -204,7 +204,7 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `search(query, top_k=10)` | Exact nearest-neighbour search |
 | `get(id)` / `delete(id)` | Fetch / soft-delete by id |
 | `about(*, visibility=None)` | Self-describing onboarding briefing — memories tagged `metadata.area="onboarding"`, manifest first. v0.17: private entries only when `visibility` asks (`["private"]`, `["all"]`) |
-| `stale()`, `kind_counts()` | v0.17: the stale records (`id`, `what`, `since`, `text`, `whose`), oldest first; the live records by kind (`facts`, `turns`, `essence`, `coordination`) |
+| `stale(*, visibility=None)`, `kind_counts()` | v0.17: the stale records (`id`, `what`, `since`, `text`, `whose`, `visibility`), oldest first, private ones only when `visibility` asks; the live records by kind (`facts`, `turns`, `essence`, `coordination`) |
 | `recent(n=20)` | The `n` most recently written live memories, newest first: facts only (no thread turns, essence items or onboarding records), nothing superseded or expired; not counted as an access (v0.16) |
 | `about_essence()` | The project essence render for the briefing (markdown), or `None` when the file has none |
 | `insert_default_manifest()` | Insert the canonical scaffold manifest (same one `mnemo init` adds); returns its id |

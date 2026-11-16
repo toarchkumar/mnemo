@@ -469,7 +469,25 @@ thread_local! {
 
 /// 13a (13.1): the `inbox` tool: `list`, `read`, `post` and `ack`, as this
 /// server's agent and role. Listing and reading mark what they show `seen`.
+/// RB-013.1: say once per server, on its log, when coordination records are
+/// tagged as facts (an older mnemo rewrote this brain).
+fn note_mistagged(db: &mut Mnemo) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if let Ok(n) = db.mistagged_coordination() {
+        if n > 0 {
+            ONCE.call_once(|| {
+                eprintln!(
+                    "mnemo mcp: warning: {n} coordination record{} tagged as facts (an older \
+                     mnemo rewrote this brain); `mnemo compact` fixes it",
+                    if n == 1 { " is" } else { "s are" }
+                )
+            });
+        }
+    }
+}
+
 fn tool_inbox(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    note_mistagged(db);
     let op = args.get("op").and_then(Value::as_str).unwrap_or("list");
     let agent = db.author().map(str::to_string);
     let role = SERVER_ROLE.with(|r| r.borrow().clone());
@@ -604,6 +622,7 @@ fn task_json(t: &crate::Task) -> Value {
 /// as this server's agent and role. What it shows from the brain comes
 /// after the framing line, escaped.
 fn tool_task(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    note_mistagged(db);
     let op = args.get("op").and_then(Value::as_str).unwrap_or("list");
     let role = SERVER_ROLE.with(|r| r.borrow().clone());
     let bad = |m: String| RpcError::new(INVALID_PARAMS, format!("task: {m}"));
@@ -694,6 +713,7 @@ fn tool_task(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcErr
 /// 13a (13.3): the `claim` tool: `take`, `renew`, `release`, `check` and
 /// `who`, as this server's agent.
 fn tool_claim(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    note_mistagged(db);
     let op = args.get("op").and_then(Value::as_str).unwrap_or("");
     let bad = |m: String| RpcError::new(INVALID_PARAMS, format!("claim: {m}"));
     let s = |k: &str| -> std::result::Result<&str, RpcError> {
@@ -1357,7 +1377,8 @@ fn tools_list() -> Value {
                     "properties": {
                         "key": { "type": "string" },
                         "agent": { "type": "string", "description": "Query the private slot for this agent. Mutually exclusive with `shared`." },
-                        "shared": { "type": "boolean", "default": false, "description": "Query the shared slot (one per file). Mutually exclusive with `agent`." }
+                        "shared": { "type": "boolean", "default": false, "description": "Query the shared slot (one per file). Mutually exclusive with `agent`." },
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team)." }
                     },
                     "additionalProperties": false
                 }
@@ -1404,11 +1425,12 @@ fn tools_list() -> Value {
             },
             {
                 "name": "list",
-                "description": "Return every live memory as JSON. Sorted by creation time, oldest first. Vectors are omitted by default to keep payloads small.",
+                "description": "Return every live memory as JSON. Sorted by creation time, oldest first. Vectors are omitted by default to keep payloads small. Private records are left out unless `visibility` asks for them (`[\"all\"]` or `[\"private\"]`).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "include_vectors": { "type": "boolean", "default": false }
+                        "include_vectors": { "type": "boolean", "default": false },
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team)." }
                     },
                     "additionalProperties": false
                 }
@@ -1722,6 +1744,18 @@ fn mnemo_err(e: MnemoError) -> RpcError {
     RpcError::new(INTERNAL_ERROR, e.to_string())
 }
 
+/// RB-013.4: a new write's `agent_id`, checked as every agent id is.
+fn checked_agent<'a>(tool: &str, a: &'a str) -> std::result::Result<&'a str, RpcError> {
+    if crate::memory::valid_agent_id(a) {
+        Ok(a)
+    } else {
+        Err(RpcError::new(
+            INVALID_PARAMS,
+            format!("{tool}: agent_id {a:?} isn't 1 to 64 of letters, digits, '.', '_' and '-'"),
+        ))
+    }
+}
+
 /// 13a (13.5): a tool's `visibility` argument (an array, or one string).
 fn visibility_arg(args: &Value) -> std::result::Result<crate::VisibilitySet, RpcError> {
     let levels: Vec<String> = match args.get("visibility") {
@@ -1749,7 +1783,7 @@ fn tool_about(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcEr
             .stale()
             .map_err(mnemo_err)?
             .iter()
-            .filter(|r| vis.private || db.get(&r.id).map(|m| vis.shows(&m)).unwrap_or(true))
+            .filter(|r| vis.shows_level(&r.visibility))
             .map(|r| {
                 json!({
                     "id": r.id.to_string(), "what": r.what, "since": r.since,
@@ -1840,7 +1874,7 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
     let mut mem = Memory::new(content, mtype, vector);
     // 13a (AGENT-DEFAULT): no `agent_id`, the brain's default agent.
     let agent = match args.get("agent_id").and_then(|v| v.as_str()) {
-        Some(a) => Some(a.to_string()),
+        Some(a) => Some(checked_agent("remember", a)?.to_string()),
         None => db.default_agent().map_err(mnemo_err)?,
     };
     if let Some(agent) = agent {
@@ -1910,7 +1944,15 @@ fn tool_remember(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rp
                 crate::WriteOutcome::Unchanged => "unchanged",
                 crate::WriteOutcome::Updated => "updated",
             };
-            Ok(json!({ "id": id.to_string(), "outcome": outcome_str }).to_string())
+            let mut v = json!({ "id": id.to_string(), "outcome": outcome_str });
+            // RB-013.2: say when a keyed write changed the level.
+            if outcome == crate::WriteOutcome::Superseded {
+                if let Some((a, b)) = db.superseded_level_change(&id).map_err(mnemo_err)? {
+                    v["visibility_changed"] = json!({ "from": a, "to": b });
+                    v["outcome"] = json!(format!("superseded ({a} → {b})"));
+                }
+            }
+            Ok(v.to_string())
         }
     }
 }
@@ -2089,7 +2131,7 @@ fn tool_commit_deltas(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
             };
             let mut mem = Memory::new(content, mtype, vector);
             if let Some(a) = obj.get("agent_id").and_then(|v| v.as_str()) {
-                mem = mem.with_agent(a);
+                mem = mem.with_agent(checked_agent("commit_deltas", a)?);
             }
             if let Some(s) = obj.get("session_id").and_then(|v| v.as_str()) {
                 mem = mem.with_session(s);
@@ -2492,10 +2534,13 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
             None => KeyScope::private_default(),
         }
     };
+    // RB-013.2: each version's state first, then the levels shown.
+    let vis = visibility_arg(args)?;
     let chain = db.history_in(key, scope).map_err(mnemo_err)?;
     let out: Vec<Value> = chain
         .iter()
         .enumerate()
+        .filter(|(_, m)| vis.shows(m))
         .map(|(i, m)| {
             let mut v = memory_to_json(m);
             if let Some(obj) = v.as_object_mut() {
@@ -2785,9 +2830,12 @@ fn tool_list(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcErr
         .get("include_vectors")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // RB-013.2: private records only when asked.
+    let vis = visibility_arg(args)?;
     let mems = db.memories().map_err(mnemo_err)?;
     let out: Vec<Value> = mems
         .iter()
+        .filter(|m| vis.shows(m))
         .map(|m| {
             let mut v = memory_to_json(m);
             if !include_vectors {

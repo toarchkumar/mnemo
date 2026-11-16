@@ -159,6 +159,7 @@ impl Mnemo {
                 .ok_or_else(|| MnemoError::Invalid("key_index drift".into()))?;
             let prev_entry = self.catalog[prev_idx].clone();
             let prev_mem = self.read_memory(&prev_entry)?;
+            inherit_levels(&mut memory, &prev_mem);
             let rounded = prev_entry.v9.is_some() && !self.float_vectors();
             if Self::is_identical_keyed_write(&memory, &prev_mem, rounded) {
                 return Ok((Ulid(prev_id_u), WriteOutcome::Unchanged));
@@ -295,6 +296,7 @@ impl Mnemo {
             .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
         old.metadata
             .insert(MNEMO_META_KEY.into(), Value::String(key.to_string()));
+        inherit_levels(&mut memory, &old);
         let rounded = old_entry.v9.is_some() && !self.float_vectors();
         if Self::is_identical_keyed_write(&memory, &old, rounded) {
             // Adopt the old record as the slot's live record.
@@ -619,4 +621,43 @@ impl Mnemo {
     }
 
     // --- Phase 12.7a: thread archive --------------------------------
+}
+
+/// RB-013.2: a keyed write that gives no visibility (or no review date)
+/// takes the live version's, so revising a private fact by its key keeps it
+/// private. A caller who wants another level says so.
+fn inherit_levels(new: &mut Memory, prev: &Memory) {
+    for k in [
+        crate::memory::MNEMO_META_VISIBILITY,
+        crate::memory::MNEMO_META_REVIEW_BY,
+    ] {
+        if !new.metadata.contains_key(k) {
+            if let Some(v) = prev.metadata.get(k) {
+                new.metadata.insert(k.into(), v.clone());
+            }
+        }
+    }
+}
+
+impl Mnemo {
+    /// RB-013.2: when the keyed version `id` changed the level of the
+    /// version it superseded, the two levels (`(old, new)`), so a caller can
+    /// say so (`superseded (private → team)`).
+    pub fn superseded_level_change(&mut self, id: &Ulid) -> Result<Option<(String, String)>> {
+        let new = self.get(id)?;
+        let Some(old) = new
+            .metadata
+            .get(MNEMO_META_SUPERSEDES)
+            .and_then(Value::as_str)
+            .and_then(|s| Ulid::from_string(s).ok())
+        else {
+            return Ok(None);
+        };
+        let old = self.get(&old)?;
+        let (a, b) = (
+            crate::memory::visibility_of(&old).to_string(),
+            crate::memory::visibility_of(&new).to_string(),
+        );
+        Ok((a != b).then_some((a, b)))
+    }
 }

@@ -713,6 +713,7 @@ fn your_work(db: &mut Mnemo) -> String {
             let mine: Vec<String> = rows
                 .iter()
                 .filter(|r| r.whose.as_deref() == Some(a.as_str()))
+                .filter(|r| r.visibility != "private")
                 .map(|r| {
                     format!(
                         "- {} since {}: {}",

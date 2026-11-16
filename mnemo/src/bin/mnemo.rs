@@ -541,6 +541,10 @@ enum Command {
         query_file: Option<String>,
         #[arg(long, default_value_t = 5)]
         top_k: usize,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -687,6 +691,10 @@ enum Command {
         /// wrote.
         #[arg(long)]
         mine: bool,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
         #[command(flatten)]
@@ -798,6 +806,10 @@ enum Command {
         /// Skip this many rows before printing.
         #[arg(long, default_value_t = 0)]
         offset: usize,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         /// Sort order: `created`, `importance`, or `id`.
         #[arg(long, default_value = "created")]
         sort: String,
@@ -1101,6 +1113,10 @@ enum Command {
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
+        /// 13a: the visibility levels shown: `public`, `team`, `private`,
+        /// or `all` (comma-separated; default public and team).
+        #[arg(long, value_name = "LEVELS", value_delimiter = ',')]
+        visibility: Vec<String>,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -2268,6 +2284,27 @@ struct AsArgs {
 }
 
 impl AsArgs {
+    /// RB-013.4: [`AsArgs::resolve`] for a write (`post`, `task add`, the
+    /// claim writes): an invalid `MNEMO_AGENT` or `MNEMO_ROLE` is an error,
+    /// not a note, since the write would go out from nobody.
+    fn resolve_for_write(&self) -> std::result::Result<(Option<String>, Option<String>), String> {
+        for (name, given) in [("MNEMO_AGENT", &self.agent), ("MNEMO_ROLE", &self.role)] {
+            if given.is_some() {
+                continue;
+            }
+            if let Ok(v) = std::env::var(name) {
+                let v = v.trim();
+                if !v.is_empty() && !mnemo_engine::valid_agent_id(v) {
+                    return Err(format!(
+                        "{name} isn't 1 to 64 of letters, digits, '.', '_' and '-'; fix it, or \
+                         give --as/--role"
+                    ));
+                }
+            }
+        }
+        self.resolve()
+    }
+
     /// The agent and role, checked.
     fn resolve(&self) -> std::result::Result<(Option<String>, Option<String>), String> {
         let (env_agent, env_role) = env_identity();
@@ -2285,6 +2322,28 @@ impl AsArgs {
             self.agent.clone().or(env_agent),
             self.role.clone().or(env_role),
         ))
+    }
+}
+
+/// RB-013.1: the line that says coordination records are tagged as facts
+/// (an older mnemo rewrote this brain), when any are.
+fn mistagged_line(db: &mut mnemo_engine::Mnemo) -> Option<String> {
+    let n = db.mistagged_coordination().ok()?;
+    (n > 0).then(|| {
+        format!(
+            "{n} coordination record{} tagged as facts (an older mnemo rewrote this brain); \
+             `mnemo compact` fixes it",
+            if n == 1 { " is" } else { "s are" }
+        )
+    })
+}
+
+/// RB-013.1: the same, once per process, on stderr, for the coordination
+/// commands.
+fn note_mistagged(db: &mut mnemo_engine::Mnemo) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if let Some(line) = mistagged_line(db) {
+        ONCE.call_once(|| eprintln!("mnemo: warning: {line}"));
     }
 }
 
@@ -3418,6 +3477,10 @@ fn run() -> std::result::Result<(), String> {
             {
                 eprintln!("note: {note}");
             }
+            // RB-013.1: coordination records an older mnemo re-tagged.
+            if let Some(line) = mistagged_line(&mut db) {
+                eprintln!("warning: {line}");
+            }
         }
         Command::Import {
             path,
@@ -3460,6 +3523,14 @@ fn run() -> std::result::Result<(), String> {
             embed_timeout,
             passphrase: pp,
         } => {
+            // RB-013.4: a new write's agent is checked as every agent id is.
+            if let Some(a) = &agent {
+                if !mnemo_engine::valid_agent_id(a) {
+                    return Err(format!(
+                        "--agent {a:?}: 1 to 64 of letters, digits, '.', '_' and '-'"
+                    ));
+                }
+            }
             let pp = secret_for(&path, &pp, &None)?;
             let mt = parse_memory_types(&r#type)?
                 .pop()
@@ -3564,7 +3635,16 @@ fn run() -> std::result::Result<(), String> {
                         // same content as the slot's live record.
                         mnemo_engine::WriteOutcome::Updated => "updated",
                     };
-                    println!("{id}\t{outcome_str}");
+                    // RB-013.2: say when a keyed write changed the level.
+                    let change = match outcome {
+                        mnemo_engine::WriteOutcome::Superseded => db
+                            .superseded_level_change(&id)
+                            .map_err(fmt)?
+                            .map(|(a, b)| format!(" ({a} → {b})"))
+                            .unwrap_or_default(),
+                        _ => String::new(),
+                    };
+                    println!("{id}\t{outcome_str}{change}");
                 }
             }
         }
@@ -3629,15 +3709,17 @@ fn run() -> std::result::Result<(), String> {
             query,
             query_file,
             top_k,
+            visibility,
             passphrase: pp,
         } => {
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             // Search is a pure catalog scan — no access-tracking, no
             // catalog writes. Safe on a read-only handle.
             let pp = secret_for(&path, &pp, &None)?;
             let q = resolve_query(query, query_file)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
             let hits = db
-                .search(&q, top_k, mnemo_engine::Metric::Cosine)
+                .search_in(&q, top_k, mnemo_engine::Metric::Cosine, vis)
                 .map_err(fmt)?;
             if hits.is_empty() {
                 println!("no results");
@@ -3748,6 +3830,9 @@ fn run() -> std::result::Result<(), String> {
                             ""
                         },
                     );
+                    if let Some(line) = mistagged_line(&mut db) {
+                        println!("# {line}");
+                    }
                     if let Some(hint) = upgrade_hint(&path, stats.format_version) {
                         println!("# {hint}");
                     }
@@ -3841,9 +3926,11 @@ fn run() -> std::result::Result<(), String> {
             offset,
             sort,
             vector,
+            visibility,
             key_file,
             passphrase: pp,
         } => {
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             let secret = secret_for(&path, &pp, &key_file)?;
             let types = match r#type {
                 Some(s) => Some(parse_memory_types(&s)?),
@@ -3859,7 +3946,8 @@ fn run() -> std::result::Result<(), String> {
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let mut all = db.memories().map_err(fmt)?;
 
-            // Filter.
+            // Filter. 13a (RB-013.2): private records only when asked.
+            all.retain(|m| vis.shows(m));
             if let Some(ts) = &types {
                 all.retain(|m| ts.contains(&m.memory_type));
             }
@@ -3892,7 +3980,16 @@ fn run() -> std::result::Result<(), String> {
                 Some(n) => (start + n).min(all.len()),
                 None => all.len(),
             };
-            let page: Vec<Memory> = all[start..end].to_vec();
+            let mut page: Vec<Memory> = all[start..end].to_vec();
+            // Asked for private records: mark them in the table, as
+            // `inspect` badges them.
+            if vis.private && matches!(format, OutputFormat::Table) {
+                for m in page.iter_mut() {
+                    if mnemo_engine::visibility_of(m) == "private" {
+                        m.content = format!("[private] {}", m.content);
+                    }
+                }
+            }
             print_memories(&page, total_after_filter, format, vector);
         }
         Command::Export {
@@ -4302,20 +4399,25 @@ fn run() -> std::result::Result<(), String> {
         Command::Stale {
             path,
             mine,
+            visibility,
             format,
             who,
             passphrase: pp,
         } => {
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             let (agent, _) = who.resolve()?;
             if mine && agent.is_none() {
                 return Err("--mine needs --as or MNEMO_AGENT".into());
             }
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_ro(&path, &pp).map_err(fmt)?;
+            note_mistagged(&mut db);
             let mut rows = db.stale().map_err(fmt)?;
             if mine {
                 rows.retain(|r| r.whose == agent);
             }
+            // RB-013.2: private records only when asked.
+            rows.retain(|r| vis.shows_level(&r.visibility));
             let json = |r: &mnemo_engine::Stale| {
                 serde_json::json!({
                     "id": r.id.to_string(), "what": r.what, "since": r.since,
@@ -4409,9 +4511,14 @@ fn run() -> std::result::Result<(), String> {
             brain: path,
             passphrase: pp,
         } => {
-            let (agent, role) = who.resolve()?;
+            let (agent, role) = if matches!(cmd, TaskCmd::Add { .. }) {
+                who.resolve_for_write()?
+            } else {
+                who.resolve()?
+            };
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "task").map_err(fmt)?;
+            note_mistagged(&mut db);
             if agent.is_some() {
                 db.set_author(agent.clone());
             }
@@ -4605,9 +4712,17 @@ fn run() -> std::result::Result<(), String> {
             brain: path,
             passphrase: pp,
         } => {
-            let (agent, role) = who.resolve()?;
+            let (agent, role) = if matches!(
+                cmd,
+                ClaimCmd::Take { .. } | ClaimCmd::Renew { .. } | ClaimCmd::Release { .. }
+            ) {
+                who.resolve_for_write()?
+            } else {
+                who.resolve()?
+            };
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "claim").map_err(fmt)?;
+            note_mistagged(&mut db);
             if agent.is_some() {
                 db.set_author(agent.clone());
             }
@@ -4729,9 +4844,10 @@ fn run() -> std::result::Result<(), String> {
             brain: path,
             passphrase: pp,
         } => {
-            let (agent, role) = who.resolve()?;
+            let (agent, role) = who.resolve_for_write()?;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "post").map_err(fmt)?;
+            note_mistagged(&mut db);
             if agent.is_some() {
                 db.set_author(agent.clone());
                 let _ = db.touch_presence(role.as_deref(), Some("cli"));
@@ -4763,6 +4879,7 @@ fn run() -> std::result::Result<(), String> {
             let (agent, role) = who.resolve()?;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "inbox").map_err(fmt)?;
+            note_mistagged(&mut db);
             if agent.is_some() {
                 db.set_author(agent.clone());
                 let _ = db.touch_presence(role.as_deref(), Some("cli"));
@@ -4819,6 +4936,7 @@ fn run() -> std::result::Result<(), String> {
             let ulid = parse_ulid(&id)?;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "ack").map_err(fmt)?;
+            note_mistagged(&mut db);
             if agent.is_some() {
                 db.set_author(agent.clone());
                 let _ = db.touch_presence(role.as_deref(), Some("cli"));
@@ -4970,8 +5088,10 @@ fn run() -> std::result::Result<(), String> {
             agent,
             shared,
             format,
+            visibility,
             passphrase: pp,
         } => {
+            let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             use mnemo_engine::KeyScope;
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
@@ -4987,14 +5107,22 @@ fn run() -> std::result::Result<(), String> {
                     None => KeyScope::private_default(),
                 }
             };
-            let chain = db.history_in(&key, scope).map_err(fmt)?;
+            // RB-013.2: each version's state first, then the levels shown,
+            // so a hidden live version never makes an older one look live.
+            let chain: Vec<(&str, Memory)> = db
+                .history_in(&key, scope)
+                .map_err(fmt)?
+                .into_iter()
+                .enumerate()
+                .map(|(i, m)| (if i == 0 { "live" } else { "superseded" }, m))
+                .filter(|(_, m)| vis.shows(m))
+                .collect();
             match format {
                 OutputFormat::Table => {
                     if chain.is_empty() {
                         println!("no history for key={key}");
                     } else {
-                        for (i, m) in chain.iter().enumerate() {
-                            let state = if i == 0 { "live" } else { "superseded" };
+                        for (state, m) in chain.iter() {
                             println!(
                                 "{state:<10} {id}  created_at={ct}  {content}",
                                 id = m.id,
@@ -5007,15 +5135,12 @@ fn run() -> std::result::Result<(), String> {
                 OutputFormat::Json => {
                     let arr: Vec<_> = chain
                         .iter()
-                        .enumerate()
-                        .map(|(i, m)| {
+                        .map(|(state, m)| {
                             let mut v = memory_to_json(m, false);
                             if let Some(obj) = v.as_object_mut() {
                                 obj.insert(
                                     "state".into(),
-                                    serde_json::Value::String(
-                                        (if i == 0 { "live" } else { "superseded" }).into(),
-                                    ),
+                                    serde_json::Value::String((*state).into()),
                                 );
                             }
                             v
@@ -5030,15 +5155,10 @@ fn run() -> std::result::Result<(), String> {
                     );
                 }
                 OutputFormat::Jsonl => {
-                    for (i, m) in chain.iter().enumerate() {
+                    for (state, m) in chain.iter() {
                         let mut v = memory_to_json(m, false);
                         if let Some(obj) = v.as_object_mut() {
-                            obj.insert(
-                                "state".into(),
-                                serde_json::Value::String(
-                                    (if i == 0 { "live" } else { "superseded" }).into(),
-                                ),
-                            );
+                            obj.insert("state".into(), serde_json::Value::String((*state).into()));
                         }
                         println!(
                             "{}",
@@ -5805,7 +5925,38 @@ fn demo(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// EPIPE-1: the exit code when stdout's reader went away (`mnemo list |
+/// head`): what a process killed by SIGPIPE reports on Unix.
+#[cfg(unix)]
+const EXIT_BROKEN_PIPE: i32 = 141;
+#[cfg(not(unix))]
+const EXIT_BROKEN_PIPE: i32 = 1;
+
+/// EPIPE-1: Rust ignores SIGPIPE, so `println!` to a closed pipe panics
+/// ("failed printing to stdout: Broken pipe"). That panic exits quietly
+/// instead, as a SIGPIPE would; every other panic goes to the default hook.
+fn quiet_broken_pipe() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        let pipe = msg.contains("Broken pipe")
+            || msg.contains("os error 32)")
+            || msg.contains("os error 232)")
+            || msg.contains("pipe is being closed");
+        if msg.starts_with("failed printing to stdout") && pipe {
+            std::process::exit(EXIT_BROKEN_PIPE);
+        }
+        default(info);
+    }));
+}
+
 fn main() -> ExitCode {
+    quiet_broken_pipe();
     // Windows' default main-thread stack is 1 MiB, and this CLI's
     // `run()` is a single ~600-line match whose debug-mode frame
     // reserves space for every variant's locals at once. Rust 1.95 +

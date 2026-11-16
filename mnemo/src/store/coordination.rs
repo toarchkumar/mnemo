@@ -181,14 +181,16 @@ impl Mnemo {
     /// one's, found through its row's hash without decrypting the rest.
     fn coordination_records(&mut self, kind: &str, locator: Option<&str>) -> Result<Vec<Memory>> {
         let want = locator.map(|l| locator_hash_of(kind, l));
+        let legacy = self.legacy_coordination_ids()?;
         let entries: Vec<CatalogEntry> = self
             .catalog
             .iter()
             .filter(|e| !e.deleted)
             .filter(|e| {
-                e.v9.is_none_or(|r| {
-                    r.kind == ROW_KIND_COORDINATION && want.is_none_or(|h| r.thread_hash == h)
-                })
+                legacy.contains(&e.id)
+                    || e.v9.is_none_or(|r| {
+                        r.kind == ROW_KIND_COORDINATION && want.is_none_or(|h| r.thread_hash == h)
+                    })
             })
             .cloned()
             .collect();
@@ -206,6 +208,52 @@ impl Mnemo {
             out.push(m);
         }
         Ok(out)
+    }
+
+    /// RB-013.1: the coordination records an older build re-tagged as facts
+    /// (its `compact` writes every row again, and it computes "fact" for a
+    /// kind it doesn't know). Found once per handle: such a record keeps
+    /// its `episodic` type in the row, so only `episodic` fact rows are
+    /// decrypted. A write of one re-tags its row.
+    fn legacy_coordination_ids(&mut self) -> Result<std::collections::HashSet<u128>> {
+        if let Some(ids) = &self.legacy_coordination {
+            return Ok(ids.clone());
+        }
+        let episodic = super::records::memory_type_code(MemoryType::Episodic);
+        let candidates: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter(|e| {
+                e.v9.is_some_and(|r| {
+                    r.kind == super::records::ROW_KIND_FACT && r.memory_type == episodic
+                })
+            })
+            .cloned()
+            .collect();
+        let mut ids = std::collections::HashSet::new();
+        for e in candidates {
+            if is_coordination(&self.read_memory(&e)?) {
+                ids.insert(e.id);
+            }
+        }
+        self.legacy_coordination = Some(ids.clone());
+        Ok(ids)
+    }
+
+    /// RB-013.1: how many coordination records are tagged as facts in their
+    /// rows (an older mnemo rewrote this brain); `mnemo compact` re-tags
+    /// them. They're found and used all the same.
+    pub fn mistagged_coordination(&mut self) -> Result<usize> {
+        let ids = self.legacy_coordination_ids()?;
+        Ok(self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted && ids.contains(&e.id))
+            .filter(|e| {
+                e.v9.is_some_and(|r| r.kind == super::records::ROW_KIND_FACT)
+            })
+            .count())
     }
 
     /// Every live message, oldest first.
@@ -2084,6 +2132,8 @@ pub struct Stale {
     pub text: String,
     /// Whose it is: a task's owner, a message's recipient, else its author.
     pub whose: Option<String>,
+    /// Its visibility level (`public`, `team` or `private`).
+    pub visibility: String,
 }
 
 impl Mnemo {
@@ -2139,6 +2189,7 @@ impl Mnemo {
                 since,
                 text: m.content.lines().next().unwrap_or("").to_string(),
                 whose,
+                visibility: crate::memory::visibility_of(&m).to_string(),
             });
         }
         out.sort_by_key(|x| (x.since, x.id.0));

@@ -1160,6 +1160,10 @@ pub struct Mnemo {
     /// 13a: seconds added to the clock coordination reads (tests only, via
     /// a dev-hooks setter).
     clock_offset: i64,
+    /// RB-013.1: the ids of coordination records whose v9 row an older
+    /// build re-tagged as a fact (its `compact` rewrites every row), found
+    /// once per handle by decrypting the `episodic` fact rows.
+    legacy_coordination: Option<std::collections::HashSet<u128>>,
     /// FMT-9 (a): the committed free list (v9; always empty on v8). Pages
     /// allocated from it since the last commit are already removed.
     free: FreeList,

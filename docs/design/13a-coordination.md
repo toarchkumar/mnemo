@@ -637,6 +637,8 @@ reads every record, and the engine says so.
 | `export` (Markdown, JSONL) | Yes | Yes | Only with `--visibility all`; a stderr line says private records were included |
 | `export --git` | Yes | Yes | **Never**, whatever the flag |
 | `inspect` | Yes | Yes | Yes, with a "private" badge (it's the user's own, local and read-only) |
+| `list`, `history`, `stale`, `search` (CLI); the MCP `list` and `history` | Yes | Yes | Only when asked (`--visibility`, `"visibility"`); `list --visibility all` marks private rows |
+| The `mnemo://recent` and `mnemo://key/{key}` resources; the `session-start` prompt | Yes | Yes | **Never** (a client attaches them without asking; a private live version reads as no such key) |
 
 **`SECURITY.local.md` moving into `private` records before 13b: no.** I
 agree with your view, for four reasons:

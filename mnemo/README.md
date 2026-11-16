@@ -975,7 +975,7 @@ cargo run --bin mnemo -- <command>
 | `about`   | Self-describing briefing — print onboarding memories. Since v0.17 its header counts facts, turns, essence items and coordination records apart, an entry past its review date is marked `[stale since <date>]`, and private entries show only with `--visibility private` (or `all`) |
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
-| `list`    | Browse live memories (table / json / jsonl, filters) |
+| `list`    | Browse live memories (table / json / jsonl, filters). Since v0.17 private records only with `--visibility private` (or `all`, which marks them `[private]`); `history` takes `--visibility` too |
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
 | `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
@@ -990,9 +990,9 @@ cargo run --bin mnemo -- <command>
 | `claim renew\|release\|check <TOPIC> <TOKEN>` | Renew (from now, `--ttl` or the lease), release, or check a claim; exits 1 with `lost` when it lapsed or another agent holds it. Check before anything irreversible (v0.17) |
 | `claim who` | The agents: role, tool, last active, whether the process is alive (`unknown` without a long-lived `serve --mcp --shared`), and the topics each holds; `--format` (v0.17) |
 | `default-agent` | Show, set (`--set <id>`) or clear (`--clear`) the agent a write that names none is made for, kept on the manifest (`_mnemo.default_agent`); the CLI and the MCP server use it in place of `default` (v0.17) |
-| `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1) |
+| `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1). Since v0.17 it leaves out coordination records, and private ones unless `--visibility` asks |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …). Since v0.17 private records only with `--visibility private` (or `all`) |
-| `stale [PATH] [--mine]` | The stale records, oldest first: past their `review_by`, or older than their kind's default (essence `state` and `next` 14 days, `open` 30; an `active` task with no update 3 days, a `blocked` one 7; an unread message 3). `--mine` keeps yours (`--as`, else `MNEMO_AGENT`) (v0.17) |
+| `stale [PATH] [--mine] [--visibility L]` | The stale records, oldest first (private ones only when asked): past their `review_by`, or older than their kind's default (essence `state` and `next` 14 days, `open` 30; an `active` task with no update 3 days, a `blocked` one 7; an unread message 3). `--mine` keeps yours (`--as`, else `MNEMO_AGENT`) (v0.17) |
 | `verify`  | Decrypt and re-validate every live record            |
 | `rekey`   | Re-encrypt the data key under a new passphrase, or a new generated key (`--new-key`, v0.15, kept in the key store); `--rotate` also rewrites the file under a fresh data key (revokes the old secret) |
 | `compact` | Rebuild the file, dropping tombstones and expired; writes v9, which converts a v8 (or older) file. Since v0.13 that's the only way to make a v8 file writable again. Since v0.15 it also rebuilds the keyword index with tokenizer 2 |

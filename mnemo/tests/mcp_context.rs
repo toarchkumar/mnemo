@@ -557,7 +557,8 @@ fn the_server_names_its_agent_and_takes_the_default_agent_and_freshness() {
             &[
                 tool("remember", json!({"content": "deploys go to staging-7", "memory_type": "semantic",
                     "key": "fact.deploy", "visibility": "private", "review_by": 1_900_000_000_i64, "as_of": 1_700_000_000_i64})),
-                tool("history", json!({"key": "fact.deploy"})),
+                // The fact is private: history shows it when asked.
+                tool("history", json!({"key": "fact.deploy", "visibility": ["all"]})),
                 tool("remember", json!({"content": "x", "memory_type": "semantic", "visibility": "secret"})),
             ],
         );
