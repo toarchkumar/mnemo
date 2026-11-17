@@ -92,7 +92,7 @@ git Markdown workflow runs entirely in MNemo) → 13.7 + personal sync (Pro)
 → 13.2 and 13.4 → team sync (Teams) → PERF-2 → Phase 14 → the rest of 15.
 The sync build is gated on a sync design note (written during 13a) and the
 waitlist (https://forms.gle/zBrWaECk4L7By4Bc6) showing demand; if it
-doesn't, PERF-2 goes first and the user is asked. SNAP-1 (reads never wait for saves) is the user's to
+doesn't, PERF-2 goes first and the user is asked. **(User decision 2026-11-17: "Yes". The waitlist had 1 sign-up and wasn't visible, so after v0.18.0 come PERF-2 and HARNESS-DOGFOOD-1 Run 2; sync is decided later on the waitlist's numbers, now that it's at the top of the site.)** SNAP-1 (reads never wait for saves) is the user's to
 schedule. **12.4's later steps:** step 6 (incremental catch-up), step 7
 (presence and claims). CLEANUP-1 is marked, not scheduled.
 **The team:** PLANNER-A, the Worker, REVIEWER-A and REVIEWER-B; the
@@ -40007,3 +40007,990 @@ Nothing else changed in either file.
 (`v0172-5` done, …); the README and site; the tag", from its HANDOFF
 commit, through to stopping at the approval. This entry is written under
 the claim `plan.md`.
+
+### 2026-11-17 — WORKER — DONE — v0.17.2 tagged; the release waits at "approve the release (v0.17.2, mobile false)"
+
+Brain: "release order tag approve attest registries site byte-equal
+attestation verify delete branches" → hit (`decision.release-order`).
+
+1. **Your HANDOFF commit:** `80c5e29` (`README.md`, `index.html`), on its
+   own. Both fixed lines are as you state ("in the CLI and over MCP";
+   "once on your next turn, and in your session's brief while it waits").
+2. **The coordination files:** `b7f9c1a`, `chore(plan): sync coordination
+   files` (`PLAN.md`, `reviewer_notes.md`; not `SECURITY.local.md`).
+   Pushed to `release-0.17.2`.
+3. **`main` fast-forwarded** from `d6dc523` to `b7f9c1a`.
+   - **As at v0.17.1,** the first push, in the same second as the release
+     branch's push, returned "failed to push some refs" and nothing more.
+     The retry went through ("d6dc523..b7f9c1a").
+   - **It happened twice, both times right after the release branch's
+     push,** so it looks like a race on GitHub's side. Next time I'll wait
+     a few seconds between the two pushes.
+   - The push runs on `b7f9c1a`: CI success, Mobile CI success.
+4. **The tag:** `v0.17.2`, annotated "MNemo 0.17.2" (tag object `0f38b30`,
+   commit `b7f9c1a`), pushed.
+5. **The release run 44084865309 is waiting on the `release` environment**
+   at "approve the release (v0.17.2, mobile false)". Every job before the
+   gate succeeded (19): version check, the 5 CLIs, the 5 wheels, the sdist
+   and its check, `SHA256SUMS`, and the 5 artifact checks. The mobile
+   builds were skipped (mobile off).
+
+**Stopping for the user's click.** After it: attest and its order,
+crates.io and PyPI, the GitHub Release (12 engine files, no mobile
+assets), the site against `main`, `gh attestation verify` at
+`refs/tags/v0.17.2`, then the branch deletions.
+
+### 2026-11-17 — PLANNER-A — REVIEW + NEEDS-USER — v0.17.2 tagged; the release waits for the user's approval click
+
+Checked:
+- `v0.17.2` is on `b7f9c1a`, which is `origin/main`. On `main`:
+  `bf73ef8` (PR 122), then `80c5e29` (the HANDOFF, with both corrected
+  README lines), then `b7f9c1a` (the sync).
+- Tag run 44084865309 is `waiting`. Only "approve the release (v0.17.2,
+  mobile false)" is left.
+
+**NEEDS-USER:** approve run 44084865309
+(https://github.com/toarchkumar/mnemo/actions/runs/44084865309).
+
+### 2026-11-17 — PLANNER-A — DECISION + DISPATCH — the user approved v0.17.2; do the after-the-tag checks
+
+**The user (2026-11-17):** "Approved", for run 44084865309.
+
+**Dispatch:** once the run completes, do the after-the-tag checks as for
+v0.17.1:
+- `attest` and its order;
+- crates.io and PyPI;
+- the GitHub Release: 12 engine files, and no mobile assets;
+- the site's files byte-equal to `main`;
+- `gh attestation verify` at `refs/tags/v0.17.2`;
+- delete `release-0.17.2` and any `rel0172-*` left.
+
+Don't install it here, and don't touch the brain. Log DONE and stop.
+This entry is written under the claim `plan.md`.
+
+### 2026-11-17 — WORKER — DONE — v0.17.2 released: the after-the-tag checks all pass
+
+Brain: no lookup and no write; your entry says not to touch the brain.
+
+**Run 44084865309: success.** On GitHub, the approval on the `release`
+environment is by `toarchkumar`.
+
+1. **Attest, and its order:**
+   - `attest the binaries` ran 14:08:44 to 14:08:54Z and succeeded.
+   - `attach engine assets` started at 14:08:58, `publish to crates.io` at
+     14:08:59, `publish to PyPI` at 14:09:00, and the gate at 14:09:52.
+     Each started after attest ended.
+   - The mobile jobs were skipped (mobile off); "mobile (skipped, release
+     note)" succeeded.
+2. **crates.io:** `max_version` 0.17.2. **PyPI:** 0.17.2 with 6 files (5
+   wheels and the sdist).
+3. **The GitHub Release** `v0.17.2`: not a draft, not a prerelease, **12
+   assets**: 5 CLIs, 5 wheels, the sdist and `SHA256SUMS`. There are **no
+   mobile assets**, and the notes say "Mobile packages not published in
+   this release (latest: Swift 0.17.0, Android 0.17.0)".
+4. **The site:** Pages built `b7f9c1a` and succeeded. Byte-equal to
+   `origin/main` (`cmp`):
+   - `install.sh`: 9057 bytes;
+   - `install.ps1`: 8830 bytes;
+   - `llms.txt`: 1821 bytes;
+   - `llms-full.txt`: 16289 bytes;
+   - `index.html`: 56379 bytes.
+5. **The attestation:**
+   - I downloaded `mnemo-v0.17.2-aarch64-apple-darwin` to the scratchpad
+     only; it isn't installed. Its `SHA256SUMS` line: OK.
+   - `gh attestation verify` with the install script's flags exited 0: 1
+     verified attestation, ref `refs/tags/v0.17.2`, run 44084865309.
+6. **The branches:**
+   - **Listed first:** `release-0.17.2` (local and origin, at `b7f9c1a`,
+     equal to `main`). No `rel0172-*` was left on either.
+   - **Deleted:** `release-0.17.2` on origin and locally.
+   - **After:** none left on origin.
+   - The tree is on `main` at `b7f9c1a`. `PLAN.md` holds only these
+     WORKLOG entries, uncommitted.
+7. **The loop:** `plan.md` taken around this entry and released with its
+   token.
+
+Stopping.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + PLAN + NEEDS-USER — v0.17.2 released; HARNESS-DOGFOOD-1 Run 1's result; Run 2's design for the user's decisions
+
+**v0.17.2, VERIFIED.** Checked myself:
+- crates.io 0.17.2, not yanked;
+- PyPI 0.17.2 with 6 files;
+- the Release has 12 assets;
+- the live `index.html` is byte-equal to `main`'s;
+- no `rel0172-*` or `release-0.17.2` branch is left.
+
+The Worker's entry covers `attest` and the attestation at
+`refs/tags/v0.17.2`.
+
+**Run 1's result: PASSED.** 13.1b's "accepted when" is met: the Worker's
+READY woke the Planner and the Planner's DISPATCH woke the Worker, with
+the user only approving.
+- **The work:** five tasks (`v0172-1` to `-5`), all queued, then active,
+  then ready, then done, in the brain. Ten hand-offs.
+- **How they arrived:** each one reached its receiver through the
+  per-turn line, on the same turn as the `SendMessage` nudge.
+- **The user relayed nothing.** They approved one rule change and the
+  release.
+- **Every PLAN.md write was under the claim `plan.md`.**
+- **The lapse warning** kept a long gate's claim alive once.
+- **Run 1 shipped its own findings:** READY-NOTICE, PRESENCE-AT-START and
+  WHO-SHAPE.
+- **What Run 1 didn't test:** the ledgers stayed the place where work was
+  described, the Reviewers' items stayed in `reviewer_notes.md`, and the
+  nudge still arrived with every hand-off.
+
+**Run 2** must take one full release, dispatch to tag, with no hand-edited
+PLAN.md or `reviewer_notes.md` (R-006.3). Going down the parity
+checklist, here's what's missing, and my proposal:
+
+| Today | What Run 2 needs | Built? |
+|---|---|---|
+| PLAN.md Status, order | The project essence (`state`, `next`, `decisions`), read in one call (`essence render --project`), kept by the Planner | Exists. **Rule 9 forbids the Planner essence writes**, so it needs the user's change (decision 2) |
+| Specs and dispatches | The task's body (8 KB), with longer specs as keyed `spec.<slug>` facts the task refers to | Body exists; **specs as facts need decision 2** |
+| DONE reports | The Worker's `report.<slug>` keyed fact, named in the task's `ready` note | Exists (the Worker writes facts) |
+| Decisions | Keyed `decision.<topic>` facts, written by the Planner when it decides (today the Worker copies them) | **Decision 2** |
+| `reviewer_notes.md` | **Findings as records:** `_mnemo.kind = finding`, with an id, category, priority, triage and `FINDING_TRANSITIONS` (declared since 12.7), plus `mnemo finding add|triage|list|get`, and MCP and Python | **Not built:** the note's step 8b |
+| The git backup of PLAN.md | `mnemo export --git` of facts, essence, tasks and findings, committed at each release instead of the ledgers | Exists for facts and tasks; **findings and essence to add** |
+| `SECURITY.local.md` | Stays beside the brain until 13b's private brain (R-006.3's condition 5) | n/a |
+| Role rules | AGENTS.md, plus the brain's onboarding notes in every brief | Met |
+| Claims, relaying | As in Run 1 | Met |
+
+**The proposal:**
+1. **v0.18.0, "the harness":** findings as records, plus the export
+   additions. It's built Run-1-style (the ledgers beside the brain), with
+   REVIEWER-B's pass at READY as for any minor release.
+2. **Then Run 2 on the next release,** with PLAN.md and
+   `reviewer_notes.md` frozen as archives. Each gets a head note pointing
+   at the brain, and they're never deleted.
+
+**Alongside (my own work, no Worker):** the sync design note I owe. It
+needs the waitlist's response count from the user.
+
+**NEEDS-USER, three decisions:**
+1. **Go for v0.18.0, the harness?** It's a minor release.
+2. **Rule 9:** the Planner may write the project essence and keyed
+   `decision.*`, `spec.*` and `status.*` facts. Everything else stays the
+   Worker's, and the Reviewers still write only findings.
+3. **The backup's place:** `mnemo export --git` committed at each release
+   as `docs/brain.md`, a public file.
+   - It holds no turns or private records (`--git` leaves them out), and
+     what's in it is what PLAN.md already publishes.
+
+### 2026-11-17 — PLANNER-A — DECISION + HANDOFF + DISPATCH — v0.18.0 "the harness" starts (the user: "Let's do it"); rule 9 for the Planner's writes; tasks `v0180-1` to `-3`
+
+**The user (2026-11-17): "Let's do it",** to my three decisions:
+1. **Go for v0.18.0, the harness.**
+2. **The Planner may write** the project essence and keyed `decision.*`,
+   `spec.*` and `status.*` facts.
+3. **The backup is `mnemo export --git`,** committed at each release as
+   `docs/brain.md`.
+
+**HANDOFF: `AGENTS.md`, the protocol text:**
+- rule 9's "Who writes facts" bullet;
+- its Reviewers' read bullet;
+- Planner rule 1's last sentence.
+
+All three carry decision 2. **Commit it first, on its own,** on
+`release-0.18.0` from `main` (`b7f9c1a`), as `docs(agents): the Planner
+may write the essence and decision, spec and status facts`.
+
+**Run 1's loop carries on for v0.18.0:** the ledgers beside the brain,
+tasks for every dispatch, and claims around PLAN.md. Run 2 starts on the
+release after this one.
+
+---
+
+**`v0180-1`: findings as records.** On `rel0180-1-findings`, with a PR
+into `release-0.18.0`. This is the 13a note's step 8b, now in scope.
+- **The kind:** `_mnemo.kind = "finding"`, a coordination kind:
+  - never a recall, BM25, ANN or `about` hit;
+  - the sentinel vector;
+  - one record changed in place, with `status_history`.
+- **Fields:**
+  - an id given by the caller, matching `^[A-Z]+-[0-9]+\.[0-9]+$` (for
+    example `RB-014.1`, `R-011.2`), unique, and refused if taken;
+  - a batch (the id's prefix);
+  - a category (`SECURITY | CORRECTNESS | PERF | PLAN-REFINEMENT |
+    PRODUCT | DX/DOCS`) and a priority (`HIGH | MEDIUM | LOW | IDEA`);
+  - a one-line title (at most 200 bytes) and a body (at most 16 KB);
+  - refs;
+  - the author (`_mnemo.author`);
+  - the status;
+  - the triage text and who triaged it;
+  - the verifying ref.
+- **`FINDING_TRANSITIONS`** (declared in `memory.rs:980`) gains the
+  user's way out of `needs-user`, and a deferral taken up later:
+  - `needs-user → accepted | deferred | rejected`;
+  - `deferred → accepted`.
+- **Who may do what** (rule 9 already names the roles; the engine checks
+  only the transitions, as for tasks):
+  - a Reviewer adds;
+  - the Planner triages: from `open` to `accepted`, `deferred`,
+    `rejected` or `needs-user`, with text;
+  - a Reviewer verifies, with a ref.
+- **Surfaces:**
+  - the CLI: `mnemo finding add|triage|verify|list|get`, where `list`
+    filters by status, batch, category and priority, and `--format
+    table|json|jsonl`;
+  - the MCP tool `finding` with the same ops, listed after `claim`;
+  - Python.
+- **The per-turn line and the brief:** for role `planner`, "N findings
+  wait for triage", in fixed text, with the titles after `FRAMING`,
+  escaped; seen per agent.
+- **Tests:**
+  - the id rules;
+  - every allowed transition, and a refused one;
+  - add, triage, verify and list round trips through the CLI, MCP and
+    Python;
+  - kept out of recall;
+  - the per-turn line;
+  - escaping.
+- **The guide:** a short "Review findings" subsection in section 6.
+  Regenerate `llms-full.txt`.
+- **The 13a note:** an as-built paragraph for step 8b.
+
+**`v0180-2`: the backup** (after `v0180-1`). On `rel0180-2-backup`:
+- **`mnemo export --git`:**
+  - includes findings (every status, ordered by id), and the project
+    essence (its open items by section, then the resolved ones from the
+    last 30 days);
+  - stays deterministic;
+  - never includes turns, private records, messages, claims or presence.
+- **Say what `--git` includes today for essence items.** If it already
+  includes them, only order and test them.
+- **A test:** two exports of an unchanged brain are byte-equal, and a
+  private finding never appears.
+- **`docs/brain.md`'s first version** is written from this repo's brain
+  and committed in this PR.
+  - **Read it first:** if any record is one the repo shouldn't publish,
+    stop and say so in DONE, without committing it.
+- **RELEASING.md:** "export `docs/brain.md` before tagging" joins the
+  checklist, beside the `chore(plan)` commit, which it replaces from Run
+  2.
+
+**`v0180-3`: READY** (after 1 and 2):
+- the bump to 0.18.0 (mobile by RELEASING.md's rule; the UniFFI crate
+  changes only if a public type does);
+- the CHANGELOG's `[0.18.0]`;
+- the dry run.
+
+**REVIEWER-B's READY pass** comes after it, as for any minor release.
+
+**The loop:** as before. The tasks are in the brain, chained by
+`--after`. Take them in order with `task next`.
+
+### 2026-11-17 — PLANNER-A — DECISION + HANDOFF + DISPATCH + NEEDS-USER — the waitlist has 1 sign-up and wasn't visible; it moves to the top of the site; the sync gate's question for the user
+
+**The user (2026-11-17):**
+- "Only 1 person and it's someone I know. I don't think the waitlist is
+  even prominent on the html, it needs to be at the top."
+- **Checked:** the site's only waitlist link was inside the roadmap's
+  "Next" card (`index.html`, line 833), near the bottom.
+- **So the gate's signal is empty,** not negative: nobody had a real
+  chance to see it.
+
+**HANDOFF: `index.html`,** a site-only change. It goes live on `main` now,
+not with v0.18.0:
+- an announcement bar above the nav: "**Coming next: encrypted sync** for
+  your project brain, across your machines and your team. The server
+  never sees your data. Join the waitlist →". It's styled with the
+  page's tokens, so it works in both themes, and it scrolls away while
+  the nav stays;
+- a "Join the sync waitlist" button in the closing call to action;
+- the roadmap card's link is kept.
+- Nothing says "paid", in keeping with the user's free-only site choice.
+
+**Dispatch: task `site-waitlist`.** Do it as soon as `v0180-1` is
+`ready`, before `v0180-2`:
+- a branch from `main` (`b7f9c1a`), with one commit holding only
+  `index.html` (`docs(site): the sync waitlist at the top`);
+- a PR into `main`, squash-merged;
+- then Pages serving it byte-equal;
+- delete the branch.
+
+**The sync gate:**
+- **The rule (2026-11-15):** the personal sync build starts after
+  HARNESS-DOGFOOD-1 only if the waitlist shows interest; if not, PERF-2
+  goes first, and I ask the user.
+- **My recommendation:** after v0.18.0, do **PERF-2** (the faster first
+  search on large brains) and **Run 2**, while the waitlist runs where
+  people can see it. Decide sync after that, on its numbers.
+- **The site has no traffic source yet,** so the waitlist's count will
+  stay small until the project is announced somewhere. When and where to
+  announce is the user's call.
+- Meanwhile I write the sync design note, my own work, so it's ready when
+  the decision comes.
+
+**NEEDS-USER:** PERF-2 next after v0.18.0, and sync decided later on the
+waitlist's numbers. Yes or no.
+
+### 2026-11-17 — WORKER — DONE — v0180-1: findings as records merged (PR 123, `52feb44`), task `v0180-1` ready
+
+Brain: "findings records review ledger triage verify coordination kind
+finding" → partial (the 13a design and the review-triage procedure;
+nothing on a finding kind). Run before the work.
+
+1. **The HANDOFF:** `4d500b1` (`docs(agents): the Planner may write the
+   essence and decision, spec and status facts`). It's the only file in
+   that commit (`AGENTS.md`'s three spots), and it went first on
+   `release-0.18.0`, created from `main` (`b7f9c1a`) and pushed.
+2. **PR 123** (https://github.com/toarchkumar/mnemo/pull/123), on
+   `rel0180-1-findings`: `fdb7db6`, squash-merged as `52feb44`, and the
+   branch deleted. CI: 18 of 18.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | The kind | **`finding`,** the fifth `COORDINATION_KINDS` entry. It has the sentinel vector, is never a recall, BM25, ANN or `about` hit, and is one record changed in place with `status_history`. **Found by id** through the row's locator hash | `findings::a_finding_is_never_a_recall_hit`; `coordination_plumbing` |
+   | Fields | **An id** (`^[A-Z]+-[0-9]+\.[0-9]+$`, at most 64 bytes, unique) and its batch; **a category and priority** (your lists); **a title** (200 bytes) and **a body** (16 KB); **refs**; **the author**; **the status**; **the triage text** and who wrote it; **the verifying ref** and who gave it. In `memory.rs` and the new `store/findings.rs`; `FindingSpec`, `Finding`, `FindingFilter` and `valid_finding_id` exported | `findings::a_finding_is_added_once_with_its_fields`; `finding_ids` |
+   | Transitions | `FINDING_TRANSITIONS` gains `needs-user → accepted\|deferred\|rejected` and `deferred → accepted`. `finding_triage` (any status but `verified`, with text); `finding_verify` (with a ref). The engine checks only the transitions | `findings::every_allowed_transition_and_a_refused_one` (all 11 rows, and the refused moves) |
+   | The list | Filters by status, batch, category and priority; ordered by id, numerically | `findings::the_list_filters_and_orders_by_id` |
+   | The surfaces | **The CLI:** `mnemo finding add\|triage\|verify\|list\|get` (`--format table\|json\|jsonl`). **The MCP tool:** `finding`, right after `claim`. **Python:** `finding_add`, `finding_triage`, `finding_verify`, `findings`, `finding_get` | `project_brain::findings_round_trip_through_the_cli`; `mcp_context::findings_round_trip_over_mcp` (both modes); `test_mnemo.py::test_findings` |
+   | The per-turn line and brief | **For role `planner`:** "N findings wait for triage. Call `finding` with `list`, then `triage`.", with the items after `FRAMING`, escaped. **Seen per agent**; never a wake-up. **The brief** gets a part for them | `hook_cli::an_open_finding_reaches_the_planner_once` |
+   | Docs | **The guide:** "Review findings" (a `json mcp` example the test runs); `llms-full.txt` regenerated. **The 13a note:** an as-built paragraph. **The READMEs:** the CLI table, the MCP list, Python's table. **CHANGELOG `[Unreleased]`** | `guide` (5) |
+
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 758
+       passed, 1 failed, 1 ignored. The failure was `coordination_plumbing`'s
+       hard-coded 4 kinds; it now follows `COORDINATION_KINDS`, and the
+       rerun passed (4);
+     - the embed-candle set, with `onboard_cli`: 127 passed;
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py`: all passed;
+     - fmt and every clippy: clean.
+     - The gates took 47 minutes (07:24 to 08:11).
+3. **One deviation, small:** the per-turn line's call to action reads "Call
+   `finding` with `list`, then `triage`." Your text was "N findings wait for
+   triage" without a call; I added one, matching the others.
+4. **The loop:**
+   - `task next` gave me `v0180-1`.
+   - The claim was renewed once during the gates.
+   - `plan.md` taken around this entry, released with its token.
+   - Then `ready`, the post, and the nudge.
+   - **Next I take `site-waitlist`,** as your entry orders, before
+     `v0180-2`.
+5. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line said "1 task ready" on the same turn.
+   - **Awkward:** a second dispatch (`site-waitlist`) arrived mid-task; the
+     per-turn line showed it as "1 task ready". Its own entry said when
+     to take it, so the order was clear.
+6. **Brain:** no fact written this round.
+
+### 2026-11-17 — PLANNER-A — VERIFIED — v0180-1: findings as records (PR 123, `52feb44`); task `v0180-1` done
+
+Checked in code, `gh` and the brain, not from the DONE alone:
+
+- **PR 123** is merged into `release-0.18.0` as `52feb44`; the branch
+  `rel0180-1-findings` is gone from the remote. The HANDOFF `4d500b1`
+  (`AGENTS.md` only, 13+/8-) is under it.
+- **The transitions at `52feb44`:** `FINDING_TRANSITIONS` has the 11 rows
+  the dispatch asked for (`memory.rs:985`), with `needs-user →
+  accepted|deferred|rejected` and `deferred → accepted`.
+  `finding_triage` and `finding_verify` are in `store/findings.rs`; the
+  planner line is in `hook.rs:1058`.
+- **The deviation** (a call to action on the per-turn line) is accepted:
+  it matches the other lines.
+- **CI:** the PR's run was 18 of 18. The push run on `52feb44` was still
+  queued when I checked; the Worker confirms it in its next DONE.
+- **One red push run to note:** `4d500b1` (a docs-only commit) failed
+  `rust (macos-latest)` on `shared_lock::a_reader_gets_in_against_a_writer_looping_back_to_back`
+  (`tests/shared_lock.rs:579`, the "reader was starved" assert). Nothing
+  in that commit touches code, so it's a timing flake on the hosted
+  runner. **For `v0180-3`:** if it fails again on any run before READY,
+  log it with the run id and the counts it printed, and we decide then
+  whether to loosen the floor; a single failure isn't a reason to change
+  the test.
+- **The task:** `mnemo task update v0180-1 --status done`, by me.
+- **The tally (Run 2's baseline, kept since Run 1):** found by the nudge;
+  the per-turn line agreed on the same turn; one awkward moment (a second
+  task queued mid-work), resolved by the entry's ordering. No user relays.
+
+**Next:** the Worker is on `site-waitlist` (branched from `main`, as the
+entry asked), then `v0180-2`. No new dispatch.
+
+### 2026-11-17 — WORKER — DONE — site-waitlist: the sync waitlist at the top, live (PR 124, `2bf9b74`), task `site-waitlist` ready
+
+1. **PR 124** (https://github.com/toarchkumar/mnemo/pull/124), on
+   `site-waitlist` from `main` (`b7f9c1a`): one commit, `6600096`, holding
+   only `index.html` (`docs(site): the sync waitlist at the top`).
+   Squash-merged into `main` as `2bf9b74`, and the branch deleted. **No
+   checks ran:** CI ignores a change to `index.html` alone.
+   - **Checked against your HANDOFF:**
+     - the bar is above the nav, in the page flow, so it scrolls away;
+     - it uses the page's tokens (`--accent-tint`, `--ink`, `--line`,
+       `--accent-ink`), each defined three times (light, the dark media
+       query, the dark toggle);
+     - the closing call to action has the "Join the sync waitlist" button;
+     - the roadmap link is kept;
+     - "paid" appears nowhere on the page.
+2. **Live:** Pages built `2bf9b74` and succeeded. The served `index.html`
+   is byte-equal to `origin/main` (`cmp`, 57100 bytes), with both waitlist
+   texts on it.
+3. **For the release order:** `main` (`2bf9b74`) is now **not an ancestor
+   of `release-0.18.0`**. At v0.18.0's tag, `main` can't fast-forward to
+   it until `release-0.18.0` has `main` merged in. **Say how you want
+   that:** a merge of `main` into `release-0.18.0` (by PR) before the
+   bump.
+4. **The loop:** `task next` gave me `site-waitlist`. `plan.md` taken
+   around this entry, released with its token. Then `ready`, the post, and
+   the nudge.
+5. **Next:** `v0180-2`, the backup, from `release-0.18.0` (`52feb44`).
+
+### 2026-11-17 — PLANNER-A — VERIFIED + DECISION — site-waitlist live (PR 124, `2bf9b74`); `main` goes into `release-0.18.0` by a merge commit, before `v0180-2`
+
+**Verified** in `gh`, `git` and the served page:
+- PR 124 is merged into `main` as `2bf9b74`; `origin/main` is at it.
+- Pages' build of `2bf9b74` succeeded.
+- The live page has the bar above the nav (`.announce`, line 443), the
+  roadmap link and the "Join the sync waitlist" button.
+- Task `site-waitlist` is set `done` by me.
+
+**Decision (your item 3):** merge `main` into `release-0.18.0` now,
+before `v0180-2`, so the release branch never drifts from `main` and
+v0.18.0's fast-forward works.
+- **How:** a PR with `main` as head and `release-0.18.0` as base,
+  merged with **a merge commit** (`gh pr merge --merge`), not a squash:
+  a squash wouldn't make `2bf9b74` an ancestor, and the fast-forward
+  would still fail.
+- **What to expect:** a clean merge. Since `b7f9c1a`, `release-0.18.0`
+  hasn't touched `index.html`, and `main` changed nothing else. The
+  repo allows merge commits, and the branch has no protection.
+- **The check:** `git merge-base --is-ancestor origin/main
+  origin/release-0.18.0` succeeds. Cite the merge hash in `v0180-2`'s DONE.
+- **Then** branch `v0180-2` from the merged `release-0.18.0`.
+- **The rule from now on:** any change to `main` during a release
+  (the site, for example) is merged back into the release branch the
+  same way, before the next task. Add that rule to RELEASING.md's
+  release order in `v0180-2`, which already updates that file.
+
+**The tally:** found by the nudge, with the per-turn line on the same
+turn; no user relays. Awkward: none.
+
+### 2026-11-17 — WORKER — DONE — v0180-2: the brain's backup (PR 126, `d4f95e7`)
+
+**Before the task:** `main` was merged into `release-0.18.0` by a merge
+commit, PR 125, `9f3ab28`. `git merge-base --is-ancestor origin/main
+origin/release-0.18.0` succeeds (run again after this merge).
+
+**What changed** (squash `d4f95e7` on `release-0.18.0`; branch deleted):
+- **`mnemo export --git`'s order and filter** (`bin/mnemo/export.rs`).
+  Before this, `--git` already wrote every essence item (thread and
+  project, resolved or not), sorted by ULID among the rest; it had no
+  place for findings, which v0.18 builds keep out of the plain rest by
+  kind. Now: keyed memories by key, then tasks, then findings (every
+  status, by `Finding::sort_key`, so RB-9.2 < RB-9.10 < RB-10.1), then
+  the project essence (open items by section: intent, conventions,
+  decisions, state, open, next, lessons, timeline; then resolved items),
+  then the rest by id. With `--git`, a resolved essence item, a done task
+  or a terminal finding whose last change is over 30 days old
+  (`TASK_DONE_EXPORT_KEEP_SECS`) is left out. Thread essence, messages,
+  claims, presence, private records and access stats stay out. The
+  Markdown header says so.
+- **Test:** `export_cli::git_writes_findings_and_the_project_essence_in_order`
+  (the order, a private finding left out, thread essence and coordination
+  left out, two byte-equal exports in md and jsonl, and the 31-day
+  `MNEMO_DEV_CLOCK_OFFSET` drop). `export_cli`: 8 of 8.
+- **`docs/brain.md`** (new, 184,525 bytes, 268 `##` records: 259 facts,
+  9 tasks; no essence, no findings yet). Written by the installed v0.17.1
+  (`~/.local/bin/mnemo export --git`), since a new build can't open the
+  real brain without a keychain prompt. So its header line is v0.17.1's
+  ("ordered by key, then id"); the first v0.18.0 export after the tag
+  rewrites it. **The review:** targeted scans, not a line-by-line read:
+  no secrets or token shapes, no email addresses, no home paths, no real
+  names, no recovery codes, nothing from `SECURITY.local.md`'s open item.
+  Monetization appears only by name, as PLAN.md already does in public.
+  Nothing found that the repo shouldn't publish, so it is committed.
+- **`RELEASING.md`:** step 7, "The brain's backup (from v0.18.0)":
+  `mnemo export --git -o docs/brain.md` before tagging, read the diff,
+  commit it; from Run 2 it replaces step 6's coordination-file commit.
+  Plus the rule: a change to `main` during a release goes back into the
+  release branch by a PR with `main` as head, merged with
+  `gh pr merge --merge`, never a squash, before the next task.
+- **`CHANGELOG.md`** `[Unreleased]` Added, and `mnemo/README.md`'s
+  `export` row.
+
+**Gates:** local `cargo fmt --check`, clippy with CI's features, and
+`cargo test --locked --no-fail-fast --features failpoints`: 760 passed,
+0 failed, 1 ignored (08:38 to 10:09; load averages 2.76 2.27 2.35 at the
+end). PR 126's CI: 18 of 18 checks pass.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0180-2 --status ready`, the post, the nudge.
+
+**The tally:** found by the Planner's `READ:` pointer, with the per-turn
+line on the same turn. Awkward: the brain can't be exported by the new
+build locally (keychain), so the committed file's header is the old
+build's; and the per-turn line warned that the task's claim would lapse
+during the 91-minute local gate.
+
+**Next:** `v0180-3` (the bump to 0.18.0), from `release-0.18.0` (`d4f95e7`).
+
+### 2026-11-17 — WORKER — NOTE — a correction to v0180-2's DONE (above)
+
+Re-read against `export.rs` (`select`, `resolved_long_ago`) after
+writing the DONE, before the nudge:
+- **The new 30-day drop applies only to resolved project essence.** Done
+  tasks keep their existing v0.17 rule (`done_long_ago`). Findings are
+  kept at every status, with no age limit. The DONE's "a done task or a
+  terminal finding" was wrong.
+- **Thread essence isn't left out.** It stays with the rest, by id, as
+  before. The DONE and the squash commit `d4f95e7`'s message say it stays
+  out. That's wrong. The commit can't change, so PR 126's description is
+  corrected. The CHANGELOG entry, the Markdown header and the README
+  never claimed it.
+- If thread essence should be left out of the backup, that's a one-line
+  `retain` in `select`. **The Planner decides:** in `v0180-3`, or never.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + DECISION — v0180-2: the brain's backup (PR 126, `d4f95e7`); two filters added to `v0180-3`
+
+**Verified:**
+- PR 125 (`9f3ab28`, `main` → `release-0.18.0`, a merge commit) and
+  PR 126 (`d4f95e7`) are merged. `origin/main` is an ancestor of
+  `origin/release-0.18.0`.
+- **`docs/brain.md`** at `d4f95e7` (184,521 bytes) was scanned by me too:
+  - names, emails, home paths, token and recovery-code shapes: the only
+    hits are the public `toarchkumar` repo, site and keychain-service
+    names, and the redaction note's "task-list" false positive;
+  - RB-006.12's details (the daemon's open item): none.
+  - It's fine to publish.
+- **CI:** `52feb44`'s push run shows `rust (macos-latest)` **cancelled**
+  (superseded by the next push), not failed. `d4f95e7`'s push runs were
+  queued when I checked. Confirm both in `v0180-3`'s DONE.
+- **Your NOTE's corrections** are accepted, and PR 126's description is
+  fixed.
+- Task `v0180-2` is set `done` by me.
+
+**Decisions, both done in `v0180-3`, before the bump:**
+
+1. **Thread essence leaves the `--git` backup.**
+   - Thread essence is one session's working state. The backup is the
+     project's knowledge, which is the project essence.
+   - Add the one-line `retain` in `select`, and extend
+     `git_writes_findings_and_the_project_essence_in_order` so a thread
+     essence item never appears. Then fix the Markdown header's wording if
+     it lists what's included.
+2. **An unfixed SECURITY finding never reaches the backup.** This is the
+   gap I found while checking. `docs/brain.md` is public, and AGENTS.md
+   keeps unfixed security findings out of the repo until the fix ships.
+   Today a Reviewer's `SECURITY` finding, added as a normal record, would
+   be published by the next `export --git`.
+   - **The rule:** with `--git`, a finding whose category is `SECURITY`
+     is written only when its status is `verified`. Every other status
+     is left out, `rejected` included.
+   - The plain export (no `--git`) is unchanged, since it's the owner's
+     own full copy.
+   - **Tests:** an `open`, `accepted` and `rejected` SECURITY finding are
+     absent, a `verified` one is present, and a `CORRECTNESS` finding at
+     `open` is present.
+   - **Docs:** the export row in `mnemo/README.md`, the CHANGELOG line,
+     the header line, and the guide's "Review findings" section say it in
+     one sentence. `llms-full.txt` is regenerated if the guide changes.
+   - **Until v0.18.0 ships,** unfixed security findings stay in
+     `SECURITY.local.md`, as now.
+
+**Then `v0180-3` as dispatched:** the bump, the CHANGELOG's `[0.18.0]`,
+and the dry run, then READY. At READY I call REVIEWER-B's READY pass
+(rule 4), scoped to v0.18.0's diff: findings, the export filters, and
+the per-turn line.
+
+**The tally:** found by the `READ:` pointer, with the per-turn line on the
+same turn; no user relays. Awkward: the new build can't export the real
+brain locally without a keychain prompt, and the claim warned about
+lapsing during the 91-minute local gate. Both go to Run 2's notes.
+
+### 2026-11-17 — WORKER — READY — v0180-3: v0.18.0 (PR 127 `635ae00`, PR 128 `430a21a`; dry run green)
+
+**`release-0.18.0` is at `430a21a`.** `origin/main` is an ancestor
+(`git merge-base --is-ancestor` succeeds).
+
+**1. The two `--git` filters** (your decision on v0180-2), PR 127, squash
+`635ae00`:
+- **Thread essence leaves the backup.** `kept_out_of_git` in
+  `bin/mnemo/export.rs` drops an essence item that has `_mnemo.thread`.
+- **A `SECURITY` finding is written only when `verified`.** Every other
+  status is left out, `rejected` included. The plain export (no `--git`)
+  keeps both.
+- **Tests:**
+  - `git_writes_findings_and_the_project_essence_in_order` now has SECURITY
+    findings at `open` (RB-11.1), `accepted` (RB-11.2) and `rejected`
+    (RB-11.3). All three are absent. The `verified` RB-11.4 and an `open`
+    `CORRECTNESS` RB-12.1 are present, in id order after RB-10.1. The
+    thread item is absent, and the plain export has all four.
+  - `a_v8_file_exports_through_the_read_only_path`: the v8 fixture has 2
+    thread essence items (thread `offsite`: decisions, timeline) and 1
+    project item. `--git` went from 13 records to 11, and the project
+    item stays.
+- **Docs:** the header line, the README's `export` row (which also gets
+  the missing full stop before "Since v0.18"), the CHANGELOG entry, and
+  one sentence in the guide's "Review findings". `llms-full.txt` is
+  regenerated; `llms.txt` is unchanged (the card didn't change).
+- **Checks:**
+  - Local: `cargo fmt --check`; clippy with CI's features
+    (`failpoints,benches,keychain,embed-candle`); `export_cli` 8, `guide`
+    4 and `findings` 5 passed. The full suite ran in CI only.
+  - PR 127's CI: 18 of 18. The `635ae00` push runs: CI and Mobile CI
+    succeeded.
+
+**2. The bump,** PR 128, squash `430a21a`:
+- **Versions:** every manifest is at 0.18.0 (the engine, Python Cargo and
+  pyproject, Node, `mnemo-uniffi`, Kotlin's `VERSION_NAME`, and the iOS
+  and Android samples). The lockfiles change only their own entries
+  (3 in `mnemo/`, 2 in `mnemo-python/`).
+- **Mobile:** `.github/release-mobile` is `true` (the minor-version rule).
+  The Swift and Kotlin READMEs name 0.18.0.
+  `git diff v0.17.0 -- mnemo/bindings/{uniffi,swift,kotlin} examples/mobile`
+  shows only version lines.
+- **CHANGELOG:** `[0.18.0] — 2026-11-17` with an intro, a Changed line
+  (`--git` drops thread essence, which v0.17 wrote), and the compare
+  links.
+- **RELEASING.md:** step 7 lists the two new filters.
+- **PR 128's CI:** 24 of 24. The first try of `mobile (aarch64-apple-ios)`
+  was **cancelled**: "The job was not acquired by Runner of type hosted
+  even after multiple attempts", with GitHub's macOS arm64 capacity
+  notice. No step ran. Its re-run passed.
+- **The `430a21a` push runs:** CI succeeded, and so did Mobile CI.
+
+**3. The dry run:** `gh workflow run release.yml --ref release-0.18.0 -f
+dry_run=true -f mobile=true`, run 44156579200, on `430a21a`. It
+**succeeded**.
+- **`version check`:** "engine 0.18.0, mnemo-uniffi 0.18.0, mnemo-android
+  0.18.0", "the commit says mobile: true", "mobile: on".
+- **The jobs:**
+  - every CLI, wheel, sdist and artifact-check job, `SHA256SUMS`, the
+    PyPI and crates.io dry runs, and attach engine assets;
+  - Swift build, publish and verify-published; Android build and publish.
+- **Maven Central:** deployment `5b039056-…` was VALIDATED, then dropped
+  (HTTP 204).
+- **Skipped, as a dry run does:** approve, attest, the GitHub Release, and
+  the engine gate.
+
+**4. The CI you asked me to confirm:**
+- **`52feb44` and `d4f95e7`:** each push run's `rust (macos-latest)` was
+  cancelled, but **not superseded**. Both jobs carry the same annotation
+  as above (no hosted runner acquired, macOS arm64 capacity). Every other
+  job in both runs succeeded, and `635ae00`'s push run, which contains
+  both commits, passed in full, macOS included.
+- **The `shared_lock` flake** (`4d500b1`) didn't recur on any run here.
+
+**5. Left for the release (RELEASING.md):**
+- the HANDOFF of root `README.md` and `index.html` (which still say
+  v0.17.2);
+- the coordination-file commit, and/or the brain's backup: step 7,
+  exported with the release's `mnemo` (so after the install, or by
+  v0.17.1 again as in PR 126; your call);
+- the fast-forward of `main`, the tag, and the user's approval click.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0180-3 --status ready`, the post, the nudge.
+
+**The tally:** found by the `READ:` pointer, with the per-turn line on the
+same turn ("1 task ready"). Awkward: GitHub's macOS runner capacity
+cancelled three jobs over the day, each of which looked like a failure
+until its annotation was read.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + DECISION + REVIEW CALL — v0.18.0 READY (`430a21a`); REVIEWER-B's READY pass, RB-014, scoped
+
+**Verified** in `git` and `gh`:
+- `origin/release-0.18.0` is at `430a21a`, with `origin/main` an
+  ancestor.
+- `mnemo/Cargo.toml` is at 0.18.0.
+- The dry run 44156579200 succeeded on `430a21a`, and so did that commit's
+  CI and Mobile CI push runs.
+- At `430a21a`, `export.rs:101-109` leaves out a `SECURITY` finding at
+  any status but `verified`. The category is checked exactly against
+  `FINDING_CATEGORIES` when a finding is added (`findings.rs:221`), so
+  "security" in lower case can't slip past.
+- The macOS cancellations were runner capacity, as your annotations say.
+- Task `v0180-3` stays `ready` until the review is answered.
+
+**Decision on step 7, the brain's backup, for this release:**
+- `docs/brain.md` is **not** re-exported before the tag.
+- An old build doesn't know the two new filters. A v0.17 `export --git`
+  would write thread essence, and any finding records as plain rows.
+- The file committed in PR 126 stays as it is.
+- Step 6's coordination-file commit is done as usual.
+- The first export by v0.18.0 itself is Run 2's first backup, after the
+  install.
+
+**REVIEWER-B: the READY pass for v0.18.0, batch `RB-014`** (rule 4, a
+minor release's READY). **Scope:** `git diff v0.17.2 430a21a`, and only
+what's new:
+1. **Findings as records:**
+   - `store/findings.rs`, the `memory.rs` constants, the CLI
+     (`finding`), the MCP `finding` tool, and Python;
+   - ids unique under two processes adding the same id;
+   - the transitions enforced on every path;
+   - whether a finding's category or kind can be changed after it's
+     added by any other write path (`update`, metadata writes,
+     `forget` then re-add), which would get a SECURITY finding past the
+     export filter.
+2. **The backup** (`bin/mnemo/export.rs`, `--git`):
+   - can an unfixed SECURITY finding, a private record, a thread essence
+     item or a turn reach `docs/brain.md` by any route, a mixed-version
+     brain included (a v0.17 build writing or exporting a brain that
+     holds findings);
+   - the determinism.
+3. **The planner's per-turn line and brief part** (`hook.rs` around
+   line 1058): the escaping of finding titles after `FRAMING`, and its
+   byte budget.
+
+**Out of scope:** everything v0.17.2 already shipped, the mobile
+bindings (version lines only), and benchmarks.
+
+**How:** `CARGO_TARGET_DIR=/tmp/rb-target`, `--locked`. Report HIGH and
+MEDIUM items in full, and LOW items as one line each. Put any SECURITY
+item in `SECURITY.local.md` with a titled placeholder in
+`reviewer_notes.md`. When done, send `REVIEW DONE: RB-014`.
+
+**The Worker** waits. The README and site HANDOFF, then the tag, come
+after the triage.
+
+### 2026-11-17 — PLANNER-A — DECISION — after v0.18.0: PERF-2 and Run 2; sync waits for the waitlist (the user: "Yes")
+
+- **The question** (my NEEDS-USER of today, the waitlist entry): PERF-2
+  next after v0.18.0, and sync decided later on the waitlist's numbers.
+- **The user's answer:** "Yes". This is also the go for PERF-2's minor
+  release (rule 4).
+- **Why:**
+  - The roadmap's gate puts PERF-2 first when the waitlist shows no
+    demand.
+  - It had 1 sign-up (someone the user knows), and the form wasn't
+    visible until `2bf9b74` put it at the top of the site.
+- **The roadmap line** (Status, around line 95) now records the decision.
+- **The order after v0.18.0's tag:**
+  1. HARNESS-DOGFOOD-1 Run 2 (PLAN.md and `reviewer_notes.md` frozen as
+     archives; the brain carries the work);
+  2. PERF-2 (Phase 11.1): partition-major index loading and a lazy
+     vector-column fill, aiming at a first recall at 100K of ≤ 15 ms
+     (about 120 ms today) and at 10K of ≤ 5 ms (about 9 ms), with no
+     format bump. It runs as Run 2's work;
+  3. sync, gated on my sync design note and the waitlist's numbers. I
+     bring both to the user.
+- **The dispatch** follows v0.18.0's VERIFIED. No Worker action now.
+
+### 2026-11-17 — PLANNER-A — REVIEW + DISPATCH + NEEDS-USER — RB-014 triaged; v0.18.0 review round 1 (`v0180-4`) before the tag
+
+**RB-014 (REVIEWER-B's READY pass at `430a21a`):**
+- no HIGH item;
+- 760 passed on the Reviewer's Mac;
+- ids unique under three racing processes;
+- every transition enforced;
+- v0.18's own `--git` export clean of all 14 markers, and deterministic;
+- the Planner's line escaped and within budget;
+- RB-013.1 to .4 `VERIFIED`.
+
+**Triage** (both ledgers updated):
+- **`RB-014.1`** (MEDIUM, held in `SECURITY.local.md`): `ACCEPTED`.
+  - Most of it goes in task `v0180-4`, before the tag.
+  - Two recommendations are `DEFERRED` with triggers: one to the first
+    release after v0.18.0, one to Run 2's first backup.
+  - One is `REJECTED`.
+  - **The spec is that item's Planner Triage in `SECURITY.local.md`:
+    read it there.** Keep commit, PR and task wording neutral: the
+    title names only "review round 1 (RB-014)".
+- **`RB-014.2`** (LOW): `ACCEPTED`, all six in `v0180-4`, as its Planner
+  Triage in `reviewer_notes.md` lists them:
+  1. `essence remove`'s kind check;
+  2. `update` refuses a finding's record;
+  3. ids unique by prefix and numbers (leading zeros stay allowed);
+  4. a guide sentence on who triages and who verifies;
+  5. the `--git` header and stderr wording, with the build's version;
+  6. `record_id` in `finding get` and `list` JSON, and `finding add`
+     needs an agent.
+
+**Dispatch, `v0180-4`** (brain task, `--for worker`), on
+`release-0.18.0` from `430a21a`:
+- one PR with both items' accepted parts, tests as each triage says,
+  CHANGELOG `[0.18.0]` updated (it isn't tagged yet), the guide's
+  "Review findings", `llms-full.txt` regenerated, and RELEASING.md's
+  step 7;
+- then a new dry run on the merged head, then READY.
+- **This counts as fix round 1 of 3** (rule 5).
+- I don't call REVIEWER-B again. I check the round myself against
+  `SECURITY.local.md`, and REVIEWER-B verifies at its next scheduled
+  pass.
+- **For the guide's id-only sentence:** write it in the guide now. The
+  same sentence in AGENTS.md's protocol text waits for the user.
+
+**NEEDS-USER:** one sentence added to AGENTS.md's security rule (after
+"move them into `PLAN.md` once the fix has shipped."): "Anything else
+that refers to one, such as a task, a fact, an essence item, a commit or
+a PR, names it by its id only." Yes or no. It doesn't block `v0180-4`.
+
+### 2026-11-17 — PLANNER-A — DECISION + HANDOFF — AGENTS.md's id-only sentence (the user: "yes"); INSPECT-COORD before Run 2 (the user: "yes")
+
+**1. HANDOFF, `AGENTS.md`** (protocol text; the user approved the
+sentence). One sentence is added after "move them into `PLAN.md` once
+the fix has shipped.":
+
+> Anything else that refers to one, such as a task, a fact, an essence
+> item, a commit or a PR, names it by its id only (user decision
+> 2026-11-17).
+
+- **The file:** `AGENTS.md` only (2 lines added).
+- **The commit:** `docs(agents): an unfixed security finding is named by
+  its id only`.
+- **When:** commit it on its own on `release-0.18.0`, before or after
+  `v0180-4`'s PR, never inside it.
+
+**2. DECISION, INSPECT-COORD** (the user: "yes", after asking where a
+human can watch findings).
+- **Why:** `mnemo inspect` shows memories only (checked at `430a21a`:
+  no findings or tasks in `inspect.rs` or `inspect.html`). Once Run 2
+  freezes `reviewer_notes.md`, the user has no page to watch the work.
+- **What:** two read-only tabs in the inspector:
+  - **Findings:** a table filtered by status, category and priority,
+    and each finding's history.
+  - **Tasks:** status, owner, `after`, and its history.
+  - Unverified `SECURITY` findings are shown, since the page is
+    loopback-only and the user's own.
+  - The inspector's rules hold: `GET` only, no handle kept open, no
+    endpoint that writes.
+- **When:** v0.18.1, right after v0.18.0, **before Run 2 freezes the
+  ledgers.**
+  - RB-014.1's deferred task `refs` (Part B rec 2) goes into the same
+    release, since its trigger is before Run 2's first security finding.
+  - The CI check on the backup's header stays with Run 2's first backup.
+- **The order after v0.18.0:** v0.18.1 (INSPECT-COORD and task
+  `refs`), then Run 2 with PERF-2 as its work, then sync, decided on the
+  waitlist's numbers.
+- **The dispatch** follows v0.18.0's VERIFIED.
+
+### 2026-11-17 — WORKER — READY — v0180-4: v0.18.0 review round 1 (RB-014) (PR 129 `61bb573`; dry run green)
+
+**`release-0.18.0` is at `61bb573`.** `origin/main` is an ancestor.
+
+**Your HANDOFF:** `AGENTS.md`'s id-only sentence was committed on its own
+as `f77040b` (`docs(agents): an unfixed security finding is named by its
+id only`) on `release-0.18.0`, before PR 129. Its push runs: CI and Mobile
+CI succeeded.
+
+**PR 129** (squash `61bb573`, branch deleted), round 1 of 3:
+- **RB-014.1:** every part its triage puts before the tag is done, as
+  `SECURITY.local.md`'s Planner Triage lists them. The deferred and
+  rejected parts aren't touched. PR 129's description and the
+  CHANGELOG's `[0.18.0]` describe the behaviour as features. A new CI job,
+  `compat (v0.17.2, linux)`, installs the published 0.17.2 (its log:
+  "Installed package `mnemo-engine v0.17.2`") and passed. Locally, with the
+  new write switched off for one run, the same test failed. Restored.
+- **RB-014.2,** all six:
+  1. `essence_remove` checks the kind (`load_essence_record`) before
+     deleting.
+  2. `update` (so `update_text`) refuses a finding's record: "a finding
+     can't be updated: it changes only by `finding triage` or `finding
+     verify`". `delete` refuses one the same way, so the MCP `forget`,
+     Python's and the mobile `delete` too. The engine's own deletes
+     touch only turns and messages.
+  3. An id is unique by prefix and numbers: `RB-0900.1` beside `RB-900.1`
+     gives "RB-0900.1 is taken (as RB-900.1)". Leading zeros stay allowed
+     on a free id.
+  4. The guide's "Review findings" says the engine doesn't check who
+     triages or verifies; the Planner triages, a Reviewer verifies.
+  5. The `--git` Markdown header now says it's the brain's backup, names
+     the build ("written by mnemo 0.18.0") and lists what's left out. The
+     stderr line with `--git` is a note: "the export is plaintext, written
+     by mnemo 0.18.0 with `--git` to be committed; read the diff first".
+     The plain export's header and warning are unchanged.
+  6. `record_id` is in `finding get` and `list` JSON (CLI and MCP) and
+     Python's dict. `finding add` with no agent fails with "a finding
+     needs its author: name the agent (MNEMO_AGENT, or --as on the CLI)".
+- **An existing test changed:** `export_cli`'s order test made a finding
+  private through `update`. That's now refused, so the step is gone, and
+  the private case is covered another way.
+- **Docs:**
+  - the guide's "Review findings" (with the id-only sentence, as you
+    asked), the README's `finding` and `export` rows, the CHANGELOG's
+    `[0.18.0]` (Added and Changed), and RELEASING.md's step 7 (the
+    release's own build writes the backup; check the header's build
+    line);
+  - `llms-full.txt` regenerated; `llms.txt` unchanged.
+
+**Checks:**
+- **Local** (12:25 to 13:11; load averages 4.88 4.61 4.52 at the end):
+  - `cargo fmt --check`, clippy with CI's features, and clippy on
+    `mnemo-python`;
+  - `cargo test --locked --no-fail-fast --features failpoints`: **765
+    passed, 0 failed, 1 ignored** (760 before);
+  - `cargo test -p mnemo-uniffi`: 23 passed. Python's tests ran in CI
+    only.
+- **PR 129's CI:** 25 of 25.
+- **The `61bb573` push runs:** CI and Mobile CI succeeded.
+
+**The dry run:** run 44182570412 on `61bb573`, with `-f mobile=true`.
+- `version check`: "engine 0.18.0, mnemo-uniffi 0.18.0, mnemo-android
+  0.18.0", "the commit says mobile: true".
+- **Attempt 1** failed only on `mobile (Swift build)`: **cancelled**, with
+  no step run. Its annotation: "The job was not acquired by Runner of
+  type hosted even after multiple attempts" (macOS arm64 capacity).
+  Everything else succeeded, including Maven Central (deployment
+  `8d9197f7-…` VALIDATED, then dropped, HTTP 204).
+- **Attempt 2** (`gh run rerun --failed`): **success**, with 27 jobs
+  succeeded. Skipped, as a dry run does: approve, attest, the Release,
+  the gate, the mobile-off note.
+
+**Left for the release:**
+- **Your HANDOFF** of root `README.md` and `index.html`. Both have
+  uncommitted changes, left unstaged until a HANDOFF lists them.
+- **The coordination-file commit,** per your step-7 decision (no
+  re-export before the tag).
+- `main`'s fast-forward, the tag, and the user's approval click.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0180-4 --status ready`, the post, the nudge.
+I renewed the task's claim three times with `task update --status active`
+while the gates and runs went on.
+
+**The tally:** found by the `READ:` pointer, with the per-turn line on the
+same turn ("1 task ready"). Awkward:
+- GitHub's macOS capacity cancelled a job again: the fourth today, and
+  the first in a dry run.
+- The HANDOFF arrived while the gates were running, so the task branch
+  had to fast-forward onto it (no files of the PR's were touched).
+
+### 2026-11-17 — PLANNER-A — VERIFIED + HANDOFF — v0180-4 (PR 129, `61bb573`); v0.18.0's README and site; the release order
+
+**Verified at `61bb573`** in `git`, `gh` and the code:
+- `origin/main` is an ancestor of `origin/release-0.18.0`. The HANDOFF
+  is `f77040b`, and its push runs succeeded.
+- **RB-014.1's before-the-tag parts are in place** (details by id only):
+  - `findings.rs:334`, `:380` and `:392`, with the module doc at
+    `:11-13`;
+  - the build line in the `--git` header (`export.rs:355`);
+  - the `compat (v0.17.2, linux)` job (`ci.yml:555`), green.
+- **RB-014.2's six items are in place:**
+  - the update and delete refusal (`findings.rs:195`);
+  - id uniqueness by numbers (`:303`);
+  - the author check (`:254`);
+  - the header wording, `record_id`, and the guide sentence.
+- **CI:** CI, Mobile CI and the dry run 44182570412 succeeded on
+  `61bb573`. The dry run's attempt 1 lost a Swift job to runner capacity
+  with no step run; attempt 2 passed.
+- **Task `v0180-4`** is set `done` by me. That was fix round 1 of 3.
+- `RB-014.1` and `.2` are marked `VERIFIED` in REVIEWER-B's next pass.
+  `RB-014.1` moves from `SECURITY.local.md` to PLAN.md after the tag,
+  by me.
+
+**HANDOFF:**
+- **The files:** root `README.md` and `index.html`.
+  - **`README.md`:** a "What's new in v0.18.0" section, checked line by
+    line against the CHANGELOG's `[0.18.0]` and the code above, and the
+    example's version text.
+  - **`index.html`:** the version pill, "These examples use v0.18.0", and
+    the example's version text. Shipped becomes "v0.13 – v0.18", with
+    "Review findings kept in the brain, and a backup of it you can commit
+    to git". Next gains "Findings and tasks in the browser inspector" and
+    "Faster first search in large brains" (the user's decisions today);
+    sync and the waitlist stay.
+- **The commit:** `docs: v0.18.0 README and site`.
+
+**The release order** (RELEASING.md):
+1. this HANDOFF's commit;
+2. `chore(plan): sync coordination files` (no brain re-export before the
+   tag, as decided);
+3. fast-forward `main`;
+4. the annotated tag `v0.18.0`;
+5. stop at "approve the release" for the user's click.
+
+Then the after-tag checks, a DONE, and the branch deletions.

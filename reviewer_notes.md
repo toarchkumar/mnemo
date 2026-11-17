@@ -203,10 +203,12 @@ Severity / Priority: `HIGH` · `MEDIUM` · `LOW` · `IDEA`
 | `RB-012.4` | 2026-11-15 | `CORRECTNESS` | `LOW` | `who` says `alive unknown` for an agent whose server holds its presence lock, after that agent uses the CLI (the CLI's touch clears the record's lock flag), until the server's next write | `VERIFIED` | PLANNER-A 2026-11-15; verified in RB-013 at `9be90cc` (PR 111) |
 | `RB-012.5` | 2026-11-15 | `CORRECTNESS` | `LOW` | The per-turn hook's stamp race, measured: 5 of 40 posts landing while the hook was showing something weren't shown by the next turns until an unrelated commit; not stamping on a turn that marked closes it | `VERIFIED` | PLANNER-A 2026-11-15; verified in RB-013 at `9be90cc` (PR 111) |
 | `RB-012.6` | 2026-11-15 | `DX/DOCS` | `LOW` | Smaller points: `common_dir_fast` differs from git for a bare repository inside a work tree and under `GIT_CEILING_DIRECTORIES`; stamps never removed; the probe inside the write window; broadcasts seen once; `after` cycles; a wrong `lost` message; Windows' constant identity; what the crash test leaves out | `VERIFIED` (item 1 re-tested) | PLANNER-A 2026-11-15; verified in RB-013 at `9be90cc` (PR 111) |
-| `RB-013.1` | 2026-11-15 | `CORRECTNESS` | `MEDIUM` | v0.17.0 at READY, mixed versions: after the published v0.16.1 compacts a v0.17 brain, v0.17's `task`, `claim` and `inbox` find nothing (the old build re-tags every coordination row as a fact, and v0.17 looks them up by the row's kind alone), with no warning, until a v0.17 `compact` | `ACCEPTED` | PLANNER-A 2026-11-15 |
-| `RB-013.2` | 2026-11-15 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (where a `private` record is shown without being asked for, and one write that changes a record's level; all tested) | `ACCEPTED` | PLANNER-A 2026-11-15 |
-| `RB-013.3` | 2026-11-15 | `CORRECTNESS` | `LOW` | `ROW_PRIVATE` and `ROW_SETTLED` are the same bit (8) of a v9 row's flags; correct today because the visibility check never reaches a turn, but free to change only before v0.17.0 is tagged | `ACCEPTED` | PLANNER-A 2026-11-15 |
-| `RB-013.4` | 2026-11-15 | `DX/DOCS` | `LOW` | Smaller points: `remember --agent` takes ids the rest refuses; an invalid `MNEMO_AGENT` posts with no sender; the default agent against `MNEMO_AGENT` in the guide; what the CHANGELOG's mixed-version rule should name | `ACCEPTED` | PLANNER-A 2026-11-15 |
+| `RB-013.1` | 2026-11-15 | `CORRECTNESS` | `MEDIUM` | v0.17.0 at READY, mixed versions: after the published v0.16.1 compacts a v0.17 brain, v0.17's `task`, `claim` and `inbox` find nothing (the old build re-tags every coordination row as a fact, and v0.17 looks them up by the row's kind alone), with no warning, until a v0.17 `compact` | `VERIFIED` | PLANNER-A 2026-11-15; verified in RB-014 at `430a21a` (shipped in v0.17.0) |
+| `RB-013.2` | 2026-11-15 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md` (where a `private` record is shown without being asked for, and one write that changes a record's level; all tested) | `VERIFIED` | PLANNER-A 2026-11-15; verified in RB-014 at `430a21a` (shipped in v0.17.0) |
+| `RB-013.3` | 2026-11-15 | `CORRECTNESS` | `LOW` | `ROW_PRIVATE` and `ROW_SETTLED` are the same bit (8) of a v9 row's flags; correct today because the visibility check never reaches a turn, but free to change only before v0.17.0 is tagged | `VERIFIED` | PLANNER-A 2026-11-15; verified in RB-014 at `430a21a` (shipped in v0.17.0) |
+| `RB-013.4` | 2026-11-15 | `DX/DOCS` | `LOW` | Smaller points: `remember --agent` takes ids the rest refuses; an invalid `MNEMO_AGENT` posts with no sender; the default agent against `MNEMO_AGENT` in the guide; what the CHANGELOG's mixed-version rule should name | `VERIFIED` (items 1 and 2 re-checked) | PLANNER-A 2026-11-15; verified in RB-014 at `430a21a` (shipped in v0.17.0) |
+| `RB-014.1` | 2026-11-17 | `SECURITY` | `MEDIUM` | Held in the gitignored `SECURITY.local.md`: the backup and unverified security findings, four routes (three tested, one with the published v0.17.2) | `ACCEPTED` | PLANNER-A 2026-11-17; task `v0180-4`, before the tag (two parts deferred, one rejected; details in `SECURITY.local.md`) |
+| `RB-014.2` | 2026-11-17 | `DX/DOCS` | `LOW` | v0.18.0 at READY, smaller points: `essence remove` deletes any record; `update --text` rewrites a finding; ids unique as text, not numbers; who triages and verifies isn't checked; the `--git` header's wording; no record id in `finding get` | `ACCEPTED` | PLANNER-A 2026-11-17; all six in task `v0180-4`, before the tag |
 
 ---
 
@@ -3954,7 +3956,7 @@ And v0.17 with a brain v0.16.1 made, filled and compacted: opens, verifies, reca
 **New items**
 
 #### RB-013.1 — [CORRECTNESS] [MEDIUM] After a v0.16.1 `compact`, v0.17 finds no tasks, claims or messages: the old build re-tags every coordination row as a fact, and v0.17 looks them up by the row's kind alone
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-014, `430a21a`, shipped in v0.17.0)
 - **Context / Evidence:** tested (`a.sh`), a brain with a message, a task, a claim and two presence records.
 
 | After | v0.17's `task list` | v0.17's `claim who` | v0.17's `about` header |
@@ -3981,13 +3983,13 @@ And v0.17 with a brain v0.16.1 made, filled and compacted: opens, verifies, reca
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15). Before the tag, in the RB-013 fix PR. Rec 1, if the Worker finds it safe: the coordination scan also takes `fact` rows whose resident vector is the sentinel, decrypts those, keeps the coordination ones, and re-tags them when next written. If it isn't safe, recs 2 to 4 carry the tag and rec 1 waits. Rec 2: `verify`, `about` and the first coordination call in a process say "N coordination records are tagged as facts (an older mnemo rewrote this brain); `mnemo compact` fixes it". Rec 3: the CHANGELOG names the effects. Rec 4: a v0.16.1 compat test beside `compat (v0.14.0, linux)`.
 
 #### RB-013.2 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-014, `430a21a`, shipped in v0.17.0)
 - **Context / Evidence:** where a `private` record is shown without being asked for, and one write that changes a record's level. All tested at `9be90cc`.
 - **Would I hold the tag for it?** Yes, for the first three recommendations there. They're small, and they're the difference between "only when asked" and "usually".
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15). Before the tag, in the RB-013 fix PR, as triaged in `SECURITY.local.md` (all recommendations, both parts). Neutral wording in commits, the PR and the CHANGELOG.
 
 #### RB-013.3 — [CORRECTNESS] [LOW] One bit of a row's flags means two things: "private" (new) and "this turn is settled" (since FMT-9e)
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (RB-014, `430a21a`, shipped in v0.17.0)
 - **Context / Evidence:**
   - **By reading** (`store/records.rs`): `ROW_PRIVATE: u8 = 8` (`:412`) and `ROW_SETTLED: u8 = 8` (`:432`), both tested on the same `flags` byte of a v9 row. `settle_turn` and `put` set bit 8 on a turn's row (`:1026`, `:1657`); `row_tags` sets it on a private record's row (`:490`); `row_visible` reads it as "private" (`:420`); `unsettled_turn` reads it as "settled" (`:1010`).
   - **Why nothing is wrong today,** tested (`d.sh`): the one place `row_visible` is called (`recall.rs:499`) skips turns a few lines later whatever it finds, and turn recall goes through the path that checks the record. Turns settled by a v0.16.1 compaction and by a v0.17 one are recalled by both builds (2 of 2 and 4 of 4), and `--visibility private` returns no turn.
@@ -4000,7 +4002,7 @@ And v0.17 with a brain v0.16.1 made, filled and compacted: opens, verifies, reca
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15). Before the tag, same PR. `ROW_PRIVATE` moves to its own bit (64), all the row-flag constants go in one block with the kinds each applies to, and a test checks that a settled turn isn't private.
 
 #### RB-013.4 — [DX/DOCS] [LOW] Smaller points
-- **Status:** `ACCEPTED`
+- **Status:** `VERIFIED` (items 1 and 2 re-checked; RB-014, `430a21a`, shipped in v0.17.0)
 - **Context / Evidence:** tested at `9be90cc`.
   1. **`remember --agent` takes ids the rest of v0.17 refuses:** `two words`, `a/b` and a 65-character id were each accepted (exit 0), where `--as` and `default-agent --set` say "1 to 64 of letters, digits, '.', '_' and '-'". That was so before v0.17, but a record's agent now names a key's slot, an inbox and a line in the brief.
   2. **An invalid `MNEMO_AGENT` is ignored and the write goes on with no sender:** `MNEMO_AGENT="two words" mnemo post planner hello` exits 0 and posts, with a note on stderr. A mistyped id in a session's settings means every message it sends is from nobody, and its inbox is empty, with one stderr line as the only sign.
@@ -4009,3 +4011,89 @@ And v0.17 with a brain v0.16.1 made, filled and compacted: opens, verifies, reca
 - **Recommendation:** item 1: validate `--agent` (and the MCP `agent_id`) as the other ids are, for new writes only. Item 2: for `post`, `task add` and `claim`, an invalid `MNEMO_AGENT` is an error, not a note; reads may go on. Items 3 and 4 are sentences.
 - **Would I hold the tag for it?** No. Item 4 belongs in step 9's CHANGELOG.
 - **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15). Same PR. Item 1: `--agent` and the MCP `agent_id` are validated for new writes. Item 2: an invalid `MNEMO_AGENT` is an error for `post`, `task add` and `claim` (reads go on with a note). Item 3: one sentence in the guide's naming section. Item 4: the CHANGELOG's mixed-version paragraph names the four effects.
+
+---
+
+### Batch `RB-014` — 2026-11-17 (REVIEWER-B: the scoped READY pass for v0.18.0: findings as records, the brain's backup, and the Planner's per-turn line and brief part, with two new items)
+
+**What was reviewed.** `release-0.18.0` at `430a21a` against the tag `v0.17.2`, and only what's new, as PLANNER-A's 2026-11-17 entry "v0.18.0 READY (`430a21a`); REVIEWER-B's READY pass, RB-014, scoped" lists it: `store/findings.rs` with its constants, CLI, MCP tool and Python methods; `bin/mnemo/export.rs`'s `--git`; and the finding lines in `hook.rs`. The committed `docs/brain.md` too, since it's the backup.
+
+**How.**
+- **A fresh clone** at `/tmp/rb-mnemo`, from GitHub, at `430a21a`. My old clone had lost files to the system's cleanup of `/tmp`, so I replaced it. Nothing was built, fetched or checked out in `mnemo.nosync`. Builds used `CARGO_TARGET_DIR=/tmp/rb-target` and `--locked`. No benchmarks.
+- **The Worker's suite on this Mac:** `cargo test --locked --features failpoints --no-fail-fast`: **760 passed, 0 failed, 1 ignored**.
+- **The published v0.17.2 binary** from the GitHub Release (its SHA-256 matches the release's `SHA256SUMS`), for the mixed-version checks.
+- **Checks of my own,** in this session's scratch directory (`q14/`), on scratch brains opened by `MNEMO_PASSPHRASE` (no keychain, not the project brain):
+  1. `f1.py`, `f2.py`: finding ids, limits and every transition; three processes adding one id, 30 times; every other write path I could find on a finding's record, with v0.18 and with v0.17.2.
+  2. `f3.py`, `f5.py`, `f6.py`: a brain with security findings at every status, a private keyed fact and its next version, a thread essence item, turns, a message and a claim; then each export, its determinism, what v0.17.2 writes from it, and v0.18 again after a v0.17.2 compaction.
+  3. `f4.py`: 40 open findings, four with hostile titles, in the Planner's brief and per-turn line, and what other roles see.
+- **By reading:** the three files above, `check_caller_metadata`, the MCP `finding` handler and the Python methods (both call the engine's functions).
+- **Not done:** nothing on Linux or Windows; Python was read, not run; the mobile bindings (out of scope).
+- **Read-only.** I wrote this file and the gitignored `SECURITY.local.md`, nothing else.
+
+---
+
+**The verdict first.**
+
+- **No HIGH item, and nothing wrong in what v0.18.0 itself writes.** Finding ids are unique under three racing processes, every transition I tried is enforced on every path, a finding's category and status can't be changed by any ordinary write (in v0.18 or by v0.17.2), and v0.18's `export --git` left out all 14 things that must stay out, with the same bytes on five further runs.
+- **One MEDIUM item, held in `SECURITY.local.md`** (`RB-014.1`): four ways an unverified security finding's text can still reach the backup, three of them tested. One of them has a few-line change that also makes an older build's export safe; I'd take that before the tag, since Run 2's first backup follows the install.
+- **Six LOW points,** one line each (`RB-014.2`).
+- **`RB-013.1` to `.4` are `VERIFIED`.**
+
+---
+
+**The Planner's three areas.**
+
+| Area | Asked | Result | How |
+|---|---|---|---|
+| 1. Findings | Ids unique under two processes | **Holds.** Three processes each added `RB-950.1` to `.30` at once: exactly one winner for all 30, the losers got "RB-950.N is taken; give the next free id", and the brain holds 30 findings with 30 ids. Two ids that are the same numbers written differently both go in (`RB-014.2` item 3) | Tested |
+| | The transitions on every path | **Holds.** 16 moves tried: `open → verified` (by `verify` and by `triage`), `open → open`, a made-up status, a triage with no text, `accepted → rejected`, `accepted → open`, `verified → anything`, `rejected → verified` and `rejected → accepted` are refused; the allowed ones I tried go through (`open` to `accepted`, `rejected`, `deferred` and `needs-user`, and `accepted → verified`). The CLI, the MCP tool and Python all call `finding_triage` and `finding_verify` | Tested (CLI), by reading (MCP, Python) |
+| | Limits | The id's shape, the category exactly (`security` and `SECURITY ` are refused), a 201-byte or two-line title, a 16,385-byte body: each refused with a clear message | Tested |
+| | Can a category or kind be changed afterwards? | **Not in place.** `update --metadata` with `_mnemo.category`, `_mnemo.status` or `_mnemo.kind` is refused ("reserved"), by v0.18 and by v0.17.2; a `remember` that forges a finding's metadata is refused; `ack` and `essence resolve` or `update` on the record say it isn't theirs. **By deleting it and adding the id again: yes** (`RB-014.1`). `update --text` rewrites the title and body (`RB-014.2` item 2) | Tested |
+| 2. The backup | An unverified `SECURITY` finding, a private record, a thread essence item or a turn in `--git` | **None, from v0.18.** Security findings at `open`, `accepted` (with its triage text), `rejected`, `deferred` and `needs-user`; a private keyed fact and its next version written with no flag; a thread essence item; two turns; a message; a claim: 14 markers, none in the Markdown or the JSON Lines `--git` export, with or without `--visibility all`. The verified security finding, the open correctness one, the team fact, the project essence item and the task are in | Tested |
+| | By any route | Four routes remain, in `RB-014.1` | Tested (three), by reading (one) |
+| | A mixed-version brain | After a v0.17.2 `compact`, v0.18's `export --git` is still clean and `finding list` still shows all six security findings. v0.17.2's own `export --git` is in `RB-014.1` | Tested |
+| | The determinism | **Holds.** The same bytes twice in a row, after two tracked recalls, after a compaction, as another agent, and with the clock 31 days on | Tested |
+| | The committed `docs/brain.md` | 268 records, no finding records, and nothing that looks like a secret: the matches for `MN1-`, `sk-`, `password` and `passphrase` are design prose. It carries the older header (`RB-014.2` item 5) | By reading |
+| 3. The Planner's line and brief | Escaping after `FRAMING` | **Holds.** Titles that begin with the framing line's words or with `##` get a backslash; each is one list line after the one framing line; a body is never shown | Tested |
+| | The byte budget | With 40 open findings: the per-turn line is 536 bytes (4 listed, the count says 40), and the brief's part lists 5 in a brief of 2,246 bytes | Tested |
+| | Who sees them | Only a session whose role is `planner`: a worker's and a reviewer's turn and brief show none, a second planner sees them once for itself, and the next turn shows nothing. The Stop hook never fires for them | Tested |
+
+---
+
+**`RB-013`, checked at this head** (the fixes shipped in v0.17.0).
+
+| Item | What I saw | Status |
+|---|---|---|
+| `RB-013.1` | After the old build's compaction v0.18 still finds every coordination record (here findings, which v0.17.2 tags as facts) | `VERIFIED` |
+| `RB-013.2` | A private record is absent from `list`, `history --key`, `stale`, the MCP `list`, `mnemo://recent` and the `session-start` prompt; a keyed write over it with no flag stays private | `VERIFIED` |
+| `RB-013.3` | `ROW_PRIVATE` is 64; `ROW_SETTLED` keeps 8 | `VERIFIED` |
+| `RB-013.4` | `remember --agent "two words"` is refused; `post` with an invalid `MNEMO_AGENT` is an error. Items 3 and 4 not re-checked | `VERIFIED` (items 1 and 2) |
+
+---
+
+**New items**
+
+#### RB-014.1 — [SECURITY] [MEDIUM] Held in `SECURITY.local.md`: the backup and unverified security findings, four routes
+- **Status:** `OPEN`
+- **Context / Evidence:** four ways the text of a `SECURITY` finding that isn't `verified` can reach a `--git` export. Three are tested at `430a21a` (one with the published v0.17.2); one is about what `verified` means. v0.18's own export of a brain used as intended is clean.
+- **Would I hold the tag for it?** For its first recommendation, yes: a few lines, and it covers the route the Planner's decision already had to work around. The rest can follow, with the guide's wording, before Run 2 starts filing findings.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-17). Task `v0180-4`, before the tag. The parts and what each gets are in `SECURITY.local.md` (two recommendations deferred with triggers, one rejected).
+
+#### RB-014.2 — [DX/DOCS] [LOW] Smaller points, one line each
+- **Status:** `OPEN`
+- **Context / Evidence:** tested at `430a21a` unless it says otherwise.
+  1. `mnemo essence remove <id>` deletes any record, a finding included (exit 0, "removed"), where `essence resolve` and `essence update` refuse a record that isn't an essence item.
+  2. `mnemo update <record id> --text …` rewrites a finding's title and body in place with no history entry, though `finding_add`'s doc says a finding is changed only by triage and verification.
+  3. `RB-0900.1` is accepted beside `RB-900.1`: ids are unique as text, not as numbers, and both sort to the same place.
+  4. Who triages and who verifies isn't checked: a worker accepted and then verified its own finding. That's the stated design ("the protocol's"); it matters for `RB-014.1`'s last part.
+  5. The `--git` export's first lines and its stderr warning still say "keep it as safe as the file's passphrase", though this is the export meant to be committed; and the committed `docs/brain.md` has the v0.17 header, which doesn't list what's left out.
+  6. `finding get --format json` has no record id, and `finding add` with no `MNEMO_AGENT` is accepted with no author.
+- **Recommendation:** item 1: the same kind check as its siblings. Item 2: refuse `update` on a coordination record, or record the edit in the finding's history. Item 3: compare ids by their numbers, or refuse leading zeros that differ from an existing id. Item 5: a header for `--git` that says what the file is and what's left out, and a re-export by v0.18.0 as Run 2's first backup (already planned). Item 6: add `record_id`; require an agent to add a finding. Item 4 needs a sentence in the guide, not code.
+- **Would I hold the tag for it?** No.
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-17), all six in task `v0180-4`, before the tag:
+  1. `essence remove` gets the kind check of `resolve` and `update` (with RB-014.1 Part C).
+  2. `update` refuses a finding's record ("a finding changes only by `finding triage` or `finding verify`"). Other coordination kinds are unchanged in this round.
+  3. Ids are unique by their prefix and numbers: `RB-0900.1` is refused beside `RB-900.1` as the same id. Leading zeros stay allowed, since batches are written `RB-014`.
+  4. The guide's "Review findings" gets one sentence: the Planner triages, and a Reviewer verifies against a release tag (RB-014.1 Part D).
+  5. The `--git` header and stderr line say what the file is (the backup meant to be committed), what's left out, and which build wrote it (RB-014.1 Part A). `docs/brain.md` is re-exported by v0.18.0 as Run 2's first backup, as planned.
+  6. `finding get` and `list --format json` carry `record_id`, and `finding add` needs an agent (`MNEMO_AGENT` or `--as`).
