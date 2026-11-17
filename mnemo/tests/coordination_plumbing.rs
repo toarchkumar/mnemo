@@ -112,7 +112,7 @@ fn coordination_kinds_are_never_recall_keyword_ann_or_about_hits() {
         .iter()
         .filter(|m| mnemo_engine::is_coordination(m))
         .collect();
-    assert_eq!(coord.len(), 4);
+    assert_eq!(coord.len(), COORDINATION_KINDS.len());
     assert!(coord.iter().all(|m| m.scope == mnemo_engine::Scope::Shared));
 }
 

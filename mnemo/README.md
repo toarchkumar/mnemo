@@ -105,7 +105,9 @@ which would leak into shell history and process listings). Tools exposed:
 `cache_get_semantic`, and since v0.17 `inbox` (messages between agents:
 `list`, `read`, `post`, `ack`, as the server's `MNEMO_AGENT` and
 `MNEMO_ROLE`; `visibility` for private ones), `task` (the shared work queue: `next`, `update`, `add`,
-`list`, `get`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
+`list`, `get`), `claim` (`take`, `renew`, `release`, `check`, `who`) and,
+since v0.18, `finding` (review findings: `add`, `triage`, `verify`, `list`,
+`get`). A
 `serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
 in the sidecar directory for its life, and since v0.17.2 writes its
 presence record at start, so `who` sees it alive before its first call; it
@@ -993,6 +995,7 @@ cargo run --bin mnemo -- <command>
 | `claim take <TOPIC> [--ttl 15m]` | Claim a topic so two agents don't do one thing (advisory: a record, not a lock). Prints `claimed`, a token and the expiry; exits 1 when another agent (or another session of yours) holds it. Leases are 30s to 24h, 15m by default. `--as`, `--role`, `--brain` (v0.17) |
 | `claim renew\|release\|check <TOPIC> <TOKEN>` | Renew (from now, `--ttl` or the lease), release, or check a claim; exits 1 with `lost` when it lapsed or another agent holds it. Check before anything irreversible (v0.17) |
 | `claim who` | The agents: role, tool, last active, whether the process is alive (`unknown` without a long-lived `serve --mcp --shared`), and the topics each holds; `--format` (v0.17) |
+| `finding add <ID> --category C --priority P --title T`, `finding triage <ID> --status S --text T`, `finding verify <ID> --ref R`, `finding list`, `finding get <ID>` | v0.18: review findings as records. A Reviewer adds one under an id (`RB-014.1`: capital letters, `-`, a number, `.`, a number; unique) with a category (SECURITY, CORRECTNESS, PERF, PLAN-REFINEMENT, PRODUCT, DX/DOCS), a priority (HIGH, MEDIUM, LOW, IDEA), a title, `--body` and `--ref`s; the Planner triages it (accepted, deferred, rejected, needs-user); a Reviewer verifies it against a commit or tag. `list` filters by `--status`, `--batch`, `--category` and `--priority`, ordered by id; `--format table\|json\|jsonl`. Kept out of recall, like tasks |
 | `default-agent` | Show, set (`--set <id>`) or clear (`--clear`) the agent a write that names none is made for, kept on the manifest (`_mnemo.default_agent`); the CLI and the MCP server use it in place of `default` (v0.17) |
 | `search`  | Exact nearest-neighbour search (similarity only); no path needed in a git repository (v0.16.1). Since v0.17 it leaves out coordination records, and private ones unless `--visibility` asks |
 | `recall`  | Multi-signal ranked retrieval (sim + recency + …). Since v0.17 private records only with `--visibility private` (or `all`) |

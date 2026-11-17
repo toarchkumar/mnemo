@@ -82,6 +82,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
         | Command::Claim { brain: path, .. }
+        | Command::Finding { brain: path, .. }
         | Command::Task { brain: path, .. }
         | Command::Wake { brain: path, .. }
         | Command::Search { path, .. }
@@ -774,6 +775,25 @@ enum Command {
         #[arg(long, global = true)]
         passphrase: Option<String>,
     },
+    /// v0.18.0: review findings: a Reviewer adds and verifies, the Planner
+    /// triages (`add`, `triage`, `verify`, `list`, `get`).
+    Finding {
+        #[command(subcommand)]
+        cmd: FindingCmd,
+        #[command(flatten)]
+        who: AsArgs,
+        /// The brain's path. Left out, this project's brain.
+        #[arg(
+            long,
+            global = true,
+            value_name = "PATH",
+            default_value = "",
+            hide_default_value = true
+        )]
+        brain: String,
+        #[arg(long, global = true)]
+        passphrase: Option<String>,
+    },
     /// 13a: show, set or clear the agent a write that names none is made
     /// for (the manifest's `_mnemo.default_agent`). The CLI and the MCP
     /// server use it in place of `default`.
@@ -1416,6 +1436,78 @@ enum TaskCmd {
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
     },
+}
+
+/// v0.18.0: `mnemo finding`.
+#[derive(Subcommand)]
+enum FindingCmd {
+    /// Add a finding, `open`, under an id you give (`RB-014.1`). Prints its
+    /// id and status.
+    Add {
+        /// Capital letters, `-`, a number, `.`, a number (`RB-014.1`).
+        id: String,
+        /// SECURITY, CORRECTNESS, PERF, PLAN-REFINEMENT, PRODUCT or DX/DOCS.
+        #[arg(long)]
+        category: String,
+        /// HIGH, MEDIUM, LOW or IDEA.
+        #[arg(long)]
+        priority: String,
+        /// One line.
+        #[arg(long)]
+        title: String,
+        #[arg(long, default_value = "")]
+        body: String,
+        /// What it points at (repeatable): a file and line, a commit, a PR.
+        #[arg(long = "ref", value_name = "REF")]
+        refs: Vec<String>,
+    },
+    /// Triage a finding: `--status accepted|deferred|rejected|needs-user`,
+    /// with `--text` (why).
+    Triage {
+        id: String,
+        #[arg(long)]
+        status: String,
+        #[arg(long)]
+        text: String,
+    },
+    /// Verify a finding against `--ref` (a commit, a tag, a PR).
+    Verify {
+        id: String,
+        #[arg(long = "ref", value_name = "REF")]
+        verified_ref: String,
+    },
+    /// The findings, ordered by id.
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        /// Its id's prefix (`RB-014`).
+        #[arg(long)]
+        batch: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+    },
+    /// One finding, with its history.
+    Get {
+        id: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+    },
+}
+
+/// v0.18.0: a finding as JSON (the CLI's `--format json|jsonl`, and the
+/// MCP tool's shape).
+fn finding_json(f: &mnemo_engine::Finding) -> serde_json::Value {
+    serde_json::json!({
+        "id": f.id, "batch": f.batch, "category": f.category, "priority": f.priority,
+        "title": f.title, "body": f.body, "refs": f.refs, "author": f.author,
+        "status": f.status, "triage": f.triage, "triaged_by": f.triaged_by,
+        "verified_ref": f.verified_ref, "verified_by": f.verified_by,
+        "created_at": f.created_at, "history": f.history,
+    })
 }
 
 /// 13a (13.3): `mnemo claim`.
@@ -4722,6 +4814,135 @@ fn run() -> std::result::Result<(), String> {
                 },
             };
             db.flush().map_err(fmt)?;
+            out?;
+        }
+        Command::Finding {
+            cmd,
+            who,
+            brain: path,
+            passphrase: pp,
+        } => {
+            let writes = !matches!(cmd, FindingCmd::List { .. } | FindingCmd::Get { .. });
+            let (agent, role) = if writes {
+                who.resolve_for_write()?
+            } else {
+                who.resolve()?
+            };
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = if writes {
+                open_w(&path, &pp, "finding").map_err(fmt)?
+            } else {
+                open_ro(&path, &pp).map_err(fmt)?
+            };
+            if agent.is_some() {
+                db.set_author(agent.clone());
+            }
+            if writes && agent.is_some() {
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
+            let row = |f: &mnemo_engine::Finding| {
+                format!(
+                    "{}  [{}]  {} {}  {}",
+                    f.id, f.status, f.category, f.priority, f.title
+                )
+            };
+            let out: std::result::Result<(), String> = match &cmd {
+                FindingCmd::Add {
+                    id,
+                    category,
+                    priority,
+                    title,
+                    body,
+                    refs,
+                } => {
+                    let spec = mnemo_engine::FindingSpec {
+                        id: id.clone(),
+                        category: category.clone(),
+                        priority: priority.clone(),
+                        title: title.clone(),
+                        body: body.clone(),
+                        refs: refs.clone(),
+                    };
+                    let f = db.finding_add(&spec).map_err(fmt)?;
+                    println!("{}\t{}", f.id, f.status);
+                    Ok(())
+                }
+                FindingCmd::Triage { id, status, text } => {
+                    let f = db.finding_triage(id, status, text).map_err(fmt)?;
+                    println!("{}\t{}", f.id, f.status);
+                    Ok(())
+                }
+                FindingCmd::Verify { id, verified_ref } => {
+                    let f = db.finding_verify(id, verified_ref).map_err(fmt)?;
+                    println!("{}\t{}", f.id, f.status);
+                    Ok(())
+                }
+                FindingCmd::List {
+                    status,
+                    batch,
+                    category,
+                    priority,
+                    format,
+                } => {
+                    let filter = mnemo_engine::FindingFilter {
+                        status: status.clone(),
+                        batch: batch.clone(),
+                        category: category.clone(),
+                        priority: priority.clone(),
+                    };
+                    let fs = db.findings(&filter).map_err(fmt)?;
+                    match format {
+                        OutputFormat::Json => println!(
+                            "{}",
+                            serde_json::Value::Array(fs.iter().map(finding_json).collect())
+                        ),
+                        OutputFormat::Jsonl => {
+                            fs.iter().for_each(|f| println!("{}", finding_json(f)))
+                        }
+                        OutputFormat::Table => {
+                            if fs.is_empty() {
+                                println!("no findings");
+                            }
+                            fs.iter().for_each(|f| println!("{}", row(f)));
+                        }
+                    }
+                    Ok(())
+                }
+                FindingCmd::Get { id, format } => match db.finding(id).map_err(fmt)? {
+                    None => Err(format!("no finding {id:?}")),
+                    Some(f) => {
+                        match format {
+                            OutputFormat::Table => {
+                                println!("{}", row(&f));
+                                for l in f.body.lines() {
+                                    println!("    {l}");
+                                }
+                                if !f.refs.is_empty() {
+                                    println!("    refs: {}", f.refs.join(", "));
+                                }
+                                for h in &f.history {
+                                    println!(
+                                        "    {} {} -> {} by {}{}",
+                                        export::rfc3339(h["at"].as_i64().unwrap_or(0)),
+                                        h["from"].as_str().unwrap_or(""),
+                                        h["to"].as_str().unwrap_or(""),
+                                        h["by"].as_str().unwrap_or(""),
+                                        h["note"]
+                                            .as_str()
+                                            .map(|n| format!(": {n}"))
+                                            .unwrap_or_default()
+                                    );
+                                }
+                            }
+                            _ => println!("{}", finding_json(&f)),
+                        }
+                        Ok(())
+                    }
+                },
+            };
+            if writes {
+                db.flush().map_err(fmt)?;
+            }
             out?;
         }
         Command::Claim {

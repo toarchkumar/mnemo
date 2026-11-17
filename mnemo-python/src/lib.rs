@@ -605,6 +605,32 @@ fn task_dict(py: Python<'_>, t: &mnemo_core::Task) -> PyResult<PyObject> {
     Ok(d.into_any().unbind())
 }
 
+/// v0.18.0: a finding as a dict.
+fn finding_dict(py: Python<'_>, f: &mnemo_core::Finding) -> PyResult<PyObject> {
+    let d = PyDict::new_bound(py);
+    d.set_item("id", &f.id)?;
+    d.set_item("batch", &f.batch)?;
+    d.set_item("category", &f.category)?;
+    d.set_item("priority", &f.priority)?;
+    d.set_item("title", &f.title)?;
+    d.set_item("body", &f.body)?;
+    d.set_item("refs", f.refs.clone())?;
+    d.set_item("author", f.author.clone())?;
+    d.set_item("status", &f.status)?;
+    d.set_item("triage", f.triage.clone())?;
+    d.set_item("triaged_by", f.triaged_by.clone())?;
+    d.set_item("verified_ref", f.verified_ref.clone())?;
+    d.set_item("verified_by", f.verified_by.clone())?;
+    d.set_item("created_at", f.created_at)?;
+    let h: Vec<PyObject> = f
+        .history
+        .iter()
+        .map(|v| json_to_py(py, v))
+        .collect::<PyResult<_>>()?;
+    d.set_item("history", h)?;
+    Ok(d.into_any().unbind())
+}
+
 /// 13a: a claim status as a dict.
 fn claim_status(py: Python<'_>, st: mnemo_core::ClaimStatus) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
@@ -2604,6 +2630,80 @@ impl Mnemo {
     fn task_get(&mut self, py: Python<'_>, slug: String) -> PyResult<Option<PyObject>> {
         let t = self.rd(move |db| db.task(&slug))?;
         t.map(|t| task_dict(py, &t)).transpose()
+    }
+
+    /// v0.18.0: add a review finding, `open`, by this handle's author,
+    /// under `id` (`RB-014.1`, unique). Returns it as a dict.
+    #[pyo3(signature = (id, category, priority, title, body="", *, refs=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn finding_add(
+        &mut self,
+        py: Python<'_>,
+        id: String,
+        category: String,
+        priority: String,
+        title: String,
+        body: &str,
+        refs: Option<Vec<String>>,
+    ) -> PyResult<PyObject> {
+        let spec = mnemo_core::FindingSpec {
+            id,
+            category,
+            priority,
+            title,
+            body: body.to_string(),
+            refs: refs.unwrap_or_default(),
+        };
+        let f = self.wr(move |db| db.finding_add(&spec))?;
+        finding_dict(py, &f)
+    }
+
+    /// v0.18.0: triage a finding: `status` `accepted`, `deferred`,
+    /// `rejected` or `needs-user`, with `text` (why). Returns it.
+    fn finding_triage(
+        &mut self,
+        py: Python<'_>,
+        id: String,
+        status: String,
+        text: String,
+    ) -> PyResult<PyObject> {
+        let f = self.wr(move |db| db.finding_triage(&id, &status, &text))?;
+        finding_dict(py, &f)
+    }
+
+    /// v0.18.0: verify a finding against `ref` (a commit, a tag, a PR).
+    /// Returns it.
+    #[pyo3(name = "finding_verify", signature = (id, r#ref))]
+    fn finding_verify(&mut self, py: Python<'_>, id: String, r#ref: String) -> PyResult<PyObject> {
+        let f = self.wr(move |db| db.finding_verify(&id, &r#ref))?;
+        finding_dict(py, &f)
+    }
+
+    /// v0.18.0: the findings, ordered by id, by `status`, `batch`,
+    /// `category` and `priority`.
+    #[pyo3(signature = (status=None, batch=None, category=None, priority=None))]
+    fn findings(
+        &mut self,
+        py: Python<'_>,
+        status: Option<String>,
+        batch: Option<String>,
+        category: Option<String>,
+        priority: Option<String>,
+    ) -> PyResult<Vec<PyObject>> {
+        let filter = mnemo_core::FindingFilter {
+            status,
+            batch,
+            category,
+            priority,
+        };
+        let fs = self.rd(move |db| db.findings(&filter))?;
+        fs.iter().map(|f| finding_dict(py, f)).collect()
+    }
+
+    /// v0.18.0: one finding by id, or `None`.
+    fn finding_get(&mut self, py: Python<'_>, id: String) -> PyResult<Option<PyObject>> {
+        let f = self.rd(move |db| db.finding(&id))?;
+        f.map(|f| finding_dict(py, &f)).transpose()
     }
 
     /// 13a (13.3): claim `topic` for this handle's author (`set_author`)

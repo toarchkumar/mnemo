@@ -108,6 +108,13 @@ pub use memory::{
     MESSAGE_SUBJECT_MAX, MESSAGE_UNREAD, MNEMO_META_ACKED_AT, MNEMO_META_CONVERSATION,
     MNEMO_META_DELIVERY, MNEMO_META_FROM, MNEMO_META_HOPS, MNEMO_META_TO,
 };
+/// v0.18.0 (13a step 8b): review findings.
+pub use memory::{
+    finding_status, FINDING_BODY_MAX, FINDING_CATEGORIES, FINDING_PRIORITIES, FINDING_TITLE_MAX,
+    MNEMO_META_BATCH, MNEMO_META_CATEGORY, MNEMO_META_FINDING_ID, MNEMO_META_KIND_FINDING,
+    MNEMO_META_PRIORITY, MNEMO_META_TRIAGE, MNEMO_META_TRIAGED_BY, MNEMO_META_VERIFIED_BY,
+    MNEMO_META_VERIFIED_REF,
+};
 pub use memory::{
     status as essence_status, CommitBatch, CommitReport, EssenceOp, EssenceOpKind, EssenceScope,
     EssenceSection, ExportedTurn, Filter, FilterTerm, IngestReport, KeyScope, KeyedMemory, Memory,
@@ -151,6 +158,8 @@ pub use store::{
     slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
     Stale, Task, TaskClaim, TaskLost, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
+/// v0.18.0 (13a step 8b): review findings.
+pub use store::{valid_finding_id, Finding, FindingFilter, FindingSpec};
 pub use store::{
     CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
     RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,

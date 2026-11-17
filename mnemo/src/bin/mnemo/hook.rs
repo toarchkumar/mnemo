@@ -713,6 +713,27 @@ fn your_work(db: &mut Mnemo) -> String {
             }
         }
     }
+    // v0.18.0: for a Planner, the findings that wait for its triage.
+    if role.as_deref() == Some("planner") {
+        let open = mnemo_engine::FindingFilter {
+            status: Some(mnemo_engine::finding_status::OPEN.into()),
+            ..Default::default()
+        };
+        if let Ok(fs) = db.findings(&open) {
+            if !fs.is_empty() {
+                sections.push((
+                    format!(
+                        "{} {} for triage (call `finding` with `list`, then `triage`):",
+                        fs.len(),
+                        plural(fs.len(), "finding waits", "findings wait")
+                    ),
+                    fs.iter()
+                        .map(|f| format!("- {}: {}", esc(&f.id), esc(&f.title)))
+                        .collect(),
+                ));
+            }
+        }
+    }
     // Its own tasks' claims about to lapse.
     if let Some(a) = &agent {
         if let Ok(claims) = db.claims() {
@@ -1030,6 +1051,13 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
             "tasks ready for your `done`",
         ));
     }
+    if !work.findings.is_empty() {
+        counts.push(n(
+            work.findings.len(),
+            "finding waits for triage",
+            "findings wait for triage",
+        ));
+    }
     // What to call, for only what the counts hold (ONBOARD-UX).
     let mut calls = Vec::new();
     let it = |k: usize, one: &'static str, many: &'static str| if k == 1 { one } else { many };
@@ -1055,6 +1083,10 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
     if !work.ready_for_done.is_empty() {
         calls.push("Call `task` with `list`, then `update --status done`.".to_string());
     }
+    // v0.18.0: fixed text; the ids and titles are items, after the framing.
+    if !work.findings.is_empty() {
+        calls.push("Call `finding` with `list`, then `triage`.".to_string());
+    }
     let head = format!(
         "mnemo: new for you: {}. {}\n{}",
         counts.join(", "),
@@ -1071,6 +1103,9 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
             esc(&t.slug),
             esc(&t.title)
         ));
+    }
+    for f in &work.findings {
+        items.push(format!("- finding {}: {}", esc(&f.id), esc(&f.title)));
     }
     for c in &work.lapsing {
         items.push(format!(

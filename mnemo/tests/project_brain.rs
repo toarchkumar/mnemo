@@ -1493,3 +1493,145 @@ fn cache_takes_no_path_in_a_git_repository() {
     assert!(!o.status.success(), "a miss after the delete");
     e.ok(&deep, &["cache", "purge", "--expired"]);
 }
+
+/// v0.18.0: `mnemo finding` round trips through the CLI: add, triage,
+/// verify, list (each format and filter) and get; a taken id and a refused
+/// transition exit 1.
+#[test]
+fn findings_round_trip_through_the_cli() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let ok_as = |who: &str, args: &[&str]| -> String {
+        let mut all = args.to_vec();
+        all.extend(["--as", who]);
+        e.ok(&main, &all)
+    };
+    assert_eq!(
+        ok_as(
+            "reviewer-b",
+            &[
+                "finding",
+                "add",
+                "RB-014.1",
+                "--category",
+                "CORRECTNESS",
+                "--priority",
+                "HIGH",
+                "--title",
+                "The release race",
+                "--body",
+                "Why it matters.",
+                "--ref",
+                "a.rs:1",
+                "--ref",
+                "b.rs:2",
+            ]
+        )
+        .trim(),
+        "RB-014.1\topen"
+    );
+    ok_as(
+        "reviewer-b",
+        &[
+            "finding",
+            "add",
+            "RB-014.2",
+            "--category",
+            "PERF",
+            "--priority",
+            "LOW",
+            "--title",
+            "Slow",
+        ],
+    );
+    let err = e.fails(
+        &main,
+        &[
+            "finding",
+            "add",
+            "RB-014.1",
+            "--category",
+            "PERF",
+            "--priority",
+            "LOW",
+            "--title",
+            "x",
+        ],
+    );
+    assert!(err.contains("RB-014.1 is taken"), "{err}");
+    let t = e.ok(&main, &["finding", "list"]);
+    assert!(
+        t.contains("RB-014.1  [open]  CORRECTNESS HIGH  The release race")
+            && t.find("RB-014.1") < t.find("RB-014.2"),
+        "{t}"
+    );
+    assert_eq!(
+        ok_as(
+            "planner-a",
+            &[
+                "finding",
+                "triage",
+                "RB-014.1",
+                "--status",
+                "accepted",
+                "--text",
+                "In v0.18.0"
+            ]
+        )
+        .trim(),
+        "RB-014.1\taccepted"
+    );
+    let err = e.fails(&main, &["finding", "verify", "RB-014.2", "--ref", "abc"]);
+    assert!(err.contains("can't go from open to verified"), "{err}");
+    ok_as(
+        "reviewer-b",
+        &["finding", "verify", "RB-014.1", "--ref", "abc1234"],
+    );
+    let v: Value =
+        serde_json::from_str(&e.ok(&main, &["finding", "get", "RB-014.1", "--format", "json"]))
+            .unwrap();
+    assert_eq!(v["status"], "verified");
+    assert_eq!(v["author"], "reviewer-b");
+    assert_eq!(v["triaged_by"], "planner-a");
+    assert_eq!(v["verified_ref"], "abc1234");
+    assert_eq!(v["refs"], serde_json::json!(["a.rs:1", "b.rs:2"]));
+    assert_eq!(v["history"].as_array().unwrap().len(), 2);
+    let get = e.ok(&main, &["finding", "get", "RB-014.1"]);
+    assert!(
+        get.contains("open -> accepted by planner-a: In v0.18.0"),
+        "{get}"
+    );
+    let lines = e.ok(
+        &main,
+        &["finding", "list", "--status", "open", "--format", "jsonl"],
+    );
+    let ids: Vec<String> = lines
+        .lines()
+        .map(|l| {
+            serde_json::from_str::<Value>(l).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(ids, ["RB-014.2"]);
+    let all: Value = serde_json::from_str(&e.ok(
+        &main,
+        &[
+            "finding",
+            "list",
+            "--batch",
+            "RB-014",
+            "--category",
+            "PERF",
+            "--format",
+            "json",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 1);
+    assert!(e
+        .fails(&main, &["finding", "get", "RB-1.1"])
+        .contains("no finding"));
+}

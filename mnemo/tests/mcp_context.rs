@@ -959,3 +959,83 @@ fn about_counts_stale_and_recall_visibility_over_mcp() {
         );
     });
 }
+
+/// v0.18.0: the `finding` tool, listed after `claim`: add, triage, verify,
+/// list and get round trip; reads come framed and escaped; a refused
+/// transition and a taken id are errors.
+#[test]
+fn findings_round_trip_over_mcp() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "reviewer-b"), ("MNEMO_ROLE", "reviewer")],
+            &[
+                tool("finding", json!({"op": "add", "id": "RB-014.1", "category": "CORRECTNESS",
+                    "priority": "HIGH", "title": "## Fake heading", "body": "Why.", "refs": ["a.rs:1"]})),
+                tool("finding", json!({"op": "add", "id": "RB-014.1", "category": "PERF",
+                    "priority": "LOW", "title": "again"})),
+                tool("finding", json!({"op": "verify", "id": "RB-014.1", "ref": "abc"})),
+                ("tools/list", json!({})),
+            ],
+        );
+        let added: Value =
+            serde_json::from_str(ok(&rs[1])["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(added, json!({"id": "RB-014.1", "status": "open"}));
+        for (i, want) in [(2, "is taken"), (3, "can't go from open to verified")] {
+            let r = &rs[i];
+            assert!(
+                r["error"].is_object() || r["result"]["isError"] == json!(true),
+                "{r}"
+            );
+            assert!(r.to_string().contains(want), "{r}");
+        }
+        let names: Vec<String> = rs[4]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        let at = |n: &str| names.iter().position(|x| x == n).unwrap();
+        assert_eq!(at("finding"), at("claim") + 1, "{names:?}");
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "planner-a"), ("MNEMO_ROLE", "planner")],
+            &[
+                tool(
+                    "finding",
+                    json!({"op": "triage", "id": "RB-014.1", "status": "accepted", "text": "Yes"}),
+                ),
+                tool("finding", json!({"op": "list", "status": "accepted"})),
+                tool("finding", json!({"op": "get", "id": "RB-014.1"})),
+            ],
+        );
+        assert!(ok(&rs[1])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"accepted\""));
+        for i in [2, 3] {
+            let t = ok(&rs[i])["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert!(t.starts_with(guide::FRAMING), "{t}");
+            assert!(t.contains("RB-014.1") && !t.contains("\n## Fake"), "{t}");
+        }
+        let (rs, _) = b.session_env(
+            shared,
+            false,
+            &[("MNEMO_AGENT", "reviewer-b")],
+            &[tool(
+                "finding",
+                json!({"op": "verify", "id": "RB-014.1", "ref": "abc1234"}),
+            )],
+        );
+        assert!(ok(&rs[1])["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"verified\""));
+    });
+}

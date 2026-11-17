@@ -795,6 +795,22 @@ agents, call `inbox` when the hook says you have work."
 4. `reviewer_notes.md`'s items can live as records (a `finding` kind with
    `FINDING_TRANSITIONS`). **That kind isn't in 13a's scope,** and I
    recommend adding it as step 8b if Run 1 wants it.
+   - **As built (v0.18.0, step 8b):** `_mnemo.kind = "finding"` is the
+     fifth coordination kind: the sentinel vector, never a recall, BM25,
+     ANN or `about` hit, one record changed in place with
+     `status_history`, and found by its id through the row's locator hash.
+     Its fields: an id the caller gives (`^[A-Z]+-[0-9]+\.[0-9]+$`,
+     unique, refused when taken), its batch (the id without the item
+     number), a category, a priority, a one-line title (200 bytes), a body
+     (16 KB), refs, the author, the status, the last triage's text and who
+     wrote it, and the verifying ref and who gave it.
+     `FINDING_TRANSITIONS` gains the user's way out of `needs-user` (to
+     `accepted`, `deferred` or `rejected`) and `deferred → accepted`. The
+     engine checks only the transitions; who may make each one is rule 9's.
+     The surfaces are `mnemo finding add|triage|verify|list|get`, the MCP
+     `finding` tool (after `claim`) and Python. A Planner's per-turn line
+     and brief name the `open` findings, seen per agent
+     (`_mnemo.seen_by`), and they never wake a session.
 5. The private brain exists (13b), or `SECURITY.local.md` stays beside it.
 
 ## 9. Deferred items that belong here

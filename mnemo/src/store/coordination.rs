@@ -203,7 +203,11 @@ impl Mnemo {
     /// Every live coordination record of `kind`, in catalog order; with a
     /// `locator` (a claim's topic, a presence record's agent), only that
     /// one's, found through its row's hash without decrypting the rest.
-    fn coordination_records(&mut self, kind: &str, locator: Option<&str>) -> Result<Vec<Memory>> {
+    pub(super) fn coordination_records(
+        &mut self,
+        kind: &str,
+        locator: Option<&str>,
+    ) -> Result<Vec<Memory>> {
         let want = locator.map(|l| locator_hash_of(kind, l));
         let legacy = self.legacy_coordination_ids()?;
         let entries: Vec<CatalogEntry> = self
@@ -606,6 +610,7 @@ fn locator_of(m: &Memory) -> Option<&str> {
         MNEMO_META_KIND_CLAIM => MNEMO_META_TOPIC,
         MNEMO_META_KIND_PRESENCE => MNEMO_META_AGENT,
         crate::memory::MNEMO_META_KIND_TASK => crate::memory::MNEMO_META_SLUG,
+        crate::memory::MNEMO_META_KIND_FINDING => crate::memory::MNEMO_META_FINDING_ID,
         _ => return None,
     };
     m.metadata.get(key).and_then(Value::as_str)
@@ -1515,7 +1520,7 @@ impl Mnemo {
     }
 
     /// Append a `status_history` entry.
-    fn task_history(
+    pub(super) fn task_history(
         m: &mut Memory,
         from: &str,
         to: &str,
@@ -1845,6 +1850,10 @@ pub struct NewWork {
     /// for its `done`, not yet shown to it as such. They wait for a
     /// review, so they never wake a session.
     pub ready_for_done: Vec<Task>,
+    /// v0.18.0: for an agent of role `planner`, the `open` findings not
+    /// yet shown to it (`_mnemo.seen_by`). They wait for its triage, so
+    /// they never wake a session.
+    pub findings: Vec<super::Finding>,
     /// The agent it was read for: [`Mnemo::mark_shown`] records this agent
     /// as having seen the broadcasts and the role's tasks.
     pub agent: Option<String>,
@@ -1857,6 +1866,7 @@ impl NewWork {
             && self.tasks.is_empty()
             && self.lapsing.is_empty()
             && self.ready_for_done.is_empty()
+            && self.findings.is_empty()
     }
 }
 
@@ -1920,6 +1930,19 @@ impl Mnemo {
                 }
             }
         }
+        // v0.18.0: the findings waiting for a Planner's triage.
+        let mut findings = Vec::new();
+        if let (Some(a), Some("planner")) = (agent, role) {
+            let open = super::FindingFilter {
+                status: Some(crate::memory::finding_status::OPEN.into()),
+                ..Default::default()
+            };
+            for f in self.findings(&open)? {
+                if !seen_by(&self.get(&f.record_id)?).iter().any(|s| s == a) {
+                    findings.push(f);
+                }
+            }
+        }
         let mut lapsing = Vec::new();
         if let Some(a) = agent {
             for m in self.coordination_records(MNEMO_META_KIND_CLAIM, None)? {
@@ -1948,6 +1971,7 @@ impl Mnemo {
             tasks,
             lapsing,
             ready_for_done,
+            findings,
             agent: agent.map(str::to_string),
         })
     }
@@ -1981,6 +2005,15 @@ impl Mnemo {
                         MNEMO_META_DELIVERY.into(),
                         Value::String(crate::memory::delivery::SEEN.into()),
                     );
+                    self.put(m)?;
+                }
+            }
+        }
+        // v0.18.0: the findings shown to the Planner that read them.
+        if let Some(a) = &who {
+            for f in &work.findings {
+                let mut m = self.get(&f.record_id)?;
+                if add_seen_by(&mut m, a) {
                     self.put(m)?;
                 }
             }

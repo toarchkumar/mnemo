@@ -1527,6 +1527,42 @@ def test_tasks():
             db.close()
 
 
+def test_findings():
+    """v0.18.0 (13a step 8b): finding_add, finding_triage, finding_verify,
+    findings and finding_get, with a refused transition."""
+    with tempfile.TemporaryDirectory() as d:
+        db = mnemo.open(os.path.join(d, "f.mnemo"), "passphrase", dimensions=4)
+        try:
+            db.set_author("reviewer-b")
+            f = db.finding_add("RB-014.1", "CORRECTNESS", "HIGH", "The race", "Why.", refs=["a.rs:1"])
+            assert (f["id"], f["batch"], f["status"], f["author"], f["refs"]) == (
+                "RB-014.1", "RB-014", "open", "reviewer-b", ["a.rs:1"]), f
+            try:
+                db.finding_add("RB-014.1", "PERF", "LOW", "again")
+                raise AssertionError("a taken id was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+            db.finding_add("RB-014.2", "PERF", "LOW", "Slower")
+            db.set_author("planner-a")
+            t = db.finding_triage("RB-014.1", "accepted", "Fix in v0.18.0")
+            assert (t["status"], t["triage"], t["triaged_by"]) == ("accepted", "Fix in v0.18.0", "planner-a"), t
+            db.set_author("reviewer-b")
+            v = db.finding_verify("RB-014.1", "abc1234")
+            assert (v["status"], v["verified_ref"]) == ("verified", "abc1234"), v
+            try:
+                db.finding_verify("RB-014.2", "abc")
+                raise AssertionError("open -> verified was accepted")
+            except mnemo.InvalidArgumentError:
+                pass
+            assert [x["id"] for x in db.findings()] == ["RB-014.1", "RB-014.2"]
+            assert [x["id"] for x in db.findings(status="open")] == ["RB-014.2"]
+            g = db.finding_get("RB-014.1")
+            assert [h["to"] for h in g["history"]] == ["accepted", "verified"], g
+            assert db.finding_get("RB-1.1") is None
+        finally:
+            db.close()
+
+
 def test_claims_and_presence():
     """v0.17 (13a step 3): claim, renew, release, check_claim, claims,
     touch_presence and who."""
@@ -2179,6 +2215,7 @@ if __name__ == "__main__":
     test_messages_post_inbox_ack()
     test_claims_and_presence()
     test_tasks()
+    test_findings()
     test_visibility_freshness_and_counts()
     test_open_with_key()
     test_keyword_and_hybrid_recall_on_v9()
