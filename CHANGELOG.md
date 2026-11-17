@@ -8,6 +8,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-11-17
+
+Review findings become records in the brain, beside tasks and messages,
+and `mnemo export --git` becomes the brain's backup, with the findings and
+the project essence. There's no format change. The mobile packages publish
+at 0.18.0, as every minor version does: their bindings are unchanged
+since 0.17.0, over this release's engine.
+
 ### Added
 
 - **Review findings as records.** A Reviewer adds a finding under an id it
@@ -37,6 +45,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `NewWork` with `..Default::default()` is unaffected.
 - **Upgrade every session's `mnemo` together:** a v0.17 build sees a
   finding as an ordinary fact (in its recall, `list` and `export`).
+- **`mnemo export --git` leaves out a thread's essence items,** which
+  v0.17 wrote among the other records. The plain export keeps them.
 
 ## [0.17.2] — 2026-11-17
 
@@ -4697,7 +4707,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/toarchkumar/mnemo/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/toarchkumar/mnemo/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/toarchkumar/mnemo/compare/v0.16.1...v0.17.0

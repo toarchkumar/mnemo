@@ -152,7 +152,8 @@ pinned to a commit (Dependabot keeps them current).
    `mnemo export --git -o docs/brain.md` (no path in this repository).
    `--git` writes the keyed facts, the tasks, the findings and the project
    essence in a fixed order, and never the saved turns, private records,
-   messages, claims or presence. Read the diff before committing: the
+   messages, claims, presence, a thread's essence, or a `SECURITY` finding
+   that isn't `verified` yet. Read the diff before committing: the
    repository is public. From Run 2 this replaces step 6.
 
 **`main` changes during a release** (the site, say) are merged back into
