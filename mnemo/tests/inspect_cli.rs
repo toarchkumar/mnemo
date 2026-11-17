@@ -745,3 +745,206 @@ fn it_stops_after_the_idle_timeout() {
     assert!(start.elapsed() >= std::time::Duration::from_millis(1500));
     assert!(std::net::TcpStream::connect(("127.0.0.1", ins.port)).is_err());
 }
+
+/// v0.18.1 (INSPECT-COORD): the Findings and Tasks tabs' routes, empty and
+/// filled. Findings are ordered by id with every status counted, filtered by
+/// status, category and priority, and carry their history; an unverified
+/// SECURITY finding is shown, marked private. Brain text, `<script>` and
+/// all, comes back as JSON strings, and the page never parses it as HTML.
+#[test]
+fn findings_and_tasks_tabs_serve_read_only_json() {
+    use mnemo_engine::{FindingSpec, TaskSpec};
+    let dir = tempfile::tempdir().unwrap();
+    // Empty: the fixture has no findings or tasks.
+    let empty = fixture(dir.path());
+    {
+        let ins = spawn(&empty, PW, &[]);
+        let f = ins.json("/api/findings", "");
+        assert_eq!(
+            (f["total"].as_u64(), f["findings"].as_array().map(Vec::len)),
+            (Some(0), Some(0))
+        );
+        assert!(f["counts"].as_array().unwrap().is_empty());
+        assert_eq!(f["categories"].as_array().unwrap().len(), 6, "{f}");
+        let t = ins.json("/api/tasks", "");
+        assert_eq!(
+            (t["total"].as_u64(), t["tasks"].as_array().map(Vec::len)),
+            (Some(0), Some(0))
+        );
+        let about = ins.json("/api/about", "");
+        assert_eq!(
+            (about["findings"].as_u64(), about["tasks"].as_u64()),
+            (Some(0), Some(0))
+        );
+    }
+
+    let evil = "<script>alert(1)</script><img src=x onerror=alert(2)>";
+    let path = dir.path().join("coord.mnemo");
+    {
+        let cfg = MnemoConfig {
+            dimensions: 4,
+            kdf: KdfParams::fast(),
+            ..Default::default()
+        };
+        let mut db = Mnemo::create(&path, PW, cfg).unwrap();
+        db.remember(Memory::new(
+            "a fact",
+            MemoryType::Semantic,
+            vec![1.0, 0.0, 0.0, 0.0],
+        ))
+        .unwrap();
+        db.set_author(Some("reviewer-b".into()));
+        let add = |db: &mut Mnemo, id: &str, category: &str, priority: &str, title: &str| {
+            db.finding_add(&FindingSpec {
+                id: id.into(),
+                category: category.into(),
+                priority: priority.into(),
+                title: title.into(),
+                body: format!("body of {id}: {evil}"),
+                refs: vec![format!("ref {evil}")],
+            })
+            .unwrap();
+        };
+        add(&mut db, "RB-10.1", "PERF", "LOW", "slow");
+        add(&mut db, "RB-9.10", "CORRECTNESS", "MEDIUM", "wrong");
+        add(&mut db, "RB-9.2", "SECURITY", "HIGH", evil);
+        db.set_author(Some("planner-a".into()));
+        db.finding_triage("RB-9.2", "accepted", &format!("fix it {evil}"))
+            .unwrap();
+        db.finding_triage("RB-9.10", "rejected", "not ours")
+            .unwrap();
+        db.task_add(&TaskSpec {
+            title: format!("first {evil}"),
+            body: evil.into(),
+            role: Some("worker".into()),
+            slug: Some("first".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        db.task_add(&TaskSpec {
+            title: "Ship it".into(),
+            after: vec!["first".into()],
+            slug: Some("ship-it".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        db.set_author(Some("worker-a".into()));
+        let taken = db.task_next(Some("worker")).unwrap().expect("a task");
+        assert_eq!(taken.task.slug, "first");
+        db.close().unwrap();
+    }
+    let before = std::fs::read(&path).unwrap();
+    let ins = spawn(&path, PW, &[]);
+
+    let f = ins.json("/api/findings", "");
+    let ids: Vec<&str> = f["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["RB-9.2", "RB-9.10", "RB-10.1"], "ordered by id");
+    assert_eq!(f["total"], 3);
+    assert_eq!(
+        f["counts"],
+        serde_json::json!([
+            {"status": "open", "count": 1},
+            {"status": "accepted", "count": 1},
+            {"status": "rejected", "count": 1},
+        ])
+    );
+    let sec = &f["findings"][0];
+    assert_eq!(sec["title"], evil, "brain text comes back as a string");
+    assert_eq!(sec["triage"], format!("fix it {evil}"));
+    assert_eq!(sec["triaged_by"], "planner-a");
+    assert_eq!(sec["author"], "reviewer-b");
+    assert_eq!(sec["refs"][0], format!("ref {evil}"));
+    assert_eq!(
+        sec["private"], true,
+        "an unverified SECURITY finding, marked"
+    );
+    assert_eq!(f["findings"][2]["private"], false);
+    assert_eq!(sec["history"][0]["to"], "accepted");
+    assert!(sec["updated_at"].as_i64().unwrap() >= sec["created_at"].as_i64().unwrap());
+    assert_eq!(sec["record_id"].as_str().unwrap().len(), 26);
+    // The filters, alone and together; the counts stay over every finding.
+    let only = |q: &str| -> Vec<String> {
+        ins.json("/api/findings", q)["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(only("status=open"), ["RB-10.1"]);
+    assert_eq!(only("category=SECURITY"), ["RB-9.2"]);
+    assert_eq!(only("priority=MEDIUM&status=rejected"), ["RB-9.10"]);
+    assert!(only("category=PRODUCT").is_empty());
+    assert_eq!(ins.json("/api/findings", "status=open")["total"], 3);
+
+    let t = ins.json("/api/tasks", "");
+    let tasks = t["tasks"].as_array().unwrap();
+    assert_eq!(t["total"].as_u64().unwrap() as usize, tasks.len());
+    let first = &tasks[0];
+    assert_eq!(first["title"], format!("first {evil}"), "oldest first");
+    assert_eq!(first["body"], evil);
+    assert_eq!(first["status"], "active");
+    assert_eq!(first["owner"], "worker-a");
+    assert_eq!(first["role"], "worker");
+    assert_eq!(first["creator"], "planner-a");
+    assert_eq!(first["history"][0]["to"], "active");
+    let ship = &tasks[1];
+    assert_eq!(
+        (ship["slug"].as_str(), ship["status"].as_str()),
+        (Some("ship-it"), Some("queued"))
+    );
+    assert_eq!(ship["after"], serde_json::json!(["first"]));
+    assert_eq!(first["slug"], "first");
+    let active = ins.json("/api/tasks", "status=active");
+    assert_eq!(active["tasks"].as_array().unwrap().len(), 1);
+    assert!(active["counts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["status"] == "queued"));
+    let about = ins.json("/api/about", "");
+    assert_eq!(about["findings"], 3);
+
+    // The JSON is served as JSON, and the page builds every element from
+    // text: no HTML sink anywhere in it.
+    let (_, head_and_body) = {
+        let mut s = TcpStream::connect(("127.0.0.1", ins.port)).unwrap();
+        write!(
+            s,
+            "GET /api/findings?t={} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            ins.token,
+            ins.host()
+        )
+        .unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        ((), out)
+    };
+    assert!(
+        head_and_body.contains("Content-Type: application/json; charset=utf-8")
+            && head_and_body.contains("X-Content-Type-Options: nosniff"),
+        "{head_and_body}"
+    );
+    let page = ins.get("/", "").1;
+    assert!(page.contains(r#"data-view="findings""#) && page.contains(r#"data-view="tasks""#));
+    for sink in [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+    ] {
+        assert!(!page.contains(sink), "the page uses {sink}");
+    }
+    drop(ins);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "the file is unchanged"
+    );
+}

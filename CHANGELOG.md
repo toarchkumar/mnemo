@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **The inspector shows review findings and tasks** (`mnemo inspect`,
+  INSPECT-COORD). A Findings tab: a table ordered by id, a count by
+  status, filters for status, category and priority, and each finding's
+  body, refs, triage, verification and status history. An unverified
+  `SECURITY` finding is shown, marked "private until verified" (the page
+  is loopback-only and the owner's). A Tasks tab: status, owner, the role
+  it's for, what it waits for and its last change, filtered by status,
+  with the body and history. Two new read-only routes, `/api/findings` and
+  `/api/tasks`, built when the file is read; the inspector still serves
+  only `GET`, holds no handle between requests and writes nothing.
+
 ## [0.18.0] — 2026-11-17
 
 Review findings become records in the brain, beside tasks and messages,

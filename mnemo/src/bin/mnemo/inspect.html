@@ -71,6 +71,10 @@
   .turn { border-left: 3px solid var(--line); padding: 4px 10px; margin: 6px 0; }
   .turn b { font-weight: 600; }
   h2 { font-size: 15px; margin: 18px 0 8px; }
+  table.data th { width: auto; }
+  table.data tr.click { cursor: pointer; }
+  table.data tr.click:hover td, table.data tr.on td { background: var(--panel); }
+  .wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -85,6 +89,8 @@
   <button data-view="memories" class="on">Memories</button>
   <button data-view="keys">Keyed history</button>
   <button data-view="threads">Threads</button>
+  <button data-view="findings">Findings</button>
+  <button data-view="tasks">Tasks</button>
   <button data-view="snapshots">Snapshots</button>
   <button data-view="about">About</button>
 </nav>
@@ -118,7 +124,8 @@ async function session() {
 }
 const main = document.getElementById("main");
 let view = "memories";
-const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null };
+const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null,
+  fStatus: "", fCategory: "", fPriority: "", findingId: null, tStatus: "", taskSlug: null };
 
 // RB-004.5 item 4: once the server has stopped (`--idle-timeout`, or
 // Ctrl-C), a request can't connect; say that instead of the browser's text.
@@ -249,6 +256,105 @@ async function showThreads() {
     ...project)));
 }
 
+// v0.18.1 (INSPECT-COORD): review findings and tasks, read-only. Everything
+// from the brain goes in as text (el() appends strings as text nodes), never
+// as HTML.
+function choose(key, label, values) {
+  return el("select", { onchange: e => { state[key] = e.target.value; state.findingId = null; state.taskSlug = null; render(); } },
+    [["", label], ...values.map(v => [v, v])].map(([v, l]) => {
+      const o = el("option", { value: v }, l); if (state[key] === v) o.selected = true; return o;
+    }));
+}
+function countsLine(data, noun) {
+  const parts = data.counts.map(c => `${c.count} ${c.status}`).join(", ");
+  return el("p", { class: "count" }, `${parts} (${data.total} ${noun}${data.total === 1 ? "" : "s"})`);
+}
+function historyTable(h) {
+  if (!h || !h.length) return el("p", { class: "empty" }, "No status changes yet.");
+  return el("div", { class: "wrap" }, el("table", { class: "data" },
+    el("tr", {}, ["When", "From", "To", "By", "Note"].map(x => el("th", {}, x))),
+    h.map(x => el("tr", {},
+      el("td", {}, when(x.at)), el("td", {}, x.from ?? "—"), el("td", {}, x.to ?? "—"), el("td", {}, x.by ?? "—"),
+      el("td", {}, el("pre", { class: "content" }, x.note ?? (x.reclaimed_from ? "reclaimed from " + x.reclaimed_from : "")))))));
+}
+function findingDetail(f) {
+  const rows = [
+    ["Status", f.status + (f.private ? " (private until verified)" : "")],
+    ["Category, priority", `${f.category}, ${f.priority}`],
+    ["Added", `${when(f.created_at)} by ${f.author || "—"}`],
+  ];
+  if (f.triage != null) rows.push(["Triage", el("div", {}, el("pre", { class: "content" }, f.triage), el("small", {}, "by " + (f.triaged_by || "—")))]);
+  if (f.verified_ref != null) rows.push(["Verified", `against ${f.verified_ref} by ${f.verified_by || "—"}`]);
+  if (f.refs.length) rows.push(["Refs", el("div", {}, f.refs.map(r => el("div", { class: "mono" }, r)))]);
+  return el("div", { class: "card" },
+    el("div", { class: "meta" }, el("span", { class: "tag mono" }, f.id), el("span", { class: "mono" }, f.record_id)),
+    el("pre", { class: "content" }, el("b", {}, f.title)),
+    f.body ? el("pre", { class: "content" }, f.body) : null,
+    el("table", {}, rows.map(([k, v]) => el("tr", {}, el("th", {}, k), el("td", {}, v)))),
+    el("h2", {}, "Status history"), historyTable(f.history));
+}
+async function showFindings() {
+  const params = {};
+  if (state.fStatus) params.status = state.fStatus;
+  if (state.fCategory) params.category = state.fCategory;
+  if (state.fPriority) params.priority = state.fPriority;
+  const data = await api("/api/findings", params);
+  if (!data.total) {
+    main.replaceChildren(el("p", { class: "empty" }, "No review findings in this file. A Reviewer adds them with `mnemo finding add`."));
+    return;
+  }
+  const filters = el("div", { class: "filters" },
+    choose("fStatus", "Any status", data.statuses),
+    choose("fCategory", "Any category", data.categories),
+    choose("fPriority", "Any priority", data.priorities));
+  const pick = data.findings.find(f => f.id === state.findingId);
+  const table = data.findings.length ? el("div", { class: "wrap" }, el("table", { class: "data" },
+    el("tr", {}, ["Id", "Category", "Priority", "Status", "Title", "Author", "Last change"].map(x => el("th", {}, x))),
+    data.findings.map(f => el("tr", { class: "click" + (f === pick ? " on" : ""),
+        onclick: () => { state.findingId = f.id === state.findingId ? null : f.id; render(); } },
+      el("td", { class: "mono" }, f.id), el("td", {}, f.category), el("td", {}, f.priority), el("td", {}, f.status),
+      el("td", {}, f.title, f.private ? [" ", el("span", { class: "tag" }, "private until verified")] : null),
+      el("td", {}, f.author || "—"), el("td", {}, when(f.updated_at))))))
+    : el("p", { class: "empty" }, "Nothing matches.");
+  main.replaceChildren(countsLine(data, "finding"), filters,
+    el("p", { class: "count" }, "Ordered by id. Click one for its body, triage, refs and history."),
+    ...(pick ? [findingDetail(pick)] : []), table);
+}
+function taskDetail(t) {
+  const rows = [
+    ["Status", t.status + (t.pre_approved ? " (pre-approved)" : "")],
+    ["For", t.role || "anyone"],
+    ["Owner", t.owner || "—"],
+    ["Added", `${when(t.created_at)} by ${t.creator || "—"}`],
+  ];
+  if (t.after.length) rows.push(["After", t.after.join(", ")]);
+  return el("div", { class: "card" },
+    el("div", { class: "meta" }, el("span", { class: "tag mono" }, t.slug), el("span", { class: "mono" }, t.record_id)),
+    el("pre", { class: "content" }, el("b", {}, t.title)),
+    t.body ? el("pre", { class: "content" }, t.body) : null,
+    el("table", {}, rows.map(([k, v]) => el("tr", {}, el("th", {}, k), el("td", {}, v)))),
+    el("h2", {}, "Status history"), historyTable(t.history));
+}
+async function showTasks() {
+  const data = await api("/api/tasks", state.tStatus ? { status: state.tStatus } : {});
+  if (!data.total) {
+    main.replaceChildren(el("p", { class: "empty" }, "No tasks in this file. They're added with `mnemo task add`."));
+    return;
+  }
+  const pick = data.tasks.find(t => t.slug === state.taskSlug);
+  const table = data.tasks.length ? el("div", { class: "wrap" }, el("table", { class: "data" },
+    el("tr", {}, ["Task", "Title", "Status", "Owner", "For", "After", "Last change"].map(x => el("th", {}, x))),
+    data.tasks.map(t => el("tr", { class: "click" + (t === pick ? " on" : ""),
+        onclick: () => { state.taskSlug = t.slug === state.taskSlug ? null : t.slug; render(); } },
+      el("td", { class: "mono" }, t.slug), el("td", {}, t.title), el("td", {}, t.status), el("td", {}, t.owner || "—"),
+      el("td", {}, t.role || "anyone"), el("td", { class: "mono" }, t.after.join(", ") || "—"), el("td", {}, when(t.updated_at))))))
+    : el("p", { class: "empty" }, "Nothing matches.");
+  main.replaceChildren(countsLine(data, "task"),
+    el("div", { class: "filters" }, choose("tStatus", "Any status", data.statuses)),
+    el("p", { class: "count" }, "Oldest first. Click one for its body and history."),
+    ...(pick ? [taskDetail(pick)] : []), table);
+}
+
 async function showSnapshots() {
   const s = await api("/api/snapshots");
   const rows = [
@@ -277,6 +383,7 @@ async function showAbout() {
     ["Dimensions", a.dimensions],
     ["Memories", `${a.memories} live, ${a.tombstoned} tombstoned`],
     ["Threads / keyed facts", `${a.threads} / ${a.keys}`],
+    ["Findings / tasks", `${a.findings} / ${a.tasks}`],
     ["Agents", a.agents.join(", ") || "—"],
     ["File size", bytes(a.file_bytes)],
     ["Vector column", bytes(a.vector_column_bytes)],
@@ -292,7 +399,8 @@ async function showAbout() {
       el("pre", { class: "content" }, o.content))) : [el("p", { class: "empty" }, "No onboarding memories.")]));
 }
 
-const views = { memories: showMemories, keys: showKeys, threads: showThreads, snapshots: showSnapshots, about: showAbout };
+const views = { memories: showMemories, keys: showKeys, threads: showThreads, findings: showFindings,
+  tasks: showTasks, snapshots: showSnapshots, about: showAbout };
 function render() { views[view]().catch(fail); }
 async function header() {
   try {
