@@ -983,7 +983,7 @@ cargo run --bin mnemo -- <command>
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters). Since v0.17 private records only with `--visibility private` (or `all`, which marks them `[private]`); `history` takes `--visibility` too |
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence. Since v0.18, `--git` writes the findings (every status, in id order) after the tasks, then the project essence (its open items by section, then those resolved in the last 30 days); it leaves out thread essence, and a `SECURITY` finding until it's `verified`, and its Markdown header says it's the backup and names the build that wrote it |
-| `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
+| `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, review findings, tasks, snapshots, about) |
 | `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |
 | `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too, `--visibility` for private ones; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
@@ -1402,6 +1402,14 @@ page, so copy the printed link instead.
   threads (the essence render, and the turn archive on demand), snapshots
   (the restore points `stats` reports) and about (format, recall mode,
   embedder identity, sizes).
+- **Findings and tasks** (since v0.18.1): the review findings in a table
+  ordered by id, with a count by status, filters for status, category and
+  priority, and a click for a finding's body, refs, triage, verification
+  and status history. An unverified `SECURITY` finding is shown, marked
+  "private until verified": the page is yours and stays on your machine.
+  The tasks in a table (status, owner, the role it's for, what it waits
+  for, its last change), filtered by status, with a click for the body and
+  history. Everything from the file is shown as text, never as HTML.
 - **It never holds the file.** It reads it once, read-only, and closes it,
   so an agent writing to the file is never blocked. **Reload** in the page
   reads it again (one passphrase derivation). If a writer has the file

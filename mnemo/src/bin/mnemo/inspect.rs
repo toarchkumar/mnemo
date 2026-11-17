@@ -120,7 +120,100 @@ pub struct Loaded {
     threads: Vec<Thread>,
     project_essence: Option<String>,
     snapshots: Value,
+    /// v0.18.1 (INSPECT-COORD): the review findings, ordered by id as
+    /// `finding list` orders them.
+    findings: Vec<Value>,
+    /// v0.18.1 (INSPECT-COORD): the tasks, oldest first.
+    tasks: Vec<Value>,
     loaded_at: i64,
+}
+
+/// When a finding or task last changed: its last history entry, else when
+/// it was added.
+fn last_change(history: &[Value], created_at: i64) -> i64 {
+    history
+        .last()
+        .and_then(|h| h.get("at"))
+        .and_then(Value::as_i64)
+        .unwrap_or(created_at)
+}
+
+/// v0.18.1: a finding for the Findings tab. An unverified `SECURITY`
+/// finding is `private`; the page is the owner's own, so it's shown, marked.
+fn finding_json(m: &Memory, f: &mnemo_engine::Finding) -> Value {
+    json!({
+        "id": f.id,
+        "record_id": f.record_id.to_string(),
+        "batch": f.batch,
+        "category": f.category,
+        "priority": f.priority,
+        "status": f.status,
+        "title": f.title,
+        "body": f.body,
+        "refs": f.refs,
+        "author": f.author,
+        "triage": f.triage,
+        "triaged_by": f.triaged_by,
+        "verified_ref": f.verified_ref,
+        "verified_by": f.verified_by,
+        "private": mnemo_engine::visibility_of(m) == "private",
+        "created_at": f.created_at,
+        "updated_at": last_change(&f.history, f.created_at),
+        "history": f.history,
+    })
+}
+
+/// v0.18.1: a task for the Tasks tab.
+fn task_json(t: &mnemo_engine::Task) -> Value {
+    json!({
+        "slug": t.slug,
+        "record_id": t.id.to_string(),
+        "title": t.title,
+        "body": t.body,
+        "status": t.status,
+        "owner": t.owner,
+        "creator": t.creator,
+        "role": t.role,
+        "after": t.after,
+        "pre_approved": t.pre_approved,
+        "created_at": t.created_at,
+        "updated_at": last_change(&t.history, t.created_at),
+        "history": t.history,
+    })
+}
+
+/// The order the Findings tab counts statuses in.
+const FINDING_STATUS_ORDER: [&str; 6] = [
+    "open",
+    "needs-user",
+    "accepted",
+    "deferred",
+    "rejected",
+    "verified",
+];
+
+/// The order the Tasks tab counts statuses in.
+const TASK_STATUS_ORDER: [&str; 5] = ["queued", "active", "blocked", "ready", "done"];
+
+/// How many of `items` have each status, in `order`, then any other status
+/// by name; statuses with none are left out.
+fn status_counts(items: &[Value], order: &[&str]) -> Value {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for v in items {
+        *counts
+            .entry(v["status"].as_str().unwrap_or("").to_string())
+            .or_default() += 1;
+    }
+    let mut out: Vec<Value> = Vec::new();
+    for s in order {
+        if let Some(n) = counts.remove(*s) {
+            out.push(json!({ "status": s, "count": n }));
+        }
+    }
+    for (s, n) in counts {
+        out.push(json!({ "status": s, "count": n }));
+    }
+    Value::Array(out)
 }
 
 fn now() -> i64 {
@@ -282,6 +375,25 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
     // RB-003.7: build what the views keep, then let the records (vectors
     // and all) go before the thread turns are read, so the peak doesn't
     // hold both.
+    // v0.18.1 (INSPECT-COORD): findings and tasks, parsed from the records
+    // already read (the same parsers `finding list` and `task list` use).
+    let mut finding_rows: Vec<(mnemo_engine::Finding, &Memory)> = all
+        .iter()
+        .filter_map(|m| mnemo_engine::Finding::from_memory(m).map(|f| (f, m)))
+        .collect();
+    finding_rows.sort_by_key(|(f, _)| f.sort_key());
+    let findings: Vec<Value> = finding_rows
+        .iter()
+        .map(|(f, m)| finding_json(m, f))
+        .collect();
+    drop(finding_rows);
+    let mut task_rows: Vec<mnemo_engine::Task> = all
+        .iter()
+        .filter_map(mnemo_engine::Task::from_memory)
+        .collect();
+    task_rows.sort_by_key(|t| t.id);
+    let tasks: Vec<Value> = task_rows.iter().map(task_json).collect();
+    drop(task_rows);
     let contents = KeywordIndex::new(shown.iter().map(|m| m.content.as_str()));
     let memories: Vec<Value> = shown.iter().map(|m| memory_json(m)).collect();
     let agents: Vec<String> = shown
@@ -352,6 +464,8 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         "onboarding": onboarding,
         "threads": thread_ids.len(),
         "keys": keys.len(),
+        "findings": findings.len(),
+        "tasks": tasks.len(),
     });
     let snapshots = json!({
         "retained": summary.snapshots_retained,
@@ -369,6 +483,8 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         // The render has a header even with no items.
         project_essence: (project_items > 0).then_some(project),
         snapshots,
+        findings,
+        tasks,
         loaded_at: now(),
     })
 }
@@ -859,6 +975,43 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
             Some(v)
         }
         "/api/snapshots" => Some(l.snapshots.clone()),
+        // v0.18.1 (INSPECT-COORD): the counts are over every finding (or
+        // task); the list is the filtered one.
+        "/api/findings" => {
+            let list: Vec<Value> = l
+                .findings
+                .iter()
+                .filter(|f| {
+                    ["status", "category", "priority"]
+                        .iter()
+                        .all(|k| q(k).is_none_or(|want| f[*k] == want))
+                })
+                .cloned()
+                .collect();
+            Some(json!({
+                "total": l.findings.len(),
+                "counts": status_counts(&l.findings, &FINDING_STATUS_ORDER),
+                "findings": list,
+                // The filters' choices, from the engine's own lists.
+                "statuses": FINDING_STATUS_ORDER,
+                "categories": mnemo_engine::FINDING_CATEGORIES,
+                "priorities": mnemo_engine::FINDING_PRIORITIES,
+            }))
+        }
+        "/api/tasks" => {
+            let list: Vec<Value> = l
+                .tasks
+                .iter()
+                .filter(|t| q("status").is_none_or(|want| t["status"] == want))
+                .cloned()
+                .collect();
+            Some(json!({
+                "total": l.tasks.len(),
+                "counts": status_counts(&l.tasks, &TASK_STATUS_ORDER),
+                "tasks": list,
+                "statuses": TASK_STATUS_ORDER,
+            }))
+        }
         _ => None,
     }
 }
