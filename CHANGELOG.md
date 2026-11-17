@@ -8,6 +8,27 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **Review findings as records.** A Reviewer adds a finding under an id it
+  gives (`RB-014.1`), with a category, a priority, a one-line title, a
+  body and refs; the Planner triages it (accepted, deferred, rejected or
+  needs-user, with why); a Reviewer verifies it against a commit or a tag.
+  Each is one record, changed in place with its history, and kept out of
+  recall like tasks and messages. `mnemo finding add|triage|verify|list|get`
+  (`list` filters by status, batch, category and priority, ordered by id),
+  the MCP `finding` tool and Python's `finding_*` and `findings()`. A
+  Planner's per-turn line says "N findings wait for triage", and its brief
+  lists them.
+
+### Changed
+
+- **Rust:** `NewWork` has a new field, `findings`, and
+  `COORDINATION_KINDS` has five kinds, with `finding`. Code that builds a
+  `NewWork` with `..Default::default()` is unaffected.
+- **Upgrade every session's `mnemo` together:** a v0.17 build sees a
+  finding as an ordinary fact (in its recall, `list` and `export`).
+
 ## [0.17.2] — 2026-11-17
 
 A patch from this project's first run of agents coordinating through their

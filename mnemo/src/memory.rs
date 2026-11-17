@@ -346,15 +346,18 @@ pub const MNEMO_META_KIND_TASK: &str = "task";
 pub const MNEMO_META_KIND_CLAIM: &str = "claim";
 /// 13a: `_mnemo.kind` of an agent's presence record (13.3).
 pub const MNEMO_META_KIND_PRESENCE: &str = "presence";
+/// v0.18.0 (13a step 8b): `_mnemo.kind` of a review finding.
+pub const MNEMO_META_KIND_FINDING: &str = "finding";
 /// 13a: the coordination kinds. Each is an ordinary record in the shared
 /// scope with the sentinel vector, never embedded, and never a hit in
 /// `recall`, the keyword index, the ANN or `about`: each is read through
 /// its own API (`docs/design/13a-coordination.md`, section 1).
-pub const COORDINATION_KINDS: [&str; 4] = [
+pub const COORDINATION_KINDS: [&str; 5] = [
     MNEMO_META_KIND_MESSAGE,
     MNEMO_META_KIND_TASK,
     MNEMO_META_KIND_CLAIM,
     MNEMO_META_KIND_PRESENCE,
+    MNEMO_META_KIND_FINDING,
 ];
 
 /// 13a: who wrote a record, the writing handle's author
@@ -974,18 +977,72 @@ pub mod task_status {
     pub const BLOCKED: &str = "blocked";
 }
 
-/// Finding transition table (declared for Phase 13; currently unused
-/// in the engine). `open → {accepted | deferred | rejected |
-/// needs-user} → verified`.
+/// Finding transition table (v0.18.0, `Mnemo::finding_triage` and
+/// `Mnemo::finding_verify`): `open → {accepted | deferred | rejected |
+/// needs-user} → verified`, the user's way out of `needs-user` (to
+/// `accepted`, `deferred` or `rejected`), and a deferral taken up later
+/// (`deferred → accepted`).
 pub const FINDING_TRANSITIONS: &[(&str, &str)] = &[
     ("open", "accepted"),
     ("open", "deferred"),
     ("open", "rejected"),
     ("open", "needs-user"),
+    ("needs-user", "accepted"),
+    ("needs-user", "deferred"),
+    ("needs-user", "rejected"),
+    ("deferred", "accepted"),
     ("accepted", "verified"),
     ("deferred", "verified"),
     ("needs-user", "verified"),
 ];
+
+/// v0.18.0: the finding statuses.
+pub mod finding_status {
+    /// Added by a Reviewer; waits for triage.
+    pub const OPEN: &str = "open";
+    /// To be done.
+    pub const ACCEPTED: &str = "accepted";
+    /// Later.
+    pub const DEFERRED: &str = "deferred";
+    /// Not to be done.
+    pub const REJECTED: &str = "rejected";
+    /// The user decides.
+    pub const NEEDS_USER: &str = "needs-user";
+    /// Done, and confirmed in the code.
+    pub const VERIFIED: &str = "verified";
+}
+
+/// v0.18.0: a finding's categories.
+pub const FINDING_CATEGORIES: [&str; 6] = [
+    "SECURITY",
+    "CORRECTNESS",
+    "PERF",
+    "PLAN-REFINEMENT",
+    "PRODUCT",
+    "DX/DOCS",
+];
+/// v0.18.0: a finding's priorities.
+pub const FINDING_PRIORITIES: [&str; 4] = ["HIGH", "MEDIUM", "LOW", "IDEA"];
+/// v0.18.0: a finding's title, at most this many bytes (one line).
+pub const FINDING_TITLE_MAX: usize = 200;
+/// v0.18.0: a finding's body, at most this many bytes.
+pub const FINDING_BODY_MAX: usize = 16 * 1024;
+/// v0.18.0: a finding's id (`RB-014.1`), its locator.
+pub const MNEMO_META_FINDING_ID: &str = "_mnemo.finding_id";
+/// v0.18.0: a finding's batch, its id's prefix (`RB-014`).
+pub const MNEMO_META_BATCH: &str = "_mnemo.batch";
+/// v0.18.0: a finding's category ([`FINDING_CATEGORIES`]).
+pub const MNEMO_META_CATEGORY: &str = "_mnemo.category";
+/// v0.18.0: a finding's priority ([`FINDING_PRIORITIES`]).
+pub const MNEMO_META_PRIORITY: &str = "_mnemo.priority";
+/// v0.18.0: a finding's triage text, and who wrote it.
+pub const MNEMO_META_TRIAGE: &str = "_mnemo.triage";
+/// v0.18.0: who triaged a finding last.
+pub const MNEMO_META_TRIAGED_BY: &str = "_mnemo.triaged_by";
+/// v0.18.0: what verified a finding (a commit, a tag, a PR).
+pub const MNEMO_META_VERIFIED_REF: &str = "_mnemo.verified_ref";
+/// v0.18.0: who verified a finding.
+pub const MNEMO_META_VERIFIED_BY: &str = "_mnemo.verified_by";
 
 /// Essence transition table for Phase 12.7b. Only `open → resolved`
 /// is allowed. Timeline entries don't use this (they're append-only

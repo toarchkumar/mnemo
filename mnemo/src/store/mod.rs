@@ -70,6 +70,7 @@ pub use coordination::{
     slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
     Stale, Task, TaskClaim, TaskLost, TaskOutcome, TaskSpec, TaskTaken, Wake,
 };
+pub use findings::{valid_finding_id, Finding, FindingFilter, FindingSpec};
 
 mod ann;
 mod cache_api;
@@ -78,6 +79,7 @@ mod crud;
 mod essence;
 pub(crate) use essence::format_unix_date;
 mod coordination;
+mod findings;
 mod flush;
 #[cfg(test)]
 mod header_graft_tests;

@@ -710,6 +710,90 @@ fn tool_task(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcErr
     Ok(out)
 }
 
+/// v0.18.0: a finding as the `finding` tool returns it.
+fn finding_json(f: &crate::Finding) -> Value {
+    json!({
+        "id": f.id, "batch": f.batch, "category": f.category, "priority": f.priority,
+        "title": f.title, "body": f.body, "refs": f.refs, "author": f.author,
+        "status": f.status, "triage": f.triage, "triaged_by": f.triaged_by,
+        "verified_ref": f.verified_ref, "verified_by": f.verified_by,
+        "created_at": f.created_at, "history": f.history,
+    })
+}
+
+/// v0.18.0: the `finding` tool: `add`, `triage`, `verify`, `list` and
+/// `get`, as this server's agent.
+fn tool_finding(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let op = args.get("op").and_then(Value::as_str).unwrap_or("list");
+    let bad = |m: String| RpcError::new(INVALID_PARAMS, format!("finding: {m}"));
+    let s = |k: &str| args.get(k).and_then(Value::as_str);
+    let need = |k: &str| s(k).ok_or_else(|| bad(format!("'{k}' is needed")));
+    let framed = |v: Value| {
+        format!(
+            "{}\n\n{}",
+            crate::guide::FRAMING,
+            crate::guide::escape_brain(&v.to_string())
+        )
+    };
+    let wrote = |db: &mut Mnemo, f: crate::Finding| -> std::result::Result<String, RpcError> {
+        db.flush().map_err(mnemo_err)?;
+        Ok(json!({"id": f.id, "status": f.status}).to_string())
+    };
+    match op {
+        "add" => {
+            let spec = crate::FindingSpec {
+                id: need("id")?.to_string(),
+                category: need("category")?.to_string(),
+                priority: need("priority")?.to_string(),
+                title: need("title")?.to_string(),
+                body: s("body").unwrap_or("").to_string(),
+                refs: args
+                    .get("refs")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
+            let f = db.finding_add(&spec).map_err(mnemo_err)?;
+            wrote(db, f)
+        }
+        "triage" => {
+            let f = db
+                .finding_triage(need("id")?, need("status")?, need("text")?)
+                .map_err(mnemo_err)?;
+            wrote(db, f)
+        }
+        "verify" => {
+            let f = db
+                .finding_verify(need("id")?, need("ref")?)
+                .map_err(mnemo_err)?;
+            wrote(db, f)
+        }
+        "list" => {
+            let filter = crate::FindingFilter {
+                status: s("status").map(str::to_string),
+                batch: s("batch").map(str::to_string),
+                category: s("category").map(str::to_string),
+                priority: s("priority").map(str::to_string),
+            };
+            let fs = db.findings(&filter).map_err(mnemo_err)?;
+            Ok(framed(
+                json!({"findings": fs.iter().map(finding_json).collect::<Vec<_>>()}),
+            ))
+        }
+        "get" => match db.finding(need("id")?).map_err(mnemo_err)? {
+            Some(f) => Ok(framed(finding_json(&f))),
+            None => Err(bad(format!("no finding {:?}", s("id").unwrap_or("")))),
+        },
+        other => Err(bad(format!(
+            "unknown op '{other}' (add, triage, verify, list, get)"
+        ))),
+    }
+}
+
 /// 13a (13.3): the `claim` tool: `take`, `renew`, `release`, `check` and
 /// `who`, as this server's agent.
 fn tool_claim(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
@@ -1278,6 +1362,28 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "finding",
+                "description": "v0.18.0: review findings. A Reviewer adds them (`op: \"add\"`, under an `id` like `RB-014.1`, with `category`, `priority`, `title`, and `body` and `refs` when there are) and verifies them (`verify`, with a `ref`: a commit, a tag, a PR); the Planner triages them (`triage`, to `accepted`, `deferred`, `rejected` or `needs-user`, with `text`). `list` filters by `status`, `batch`, `category` and `priority`, ordered by id; `get` returns one with its history.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "op": { "type": "string", "enum": ["add", "triage", "verify", "list", "get"] },
+                        "id": { "type": "string", "description": "add, triage, verify, get: the finding's id (`RB-014.1`)." },
+                        "category": { "type": "string", "enum": ["SECURITY", "CORRECTNESS", "PERF", "PLAN-REFINEMENT", "PRODUCT", "DX/DOCS"], "description": "add; list: a filter." },
+                        "priority": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW", "IDEA"], "description": "add; list: a filter." },
+                        "title": { "type": "string", "description": "add: one line, at most 200 bytes." },
+                        "body": { "type": "string", "description": "add: at most 16 KB." },
+                        "refs": { "type": "array", "items": { "type": "string" }, "description": "add: what it points at." },
+                        "status": { "type": "string", "description": "triage: accepted, deferred, rejected or needs-user; list: a filter." },
+                        "text": { "type": "string", "description": "triage: why." },
+                        "ref": { "type": "string", "description": "verify: the commit, tag or PR that verifies it." },
+                        "batch": { "type": "string", "description": "list: the id's prefix (`RB-014`)." }
+                    },
+                    "required": ["op"],
+                    "additionalProperties": false
+                }
+            },
+            {
                 "name": "essence",
                 "description": "Phase 12.7b: edit or render the essence layer of a thread (or the project layer). ONE tool for every op — set `op` to `add` / `append` / `update` / `resolve` / `remove` / `render`. **Call it when the goal, a decision, an open problem, the next step or the user's way of working changes, and append a timeline entry at each milestone.** Section items (`intent`, `conventions`, `decisions`, `state`, `open`, `next`, `lessons`) are ≤ 280 bytes and have an `open → resolved` lifecycle; `append` adds an append-only `timeline` entry (≤ 600 bytes). Thread-scoped (`thread`) or project-scoped (`project: true`). `render` returns the deterministic markdown view, budgeted at `budget` bytes (default 6144).",
                 "inputSchema": {
@@ -1585,6 +1691,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "task" => tool_task(db, args)?,
         "inbox" => tool_inbox(db, args)?,
         "claim" => tool_claim(db, args)?,
+        "finding" => tool_finding(db, args)?,
         "thread_ingest" => tool_thread_ingest(db, args)?,
         "thread_export" => tool_thread_export(db, args)?,
         "thread_start" => tool_thread_start(db, args)?,

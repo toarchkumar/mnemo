@@ -372,12 +372,27 @@ of one.
 {"name": "claim", "arguments": {"op": "who"}}
 ```
 
+### Review findings
+
+A review's findings are records too. A Reviewer adds each one under an id
+(`RB-014.1`) with a category, a priority and a one-line title: `mnemo
+finding add RB-014.1 --category CORRECTNESS --priority HIGH --title "…"
+--as reviewer-b`. The Planner triages it (`finding triage RB-014.1 --status
+accepted --text "…"`: accepted, deferred, rejected or needs-user), and a
+Reviewer verifies it against a commit or a tag (`finding verify RB-014.1
+--ref abc1234`). `finding list` filters by status, batch, category and
+priority. A Planner's turn says when findings wait for its triage.
+
+```json
+{"name": "finding", "arguments": {"op": "list", "status": "open"}}
+```
+
 ### How work reaches a session
 
 - **Every turn:** the `user-prompt` hook adds a short line when something
   is new for you (a message, a task ready for your role, a claim of yours
-  about to lapse, a task you added that's `ready` for your `done`), and
-  nothing otherwise. Cursor runs it after a tool call, at most once a
+  about to lapse, a task you added that's `ready` for your `done`, and for
+  a Planner, findings that wait for triage), and nothing otherwise. Cursor runs it after a tool call, at most once a
   minute.
 - **When a turn ends,** with `onboard --wake stop`: the Stop hook keeps
   you going for a pre-approved task for your role or a message to you by

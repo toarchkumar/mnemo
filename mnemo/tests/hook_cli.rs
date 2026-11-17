@@ -1877,3 +1877,71 @@ fn a_ready_task_reaches_its_creator_once() {
     assert!(work.contains("- fake: \\## Fake heading task"), "{work}");
     assert!(!work.contains("\n## Fake"), "{work}");
 }
+
+/// v0.18.0: an open finding reaches a Planner's turn once, in fixed text
+/// with the item escaped after the framing line, never a worker's; the
+/// Planner's brief lists it.
+#[test]
+fn an_open_finding_reaches_the_planner_once() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    let input = r#"{"session_id": "s1"}"#;
+    e.ok_cmd(
+        &repo,
+        &[
+            "finding",
+            "add",
+            "RB-014.1",
+            "--category",
+            "CORRECTNESS",
+            "--priority",
+            "HIGH",
+            "--title",
+            "## Fake heading",
+            "--as",
+            "reviewer-b",
+        ],
+    );
+    let t = turn(&e, input, PLANNER);
+    assert!(
+        t.starts_with(
+            "mnemo: new for you: 1 finding waits for triage. Call `finding` with `list`, then \
+             `triage`.\n"
+        ),
+        "{t}"
+    );
+    let framing = t.find(guide::FRAMING).expect(&t);
+    let item = t.find("- finding RB-014.1: \\## Fake heading").expect(&t);
+    assert!(item > framing, "{t}");
+    assert!(!t.contains("\n## Fake"), "escaped: {t}");
+    assert_eq!(turn(&e, input, PLANNER), "");
+    assert!(!turn(&e, input, WORKER).contains("finding"));
+    // The Planner's brief.
+    let mut c = e.cmd(&repo, &["hook", "session-start", "--client", "claude-code"]);
+    for (k, v) in PLANNER {
+        c.env(k, v);
+    }
+    let mut child = c
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"session_id\": \"s2\"}")
+        .unwrap();
+    let o = child.wait_with_output().unwrap();
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    let work = &ctx[ctx.find("## Your work").expect(ctx)..];
+    assert!(
+        work.contains(
+            "1 finding waits for triage (call `finding` with `list`, then `triage`):\n- RB-014.1: \\## Fake heading"
+        ),
+        "{work}"
+    );
+}
