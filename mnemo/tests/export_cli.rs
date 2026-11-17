@@ -363,10 +363,11 @@ fn a_v8_file_exports_through_the_read_only_path() {
     let md = go(&[]);
     assert!(md.contains("(format v8, 8 dimensions)"));
     assert!(md.contains("17 memories."));
-    // The thread's 4 turns are memories; --git leaves them out.
+    // The thread's 4 turns are memories; --git leaves them out, and (since
+    // v0.18.0) the thread's 2 essence items. The project's one stays.
     let all = jsonl(&go(&["--format", "jsonl"]));
     let git = jsonl(&go(&["--format", "jsonl", "--git"]));
-    assert_eq!((all.len(), git.len()), (17, 13));
+    assert_eq!((all.len(), git.len()), (17, 11));
     assert!(git
         .iter()
         .all(|r| r["metadata"].get("_mnemo.kind") != Some(&Value::from("turn"))));
@@ -383,23 +384,25 @@ fn a_v8_file_exports_through_the_read_only_path() {
 /// v0.18.0 (the backup): `--git` writes findings (every status, in id
 /// order) and the project essence (open items by section, then the
 /// resolved ones from the last 30 days); never a private finding, a
-/// message or a claim; two exports of an unchanged brain are byte-equal.
+/// thread's essence, a message or a claim, nor a `SECURITY` finding until
+/// it's `verified`; two exports of an unchanged brain are byte-equal.
 #[test]
 fn git_writes_findings_and_the_project_essence_in_order() {
     use mnemo_engine::{EssenceScope, EssenceSection, FindingSpec, MemoryPatch};
     let (_d, path) = seed();
     let mut db = Mnemo::open(&path, PW).unwrap();
     db.set_author(Some("reviewer-b".into()));
-    let finding = |db: &mut Mnemo, id: &str| {
+    let finding_in = |db: &mut Mnemo, id: &str, category: &str| {
         db.finding_add(&FindingSpec {
             id: id.into(),
-            category: "PERF".into(),
+            category: category.into(),
             priority: "LOW".into(),
             title: format!("finding {id}"),
             ..Default::default()
         })
         .unwrap()
     };
+    let finding = |db: &mut Mnemo, id: &str| finding_in(db, id, "PERF");
     for id in ["RB-10.1", "RB-9.10", "RB-9.2"] {
         finding(&mut db, id);
     }
@@ -416,6 +419,18 @@ fn git_writes_findings_and_the_project_essence_in_order() {
         },
     )
     .unwrap();
+    // SECURITY findings: only the verified one is written. A CORRECTNESS
+    // finding at `open` is.
+    for id in ["RB-11.1", "RB-11.2", "RB-11.3", "RB-11.4"] {
+        finding_in(&mut db, id, "SECURITY");
+    }
+    finding_in(&mut db, "RB-12.1", "CORRECTNESS");
+    db.set_author(Some("planner-a".into()));
+    db.finding_triage("RB-11.2", "accepted", "yes").unwrap();
+    db.finding_triage("RB-11.3", "rejected", "no").unwrap();
+    db.finding_triage("RB-11.4", "accepted", "yes").unwrap();
+    db.set_author(Some("reviewer-b".into()));
+    db.finding_verify("RB-11.4", "abc1234").unwrap();
     db.set_author(Some("planner-a".into()));
     db.task_add(&mnemo_engine::TaskSpec {
         title: "Ship it".into(),
@@ -458,6 +473,17 @@ fn git_writes_findings_and_the_project_essence_in_order() {
         assert_eq!(a, export(&path, &["--git", "--format", format]), "{format}");
         assert!(!a.contains("RB-9.3"), "a private finding: {format}");
         assert!(
+            !a.contains("a thread's own item"),
+            "thread essence: {format}"
+        );
+        for id in ["RB-11.1", "RB-11.2", "RB-11.3"] {
+            assert!(
+                !a.contains(id),
+                "an unverified SECURITY finding {id}: {format}"
+            );
+        }
+        assert!(a.contains("RB-11.4") && a.contains("RB-12.1"), "{format}");
+        assert!(
             !a.contains("a message") && !a.contains("a topic"),
             "{format}"
         );
@@ -494,6 +520,8 @@ fn git_writes_findings_and_the_project_essence_in_order() {
             "finding RB-9.2",
             "finding RB-9.10",
             "finding RB-10.1",
+            "finding RB-11.4",
+            "finding RB-12.1",
             "essence decisions open",
             "essence next open",
             "essence state resolved",
@@ -517,4 +545,9 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     let later = String::from_utf8(later.stdout).unwrap();
     assert!(!later.contains("v0180-2 in progress"), "{later}");
     assert!(later.contains("next: the backup") && later.contains("RB-9.10"));
+    // The plain export, the owner's full copy, keeps them all.
+    let plain = export(&path, &["--format", "jsonl"]);
+    for s in ["a thread's own item", "RB-11.1", "RB-11.2", "RB-11.3"] {
+        assert!(plain.contains(s), "{s}");
+    }
 }

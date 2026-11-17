@@ -384,6 +384,8 @@ accepted --text "…"`: accepted, deferred, rejected or needs-user), and a
 Reviewer verifies it against a commit or a tag (`finding verify RB-014.1
 --ref abc1234`). `finding list` filters by status, batch, category and
 priority. A Planner's turn says when findings wait for its triage.
+`mnemo export --git` writes a `SECURITY` finding only once it's verified,
+so an unfixed one never reaches a backup you commit.
 
 ```json mcp
 {"name": "finding", "arguments": {"op": "list", "status": "open"}}
