@@ -1213,6 +1213,13 @@ impl Mnemo {
 
     /// FMT-9b: row `e`'s column entry (fp16 values and norm), from the
     /// staged set, the resident column, or its page.
+    /// Whether a row's vector waits in the hot set (not on a page yet).
+    pub(super) fn has_hot_vector(&self, e: &CatalogEntry) -> bool {
+        self.index
+            .get(e.id, &self.catalog)
+            .is_some_and(|idx| self.col.hot.contains_key(&idx))
+    }
+
     pub(super) fn column_entry(&mut self, e: &CatalogEntry) -> Result<(Vec<u16>, f32)> {
         let d = self.dimensions;
         if let Some(idx) = self.index.get(e.id, &self.catalog) {

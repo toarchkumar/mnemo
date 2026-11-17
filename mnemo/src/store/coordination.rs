@@ -161,6 +161,16 @@ fn seen_by(m: &Memory) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// COORD-LEGACY-SCAN: whether a stored (fp16) vector is the sentinel every
+/// coordination record carries: all its values equal, at 1/sqrt(dims).
+fn is_sentinel(h: &[u16]) -> bool {
+    let Some(&first) = h.first() else {
+        return false;
+    };
+    let want = 1.0 / (h.len() as f32).sqrt();
+    h.iter().all(|&x| x == first) && (crate::veccol::f16_to_f32(first) - want).abs() < 1e-3
+}
+
 /// READY-NOTICE: the agents a `ready` task was shown to as theirs to
 /// close (`_mnemo.ready_seen_by`).
 fn ready_seen_by(m: &Memory) -> Vec<String> {
@@ -227,8 +237,10 @@ impl Mnemo {
     /// RB-013.1: the coordination records an older build re-tagged as facts
     /// (its `compact` writes every row again, and it computes "fact" for a
     /// kind it doesn't know). Found once per handle: such a record keeps
-    /// its `episodic` type in the row, so only `episodic` fact rows are
-    /// decrypted. A write of one re-tags its row.
+    /// its `episodic` type in the row and its sentinel vector in the column,
+    /// so only `episodic` fact rows whose vector is the sentinel are
+    /// decrypted (COORD-LEGACY-SCAN, v0.17.2); a row whose vector can't be
+    /// read is decrypted, as before. A write of one re-tags its row.
     fn legacy_coordination_ids(&mut self) -> Result<std::collections::HashSet<u128>> {
         if let Some(ids) = &self.legacy_coordination {
             return Ok(ids.clone());
@@ -246,7 +258,24 @@ impl Mnemo {
             .cloned()
             .collect();
         let mut ids = std::collections::HashSet::new();
+        // Each vector page read once, for every candidate row on it.
+        let mut pages: std::collections::HashMap<(u64, u64), Option<Vec<u8>>> =
+            std::collections::HashMap::new();
         for e in candidates {
+            let vector = match e.v9 {
+                Some(r) if r.vec_page != 0 && !self.has_hot_vector(&e) => {
+                    let page = pages
+                        .entry((r.vec_page, r.vec_gen))
+                        .or_insert_with(|| self.pager.read_page(r.vec_page, r.vec_gen).ok());
+                    page.as_ref().and_then(|p| {
+                        crate::veccol::decode_entry(p, self.dimensions, r.vec_slot as usize).ok()
+                    })
+                }
+                _ => self.column_entry(&e).ok(),
+            };
+            if matches!(vector, Some((h, _)) if !is_sentinel(&h)) {
+                continue;
+            }
             if is_coordination(&self.read_memory(&e)?) {
                 ids.insert(e.id);
             }
@@ -2276,5 +2305,31 @@ impl Mnemo {
             }
         }
         c
+    }
+}
+
+#[cfg(test)]
+mod legacy_scan_tests {
+    use super::is_sentinel;
+
+    /// COORD-LEGACY-SCAN: the sentinel, quantised as the column stores it,
+    /// is recognised at every width; an ordinary vector isn't.
+    #[test]
+    fn the_sentinel_is_told_from_an_ordinary_vector() {
+        for dims in [4, 32, 384, 768] {
+            let s = vec![1.0 / (dims as f32).sqrt(); dims];
+            let (h, _) = crate::veccol::quantize(&s);
+            assert!(is_sentinel(&h), "{dims}");
+            let mut v = s.clone();
+            v[dims / 2] += 0.05;
+            assert!(!is_sentinel(&crate::veccol::quantize(&v).0), "{dims}");
+            let flat = vec![0.5; dims];
+            assert_eq!(
+                is_sentinel(&crate::veccol::quantize(&flat).0),
+                dims == 4,
+                "{dims}"
+            );
+        }
+        assert!(!is_sentinel(&[]));
     }
 }

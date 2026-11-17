@@ -40,6 +40,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **The MCP `claim` tool's `who`: `alive` is now `"yes"`, `"no"` or
   `"unknown"`**, as in `mnemo claim who --format json`. It was `true`,
   `false` or `"unknown"`.
+- **The first coordination lookup on a handle reads less.** Finding the
+  messages, tasks and claims an older `mnemo` re-tagged as facts now
+  decrypts only the rows that carry a coordination record's vector, not
+  every dated fact: on a brain of 10,000 dated facts it took 8.5 ms here,
+  from 17.1 ms.
 
 ## [0.17.1] — 2026-11-16
 

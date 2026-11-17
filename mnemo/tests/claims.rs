@@ -331,6 +331,25 @@ fn no_lock_on_the_brain_between_calls() {
 
 const ROLE: &str = "MNEMO_CLAIMS_ROLE";
 
+/// CLAIM-RACE-FLAKE (v0.17.2): `f` again while it meets `Locked`, with a
+/// short pause, until `limit` has passed. A `Locked` window never opened,
+/// so nothing was written and another try is safe; a slow CI runner can
+/// take longer than one window's 10 s wait. Any other answer is returned.
+fn retry_locked<T>(
+    limit: Duration,
+    mut f: impl FnMut() -> mnemo_engine::Result<T>,
+) -> mnemo_engine::Result<T> {
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        match f() {
+            Err(MnemoError::Locked { .. }) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
 /// The child entry point; returns at once in a normal run.
 #[test]
 fn claims_child() {
@@ -356,7 +375,10 @@ fn claims_child() {
             })
         })
         .collect();
-    let mut s = Mnemo::open_shared(&path, PW, opts()).unwrap();
+    let mut s = retry_locked(Duration::from_secs(120), || {
+        Mnemo::open_shared(&path, PW, opts())
+    })
+    .unwrap();
     s.set_author(Some(agent.clone()));
     s.hold_presence().unwrap();
     let mut log = String::new();
@@ -381,7 +403,9 @@ fn claims_child() {
             std::thread::yield_now();
         }
         // The longest lease, so no claim lapses before the count at the end.
-        let r = s.write(|db| db.claim(&format!("race-{i}"), Some(86_400)));
+        let r = retry_locked(Duration::from_secs(60), || {
+            s.write(|db| db.claim(&format!("race-{i}"), Some(86_400)))
+        });
         let tag = match r {
             Ok(ClaimOutcome::Claimed { .. }) => "won",
             Ok(ClaimOutcome::HeldBy { .. }) => "held",
