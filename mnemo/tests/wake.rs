@@ -354,3 +354,77 @@ fn broadcasts_and_role_tasks_are_seen_per_agent() {
     assert_eq!(shown(&mut db, "worker-b"), (2, 1));
     assert_eq!(shown(&mut db, "worker-b"), (0, 0));
 }
+
+/// READY-NOTICE (v0.17.2): a task its creator must close shows to the
+/// creator once each time it becomes `ready`, never to another agent, and
+/// never wakes a session.
+#[test]
+fn a_ready_task_is_new_to_its_creator_once_per_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir, true);
+    task(&mut db, "Ship it", false);
+    // Queued: nothing for the creator yet.
+    assert!(db
+        .new_work(Some("planner-a"), Some("planner"))
+        .unwrap()
+        .is_empty());
+    db.set_author(Some("worker-a".into()));
+    let w = db.new_work(Some("worker-a"), Some("worker")).unwrap();
+    db.mark_shown(&w).unwrap();
+    db.task_next(Some("worker")).unwrap().unwrap();
+    db.task_update("ship-it", Some("ready"), Some("PR 1"), None)
+        .unwrap();
+    // The creator: once.
+    let w = db.new_work(Some("planner-a"), Some("planner")).unwrap();
+    assert_eq!(w.ready_for_done.len(), 1, "{w:?}");
+    assert_eq!(w.ready_for_done[0].slug, "ship-it");
+    assert!(w.tasks.is_empty() && w.messages.is_empty());
+    db.mark_shown(&w).unwrap();
+    assert!(db
+        .new_work(Some("planner-a"), Some("planner"))
+        .unwrap()
+        .is_empty());
+    // Not the worker's, nor another agent's.
+    for (a, r) in [("worker-a", "worker"), ("reviewer-b", "reviewer")] {
+        assert!(
+            db.new_work(Some(a), Some(r))
+                .unwrap()
+                .ready_for_done
+                .is_empty(),
+            "{a}"
+        );
+    }
+    // It wakes nobody: it waits for a person's review.
+    assert_eq!(
+        db.wake("planner-a", Some("planner")).unwrap(),
+        Wake::Nothing
+    );
+    // A creator of the task's own role was shown it queued (`seen_by`);
+    // ready, it's still new to it as one to close.
+    db.set_author(Some("worker-a".into()));
+    db.task_add(&TaskSpec {
+        title: "Tidy the tests".into(),
+        role: Some("worker".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let w = db.new_work(Some("worker-a"), Some("worker")).unwrap();
+    assert_eq!(w.tasks.len(), 1, "{w:?}");
+    db.mark_shown(&w).unwrap();
+    db.task_next(Some("worker")).unwrap().unwrap();
+    db.task_update("tidy-the-tests", Some("ready"), None, None)
+        .unwrap();
+    let w = db.new_work(Some("worker-a"), Some("worker")).unwrap();
+    assert_eq!(w.ready_for_done.len(), 1, "{w:?}");
+    assert_eq!(w.ready_for_done[0].slug, "tidy-the-tests");
+    db.mark_shown(&w).unwrap();
+    assert!(db
+        .new_work(Some("worker-a"), Some("worker"))
+        .unwrap()
+        .is_empty());
+    // Done: gone from the list.
+    db.set_author(Some("planner-a".into()));
+    db.task_update("ship-it", Some("done"), None, None).unwrap();
+    let t = db.task("ship-it").unwrap().unwrap();
+    assert_eq!(t.status, "done");
+}

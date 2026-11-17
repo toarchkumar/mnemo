@@ -8,6 +8,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **A task you added tells you when it's `ready` for your `done`.** The
+  per-turn line says "1 task ready for your `done`. Call `task` with
+  `list`, then `update --status done`." once, and the brief's "Your work"
+  lists your tasks that wait for it. It's shown per agent (a new reserved
+  key, `_mnemo.ready_seen_by`), and it never wakes a session: it waits for
+  your review.
+
+### Changed
+
+- **Rust: `NewWork` has a new field, `ready_for_done`.** Code that builds
+  one with `..Default::default()` is unaffected.
+
 ## [0.17.1] — 2026-11-16
 
 A patch: `mnemo onboard` reads clearly at a terminal, and the keychain

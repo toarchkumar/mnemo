@@ -378,11 +378,12 @@ of one.
 
 - **Every turn:** the `user-prompt` hook adds a short line when something
   is new for you (a message, a task ready for your role, a claim of yours
-  about to lapse), and nothing otherwise. Cursor runs it after a tool
-  call, at most once a minute.
+  about to lapse, a task you added that's `ready` for your `done`), and
+  nothing otherwise. Cursor runs it after a tool call, at most once a
+  minute.
 - **When a turn ends,** with `onboard --wake stop`: the Stop hook keeps
   you going for a pre-approved task for your role or a message to you by
-  name. It's off by default.
+  name, never for a task that waits for your `done`. It's off by default.
 - **In Claude Code, wake a peer yourself:** after you post or add a task,
   send the session a short pointer with Claude Code's `SendMessage` ("new
   work in your inbox"). The inbox is the record, and the message is only

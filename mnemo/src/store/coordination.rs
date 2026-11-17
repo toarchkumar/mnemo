@@ -161,6 +161,20 @@ fn seen_by(m: &Memory) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// READY-NOTICE: the agents a `ready` task was shown to as theirs to
+/// close (`_mnemo.ready_seen_by`).
+fn ready_seen_by(m: &Memory) -> Vec<String> {
+    m.metadata
+        .get(crate::memory::MNEMO_META_READY_SEEN_BY)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Add `agent` to a record's `_mnemo.seen_by`; `false` when it was there.
 fn add_seen_by(m: &mut Memory, agent: &str) -> bool {
     let mut v = seen_by(m);
@@ -1798,6 +1812,10 @@ pub struct NewWork {
     /// [`crate::memory::TASK_CLAIM_WARN_SECS`], not yet warned about at this
     /// expiry.
     pub lapsing: Vec<Claim>,
+    /// READY-NOTICE (v0.17.2): tasks it created that are `ready`, waiting
+    /// for its `done`, not yet shown to it as such. They wait for a
+    /// review, so they never wake a session.
+    pub ready_for_done: Vec<Task>,
     /// The agent it was read for: [`Mnemo::mark_shown`] records this agent
     /// as having seen the broadcasts and the role's tasks.
     pub agent: Option<String>,
@@ -1806,7 +1824,10 @@ pub struct NewWork {
 impl NewWork {
     /// Whether there's nothing.
     pub fn is_empty(&self) -> bool {
-        self.messages.is_empty() && self.tasks.is_empty() && self.lapsing.is_empty()
+        self.messages.is_empty()
+            && self.tasks.is_empty()
+            && self.lapsing.is_empty()
+            && self.ready_for_done.is_empty()
     }
 }
 
@@ -1860,6 +1881,16 @@ impl Mnemo {
                 tasks.push(t);
             }
         }
+        // READY-NOTICE: its own tasks waiting for its `done`, not yet
+        // shown to it as such.
+        let mut ready_for_done = Vec::new();
+        if let Some(a) = agent {
+            for t in self.tasks(Some(crate::memory::task_status::READY), None)? {
+                if t.creator == a && !ready_seen_by(&self.get(&t.id)?).iter().any(|s| s == a) {
+                    ready_for_done.push(t);
+                }
+            }
+        }
         let mut lapsing = Vec::new();
         if let Some(a) = agent {
             for m in self.coordination_records(MNEMO_META_KIND_CLAIM, None)? {
@@ -1887,12 +1918,15 @@ impl Mnemo {
             messages,
             tasks,
             lapsing,
+            ready_for_done,
             agent: agent.map(str::to_string),
         })
     }
 
     /// 13a (13.1b): record that `work` was shown: its messages and tasks
-    /// `seen`, its lapsing claims warned about at their expiry. In place.
+    /// `seen`, its tasks waiting for a `done` shown to their creator
+    /// (READY-NOTICE), its lapsing claims warned about at their expiry. In
+    /// place.
     pub fn mark_shown(&mut self, work: &NewWork) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
@@ -1920,6 +1954,22 @@ impl Mnemo {
                     );
                     self.put(m)?;
                 }
+            }
+        }
+        // READY-NOTICE: shown to its creator as waiting for its `done`.
+        if let Some(a) = &who {
+            for t in &work.ready_for_done {
+                let mut m = self.get(&t.id)?;
+                let mut v = ready_seen_by(&m);
+                if v.iter().any(|s| s == a) {
+                    continue;
+                }
+                v.push(a.clone());
+                m.metadata.insert(
+                    crate::memory::MNEMO_META_READY_SEEN_BY.into(),
+                    Value::Array(v.into_iter().map(Value::String).collect()),
+                );
+                self.put(m)?;
             }
         }
         for c in &work.lapsing {
