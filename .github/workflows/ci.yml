@@ -547,6 +547,45 @@ jobs:
           MNEMO_V0_16_1_BIN="$RUNNER_TEMP/v0_16_1/bin/mnemo"
           cargo test --features failpoints --test v0_16_compat -- --nocapture
 
+  # --- Mixed versions (RB-014, v0.18.0): v0.17 reads a finding as a fact,
+  # but respects `private`. v0.18 writes a SECURITY finding private until
+  # it's verified, so v0.17.2's `export --git`, `list` and recall must leave
+  # an unverified one out.
+  compat-v0-17-2:
+    name: compat (v0.17.2, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: compat-v0-17-2
+
+      - name: Cache the v0.17.2 CLI
+        id: v0_17_2
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/v0_17_2
+          key: mnemo-cli-0.17.2-${{ runner.os }}
+
+      - name: Install the v0.17.2 CLI
+        if: steps.v0_17_2.outputs.cache-hit != 'true'
+        # Its own published lockfile; see the compat job.
+        env:
+          RUSTFLAGS: ""
+        run: cargo install mnemo-engine --version =0.17.2 --locked --root "$RUNNER_TEMP/v0_17_2"
+
+      - name: cargo test (security findings against v0.17.2)
+        working-directory: mnemo
+        run: >-
+          MNEMO_V0_17_2_BIN="$RUNNER_TEMP/v0_17_2/bin/mnemo"
+          cargo test --features failpoints --test v0_17_compat -- --nocapture
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the

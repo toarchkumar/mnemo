@@ -388,7 +388,7 @@ fn a_v8_file_exports_through_the_read_only_path() {
 /// it's `verified`; two exports of an unchanged brain are byte-equal.
 #[test]
 fn git_writes_findings_and_the_project_essence_in_order() {
-    use mnemo_engine::{EssenceScope, EssenceSection, FindingSpec, MemoryPatch};
+    use mnemo_engine::{EssenceScope, EssenceSection, FindingSpec};
     let (_d, path) = seed();
     let mut db = Mnemo::open(&path, PW).unwrap();
     db.set_author(Some("reviewer-b".into()));
@@ -408,17 +408,8 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     }
     db.finding_triage("RB-9.10", "rejected", "not ours")
         .unwrap();
-    let private = finding(&mut db, "RB-9.3");
-    let mut keys = serde_json::Map::new();
-    keys.insert("_mnemo.visibility".into(), Value::String("private".into()));
-    db.update(
-        &private.record_id,
-        MemoryPatch {
-            caller_keys: Some(keys),
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    // A finding can't be made private by `update` (RB-014); an unverified
+    // SECURITY finding is private by itself (below).
     // SECURITY findings: only the verified one is written. A CORRECTNESS
     // finding at `open` is.
     for id in ["RB-11.1", "RB-11.2", "RB-11.3", "RB-11.4"] {
@@ -430,7 +421,7 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     db.finding_triage("RB-11.3", "rejected", "no").unwrap();
     db.finding_triage("RB-11.4", "accepted", "yes").unwrap();
     db.set_author(Some("reviewer-b".into()));
-    db.finding_verify("RB-11.4", "abc1234").unwrap();
+    db.finding_verify("RB-11.4", "v0.18.0").unwrap();
     db.set_author(Some("planner-a".into()));
     db.task_add(&mnemo_engine::TaskSpec {
         title: "Ship it".into(),
@@ -471,7 +462,6 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     for format in ["markdown", "jsonl"] {
         let a = export(&path, &["--git", "--format", format]);
         assert_eq!(a, export(&path, &["--git", "--format", format]), "{format}");
-        assert!(!a.contains("RB-9.3"), "a private finding: {format}");
         assert!(
             !a.contains("a thread's own item"),
             "thread essence: {format}"
@@ -545,9 +535,31 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     let later = String::from_utf8(later.stdout).unwrap();
     assert!(!later.contains("v0180-2 in progress"), "{later}");
     assert!(later.contains("next: the backup") && later.contains("RB-9.10"));
-    // The plain export, the owner's full copy, keeps them all.
+    // The plain export keeps thread essence; an unverified SECURITY
+    // finding is private (RB-014), so it's there with `--visibility all`,
+    // the owner's full copy.
     let plain = export(&path, &["--format", "jsonl"]);
+    assert!(plain.contains("a thread's own item") && plain.contains("RB-11.4"));
+    assert!(!plain.contains("RB-11.1"));
+    let all = export(&path, &["--format", "jsonl", "--visibility", "all"]);
     for s in ["a thread's own item", "RB-11.1", "RB-11.2", "RB-11.3"] {
-        assert!(plain.contains(s), "{s}");
+        assert!(all.contains(s), "{s}");
     }
+    // `--visibility all` with `--git` still leaves them out.
+    let git_all = export(&path, &["--git", "--visibility", "all"]);
+    assert!(!git_all.contains("RB-11.1") && git_all.contains("RB-11.4"));
+    // RB-014: the header names what the file is and the build that wrote
+    // it; the plain export's doesn't.
+    let md = export(&path, &["--git"]);
+    let version = format!("written by mnemo {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        md.contains(&version) && md.contains("read the diff"),
+        "{md}"
+    );
+    assert!(!export(&path, &[]).contains("written by mnemo"));
+    let (ok, _, err) = run(&["export", path.to_str().unwrap(), "--git"], PW);
+    assert!(
+        ok && err.contains(&version) && err.contains("plaintext"),
+        "{err}"
+    );
 }

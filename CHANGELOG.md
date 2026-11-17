@@ -23,7 +23,15 @@ since 0.17.0, over this release's engine.
   body and refs; the Planner triages it (accepted, deferred, rejected or
   needs-user, with why); a Reviewer verifies it against a commit or a tag.
   Each is one record, changed in place with its history, and kept out of
-  recall like tasks and messages. `mnemo finding add|triage|verify|list|get`
+  recall like tasks and messages. A finding changes only by triage and
+  verification: `update`, `delete` (the MCP `forget`) and `essence remove`
+  refuse its record, and a wrong one is rejected. An id is unique by its
+  prefix and numbers (`RB-0900.1` is `RB-900.1`), adding one needs an
+  agent, and the JSON output carries its `record_id`.
+- **A `SECURITY` finding stays `private` until it's verified,** and it's
+  verified only against a published release tag (`v0.18.0`), so verified
+  means shipped. A v0.17 build, which reads a finding as a fact, then
+  leaves an unverified one out of its `export --git`, `list` and recall. `mnemo finding add|triage|verify|list|get`
   (`list` filters by status, batch, category and priority, ordered by id),
   the MCP `finding` tool and Python's `finding_*` and `findings()`. A
   Planner's per-turn line says "N findings wait for triage", and its brief
@@ -35,8 +43,10 @@ since 0.17.0, over this release's engine.
   since the backup may be public. It leaves out a thread's essence (one
   session's working state), and still never writes saved turns, private
   records, messages, claims or presence. Two exports of an unchanged
-  brain are byte-equal. This repository commits its brain's export as
-  `docs/brain.md` at each release.
+  brain are byte-equal. The Markdown header says the file is the backup
+  and names the build that wrote it (`written by mnemo 0.18.0`), and the
+  stderr note says to read the diff before committing. This repository
+  commits its brain's export as `docs/brain.md` at each release.
 
 ### Changed
 
@@ -47,6 +57,8 @@ since 0.17.0, over this release's engine.
   finding as an ordinary fact (in its recall, `list` and `export`).
 - **`mnemo export --git` leaves out a thread's essence items,** which
   v0.17 wrote among the other records. The plain export keeps them.
+- **`essence remove` refuses a record that isn't an essence item,** as
+  `essence update` and `essence resolve` already did.
 
 ## [0.17.2] — 2026-11-17
 

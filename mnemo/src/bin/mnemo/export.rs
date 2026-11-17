@@ -20,7 +20,8 @@
 //!   only.
 //! - v0.18.0: a thread's essence (one session's working state) is left
 //!   out, and so is a `SECURITY` finding until it's `verified`: the backup
-//!   may be public, and an unfixed security finding never is.
+//!   may be public, and an unfixed security finding never is. The Markdown
+//!   header names the build that wrote it.
 //!
 //! The same unchanged file exports to the same bytes, and one new memory
 //! adds only its own lines. A new version of a keyed fact also changes the
@@ -347,19 +348,29 @@ fn record(m: &Memory, git: bool) -> Map<String, Value> {
 fn markdown(memories: &[Memory], o: &ExportOptions, facts: &FileFacts) -> String {
     let mut out = String::new();
     out.push_str("# mnemo export\n\n");
-    out.push_str(&format!(
-        "Plaintext export of a `.mnemo` file (format v{}, {} dimensions). \
-         Keep it as safe as the file's passphrase.\n\n",
-        facts.format_version, facts.dimensions
-    ));
     if o.git {
+        // RB-014: what the file is, which build wrote it, and what's left
+        // out, so a review of the commit can check all three.
+        out.push_str(&format!(
+            "The brain's backup, written by mnemo {} with `--git` to be committed \
+             beside the project, from a `.mnemo` file (format v{}, {} dimensions). \
+             It's plaintext: read the diff before committing.\n\n",
+            env!("CARGO_PKG_VERSION"),
+            facts.format_version,
+            facts.dimensions
+        ));
         out.push_str(
-            "Written with `--git`: keyed memories by key, then tasks, findings and \
-             the project essence, then the rest by id; vectors, thread turns, \
-             thread essence, messages, claims, presence, private records, access \
-             stats and security findings not yet verified are left out.\n",
+            "Keyed memories by key, then tasks, findings and the project essence, \
+             then the rest by id. Left out: vectors, thread turns, thread essence, \
+             messages, claims, presence, private records, access stats, and \
+             security findings until they're verified against a release.\n",
         );
     } else {
+        out.push_str(&format!(
+            "Plaintext export of a `.mnemo` file (format v{}, {} dimensions). \
+             Keep it as safe as the file's passphrase.\n\n",
+            facts.format_version, facts.dimensions
+        ));
         out.push_str(&format!(
             "{} {}. Vectors are left out.\n",
             memories.len(),

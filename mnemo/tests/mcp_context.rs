@@ -1023,6 +1023,8 @@ fn findings_round_trip_over_mcp() {
                 .to_string();
             assert!(t.starts_with(guide::FRAMING), "{t}");
             assert!(t.contains("RB-014.1") && !t.contains("\n## Fake"), "{t}");
+            // RB-014: the record id is in both.
+            assert!(t.contains("record_id"), "{t}");
         }
         let (rs, _) = b.session_env(
             shared,

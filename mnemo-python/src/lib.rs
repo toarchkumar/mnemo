@@ -609,6 +609,7 @@ fn task_dict(py: Python<'_>, t: &mnemo_core::Task) -> PyResult<PyObject> {
 fn finding_dict(py: Python<'_>, f: &mnemo_core::Finding) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("id", &f.id)?;
+    d.set_item("record_id", f.record_id.to_string())?;
     d.set_item("batch", &f.batch)?;
     d.set_item("category", &f.category)?;
     d.set_item("priority", &f.priority)?;

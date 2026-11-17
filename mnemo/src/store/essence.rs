@@ -262,13 +262,15 @@ impl Mnemo {
         self.essence_transition_status(id, essence_status::RESOLVED)
     }
 
-    /// Phase 12.7b: soft-delete a section item. Same semantics as
-    /// [`Mnemo::delete`] on any record — space reclaimed by a later
-    /// compact.
+    /// Phase 12.7b: soft-delete a section item, as [`Mnemo::delete`] does
+    /// (space reclaimed by a later compact). Like `essence_update` and
+    /// `essence_resolve`, it refuses a record that isn't an essence item
+    /// (RB-014).
     pub fn essence_remove(&mut self, id: &Ulid) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
+        self.load_essence_record(id)?;
         self.delete(id)
     }
 

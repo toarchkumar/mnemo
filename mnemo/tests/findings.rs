@@ -235,3 +235,155 @@ fn a_finding_is_never_a_recall_hit() {
         .all(|m| !mnemo_engine::is_coordination(m)));
     assert_eq!(db.kind_counts().coordination, 1);
 }
+
+/// Review round 1 (RB-014): a finding needs its author, and its id is
+/// unique by prefix and numbers (leading zeros stay allowed).
+#[test]
+fn a_finding_needs_an_author_and_an_id_free_by_its_numbers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir);
+    let e = db
+        .finding_add(&spec("RB-014.1", "PERF", "LOW", "t"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("needs its author"), "{e}");
+    db.set_author(Some("  ".into()));
+    assert!(db
+        .finding_add(&spec("RB-014.1", "PERF", "LOW", "t"))
+        .is_err());
+    db.set_author(Some("reviewer-b".into()));
+    db.finding_add(&spec("RB-900.1", "PERF", "LOW", "t"))
+        .unwrap();
+    let e = db
+        .finding_add(&spec("RB-0900.1", "PERF", "LOW", "t"))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("RB-0900.1 is taken (as RB-900.1)"), "{e}");
+    // Leading zeros are fine on a free id.
+    db.finding_add(&spec("RB-014.1", "PERF", "LOW", "t"))
+        .unwrap();
+    assert!(db
+        .finding_add(&spec("RB-14.1", "PERF", "LOW", "t"))
+        .is_err());
+    db.finding_add(&spec("RB-014.2", "PERF", "LOW", "t"))
+        .unwrap();
+}
+
+/// Review round 1 (RB-014): a `SECURITY` finding is `private` until it's
+/// verified, and it's verified only against a release tag. The finding
+/// reads still see it; other categories keep any ref.
+#[test]
+fn a_security_finding_is_private_until_verified_against_a_tag() {
+    use mnemo_engine::visibility_of;
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir);
+    db.set_author(Some("reviewer-b".into()));
+    let f = db
+        .finding_add(&spec("RB-014.1", "SECURITY", "MEDIUM", "t"))
+        .unwrap();
+    let other = db
+        .finding_add(&spec("RB-014.2", "CORRECTNESS", "LOW", "t"))
+        .unwrap();
+    assert_eq!(visibility_of(&db.get(&f.record_id).unwrap()), "private");
+    assert_eq!(visibility_of(&db.get(&other.record_id).unwrap()), "team");
+    // Every finding read sees it.
+    assert_eq!(db.finding("RB-014.1").unwrap().unwrap().id, "RB-014.1");
+    let f2 = mnemo_engine::FindingFilter {
+        category: Some("SECURITY".into()),
+        ..Default::default()
+    };
+    assert_eq!(db.findings(&f2).unwrap().len(), 1);
+    db.set_author(Some("planner-a".into()));
+    db.finding_triage("RB-014.1", "accepted", "fix it").unwrap();
+    db.finding_triage("RB-014.2", "accepted", "fix it").unwrap();
+    assert_eq!(visibility_of(&db.get(&f.record_id).unwrap()), "private");
+    db.set_author(Some("reviewer-b".into()));
+    for r in ["abc1234", "v0.18", "v0.18.0-rc1", "#128", "release-0.18.0"] {
+        let e = db.finding_verify("RB-014.1", r).unwrap_err().to_string();
+        assert!(e.contains("published release tag"), "{r}: {e}");
+    }
+    assert_eq!(db.finding("RB-014.1").unwrap().unwrap().status, "accepted");
+    let v = db.finding_verify("RB-014.1", "v0.18.0").unwrap();
+    assert_eq!(
+        (v.status.as_str(), v.verified_ref.as_deref()),
+        ("verified", Some("v0.18.0"))
+    );
+    assert_eq!(visibility_of(&db.get(&f.record_id).unwrap()), "team");
+    // Another category takes any ref, and stays team.
+    db.finding_verify("RB-014.2", "abc1234").unwrap();
+    assert_eq!(visibility_of(&db.get(&other.record_id).unwrap()), "team");
+    // It survives a reopen.
+    db.close().unwrap();
+    let mut db = Mnemo::open(dir.path().join("f.mnemo"), PW).unwrap();
+    assert_eq!(visibility_of(&db.get(&f.record_id).unwrap()), "team");
+}
+
+/// Review round 1 (RB-014): `update` (which `update_text` calls), `delete`
+/// and `essence_remove` refuse a finding's record; `essence_remove` refuses any
+/// record that isn't an essence item.
+#[test]
+fn a_finding_changes_only_by_triage_and_verification() {
+    use mnemo_engine::{EssenceScope, EssenceSection, MemoryPatch};
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir);
+    db.set_author(Some("reviewer-b".into()));
+    let f = db
+        .finding_add(&spec("RB-014.1", "SECURITY", "MEDIUM", "t"))
+        .unwrap();
+    let id = f.record_id;
+    let e = db
+        .update(
+            &id,
+            MemoryPatch {
+                content: Some("other".into()),
+                vector: Some(vec![1.0, 0.0, 0.0, 0.0]),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("can't be updated"), "{e}");
+    let mut keys = serde_json::Map::new();
+    keys.insert("_mnemo.visibility".into(), "team".into());
+    assert!(db
+        .update(
+            &id,
+            MemoryPatch {
+                caller_keys: Some(keys),
+                ..Default::default()
+            },
+        )
+        .is_err());
+    let e = db.delete(&id).unwrap_err().to_string();
+    assert!(
+        e.contains("can't be deleted") && e.contains("rejected"),
+        "{e}"
+    );
+    let e = db.essence_remove(&id).unwrap_err().to_string();
+    assert!(e.contains("not an essence record"), "{e}");
+    // Unchanged.
+    let after = db.finding("RB-014.1").unwrap().unwrap();
+    assert_eq!((after.title.as_str(), after.status.as_str()), ("t", "open"));
+    assert_eq!(
+        mnemo_engine::visibility_of(&db.get(&id).unwrap()),
+        "private"
+    );
+    // `essence_remove` refuses a plain fact too, and still removes an item.
+    let fact = db
+        .remember(Memory::new(
+            "a plain fact",
+            MemoryType::Semantic,
+            vec![0.0, 1.0, 0.0, 0.0],
+        ))
+        .unwrap();
+    assert!(db.essence_remove(&fact).is_err());
+    assert!(db.get(&fact).is_ok());
+    let item = db
+        .essence_add(EssenceScope::Project, EssenceSection::Open, "an item", None)
+        .unwrap();
+    db.essence_remove(&item).unwrap();
+    assert!(db.get(&item).is_err());
+    // `delete` still deletes everything else.
+    db.delete(&fact).unwrap();
+    assert!(db.get(&fact).is_err());
+}
