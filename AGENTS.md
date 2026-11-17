@@ -367,10 +367,13 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
      are `planner-a` (`planner`), `worker-a` (`worker`), `reviewer-b` and
      `reviewer-a` (`reviewer`). Resuming by id keeps a session on its own
      conversation.
-   - **Only the Worker writes facts,** each with a key (the MCP `remember`
-     tool with `key`, or `test/scripts/project_memory.py remember --key`).
-     The brain's default agent (`mnemo default-agent`, `cursor-agent`)
-     gives every such write the right slot, so no write names the agent.
+   - **Who writes facts** (user decision 2026-11-17): the Worker writes
+     facts, each with a key (the MCP `remember` tool with `key`, or
+     `test/scripts/project_memory.py remember --key`). **The Planner**
+     writes only the project essence and keyed `decision.*`, `spec.*` and
+     `status.*` facts. The brain's default agent (`mnemo default-agent`,
+     `cursor-agent`) gives every such write the right slot, so no write
+     names the agent.
    - **Every session may use the coordination records** (user decision
      2026-11-16): read and `ack` its own inbox, `post` messages, and take,
      renew and release claims. Until HARNESS-DOGFOOD-1's Run 1, the
@@ -380,9 +383,10 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
      `done`; the Worker takes them with `task next` and moves them through
      `active`, `ready` and `blocked`; a Reviewer may add a task for the
      Planner (`--for planner`) when the user calls a review.
-   - **The Planner and the Reviewers read facts** with `recall` (MCP) or
-     `mnemo recall --no-track`, and never call `remember`, `update`,
-     `forget` or `essence` writes.
+   - **The Reviewers read facts** with `recall` (MCP) or `mnemo recall
+     --no-track`, and never call `remember`, `update`, `forget` or
+     `essence` writes. The Planner reads the same way, and writes only
+     what the bullet above allows it.
    - **A session in a client `onboard` doesn't wire** (`reviewer-a` runs in
      Antigravity) has no hooks. It reads through the CLI
      (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
@@ -395,7 +399,8 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    decision, review triage, handoff, or verification as a
    `PLANNER — PLAN | DECISION | REVIEW | HANDOFF | VERIFIED` entry in
    `PLAN.md`'s `WORKLOG`. Read the project brain with `recall` or `mnemo
-   recall --no-track`, and never write facts to it (tmux rule 9).
+   recall --no-track`. Write to it only the project essence and keyed
+   `decision.*`, `spec.*` and `status.*` facts (tmux rule 9).
 2. **Hand off tracked-file edits (never commit directly):** You own the
    content of root `README.md`, `index.html`, `.gitignore`, and the
    protocol text in `AGENTS.md` (this "Multi-agent roles & coordination"
