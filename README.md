@@ -141,7 +141,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.17.1", "semantic", key="current-release")
+    db.remember_text("the current release is v0.17.2", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -162,6 +162,23 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.17.2: from our own agents' first run
+
+Built while this project's own agents handed their work to each other
+through their brain, and shaped by what that run turned up:
+
+- **A task you added tells you when it's ready** for your `done`: once on
+  your next turn, and in your session's brief while it waits.
+- **A session shows as present from its start** (`mnemo claim who`), not
+  only after its first write.
+- **The built-in model's download tries again** after a dropped
+  connection, a timeout or a server error, and never after a file that
+  doesn't match its checksum.
+- **Smaller:** `cache` takes no path in a git repository; `mnemo://about`
+  shows the counts; `who`'s `alive` reads `"yes"`, `"no"` or `"unknown"`
+  in the CLI and over MCP; finding records an older `mnemo` re-tagged reads less.
+- The iOS and Android packages stay at 0.17.0.
 
 ## What's new in v0.17.1: clearer setup output
 
