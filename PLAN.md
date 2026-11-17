@@ -327,7 +327,7 @@ read. From now on:
 
 | Release | Lookups | Hit | Partial | Miss: not stored | Miss: not found |
 |---|---|---|---|---|---|
-| v0.15.0 (from 2026-11-14) | 65 | 26 | 25 | 14 | 0 |
+| v0.15.0 (from 2026-11-14) | 66 | 26 | 26 | 14 | 0 |
 
 First lookup (PLANNER-A, 2026-11-14): "keyword tokenizer 2 and older
 builds opening the file" → hit (rank 1, sim 0.64), the Worker's TOK-1
@@ -37860,3 +37860,1282 @@ Nothing else changed in either file.
 EPIPE-1); the README and site are staged; the tag", from its step 1 (the
 HANDOFF commit, with that entry's file list and commit message), through
 to stopping at the approval.
+
+### 2026-11-16 — WORKER — DONE — v0.17.0 tagged; the release waits at "approve the release (v0.17.0, mobile true)"
+
+Brain: "release order tag approve attest registries site byte-equal
+attestation verify delete branches" → hit (`decision.release-order`).
+Run before the work.
+
+1. **Your HANDOFF commit:** `a37bd9a` (`README.md`, `index.html`), on its
+   own. I checked both fixed lines first ("`update`, `thread start`,
+   `essence update|resolve|remove` and the new coordination commands";
+   "for a pre-approved task or a message to it by name").
+2. **The coordination files:** `90198b9`, `chore(plan): sync coordination
+   files` (`PLAN.md` and `reviewer_notes.md`; not `SECURITY.local.md`,
+   which git doesn't track). Pushed to `release-0.17.0`.
+3. **`main` fast-forwarded** from `35cff9f` to `90198b9`. Its push runs
+   on `90198b9`: CI success, Mobile CI success.
+4. **The tag:** `v0.17.0`, annotated "MNemo 0.17.0" (tag object
+   `fadd514`, commit `90198b9`), pushed.
+5. **The release run 43838673551 is waiting on the `release`
+   environment** at "approve the release (v0.17.0, mobile true)". Every
+   job before the gate succeeded: version check, the 5 CLIs, the 5
+   wheels, the sdist and its check, `SHA256SUMS`, the 5 artifact checks,
+   and the Swift and Android builds.
+
+**Stopping for the user's click.** After it: attest and its order, the
+four registries and the GitHub Release, the site's files against `main`,
+`gh attestation verify`, then the branch deletions, as your entry lists.
+
+### 2026-11-16 — PLANNER-A — REVIEW + NEEDS-USER — v0.17.0 tagged; the release waits for the user's approval click
+
+Checked:
+- `v0.17.0` is annotated ("MNemo 0.17.0") on `90198b9`, which is
+  `origin/main`;
+- on `main`: `ef0c1af` (PR 114), then `a37bd9a` (the HANDOFF), then
+  `90198b9` (the sync);
+- tag run 43838673551 is `waiting`. Only "approve the release (v0.17.0,
+  mobile true)" isn't done, and every other job before it succeeded or
+  was skipped as planned.
+
+**NEEDS-USER:** approve run 43838673551
+(https://github.com/toarchkumar/mnemo/actions/runs/43838673551). After
+the click, the Worker does step 4 of my entry "PR 114 accepted (RB-013
+and EPIPE-1); the README and site are staged; the tag".
+
+### 2026-11-16 — PLANNER-A — DECISION + DISPATCH — the user approved v0.17.0; do the after-the-tag checks
+
+**The user (2026-11-16):** "Release approved". In run 43838673551 the
+approval and `attest` have succeeded, Create GitHub Release has succeeded,
+and PyPI, crates.io and `attach` are running.
+
+**Dispatch:** once the run completes, do step 4 of my entry "PR 114
+accepted (RB-013 and EPIPE-1); the README and site are staged; the tag":
+- `attest` and its order;
+- the four registries;
+- the GitHub Release (12 engine files, plus the XCFramework zip and the
+  AAR);
+- the site's files byte-equal to `main`, `index.html` included this time;
+- `gh attestation verify` with `--source-ref refs/tags/v0.17.0`;
+- the branch deletions, each listed first.
+
+**Don't install v0.17.0 on this Mac, and don't touch the project brain.**
+The user's post-release steps cover both.
+
+Log DONE and stop.
+
+### 2026-11-16 — WORKER — DONE — v0.17.0 released: the after-the-tag checks all pass
+
+Brain: no lookup and no write. Your entry says not to touch the
+project brain. The release order came from the fact recalled at the
+previous step (`decision.release-order`).
+
+**Run 43838673551: success.** On GitHub, the approval on the `release`
+environment is by `toarchkumar`.
+
+1. **Attest, and its order:**
+   - `attest the binaries` ran 15:04:33 to 15:04:41Z and succeeded.
+   - `publish to PyPI` and `publish to crates.io` started at 15:04:46,
+     `attach engine assets` at 15:04:49, and the gate at 15:05:31.
+     Each started after attest ended.
+2. **The four registries:**
+   - **crates.io:** `max_version` 0.17.0.
+   - **PyPI:** 0.17.0 with 6 files (5 wheels and the sdist).
+   - **The Swift mirror:** `toarchkumar/mnemo-swift` has tag 0.17.0, and
+     `mobile (Swift verify published)` succeeded.
+   - **Maven Central:** `mnemo-android` 0.17.0's `.pom`, `.aar` and
+     `.module` return 200, and `maven-metadata.xml` has `latest` and
+     `release` 0.17.0, as of 15:18:29Z. The Android job ran
+     `publishAndReleaseToMavenCentral` with `DRY_RUN: false` and ended
+     15:07:23. `repo1` returned 404 until about 11 minutes later
+     (normal sync lag).
+3. **The GitHub Release** `v0.17.0`: not a draft, not a prerelease, 14
+   assets.
+   - **The 12 engine files:** 5 CLIs, 5 wheels, the sdist and
+     `SHA256SUMS`.
+   - **Mobile:** `MnemoFFI-0.17.0.xcframework.zip` and
+     `mnemo-android-0.17.0.aar`.
+4. **The site:** Pages built `90198b9` and succeeded. These files are
+   byte-equal to `origin/main` (`cmp`):
+   - `install.sh`: 8547 bytes;
+   - `install.ps1`: 8763 bytes;
+   - `llms.txt`: 1821 bytes;
+   - `llms-full.txt`: 16186 bytes;
+   - `index.html`: 56379 bytes.
+5. **The attestation:**
+   - I downloaded `mnemo-v0.17.0-aarch64-apple-darwin` to the scratchpad
+     only. It isn't installed, and it never touched the brain.
+   - Its `SHA256SUMS` line: OK.
+   - `gh attestation verify --repo toarchkumar/mnemo --signer-workflow
+     toarchkumar/mnemo/.github/workflows/release.yml --source-ref
+     refs/tags/v0.17.0` (the install script's flags) exited 0.
+   - The JSON shows 1 verified attestation: ref `refs/tags/v0.17.0`, the
+     signer at `refs/tags/v0.17.0`, run 43838673551. Its subjects are
+     the release binaries.
+6. **The branches:**
+   - **Listed first:** `release-0.17.0` (local and origin, at `90198b9`,
+     equal to `main`). No `rel0170-*` was left on either.
+   - **Deleted:** `release-0.17.0` on origin and locally.
+   - **After:** none of either name on origin.
+   - The tree is on `main` at `90198b9`. `PLAN.md` holds only these
+     WORKLOG entries, uncommitted.
+
+Stopping.
+
+### 2026-11-16 — PLANNER-A — VERIFIED — v0.17.0 (Phase 13a, agents coordinating on one machine) is released
+
+**Checked myself:**
+- crates.io `mnemo-engine` 0.17.0, not yanked;
+- PyPI 0.17.0 with 6 files;
+- mnemo-swift tag `0.17.0` (`511f6e1`);
+- the live site's `index.html` byte-equal to `main`'s;
+- no `release-0.17.0` or `rel0170-*` branch left on `origin`.
+
+**The Worker's entry covers the rest:**
+- `attest` ran before `attach` and both publish jobs;
+- Maven Central's 0.17.0 files return 200, after the usual sync lag;
+- the Release has 14 assets;
+- `install.sh`, `install.ps1`, `llms.txt` and `llms-full.txt` are
+  byte-equal to `main`;
+- the attestation verifies with the scripts' flags at
+  `refs/tags/v0.17.0`.
+
+**Phase 13a shipped:**
+- messages, tasks, claims and presence;
+- the per-turn hook, and Stop (opt-in);
+- the guardrails and the kill switch;
+- visibility and freshness;
+- the guide's "Working with other agents".
+- Path 2 (the idle wake-up) is carried as WAKE-SOCKET.
+
+**Carried, all LOW:**
+- COORD-LEGACY-SCAN;
+- the MCP `about` counts;
+- CLI-PATHLESS for the commands that still take a path;
+- MODEL-RETRY;
+- RB-011.3 rec 5 (the Windows hook shell).
+
+**RB-012 and RB-013's items** are marked `VERIFIED` by REVIEWER-B at its
+next pass. **RB-013.2** moves here in the next entry. **RB-006.12** stays
+open, since no daemon has shipped.
+
+**Next:**
+- the user's post-release steps (the next NEEDS-USER), which also start
+  HARNESS-DOGFOOD-1's path;
+- then rule 9's "name the agent" goes, once `mnemo default-agent` is set
+  on this brain.
+
+### 2026-11-16 — PLANNER-A — NOTE — RB-013.2 moved here from SECURITY.local.md (its fix shipped in v0.17.0)
+
+Verbatim from `SECURITY.local.md`, as it stood at the tag (`90198b9`).
+The fix is in `ef0c1af` (PR 114), released as v0.17.0.
+
+#### RB-013 (REVIEWER-B, 2026-11-15) — the v0.17.0 scoped READY pass (`release-0.17.0` at `9be90cc`): RB-013.2
+
+One item. Everything in it is tested (`/tmp/rb-scratch/q13/b.py` and `a.sh`). The rest of the batch is in `reviewer_notes.md`. None of this is in a published release. Visibility is a filter and not a security boundary until 13b, as the note says; this item is about the filter doing what its table promises.
+
+##### RB-013.2 — [SECURITY] [MEDIUM] A `private` record is shown without being asked for on six read surfaces, and a keyed write that leaves out the flag makes the next version visible
+
+- **Status:** `ACCEPTED`
+
+###### Part A: the read surfaces
+
+- **Tested:** a brain with a team fact and four private records by one agent (an unkeyed fact, a keyed one, one tagged as onboarding, one past its review date), then 30 read surfaces with their defaults.
+  - **24 showed none of the four:** `recall` by text, by keywords and as another agent; `about`; `export` as Markdown, as JSON Lines, with `--git`, and with `--git --visibility all`; `inbox`; the essence render; the brief; the per-turn line; the MCP `recall` (text and keywords), `about`, `history`, `stats`, `essence` and `inbox`; the resources `mnemo://about`, `mnemo://key/{key}` and `mnemo://guide`; the `session-start` prompt with a task, and `session-end`.
+  - **6 showed them:**
+
+| Surface | Private records shown | Can the caller ask for less? |
+|---|---|---|
+| The resource `mnemo://recent` | 3 of 4 (all but the onboarding one, which it never lists) | No |
+| The `session-start` prompt with no task | The same 3 (it falls back to the most recent memories) | No |
+| The MCP `list` tool | All 4 | No: it has no `visibility` argument |
+| `mnemo list` | All 4 | No flag |
+| `mnemo history --key` | The private keyed one | No flag (the MCP `history` hides it) |
+| `mnemo stale` | The private one past its review date | No flag |
+
+- **By reading:** `Mnemo::recent` filters rows by kind, superseded and TTL, and has no visibility test (`store/recall.rs:60-80`); `mcp/context.rs` never mentions visibility, and both the resource and the prompt call `recent`. `Mnemo::memories` returns every live record, and the MCP `list` returns what it gives (`mcp.rs:2788`).
+- **Finding:**
+  1. **The two that matter are the ones a client reads on its own.** A resource and a prompt are what an MCP client attaches to a session without the agent choosing to; `mnemo://recent` is the obvious one to attach. A private note then sits in every session's context, which is what "only when asked" is meant to prevent.
+  2. **The MCP `list` is one call from any agent,** and its description says "every live memory". With no argument to narrow it, an agent that lists to look around gets the private records with nothing marking them.
+  3. **The CLI and the MCP server disagree about `history`:** the tool hides a private key's chain, the command shows it.
+  4. The note's table names recall, `about`, the brief, `inbox` and the exports, and those are right. These six aren't in the table, so nobody decided them.
+- **Recommendation:**
+  1. **`recent` takes the levels to show,** public and team by default, and checks the row's bits and then the record, as recall does. The resource and the prompt use the default. (See `RB-013.3` in `reviewer_notes.md` before adding a row-level check: the private bit is also the "settled turn" bit, and `recent` skips turns only because it keeps facts alone.)
+  2. **The MCP `list` gets a `visibility` argument** with the same default as `recall`, and says in its description that private records need it.
+  3. **`mnemo list`, `history` and `stale` get `--visibility`** with the same default. If `list` is meant to be the one command that shows everything, say so in its help and mark each private row, as `inspect` does with its badge.
+  4. **Add the six to the note's table,** with the decision for each.
+  5. **One test that walks every read surface** with a private record and fails when a new surface shows it by default. A new tool or resource is where the next one will come from.
+
+###### Part B: a keyed write over a private fact, with no `--visibility`, is visible
+
+- **Tested:**
+
+| Step | Result |
+|---|---|
+| `remember --text "… yak-onyx" --visibility private --key plan.draft` | Added. `recall` doesn't show it by default |
+| `remember --text "plan v2 still yak-onyx" --key plan.draft` (v0.17, the same agent, no flag) | `superseded` |
+| `recall --text "plan yak-onyx"` | **Shows version 2** |
+| For comparison: `update <id> --text …` on a private fact, no flag | Still hidden |
+
+  - The same happens when the second write comes from v0.16.1, which has no flag to give (`a.sh`).
+  - By reading: `store/keyed.rs`'s comments say visibility and freshness "are the caller's": each version carries what its writer passed, and the default is `team`.
+- **Finding:**
+  1. **Updating a fact by its key is the normal way to change it** (the guide tells agents to), and nothing about the second write suggests the level has to be repeated. The agent that wrote "plan.draft" as private and revises it an hour later publishes it.
+  2. It's the note's own reason 2 for not trusting `private` yet ("a record is one forgotten flag away from an export"), built into the most common write.
+  3. Nothing is printed when a slot goes from private to team.
+- **Recommendation:**
+  1. **A keyed write with no visibility given takes the live version's.** A caller who wants to change the level says so.
+  2. **Say when the level changes:** `superseded (private → team)` in the CLI's outcome and the MCP result.
+  3. The same for `--review-by` if the freshness fields follow the same rule (I didn't test them).
+  4. Tests for both.
+
+###### What an older build does (for the CHANGELOG, not a fix)
+
+- v0.16.1 shows private records in `recall`, `list` and `export`: it doesn't know the level exists. That can't be changed in a published build, and "a filter, not a security boundary" covers it, but the CHANGELOG's mixed-version rule should say it in so many words (`RB-013.4` item 4 in `reviewer_notes.md`).
+
+- **Would I hold the tag for it?** For Part A's recommendations 1 and 2 and Part B's recommendation 1, yes. Each is small, and together they're what makes "private" mean what the README will say it means on the day it ships.
+
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-15), before the tag, in the RB-013 fix PR (`rel0170-rb013`). Neutral wording in commits, the PR and the CHANGELOG ("visibility filters on more read surfaces", "a keyed write keeps the level"). This stays here until v0.17.0 ships.
+  - **Part A:**
+    - rec 1: `recent` takes the levels, public and team by default, after RB-013.3's own bit;
+    - rec 2: the MCP `list` gets `visibility`, and its description says so;
+    - rec 3: `mnemo list`, `history` and `stale` get `--visibility` with the same default, and `list` marks private rows when asked for all;
+    - rec 4: the six surfaces are in the note's table;
+    - rec 5: one test that walks every read surface, the CLI, the MCP tools, the resources and the prompts, with a private record, and fails on any default leak.
+  - **Part B:**
+    - rec 1: a keyed write with no level takes the live version's;
+    - rec 2: `superseded (private → team)` when it changes;
+    - rec 3: the same for `review_by`;
+    - rec 4: tests.
+  - The older build's behaviour goes in the CHANGELOG (RB-013.4 item 4).
+
+### 2026-11-16 — PLANNER-A — NEEDS-USER — v0.17.0's post-release steps: install, the default agent, the per-turn hook, named sessions, and one check
+
+**In a plain terminal** (not a tmux session), in
+`~/Documents/GitHub/mnemo.nosync`:
+1. **Install the release:**
+   - `curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh`,
+     then `rehash; mnemo --version`. It should say `mnemo 0.17.0`.
+   - The script names `~/.cargo/bin/mnemo` if it's still there;
+     `cargo uninstall mnemo-engine` removes it.
+2. **The keychain:** run `mnemo about | head -3`.
+   - The binary is new, so macOS may ask to let `mnemo` use the brain's
+     keychain item. Choose **Always Allow**.
+   - The user does this, never an agent.
+3. **The default agent:** `mnemo default-agent --set cursor-agent`, then
+   `mnemo default-agent`, which should print `cursor-agent`.
+4. **The per-turn hook:** run `mnemo onboard --client claude-code` and
+   answer `y`. Its plan should add only the `UserPromptSubmit` hook
+   (`hook user-prompt`).
+   - **Leave `--wake stop` off** until HARNESS-DOGFOOD-1's Run 1.
+5. **`mnemo wake status`:** it shouldn't say `refuse` or `hold` for
+   `crossSessionInbound`.
+6. **Restart the tmux sessions with names,** each by its own conversation
+   id, so the picker can't mix them up. In each pane, `/exit`, then:
+   - worker-a: `MNEMO_AGENT=worker-a MNEMO_ROLE=worker claude
+     --remote-control --resume ac58fe13-1fb0-496d-bb51-b159c87e2361`
+   - reviewer-b: `MNEMO_AGENT=reviewer-b MNEMO_ROLE=reviewer claude
+     --remote-control --resume 06f4c846-9900-4055-ab09-549b413fb9c4`
+   - planner-a, last: `MNEMO_AGENT=planner-a MNEMO_ROLE=planner claude
+     --remote-control --resume 49251894-c383-4c21-b990-e99807c717ac`
+7. **The check** (the by-hand one from step 1):
+   - from the plain terminal, run `mnemo post planner-a "hello from the
+     user" --as user`;
+   - then type anything in planner-a.
+   - **Pass:** planner-a's turn starts with mnemo's line, "1 unread". That
+     shows the hooks see `MNEMO_AGENT`.
+
+**reviewer-a in Antigravity** needs nothing installed beyond step 1. It
+uses `--as reviewer-a` on the coordination commands (rule 9's exception).
+
+**After the user's report:**
+- I remove rule 9's "name the agent" (a HANDOFF);
+- the Worker updates `seed.json` and the onboarding note to match;
+- then HARNESS-DOGFOOD-1's plan: Run 1 moves this repo's pointers and
+  dispatches onto the inbox and tasks.
+
+### 2026-11-16 — PLANNER-A — NOTE + PLAN — the user's steps 1 to 4 done; the user's feedback: `onboard`'s terminal output "read like a jumble of text"; ONBOARD-UX is planned as v0.17.1
+
+**The user's steps (2026-11-16):**
+- `mnemo 0.17.0` is installed (SHA-256 and attestation checked);
+- `about` opens with the new counts: 251 facts and 12,880 turns;
+- `default-agent` is `cursor-agent`;
+- `onboard --client claude-code` added the `UserPromptSubmit` hook. I
+  checked `.claude/settings.local.json`: 4 events, one hook each.
+
+**The user's feedback (2026-11-16):** "the onboarding output in terminal
+needs to be better formatted, it read like a jumble of text IMO". I read
+the pasted output, and agree. At a terminal:
+1. **The whole guide (about 400 lines) is printed after the writes.** It
+   buries the result. That order was v0.16.1's fix for agents that
+   `tail`. A person at a terminal doesn't need the guide dumped; a
+   pointer to `mnemo onboard --guide` is enough.
+2. **The plan shows every hook as `+`,** though three were already there
+   and unchanged. Only the new one was added. And "+ the guide's card
+   (163 lines)" for a file that changed by a line or two.
+3. **The summary repeats absolute paths** ("wrote: /Users/…"), and **prints
+   the keychain-delete command on every run.** That belongs to `--undo`
+   only, and alarms a reader on a routine re-run.
+4. **No structure:** the plan, the question, the result and the next
+   steps run together, with no headings, spacing or marks.
+5. **The install script's "another mnemo is on your PATH" line** is one
+   run-on sentence of about 250 characters.
+
+**ONBOARD-UX, as v0.17.1** (a patch: output only, no format or behaviour
+change). It goes first after the user's step 7, and before
+HARNESS-DOGFOOD-1, because `onboard` is a new user's first impression
+(the goal is adoption):
+- **At a terminal:**
+  - the plan grouped under short headings (Brain, Model, Claude Code,
+    Cursor, Git), with each line marked added, changed, unchanged or
+    removed;
+  - unchanged items collapsed into one line ("3 hooks already right");
+  - after the writes: a short "Done" block, then "Next" (restart the
+    client, trust the workspace), then the human steps last;
+  - "The guide: `mnemo onboard --guide`" in place of the guide itself;
+  - paths relative to the repo;
+  - the keychain-delete line only with `--undo`;
+  - colour only on a TTY, with `NO_COLOR` respected.
+- **Without a terminal (an agent):** unchanged from v0.16.1. The guide
+  first, the human steps last, and the pass-on line.
+- **The install script's notes** are wrapped and split: what was found,
+  then what to do, each on its own short line.
+- **A test** pins both shapes: a TTY (through a pty or the dev-hooks
+  switch) and no TTY.
+
+Not dispatched yet. The Worker is about to be restarted with its name
+(step 6).
+
+### 2026-11-16 — PLANNER-A — NOTE + NEEDS-USER (later) — KEYCHAIN-REPROMPT: every upgrade makes macOS ask for the brain's keychain item again
+
+**The user's step 5:** `mnemo wake status` says "wake-ups: on" and
+"crossSessionInbound: not set in the settings files found". That's the
+default, which delivers.
+
+**The user (2026-11-16):** "each step I had to allow with computer
+password".
+- **Why:** macOS ties a keychain item's access to the program that may
+  read it. The release binaries aren't signed with a stable identity:
+  `codesign -dv ~/.local/bin/mnemo` shows an ad-hoc signature with no
+  team identifier. So each release is a new program to macOS, and it
+  asks again.
+- **Choosing "Allow"** asks again on every run. **"Always Allow"** adds
+  this binary to the item, until the next upgrade.
+- **The risk for this repo:** a session's MCP server and hooks read the
+  key without a terminal. A pending dialog makes a hook time out with no
+  word, and a server fails to open the brain. So I've asked the user to
+  run `mnemo info` once more and choose **Always Allow** before
+  restarting the sessions.
+
+**For every user:** each upgrade re-prompts once per machine (and
+"Allow" re-prompts on every call).
+
+**The lasting fix is the user's to decide** (cost and an account):
+- sign and notarize the macOS release binaries with an Apple Developer
+  ID: the Apple Developer Program, $99 a year, and the signing identity
+  as a CI secret;
+- the keychain item's access then follows the designated requirement
+  (the team ID), so "Always Allow" carries across releases.
+
+**Until then, in v0.17.1 (ONBOARD-UX):**
+- the CHANGELOG's upgrade note, and the install script's macOS "Next"
+  line, say that the first run after an upgrade asks for the keychain
+  once, and to choose "Always Allow";
+- a hook or server that can't read the key in time says so on stderr
+  ("the keychain is waiting for permission"), if the keychain's error
+  allows telling that apart from a missing item.
+
+**NEEDS-USER (later, no rush):** sign the macOS binaries with a
+Developer ID, or not.
+
+### 2026-11-16 — PLANNER-A — VERIFIED + DISPATCH + NEEDS-USER — v0.17's post-release steps all pass; ONBOARD-UX is v0.17.1; rule 9's change for the user
+
+**The user's steps 5 to 7 (2026-11-16), all PASS:**
+- **5:** `mnemo wake status` says wake-ups are on, and
+  `crossSessionInbound` isn't set (the default delivers).
+- **6, the second try, checked by process:**
+  - **The first try** started all three with a bare `claude
+    --remote-control --resume`, with no names. I found that through each
+    process's environment, and the user redid it with `export`.
+  - **Each session:**
+    - planner-a: conversation `49251894…`, `MNEMO_AGENT=planner-a`,
+      `MNEMO_ROLE=planner`;
+    - worker-a: `ac58fe13…`, `worker-a`, `worker`;
+    - reviewer-b: `06f4c846…`, `reviewer-b`, `reviewer`.
+  - Each one's `mnemo serve` inherited the same pair.
+- **7:** `mnemo post planner-a "hello from the user" --as user` gave
+  `01M7JTDP5VQCVR9PJ8WVG0DT0P hop 0`.
+  - planner-a's next turn opened with the per-turn hook's "mnemo: new for
+    you: 1 message", then the framing line, then "- user: hello from the
+    user".
+  - I acked it, and the inbox is now empty.
+  - **So the hooks see `MNEMO_AGENT`:** step 1's by-hand check is done.
+
+**Also observed:** the per-turn line said "Call `inbox` or `task` (with
+`next`, or an update to renew a claim)" for a message alone. Its tail
+belongs only when a task or a claim is in the counts. That goes into
+ONBOARD-UX below.
+
+---
+
+**Dispatch to the Worker: ONBOARD-UX, as v0.17.1** (a patch: output and
+notes only, no format or behaviour change). Use `release-0.17.1` from
+`main` (`90198b9`), with one PR, `rel0171-onboard-ux`. The scope is my
+entry "the user's feedback: `onboard`'s terminal output 'read like a
+jumble of text'", items 1 to 5 and its spec, plus:
+1. **KEYCHAIN-REPROMPT's interim notes** (my entry on it):
+   - the CHANGELOG's upgrade line, and the install script's macOS "Next"
+     note: the first run after an upgrade asks once for the keychain, so
+     choose "Always Allow";
+   - if the keychain's error can tell "waiting for permission" from "no
+     item", the hook's and the server's stderr say so.
+2. **The per-turn line's call to action** names only what's in its
+   counts: `inbox` for messages, `task next` for ready tasks, and renewing
+   for a claim about to lapse.
+3. **`seed.json` and the brain's onboarding notes:** with
+   `_mnemo.default_agent` set on this brain, writes with no agent go to
+   `cursor-agent`, so "a keyed write must name it" is no longer needed.
+   Update the manifest's line and the workflow note, keyed and
+   superseding, to say the default agent covers it. Keep the helper's
+   `--agent`, which is harmless.
+
+**Both output shapes are pinned by tests:** a TTY (through a pty or the
+dev-hooks switch) and no TTY (unchanged from v0.16.1: the guide first,
+the human steps last, the pass-on line).
+
+**The release:** the bump to 0.17.1 in the same PR; mobile by
+RELEASING.md (no mobile code changes, so off); the dry run on
+`release-0.17.1`; then READY.
+- **Show the new terminal output in DONE**, a TTY `onboard` re-run on a
+  scratch repo, pasted, so I can judge the format before the tag. The
+  user asked for this.
+
+---
+
+**NEEDS-USER: rule 9's text** (AGENTS.md protocol, so the user's call).
+My proposal, edited and handed off once the user agrees:
+1. **"Only the Worker writes facts, with a key and the brain's agent"**
+   loses the agent part. `default-agent` now covers it, and the
+   `"agent_id": "cursor-agent"` instruction goes.
+2. **A new line:** each tmux session starts with its name and role:
+   `export MNEMO_AGENT=<name> MNEMO_ROLE=<role>`, then `claude
+   --remote-control --resume <its conversation id>`.
+3. **A new line:** every session may use its own inbox (`ack`), post
+   messages, and take claims. Only the Worker writes facts. Until
+   HARNESS-DOGFOOD-1's Run 1, the ledgers and the `SendMessage` pointers
+   stay the authority, and the inbox runs beside them.
+
+### 2026-11-16 — PLANNER-A — DECISION + HANDOFF — rule 9 changed (the user: "Yes")
+
+**The user (2026-11-16): "Yes"** to my three changes to tmux rule 9.
+
+**HANDOFF: `AGENTS.md`, the protocol text, rule 9 only:**
+1. **"Only the Worker writes facts"** no longer names the agent: the
+   brain's default agent, `cursor-agent`, covers it.
+2. **A new bullet:** each session is named before its client starts
+   (`export MNEMO_AGENT=… MNEMO_ROLE=…`, then `claude --remote-control
+   --resume <its id>`), with the four names and roles.
+3. **A new bullet:** every session may read and `ack` its own inbox,
+   `post`, and take, renew and release claims. The ledgers and the
+   `SendMessage` pointers stay the authority until HARNESS-DOGFOOD-1's
+   Run 1.
+4. **The read bullet** adds `update` to what the Planner and the
+   Reviewers never call.
+
+**Commit it on `release-0.17.1` first,** on its own, before your PR
+touches `AGENTS.md`'s technical text (Worker rule 3). Commit message:
+`docs(agents): rule 9 names each session, and every session may use the
+inbox`. Then carry on with ONBOARD-UX.
+
+### 2026-11-16 — WORKER — READY — v0.17.1: ONBOARD-UX merged (PR 115, `59e1c03`), the dry run green with mobile off
+
+Brain: "onboard terminal output format plan summary guide printed after
+writes no TTY agents tail" → partial (the onboard decision and the 12.2
+design; nothing on the output format). Run before the work.
+
+1. **The rule 9 HANDOFF:** `1b6df66` (`docs(agents): rule 9 names each
+   session, and every session may use the inbox`). It's the only file in
+   that commit (`AGENTS.md`), and it touches rule 9 only. It went to
+   `release-0.17.1` before the PR touched AGENTS.md.
+2. **PR 115** (https://github.com/toarchkumar/mnemo/pull/115), on
+   `rel0171-onboard-ux`:
+   - `68f21e3`: the change;
+   - `35eb2ab`: the bump;
+   - `ead78be`: the Windows fix.
+   - **CI:** the first run's `rust (windows-latest)` failed on my test, which
+     used the Unix-only `Env::root`; fixed by `ead78be`. Its two macOS
+     mobile jobs were cancelled with "not acquired by Runner… capacity
+     constraints" (no runner, nothing run). The second run passed 24 of 24.
+   - Squash-merged as `59e1c03`, and the branch deleted.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | Feedback 1 (the guide dumped) | A pointer at a terminal: "The guide for agents: `mnemo onboard --guide`" | `onboard_cli::at_a_terminal_the_output_is_grouped_and_short` |
+   | Feedback 2 (every hook `+`) | Each hook is marked added, changed, removed or already right. Same-mark hooks share one line; the already-right ones are counted. A changed skill or rule gives "(+N -M lines)" (an LCS of lines) | the same |
+   | Feedback 3 (absolute paths; the keychain line) | Paths are relative (`~` in the header). The keychain-delete line is only with `--undo`, on a line of its own, never wrapped | the same |
+   | Feedback 4 (no structure) | Headings Brain / Model / Claude Code / Cursor / Git; marks `+ ~ - = !` with a legend; Done (one line per file), then Next (restart the changed clients, then the human steps, the trust prompt among them). Colour only at a terminal, and `NO_COLOR` / `TERM=dumb` turn it off. Wrapping at 80 columns, never inside backticks | the same; `a_real_terminal_gets_the_grouped_view` (a real pty via Python, Unix) |
+   | Feedback 5 (install's run-on line) | Split: what was found, then what to do, each line ≤ 72 characters but for a path (`install.sh`, `install.ps1`) | `install_sh::another_mnemo_on_the_path_is_named` |
+   | No-TTY unchanged | **Byte-compared** against the pre-PR build (`1b6df66`, dev-hooks) at one path, from the same starting states, in 6 cases: first run, the user's re-run, already set up, `--undo`, no `--yes` (exit 3) and `--print`. All 6 are identical except the guide's own reworded sentence (2 lines of the printed guide). | the existing tail-order test, and the 14 earlier onboard tests |
+   | KEYCHAIN-REPROMPT 1 | **The CHANGELOG's** macOS upgrade note: run `mnemo info` once, and choose Always Allow. **`install.sh`** adds it on a macOS upgrade only (a `mnemo` already in `~/.local/bin`) | `install_sh` (none on a first install; present on a macOS upgrade) |
+   | KEYCHAIN-REPROMPT 2 | **The error can tell them apart:** a missing item is `NoSource`; a refusal is a store error ("(reading)"). The hook and the server now name a refusal, with how to allow it, and a missing key still says `mnemo unlock`. **An open dialog doesn't error; it blocks.** So I added `keys::SlowStoreNote`: "still waiting for the keychain…" on stderr after 3 s. **The watchdog goes past the letter of the item** (which asked only to read the error); say if you'd rather it went | `hook_cli::a_keychain_that_refuses_or_waits_is_named`; `cli_keychain::a_refusing_keychain_stops_the_server_with_what_to_do` (the dev-hooks store; `MNEMO_DEV_KEYSTORE_DELAY_MS`) |
+   | Per-turn line | "Call `inbox` to read it/them." / "Call `task` with `next` to take it/one." / "Update the task with `task` to renew its claim / their claims." Only for what's in the counts | `hook::tests::the_turn_line_names_only_what_is_new`; `hook_cli` |
+   | `seed.json` and the brain | The manifest line and `fact.onboarding.workflow` say the default agent covers every write's agent; the helper keeps `--agent`. **The brain:** `fact.onboarding.workflow` superseded (`01M7K07R0XRFKV7DZQ7BRJAD22`), and the unkeyed manifest `01M5NWDK…` updated in place (`_mnemo.default_agent` kept) | |
+
+   - **Also:**
+     - the guide's one sentence ("Run by an agent, its output ends with
+       the `human step:` lines"), with `llms-full.txt` regenerated;
+     - the `onboard` row in `mnemo/README.md`;
+     - an as-built line in `docs/design/12.2-onboard.md`;
+     - AGENTS.md's technical `onboard` row (the two views and both
+       dev-hooks switches);
+     - the CHANGELOG's `[0.17.1]` section.
+   - **The bump:** every manifest and lockfile is at 0.17.1. The Swift and
+     Kotlin READMEs keep 0.17.0, the newest published.
+     `.github/release-mobile` is `false` (no mobile code changed, and
+     0.17.0 published mobile for this minor version).
+   - **Tests** (macOS, run here, load 8.69):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 744
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set: 105 passed;
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py`: all passed;
+     - fmt and every clippy: clean;
+     - after the guide rewrap and the Windows fix: `guide` 5 passed,
+       `onboard_cli` 16 passed.
+3. **The dry run: success** (run 43948527607, `release-0.17.1` at
+   `59e1c03`, mobile off).
+   - `version check`: "engine 0.17.1, mnemo-uniffi 0.17.1, mnemo-android
+     0.17.1", "the commit says mobile: false".
+   - **Every engine job passed:** the 5 CLIs, the 5 wheels, the sdist and
+     its check, `SHA256SUMS`, the 5 artifact checks, the crates.io and PyPI
+     dry runs, attach, and the mobile release note.
+   - **Skipped:** the mobile build, publish and verify jobs (mobile off),
+     and the approval, attest, GitHub Release and gate (a dry run).
+   - The push runs on `59e1c03`: CI success, Mobile CI success.
+4. **The terminal output, as you asked.** A real pty on a scratch repo
+   (scratch `HOME`, the dev-hooks key store, no `claude` on the
+   `PATH`), `NO_COLOR=1`, the path shown as `~/code/myproject`.
+   - This scratch build has no embedder, hence the Model `!`. A release
+     build says "= the built-in model is installed".
+   - In colour, the marks are green, yellow, red, dim and magenta, and the
+     headings bold.
+
+   **A first run** (`onboard --client claude-code,cursor --yes`, the brain
+   already made):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (its key opens it)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      + the MCP server, in .mcp.json
+      + the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks, in
+        .claude/settings.local.json
+      + the skill, in .claude/skills/mnemo/SKILL.md
+    
+    Cursor
+      + the MCP server, in .cursor/mcp.json
+      + the sessionStart, preCompact, sessionEnd and postToolUse hooks, in
+        .cursor/hooks.json
+      + the rule, in .cursor/rules/mnemo.mdc
+    
+    Git
+      + 6 files left out of git, in .git/info/exclude
+    
+      + add   = already right   ! look at this
+    
+    Done
+      + .mcp.json
+      + .claude/settings.local.json
+      + .claude/skills/mnemo/SKILL.md
+      + .cursor/mcp.json
+      + .cursor/hooks.json
+      + .cursor/rules/mnemo.mdc
+      ~ .git/info/exclude
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    
+    Next
+      1. Restart Claude Code and Cursor (or start a new session) so they load the
+         changes.
+      2. Claude Code and Cursor run hooks only in a trusted workspace: accept the
+         trust prompt when you open this project.
+    [exit 0]
+
+   **The user's re-run** (three hooks right, `UserPromptSubmit` missing,
+   the skill a line behind):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (its key opens it)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      + the UserPromptSubmit hook, in .claude/settings.local.json
+      ~ the skill, in .claude/skills/mnemo/SKILL.md (+1 -1 lines)
+      = already right: the MCP server (.mcp.json) and 3 hooks
+    
+    Cursor
+      = already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+    
+      + add   ~ change   = already right   ! look at this
+    
+    Done
+      ~ .claude/settings.local.json
+      ~ .claude/skills/mnemo/SKILL.md
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    
+    Next
+      1. Restart Claude Code (or start a new session) so it loads the changes.
+      2. Claude Code and Cursor run hooks only in a trusted workspace: accept the
+         trust prompt when you open this project.
+    [exit 0]
+
+5. **Brain** (agent `cursor-agent`):
+   - `release.v0.17.1-ready`;
+   - `architecture.onboard-views`;
+   - `architecture.keychain-reprompt`;
+   - the two onboarding notes in item 2.
+
+Stopping for your read of the format, then the README and site HANDOFF and
+the tag order.
+
+### 2026-11-16 — PLANNER-A — REVIEW + NEEDS-USER — v0.17.1 READY accepted (`59e1c03`, the dry run green); the README and site are staged; the format waits for the user's look
+
+Brain: your lookup was partial.
+- **Tally:** 66 lookups, 26 hits, 26 partial, 14 misses not stored.
+
+**Accepted:**
+- **The rule 9 HANDOFF,** as `1b6df66` on its own.
+- **PR 115 (`59e1c03`, 24 of 24):** all five feedback items, with the
+  no-TTY output byte-compared in 6 cases (only the guide's reworded
+  sentence differs); the KEYCHAIN-REPROMPT notes; the per-turn line's
+  call to action; the seed and brain notes.
+- **The watchdog** (`keys::SlowStoreNote`, "still waiting for the
+  keychain…" after 3 s): **ACCEPTED.** An open dialog blocks rather than
+  errors, so a note is the only way the user learns why a session
+  stalls.
+- **The dry run** 43948527607 at `59e1c03`, mobile off.
+
+**Staged for the HANDOFF** (not yet listed for commit):
+- `README.md`: a "What's new in v0.17.1: clearer setup output" section,
+  and Python's example at v0.17.1;
+- `index.html`: the pill, the "current release" line and Python's
+  example at v0.17.1.
+
+**NEEDS-USER:** the user asked to see the new output before it ships. The
+Worker's two pty runs (a first run and a re-run) are in its READY entry
+above. The tag order follows the user's OK.
+
+### 2026-11-16 — PLANNER-A — DECISION + DISPATCH — three wording fixes before v0.17.1's tag (the user: "let's do it")
+
+**The user (2026-11-16):** asked for my recommendation on the new output,
+then said "let's do it" to three fixes before the tag. The reason: until
+the binaries are signed (KEYCHAIN-REPROMPT), every release costs Mac
+users a keychain "Always Allow", so polish goes into this release rather
+than the next.
+
+**Dispatch:** on `rel0171-ux2` from `release-0.17.1` (`59e1c03`), with a
+PR into `release-0.17.1`:
+1. **"! look at this" becomes "! needs attention",** in the legend and
+   wherever it's explained.
+2. **"(its key opens it)" becomes "(key found in your keychain)"** when
+   the key came from the key store. Where it came from elsewhere
+   (`MNEMO_KEY`, a key file or a passphrase), name that source in a few
+   words instead. Never print a key or a path to one beyond its file
+   name.
+3. **Next's trust step is shown only when it's needed:**
+   - **Claude Code** records a trusted folder as
+     `projects[<absolute repo path>].hasTrustDialogAccepted: true` in
+     `~/.claude.json`. I checked that it exists for this repo.
+   - **Read that one field, read-only,** and print nothing else from the
+     file. With `true`, Claude Code's half of the step is left out.
+   - **If the file or the field is missing or unreadable,** keep the step,
+     worded "if Claude Code asks you to trust this folder, accept".
+   - **Cursor** has no such record we know of, so its half stays,
+     worded "if Cursor asks".
+   - **If neither half remains,** and nothing else is in Next, Next is left
+     out.
+4. **A run with nothing to change** prints "Nothing to change; everything
+   is already set up." in place of Done. Show that run too.
+
+**Tests** for each, and the no-TTY output still byte-equal to v0.16.1's
+in the same 6 cases (save the trust-step and wording lines, if they
+appear there too; say which).
+
+**Then:**
+- merge, and a fresh dry run on `release-0.17.1` (mobile off);
+- **paste three pty runs in DONE:** a first run, the user's re-run, and
+  a nothing-to-change run, as before;
+- log READY and stop.
+
+My staged README and site text don't change.
+
+### 2026-11-16 — WORKER — READY — v0.17.1 again: the three wording fixes merged (PR 116, `53f9e9e`), the dry run green with mobile off
+
+Brain: "onboard terminal view wording trust prompt key source" → partial
+(the ONBOARD-UX fact; nothing on the trust record). Run before the work.
+
+1. **PR 116** (https://github.com/toarchkumar/mnemo/pull/116), on
+   `rel0171-ux2` from `59e1c03`: `5e50437`, squash-merged as
+   `53f9e9e`, and the branch deleted.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | 1 | The legend's `!` now reads "needs attention" (it was "look at this") | `onboard_cli::at_a_terminal_the_key_source_and_the_trust_step_are_named` (a `!` line means the legend says it) |
+   | 2 | **The brain's line** names where its key came from. From the store: "(key found in your keychain)". Otherwise: "key from MNEMO_KEY", "key from the file <name>" (the name only), "key from MNEMO_KEY_COMMAND" or "passphrase from MNEMO_PASSPHRASE". `check_brain` returns `Resolved::source`; the key is never printed | the same: the store, then `MNEMO_KEY`, with the key's hex absent |
+   | 3 | **`claude_trusted`** reads `~/.claude.json` and takes `projects[<root>].hasTrustDialogAccepted`, nothing else. **With `true`,** Claude Code's half goes. **Missing, unreadable or `false`:** "If Claude Code asks you to trust this folder, accept: it runs the hooks only in a trusted folder." **Cursor's half** always stays ("If Cursor asks…"), and both together read "If Claude Code or Cursor asks…". **Next is left out when it's empty.** It applies to the clients wired in this run | the same: no record (both), trusted (Cursor only), Claude Code alone and trusted (no Next), `false` (back) |
+   | 4 | A run with nothing to change says "Nothing to change; everything is already set up." in place of Done | `at_a_terminal_the_output_is_grouped_and_short` |
+
+   - **No-TTY output:** byte-compared against the pre-PR-115 build
+     (`1b6df66`) in the same 6 cases.
+     - `--undo`, no `--yes` (exit 3) and `--print` are **identical**.
+     - The first run, the re-run and the already-set-up run differ **only
+       in the guide's sentence** that PR 115 reworded (3 lines of the
+       printed guide).
+     - These fixes don't reach the no-TTY path. The brain line ("its key
+       opens it"), the trust human step and "already set up" are as they
+       were.
+   - **CI:** 18 of 18 after one rerun. On attempt 1, `rust
+     (macos-latest)` failed in
+     `claims::two_processes_race_for_claims_and_exactly_one_wins_each`
+     ("worker-a: 160 error file already locked by another handle", after
+     27.7 s).
+     - The test's children open shared with a 10 s deadline, so a slow
+       runner can hit `Locked` in the 200-round race. It's step 3's test,
+       which passed on PRs 107 to 115, and PR 116 doesn't touch it.
+     - Attempt 2 passed. **Suggest a follow-up** (CLAIM-RACE-FLAKE): the
+       children retry `Locked`, or take a longer deadline, as the step 3
+       kill test's harness does.
+   - **Tests** (macOS, run here):
+     - the full suite with `failpoints`: 745 passed, 0 failed, 1 ignored;
+     - fmt and clippy (CI's features): clean.
+     - **An extra run of mine,** `onboard_cli` with `embed-candle`
+       (CI's embedder job doesn't run it), failed 2 tests at first. Under
+       the tests' closed model URL, that build plans the model's download
+       on every run, so its runs never had nothing to change, and the
+       trust step wasn't first in Next. The tests now hold in both builds:
+       17 passed without it, 18 with it. **PR 115's grouped test had the
+       same blind spot**; it's fixed in this PR too.
+   - **The local suite took about 67 minutes.** `syspolicyd` (49% CPU)
+     and `XprotectService` (32%) held each freshly linked test binary at
+     `_dyld_start`, at a load average of about 5.
+2. **The dry run: success** (run 43972967392, `release-0.17.1` at
+   `53f9e9e`, mobile off).
+   - 23 jobs succeeded. `version check`: "engine 0.17.1, mnemo-uniffi
+     0.17.1, mnemo-android 0.17.1", "the commit says mobile: false".
+   - Skipped: the mobile jobs, and the approval, attest, GitHub Release
+     and gate.
+   - The push runs on `53f9e9e`: CI success, Mobile CI success.
+3. **The pty runs, as you asked.** A real pty on a scratch repo (scratch
+   `HOME`, the dev-hooks key store, no `claude` on the `PATH`),
+   `NO_COLOR=1`, the path shown as `~/code/myproject`. The build has no
+   embedder, hence the Model `!`.
+
+   **A first run** (no `~/.claude.json`, so both trust halves):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (key found in your keychain)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      + the MCP server, in .mcp.json
+      + the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks, in
+        .claude/settings.local.json
+      + the skill, in .claude/skills/mnemo/SKILL.md
+    
+    Cursor
+      + the MCP server, in .cursor/mcp.json
+      + the sessionStart, preCompact, sessionEnd and postToolUse hooks, in
+        .cursor/hooks.json
+      + the rule, in .cursor/rules/mnemo.mdc
+    
+    Git
+      + 6 files left out of git, in .git/info/exclude
+    
+      + add   = already right   ! needs attention
+    
+    Done
+      + .mcp.json
+      + .claude/settings.local.json
+      + .claude/skills/mnemo/SKILL.md
+      + .cursor/mcp.json
+      + .cursor/hooks.json
+      + .cursor/rules/mnemo.mdc
+      ~ .git/info/exclude
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    
+    Next
+      1. Restart Claude Code and Cursor (or start a new session) so they load the
+         changes.
+      2. If Claude Code or Cursor asks you to trust this folder, accept: they run
+         the hooks only in a trusted folder.
+    [exit 0]
+
+   **The user's re-run.** `~/.claude.json` records the folder as trusted,
+   as on the user's Mac, so only Cursor's half is left:
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (key found in your keychain)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      + the UserPromptSubmit hook, in .claude/settings.local.json
+      ~ the skill, in .claude/skills/mnemo/SKILL.md (+1 -1 lines)
+      = already right: the MCP server (.mcp.json) and 3 hooks
+    
+    Cursor
+      = already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+    
+      + add   ~ change   = already right   ! needs attention
+    
+    Done
+      ~ .claude/settings.local.json
+      ~ .claude/skills/mnemo/SKILL.md
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    
+    Next
+      1. Restart Claude Code (or start a new session) so it loads the changes.
+      2. If Cursor asks you to trust this folder, accept: it runs the hooks only in
+         a trusted folder.
+    [exit 0]
+
+   **Nothing to change** (Cursor wired too, so its half stays):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (key found in your keychain)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      = already right: the MCP server (.mcp.json), 4 hooks and the skill
+    
+    Cursor
+      = already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+    
+      = already right   ! needs attention
+    
+    Nothing to change; everything is already set up.
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    
+    Next
+      1. If Cursor asks you to trust this folder, accept: it runs the hooks only in
+         a trusted folder.
+    [exit 0]
+
+   **And the user's own setup** (`--client claude-code`, trusted,
+   nothing to change: no Next):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      = .git/mnemo/project.mnemo (key found in your keychain)
+    
+    Model
+      ! this build of mnemo has no built-in embedder; recall is keyword-only and the
+        hooks save nothing
+    
+    Claude Code
+      = already right: the MCP server (.mcp.json), 4 hooks and the skill
+    
+      = already right   ! needs attention
+    
+    Nothing to change; everything is already set up.
+    
+    The brain: .git/mnemo/project.mnemo
+    The guide for agents: mnemo onboard --guide
+    [exit 0]
+
+4. **Your README and site edits** are in the tree, unstaged, as before.
+5. **Brain:** `release.v0.17.1-ready` superseded with this run.
+
+Stopping for your HANDOFF and the tag order.
+
+### 2026-11-16 — PLANNER-A — DECISION + DISPATCH — `onboard`'s terminal view takes the boot log's `[  OK  ]` tags (the user's choice); v0.17.1 holds for it
+
+**The user (2026-11-16):**
+- **Borrow a classic terminal look:** "we should inspire from some
+  classic ascii famous for their look and feel in terminal programs".
+- **Not Cargo's:** "Cargo is not as popular, we should borrow from a time
+  tested one".
+- **Of three time-tested styles** (the boot log's status tags, Homebrew's
+  `==>` headings, and `git status`'s letters), they chose **the boot log's
+  `[  OK  ]` tags**, from SysV init and systemd.
+- **Timing:** hold v0.17.1 and add it first. That saves Mac users a
+  second keychain "Always Allow".
+
+**Dispatch:** on `rel0171-tags` from `release-0.17.1` (`53f9e9e`), with a
+PR into `release-0.17.1`. **The terminal view only;** the no-TTY output
+stays byte-equal, as before.
+1. **One line per item,** `[ TAG  ] <Section>: <what> (<detail>)`:
+   - **an 8-character tag,** centred like systemd's: `[  OK  ]`,
+     `[ ADD  ]`, `[ EDIT ]`, `[ DEL  ]` (for `--undo`), `[ WARN ]` (needs
+     attention), `[FAILED]`, `[ SKIP ]`;
+   - **the sections are the same** (Brain, Model, Claude Code, Cursor,
+     Git), named in the line rather than as headings;
+   - **already-right items** still collapse, to one `[  OK  ]` line per
+     client ("Claude Code: the MCP server and 3 hooks already right");
+   - a file's path goes in the detail, relative, wrapped at 80 columns
+     with the wrapped text indented under the text, not the tag.
+2. **The legend goes away:** the tags say what they mean.
+3. **Colour, on a terminal only, as systemd does it:**
+   - only the word inside the brackets is coloured;
+   - `OK` and `ADD` in green, `EDIT`, `DEL` and `WARN` in yellow, `FAILED`
+     in red, and `SKIP` dim;
+   - the brackets in the default colour;
+   - `NO_COLOR` and `TERM=dumb` give plain brackets.
+4. **After the lines:**
+   - "Done: N files changed." (or "Nothing to change; everything is
+     already set up.");
+   - then "Next:" with numbered steps, only when there's one;
+   - then "The guide for agents: `mnemo onboard --guide`".
+
+   The "Done" list of files goes: the `ADD`/`EDIT` lines already name
+   them.
+5. **The interactive flow:**
+   - the tagged lines are the plan, then `Write these N changes? [y/N]`;
+   - after the writes, only the "Done", "Next" and guide lines, so
+     nothing is printed twice;
+   - `--print` ends "Nothing was written; run `mnemo onboard --yes` to
+     write it".
+6. **Out of scope:** `install.sh` and `install.ps1`'s output.
+   `release.yml`'s artifact check matches their "installed … (mnemo X)"
+   line, so they stay as they are.
+7. **Tests:** update the terminal-view tests for the tags and colours,
+   with the no-TTY byte comparison in the same 6 cases.
+8. **Then:**
+   - merge, and a fresh dry run on `release-0.17.1` (mobile off);
+   - **paste the four pty runs in DONE** (a first run, the user's re-run,
+     nothing to change, and the user's own setup), plus one `--undo` run;
+   - log READY and stop.
+
+My staged README line for v0.17.1 ("short and grouped … each item marked
+added, changed or already right") still holds, so it doesn't change.
+
+### 2026-11-16 — PLANNER-A — DECISION + DISPATCH (amends the tags entry) — tags are past-tense results, and the plan before a write says "will"
+
+**The user (2026-11-16):** "updated makes sense, I think the verb is key
+because update could be an action instruction". So a tag reports what
+happened, in the past tense, and never reads as an instruction.
+
+**Changes to my tags entry:**
+1. **The tags, 7 characters inside the brackets,** one width for all,
+   centred:
+   - `[  OK   ]` (already right);
+   - `[ ADDED ]`;
+   - `[UPDATED]`;
+   - `[REMOVED]` (`--undo`);
+   - `[ WARN  ]` (needs attention);
+   - `[FAILED ]`;
+   - `[SKIPPED]`.
+
+   Colours as before: OK and ADDED green, UPDATED, REMOVED and WARN
+   yellow, FAILED red, SKIPPED dim. Only the word is coloured.
+2. **Tags only describe what's true or done,** so they're printed after
+   the writes, or when nothing needs writing:
+   - **Interactive, without `--yes`:** first a short plan in the future
+     tense, untagged, grouped by section ("Will add: the UserPromptSubmit
+     hook (.claude/settings.local.json)"; "Will update: the skill (+1 -1
+     lines)"; "Already right: the MCP server and 3 hooks"). Then `Write
+     these N changes? [y/N]`. After the writes come the tagged lines,
+     then "Done", "Next" and the guide line.
+   - **With `--yes`, or nothing to change:** the tagged lines straight
+     away.
+   - **`--print`:** the future-tense plan, then "Nothing was written;
+     run `mnemo onboard --yes` to write it". No tags.
+   - **A failure part-way:** the lines written so far keep their tags,
+     the failed one is `[FAILED ]` with the reason, and the rest are
+     `[SKIPPED]`.
+3. Everything else in the tags entry stands: one line per item, collapsed
+   OK lines, no legend, the no-TTY output byte-equal, the install scripts
+   untouched, and the five pty runs in DONE. **Add a sixth:** an
+   interactive run without `--yes`, answered `y`, showing the plan then
+   the tags.
+
+### 2026-11-16 — WORKER — READY — v0.17.1 again: the boot-log tags merged (PR 117, `6d0288a`), the dry run green with mobile off
+
+Brain: "onboard terminal view tags OK ADD EDIT systemd style" → partial
+(the ONBOARD-UX fact). Run before the work. Both your entries done: the
+tags entry, and its amendment (past-tense tags, "will" before a write).
+
+1. **PR 117** (https://github.com/toarchkumar/mnemo/pull/117), on
+   `rel0171-tags` from `53f9e9e`: `0989dfc`, squash-merged as
+   `6d0288a`, and the branch deleted. CI: 18 of 18 on the first run.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | Tags (amended) | Seven characters, centred: `[  OK   ]`, `[ ADDED ]`, `[UPDATED]`, `[REMOVED]`, `[ WARN  ]`, `[FAILED ]`, `[SKIPPED]`. `[TAG] <Section>: <what> (<file>)`, wrapped at 80 columns under the text | `onboard_cli::at_a_terminal_lines_are_tagged_like_a_boot_log` (every bracketed line is one of the seven, then a section) |
+   | Collapsed OK | One `[  OK   ]` line per client, "… already right"; the brain and the model have their own | the same |
+   | No legend; colour | No legend. Only the word is coloured: OK/ADDED green; UPDATED/REMOVED/WARN yellow; FAILED red; SKIPPED dim. The brackets are plain. `NO_COLOR` and `TERM=dumb` turn colour off | the same |
+   | After the lines | "Done: N files changed." (or "Nothing to change; everything is already set up."), "Next:" when there's a step, then "The guide for agents: `mnemo onboard --guide`" | the same |
+   | Tags are results (amended) | **Before a write:** an untagged, future-tense plan by section ("Will add:", "Will update:", "Will remove:", "Already right:", "Needs attention:", "Will skip:"), then the question, then the tags. **`--yes` or nothing to change:** the tags straight away. **`--print`:** the plan, then "Nothing was written; run `mnemo onboard --yes` to write it." | the same (no `--yes`: plan, exit 3, no tags; `--print`); `a_real_terminal_is_asked_then_shown_the_tags` (a pty answered `y`: plan, question, tags) |
+   | A failure part-way (amended) | `apply` returns an `Outcome` per item (Done, Failed, NotRun) and the error that stopped it. **The failed item:** `[FAILED ]` with the reason (paths made repo-relative). **The rest:** `[SKIPPED]`. **Restart** covers only the clients written. **Exit 1:** "a change failed, and the ones after it weren't made". The no-TTY path returns the same error as before | `at_a_terminal_a_failure_part_way_is_tagged` (a read-only `.cursor`, Unix) |
+   | No-TTY | Byte-compared against `1b6df66` in the same 6 cases. `--undo`, no `--yes` (exit 3) and `--print` are identical. The other three differ only in PR 115's guide sentence (3 lines). **None of the tag work touches the no-TTY path** | the existing no-TTY tests |
+   | Install scripts | Untouched | |
+
+   - **Also changed:** the CHANGELOG's ONBOARD-UX bullet; the
+     `mnemo/README.md` row; the 12.2 note's as-built line; and AGENTS.md's
+     technical `onboard` row.
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 746
+       passed, 0 failed, 1 ignored (about 20 minutes, load about 6);
+     - `onboard_cli`: 18 passed without `embed-candle`, 19 with it;
+     - fmt and clippy (CI's features): clean.
+2. **The dry run: success** (run 43985452970, `release-0.17.1` at
+   `6d0288a`, mobile off).
+   - 23 jobs succeeded and 9 were skipped (mobile, and the tag-only jobs).
+   - `version check`: "engine 0.17.1, mnemo-uniffi 0.17.1, mnemo-android
+     0.17.1", "the commit says mobile: false".
+   - The push runs on `6d0288a`: CI success, Mobile CI success (run
+     43985446501).
+3. **The six pty runs.** A real pty on a scratch repo (scratch `HOME`, the
+   dev-hooks key store, no `claude` on the `PATH`), `NO_COLOR=1`, the
+   path shown as `~/code/myproject`. The build has no embedder, hence the
+   Model `[ WARN  ]`. Runs 2 to 6 have Claude Code's trust record set, as
+   on the user's Mac.
+
+   **1. A first run** (`--yes`, no trust record):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    [  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)
+    [ WARN  ] Model: this build of mnemo has no built-in embedder; recall is
+              keyword-only and the hooks save nothing
+    [ ADDED ] Claude Code: the MCP server (.mcp.json)
+    [ ADDED ] Claude Code: the SessionStart, PreCompact, SessionEnd and
+              UserPromptSubmit hooks (.claude/settings.local.json)
+    [ ADDED ] Claude Code: the skill (.claude/skills/mnemo/SKILL.md)
+    [ ADDED ] Cursor: the MCP server (.cursor/mcp.json)
+    [ ADDED ] Cursor: the sessionStart, preCompact, sessionEnd and postToolUse hooks
+              (.cursor/hooks.json)
+    [ ADDED ] Cursor: the rule (.cursor/rules/mnemo.mdc)
+    [ ADDED ] Git: 6 files left out of git (.git/info/exclude)
+    
+    Done: 7 files changed.
+    
+    Next:
+      1. Restart Claude Code and Cursor (or start a new session) so they load the
+         changes.
+      2. If Claude Code or Cursor asks you to trust this folder, accept: they run
+         the hooks only in a trusted folder.
+    
+    The guide for agents: `mnemo onboard --guide`
+    [exit 0]
+
+   **2. The user's re-run** (`--yes`):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    [  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)
+    [ WARN  ] Model: this build of mnemo has no built-in embedder; recall is
+              keyword-only and the hooks save nothing
+    [ ADDED ] Claude Code: the UserPromptSubmit hook (.claude/settings.local.json)
+    [UPDATED] Claude Code: the skill (.claude/skills/mnemo/SKILL.md, +1 -1 lines)
+    [  OK   ] Claude Code: the MCP server (.mcp.json) and 3 hooks already right
+    [  OK   ] Cursor: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+              already right
+    
+    Done: 2 files changed.
+    
+    Next:
+      1. Restart Claude Code (or start a new session) so it loads the changes.
+      2. If Cursor asks you to trust this folder, accept: it runs the hooks only in
+         a trusted folder.
+    
+    The guide for agents: `mnemo onboard --guide`
+    [exit 0]
+
+   **3. Nothing to change** (Cursor wired too):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    [  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)
+    [ WARN  ] Model: this build of mnemo has no built-in embedder; recall is
+              keyword-only and the hooks save nothing
+    [  OK   ] Claude Code: the MCP server (.mcp.json), 4 hooks and the skill already
+              right
+    [  OK   ] Cursor: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+              already right
+    
+    Nothing to change; everything is already set up.
+    
+    Next:
+      1. If Cursor asks you to trust this folder, accept: it runs the hooks only in
+         a trusted folder.
+    
+    The guide for agents: `mnemo onboard --guide`
+    [exit 0]
+
+   **4. The user's own setup** (`--client claude-code`, trusted, nothing
+   to change):
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    [  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)
+    [ WARN  ] Model: this build of mnemo has no built-in embedder; recall is
+              keyword-only and the hooks save nothing
+    [  OK   ] Claude Code: the MCP server (.mcp.json), 4 hooks and the skill already
+              right
+    
+    Nothing to change; everything is already set up.
+    
+    The guide for agents: `mnemo onboard --guide`
+    [exit 0]
+
+   **5. `--undo`:**
+
+    mnemo onboard --undo: ~/code/myproject (local scope)
+    
+    [REMOVED] Claude Code: .mcp.json
+    [REMOVED] Claude Code: .claude/settings.local.json
+    [REMOVED] Claude Code: .claude/skills/mnemo/SKILL.md
+    [REMOVED] Cursor: .cursor/mcp.json
+    [REMOVED] Cursor: .cursor/hooks.json
+    [REMOVED] Cursor: .cursor/rules/mnemo.mdc
+    [REMOVED] Git: mnemo onboard's block (.git/info/exclude)
+    
+    Done: 7 files changed.
+    
+    Kept: the brain, its key and the model (onboard --undo never removes them).
+    To delete the brain (its memories go with it), remove .git/mnemo/project.mnemo.
+    To delete this brain's keychain entry:
+        security delete-generic-password -s io.github.toarchkumar.mnemo.brain -a 300476cbb4874652c8ef9dfa50f2e744
+    [exit 0]
+
+   **6. Interactive, without `--yes`, answered `y`** (the user's re-run
+   state): the plan, the question, then the tags.
+
+    mnemo onboard: ~/code/myproject (local scope)
+    
+    Brain
+      Already right: .git/mnemo/project.mnemo (key found in your keychain)
+    Model
+      Needs attention: this build of mnemo has no built-in embedder; recall is
+                       keyword-only and the hooks save nothing
+    Claude Code
+      Will add: the UserPromptSubmit hook (.claude/settings.local.json)
+      Will update: the skill (.claude/skills/mnemo/SKILL.md, +1 -1 lines)
+      Already right: the MCP server (.mcp.json) and 3 hooks
+    Cursor
+      Already right: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+    
+    Write these 2 changes? [y/N] y
+    
+    [  OK   ] Brain: .git/mnemo/project.mnemo (key found in your keychain)
+    [ WARN  ] Model: this build of mnemo has no built-in embedder; recall is
+              keyword-only and the hooks save nothing
+    [ ADDED ] Claude Code: the UserPromptSubmit hook (.claude/settings.local.json)
+    [UPDATED] Claude Code: the skill (.claude/skills/mnemo/SKILL.md, +1 -1 lines)
+    [  OK   ] Claude Code: the MCP server (.mcp.json) and 3 hooks already right
+    [  OK   ] Cursor: the MCP server (.cursor/mcp.json), 4 hooks and the rule
+              already right
+    
+    Done: 2 files changed.
+    
+    Next:
+      1. Restart Claude Code (or start a new session) so it loads the changes.
+      2. If Cursor asks you to trust this folder, accept: it runs the hooks only in
+         a trusted folder.
+    
+    The guide for agents: `mnemo onboard --guide`
+    [exit 0]
+
+4. **Your README and site edits** are in the tree, unstaged, as before.
+5. **Brain:** `release.v0.17.1-ready` and `architecture.onboard-views`,
+   superseded.
+
+Stopping for your HANDOFF and the tag order.
+
+### 2026-11-16 — PLANNER-A — REVIEW + HANDOFF + DISPATCH — v0.17.1 accepted (PR 117, `6d0288a`); the user: "Ship it"; the README and site; the tag
+
+**PR 117, ACCEPTED** (18 of 18 checks; the dry run 43985452970 at
+`6d0288a`, mobile off):
+- the seven past-tense tags;
+- the "will" plan before a write;
+- tags only once true;
+- `[FAILED ]`/`[SKIPPED]` part-way, with exit 1;
+- the six pty runs;
+- the no-TTY output byte-equal (except PR 115's guide sentence).
+
+**The user (2026-11-16):** "Ship it".
+
+**Carried as TTY-BACKTICKS (LOW, next release):** the terminal view's
+last line shows `` `mnemo onboard --guide` `` with Markdown backticks;
+plain text on a terminal.
+
+Also carried, from the Worker:
+- **CLAIM-RACE-FLAKE (LOW):** the race test's children retry `Locked`,
+  or take a longer deadline;
+- **macOS's `syspolicyd` scanning** slows local test builds. It's an
+  observation, with nothing to do.
+
+**HANDOFF: commit these on `release-0.17.1` on their own:**
+- `README.md`: "What's new in v0.17.1: clearer setup output", and
+  Python's example at v0.17.1;
+- `index.html`: the pill, the "current release" line and Python's
+  example at v0.17.1.
+- **Commit message:** `docs: v0.17.1 README and site`.
+- **Check the README's v0.17.1 lines against the CHANGELOG.** It says
+  "each item marked added, changed or already right". If you'd rather
+  it name the tags (`[ ADDED ]`, `[UPDATED]`, `[  OK   ]`), say so in
+  DONE and leave both files uncommitted; I'll edit them.
+
+**Dispatch: the release, in v0.17.0's order:**
+1. The HANDOFF commit, then `chore(plan): sync coordination files`.
+2. Fast-forward `main` to `release-0.17.1`, then tag `v0.17.1` (annotated,
+   "MNemo 0.17.1").
+3. Stop at "approve the release (v0.17.1, mobile false)" with every job
+   before it green, then log DONE.
+4. **After the click:**
+   - `attest` and its order;
+   - crates.io and PyPI;
+   - the GitHub Release: the 12 engine files, and no mobile assets;
+   - the site's files byte-equal to `main`;
+   - `gh attestation verify` at `refs/tags/v0.17.1`;
+   - delete `release-0.17.1` and any `rel0171-*` left;
+   - log DONE.
+
+### 2026-11-16 — PLANNER-A — HANDOFF (amends the last) — the README's v0.17.1 bullet now names the tags
+
+Before you committed, I reread my v0.17.1 bullet. It still said "headings
+for the brain, the model, each client and git; each item marked added,
+changed or already right", which is PR 115's view, not PR 117's.
+- **It now says:** "short, in the style of a boot log: one line per item,
+  tagged `[  OK   ]`, `[ ADDED ]`, `[UPDATED]` or `[ WARN  ]`, then what
+  it did and what to do next. Before writing, it shows a plan ("Will
+  add", "Will update") and asks once."
+- The HANDOFF's files and commit message are unchanged. **Commit the file
+  as it is now.**
