@@ -713,7 +713,7 @@ fn tool_task(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcErr
 /// v0.18.0: a finding as the `finding` tool returns it.
 fn finding_json(f: &crate::Finding) -> Value {
     json!({
-        "id": f.id, "batch": f.batch, "category": f.category, "priority": f.priority,
+        "id": f.id, "record_id": f.record_id.to_string(), "batch": f.batch, "category": f.category, "priority": f.priority,
         "title": f.title, "body": f.body, "refs": f.refs, "author": f.author,
         "status": f.status, "triage": f.triage, "triaged_by": f.triaged_by,
         "verified_ref": f.verified_ref, "verified_by": f.verified_by,
@@ -1363,7 +1363,7 @@ fn tools_list() -> Value {
             },
             {
                 "name": "finding",
-                "description": "v0.18.0: review findings. A Reviewer adds them (`op: \"add\"`, under an `id` like `RB-014.1`, with `category`, `priority`, `title`, and `body` and `refs` when there are) and verifies them (`verify`, with a `ref`: a commit, a tag, a PR); the Planner triages them (`triage`, to `accepted`, `deferred`, `rejected` or `needs-user`, with `text`). `list` filters by `status`, `batch`, `category` and `priority`, ordered by id; `get` returns one with its history.",
+                "description": "v0.18.0: review findings. A Reviewer adds them (`op: \"add\"`, under an `id` like `RB-014.1`, with `category`, `priority`, `title`, and `body` and `refs` when there are) and verifies them (`verify`, with a `ref`: a commit, a tag, a PR; for a `SECURITY` finding, only a release tag like `v0.18.0`); the Planner triages them (`triage`, to `accepted`, `deferred`, `rejected` or `needs-user`, with `text`). `list` filters by `status`, `batch`, `category` and `priority`, ordered by id; `get` returns one with its history.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

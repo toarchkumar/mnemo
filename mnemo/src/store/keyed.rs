@@ -448,6 +448,10 @@ impl Mnemo {
         }
         let entry = self.catalog[idx].clone();
         let existing = self.read_memory(&entry)?;
+        // RB-014: a finding changes only by triage and verification.
+        if super::findings::is_finding(&existing) {
+            return Err(super::findings::finding_write_refused("updated"));
+        }
 
         // Apply patch into a candidate, detect no-op after the fact.
         let mut cand = existing.clone();

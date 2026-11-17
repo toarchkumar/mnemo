@@ -148,8 +148,12 @@ pinned to a commit (Dependabot keeps them current).
 6. **The coordination files.** Commit `PLAN.md` and `reviewer_notes.md` as
    `chore(plan): sync coordination files` (see AGENTS.md).
 7. **The brain's backup (from v0.18.0).** Export the project brain with
-   the release's `mnemo` and commit it on its own:
+   the release's own `mnemo`, never an older one that's on the PATH (a
+   virtualenv's, a session not yet reinstalled): an older build doesn't
+   know what `--git` must leave out. Commit it on its own:
    `mnemo export --git -o docs/brain.md` (no path in this repository).
+   Check the header's build line (`written by mnemo X.Y.Z`) names this
+   release.
    `--git` writes the keyed facts, the tasks, the findings and the project
    essence in a fixed order, and never the saved turns, private records,
    messages, claims, presence, a thread's essence, or a `SECURITY` finding

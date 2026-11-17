@@ -1470,7 +1470,8 @@ enum FindingCmd {
         #[arg(long)]
         text: String,
     },
-    /// Verify a finding against `--ref` (a commit, a tag, a PR).
+    /// Verify a finding against `--ref` (a commit, a tag, a PR). A
+    /// `SECURITY` finding takes only a published release tag (`v0.18.0`).
     Verify {
         id: String,
         #[arg(long = "ref", value_name = "REF")]
@@ -1502,7 +1503,7 @@ enum FindingCmd {
 /// MCP tool's shape).
 fn finding_json(f: &mnemo_engine::Finding) -> serde_json::Value {
     serde_json::json!({
-        "id": f.id, "batch": f.batch, "category": f.category, "priority": f.priority,
+        "id": f.id, "record_id": f.record_id.to_string(), "batch": f.batch, "category": f.category, "priority": f.priority,
         "title": f.title, "body": f.body, "refs": f.refs, "author": f.author,
         "status": f.status, "triage": f.triage, "triaged_by": f.triaged_by,
         "verified_ref": f.verified_ref, "verified_by": f.verified_by,
@@ -4173,10 +4174,18 @@ fn run() -> std::result::Result<(), String> {
             };
             let selected = export::select(all, &opts);
             let body = export::render(&selected, &opts, &facts);
-            eprintln!(
-                "warning: the export is plaintext, not encrypted; keep it as safe as \
-                 the file's passphrase"
-            );
+            if git {
+                eprintln!(
+                    "note: the export is plaintext, written by mnemo {} with `--git` to be \
+                     committed; read the diff first",
+                    env!("CARGO_PKG_VERSION")
+                );
+            } else {
+                eprintln!(
+                    "warning: the export is plaintext, not encrypted; keep it as safe as \
+                     the file's passphrase"
+                );
+            }
             match output {
                 Some(p) => {
                     export::write_private(&p, &body)?;

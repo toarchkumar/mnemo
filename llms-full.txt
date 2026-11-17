@@ -382,8 +382,18 @@ accepted --text "…"`: accepted, deferred, rejected or needs-user), and a
 Reviewer verifies it against a commit or a tag (`finding verify RB-014.1
 --ref abc1234`). `finding list` filters by status, batch, category and
 priority. A Planner's turn says when findings wait for its triage.
-`mnemo export --git` writes a `SECURITY` finding only once it's verified,
-so an unfixed one never reaches a backup you commit.
+
+A finding changes only by triage and verification: `update` and `forget`
+refuse it, and a wrong one is rejected, with why. Adding one needs your
+agent's name (`MNEMO_AGENT` or `--as`). The engine doesn't check who
+triages or verifies; the Planner triages and a Reviewer verifies.
+
+A `SECURITY` finding stays private until it's verified, and it's verified
+only against a published release tag (`--ref v0.18.0`), so verified means
+shipped. `mnemo export --git` leaves it out until then, so an unfixed one
+never reaches a backup you commit. Anything else that refers to an
+unverified one (a task, a fact, an essence item, a commit, a PR) names it
+by its id only.
 
 ```json
 {"name": "finding", "arguments": {"op": "list", "status": "open"}}

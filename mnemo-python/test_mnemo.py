@@ -1559,6 +1559,19 @@ def test_findings():
             g = db.finding_get("RB-014.1")
             assert [h["to"] for h in g["history"]] == ["accepted", "verified"], g
             assert db.finding_get("RB-1.1") is None
+            # RB-014: the record id; a SECURITY finding is verified only
+            # against a release tag.
+            assert len(g["record_id"]) == 26, g
+            db.finding_add("RB-014.3", "SECURITY", "MEDIUM", "Held")
+            db.set_author("planner-a")
+            db.finding_triage("RB-014.3", "accepted", "Fix it")
+            db.set_author("reviewer-b")
+            try:
+                db.finding_verify("RB-014.3", "abc1234")
+                raise AssertionError("a SECURITY finding was verified against a commit")
+            except mnemo.InvalidArgumentError:
+                pass
+            assert db.finding_verify("RB-014.3", "v0.18.0")["status"] == "verified"
         finally:
             db.close()
 

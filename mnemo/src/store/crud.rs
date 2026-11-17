@@ -383,6 +383,9 @@ impl Mnemo {
     }
 
     /// Soft-delete a memory (tombstoned; space reclaimed by `compact`).
+    ///
+    /// A review finding is refused (RB-014): a wrong one is `rejected`
+    /// with [`Mnemo::finding_triage`], which keeps its history.
     pub fn delete(&mut self, id: &Ulid) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
@@ -395,9 +398,20 @@ impl Mnemo {
         // being deleted (one decrypt) so the key slot, superseded set and
         // thread layers drop exactly what it contributed.
         let entry = self.catalog[idx].clone();
-        if self.layers.is_some() && !entry.deleted {
+        // RB-014: a finding's row is a coordination row, or a fact row when
+        // an older build compacted the file; only those are read for it.
+        let maybe_finding = entry.v9.is_none_or(|r| {
+            r.kind == super::records::ROW_KIND_COORDINATION
+                || r.kind == super::records::ROW_KIND_FACT
+        });
+        if !entry.deleted && (self.layers.is_some() || maybe_finding) {
             let old = self.read_memory(&entry)?;
-            self.note_removed(&old)?;
+            if super::findings::is_finding(&old) {
+                return Err(super::findings::finding_write_refused("deleted"));
+            }
+            if self.layers.is_some() {
+                self.note_removed(&old)?;
+            }
         }
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;

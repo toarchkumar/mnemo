@@ -1545,20 +1545,21 @@ fn findings_round_trip_through_the_cli() {
             "Slow",
         ],
     );
-    let err = e.fails(
-        &main,
-        &[
-            "finding",
-            "add",
-            "RB-014.1",
-            "--category",
-            "PERF",
-            "--priority",
-            "LOW",
-            "--title",
-            "x",
-        ],
-    );
+    let again = [
+        "finding",
+        "add",
+        "RB-014.1",
+        "--category",
+        "PERF",
+        "--priority",
+        "LOW",
+        "--title",
+        "x",
+    ];
+    // RB-014: a finding needs an agent.
+    let err = e.fails(&main, &again);
+    assert!(err.contains("needs its author"), "{err}");
+    let err = e.fails(&main, &[&again[..], &["--as", "reviewer-b"]].concat());
     assert!(err.contains("RB-014.1 is taken"), "{err}");
     let t = e.ok(&main, &["finding", "list"]);
     assert!(
@@ -1593,6 +1594,10 @@ fn findings_round_trip_through_the_cli() {
             .unwrap();
     assert_eq!(v["status"], "verified");
     assert_eq!(v["author"], "reviewer-b");
+    // RB-014: the record id, as `get <id>` takes it.
+    let rid = v["record_id"].as_str().unwrap();
+    assert_eq!(rid.len(), 26, "{v}");
+    assert!(e.ok(&main, &["get", rid]).contains("The release race"));
     assert_eq!(v["triaged_by"], "planner-a");
     assert_eq!(v["verified_ref"], "abc1234");
     assert_eq!(v["refs"], serde_json::json!(["a.rs:1", "b.rs:2"]));
