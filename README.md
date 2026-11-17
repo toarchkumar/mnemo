@@ -141,7 +141,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.17.2", "semantic", key="current-release")
+    db.remember_text("the current release is v0.18.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -162,6 +162,28 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.18.0: review findings in the brain, and a backup you can commit
+
+- **Review findings are records in the brain,** beside tasks and messages.
+  A reviewer adds one under an id (`RB-014.1`) with a category, a
+  priority, a title and a body; the planner triages it (accepted,
+  deferred, rejected or needs-user, with why); a reviewer verifies it.
+  Each keeps its history. `mnemo finding add|triage|verify|list|get`,
+  the MCP `finding` tool and Python. A planner session is told when
+  findings wait for triage.
+- **`mnemo export --git` is the brain's backup,** written to be committed:
+  facts by key, tasks, findings, then the project's essence. It leaves out
+  saved turns, private records, messages, claims, one session's working
+  notes, and any security finding until it's verified against a
+  released version (until then it's private, so older builds skip it
+  too). The file names the build that wrote it, and two exports of an
+  unchanged brain are identical. This repository commits its own as
+  [`docs/brain.md`](docs/brain.md).
+- **Upgrade every session's `mnemo` together:** an older build sees a
+  finding as an ordinary fact.
+- The iOS and Android packages publish at 0.18.0, with no change to their
+  API.
 
 ## What's new in v0.17.2: from our own agents' first run
 
