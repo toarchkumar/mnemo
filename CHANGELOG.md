@@ -8,6 +8,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.17.2] — 2026-11-17
+
+A patch from this project's first run of agents coordinating through their
+own brain: a task's creator hears when it's ready, a session shows as
+present from its start, the model's download retries what may pass, and
+smaller fixes. There's no format change. The mobile packages aren't
+published in this release: they stay at 0.17.0, which has the same mobile
+code.
+
 ### Added
 
 - **A task you added tells you when it's `ready` for your `done`.** The
@@ -4658,7 +4667,9 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...HEAD
+[0.17.2]: https://github.com/toarchkumar/mnemo/compare/v0.17.1...v0.17.2
+[0.17.1]: https://github.com/toarchkumar/mnemo/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/toarchkumar/mnemo/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/toarchkumar/mnemo/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/toarchkumar/mnemo/compare/v0.15.0...v0.16.0
