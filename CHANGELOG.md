@@ -23,9 +23,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **`mnemo export --git` is the brain's backup.** It writes the findings
   (every status, in their id's order) after the tasks, then the project
   essence: its open items by section, then the ones resolved in the last
-  30 days. It still never writes saved turns, private records, messages,
-  claims or presence, and two exports of an unchanged brain are
-  byte-equal. This repository commits its brain's export as
+  30 days. It never writes a `SECURITY` finding until it's `verified`,
+  since the backup may be public. It leaves out a thread's essence (one
+  session's working state), and still never writes saved turns, private
+  records, messages, claims or presence. Two exports of an unchanged
+  brain are byte-equal. This repository commits its brain's export as
   `docs/brain.md` at each release.
 
 ### Changed

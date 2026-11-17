@@ -18,6 +18,9 @@
 //!   status, in their id's order; then the project essence, its open items
 //!   by section, then its resolved ones by section, from the last 30 days
 //!   only.
+//! - v0.18.0: a thread's essence (one session's working state) is left
+//!   out, and so is a `SECURITY` finding until it's `verified`: the backup
+//!   may be public, and an unfixed security finding never is.
 //!
 //! The same unchanged file exports to the same bytes, and one new memory
 //! adds only its own lines. A new version of a keyed fact also changes the
@@ -92,6 +95,19 @@ fn done_long_ago(m: &Memory, now: i64) -> bool {
 /// v0.18.0: a finding's place in the order: its id's prefix and numbers.
 fn finding_order(m: &Memory) -> Option<(String, u64, u64)> {
     mnemo_engine::Finding::from_memory(m).map(|f| f.sort_key())
+}
+
+/// v0.18.0: left out of a `--git` export: a thread's essence item, and a
+/// `SECURITY` finding at any status but `verified`.
+fn kept_out_of_git(m: &Memory) -> bool {
+    if kind_of(m) == Some(mnemo_engine::MNEMO_META_KIND_ESSENCE)
+        && m.metadata.contains_key(mnemo_engine::MNEMO_META_THREAD)
+    {
+        return true;
+    }
+    mnemo_engine::Finding::from_memory(m).is_some_and(|f| {
+        f.category == "SECURITY" && f.status != mnemo_engine::finding_status::VERIFIED
+    })
 }
 
 /// v0.18.0: a project essence item (no thread)'s place in the order: the
@@ -170,6 +186,7 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
         all.retain(|m| kind_of(m) != Some("message"));
         all.retain(|m| !done_long_ago(m, now));
         all.retain(|m| !resolved_long_ago(m, now));
+        all.retain(|m| !kept_out_of_git(m));
     }
     if let Some(ts) = &o.types {
         all.retain(|m| ts.contains(&m.memory_type));
@@ -339,8 +356,8 @@ fn markdown(memories: &[Memory], o: &ExportOptions, facts: &FileFacts) -> String
         out.push_str(
             "Written with `--git`: keyed memories by key, then tasks, findings and \
              the project essence, then the rest by id; vectors, thread turns, \
-             messages, claims, presence, private records and access stats are left \
-             out.\n",
+             thread essence, messages, claims, presence, private records, access \
+             stats and security findings not yet verified are left out.\n",
         );
     } else {
         out.push_str(&format!(
