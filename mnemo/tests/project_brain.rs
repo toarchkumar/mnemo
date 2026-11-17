@@ -1448,6 +1448,18 @@ fn a_named_shared_server_is_present_from_its_start() {
     assert_eq!(a["role"], "worker");
     drop(server.stdin.take());
     assert!(server.wait().unwrap().success());
+    // WHO-SHAPE (v0.17.2): once it's gone, "no" (the record says it held
+    // the lock, and nobody does).
+    let v: Value =
+        serde_json::from_str(&e.ok(&main, &["claim", "who", "--format", "json"])).unwrap();
+    let a = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["agent"] == "worker-a")
+        .unwrap()
+        .clone();
+    assert_eq!(a["alive"], "no", "{v}");
 }
 
 /// v0.17.2: `cache` takes no path in a git repository, like `get`.

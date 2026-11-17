@@ -774,9 +774,11 @@ fn tool_claim(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcEr
                     json!({
                         "agent": p.agent, "role": p.role, "tool": p.tool,
                         "last_active": p.last_active,
+                        // WHO-SHAPE (v0.17.2): the CLI's strings, which
+                        // say what a boolean can't.
                         "alive": match p.alive {
-                            crate::Alive::Yes => json!(true),
-                            crate::Alive::No => json!(false),
+                            crate::Alive::Yes => json!("yes"),
+                            crate::Alive::No => json!("no"),
                             crate::Alive::Unknown => json!("unknown"),
                         },
                         "claims": p.claims,

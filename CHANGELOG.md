@@ -25,6 +25,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   with `MNEMO_AGENT` writes its presence record when it starts, so `claim
   who` shows the session alive before its first write. A busy brain is a
   note on stderr, never a failed start.
+- **The built-in model's download tries again** after a reset or cut
+  connection, a timeout or a server error (5xx): twice more, 1 s and then
+  4 s later, with a line on stderr each time. A refused connection, a 4xx,
+  or a file whose size or SHA-256 doesn't match the pin isn't tried again,
+  and the hooks still never download.
 
 ### Changed
 
@@ -32,6 +37,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   one with `..Default::default()` is unaffected.
 - **`mnemo onboard` at a terminal** prints its last line, the guide's
   pointer, as plain text, without Markdown backticks.
+- **The MCP `claim` tool's `who`: `alive` is now `"yes"`, `"no"` or
+  `"unknown"`**, as in `mnemo claim who --format json`. It was `true`,
+  `false` or `"unknown"`.
 
 ## [0.17.1] — 2026-11-16
 

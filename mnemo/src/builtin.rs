@@ -304,10 +304,96 @@ fn remove_stale_parts(dir: &Path) {
     }
 }
 
+/// MODEL-RETRY (v0.17.2): the waits before the second and third tries of a
+/// download that failed in a way that may pass.
+const RETRY_BACKOFF: [std::time::Duration; 2] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(4),
+];
+
 /// Download `url` to `dest`, through a temporary file beside it that
-/// replaces `dest` only once its size and SHA-256 match.
+/// replaces `dest` only once its size and SHA-256 match. A reset
+/// connection, a timeout, a body cut short or a 5xx is tried twice more,
+/// with a line on stderr each time; a 4xx, a refused connection, a size or
+/// SHA-256 that doesn't match, or a local write error isn't.
 pub(crate) fn fetch(url: &str, dest: &Path, sha256: &str, size: u64) -> Result<()> {
+    fetch_with(url, dest, sha256, size, &RETRY_BACKOFF, &mut |m| {
+        eprintln!("{m}")
+    })
+}
+
+/// [`fetch`] with its waits and its notice given (the tests' short ones).
+fn fetch_with(
+    url: &str,
+    dest: &Path,
+    sha256: &str,
+    size: u64,
+    backoff: &[std::time::Duration],
+    notice: &mut dyn FnMut(&str),
+) -> Result<()> {
+    let name = dest
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("model file");
+    let tries = backoff.len() + 1;
+    let mut attempt = 1;
+    loop {
+        match fetch_once(url, dest, sha256, size) {
+            Ok(()) => return Ok(()),
+            Err(Attempt { error, retry }) => {
+                let Some(wait) = backoff.get(attempt - 1).filter(|_| retry) else {
+                    return Err(error);
+                };
+                notice(&format!(
+                    "mnemo: {error}; trying {name} again in {} s ({} of {tries})",
+                    wait.as_secs_f32(),
+                    attempt + 1
+                ));
+                std::thread::sleep(*wait);
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// One download's failure, and whether another try may pass.
+struct Attempt {
+    error: MnemoError,
+    retry: bool,
+}
+
+/// Whether a request error may pass on another try: a timeout, a reset
+/// or cut connection, or a 5xx. Not a refused connection, an unknown host,
+/// or a 4xx.
+fn may_pass(e: &ureq::Error) -> bool {
+    match e {
+        ureq::Error::StatusCode(code) => *code >= 500,
+        ureq::Error::Timeout(_) | ureq::Error::BodyStalled => true,
+        ureq::Error::Io(io) => cut_short(io),
+        _ => false,
+    }
+}
+
+/// An I/O error from a connection that was reset, cut or timed out.
+fn cut_short(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::*;
+    matches!(
+        e.kind(),
+        ConnectionReset | ConnectionAborted | BrokenPipe | TimedOut | UnexpectedEof | Interrupted
+    )
+}
+
+/// One try of [`fetch`].
+fn fetch_once(url: &str, dest: &Path, sha256: &str, size: u64) -> std::result::Result<(), Attempt> {
     let fail = |what: String| MnemoError::Invalid(format!("the built-in embedder's {what}"));
+    let last = |what: String| Attempt {
+        error: fail(what),
+        retry: false,
+    };
+    let again = |what: String| Attempt {
+        error: fail(what),
+        retry: true,
+    };
     let name = dest
         .file_name()
         .and_then(|n| n.to_str())
@@ -318,10 +404,10 @@ pub(crate) fn fetch(url: &str, dest: &Path, sha256: &str, size: u64) -> Result<(
         .user_agent(concat!("mnemo/", env!("CARGO_PKG_VERSION")))
         .build()
         .into();
-    let mut resp = agent
-        .get(url)
-        .call()
-        .map_err(|e| fail(format!("download of {name} failed ({url}): {e}")))?;
+    let mut resp = agent.get(url).call().map_err(|e| Attempt {
+        retry: may_pass(&e),
+        error: fail(format!("download of {name} failed ({url}): {e}")),
+    })?;
     let tmp = dest.with_file_name(format!("{name}.{}.part", std::process::id()));
     let result = (|| {
         // `create_new`: never through a link, or over another writer's file.
@@ -329,7 +415,7 @@ pub(crate) fn fetch(url: &str, dest: &Path, sha256: &str, size: u64) -> Result<(
             .write(true)
             .create_new(true)
             .open(&tmp)
-            .map_err(|e| fail(format!("download can't write {}: {e}", tmp.display())))?;
+            .map_err(|e| last(format!("download can't write {}: {e}", tmp.display())))?;
         // One byte over the size is enough to tell a too-long body.
         let mut body = resp.body_mut().with_config().limit(size + 1).reader();
         let mut hasher = Sha256::new();
@@ -341,40 +427,47 @@ pub(crate) fn fetch(url: &str, dest: &Path, sha256: &str, size: u64) -> Result<(
                 Ok(n) => n,
                 Err(e) => {
                     // ureq reports the limit as an error: the body is too long.
-                    if got + buf.len() as u64 > size {
-                        return Err(fail(format!(
+                    let over = e
+                        .get_ref()
+                        .and_then(|i| i.downcast_ref::<ureq::Error>())
+                        .is_some_and(|u| matches!(u, ureq::Error::BodyExceedsLimit(_)));
+                    if over {
+                        return Err(last(format!(
                             "{name} is larger than the {size} bytes pinned"
                         )));
                     }
-                    return Err(fail(format!("download of {name} failed: {e}")));
+                    // Cut off mid-body: a reset or a stall.
+                    return Err(again(format!("download of {name} failed: {e}")));
                 }
             };
             got += n as u64;
             if got > size {
-                return Err(fail(format!(
+                return Err(last(format!(
                     "{name} is larger than the {size} bytes pinned"
                 )));
             }
             hasher.update(&buf[..n]);
             out.write_all(&buf[..n])
-                .map_err(|e| fail(format!("download can't write {}: {e}", tmp.display())))?;
+                .map_err(|e| last(format!("download can't write {}: {e}", tmp.display())))?;
         }
         if got != size {
-            return Err(fail(format!(
+            // Shorter than pinned: the connection closed early.
+            return Err(again(format!(
                 "{name} is {got} bytes, not the {size} pinned (an interrupted download?)"
             )));
         }
         let digest = hex(&hasher.finalize());
         if digest != sha256 {
-            return Err(fail(format!(
+            // Never tried again: the file served isn't the one pinned.
+            return Err(last(format!(
                 "{name} doesn't match its pinned SHA-256 (got {digest}); nothing was installed"
             )));
         }
         out.sync_all()
-            .map_err(|e| fail(format!("download can't write {}: {e}", tmp.display())))?;
+            .map_err(|e| last(format!("download can't write {}: {e}", tmp.display())))?;
         drop(out);
         std::fs::rename(&tmp, dest)
-            .map_err(|e| fail(format!("download can't move {name} into place: {e}")))
+            .map_err(|e| last(format!("download can't move {name} into place: {e}")))
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -635,20 +728,132 @@ mod tests {
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 
         // Too short and too long.
-        let e = fetch(
+        // One try each (MODEL-RETRY retries a short body; this serves once).
+        let e = fetch_with(
             &serve_once(body.clone()),
             &dest,
             &sha,
             body.len() as u64 + 5,
+            &[],
+            &mut |_| {},
         )
         .unwrap_err()
         .to_string();
         assert!(e.contains("not the"), "{e}");
-        let e = fetch(&serve_once(body.clone()), &dest, &sha, 4)
+        let e = fetch_with(&serve_once(body.clone()), &dest, &sha, 4, &[], &mut |_| {})
             .unwrap_err()
             .to_string();
         assert!(e.contains("larger than"), "{e}");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// What the scripted server answers to one connection.
+    #[derive(Clone, Copy)]
+    enum Reply {
+        /// The headers and half the body, then the connection closes.
+        Cut,
+        /// The whole body.
+        Full,
+        /// A status with no body.
+        Status(u16),
+    }
+
+    /// Answer each connection with the next reply (the last one again when
+    /// they run out); returns the URL and a count of the requests.
+    fn serve_script(
+        replies: Vec<Reply>,
+        body: Vec<u8>,
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::Ordering;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let served = count.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming() {
+                let Ok(mut s) = s else { continue };
+                let mut r = std::io::BufReader::new(s.try_clone().unwrap());
+                let mut line = String::new();
+                while r.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n" {
+                    line.clear();
+                }
+                let i = served.fetch_add(1, Ordering::SeqCst);
+                let reply = *replies.get(i).or(replies.last()).unwrap();
+                let head = |code: u16, len: usize| {
+                    format!(
+                        "HTTP/1.1 {code} X\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+                    )
+                };
+                let _ = match reply {
+                    Reply::Cut => s
+                        .write_all(head(200, body.len()).as_bytes())
+                        .and_then(|_| s.write_all(&body[..body.len() / 2])),
+                    Reply::Full => s
+                        .write_all(head(200, body.len()).as_bytes())
+                        .and_then(|_| s.write_all(&body)),
+                    Reply::Status(code) => s.write_all(head(code, 0).as_bytes()),
+                };
+            }
+        });
+        (format!("http://{addr}/f"), count)
+    }
+
+    /// MODEL-RETRY: a download cut short is tried again, and a 5xx twice
+    /// more, each with a notice; a 4xx and a SHA-256 mismatch aren't, and
+    /// the last error is the one a single try gives.
+    #[test]
+    fn a_download_retries_only_what_may_pass() {
+        use std::sync::atomic::Ordering;
+        let fast = [std::time::Duration::from_millis(10); 2];
+        let body = b"{\"hidden_size\": 384, \"layers\": 6}".to_vec();
+        let sha = hex(&Sha256::digest(&body));
+        let n = body.len() as u64;
+        let run = |replies: Vec<Reply>, sha: &str, backoff: &[std::time::Duration]| {
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("config.json");
+            let (url, count) = serve_script(replies, body.clone());
+            let mut notices = Vec::new();
+            let r = fetch_with(&url, &dest, sha, n, backoff, &mut |m| {
+                notices.push(m.to_string())
+            });
+            let installed = std::fs::read(&dest).ok();
+            (r, count.load(Ordering::SeqCst), notices, installed)
+        };
+        // Cut short, then whole: installed on the second try.
+        let (r, count, notices, installed) = run(vec![Reply::Cut, Reply::Full], &sha, &fast);
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!((count, installed.as_deref()), (2, Some(&body[..])));
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(
+            notices[0].contains("trying config.json again") && notices[0].contains("(2 of 3)"),
+            "{notices:?}"
+        );
+        // Three 503s: three tries, two notices, and today's error.
+        let (r, count, notices, installed) = run(vec![Reply::Status(503)], &sha, &fast);
+        let (once, one, _, _) = run(vec![Reply::Status(503)], &sha, &[]);
+        assert_eq!((count, notices.len(), installed), (3, 2, None));
+        assert_eq!(one, 1);
+        let (r, once) = (r.unwrap_err().to_string(), once.unwrap_err().to_string());
+        assert!(r.contains("503"), "{r}");
+        assert_eq!(
+            r.replace(&r[r.find("http://").unwrap()..r.find("/f").unwrap()], ""),
+            once.replace(
+                &once[once.find("http://").unwrap()..once.find("/f").unwrap()],
+                ""
+            )
+        );
+        // A 404: once, no notice.
+        let (r, count, notices, _) = run(vec![Reply::Status(404)], &sha, &fast);
+        assert!(r.unwrap_err().to_string().contains("404"));
+        assert_eq!((count, notices.len()), (1, 0));
+        // A SHA-256 mismatch: once, nothing installed.
+        let wrong = "0".repeat(64);
+        let (r, count, notices, installed) = run(vec![Reply::Full], &wrong, &fast);
+        assert!(r
+            .unwrap_err()
+            .to_string()
+            .contains("doesn't match its pinned SHA-256"));
+        assert_eq!((count, notices.len(), installed), (1, 0, None));
     }
 
     #[test]
