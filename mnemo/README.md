@@ -982,7 +982,7 @@ cargo run --bin mnemo -- <command>
 | `import`  | Bulk-load memories from a JSON Lines file            |
 | `index`   | Build, rebuild, or drop the IVF+PQ index             |
 | `list`    | Browse live memories (table / json / jsonl, filters). Since v0.17 private records only with `--visibility private` (or `all`, which marks them `[private]`); `history` takes `--visibility` too |
-| `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence |
+| `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence Since v0.18, `--git` writes the findings (every status, in id order) after the tasks, then the project essence (its open items by section, then those resolved in the last 30 days) |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, snapshots, about) |
 | `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |

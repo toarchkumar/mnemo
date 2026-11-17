@@ -379,3 +379,142 @@ fn a_v8_file_exports_through_the_read_only_path() {
         "exporting changed the v8 file"
     );
 }
+
+/// v0.18.0 (the backup): `--git` writes findings (every status, in id
+/// order) and the project essence (open items by section, then the
+/// resolved ones from the last 30 days); never a private finding, a
+/// message or a claim; two exports of an unchanged brain are byte-equal.
+#[test]
+fn git_writes_findings_and_the_project_essence_in_order() {
+    use mnemo_engine::{EssenceScope, EssenceSection, FindingSpec, MemoryPatch};
+    let (_d, path) = seed();
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    db.set_author(Some("reviewer-b".into()));
+    let finding = |db: &mut Mnemo, id: &str| {
+        db.finding_add(&FindingSpec {
+            id: id.into(),
+            category: "PERF".into(),
+            priority: "LOW".into(),
+            title: format!("finding {id}"),
+            ..Default::default()
+        })
+        .unwrap()
+    };
+    for id in ["RB-10.1", "RB-9.10", "RB-9.2"] {
+        finding(&mut db, id);
+    }
+    db.finding_triage("RB-9.10", "rejected", "not ours")
+        .unwrap();
+    let private = finding(&mut db, "RB-9.3");
+    let mut keys = serde_json::Map::new();
+    keys.insert("_mnemo.visibility".into(), Value::String("private".into()));
+    db.update(
+        &private.record_id,
+        MemoryPatch {
+            caller_keys: Some(keys),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    db.set_author(Some("planner-a".into()));
+    db.task_add(&mnemo_engine::TaskSpec {
+        title: "Ship it".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    let add = |db: &mut Mnemo, s: EssenceSection, t: &str| {
+        db.essence_add(EssenceScope::Project, s, t, None).unwrap()
+    };
+    add(&mut db, EssenceSection::Next, "next: the backup");
+    add(
+        &mut db,
+        EssenceSection::Decisions,
+        "decided: findings as records",
+    );
+    let state = add(&mut db, EssenceSection::State, "state: v0180-2 in progress");
+    db.essence_resolve(&state).unwrap();
+    db.essence_add(
+        EssenceScope::Thread("t1".into()),
+        EssenceSection::Open,
+        "a thread's own item",
+        None,
+    )
+    .unwrap();
+    db.post(
+        "worker-a",
+        "a message",
+        "",
+        &[],
+        None,
+        Some("planner-a"),
+        None,
+    )
+    .unwrap();
+    db.claim("a topic", None).unwrap();
+    db.close().unwrap();
+
+    for format in ["markdown", "jsonl"] {
+        let a = export(&path, &["--git", "--format", format]);
+        assert_eq!(a, export(&path, &["--git", "--format", format]), "{format}");
+        assert!(!a.contains("RB-9.3"), "a private finding: {format}");
+        assert!(
+            !a.contains("a message") && !a.contains("a topic"),
+            "{format}"
+        );
+    }
+    let rows = jsonl(&export(&path, &["--git", "--format", "jsonl"]));
+    let what: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let m = &r["metadata"];
+            if let Some(k) = r["key"].as_str() {
+                format!("key {k}")
+            } else if let Some(s) = m["_mnemo.slug"].as_str() {
+                format!("task {s}")
+            } else if let Some(f) = m["_mnemo.finding_id"].as_str() {
+                format!("finding {f}")
+            } else if m["_mnemo.kind"] == "essence" && m.get("_mnemo.thread").is_none() {
+                format!(
+                    "essence {} {}",
+                    m["_mnemo.section"].as_str().unwrap(),
+                    m["_mnemo.status"].as_str().unwrap_or("-")
+                )
+            } else {
+                "rest".into()
+            }
+        })
+        .collect();
+    let first_rest = what.iter().position(|w| w == "rest").unwrap();
+    assert_eq!(
+        what[..first_rest],
+        [
+            "key deploy:region",
+            "key deploy:region",
+            "task ship-it",
+            "finding RB-9.2",
+            "finding RB-9.10",
+            "finding RB-10.1",
+            "essence decisions open",
+            "essence next open",
+            "essence state resolved",
+        ],
+        "{what:?}"
+    );
+    assert!(what[first_rest..].iter().all(|w| w == "rest"), "{what:?}");
+    // 31 days on, the resolved item is left out; the open ones stay.
+    let later = Command::new(env!("CARGO_BIN_EXE_mnemo"))
+        .args([
+            "export",
+            path.to_str().unwrap(),
+            "--git",
+            "--format",
+            "jsonl",
+        ])
+        .env("MNEMO_PASSPHRASE", PW)
+        .env("MNEMO_DEV_CLOCK_OFFSET", (31 * 86_400).to_string())
+        .output()
+        .unwrap();
+    let later = String::from_utf8(later.stdout).unwrap();
+    assert!(!later.contains("v0180-2 in progress"), "{later}");
+    assert!(later.contains("next: the backup") && later.contains("RB-9.10"));
+}
