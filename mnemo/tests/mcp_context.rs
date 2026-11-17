@@ -740,16 +740,9 @@ fn the_claim_tool_as_the_servers_agent() {
         assert_eq!(me["agent"], "worker-a", "{who}");
         assert_eq!(me["claims"], json!(["step 3"]));
         assert_eq!(me["tool"], "mcp");
-        // Only a shared server holds a presence lock.
-        assert_eq!(
-            me["alive"],
-            if shared {
-                json!(true)
-            } else {
-                json!("unknown")
-            },
-            "{who}"
-        );
+        // Only a shared server holds a presence lock. WHO-SHAPE (v0.17.2):
+        // the CLI's strings.
+        assert_eq!(me["alive"], if shared { "yes" } else { "unknown" }, "{who}");
         assert!(
             rs[4]["error"].is_object() || rs[4]["result"]["isError"] == json!(true),
             "{}",
