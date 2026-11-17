@@ -1398,3 +1398,86 @@ fn rb013_agent_ids_are_checked_for_writes() {
     assert!(o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("it's ignored"));
 }
+
+/// PRESENCE-AT-START (v0.17.2): a named shared server writes its presence
+/// record at start, with the lock flag, so `who` shows the session alive
+/// before any tool call.
+#[test]
+fn a_named_shared_server_is_present_from_its_start() {
+    use std::io::{BufRead, BufReader};
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    let mut server = e
+        .cmd(&main, &["serve", "--mcp", "--shared"])
+        .env("MNEMO_AGENT", "worker-a")
+        .env("MNEMO_ROLE", "worker")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut err = BufReader::new(server.stderr.take().unwrap());
+    let mut said = String::new();
+    loop {
+        let mut line = String::new();
+        if err.read_line(&mut line).unwrap() == 0 {
+            panic!("the server stopped: {said}");
+        }
+        said.push_str(&line);
+        if line.starts_with("mnemo mcp: ready") {
+            break;
+        }
+    }
+    assert!(
+        said.contains("mnemo mcp: worker-a is present (tool mcp)"),
+        "{said}"
+    );
+    // No tool call yet: `who` already shows it alive, through `mcp`.
+    let v: Value =
+        serde_json::from_str(&e.ok(&main, &["claim", "who", "--format", "json"])).unwrap();
+    let a = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["agent"] == "worker-a")
+        .unwrap_or_else(|| panic!("{v}"))
+        .clone();
+    assert_eq!(a["alive"], "yes", "{v}");
+    assert_eq!(a["tool"], "mcp");
+    assert_eq!(a["role"], "worker");
+    drop(server.stdin.take());
+    assert!(server.wait().unwrap().success());
+}
+
+/// v0.17.2: `cache` takes no path in a git repository, like `get`.
+#[test]
+fn cache_takes_no_path_in_a_git_repository() {
+    let e = Env::new();
+    e.init();
+    let deep = e.p("main/sub/deep");
+    e.ok(
+        &deep,
+        &[
+            "cache",
+            "put",
+            "--ns",
+            "llm",
+            "--key",
+            "q1",
+            "--value",
+            "an answer",
+        ],
+    );
+    assert_eq!(
+        e.ok(&deep, &["cache", "get", "--ns", "llm", "--key", "q1"])
+            .trim_end(),
+        "an answer"
+    );
+    let stats: Value = serde_json::from_str(&e.ok(&e.p("main"), &["cache", "stats"])).unwrap();
+    assert_eq!(stats["entries"], 1, "{stats}");
+    e.ok(&deep, &["cache", "delete", "--ns", "llm", "--key", "q1"]);
+    let o = e.run(&deep, &["cache", "get", "--ns", "llm", "--key", "q1"]);
+    assert!(!o.status.success(), "a miss after the delete");
+    e.ok(&deep, &["cache", "purge", "--expired"]);
+}

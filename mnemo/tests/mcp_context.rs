@@ -260,6 +260,25 @@ fn every_resource_has_its_shape_budget_and_framing() {
         let framing = about.find(guide::FRAMING).expect("the framing line");
         assert!(framing < about.find("## About this brain").unwrap());
         assert!(about.contains("Use the release branch for every release."));
+        // v0.17.2: the counts, as `mnemo about`'s header.
+        let counts = about
+            .split("## About this brain\n\n")
+            .nth(1)
+            .and_then(|r| r.lines().next())
+            .unwrap_or_default();
+        let words: Vec<&str> = counts.split_whitespace().collect();
+        assert!(
+            words.len() == 10
+                && words[1] == "memories:"
+                && words[3] == "facts,"
+                && words[5] == "turns,"
+                && words[7] == "essence,"
+                && words[9] == "coordination"
+                && [0, 2, 4, 6, 8]
+                    .iter()
+                    .all(|&i| words[i].trim_end_matches(',').parse::<usize>().is_ok()),
+            "{counts:?}"
+        );
 
         let recent = text(&rs[2]);
         assert!(recent.len() <= 6_000, "{}", recent.len());

@@ -16,11 +16,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   lists your tasks that wait for it. It's shown per agent (a new reserved
   key, `_mnemo.ready_seen_by`), and it never wakes a session: it waits for
   your review.
+- **`cache` takes no path in a git repository,** as `get` does: `mnemo
+  cache get --ns llm --key k` uses this project's brain.
+- **`mnemo://about` shows the counts,** as `mnemo about`'s header does:
+  memories, facts, saved turns, essence and coordination records. The MCP
+  `about` tool is unchanged.
+- **A named MCP server is present from its start.** `serve --mcp --shared`
+  with `MNEMO_AGENT` writes its presence record when it starts, so `claim
+  who` shows the session alive before its first write. A busy brain is a
+  note on stderr, never a failed start.
 
 ### Changed
 
 - **Rust: `NewWork` has a new field, `ready_for_done`.** Code that builds
   one with `..Default::default()` is unaffected.
+- **`mnemo onboard` at a terminal** prints its last line, the guide's
+  pointer, as plain text, without Markdown backticks.
 
 ## [0.17.1] — 2026-11-16
 

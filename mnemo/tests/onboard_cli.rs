@@ -1194,7 +1194,7 @@ fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
     assert!(flat.contains("Done: ") && !flat.contains("Will add"), "{t}");
     assert_eq!(
         t.lines().rev().find(|l| !l.is_empty()),
-        Some("The guide for agents: `mnemo onboard --guide`"),
+        Some("The guide for agents: mnemo onboard --guide"),
         "{t}"
     );
     assert!(!t.contains(&guide::markdown()[..120]), "no guide: {t}");
@@ -1231,7 +1231,7 @@ fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
             "\nClaude Code\n  Will add: the UserPromptSubmit hook (.claude/settings.local.json)\n",
             "\n  Will update: the skill (.claude/skills/mnemo/SKILL.md, +0 -1 lines)\n",
             "\n  Already right: the MCP server (.mcp.json) and 3 hooks\n",
-            "\nNothing was written; run `mnemo onboard --yes` to write it.\n",
+            "\nNothing was written; run mnemo onboard --yes to write it.\n",
         ] {
             assert!(t.contains(want), "{want:?} in {t}");
         }

@@ -107,8 +107,9 @@ which would leak into shell history and process listings). Tools exposed:
 `MNEMO_ROLE`; `visibility` for private ones), `task` (the shared work queue: `next`, `update`, `add`,
 `list`, `get`) and `claim` (`take`, `renew`, `release`, `check`, `who`). A
 `serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
-in the sidecar directory for its life, so `who` sees it alive; it never
-holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Every mutation flushes before
+in the sidecar directory for its life, and since v0.17.2 writes its
+presence record at start, so `who` sees it alive before its first call; it
+never holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Every mutation flushes before
 returning.
 
 With no `--embed-cmd`, the server embeds `text` with the built-in embedder
@@ -139,7 +140,7 @@ On `initialize`, the server sends the guide's card as its `instructions`
 
 | Resource | What it holds | Limit |
 |---|---|---|
-| `mnemo://about` | The card, then the brain's briefing (the manifest and onboarding memories) and the project essence | 8,000 bytes |
+| `mnemo://about` | The card, then the counts (as `mnemo about`'s header, since v0.17.2), the brain's briefing (the manifest and onboarding memories) and the project essence | 8,000 bytes |
 | `mnemo://recent` | The 20 most recently written memories, newest first, a line each | 6,000 bytes |
 | `mnemo://guide` | The whole guide | Its size |
 | `mnemo://key/{key}` (a template) | A key's live value, then its earlier versions | 4,000 bytes |
@@ -390,6 +391,9 @@ mnemo cache stats agent.mnemo --ns llm         # or omit --ns for the whole cach
 mnemo cache purge agent.mnemo --ns llm --expired
 mnemo cache delete agent.mnemo --ns llm --key prompt-42
 ```
+
+Since v0.17.2 the path may be left out in a git repository, as with `get`:
+`mnemo cache get --ns llm --key prompt-42` uses this project's brain.
 
 **MCP:** `mnemo serve --mcp` exposes `cache_put`, `cache_get`,
 `cache_stats`, `cache_put_semantic`, and `cache_get_semantic` as
