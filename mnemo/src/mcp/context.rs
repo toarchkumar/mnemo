@@ -188,13 +188,21 @@ pub(super) fn resources_read(
     Ok(json!({ "contents": [ { "uri": uri, "mimeType": MD, "text": text } ] }))
 }
 
-/// `mnemo://about`: the card, the framing line, the onboarding memories
-/// (the manifest first) and the project essence.
+/// `mnemo://about`: the card, the framing line, the counts (as `mnemo
+/// about`'s header, v0.17.2), the onboarding memories (the manifest first)
+/// and the project essence.
 pub(super) fn about_text(m: &mut Mnemo) -> std::result::Result<String, RpcError> {
+    let memories = m.stats().map_err(mnemo_err)?.memories;
+    let c = m.kind_counts();
     let mut out = format!(
-        "{}\n\n{}\n\n## About this brain\n",
+        "{}\n\n{}\n\n## About this brain\n\n{memories} memories: {} facts, {} turns, {} essence, \
+         {} coordination\n",
         guide::card(),
-        guide::FRAMING
+        guide::FRAMING,
+        c.facts,
+        c.turns,
+        c.essence,
+        c.coordination
     );
     let mems = m.about().map_err(mnemo_err)?;
     if mems.is_empty() {

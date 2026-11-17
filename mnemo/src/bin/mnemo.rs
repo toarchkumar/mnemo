@@ -91,6 +91,14 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Mcp {
             cmd: McpCmd::Install { path, .. },
         }
+        | Command::Cache {
+            op:
+                CacheOp::Get { path, .. }
+                | CacheOp::Put { path, .. }
+                | CacheOp::Delete { path, .. }
+                | CacheOp::Stats { path, .. }
+                | CacheOp::Purge { path, .. },
+        }
         | Command::Thread {
             cmd:
                 ThreadCmd::Ingest { path, .. }
@@ -1756,7 +1764,9 @@ enum CacheOp {
     /// Look up a key; prints the value to stdout on hit, non-zero
     /// exit on miss.
     Get {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.17.2), as with `get`.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         /// Cache namespace.
         #[arg(long)]
@@ -1770,7 +1780,9 @@ enum CacheOp {
     /// Insert or overwrite an entry. Either `--value <string>` (UTF-8)
     /// or `--file <path>` (raw bytes) must be provided.
     Put {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.17.2), as with `get`.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         #[arg(long)]
         ns: String,
@@ -1794,7 +1806,9 @@ enum CacheOp {
     },
     /// Tombstone an entry. Space reclaimed by `mnemo compact`.
     Delete {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.17.2), as with `get`.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         #[arg(long)]
         ns: String,
@@ -1806,7 +1820,9 @@ enum CacheOp {
     /// Print cache statistics as JSON. `--ns` restricts to one
     /// namespace; without it the whole cache is summarized.
     Stats {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.17.2), as with `get`.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         #[arg(long)]
         ns: Option<String>,
@@ -1817,7 +1833,9 @@ enum CacheOp {
     /// `--expired` restricts to TTL-expired entries only; otherwise
     /// every live entry in the scope is tombstoned.
     Purge {
-        /// Path to the `.mnemo` file.
+        /// Path to the `.mnemo` file. Leave it out for this project's brain
+        /// (v0.17.2), as with `get`.
+        #[arg(default_value = "", hide_default_value = true)]
         path: String,
         #[arg(long)]
         ns: Option<String>,

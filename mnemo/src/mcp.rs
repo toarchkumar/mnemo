@@ -958,7 +958,21 @@ fn serve_inner<R: Read, W: Write>(
             // lapse early once it's gone. It never touches the brain's lock.
             if let Some(a) = &named {
                 match s.hold_presence() {
-                    Ok(()) => eprintln!("mnemo mcp: holding {a}'s presence lock"),
+                    Ok(()) => {
+                        eprintln!("mnemo mcp: holding {a}'s presence lock");
+                        // PRESENCE-AT-START (v0.17.2): the presence record,
+                        // with the lock flag, written once now in one short
+                        // write window, so `who` sees this session alive
+                        // before its first write. Never a failed start.
+                        let role = SERVER_ROLE.with(|r| r.borrow().clone());
+                        match s.write(|db| db.touch_presence(role.as_deref(), Some("mcp"))) {
+                            Ok(_) => eprintln!("mnemo mcp: {a} is present (tool mcp)"),
+                            Err(e) => eprintln!(
+                                "mnemo mcp: note: {a}'s presence wasn't written at start ({e}); \
+                                 the first write tool call writes it"
+                            ),
+                        }
+                    }
                     Err(e) => eprintln!("mnemo mcp: no presence lock for {a}: {e}"),
                 }
             }

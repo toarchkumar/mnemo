@@ -1780,7 +1780,8 @@ fn summary_tty(
         }
     }
     println!();
-    println!("The guide for agents: `mnemo onboard --guide`");
+    // TTY-BACKTICKS: plain text on a terminal, no Markdown.
+    println!("The guide for agents: mnemo onboard --guide");
 }
 
 /// A step as a sentence: a capital first, a full stop last.
@@ -2109,7 +2110,7 @@ fn run_person(v: &View, o: &Opts, changes: usize) -> Result<(), String> {
         println!();
         if o.print || !interactive() {
             println!(
-                "Nothing was written; run `mnemo onboard{} --yes` to write it.",
+                "Nothing was written; run mnemo onboard{} --yes to write it.",
                 if o.undo { " --undo" } else { "" }
             );
             if o.print {
