@@ -692,6 +692,27 @@ fn your_work(db: &mut Mnemo) -> String {
             }
         }
     }
+    // READY-NOTICE: tasks it created that wait for its `done`.
+    if let Some(a) = &agent {
+        if let Ok(ts) = db.tasks(Some(mnemo_engine::task_status::READY), None) {
+            let mine: Vec<String> = ts
+                .iter()
+                .filter(|t| &t.creator == a)
+                .map(|t| format!("- {}: {}", esc(&t.slug), esc(&t.title)))
+                .collect();
+            if !mine.is_empty() {
+                sections.push((
+                    format!(
+                        "{} of your tasks {} for your done (call `task` with `list`, then \
+                         `update --status done`):",
+                        mine.len(),
+                        plural(mine.len(), "waits", "wait")
+                    ),
+                    mine,
+                ));
+            }
+        }
+    }
     // Its own tasks' claims about to lapse.
     if let Some(a) = &agent {
         if let Ok(claims) = db.claims() {
@@ -1002,6 +1023,13 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
             "claims lapsing soon",
         ));
     }
+    if !work.ready_for_done.is_empty() {
+        counts.push(n(
+            work.ready_for_done.len(),
+            "task ready for your `done`",
+            "tasks ready for your `done`",
+        ));
+    }
     // What to call, for only what the counts hold (ONBOARD-UX).
     let mut calls = Vec::new();
     let it = |k: usize, one: &'static str, many: &'static str| if k == 1 { one } else { many };
@@ -1023,6 +1051,10 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
             it(work.lapsing.len(), "its claim", "their claims")
         ));
     }
+    // READY-NOTICE: fixed text; the slugs are items, after the framing.
+    if !work.ready_for_done.is_empty() {
+        calls.push("Call `task` with `list`, then `update --status done`.".to_string());
+    }
     let head = format!(
         "mnemo: new for you: {}. {}\n{}",
         counts.join(", "),
@@ -1032,6 +1064,13 @@ pub fn turn_text(work: &mnemo_engine::NewWork, now: i64) -> String {
     let mut items: Vec<String> = Vec::new();
     for t in &work.tasks {
         items.push(format!("- task {}: {}", esc(&t.slug), esc(&t.title)));
+    }
+    for t in &work.ready_for_done {
+        items.push(format!(
+            "- ready for your done: {}: {}",
+            esc(&t.slug),
+            esc(&t.title)
+        ));
     }
     for c in &work.lapsing {
         items.push(format!(

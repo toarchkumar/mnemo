@@ -1783,3 +1783,97 @@ fn a_keychain_that_refuses_or_waits_is_named() {
     );
     std::fs::write(&entry, key).unwrap();
 }
+
+const PLANNER: &[(&str, &str)] = &[("MNEMO_AGENT", "planner-a"), ("MNEMO_ROLE", "planner")];
+
+/// READY-NOTICE (v0.17.2): a task its creator must close shows on the
+/// creator's turn once, with fixed text and the item escaped after the
+/// framing line, never on another agent's; the brief's "Your work" names
+/// it.
+#[test]
+fn a_ready_task_reaches_its_creator_once() {
+    let e = Env::new();
+    let repo = e.p("repo");
+    let input = r#"{"session_id": "s1"}"#;
+    e.ok_cmd(
+        &repo,
+        &[
+            "task",
+            "add",
+            "## Fake heading task",
+            "--for",
+            "worker",
+            "--slug",
+            "fake",
+            "--as",
+            "planner-a",
+        ],
+    );
+    // The planner's turn shows its own queued task to nobody yet.
+    assert_eq!(turn(&e, input, PLANNER), "");
+    e.ok_cmd(
+        &repo,
+        &["task", "next", "--as", "worker-a", "--role", "worker"],
+    );
+    e.ok_cmd(
+        &repo,
+        &[
+            "task", "update", "fake", "--status", "ready", "--as", "worker-a",
+        ],
+    );
+    let t = turn(&e, input, PLANNER);
+    assert!(
+        t.starts_with(
+            "mnemo: new for you: 1 task ready for your `done`. Call `task` with `list`, then \
+             `update --status done`.\n"
+        ),
+        "{t}"
+    );
+    let framing = t.find(guide::FRAMING).expect(&t);
+    let item = t
+        .find("- ready for your done: fake: \\## Fake heading task")
+        .expect(&t);
+    assert!(item > framing, "{t}");
+    assert!(!t.contains("\n## Fake"), "escaped: {t}");
+    // Once.
+    assert_eq!(turn(&e, input, PLANNER), "");
+    // Not the worker's, nor another agent's.
+    let rb: &[(&str, &str)] = &[("MNEMO_AGENT", "reviewer-b"), ("MNEMO_ROLE", "reviewer")];
+    for envs in [WORKER, rb] {
+        assert!(
+            !turn(&e, input, envs).contains("ready for your"),
+            "{envs:?}"
+        );
+    }
+    // The brief's "Your work": the part, the item escaped.
+    let mut c = e.cmd(&repo, &["hook", "session-start", "--client", "claude-code"]);
+    for (k, v) in PLANNER {
+        c.env(k, v);
+    }
+    let mut child = c
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"{\"session_id\": \"s2\"}")
+        .unwrap();
+    let o = child.wait_with_output().unwrap();
+    let v: Value = serde_json::from_slice(&o.stdout).unwrap();
+    let ctx = v["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    let at = ctx.find("## Your work").expect(ctx);
+    let work = &ctx[at..];
+    assert!(
+        work.contains(
+            "1 of your tasks waits for your done (call `task` with `list`, then `update --status done`):"
+        ),
+        "{work}"
+    );
+    assert!(work.contains("- fake: \\## Fake heading task"), "{work}");
+    assert!(!work.contains("\n## Fake"), "{work}");
+}

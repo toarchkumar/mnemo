@@ -657,6 +657,10 @@ pub const MNEMO_META_WAKES: &str = "_mnemo.wakes";
 /// 13a (RB-012.6 item 4): the agents a message to a role or everyone, or a
 /// role's task, has been shown to.
 pub const MNEMO_META_SEEN_BY: &str = "_mnemo.seen_by";
+/// 13a (READY-NOTICE, v0.17.2): the agents a `ready` task has been shown
+/// to as waiting for their `done`. Apart from [`MNEMO_META_SEEN_BY`]: a
+/// creator of the task's own role was shown it while it was queued.
+pub const MNEMO_META_READY_SEEN_BY: &str = "_mnemo.ready_seen_by";
 /// 13a (13.1b): the claim expiry its holder was last warned about.
 pub const MNEMO_META_WARNED_EXPIRY: &str = "_mnemo.warned_expiry";
 
