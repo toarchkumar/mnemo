@@ -14,6 +14,11 @@
 //! - the result cache (and so the embedder-identity record) is never part
 //!   of an export.
 //!
+//! - v0.18.0 (the backup): review findings come after the tasks, every
+//!   status, in their id's order; then the project essence, its open items
+//!   by section, then its resolved ones by section, from the last 30 days
+//!   only.
+//!
 //! The same unchanged file exports to the same bytes, and one new memory
 //! adds only its own lines. A new version of a keyed fact also changes the
 //! line of the version it supersedes (its `_mnemo.superseded_by` and
@@ -84,6 +89,60 @@ fn done_long_ago(m: &Memory, now: i64) -> bool {
     now - at > mnemo_engine::TASK_DONE_EXPORT_KEEP_SECS
 }
 
+/// v0.18.0: a finding's place in the order: its id's prefix and numbers.
+fn finding_order(m: &Memory) -> Option<(String, u64, u64)> {
+    mnemo_engine::Finding::from_memory(m).map(|f| f.sort_key())
+}
+
+/// v0.18.0: a project essence item (no thread)'s place in the order: the
+/// open items by section, then the resolved ones by section, each by id.
+fn project_essence_order(m: &Memory) -> Option<(bool, usize)> {
+    if kind_of(m) != Some(mnemo_engine::MNEMO_META_KIND_ESSENCE)
+        || m.metadata.contains_key(mnemo_engine::MNEMO_META_THREAD)
+    {
+        return None;
+    }
+    const SECTIONS: [&str; 8] = [
+        "intent",
+        "conventions",
+        "decisions",
+        "state",
+        "open",
+        "next",
+        "lessons",
+        "timeline",
+    ];
+    let section = m
+        .metadata
+        .get(mnemo_engine::MNEMO_META_SECTION)
+        .and_then(Value::as_str)
+        .and_then(|s| SECTIONS.iter().position(|x| *x == s))
+        .unwrap_or(SECTIONS.len());
+    Some((is_resolved(m), section))
+}
+
+fn is_resolved(m: &Memory) -> bool {
+    m.metadata.get("_mnemo.status").and_then(Value::as_str) == Some("resolved")
+}
+
+/// v0.18.0: a project essence item resolved more than 30 days ago (by its
+/// last history entry, else when it was last changed).
+fn resolved_long_ago(m: &Memory, now: i64) -> bool {
+    if project_essence_order(m).is_none() || !is_resolved(m) {
+        return false;
+    }
+    let at = m
+        .metadata
+        .get("_mnemo.status_history")
+        .and_then(Value::as_array)
+        .and_then(|h| h.last())
+        .and_then(|e| e.get("at"))
+        .and_then(Value::as_i64)
+        .or_else(|| m.metadata.get("_mnemo.updated_at").and_then(Value::as_i64))
+        .unwrap_or(m.created_at);
+    now - at > mnemo_engine::TASK_DONE_EXPORT_KEEP_SECS
+}
+
 fn is_turn(m: &Memory) -> bool {
     m.metadata.get(MNEMO_META_KIND).and_then(Value::as_str) == Some(MNEMO_META_KIND_TURN)
 }
@@ -99,10 +158,18 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
+    // Tests shift the clock (dev-hooks builds only), as for coordination.
+    #[cfg(feature = "dev-hooks")]
+    let now = now
+        + std::env::var("MNEMO_DEV_CLOCK_OFFSET")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
     all.retain(|m| !matches!(kind_of(m), Some("claim" | "presence")));
     if o.git {
         all.retain(|m| kind_of(m) != Some("message"));
         all.retain(|m| !done_long_ago(m, now));
+        all.retain(|m| !resolved_long_ago(m, now));
     }
     if let Some(ts) = &o.types {
         all.retain(|m| ts.contains(&m.memory_type));
@@ -112,19 +179,25 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
     }
     if o.git {
         all.retain(|m| !is_turn(m));
-        // Keyed memories in key order, then tasks in slug order, then the
-        // rest, each by id.
-        all.sort_by(|a, b| {
-            let ka = key_of(a);
-            let kb = key_of(b);
-            let (ta, tb) = (task_slug(a), task_slug(b));
-            (ka.is_none(), ka, ta.is_none(), ta, a.id).cmp(&(
-                kb.is_none(),
-                kb,
-                tb.is_none(),
-                tb,
-                b.id,
-            ))
+        // Keyed memories in key order, then tasks in slug order, then
+        // findings in id order, then the project essence by section (open
+        // before resolved), then the rest, each by id.
+        all.sort_by_cached_key(|m| {
+            let key = key_of(m).map(str::to_string);
+            let task = task_slug(m).map(str::to_string);
+            let finding = finding_order(m);
+            let essence = project_essence_order(m);
+            (
+                key.is_none(),
+                key,
+                task.is_none(),
+                task,
+                finding.is_none(),
+                finding,
+                essence.is_none(),
+                essence,
+                m.id,
+            )
         });
     } else {
         all.sort_by_key(|m| m.id);
@@ -264,8 +337,10 @@ fn markdown(memories: &[Memory], o: &ExportOptions, facts: &FileFacts) -> String
     ));
     if o.git {
         out.push_str(
-            "Written with `--git`: ordered by key, then id; vectors, thread turns \
-             and access stats are left out.\n",
+            "Written with `--git`: keyed memories by key, then tasks, findings and \
+             the project essence, then the rest by id; vectors, thread turns, \
+             messages, claims, presence, private records and access stats are left \
+             out.\n",
         );
     } else {
         out.push_str(&format!(

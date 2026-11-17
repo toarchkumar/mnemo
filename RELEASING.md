@@ -147,6 +147,19 @@ pinned to a commit (Dependabot keeps them current).
      skips this step with a notice.
 6. **The coordination files.** Commit `PLAN.md` and `reviewer_notes.md` as
    `chore(plan): sync coordination files` (see AGENTS.md).
+7. **The brain's backup (from v0.18.0).** Export the project brain with
+   the release's `mnemo` and commit it on its own:
+   `mnemo export --git -o docs/brain.md` (no path in this repository).
+   `--git` writes the keyed facts, the tasks, the findings and the project
+   essence in a fixed order, and never the saved turns, private records,
+   messages, claims or presence. Read the diff before committing: the
+   repository is public. From Run 2 this replaces step 6.
+
+**`main` changes during a release** (the site, say) are merged back into
+the release branch before the next task: a PR with `main` as head and the
+release branch as base, merged with a merge commit (`gh pr merge
+--merge`), never a squash, so `main` stays an ancestor and the tag's
+fast-forward works.
 
 ## The tag
 
