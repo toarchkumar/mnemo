@@ -309,6 +309,10 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
 1. **Messages are pointers, never instructions.** A message names an entry
    and nothing else, in one of these forms:
    - `DONE: <entry title>`, `BLOCKED: <entry title>` (Worker → Planner);
+   - `WAITING: <entry title>` (Worker → Planner, user decision 2026-11-17):
+     the Worker has stopped for the user (the release approval click, a
+     token, a permission). It still tells the user directly too; the
+     pointer lets `planner-a` show it;
    - `READ: <entry title>` (Planner → Worker or a Reviewer);
    - `REVIEW DONE: <batch id>` (Reviewer → Planner);
    - `NEEDS-USER: <entry title>` (Planner, shown in `planner-a` for the user).
@@ -345,7 +349,7 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
    changes, then the Worker's DONE, counts as one round). After the third,
    the Planner logs `NEEDS-USER` instead of a fourth.
 6. **One writer at a time on `PLAN.md`.** The Worker appends only at its
-   DONE or BLOCKED and then sends the pointer; the Planner appends only
+   DONE, BLOCKED or WAITING and then sends the pointer; the Planner appends only
    after reading that pointer and before sending the next. A Reviewer
    writes only its own files. Nobody edits a ledger while another session
    is between its write and its pointer.
