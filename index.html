@@ -128,6 +128,14 @@ a { color: var(--accent-ink); }
 code { font-family: var(--mono); font-size: .88em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .05em .35em; overflow-wrap: anywhere; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
+/* ---------- ANNOUNCEMENT ---------- */
+.announce {
+  background: var(--accent-tint); color: var(--ink); border-bottom: 1px solid var(--line);
+  text-align: center; font-size: .9rem; line-height: 1.45; padding: .6rem 16px;
+}
+.announce b { font-weight: 700; }
+.announce a { color: var(--accent-ink); font-weight: 700; white-space: nowrap; }
+
 /* ---------- NAV ---------- */
 nav.top {
   position: sticky; top: 0; z-index: 50;
@@ -431,6 +439,11 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
     <symbol id="i-gh" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.44 9.8 8.2 11.39.6.1.83-.26.83-.57v-2.24c-3.34.73-4.04-1.41-4.04-1.41-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></symbol>
   </defs>
 </svg>
+
+<div class="announce" role="region" aria-label="Announcement">
+  <b>Coming next: encrypted sync</b> for your project brain, across your machines and your team. The server never sees your data.
+  <a href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the waitlist &rarr;</a>
+</div>
 
 <nav class="top" aria-label="Main">
   <div class="nav-inner">
@@ -863,6 +876,7 @@ staging-7 environment and is owned by the payments team.</pre>
     <div class="actions">
       <a class="btn btn-primary" href="#how">How it works</a>
       <a class="btn btn-ghost" href="https://github.com/toarchkumar/mnemo"><svg><use href="#i-gh"/></svg>Star on GitHub</a>
+      <a class="btn btn-ghost" href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the sync waitlist</a>
     </div>
   </div>
 </section>
