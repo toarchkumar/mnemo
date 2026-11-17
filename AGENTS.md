@@ -287,6 +287,8 @@ these files into a code commit. CI ignores pushes that touch only them.
 Because the repository is public, keep **unfixed security findings** out of
 both files. Write them in a gitignored `*.local.md` file (for example
 `SECURITY.local.md`) and move them into `PLAN.md` once the fix has shipped.
+Anything else that refers to one, such as a task, a fact, an essence item,
+a commit or a PR, names it by its id only (user decision 2026-11-17).
 If either file is absent in a fresh workspace, only its primary
 author (`Planner` for `PLAN.md`, `Reviewer` for `reviewer_notes.md`) creates
 it; other roles stop and ask the user first.
