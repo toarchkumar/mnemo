@@ -141,7 +141,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.17.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.17.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -162,6 +162,24 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.17.1: clearer setup output
+
+- **`mnemo onboard` at a terminal is short, in the style of a boot log:**
+  one line per item, tagged `[  OK   ]`, `[ ADDED ]`, `[UPDATED]` or
+  `[ WARN  ]`, then what it did and what to do next. Before writing, it
+  shows a plan ("Will add", "Will update") and asks once. The guide is a
+  pointer (`mnemo onboard --guide`), and the keychain's delete command
+  appears only with `--undo`. Run by an agent, the output is unchanged.
+- **The keychain after an upgrade (macOS).** A new `mnemo` binary has to be
+  allowed to read the brain's key once: run `mnemo info` after upgrading
+  and choose **Always Allow**. The install script says so, and the hooks
+  and the server now say when the keychain is waiting or refused instead
+  of failing quietly.
+- **The per-turn line** names only what's new: messages, a ready task, or
+  a claim about to lapse.
+- The install script's notes are shorter. The iOS and Android packages
+  stay at 0.17.0.
 
 ## What's new in v0.17.0: several agents, one brain
 
