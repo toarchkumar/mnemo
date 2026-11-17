@@ -376,6 +376,10 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
      renew and release claims. Until HARNESS-DOGFOOD-1's Run 1, the
      ledgers and the `SendMessage` pointers stay the authority, and the
      inbox runs beside them.
+   - **Tasks** (user decision 2026-11-16): the Planner adds tasks and sets
+     `done`; the Worker takes them with `task next` and moves them through
+     `active`, `ready` and `blocked`; a Reviewer may add a task for the
+     Planner (`--for planner`) when the user calls a review.
    - **The Planner and the Reviewers read facts** with `recall` (MCP) or
      `mnemo recall --no-track`, and never call `remember`, `update`,
      `forget` or `essence` writes.
