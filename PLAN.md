@@ -327,7 +327,7 @@ read. From now on:
 
 | Release | Lookups | Hit | Partial | Miss: not stored | Miss: not found |
 |---|---|---|---|---|---|
-| v0.15.0 (from 2026-11-14) | 66 | 26 | 26 | 14 | 0 |
+| v0.15.0 (from 2026-11-14) | 71 | 29 | 27 | 15 | 0 |
 
 First lookup (PLANNER-A, 2026-11-14): "keyword tokenizer 2 and older
 builds opening the file" → hit (rank 1, sim 0.64), the Worker's TOK-1
@@ -39139,3 +39139,871 @@ changed or already right", which is PR 115's view, not PR 117's.
   add", "Will update") and asks once."
 - The HANDOFF's files and commit message are unchanged. **Commit the file
   as it is now.**
+
+### 2026-11-16 — WORKER — DONE — v0.17.1 tagged; the release waits at "approve the release (v0.17.1, mobile false)"
+
+Brain: "release order tag approve attest registries site byte-equal
+attestation verify delete branches" → hit (`decision.release-order`).
+Run before the work.
+
+1. **Your HANDOFF commit:** `b6336ac` (`README.md`, `index.html`), on its
+   own.
+   - The README's v0.17.1 lines are **as your amendment states** ("short,
+     in the style of a boot log … tagged `[  OK   ]`, `[ ADDED ]`,
+     `[UPDATED]` or `[ WARN  ]` … Before writing, it shows a plan").
+   - I checked each claim against the code and the CHANGELOG: the plan
+     before writing, the guide's pointer, the keychain-delete line only
+     with `--undo`, the agent's output unchanged, the macOS keychain note,
+     the per-turn line, and mobile staying at 0.17.0. All are right.
+   - **One small thing, not wrong:** the tag list names four of the seven.
+     `[REMOVED]` (`--undo`), `[FAILED ]` and `[SKIPPED]` don't appear in a
+     normal run.
+2. **The coordination files:** `d6dc523`, `chore(plan): sync coordination
+   files` (`PLAN.md`, `reviewer_notes.md`; not `SECURITY.local.md`, which
+   git doesn't track). Pushed to `release-0.17.1`.
+3. **`main` fast-forwarded** from `90198b9` to `d6dc523`.
+   - The first push returned "failed to push some refs" with nothing
+     more. The retry, a second after the release branch's push, went
+     through ("90198b9..d6dc523").
+   - The push runs on `d6dc523`: CI success, Mobile CI success.
+4. **The tag:** `v0.17.1`, annotated "MNemo 0.17.1" (tag object `eda2a3b`,
+   commit `d6dc523`), pushed.
+5. **The release run 43999228892 is waiting on the `release` environment**
+   at "approve the release (v0.17.1, mobile false)". Every job before the
+   gate succeeded: version check, the 5 CLIs, the 5 wheels, the sdist and
+   its check, `SHA256SUMS`, and the 5 artifact checks. The mobile build
+   jobs were skipped (mobile off).
+
+**Stopping for the user's click.** After it: attest and its order,
+crates.io and PyPI, the GitHub Release (12 engine files, no mobile
+assets), the site against `main`, `gh attestation verify` at
+`refs/tags/v0.17.1`, then the branch deletions.
+
+### 2026-11-16 — PLANNER-A — REVIEW + NEEDS-USER — v0.17.1 tagged; the release waits for the user's approval click
+
+Checked:
+- `v0.17.1` is on `d6dc523`, which is `origin/main`. On `main`:
+  `6d0288a` (PR 117), then `b6336ac` (the HANDOFF, with the README's
+  boot-log bullet), then `d6dc523` (the sync).
+- Tag run 43999228892 is `waiting`. Only "approve the release (v0.17.1,
+  mobile false)" is left.
+
+**NEEDS-USER:** approve run 43999228892
+(https://github.com/toarchkumar/mnemo/actions/runs/43999228892). The
+Worker then does step 4 of my entry "v0.17.1 accepted (PR 117, …); the
+user: 'Ship it'; the README and site; the tag".
+
+### 2026-11-16 — PLANNER-A — DECISION + DISPATCH — the user approved v0.17.1; do the after-the-tag checks
+
+**The user (2026-11-16):** "Approved", for run 43999228892.
+
+**Dispatch:** once the run completes, do step 4 of my entry "v0.17.1
+accepted (PR 117, …); the user: 'Ship it'; the README and site; the tag":
+- `attest` and its order;
+- crates.io and PyPI;
+- the GitHub Release: the 12 engine files, and no mobile assets;
+- the site's files byte-equal to `main`;
+- `gh attestation verify` at `refs/tags/v0.17.1`;
+- the branch deletions, each listed first.
+
+**Don't install v0.17.1 here, and don't touch the brain.** Log DONE and
+stop.
+
+### 2026-11-16 — WORKER — DONE — v0.17.1 released: the after-the-tag checks all pass
+
+Brain: no lookup and no write; your entry says not to touch the brain.
+
+**Run 43999228892: success.** On GitHub, the approval on the `release`
+environment is by `toarchkumar`.
+
+1. **Attest, and its order:**
+   - `attest the binaries` ran 02:51:30 to 02:51:39Z and succeeded.
+   - `attach engine assets` started at 02:51:43, both publishes at
+     02:51:44, and the gate at 02:52:36. Each started after attest ended.
+   - The mobile build, publish and verify jobs were skipped (mobile off);
+     "mobile (skipped, release note)" succeeded.
+2. **crates.io:** `max_version` 0.17.1. **PyPI:** 0.17.1 with 6 files (5
+   wheels and the sdist).
+3. **The GitHub Release** `v0.17.1`: not a draft, not a prerelease, **12
+   assets**: 5 CLIs, 5 wheels, the sdist and `SHA256SUMS`. There are **no
+   mobile assets**, and the notes say "Mobile packages not published in
+   this release (latest: Swift 0.17.0, Android 0.17.0)".
+4. **The site:** Pages built `d6dc523` and succeeded. Byte-equal to
+   `origin/main` (`cmp`):
+   - `install.sh`: 9057 bytes;
+   - `install.ps1`: 8830 bytes;
+   - `llms.txt`: 1821 bytes;
+   - `llms-full.txt`: 16193 bytes;
+   - `index.html`: 56379 bytes.
+5. **The attestation:**
+   - I downloaded `mnemo-v0.17.1-aarch64-apple-darwin` to the scratchpad
+     only; it isn't installed. Its `SHA256SUMS` line: OK.
+   - `gh attestation verify` with the install script's flags
+     (`--signer-workflow …/release.yml --source-ref refs/tags/v0.17.1`)
+     exited 0: 1 verified attestation, ref `refs/tags/v0.17.1`, run
+     43999228892.
+6. **The branches:**
+   - **Listed first:** `release-0.17.1` (local and origin, at `d6dc523`,
+     equal to `main`). No `rel0171-*` was left on either.
+   - **Deleted:** `release-0.17.1` on origin and locally.
+   - **After:** none left on origin.
+   - The tree is on `main` at `d6dc523`. `PLAN.md` holds only these
+     WORKLOG entries, uncommitted.
+
+Stopping.
+
+### 2026-11-16 — PLANNER-A — VERIFIED — v0.17.1 (ONBOARD-UX, the boot-log view) is released
+
+**Checked myself:**
+- crates.io 0.17.1, not yanked;
+- PyPI 0.17.1 with 6 files;
+- the GitHub Release has 12 assets;
+- the live `index.html` is byte-equal to `main`'s;
+- no `release-0.17.1` or `rel0171-*` branch is left.
+
+The Worker's entry covers `attest` running before the publish jobs, and
+the attestation verifying at `refs/tags/v0.17.1`.
+
+**Carried, LOW:**
+- TTY-BACKTICKS;
+- CLAIM-RACE-FLAKE;
+- COORD-LEGACY-SCAN;
+- the MCP `about` counts;
+- MODEL-RETRY;
+- WAKE-SOCKET;
+- RB-011.3 rec 5.
+
+**Open with the user:** KEYCHAIN-REPROMPT's Developer ID signing.
+
+**Next: HARNESS-DOGFOOD-1,** the first-success milestone. This
+project's own handoffs move onto the brain's tasks and inbox. It starts
+with my plan for its Run 1, for the user's go.
+
+### 2026-11-16 — PLANNER-A — DECISION — no Developer ID signing for now; the carried items go into v0.17.2; the sync design note is owed
+
+**The user (2026-11-16):** "I won't do apple dev now but okay for rest of
+list".
+- **KEYCHAIN-REPROMPT's signing is DEFERRED.** Not now, by the user's
+  choice. Until then, each macOS upgrade asks once, and v0.17.1's notes
+  and watchdog stand. It's revisited before any wide promotion.
+- **v0.17.2, beside HARNESS-DOGFOOD-1:**
+  1. TTY-BACKTICKS;
+  2. CLAIM-RACE-FLAKE;
+  3. the MCP `about` counts (`mnemo://about`);
+  4. MODEL-RETRY;
+  5. a pathless `cache`;
+  6. COORD-LEGACY-SCAN, measured.
+- **At the next phase review:**
+  - keyword-indexing saved turns;
+  - PY-SDIST.
+- **Still waiting on others:** WAKE-SOCKET (Claude Code's docs) and
+  RB-011.3 rec 5 (a Windows machine).
+
+**A miss of mine:** the order says "a sync design note is written during
+13a", and it gates the personal sync build. 13a shipped without it. I
+write it during HARNESS-DOGFOOD-1, before anything in 13.7 or sync
+starts. It needs the waitlist's numbers from the user (the Google form's
+responses), which I'll ask for then.
+
+### 2026-11-16 — PLANNER-A — DECISION + PLAN + NEEDS-USER — HARNESS-DOGFOOD-1 starts (the user: "Let's do it"); Run 1 is v0.17.2, carried through the brain's tasks and inbox; one rule-9 addition for the user
+
+**The user (2026-11-16): "Let's do it",** for HARNESS-DOGFOOD-1's Run 1.
+
+**What the milestone is** (R-006.3, accepted 2026-11-11):
+- everything this project does through the git Markdown files runs in
+  MNemo;
+- it's met when **Run 2** takes one full release, dispatch to tag, with
+  no hand-edited PLAN.md or `reviewer_notes.md`;
+- **Run 1 is the rehearsal:** 13.1b's "accepted when" is that the
+  Worker's READY wakes the Planner and the Planner's DISPATCH wakes the
+  Worker, with the user only approving.
+
+**Run 1 = the v0.17.2 release,** carried through the brain alongside the
+ledgers. The ledgers stay the authority (rule 9), and every dispatch
+also exists as a task.
+
+**The Run 1 loop:**
+1. **The Planner** writes its DISPATCH entry as today. Then it adds a
+   task: `mnemo task add "<entry title>" --for worker --slug v0172-<n>
+   --body "PLAN.md: <entry title>"`, with `--after` for order. Then it
+   nudges worker-a with `SendMessage` (`READ: <entry title>`), as today.
+2. **The Worker** takes it with `mnemo task next`, so it's the task's
+   owner, with a 2 h claim. It works, appends its DONE, then `mnemo task
+   update <slug> --status ready --note "PLAN.md: <DONE title>"`. Then it
+   posts `mnemo post planner-a "ready: <slug>"` and nudges with
+   `SendMessage` (`DONE: <title>`).
+3. **The Planner** reviews, then `mnemo task update <slug> --status
+   done`, or adds a note and leaves it `ready` for another round.
+4. **Writing PLAN.md under a claim:** the writer takes `mnemo claim take
+   plan.md --ttl 10m`, appends, releases. That replaces rule 6's "one
+   writer at a time" honour system, beside it.
+5. **The tally:** each round gets one row in a Run 1 table, kept by me
+   here. The columns:
+   - did the receiver find the work through its per-turn line, its inbox
+     or `task next` before reading the nudge;
+   - did the user relay anything;
+   - what was awkward.
+
+   DOGFOOD-0's lookups carry on.
+
+**Not in Run 1, and waiting for Run 2 or later:**
+- the Reviewers' items as records (step 8b's `finding` kind);
+- the specs as keyed records;
+- the private brain for `SECURITY.local.md`, which needs 13b's keys.
+
+Run 1's frictions decide Run 2's design.
+
+**v0.17.2's tasks** (from my DECISION entry, plus one Run 1 needs):
+
+| Slug | What | After |
+|---|---|---|
+| `v0172-1` | **READY-NOTICE, new:** the per-turn line and the brief also count tasks this agent created that are now `ready` and waiting for its `done`. Today `new_work` counts only messages, the role's queued tasks and lapsing claims (`coordination.rs:1792`), so a READY reaches its creator only by a message. Used from Run 2, since the hooks run the installed binary | |
+| `v0172-2` | CLI and MCP polish: TTY-BACKTICKS, a pathless `cache`, `about`'s counts over `mnemo://about` | |
+| `v0172-3` | MODEL-RETRY | |
+| `v0172-4` | Engine: CLAIM-RACE-FLAKE, and COORD-LEGACY-SCAN measured | |
+| `v0172-5` | READY: the bump, the CHANGELOG, the dry run | 1 to 4 |
+
+**NEEDS-USER, a rule-9 addition** (protocol text). Rule 9 lets every
+session use the inbox and claims, but doesn't mention tasks. Proposed:
+"**Tasks:** the Planner adds tasks and sets `done`; the Worker takes them
+with `task next` and moves them through `active`, `ready` and `blocked`;
+a Reviewer may add a task for the Planner (`--for planner`) when the
+user calls a review." Once the user agrees, I edit it, hand it off, and
+dispatch `v0172-1`.
+
+### 2026-11-16 — PLANNER-A — DECISION + HANDOFF + DISPATCH — rule 9's tasks bullet (the user: "Yes"); Run 1 round 1: `v0172-1`, READY-NOTICE
+
+**The user (2026-11-16): "Yes"** to the tasks bullet.
+
+**HANDOFF: `AGENTS.md`, rule 9 only,** a new bullet: "**Tasks:** the
+Planner adds tasks and sets `done`; the Worker takes them with `task
+next` and moves them through `active`, `ready` and `blocked`; a Reviewer
+may add a task for the Planner (`--for planner`) when the user calls a
+review."
+- **Commit it on its own,** first, on `release-0.17.2`. Create that from
+  `main` (`d6dc523`).
+- **Commit message:** `docs(agents): rule 9 names who adds, takes and
+  closes tasks`.
+
+---
+
+**Run 1, round 1. As the Run 1 plan says:**
+- I took the claim `plan.md` before writing this entry, and I release it
+  after;
+- the task is `v0172-1`, in the brain;
+- the `SendMessage` nudge follows.
+
+**Your part of the loop:**
+1. `mnemo task next` (your session's `MNEMO_AGENT` and `MNEMO_ROLE`
+   apply), then work.
+2. Take `plan.md` before you append your DONE, and release it after.
+3. `mnemo task update v0172-1 --status ready --note "PLAN.md: <your DONE
+   title>"`.
+4. `mnemo post planner-a "ready: v0172-1"`, then the `DONE:` nudge.
+5. **In DONE, two lines for the tally:**
+   - how you found this work: the per-turn line, the brief, `task next`,
+     or the nudge;
+   - anything awkward in the loop.
+
+**The task: READY-NOTICE,** on `rel0172-1-ready-notice` from
+`release-0.17.2`, with a PR into it:
+- **`new_work`** (`coordination.rs:1792`) also returns tasks this agent
+  created that are `ready` and not yet seen by it, as a fourth list.
+- **The per-turn line** names them: "N tasks ready for your `done`: call
+  `task` with `list`, then `update --status done`". The text is fixed,
+  with no slug outside the framing; any listed items go after `FRAMING`
+  and are escaped, as now.
+- **The brief's "Your work"** gets a "waiting for your done" part, within
+  the 600 bytes.
+- **The Stop hook** doesn't wake for these. They wait for a person's
+  review, so they're the per-turn line's alone.
+- **Seen per agent,** like the others (`_mnemo.seen_by`).
+- **Tests:** a creator's turn shows its ready task once, and another
+  agent's doesn't show it; the brief's part; the escaping.
+- **The CHANGELOG's `[Unreleased]`,** and the guide's "How work reaches a
+  session" line. Regenerate `llms-full.txt`.
+
+Log DONE and stop, as the loop says.
+
+### 2026-11-17 — WORKER — DONE — Run 1 round 1: READY-NOTICE merged (PR 118, `dedbba0`), task `v0172-1` ready
+
+Brain: "new_work per-turn line tasks ready for the creator's done seen_by
+brief your work" → hit (step 5's per-turn hook, and SEEN-PER-AGENT). Run
+before the work.
+
+1. **The rule 9 HANDOFF:** `e8dbdd4` (`docs(agents): rule 9 names who adds,
+   takes and closes tasks`). It's the only file in that commit
+   (`AGENTS.md`, rule 9's new tasks bullet). It went first on
+   `release-0.17.2`, created from `main` (`d6dc523`) and pushed.
+2. **PR 118** (https://github.com/toarchkumar/mnemo/pull/118), on
+   `rel0172-1-ready-notice`: `e82de1f`, squash-merged as `dedbba0`, and
+   the branch deleted. CI: 18 of 18.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | `new_work` | A fourth list, `NewWork::ready_for_done`: tasks this agent created that are `ready` and not yet shown to it as such. `is_empty` counts it | `wake::a_ready_task_is_new_to_its_creator_once_per_ready` |
+   | Seen per agent | `mark_shown` adds the agent to a new reserved key, `_mnemo.ready_seen_by`. **Not `_mnemo.seen_by`, a deviation:** a creator of the task's own role is shown it while it's queued, and would then never hear it's ready. The test covers that case | the same |
+   | The per-turn line | "N tasks ready for your `done`. Call `task` with `list`, then `update --status done`." Fixed text, with the items after `FRAMING`, escaped | `hook_cli::a_ready_task_reaches_its_creator_once` (once; not the worker's; not reviewer-b's; a `## Fake heading` title escaped) |
+   | The brief | "N of your tasks wait(s) for your done (call `task` with `list`, then `update --status done`):" in "Your work", within the 600 bytes | the same |
+   | The Stop hook | Never wakes for these: `wake` doesn't read `new_work` | `wake::…` (`Nothing` while one waits) |
+   | Docs | CHANGELOG `[Unreleased]`: Added, and Changed for Rust's new `NewWork` field. The guide's "How work reaches a session" names it, and says Stop never wakes for it. `llms-full.txt` regenerated | the guide test |
+
+   - **One note:** a task reaches `ready` once, since the only move out of
+     it is to `done` (`TASK_TRANSITIONS`). So one entry per agent is
+     enough. I first wrote per-ready timestamps, found the transition
+     table, and dropped them.
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 748
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set, with `onboard_cli`: 124 passed;
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py`: all passed;
+     - fmt and every clippy: clean.
+     - The full suite took about 65 minutes again (`syspolicyd` at 73%
+       CPU, load about 4.6).
+3. **The loop:**
+   - `task next` gave me `v0172-1`.
+   - I took `plan.md` (05:35:07Z) before this entry, and release it
+     after.
+   - Then `task update v0172-1 --status ready`, `post planner-a "ready:
+     v0172-1"`, and the nudge.
+4. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line also said "1 task ready" on the same turn; I acted on
+     the ledger.
+   - **Awkward:**
+     - The per-turn line came from the installed v0.17.0, so it had the
+       old call to action ("Call `inbox` or `task`…"), not v0.17.1's.
+       This Mac's `~/.local/bin/mnemo` is still 0.17.0.
+     - `task next` prints the claim token. I didn't need it: the owner
+       updates without one.
+     - `claim who` shows "alive unknown" for every session, so whether a
+       peer is running can't be told from it here.
+     - **My slip:** `claim release plan.md` needs the token that `claim
+       take` printed. My first release had no token and failed (the CLI
+       printed its usage). I released it with the token after posting, a
+       minute later. A token-free release by the holder, like a task's
+       owner update, would make the loop smoother.
+5. **Brain:** no fact written this round. The work is in the code and
+   this entry, and the Run 1 plan doesn't ask for one.
+
+### 2026-11-17 — PLANNER-A — REVIEW + DISPATCH — Run 1 round 1 accepted (`v0172-1` done); the tally's first row; round 2: `v0172-2`
+
+Brain: your lookup was a hit.
+- **Tally:** 67 lookups, 27 hits, 26 partial, 14 misses not stored.
+
+**PR 118, ACCEPTED** (`dedbba0`, 18 of 18):
+- `NewWork::ready_for_done`;
+- the fixed-text line with items after `FRAMING`;
+- the brief's part;
+- Stop never waking for it;
+- the docs.
+- **The deviation, `_mnemo.ready_seen_by` and not `_mnemo.seen_by`, is
+  right:** a creator of its own role would otherwise never hear.
+- One entry per agent is enough, since `ready` happens once.
+
+**The HANDOFF** is committed as `e8dbdd4`, on its own.
+
+**Closed in the brain:** `mnemo task update v0172-1 --status done`
+(history: queued, then active by worker-a, then ready by worker-a, then
+done by planner-a).
+
+**The Run 1 tally:**
+
+| Round | Task | How the receiver found the work | User relayed? | Awkward |
+|---|---|---|---|---|
+| 1 | `v0172-1` dispatch | Worker: the nudge (the per-turn line said "1 task ready" on the same turn) | No | The per-turn line came from the installed 0.17.0, with old wording; `task next` prints a token the owner never needs |
+| 1 | `v0172-1` ready | Planner: **the per-turn line** ("1 message … worker-a: ready: v0172-1"), on the same turn as the nudge | No | **`claim who` says "alive unknown" for every session.** The presence records show tool `cli`: the sessions' MCP servers haven't written presence, since they've made no write tool call since their restart |
+
+**Findings for Run 2:**
+- **PRESENCE-AT-START:** a named `serve --mcp --shared` writes its
+  presence once at start, holding its lock, so `who` shows a running
+  session as alive from the start. Taken into round 2.
+- The token on `task next` is kept: the strict path (RB-012.1) needs it.
+  The guide already says the owner may update without it.
+- This Mac's `mnemo` is now 0.17.1 (`mnemo --version`; the user
+  installed it). The sessions' servers stay on 0.17.0 until they
+  restart, which is harmless.
+
+---
+
+**Run 1, round 2: `v0172-2`,** written under the claim `plan.md`. On
+`rel0172-2-polish` from `release-0.17.2`, with a PR into it:
+1. **TTY-BACKTICKS:** the terminal view's last line without Markdown
+   backticks.
+2. **A pathless `cache`:** `mnemo cache put|get|…` take no path in a git
+   repository, with the same shift as `get` (`[PATH]` first and
+   optional).
+3. **The counts over MCP:** `mnemo://about` gets the header line with the
+   facts, turns, essence and coordination counts. The MCP `about` tool's
+   array shape is unchanged.
+4. **PRESENCE-AT-START** (Run 1's finding):
+   - `serve --mcp --shared` with a valid `MNEMO_AGENT` writes its presence
+     record at start, with the lock flag, `tool: mcp` and the role, in one
+     short write window, once;
+   - a busy brain or a failure is a stderr note, never a failed start;
+   - a test: `who` shows the agent alive right after the server starts,
+     before any tool call.
+5. Tests, the CHANGELOG's `[Unreleased]` and the READMEs.
+
+**The loop,** as in round 1: `task next`; `plan.md` claimed around your
+DONE; `ready` with a note; `post planner-a "ready: v0172-2"`; the nudge;
+and the two tally lines in DONE.
+
+### 2026-11-17 — WORKER — DONE — Run 1 round 2: polish and presence at start merged (PR 119, `997200c`), task `v0172-2` ready
+
+Brain: "presence record lock alive MCP server touch_presence who" →
+partial (the claims and presence design; nothing on the server's start).
+Run before the work.
+
+1. **PR 119** (https://github.com/toarchkumar/mnemo/pull/119), on
+   `rel0172-2-polish` from `release-0.17.2` (`dedbba0`): `7c2d5f9`,
+   squash-merged as `997200c`, and the branch deleted. CI: 18 of 18.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | 1. TTY-BACKTICKS | The last line at a terminal is "The guide for agents: mnemo onboard --guide". **Also** `--print`'s last line, "Nothing was written; run mnemo onboard --yes to write it.", for the same reason. Next's human steps keep their backticks: they quote commands mid-sentence | `onboard_cli` (18) |
+   | 2. A pathless `cache` | `cache get`, `put`, `delete`, `stats` and `purge` take `[PATH]` optional, through `brain_arg` (the project brain), as `get` does. They have no positional argument after the path, so no shift | `project_brain::cache_takes_no_path_in_a_git_repository` |
+   | 3. The counts over MCP | `mnemo://about`: "N memories: F facts, T turns, E essence, C coordination" right under "## About this brain", the counts of `mnemo about`'s header. The MCP `about` tool is unchanged | `mcp_context::every_resource_has_its_shape_budget_and_framing` |
+   | 4. PRESENCE-AT-START | **When:** after `hold_presence`, one write window: `touch_presence(role, "mcp")`, writing the lock flag, the tool and the role. **Its stderr:** "mnemo mcp: worker-a is present (tool mcp)". **A failure:** a stderr note, and the server starts anyway | `project_brain::a_named_shared_server_is_present_from_its_start` (a real server; after "ready" and before any tool call, `claim who --format json`: worker-a `alive: "yes"`, `mcp`, `worker`) |
+   | 5. Docs | **CHANGELOG `[Unreleased]`:** three Added entries and one Changed. **`mnemo/README.md`:** the cache paragraph, the presence paragraph, the `mnemo://about` row. **The root README** is yours | |
+
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 750
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set, with `onboard_cli`: 124 passed;
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py`: all passed;
+     - fmt and every clippy: clean.
+     - The gates took 73 minutes (21:49 to 23:02).
+2. **The loop:**
+   - `task next` gave me `v0172-2`.
+   - I took `plan.md` (07:14:59Z, the token kept this time) before this
+     entry, and release it with the token after.
+   - Then `task update v0172-2 --status ready`, `post planner-a "ready:
+     v0172-2"`, and the nudge.
+3. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line said "1 task ready. Call `task` with `next` to take
+     it." on the same turn, now in v0.17.1's wording.
+   - **Awkward:**
+     - **The `who` JSON differs by surface:** `alive` is `"yes"` in the
+       CLI's JSON and `true` in the MCP `who`. My test first expected
+       `true`. Worth one shape (a LOW item).
+     - **The local gates take over an hour on this Mac** (the macOS scan
+       of each new test binary). CI's suite is faster.
+4. **Brain:** no fact written this round; the work is in the code and this
+   entry.
+
+### 2026-11-17 — PLANNER-A — REVIEW + DISPATCH — Run 1 round 2 accepted (`v0172-2` done); round 3: `v0172-3`, MODEL-RETRY and one `who` shape
+
+Brain: your lookup was partial.
+- **Tally:** 68 lookups, 27 hits, 27 partial, 14 misses not stored.
+
+**PR 119, ACCEPTED** (`997200c`, 18 of 18):
+- the backticks are gone from the terminal view's last line and from
+  `--print`'s (the human steps keep theirs, rightly);
+- `cache` is pathless;
+- `mnemo://about`'s counts;
+- **PRESENCE-AT-START,** with a real-server test of `who` before any tool
+  call.
+
+**Closed in the brain:** `v0172-2` is done.
+
+**The Run 1 tally:**
+
+| Round | Task | How the receiver found the work | User relayed? | Awkward |
+|---|---|---|---|---|
+| 2 | `v0172-2` dispatch | Worker: the nudge (the per-turn line said "1 task ready. Call `task` with `next`…" on the same turn) | No | `who`'s JSON: `alive` is `"yes"` in the CLI and `true` in MCP |
+| 2 | `v0172-2` ready | Planner: **the per-turn line** ("worker-a: ready: v0172-2"), on the same turn as the nudge | No | none |
+
+**So far:**
+- the per-turn line has carried every hand-off in both directions,
+  arriving with the nudge;
+- the user relayed nothing;
+- the ledgers stay the place where the work is described.
+
+**The Worker's local gates take over an hour** (73 minutes this round).
+macOS scans each new test binary (`syspolicyd`, XProtect). macOS has a
+documented switch for this: **Privacy & Security, then Developer Tools,
+with the terminal app added.** Processes started from it skip those
+checks.
+- It's a security setting on the user's Mac, so it's the user's call. I'll
+  raise it with them, and nothing changes until they decide.
+
+---
+
+**Run 1, round 3: `v0172-3`,** written under the claim `plan.md`. On
+`rel0172-3-retry` from `release-0.17.2`, with a PR into it:
+1. **MODEL-RETRY:**
+   - the built-in model's download retries a reset connection, a
+     timeout, or a 5xx, two more times, with a backoff (for example 1 s,
+     then 4 s);
+   - each retry is a stderr line;
+   - the SHA-256 check is unchanged, and a hash mismatch never retries;
+   - a 4xx never retries;
+   - the hooks still never download;
+   - tests through a local stub server: a reset then success; three
+     failures giving the same error as today; a 404 not retried.
+2. **WHO-SHAPE** (round 2's finding):
+   - `alive` is one shape in the CLI's JSON and the MCP `who`: the
+     strings `"yes"`, `"no"` and `"unknown"`, which say what a boolean
+     can't;
+   - the CHANGELOG's Changed says the MCP field moves from a boolean;
+   - a test for each surface.
+3. The CHANGELOG's `[Unreleased]`.
+
+**The loop:** as before.
+
+### 2026-11-17 — WORKER — DONE — Run 1 round 3: MODEL-RETRY and WHO-SHAPE merged (PR 120, `f623159`), task `v0172-3` ready
+
+Brain: "built-in model download retry reset timeout 5xx SHA-256 check" →
+miss (nothing on the download's retry; the top hits were release facts).
+Run before the work.
+
+1. **PR 120** (https://github.com/toarchkumar/mnemo/pull/120), on
+   `rel0172-3-retry` from `release-0.17.2` (`997200c`): `f7c583f`,
+   squash-merged as `f623159`, and the branch deleted. CI: 18 of 18.
+
+   | Item | Change | Test |
+   |---|---|---|
+   | MODEL-RETRY | `fetch` → `fetch_with(…, backoff, notice)` over `fetch_once`, which returns its error and whether it may pass. **Retried twice more, 1 s then 4 s later, each with a stderr line ("mnemo: <error>; trying <file> again in 1 s (2 of 3)"):** a 5xx, a timeout, `BodyStalled`, an I/O reset, abort, broken pipe or EOF, and a body cut short. **Never retried:** a 4xx, a body over the pin, a SHA-256 mismatch, a local write error. **The error after the last try** is a single try's text. **The hooks** still never download | `builtin::tests::a_download_retries_only_what_may_pass` (a scripted local server: cut then whole, installed, 2 requests, 1 notice; three 503s, 3 requests, 2 notices, the single-try error; a 404, 1 request; a SHA-256 mismatch, 1 request, nothing installed) |
+   | **A refused connection isn't retried** (a deviation, to confirm) | Your list was a reset, a timeout and a 5xx. A refused connection or an unknown host means nothing is listening, as when offline. **Every offline test** points `MNEMO_MODEL_URL` at a closed port, so retrying it would add 5 s to each such run. Say if you want it retried | `an_unreachable_server_is_an_error_not_a_hang` (unchanged, still fast) |
+   | A fix on the way | **The old size check:** it read any error near the end as "larger than pinned" (it compared against the 64 KB buffer), so a cut body was never retried. **Now** it's told by `ureq`'s `BodyExceedsLimit`. **The older test** uses `fetch_with` with no retries for its single-try cases | `a_download_takes_its_place_only_when_it_matches` |
+   | WHO-SHAPE | The MCP `who`'s `alive` is `"yes"`, `"no"` or `"unknown"`, as the CLI's JSON. **Python's `who()`** keeps `True`/`False`/`None` (idiomatic there, and outside the two surfaces named) | MCP: `mcp_context::the_server_names_its_agent…` (`"yes"` shared, `"unknown"` plain); CLI: `project_brain::a_named_shared_server_is_present_from_its_start` (`"yes"` running, `"no"` once gone) |
+   | CHANGELOG | `[Unreleased]`: Added (the retry), and Changed (the MCP field moves from a boolean) | |
+
+   - **Tests** (macOS, run here):
+     - `cargo test --locked --no-fail-fast --features failpoints`: 750
+       passed, 0 failed, 1 ignored;
+     - the embed-candle set, with `onboard_cli`: 125 passed (the retry
+       test is a `builtin` unit test, embedder-only);
+     - `mnemo-uniffi`: 23 passed;
+     - `python test_mnemo.py`: all passed;
+     - fmt and clippy: clean.
+     - The gates took 2 h 3 min (23:23 to 01:26).
+2. **The loop:**
+   - `task next` gave me `v0172-3`.
+   - I took `plan.md` (09:37:43Z) before this entry, and release it with
+     its token after.
+   - Then `task update v0172-3 --status ready`, `post planner-a "ready:
+     v0172-3"`, and the nudge.
+3. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line said "1 task ready. Call `task` with `next` to take
+     it." on the same turn.
+   - **Awkward:** none in the loop. The gates' time grows (2 h this
+     round), from the same macOS scanning you raised with the user.
+4. **Brain:** no fact written this round.
+
+### 2026-11-17 — PLANNER-A — REVIEW + DISPATCH — Run 1 round 3 accepted (`v0172-3` done); round 4: `v0172-4`, the claim race test and the legacy scan
+
+Brain: your lookup was a miss, not stored: MODEL-RETRY was only ever in
+PLAN.md.
+- **Tally:** 69 lookups, 27 hits, 27 partial, 15 misses not stored.
+
+**PR 120, ACCEPTED** (`f623159`, 18 of 18):
+- the retry's split: a 5xx, a timeout, a stall, a reset, a cut body
+  retried, at 1 s then 4 s; a 4xx, a size over the pin, a SHA-256
+  mismatch and a local error never retried;
+- the size check fixed on the way;
+- WHO-SHAPE's strings.
+- **Your deviation, a refused connection not retried: ACCEPTED.** It
+  means offline, and retrying would only delay the same answer.
+- Python's `who()` keeping `True`/`False`/`None`: accepted.
+
+**Closed in the brain:** `v0172-3` is done.
+
+| Round | Task | How the receiver found the work | User relayed? | Awkward |
+|---|---|---|---|---|
+| 3 | `v0172-3` dispatch | Worker: the nudge (the per-turn line said "1 task ready…" on the same turn) | No | none; the gates took 2 h 3 min (the macOS scans) |
+| 3 | `v0172-3` ready | Planner: the per-turn line, on the same turn as the nudge | No | none |
+
+---
+
+**Run 1, round 4: `v0172-4`,** written under the claim `plan.md`. On
+`rel0172-4-engine` from `release-0.17.2`, with a PR into it:
+1. **CLAIM-RACE-FLAKE:**
+   - the race test's two children retry a `Locked` open (back off and
+     try again within a deadline), as step 3's kill test's harness does,
+     instead of failing on a 10 s wait;
+   - the test still checks one winner per round and 1,000 records under
+     `MNEMO_STRESS`.
+2. **COORD-LEGACY-SCAN:**
+   - **measure first:** `legacy_coordination_ids`'s cost on this repo's
+     brain (read-only; it decrypts the `episodic` fact rows once per
+     handle), and on a scratch brain with 10,000 episodic facts;
+   - then narrow it: only rows whose resident vector is the sentinel are
+     decrypted, so ordinary episodic facts never are;
+   - measure again, and report both numbers with the load average and a
+     `--version` baseline, as before;
+   - the v0.16.1 compat test must still pass.
+3. The CHANGELOG's `[Unreleased]`.
+
+**The loop:** as before.
+
+### 2026-11-17 — WORKER — DONE — Run 1 round 4: the legacy scan narrowed and the claim race fixed (PR 121, `796a3ad`), task `v0172-4` ready
+
+Brain: "claim race test two processes Locked open retry harness kill test"
+→ hit (step 3's race facts, the 200-round decision). Run before the work.
+
+1. **PR 121** (https://github.com/toarchkumar/mnemo/pull/121), on
+   `rel0172-4-engine` from `release-0.17.2` (`f623159`): `ce9cfc5`,
+   squash-merged as `796a3ad`, and the branch deleted. CI: 18 of 18.
+2. **CLAIM-RACE-FLAKE:**
+   - **The change:** `claims::retry_locked` retries `Locked` with a 20 ms
+     pause, within a deadline: 120 s for the child's `open_shared` and 60
+     s for each round's claim window. A `Locked` window never opened, so
+     nothing was written. Any other error still fails the test, and one
+     winner per round is still required.
+   - **Run here:** 200 rounds pass (10.2 s). **Under `MNEMO_STRESS=1`,**
+     1,000 rounds pass with 1,000 claim records (58.4 s).
+3. **COORD-LEGACY-SCAN:**
+   - **The change:** `legacy_coordination_ids` reads each `episodic` fact
+     row's vector from the column, each vector page once. It decrypts only
+     rows whose vector is the sentinel (`is_sentinel`: all values equal,
+     at 1/√dims). A row whose vector can't be read is decrypted, as before.
+   - **Measured:** an in-process timer around a fresh handle's first
+     `mistagged_coordination()`, median of 5, on a scratch brain 384 wide
+     (a throwaway program, not committed).
+
+   | Brain | Before | After | Load average | `--version` baseline |
+   |---|---|---|---|---|
+   | 100 episodic facts | 0.71 ms | 0.18 ms | 4.7 before, 4.5 after | 3.8 ms |
+   | 10,000 episodic facts | 17.07 ms | 8.45 ms | | |
+
+   - **An intermediate version** read a page per row and measured 9.79 ms
+     at 10,000 (load 5.3). Reading each page once gave 8.45 ms. What
+     remains is decrypting the vector pages; no record is decrypted.
+   - **This repo's brain**, read-only, with the installed v0.17.1 (a new
+     build would raise the keychain prompt, so it doesn't open the real
+     brain):
+     - 94 `episodic` fact rows;
+     - `claim who` (which runs the scan): 39.0 ms;
+     - `get <id>` (no scan): 37.8 ms;
+     - `--version`: 5.1 ms.
+     - All are medians of 5. The scan's share is within the spread (35 to
+       41 ms) at this size.
+   - **The v0.16.1 compat test passes,** here, against the published
+     v0.16.1.
+   - **A unit test:**
+     `legacy_scan_tests::the_sentinel_is_told_from_an_ordinary_vector`.
+4. **CHANGELOG `[Unreleased]`:** a Changed entry for the scan, with its
+   measured numbers. The race test is test-only, so it's in the PR, not the
+   CHANGELOG.
+5. **Tests** (macOS, run here):
+   - `cargo test --locked --no-fail-fast --features failpoints`: 751
+     passed, 0 failed, 1 ignored;
+   - the embed-candle set, with `onboard_cli`: 126 passed;
+   - `mnemo-uniffi`: 23 passed;
+   - `python test_mnemo.py`: all passed;
+   - fmt and clippy: clean.
+   - The gates took 1 h 34 min (01:50 to 03:24).
+6. **The loop:**
+   - `task next` gave me `v0172-4`.
+   - **The per-turn line warned** "your claim task:v0172-4 lapses in 15
+     min" while the gates ran. A `task update` with a note renewed it (to
+     13:24Z).
+   - `plan.md` taken (11:37:36Z) around this entry, then released with its
+     token. Then `ready`, the post, and the nudge.
+7. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line said "1 task ready" on the same turn.
+   - **Awkward:** none in the loop. **The lapse warning worked as
+     designed** (13.1b's 15-minute warning), the first time it carried
+     real work.
+8. **Brain:** no fact written this round.
+
+### 2026-11-17 — PLANNER-A — REVIEW + DISPATCH — Run 1 round 4 accepted (`v0172-4` done); round 5: `v0172-5`, READY
+
+Brain: a hit.
+- **Tally:** 70 lookups, 28 hits, 27 partial, 15 misses not stored.
+
+**PR 121, ACCEPTED** (`796a3ad`, 18 of 18):
+- **CLAIM-RACE-FLAKE:** `retry_locked` within a deadline, never past a
+  write. 200 rounds in 10.2 s, and 1,000 under `MNEMO_STRESS` in 58.4 s.
+- **COORD-LEGACY-SCAN,** measured before and after, medians of 5:
+  - 10,000 episodic facts: 17.07 ms, now 8.45 ms;
+  - 100: 0.71 ms, now 0.18 ms;
+  - with the load and the baseline reported;
+  - what's left is decrypting the vector pages, and no record is
+    decrypted;
+  - this repo's brain shows no measurable share (`claim who` 39.0 ms
+    against `get` 37.8 ms);
+  - the v0.16.1 compat test passes.
+- **The lapse warning carried real work for the first time:** a 15-minute
+  warning during a long gate run, renewed with a note. That's 13.1b's
+  design, working.
+
+**Closed in the brain:** `v0172-4` is done.
+
+| Round | Task | How the receiver found the work | User relayed? | Awkward |
+|---|---|---|---|---|
+| 4 | `v0172-4` dispatch | Worker: the nudge (the per-turn line said "1 task ready" on the same turn); then the per-turn line's lapse warning during the gates | No | none |
+| 4 | `v0172-4` ready | Planner: the per-turn line, on the same turn as the nudge | No | none |
+
+---
+
+**Run 1, round 5: `v0172-5`, READY,** written under the claim `plan.md`.
+On `rel0172-5-ready` from `release-0.17.2`, with a PR into it:
+- the bump to 0.17.2: the manifests, the lockfiles' own entries, and the
+  CHANGELOG's `[0.17.2] — <date>` with the compare links;
+- **mobile: off.** No mobile code changed, and 0.17.0 published mobile
+  for this minor version. The Swift and Kotlin READMEs keep 0.17.0;
+- after the merge, **the dry run on `release-0.17.2`,** mobile off;
+- **the loop:** `ready` with the dry run's id in the note, the post and
+  the nudge.
+
+Then I write the README and site HANDOFF and the tag order. Run 1's
+summary and Run 2's design follow the release.
+
+### 2026-11-17 — WORKER — READY — Run 1 round 5: v0.17.2 bumped (PR 122, `bf73ef8`), the dry run green with mobile off; task `v0172-5` ready
+
+Brain: "release bump manifests lockfiles mobile off CHANGELOG cut patch
+release" → hit (the v0.17.1 and v0.17.0 READY facts). Run before the
+work.
+
+1. **PR 122** (https://github.com/toarchkumar/mnemo/pull/122), on
+   `rel0172-5-ready` from `release-0.17.2` (`796a3ad`): `a1d0836`,
+   squash-merged as `bf73ef8`, and the branch deleted. CI: 24 of 24 (the
+   mobile jobs ran, since the samples changed).
+   - **At 0.17.2:** the engine, `mnemo-uniffi`, Node, `mnemo-python`'s
+     `Cargo.toml` and `pyproject.toml`, the Kotlin `VERSION_NAME`, both
+     samples, and the lockfiles' own entries (`mnemo-engine`,
+     `mnemo-node`, `mnemo-uniffi`, `mnemo-python`).
+   - **Mobile off:** `.github/release-mobile` stays `false`. The Swift and
+     Kotlin READMEs keep 0.17.0.
+   - **The CHANGELOG:**
+     - `[0.17.2] — 2026-11-17`, with a short summary;
+     - `[Unreleased]` compares from v0.17.2, and `[0.17.2]` is added;
+     - **a fix:** `[0.17.1]`'s link was missing, since v0.17.1's cut left
+       it out and `[Unreleased]` still compared from v0.17.0.
+   - **Tests** (macOS, run here). **A targeted set:** the code is
+     `796a3ad`'s, fully gated last round (751 passed), and this change is
+     version strings and the CHANGELOG.
+     - `install_sh`, `release_names`, `cli_smoke`, `guide`,
+       `onboard_cli`: 73 passed;
+     - `mnemo --version`: "mnemo 0.17.2";
+     - the 0.17.2 wheel installs, and `python test_mnemo.py` passes;
+     - fmt and clippy: clean.
+     - CI's full suite on the PR: 24 of 24.
+2. **The dry run: success** (run 44081832937, `release-0.17.2` at
+   `bf73ef8`, mobile off).
+   - 23 jobs succeeded and 9 were skipped (mobile, and the tag-only jobs).
+   - `version check`: "engine 0.17.2, mnemo-uniffi 0.17.2, mnemo-android
+     0.17.2", "the commit says mobile: false".
+   - The push runs on `bf73ef8`: CI success, Mobile CI success.
+3. **`release-0.17.2` holds, in order:**
+   - `e8dbdd4`: rule 9's tasks bullet;
+   - `dedbba0`: READY-NOTICE;
+   - `997200c`: polish and presence at start;
+   - `f623159`: MODEL-RETRY and WHO-SHAPE;
+   - `796a3ad`: the legacy scan and the claim race;
+   - `bf73ef8`: the bump.
+4. **The loop:**
+   - `task next` gave me `v0172-5`.
+   - `plan.md` taken (12:35:29Z) around this entry, then released with its
+     token.
+   - Then `ready` with the dry run's id in the note, the post, and the
+     nudge.
+5. **For the tally:**
+   - **How I found this work: the nudge** (your `READ:` pointer). The
+     per-turn line said "1 task ready" on the same turn.
+   - **Awkward:** none.
+6. **Brain:** `release.v0.17.2-ready` added.
+
+Stopping for your README and site HANDOFF and the tag order.
+
+### 2026-11-17 — PLANNER-A — REVIEW + HANDOFF + DISPATCH — Run 1 round 5 accepted (`v0172-5` done, PR 122, the dry run green); the README and site; the tag
+
+Brain: a hit.
+- **Tally:** 71 lookups, 29 hits, 27 partial, 15 misses not stored.
+
+**PR 122, ACCEPTED** (`bf73ef8`, 24 of 24):
+- the bump to 0.17.2, with mobile off and the mobile READMEs at 0.17.0;
+- the CHANGELOG's `[0.17.2]`, which I read against PRs 118 to 121;
+- the missing `[0.17.1]` link fixed;
+- the targeted local set, given that the code is `796a3ad`'s, fully gated
+  last round.
+- **The dry run** 44081832937 at `bf73ef8`.
+
+**Closed in the brain:** `v0172-5` is done. All five of v0.17.2's tasks
+are done.
+
+| Round | Task | How the receiver found the work | User relayed? | Awkward |
+|---|---|---|---|---|
+| 5 | `v0172-5` dispatch | Worker: the nudge (the per-turn line said "1 task ready" on the same turn) | No | none |
+| 5 | `v0172-5` ready | Planner: the per-turn line, on the same turn as the nudge | No | none |
+
+**HANDOFF: commit these on `release-0.17.2` on their own:**
+- **`README.md`:**
+  - "What's new in v0.17.2: from our own agents' first run": the ready
+    notice, presence from the start, the download's retries, the smaller
+    items, and mobile at 0.17.0;
+  - Python's example at v0.17.2.
+- **`index.html`:** the pill, the "current release" line and Python's
+  example at v0.17.2.
+- **Commit message:** `docs: v0.17.2 README and site`.
+- **Check the README lines against the CHANGELOG.** If one's wrong, say so
+  and leave both files uncommitted.
+
+**Dispatch: the release, as v0.17.1's order** (the HANDOFF commit, the
+sync, the fast-forward, the tag "MNemo 0.17.2", stop at "approve the
+release (v0.17.2, mobile false)" and log DONE; after the click, the
+checks and the branch deletions). This entry is written under the claim
+`plan.md`. The release isn't a task: it's the tail of `v0172-5`.
+
+### 2026-11-17 — WORKER — DONE — the v0.17.2 HANDOFF held: one README line is wrong; nothing committed, no tag
+
+Brain: "release order tag approve attest registries site byte-equal
+attestation verify delete branches" → hit (`decision.release-order`).
+
+I checked your README lines against the CHANGELOG and the code.
+- **One line is wrong,** so by your instruction both files are left
+  uncommitted. **Nothing else ran:** no HANDOFF commit, no `chore(plan)`,
+  no fast-forward of `main`, no tag.
+- **The line, in "What's new in v0.17.2", under "Smaller":** "`who`'s
+  `alive` reads `"yes"`, `"no"` or `"unknown"` everywhere".
+  - **Not everywhere.** The CLI's JSON and the MCP `who` say those strings.
+  - **Python's `who()`** still returns `True`, `False` or `None`
+    (`mnemo-python/src/lib.rs:2685`, its README's `who()` row). Round 3
+    kept it, and you accepted that.
+  - **A suggested line:** "`who`'s `alive` reads `"yes"`, `"no"` or
+    `"unknown"` in the CLI and over MCP".
+- **One ambiguity, not wrong; your call:** "tells you when it's ready …
+  once, on your next turn and in your session's brief". The per-turn line
+  says it once. The brief lists such tasks at every session start while
+  they wait, not once.
+  - **A possible line:** "tells you when it's ready for your `done`: once
+    on your next turn, and in your session's brief while it waits."
+- **Checked and right:**
+  - presence from the start (a named shared MCP server);
+  - the download's retries, and never after a checksum mismatch;
+  - the pathless `cache`;
+  - `mnemo://about`'s counts;
+  - the narrower re-tag scan;
+  - mobile at 0.17.0;
+  - every `index.html` change (the pill, the "These examples use" line,
+    Python's example).
+- **The tree:** `README.md` and `index.html` are modified and unstaged.
+  `release-0.17.2` is at `bf73ef8`, same as origin.
+
+Stopping. When the line is fixed, `READ:` your entry and I'll run the
+release order from the HANDOFF commit.
+
+### 2026-11-17 — PLANNER-A — HANDOFF + DISPATCH — the README's two v0.17.2 lines are fixed; run the release order
+
+**You were right on both.**
+- **`alive`** now reads: "`who`'s `alive` reads `"yes"`, `"no"` or
+  `"unknown"` in the CLI and over MCP". Python's `who()` keeps its
+  booleans, as accepted in round 3.
+- **The ready notice** now reads: "tells you when it's ready for your
+  `done`: once on your next turn, and in your session's brief while it
+  waits."
+
+Nothing else changed in either file.
+
+**Dispatch:** the release order of my entry "Run 1 round 5 accepted
+(`v0172-5` done, …); the README and site; the tag", from its HANDOFF
+commit, through to stopping at the approval. This entry is written under
+the claim `plan.md`.
