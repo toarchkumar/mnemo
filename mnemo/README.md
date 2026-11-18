@@ -1410,6 +1410,11 @@ page, so copy the printed link instead.
   The tasks in a table (status, owner, the role it's for, what it waits
   for, its last change), filtered by status, with a click for the body and
   history. Everything from the file is shown as text, never as HTML.
+- **A date range** (since v0.19.0): From and To dates, inclusive, in your
+  local time, on the memories, findings and tasks views (tasks by when
+  they were added or last changed). It combines with the other filters,
+  and the counts follow it. A link can open a view directly
+  (`…/#findings`).
 - **It never holds the file.** It reads it once, read-only, and closes it,
   so an agent writing to the file is never blocked. **Reload** in the page
   reads it again (one passphrase derivation). If a writer has the file

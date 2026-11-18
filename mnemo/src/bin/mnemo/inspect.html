@@ -109,7 +109,8 @@ function storedToken() {
 async function session() {
   const code = new URLSearchParams(location.search).get("c");
   if (!code) return { token: storedToken() };
-  history.replaceState(null, "", location.pathname);
+  // The tab in the hash (`#findings`) stays; only the code goes.
+  history.replaceState(null, "", location.pathname + location.hash);
   // A page the browser renders ahead of time waits until it's shown, so a
   // prerender that's thrown away doesn't use up the link.
   if (document.prerendering) {
@@ -125,7 +126,29 @@ async function session() {
 const main = document.getElementById("main");
 let view = "memories";
 const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null,
-  fStatus: "", fCategory: "", fPriority: "", findingId: null, tStatus: "", taskSlug: null };
+  fStatus: "", fCategory: "", fPriority: "", findingId: null, tStatus: "", taskSlug: null,
+  dFrom: "", dTo: "", tDate: "created" };
+
+// v0.19.0: one date range for every tab, From and To inclusive, in the
+// viewer's local time. The server filters (`since`, `until`, unix seconds).
+function dayStart(v) { const [y, m, d] = v.split("-").map(Number); return Math.floor(new Date(y, m - 1, d).getTime() / 1000); }
+function dayEnd(v) { const [y, m, d] = v.split("-").map(Number); return Math.floor(new Date(y, m - 1, d + 1).getTime() / 1000) - 1; }
+function withRange(params) {
+  if (state.dFrom) params.since = dayStart(state.dFrom);
+  if (state.dTo) params.until = dayEnd(state.dTo);
+  return params;
+}
+function dateInputs() {
+  const input = (key, label) => {
+    const i = el("input", { type: "date", title: label, "aria-label": label });
+    i.value = state[key];
+    i.addEventListener("change", e => { state[key] = e.target.value; state.findingId = null; state.taskSlug = null; render(); });
+    return i;
+  };
+  return [el("span", { class: "count", style: "margin:0" }, "From"), input("dFrom", "From (inclusive)"),
+    el("span", { class: "count", style: "margin:0" }, "to"), input("dTo", "To (inclusive)")];
+}
+const ranged = () => Boolean(state.dFrom || state.dTo);
 
 // RB-004.5 item 4: once the server has stopped (`--idle-timeout`, or
 // Ctrl-C), a request can't connect; say that instead of the browser's text.
@@ -178,7 +201,7 @@ function memoryCard(m) {
 }
 
 async function showMemories() {
-  const params = { limit: 200 };
+  const params = withRange({ limit: 200 });
   for (const k of ["q", "type", "agent", "keyed", "thread"]) if (state[k]) params[k] = state[k];
   const [data, threads] = await Promise.all([api("/api/memories", params), api("/api/threads")]);
   const sel = (name, opts) => {
@@ -193,7 +216,8 @@ async function showMemories() {
     sel("type", [["", "All types"], ["semantic", "semantic"], ["episodic", "episodic"], ["procedural", "procedural"], ["working", "working"]]),
     sel("agent", [["", "All agents"], ...data.agents.map(a => [a, a])]),
     sel("keyed", [["", "Keyed or not"], ["yes", "Keyed"], ["no", "Not keyed"]]),
-    sel("thread", [["", "Any thread"], ...threads.threads.map(t => [t.id, t.id])]));
+    sel("thread", [["", "Any thread"], ...threads.threads.map(t => [t.id, t.id])]),
+    ...dateInputs());
   const shown = data.memories.length;
   const note = shown < data.total ? `showing ${shown} of ${data.total}` : `${data.total} ${data.total === 1 ? "memory" : "memories"}`;
   main.replaceChildren(filters,
@@ -294,19 +318,20 @@ function findingDetail(f) {
     el("h2", {}, "Status history"), historyTable(f.history));
 }
 async function showFindings() {
-  const params = {};
+  const params = withRange({});
   if (state.fStatus) params.status = state.fStatus;
   if (state.fCategory) params.category = state.fCategory;
   if (state.fPriority) params.priority = state.fPriority;
   const data = await api("/api/findings", params);
-  if (!data.total) {
+  if (!data.total && !ranged()) {
     main.replaceChildren(el("p", { class: "empty" }, "No review findings in this file. A Reviewer adds them with `mnemo finding add`."));
     return;
   }
   const filters = el("div", { class: "filters" },
     choose("fStatus", "Any status", data.statuses),
     choose("fCategory", "Any category", data.categories),
-    choose("fPriority", "Any priority", data.priorities));
+    choose("fPriority", "Any priority", data.priorities),
+    ...dateInputs());
   const pick = data.findings.find(f => f.id === state.findingId);
   const table = data.findings.length ? el("div", { class: "wrap" }, el("table", { class: "data" },
     el("tr", {}, ["Id", "Category", "Priority", "Status", "Title", "Author", "Last change"].map(x => el("th", {}, x))),
@@ -315,7 +340,7 @@ async function showFindings() {
       el("td", { class: "mono" }, f.id), el("td", {}, f.category), el("td", {}, f.priority), el("td", {}, f.status),
       el("td", {}, f.title, f.private ? [" ", el("span", { class: "tag" }, "private until verified")] : null),
       el("td", {}, f.author || "—"), el("td", {}, when(f.updated_at))))))
-    : el("p", { class: "empty" }, "Nothing matches.");
+    : el("p", { class: "empty" }, ranged() && !data.total ? "Nothing in this date range." : "Nothing matches.");
   main.replaceChildren(countsLine(data, "finding"), filters,
     el("p", { class: "count" }, "Ordered by id. Click one for its body, triage, refs and history."),
     ...(pick ? [findingDetail(pick)] : []), table);
@@ -337,8 +362,10 @@ function taskDetail(t) {
     el("h2", {}, "Status history"), historyTable(t.history));
 }
 async function showTasks() {
-  const data = await api("/api/tasks", state.tStatus ? { status: state.tStatus } : {});
-  if (!data.total) {
+  const params = withRange({ date: state.tDate });
+  if (state.tStatus) params.status = state.tStatus;
+  const data = await api("/api/tasks", params);
+  if (!data.total && !ranged()) {
     main.replaceChildren(el("p", { class: "empty" }, "No tasks in this file. They're added with `mnemo task add`."));
     return;
   }
@@ -349,9 +376,13 @@ async function showTasks() {
         onclick: () => { state.taskSlug = t.slug === state.taskSlug ? null : t.slug; render(); } },
       el("td", { class: "mono" }, t.slug), el("td", {}, t.title), el("td", {}, t.status), el("td", {}, t.owner || "—"),
       el("td", {}, t.role || "anyone"), el("td", { class: "mono" }, t.after.join(", ") || "—"), el("td", {}, when(t.updated_at))))))
-    : el("p", { class: "empty" }, "Nothing matches.");
+    : el("p", { class: "empty" }, ranged() && !data.total ? "Nothing in this date range." : "Nothing matches.");
+  const byDate = el("select", { "aria-label": "Date of", onchange: e => { state.tDate = e.target.value; render(); } },
+    [["created", "Added"], ["updated", "Last change"]].map(([v, l]) => {
+      const o = el("option", { value: v }, l); if (state.tDate === v) o.selected = true; return o;
+    }));
   main.replaceChildren(countsLine(data, "task"),
-    el("div", { class: "filters" }, choose("tStatus", "Any status", data.statuses)),
+    el("div", { class: "filters" }, choose("tStatus", "Any status", data.statuses), byDate, ...dateInputs()),
     el("p", { class: "count" }, "In the order they were added. Click one for its body and history."),
     ...(pick ? [taskDetail(pick)] : []), table);
 }
@@ -410,10 +441,16 @@ async function header() {
     document.getElementById("loaded").textContent = "read " + when(a.loaded_at);
   } catch (e) { fail(e); }
 }
+function selectTab(name) {
+  if (!views[name]) return false;
+  view = name;
+  for (const x of document.querySelectorAll("#tabs button")) x.classList.toggle("on", x.dataset.view === name);
+  return true;
+}
 document.getElementById("tabs").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
-  view = b.dataset.view;
-  for (const x of document.querySelectorAll("#tabs button")) x.classList.toggle("on", x === b);
+  // v0.19.0: the tab is in the address (`#findings`), so a link can open it.
+  if (selectTab(b.dataset.view)) history.replaceState(null, "", location.pathname + "#" + view);
   render();
 });
 document.getElementById("reload").addEventListener("click", async () => {
@@ -425,6 +462,7 @@ document.getElementById("reload").addEventListener("click", async () => {
 });
 session().then(s => {
   TOKEN = s.token;
+  selectTab(location.hash.slice(1));
   if (TOKEN) { header(); render(); return; }
   main.replaceChildren(el("p", { class: "error" }, s.used
     ? "This link has already been used. Each link `mnemo inspect` prints opens one tab; run it again for a new one."

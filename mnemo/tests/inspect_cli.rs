@@ -958,3 +958,129 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
         "the file is unchanged"
     );
 }
+
+/// v0.19.0: the date range. `since` and `until` (unix seconds, inclusive,
+/// either open-ended) narrow memories by when they were made, findings the
+/// same, and tasks by when they were added or (`date=updated`) last
+/// changed; the totals and counts follow it. A malformed value is a 400.
+#[test]
+fn the_date_range_filters_every_dated_tab() {
+    use mnemo_engine::{FindingSpec, TaskSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dated.mnemo");
+    let day = 86_400i64;
+    let t0 = 1_700_000_000i64;
+    {
+        let cfg = MnemoConfig {
+            dimensions: 4,
+            kdf: KdfParams::fast(),
+            ..Default::default()
+        };
+        let mut db = Mnemo::create(&path, PW, cfg).unwrap();
+        for i in 0..3i64 {
+            let mut m = Memory::new(
+                format!("day {i}"),
+                MemoryType::Semantic,
+                vec![1.0 + i as f32, 0.5, 0.25, 1.0],
+            );
+            m.created_at = t0 + i * day;
+            m.accessed_at = m.created_at;
+            db.remember(m).unwrap();
+        }
+        db.set_author(Some("reviewer-b".into()));
+        db.finding_add(&FindingSpec::new("DEMO-1.1", "PERF", "LOW", "slow"))
+            .unwrap();
+        db.set_author(Some("planner-a".into()));
+        db.task_add(&TaskSpec::new("Ship it")).unwrap();
+        db.close().unwrap();
+    }
+    let ins = spawn(&path, PW, &[]);
+    let days = |q: &str| -> (u64, Vec<String>) {
+        let v = ins.json("/api/memories", q);
+        let mut c: Vec<String> = v["memories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["content"].as_str().unwrap().to_string())
+            .collect();
+        c.sort();
+        (v["total"].as_u64().unwrap(), c)
+    };
+    // The memories list also holds the finding and the task (made now).
+    assert_eq!(days("").0, 5);
+    // Inclusive at both ends, and either end may be open.
+    assert_eq!(
+        days(&format!("since={}&until={}", t0 + day, t0 + 3 * day)).1,
+        ["day 1", "day 2"]
+    );
+    assert_eq!(days(&format!("until={}", t0 + day)).1, ["day 0", "day 1"]);
+    assert_eq!(
+        days(&format!("since={}&until={}", t0 + day, t0 + day)),
+        (1, vec!["day 1".to_string()])
+    );
+    assert_eq!(
+        days(&format!("since={}&until={}", t0 + 1, t0 + day - 1)).0,
+        0
+    );
+    // With the other filters; open-ended since reaches today's records.
+    assert_eq!(
+        days(&format!("since={}&type=semantic", t0 + day)).1,
+        ["day 1", "day 2"]
+    );
+    assert_eq!(days(&format!("since={}", t0 + day)).0, 4);
+    // An empty value is no bound.
+    assert_eq!(days("since=&until=").0, 5);
+
+    // Findings and tasks were made now.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let f = ins.json("/api/findings", &format!("since={}", now - day));
+    assert_eq!(
+        (f["total"].as_u64(), f["findings"].as_array().map(Vec::len)),
+        (Some(1), Some(1))
+    );
+    let f = ins.json("/api/findings", &format!("since={}", now + day));
+    assert_eq!(f["total"], 0, "the total follows the range");
+    assert!(
+        f["counts"].as_array().unwrap().is_empty(),
+        "so do the counts"
+    );
+    let f = ins.json("/api/findings", &format!("until={}&status=open", now - day));
+    assert!(f["findings"].as_array().unwrap().is_empty());
+    for q in ["", "date=created", "date=updated"] {
+        let t = ins.json("/api/tasks", &format!("{q}&since={}", now - day));
+        assert_eq!(t["total"], 1, "{q}");
+        let t = ins.json("/api/tasks", &format!("{q}&until={}", now - day));
+        assert_eq!(t["total"], 0, "{q}");
+    }
+
+    // Malformed values are a 400 with the reason, on every route.
+    for (route, q) in [
+        ("/api/memories", "since=yesterday"),
+        ("/api/memories", "until=1.5"),
+        ("/api/findings", "since=1e9"),
+        ("/api/tasks", "date=bogus"),
+        ("/api/tasks", "until=abc&date=updated"),
+    ] {
+        let (status, body) = ins.get(route, q);
+        assert_eq!(status, 400, "{route}?{q}: {body}");
+        assert!(body.contains("error"), "{body}");
+    }
+
+    // The page: date inputs on the dated tabs, and the tab in the hash.
+    let page = ins.get("/", "").1;
+    assert!(page.contains(r#"type: "date""#), "date inputs");
+    assert!(page.contains("since") && page.contains("until"));
+    assert!(page.contains("location.hash"));
+    for sink in [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+    ] {
+        assert!(!page.contains(sink), "the page uses {sink}");
+    }
+}

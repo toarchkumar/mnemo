@@ -239,7 +239,8 @@ mnemo export --git
 ```
 
 - `mnemo inspect` opens a read-only view of the brain in your browser,
-  with the review findings and tasks in tabs of their own.
+  with the review findings and tasks in tabs of their own, and a date
+  range on each.
 - `mnemo export` writes the brain as readable text (it isn't encrypted;
   keep it private).
 - `mnemo mcp install --client cursor` adds the MCP server to one client by
