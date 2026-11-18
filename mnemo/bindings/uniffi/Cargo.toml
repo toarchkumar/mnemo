@@ -7,7 +7,7 @@
 # and the `msrv-uniffi` CI job proves it builds on the version declared here.
 [package]
 name = "mnemo-uniffi"
-version = "0.18.1"
+version = "0.19.0"
 edition = "2021"
 rust-version = "1.94"
 license = "Apache-2.0"
