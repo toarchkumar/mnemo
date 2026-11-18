@@ -1,6 +1,6 @@
 # mnemo export
 
-The brain's backup, written by mnemo 0.18.0 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
+The brain's backup, written by mnemo 0.18.1 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
 
 Keyed memories by key, then tasks, findings and the project essence, then the rest by id. Left out: vectors, thread turns, thread essence, messages, claims, presence, private records, access stats, and security findings until they're verified against a release.
 
@@ -44,6 +44,20 @@ mnemo export --git order (v0.18.0, PRs 126 d4f95e7 and 127 635ae00, bin/mnemo/ex
 
 ```text
 Review findings (v0.18.0, store/findings.rs): _mnemo.kind=finding, a coordination record (sentinel vector, never a recall hit), id ^[A-Z]+-[0-9]+\.[0-9]+$ unique by prefix and numbers (RB-0900.1 = RB-900.1), batch = id prefix. Transitions in FINDING_TRANSITIONS; finding_triage/finding_verify write status_history. Since round 1 (PR 129, 61bb573): adding needs an author; update/update_text, delete (MCP forget, Python, mobile) and essence_remove refuse a finding's record (a wrong one is rejected); finding JSON carries record_id; a SECURITY finding is stored _mnemo.visibility=private until verified, and verified only against a release tag ^v\d+\.\d+\.\d+$ (then team). The finding tools read through coordination_records, which ignores visibility.
+```
+
+## 01M7PTYR4MZP0YYSD16S6KPHKZ
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.index-layout-2`
+- scope: private
+- created: 2026-11-18T08:04:16Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.index-layout-2","area":"architecture","topic":"ann-index"}`
+
+```text
+ANN index layout 2 (v0.19.0, PERF-2, PR 136 8a63540): the v9 index run's layout byte is 2 (V9_INDEX_LAYOUT); the body is flat little-endian partition-major arrays (IvfPqIndex::write_layout2/read_layout2: u32 dims, partitions, n_probe, n_rerank, m; subspace offsets; codeword counts; f32 centroids; f32 codebooks; u32 per-partition counts; u128 ids; u8 codes), every length checked before allocation. Layout 1 (msgpack, V9_INDEX_LAYOUT_MSGPACK) is still read and rewritten as 2 with the next base. v0.18 and older read layout 2 as no index (exact recall, no error). The id->partition map is built lazily (ensure_assignment) only for writes. No format bump.
 ```
 
 ## 01M7P24YERKT0YD8B0D3W0GX8W
@@ -100,6 +114,20 @@ ONBOARD-UX (v0.17.1, 2026-11-16): mnemo onboard has two views. At a terminal (st
 
 ```text
 ONBOARD-UX (v0.17.1, 2026-11-16, the user's choices): mnemo onboard has two views. At a terminal (stdout a TTY; MNEMO_DEV_ONBOARD_TTY in tests) each item is one line tagged as a boot log tags its lines (SysV init, systemd): [  OK   ], [ ADDED ], [UPDATED], [REMOVED], [ WARN  ], [FAILED ], [SKIPPED], then the part (Brain, Model, Claude Code, Cursor, Git); only the word is coloured. Tags are past-tense results, printed after the writes or when nothing needs writing; before a write the plan is untagged in the future tense ('Will add: ...'), then the question. apply() records each item's Outcome (Done, Failed, NotRun). After the lines: 'Done: N files changed.', 'Next:', the guide's pointer. With no terminal the output is v0.16.1's byte for byte, since agents read it.
+```
+
+## 01M7PTYRH9DG1W9XETQPV981X7
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.page-batch-reads`
+- scope: private
+- created: 2026-11-18T08:04:16Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.page-batch-reads","area":"architecture","topic":"pager"}`
+
+```text
+Pager batch reads (v0.19.0, PERF-2): read_pages_uncached(&[(page, gen)]) -> PageBatch does one positioned read per run of adjacent pages and AES-GCM decrypts in place (crypto::aead_decrypt_in_place) on scoped threads from PARALLEL_DECRYPT_MIN_PAGES (64, chosen not measured); RunReader refills 256 pages and reads PageBatch::into_images as a plain slice (a per-page lookup on that hot path cost ~10 ms of open at 100K). for_each_page streams a fill: threads started once, 15-page (120 KiB) buffers over a bounded channel, so the macOS allocator doesn't keep 2 MiB buffers (it did: +2.4 to 3.7 MB on a 10K handle). MNEMO_DEV_DECRYPT_THREADS (dev-hooks) caps threads for single-thread numbers.
 ```
 
 ## 01M7HTAC00BQ1BCWRQ09FV7SW8
@@ -212,6 +240,20 @@ Mobile CI on a release branch uses one concurrency group per ref (mobile-ci-refs
 
 ```text
 Swift timing test EmbedQueueTests.slowEmbedsDontStarveTheAppsOtherTasks (EmbedQueueTests.swift:45, sinceLaunch < 1.2 s) failed once on a hosted macOS runner at 1.449 s (Mobile CI on 98c2a68, 2026-11-17); its re-run passed, and the next run measured 1.999 s for the whole test. Logged, not changed (one failure isn't a reason to loosen a test); the Planner decides if it recurs.
+```
+
+## 01M7PX5ZTQBZEFZ7XGMQ87C88X
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `convention.non-exhaustive-types`
+- scope: private
+- created: 2026-11-18T08:43:10Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"convention.non-exhaustive-types","area":"convention","topic":"rust-api"}`
+
+```text
+Rust API convention (v0.19.0, PR 137 b97e689): the 13a and findings record types (TaskSpec, Task, TaskTaken, TaskClaim, NewWork, Message, Claim, Presence, Stale, KindCounts, FindingSpec, Finding, FindingFilter) are #[non_exhaustive]. Outside the engine crate (the CLI bin, tests/, mnemo-python, users) a struct expression is refused even with ..Default::default() (E0639): build with TaskSpec::new(title), FindingSpec::new(id, category, priority, title) or Type::default(), then assign fields; destructuring needs a trailing `..`. New public record types should follow this, with Default or a constructor.
 ```
 
 ## 01M7GMSXQBCWKAQSMZ3CRK81VT
@@ -424,6 +466,29 @@ Decision (2026-11-17): v0.18.1 adds public field `refs` to TaskSpec and Task (no
 2026-11-11 decision (user), restated for 12.2 on 2026-11-15: mnemo onboard is the one entry point, safe to re-run. It finds or creates the project brain through git rev-parse --git-common-dir (every worktree shares one file), keeps its generated key in the OS keychain (the one step that may need the human), installs the built-in model, wires Claude Code and Cursor (MCP through mcp install, rules, hooks), and prints the guide; onboard --guide prints only the guide, and mnemo init stays the low-level create. GUIDE-1 is one source text compiled into the binary, delivered by onboard --guide, the MCP server, the rule files and llms.txt, and every command in it runs in CI. Layers: 1 setup and 2 organizing memory ship with 12.2, 3 orchestration with 13a. Trust boundary: the guide lives in the binary; project conventions in the manifest are project notes that never override it. Acceptance: a fresh agent, told only how to install mnemo and then 'run mnemo onboard', runs this project's workflow unaided; the only human step is the keychain prompt. Design note: docs/design/12.2-onboard.md (v0.16.0 step 0, PR 91).
 ```
 
+## 01M7PGEBHXDYV6EDD1PHMA3QCF
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.perf-2-design`
+- scope: private
+- created: 2026-11-18T05:00:33Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.perf-2-design"}`
+
+```text
+decision.perf-2-design (PLANNER-A, 2026-11-17, review of v0190-1: PR 135, docs/design/perf-2.md). Accepted, with this order and scope for v0190-2:
+1. Merge PR 135 first, as it is, then build on release-0.19.0.
+2. Measure the 100K index load's split before choosing (decode, the id->partition map, reconcile, posting bytes), and put the split in the report.
+3. Build layout 2 in two stages. Stage A: the head (centroids, codebook, directory) plus postings as raw flat arrays, still loaded whole on first use but with no per-element msgpack decode, and the id->partition map built only when a write path needs it. Stage B, lazy load by partition (queued Adds per unloaded partition, the handle-wide removed set): only if stage A leaves first recall at 100K above 15 ms. Either way every new base is layout 2 and layout 1 is still read.
+4. 3b (batched reads, parallel decrypt with scoped threads above a measured threshold, at most available_parallelism) and 3c (Pager::read_pages) are in. Record the single-thread number as well, so phones without spare cores are covered.
+5. 3d: the two single-thread levers only. No parallel warm scan in v0.19.0; if 10K warm recall stays above 2 ms, report the number and the README says it honestly.
+6. 3f (merging the 4th fsync): DEFERRED, not in v0.19.0. It's a durability change for one fsync on some batch commits; it gets its own task later with its crash tests. The investigation in the note is the spec's ask, done.
+7. Also fix ann_defaults_v0_6_0 so it runs on v9 without MNEMO_DEV_ANN_MIN_FACTS (skip or label the tiers below V9_ANN_MIN_FACTS), and so it never writes to a tracked perf file by default.
+8. Tests as the note's section 5, minus the 3f ones. The compat test with the published 0.18.1 binary is required.
+Every number in the report from a run; note the machine load as in step 1.
+```
+
 ## 01M7GMSXBAQPP7R50GB4XQQMD7
 
 - type: episodic
@@ -436,6 +501,20 @@ Decision (2026-11-17): v0.18.1 adds public field `refs` to TaskSpec and Task (no
 
 ```text
 2026-11-15, the user: 'go' for Phase 13a, released as v0.17.0, all free (one machine, the Monetization rule). Scope: 13.1 messages and tasks with 13.1b delivery, 13.3 claims and presence, 13.5 visibility, 13.6 freshness. REVIEWER-A's REV-010 pass (its scheduled pass before a phase) runs first, and the Worker's design note docs/design/13a-coordination.md is step 0, on release-0.17.0.
+```
+
+## 01M7PBZ94MBPZ7BDY2J0FY9G76
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.positioning`
+- scope: private
+- created: 2026-11-18T03:42:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.positioning"}`
+
+```text
+Decision (user, 2026-11-17): positioning — "MNemo doesn't compete with vector databases. It competes with CLAUDE.md and a notes folder." The README and site explain it in three layers: memory you can search; agents sharing work; the engine underneath (encryption, crash safety, snapshots, size). mnemo inspect is a key command (hero step 3). Say "coordinate", never "orchestration". Shipped as a docs-only PR to main (no release); v0.19.0 adds a date range filter to inspect and a Findings-tab screenshot from a demo brain.
 ```
 
 ## 01M7GRC02NRRAE09TCHHM4D02S
@@ -506,6 +585,20 @@ Release rule (PLANNER-A decision 2026-11-17, in RELEASING.md since v0180-2): any
 
 ```text
 Roadmap after v0.18.0 (user decision 2026-11-17): HARNESS-DOGFOOD-1 Run 2, then PERF-2 (partition-major index loading and a lazy vector-column fill; first recall at 100K toward <= 15 ms, at 10K toward <= 5 ms, no format bump). Sync (Pro, then Teams) waits: it is decided later on the waitlist's numbers, since the waitlist had 1 sign-up and was not visible until the site's top bar (2bf9b74).
+```
+
+## 01M7PEYPSTKP6NTD4E8NBCMWV8
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.run-2`
+- scope: private
+- created: 2026-11-18T04:34:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.run-2"}`
+
+```text
+Decision (user, 2026-11-17: "Yes"): HARNESS-DOGFOOD-1 Run 2 runs on v0.19.0. The brain is the ledger: PLAN.md and reviewer_notes.md are frozen archives with head notes; status and order are the project essence; dispatches are tasks (spec in the body or a spec.<slug> fact); Planner decisions and verifications are decision.* or status.* facts or task notes; the Worker's reports are report.<slug> facts named in task updates; review findings are records; hand-offs of Planner-owned files are tasks. Pointers name a slug or key. Every task starts with a recall and its report says what came back. docs/brain.md replaces the chore(plan) commit. The rules are AGENTS.md's subsection "The brain is the ledger". Run 2 passes if v0.19.0 goes dispatch to tag with no hand-edited PLAN.md or reviewer_notes.md.
 ```
 
 ## 01M7P5HQ05970SDH96H09KHQTQ
@@ -1768,6 +1861,34 @@ COORDINATION IN THIS REPO (v0.17, 13a): each session is named with MNEMO_AGENT a
 The brain's backup (RELEASING.md step 7, from v0.18.0): before tagging, run mnemo export --git -o docs/brain.md with the installed CLI, read the diff for anything the public repo shouldn't publish, and commit it; from Run 2 it replaces the chore(plan) coordination-file commit. The first docs/brain.md (PR 126) was written by v0.17.1 because a freshly built binary would trigger a keychain prompt on the real brain, so its header line is v0.17.1's.
 ```
 
+## 01M7PYQQBWX4TKX8R35AGDMWEN
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `process.inspect-screenshot`
+- scope: private
+- created: 2026-11-18T09:10:20Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"process.inspect-screenshot","area":"process","topic":"docs"}`
+
+```text
+Retaking docs/img/inspect-findings.png (v0.19.0, PR 138 dabb5fc): sh test/scripts/inspect_screenshot.sh builds a synthetic demo brain (mnemo/examples/inspect_demo_brain.rs: DEMO-* findings in every status, role-named authors, made-up text) in a temp dir under a throwaway passphrase, runs mnemo inspect from inside that dir (so the header shows only demo.mnemo, not a machine path), and screenshots <url>#findings with headless Chrome (light theme, 1200x540, --virtual-time-budget=5000); it checks the 300 KB limit. The inspector opens a tab from the URL hash (#findings, #tasks). Never photograph the project brain.
+```
+
+## 01M7PTYRY1TC3YCP9W55G1DJ1K
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `process.perf-measurement`
+- scope: private
+- created: 2026-11-18T08:04:16Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"process.perf-measurement","area":"process","topic":"performance"}`
+
+```text
+Measuring PERF numbers on this Mac: cargo run --release --features benches --example device_budget -- --sizes 1000,10000,100000 (cached corpora under mnemo/target/device_budget; move the dir aside to rebuild with a new layout); run twice and log uptime's load average per run (macOS background work like fileproviderd, mediaanalysisd, mlhostd, ANECompilerService can push it to 5 to 26). examples/perf2_split.rs gives the 100K index load split (--rewrite-to copies and rewrites the base in the current layout). ranking_v2 takes --perf-json <scratch copy>; ann_defaults_v0_6_0 writes only with --out. Don't build or run other heavy work while a benchmark runs.
+```
+
 ## 01M71NHYN8Q47NZEASB4EHC62N
 
 - type: procedural
@@ -1836,6 +1957,20 @@ The release order (v0.14 to v0.16): merge the last PR into the release branch an
 
 ```text
 REVIEWER-B reviews each minor release at READY, before the tag: everything since the last release, the workflow changes, and the prior batch's triage. A patch release gets no review unless the Planner asks.
+```
+
+## 01M7PCC07YEX6KYAGPMY6BGR24
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `process.site-phone-check`
+- scope: private
+- created: 2026-11-18T03:49:21Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"process.site-phone-check","area":"process","topic":"site"}`
+
+```text
+Checking index.html at phone width without a browser tool: headless Chrome (/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless=new --user-data-dir=<scratch> --allow-file-access-from-files) can't make a window 390 px wide, so load the page in a 390 px iframe inside a wrapper page; render slices by shifting the iframe with a negative margin-top and a 1300 px tall window (sips --cropOffset doesn't crop by offset); measure overflow with a wrapper script reading iframe.contentDocument scrollWidth vs clientWidth (--dump-dom --virtual-time-budget=5000). macOS has no `timeout`: use perl -e 'alarm 90; exec @ARGV'.
 ```
 
 ## 01M7NWWEF2PTAEZDHERP4RXW4S
@@ -1978,6 +2113,248 @@ v0.17.1 READY again (2026-11-16): release-0.17.1 at 6d0288a after PR 117 (onboar
 v0.17.2 READY (2026-11-17): release-0.17.2 at bf73ef8, Run 1's five rounds (PR 118 READY-NOTICE, PR 119 presence at start and polish, PR 120 MODEL-RETRY and WHO-SHAPE, PR 121 the legacy scan and the claim race, PR 122 the bump) after the rule 9 handoff e8dbdd4. The dry run 44081832937 (mobile off) succeeded: 23 jobs, 9 skipped; version check read 0.17.2; CI and Mobile CI passed on bf73ef8.
 ```
 
+## 01M7PF1C7HS3K4SW8C9GXQY9BS
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-0`
+- scope: private
+- created: 2026-11-18T04:35:59Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-0","area":"report","topic":"v0190-0"}`
+
+```text
+WORKER DONE v0190-0 (2026-11-17): v0.19.0 setup. Brain: "v0.19.0 setup: the release branch, the Run 2 rules commit, and the archives frozen" -> partial (the release-order and roadmap-status facts came back; decision.run-2 wasn't in the top 5, read by key). 1. release-0.19.0 branched from main at 9fb1191 (origin/main was 9fb1191). 2. d3f828a 'docs(agents): the brain is the ledger (HARNESS-DOGFOOD-1 Run 2)': AGENTS.md alone, +39 lines (the new subsection). 3. 72ae920 'chore(plan): freeze the coordination files as archives (Run 2)': PLAN.md and reviewer_notes.md by path, as they stood (+150 lines: the archive head notes and the last entries). From here neither file is edited. 4. Pushed: origin/release-0.19.0 at 72ae920. No PR, as the task says. Pointer: the Planner's new socket (11856). Tally: found by the READ: v0190-0 pointer and the per-turn line (1 task ready). Awkward: none.
+```
+
+## 01M7PGBF8RN8YQV054P2HN8WWP
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-1`
+- scope: private
+- created: 2026-11-18T04:58:58Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-1","area":"report","topic":"v0190-1"}`
+
+```text
+WORKER READY v0190-1 (2026-11-17): PERF-2 step 1, the baseline on v0.18.1 and docs/design/perf-2.md. PR 135 (8dceda9, branch rel0190-1-perf2-design) into release-0.19.0, left OPEN for your review (merge on your word; changes from the review go in first). No engine change.
+
+Brain: "PERF-2 baseline first recall after opening vector column fill ANN index layout perf numbers" -> found (spec.perf-2 at the top; no stored v0.11 profile numbers, read the code and the spec's).
+
+Setup: Apple M1 Pro 8 cores 16 GB; release build with --cfg aes_armv8/polyval_armv8 from .cargo/config.toml (RUSTFLAGS not set); release-0.19.0 at 72ae920, engine = v0.18.1 (git diff v0.18.1 HEAD -- src Cargo.toml Cargo.lock empty). Load average 3.2 to 6.4 during the runs (fileproviderd held one core); device_budget ran twice to show the noise.
+
+Numbers (run 1 / run 2; ms unless marked; device_budget --sizes 1000,10000,100000):
+- first recall, fresh handle, median of 20: 1K 0.92/0.92; 10K 10.38/9.16; 100K 118.29/116.45 (p95 run 2: 0.93, 10.21, 122.18)
+- first recall after stats() loaded the index: 1K 0.33/0.33; 10K 9.14/8.85; 100K 6.31/6.37
+- warm recall, median of 1,000: 1K 0.22/0.22; 10K 2.25/2.28; 100K 2.40/2.41
+- open, median of 20: 0.54/0.52; 3.79/3.37; 30.47/30.16
+- handle RSS MB: 2.9/2.9; 17.5/16.2; 112.5/112.5
+- durable single write median: 14.99/14.01; 12.79/15.17; 14.63/15.53
+- batch of 100 per memory: 0.256/0.280; 0.198/0.271; 0.376/0.388
+- fsyncs single/batch (run 2): 3/4; 3/3; 3/4
+- ranking_v2: hit@1 0.9231, MRR 0.9487; phase6 0.5667/0.6779 (floors 0.5467/0.6665)
+- ann_defaults at 100K, defaults: 317 partitions, n_probe 159, n_rerank 500, recall@10 0.978, 3.78 ms/query
+
+The note's choices:
+(1) Where it goes: at 100K about 110 of 116 ms is the index load (ensure_ann: decode the ~17 MB run, the id->partition map, reconcile); the query is about 6 ms. At 10K (no index) it's the vector-column fill: 1,000 pages each a seek, a read and an AES-GCM decrypt.
+(2) Index layout 2, partition-major, behind the existing v9 layout byte (no format bump): a head (centroids, PQ codebook, a partition directory; about 1 MB at 100K) decoded at first use; partitions loaded when a query probes them; the id->partition map built only when a write path needs it; delta Adds queued per unloaded partition, Removes in a handle-wide set; every new base written as layout 2, layout 1 still read. v0.18.1 on layout 2: unknown layout -> no index -> exact recall, no error; its writes are re-added by generation on the next v0.19 open; its build_index writes layout 1, still read.
+(3) Pager::read_pages: one positioned read per run of pages (read_at / seek_read), then per-page auth and decrypt.
+(4) 10K first recall: batched reads plus a parallel decrypt with scoped threads above a measured threshold; no new dependency, no unsafe.
+(5) Warm 10K: dot_f16 already runs 8 lanes; try 16 lanes in two accumulators, and widening a whole entry before the dot; parallel warm scan only if those miss 2 ms.
+(6) Shared mode: plain handles hold their lock for life, so lazy reads see the same run; shared handles load partitions only inside a call that passed the stamp check, and drop them on reload; page generations make a wrong-run read fail as PageAuthFailed. PERF-2 also cuts the 112.5 ms first recall every shared reload pays at 100K.
+(7) The 4th fsync: FMT-9c direct writes of big control runs after Pager::flush already synced. Proposal: defer that sync until after the direct writes so one fsync covers both (4 -> 3); safe because both are unreferenced until the WAL commit and SEC-1 removed the lease ordering; never fold it into the commit's own fsync. Needs failpoint crash tests; your call whether it's in v0.19.0.
+Open questions for you: the lever order (measure the 100K load's split first; head-only load may be enough at n_probe = half the partitions), 3f in v0.19.0 or its own step, and whether a parallel warm scan is in scope.
+
+Deviations: ann_defaults_v0_6_0 panics on v9 at its 10K tier (no index below V9_ANN_MIN_FACTS = 20,000, so stats().index is None); re-run with MNEMO_DEV_ANN_MIN_FACTS=1000, its 10K row is a forced index; it writes test/scripts/perf_v0.5.0.json, restored from HEAD after each run (git status clean). The over-budget phase's first-recall numbers include a prior stats() call, so they aren't cold first recalls; the note says so.
+
+Tally: found by READ: v0190-1 and the per-turn line. Awkward: fileproviderd at ~94% of a core during the benchmarks.
+```
+
+## 01M7PTY93EFSCWMJKZTEYTTZ61
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-2`
+- scope: private
+- created: 2026-11-18T08:04:00Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-2","area":"report","topic":"v0190-2"}`
+
+```text
+WORKER READY v0190-2 (2026-11-18): PERF-2 step 2, the build. PR 136 squash-merged into release-0.19.0 as 8a63540 (branch deleted). CI 26 of 26; the new compat (v0.18.1, linux) job installed the published 0.18.1 ("Installed package mnemo-engine v0.18.1") and passed 2 of 2. No format bump.
+
+Brain: "PERF-2 step 2 build index layout 2 flat arrays read_pages parallel column fill" -> found (decision.perf-2-design, report.v0190-1, spec.perf-2).
+
+Order as decided: PR 135 merged first (74982c4); the 100K split measured before choosing; stage A built; stage B not needed; 3b and 3c in; 3d single-thread levers only; 3f not built.
+
+The 100K load split (examples/perf2_split.rs, dev hook __index_load_split; medians of fresh handles), layout 1 (v0.18.1's engine) -> layout 2: read+decrypt 15.69 -> 4.22 ms; decode 70.76 -> 0.70; id->partition map 1.08 (in the load) -> 1.02 (only when a write needs it); delta chain 0.00; reconcile 3.32 -> 3.02; the following first recall 30.22 -> 4.19; plain first recall 114.98 -> 11.54; run 17,298,907 -> 12,082,189 bytes.
+
+Against every target and floor (device_budget, M1 Pro, release, hardware AES; v0.19.0 run 1 / run 2; load average 9.36 / 5.45 at each run's start, 5.08 for the single-thread run, macOS background work; test/scripts/perf_v0.19.0.json):
+- first recall 100K: 11.50 / 11.50 ms (v0.18.1 116.45 to 118.29; target <=15) MET. One decrypt thread: 17.66 ms.
+- first recall 10K: 4.22 / 4.20 ms (9.16 to 10.38; target <=5) MET. One thread: 8.19 ms.
+- warm recall 10K: 2.35 / 2.31 ms (2.25 to 2.28; target <=2) NOT MET. Sixteen lanes in dot_f16 measured no gain, so it was reverted and the second lever not tried: the warm time isn't in the dot product; a profile is the next step if the target stays. Report it as 2.3 ms.
+- warm recall 100K: 2.39 / 2.38 (2.40 / 2.41) held.
+- open 100K: 25.78 / 25.70 ms (30.16 to 30.47) better. 10K: 3.02 / 3.00 (3.37 to 3.79).
+- handle RSS 100K: 111.6 / 110.9 MB (112.5) held. 10K: 17.3 / 17.2 (16.2 to 17.5). 1K: 3.7 (2.9), +0.8 MB, noted.
+- durable single write: 12.0 to 16.8 ms across sizes (12.8 to 15.5) held; fsyncs unchanged (3 single; batch 4 at 1K and 100K).
+- ranking_v2 hit@1 0.9231, MRR 0.9487 (unchanged); phase6 0.5667 / 0.6779.
+- recall@10 at 100K, defaults: 0.978, 2.93 ms/query (unchanged). ann_defaults now skips the 10K tier (below V9_ANN_MIN_FACTS) and wrote only to a scratch --out file.
+- exact results below 20K: covered by the unchanged suites (all pass).
+- v0.18.1 on a layout-2 file: no error, exact recall, its write picked up by v0.19 (tests/v0_18_compat.rs, CI).
+
+What was built: index layout 2 (flat partition-major arrays behind the layout byte, every length checked before allocating, trailing bytes refused; every new base is layout 2, layout 1 still read and rewritten as 2 with the next base); Pager::read_pages_uncached (one positioned read per run of adjacent pages, AES-GCM in place, scoped threads from 64 pages) behind RunReader (256 pages per refill, read as a plain slice); Pager::for_each_page streaming the column fill (threads once per fill, 15-page/120 KiB buffers over a bounded channel); recall prefills the scored candidates' vector pages; the id->partition map lazy; dev hooks __index_load_split, __rewrite_index_base_for_testing, MNEMO_DEV_DECRYPT_THREADS.
+
+Deviations found while measuring, all fixed before the final runs: (1) a single 256-page batch for the column fill added 2.4 to 3.7 MB to a 10K handle (allocator keeps 2 MiB buffers); 64-page batches fixed memory but restarted threads per batch (10K first recall 7.32 ms); streaming fixed both. (2) RunReader serving through the batch's per-page lookup slowed the catalog decode: open at 100K 36.18 vs 26.98 ms; RunReader now owns the decrypted buffer. (3) The 64-page parallel threshold was chosen, not measured; the single-thread numbers are recorded. (4) Stage B and 3e's shared-mode test not built (stage A met the target, as decided).
+
+Tests: unit pager::batched_reads_match_single_reads and pager::streamed_reads_reach_the_sink_once_each (1 and 4 threads, order and gaps, damaged page, wrong generation, past the end, cached dirty page, failing sink); index::layout2_tests (round trip, lazy map, damaged runs as errors); tests/v0_18_compat.rs. Local: fmt, clippy CI features, clippy mnemo-python; full cargo test --features failpoints 777 passed 0 failed 1 ignored; mnemo-uniffi 23 passed; after the last change, fmt, clippy and 27 suites (open, recovery, crash, shared, compat, fixtures) 467 passed 0 failed.
+
+Docs: CHANGELOG [Unreleased] Changed (the numbers, how, mixed versions: upgrade every session together on a brain with 20,000+ facts); mnemo/README.md performance history row v0.19.0; docs/design/perf-2.md status and section 7 "As built". For your HANDOFF, the root README states the old first-search numbers: line 695 area, line 743, the table row at 860 ("First search after opening ... 0.9 ms | 9 ms | 112 ms"), and lines 917 to 919 ("about 112 ms at 100K ... about 9 ms at 10K"); the site's roadmap "Next" lists "Faster first search in large brains". iPhone numbers weren't re-measured.
+
+Tally: found by READ: decision.perf-2-design and the per-turn line (1 task ready). Awkward: macOS background work (load 5 to 26) during the final runs; two of my own fixes (memory, open time) only showed up in measurement, not tests.
+```
+
+## 01M7PX5FQ0A1PB3SF2G4W9EXEV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-3`
+- scope: private
+- created: 2026-11-18T08:42:54Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1794991382,"_mnemo.key":"report.v0190-3","_mnemo.superseded_by":"01M7PX5QK2DZVZ4JCBJFD4TT60","area":"report","topic":"v0190-3"}`
+
+```text
+WORKER READY v0190-3 (2026-11-18): the 13a and findings public types are #[non_exhaustive]. PR 137 squash-merged into release-0.19.0 as the head commit now (branch deleted); CI 20 of 20.
+
+Brain: "non_exhaustive public record types TaskSpec Task FindingSpec Finding NewWork message claim spec constructors" -> found (decision.non-exhaustive-0.19 at the top).
+
+Done: #[non_exhaustive] on all 13 listed: TaskSpec, Task, TaskTaken, TaskClaim, NewWork, Message, Claim, Presence, Stale, KindCounts, FindingSpec, Finding, FindingFilter. None left out: each is a record callers build or read, and a later field on any is likely.
+
+A correction to the task's wording: #[non_exhaustive] refuses a struct expression outside the defining crate even with ..Default::default() (E0639). So outside the crate (the CLI binary, the integration tests, Python, any user) callers start from a constructor or Default and set fields. Added TaskSpec::new(title) and FindingSpec::new(id, category, priority, title); Message and Claim now derive Default (the hook's unit test builds them); TaskSpec, FindingSpec, FindingFilter, NewWork and KindCounts already had Default. Destructuring patterns need a trailing `..`; reading fields is unchanged.
+
+Updated: the CLI (task add, finding add, finding list, the hook's Planner findings line), the hook's unit test, the Python binding (task_add, finding_add, findings), 27 struct expressions in 9 integration test files (rewritten from the compiler's E0639 spans). uniffi and the doc tests needed nothing. No README or guide snippet used the old style. CHANGELOG [Unreleased] Changed: what struct-literal and destructuring code needs, with an example.
+
+Checks: build --tests --examples (failpoints, benches); clippy with CI's features clean; cargo test --doc 6 passed; cargo check -p mnemo-uniffi; cargo check and clippy on mnemo-python clean; the affected suites (bin unit tests, tasks, findings, export_cli, inspect_cli, wake, visibility_freshness, v0_16/v0_17 compat, project_brain, mcp_context, hook_cli, coordination_plumbing, messages, claims) all passed locally. Full suite in CI only (last full local run on PR 136).
+
+Tally: found by your VERIFIED note on v0190-2 and the per-turn line. Awkward: the task's ..Default::default() assumption doesn't hold for non_exhaustive types.
+```
+
+## 01M7PX5QK2DZVZ4JCBJFD4TT60
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-3`
+- scope: private
+- created: 2026-11-18T08:43:02Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-3","_mnemo.supersedes":"01M7PX5FQ0A1PB3SF2G4W9EXEV","area":"report","topic":"v0190-3"}`
+
+```text
+WORKER READY v0190-3 (2026-11-18): the 13a and findings public types are #[non_exhaustive]. PR 137 squash-merged into release-0.19.0 as b97e689 (branch deleted); CI 20 of 20.
+
+Brain: "non_exhaustive public record types TaskSpec Task FindingSpec Finding NewWork message claim spec constructors" -> found (decision.non-exhaustive-0.19 at the top).
+
+Done: #[non_exhaustive] on all 13 listed: TaskSpec, Task, TaskTaken, TaskClaim, NewWork, Message, Claim, Presence, Stale, KindCounts, FindingSpec, Finding, FindingFilter. None left out: each is a record callers build or read, and a later field on any is likely.
+
+A correction to the task's wording: #[non_exhaustive] refuses a struct expression outside the defining crate even with ..Default::default() (E0639). So outside the crate (the CLI binary, the integration tests, Python, any user) callers start from a constructor or Default and set fields. Added TaskSpec::new(title) and FindingSpec::new(id, category, priority, title); Message and Claim now derive Default (the hook's unit test builds them); TaskSpec, FindingSpec, FindingFilter, NewWork and KindCounts already had Default. Destructuring patterns need a trailing `..`; reading fields is unchanged.
+
+Updated: the CLI (task add, finding add, finding list, the hook's Planner findings line), the hook's unit test, the Python binding (task_add, finding_add, findings), 27 struct expressions in 9 integration test files (rewritten from the compiler's E0639 spans). uniffi and the doc tests needed nothing. No README or guide snippet used the old style. CHANGELOG [Unreleased] Changed: what struct-literal and destructuring code needs, with an example.
+
+Checks: build --tests --examples (failpoints, benches); clippy with CI's features clean; cargo test --doc 6 passed; cargo check -p mnemo-uniffi; cargo check and clippy on mnemo-python clean; the affected suites (bin unit tests, tasks, findings, export_cli, inspect_cli, wake, visibility_freshness, v0_16/v0_17 compat, project_brain, mcp_context, hook_cli, coordination_plumbing, messages, claims) all passed locally. Full suite in CI only (last full local run on PR 136).
+
+Tally: found by your VERIFIED note on v0190-2 and the per-turn line. Awkward: the task's ..Default::default() assumption doesn't hold for non_exhaustive types.
+```
+
+## 01M7PYQ7R536FSB69W4A8ESXR6
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-4`
+- scope: private
+- created: 2026-11-18T09:10:04Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-4","area":"report","topic":"v0190-4"}`
+
+```text
+WORKER READY v0190-4 (2026-11-18): the inspector's date range and the Findings screenshot. PR 138 squash-merged into release-0.19.0 as dabb5fc (branch deleted); CI 20 of 20.
+
+Brain: "inspector date range filter memories findings tasks created_at screenshot demo brain" -> found (spec.inspect-date-filter).
+
+(1) The date range (spec.inspect-date-filter): From and To dates, inclusive, in the viewer's local time, on Memories, Findings and Tasks; either may be empty. The page turns them into local day bounds (a DST day is 23 or 25 hours: Nov 1 to Nov 2 here spans 49 hours, checked). Server-side for all three routes, since /api/memories is paged: since/until in unix seconds; memories and findings by created_at, tasks by created_at or updated_at (date=updated, the tab's "Last change"). Combines with every filter; totals and status counts follow the range (the other filters still narrow only the list). Malformed since/until/date -> 400 with the reason. With a range and nothing in it, the tab keeps its filters and says "Nothing in this date range." Also: a link can open a tab (#findings), the code exchange keeps the hash, picking a tab updates it. Rules unchanged: GET only, text nodes only (no HTML sink), no handle held, nothing written.
+
+(2) The screenshot: docs/img/inspect-findings.png, 101,720 bytes, light theme, the Findings tab (counts line, filters with the date inputs, DEMO-1.1 to DEMO-2.2 in every status, the "private until verified" mark on the unverified SECURITY finding). Built from a synthetic brain (mnemo/examples/inspect_demo_brain.rs: made-up text, role names reviewer/planner/worker, 3 tasks, 3 memories) by test/scripts/inspect_screenshot.sh: temp directory, throwaway passphrase, inspector run from inside it so the header shows only demo.mnemo (the first take showed the /var/folders temp path; fixed), headless Chrome with preferredColorScheme light, 1200x540, checks the 300 KB limit. Never touches the project brain or the keychain. Retake: sh test/scripts/inspect_screenshot.sh.
+
+Tests: inspect_cli::the_date_range_filters_every_dated_tab (backdated memories: inclusive bounds, open ends, empty values, an empty window, with type and q; findings and tasks totals and counts follow the range for date=created|updated; five malformed requests -> 400; the page has the date inputs and hash handling, no HTML sink). The page's script parses in JavaScriptCore and ran against a stub DOM (routes get the same since/until; the range empty state). Local: fmt, clippy CI features, inspect_cli 11, guide 5. Docs: CHANGELOG Added, mnemo/README.md's inspector section, one guide line (llms-full.txt regenerated).
+
+A slip, fixed before anything was pushed: I committed on my local release-0.19.0 instead of a task branch; the push failed (no such branch), so I moved my own unpushed commit to rel0190-4-inspect-dates (git switch -c) and pointed local release-0.19.0 back at origin (git branch -f, only my commit was ahead). Nothing reached GitHub outside the PR.
+
+For v0190-5: the image is at docs/img/inspect-findings.png (1200x540).
+
+Tally: found by READ: v0190-3 and the per-turn line. Awkward: the missing branch, above.
+```
+
+## 01M7PYTFGGWMJBVB5GKD7W1N0H
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-5`
+- scope: private
+- created: 2026-11-18T09:11:50Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-5","area":"report","topic":"v0190-5"}`
+
+```text
+WORKER DONE v0190-5 (2026-11-18): the hand-off committed. 3ba2f7b 'docs(site): the inspector screenshot; one roadmap line' on release-0.19.0, README.md and index.html alone (16 insertions, 8 deletions), pushed. No PR, as the task says (a hand-off commit on the release branch).
+
+Brain: "Hand-off README.md index.html inspector screenshot roadmap duplicate line" -> partial (earlier hand-off notes came back).
+
+Checked before committing: the README's new first-search row (0.6 / 4.2 / 12 ms) and its limitation text (about 12 ms at 100K and 4 ms at 10K, v0.19.0) match the measured runs (perf_v0.19.0.json: 0.60/0.61, 4.22/4.20, 11.50/11.50 ms; 12 is 11.5 rounded); the iPhone number is marked as v0.12.0's, not re-measured. index.html: the screenshot figure (width 1200 height 540, alt text, lazy), the shipped line 'v0.13 – v0.19' with 'A first search about ten times faster ... 12 ms at 100,000 memories' (116 to 118 ms -> 11.5 ms is about 10x), the inspector line with the date range, and both first-search roadmap lines (Next and After that) removed. docs/img/inspect-findings.png is on the branch (PR 138), at the path both files reference. No CI runs for these paths (paths-ignore).
+
+Tally: found by READ: v0190-4 and the per-turn line. Awkward: none.
+```
+
+## 01M7PEYPQ3MXR42MYWFEHJCE0J
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.inspect-date-filter`
+- scope: private
+- created: 2026-11-18T04:34:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.inspect-date-filter"}`
+
+```text
+spec.inspect-date-filter (v0.19.0, the user's request 2026-11-17; PLANNER-A). `mnemo inspect` gets a date range filter on every tab with dated rows (memories, Findings, Tasks): a From and a To date, inclusive, in the viewer's local time; either may be empty (open-ended). It filters by the row's created time; Tasks may offer last change instead, labelled. It combines with the existing filters, and the counts shown reflect it. The inspector's rules are unchanged: GET only, brain text into text nodes only, no handle held between requests, nothing written. If a tab's rows are paged by the server, add since/until query parameters to its GET route instead of filtering one page in the browser; reject a malformed date with a 400. Tests: routes in tests/inspect_cli.rs, and a page check like the existing ones. Guide or README line if the inspector is described there.
+```
+
+## 01M7PEYPMDMCFJ0407GATXH96F
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.perf-2`
+- scope: private
+- created: 2026-11-18T04:34:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.perf-2"}`
+
+```text
+spec.perf-2 (v0.19.0, HARNESS-DOGFOOD-1 Run 2; PLANNER-A 2026-11-17). PERF-2 (Phase 11.1): a faster first search after opening, with NO file-format bump. The v9 ANN index run carries a layout version byte, so a new index layout can ship: a reader that doesn't know a layout treats the file as having no index (exact scan or rebuild_index), never as an error.
+
+Targets (M1 Pro, release build, 384-dim, about 300 B of text per memory: the v0.11 perf setup):
+- first recall on a fresh handle at 100K (ANN): <= 15 ms (about 120 ms since v0.11);
+- first recall at 10K (no index, exact fp16 scan): <= 5 ms (about 9 ms on the M1 Pro, 7.1 ms on an iPhone);
+- warm recall at 10K: <= 2 ms (2.19 ms), for example a SIMD fp16 scan;
+- the 4th fsync on some batch commits (9c's ordering): investigate and report; change it only if it's provably safe.
+
+Known starting point (first_recall_10k_profile, v0.11): the vector-column fill is 66% of first recall and AES-GCM decrypt 48%. Levers: partition-major index loading (read only the partitions a query probes), a lazy or partial vector-column fill, one pread per run instead of an lseek and a read per page.
+
+Must not regress: ranking_v2 (hit@1 0.9231, MRR 0.9487), recall@10 at 100K (98% at the defaults), exact results below 20K (recall 1.0), durable write latency, open time, RSS at 100K (112 MB), shared mode, read-only opens, and v8 read-only files.
+
+Step 1 (task v0190-1): measure the baseline on v0.18.1 with the existing benches and examples, and write a short design note, docs/design/perf-2.md: the layout, the lazy fill, how it works with shared mode and the lock, which numbers it should reach, and what an older reader does with the new layout. Then ready, for the Planner's review before any engine change.
+Step 2 (task v0190-2): the build, with tests: an old-layout index still read; a new-layout file opened by v0.18.1 falls back without error; failpoint and proptest coverage if any write path changes; test/scripts/perf_v0.19.0.json with the measured numbers. README and CHANGELOG numbers come only from measured runs. REVIEWER-B's READY pass applies (a minor release that touches the read path).
+```
+
 ## 01M7P5HQ3XCY792ZH38JFEER8G
 
 - type: episodic
@@ -1986,10 +2363,24 @@ v0.17.2 READY (2026-11-17): release-0.17.2 at bf73ef8, Run 1's five rounds (PR 1
 - scope: private
 - created: 2026-11-18T01:50:09Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1794976518,"_mnemo.key":"status.roadmap","_mnemo.superseded_by":"01M7PF04H3SXFRVZH441NFR94F"}`
 
 ```text
 Roadmap status (2026-11-17): v0.18.1 (INSPECT-COORD, task refs) in release prep; bump PR 132 72d78b5 merged, dry run 44213067706 green; waiting on the user's install of v0.18.0 for the docs/brain.md backup step. Then: HARNESS-DOGFOOD-1 Run 2 with PERF-2 as its work in v0.19.0 (with #[non_exhaustive]); sync is decided later on the waitlist's numbers.
+```
+
+## 01M7PF04H3SXFRVZH441NFR94F
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.roadmap`
+- scope: private
+- created: 2026-11-18T04:35:18Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap","_mnemo.supersedes":"01M7P5HQ3XCY792ZH38JFEER8G"}`
+
+```text
+Roadmap status (2026-11-17): v0.18.1 released; the README/site rework is live (PR 134). HARNESS-DOGFOOD-1 Run 2 started: the brain is the ledger, PLAN.md and reviewer_notes.md frozen. v0.19.0 is Run 2's release: tasks v0190-0 (setup) to v0190-6 (READY): PERF-2 (spec.perf-2, design then build), non_exhaustive on the coordination and findings types, the inspect date filter (spec.inspect-date-filter) and a Findings screenshot from a demo brain, a site hand-off. Then judge Run 2, then sync, decided on the waitlist's numbers.
 ```
 
 ## 01M7NG7T0DCNRRBV7QV97TQ196
@@ -2018,6 +2409,34 @@ v0.18.0 READY (2026-11-17): release-0.18.0 at 430a21a after PR 125 (main merged,
 
 ```text
 v0.18.0 released 2026-11-17: tag v0.18.0 at 9cd5daf, release run 44191123230 (31 jobs, mobile on, user approved). crates.io, PyPI (5 wheels + sdist), mnemo-swift tag 0.18.0 (ed32685), Maven Central (repo1 live ~12 min after the job), GitHub Release with 14 assets; site shows v0.18.0. PRs: 123 findings, 125 main merge, 126 export --git backup, 127 thread essence and unverified SECURITY out of --git, 128 bump, 129 review round 1 (RB-014). release-0.18.0 deleted. Next: v0.18.1 (INSPECT-COORD, task refs), whose branch starts with the AGENTS.md WAITING-pointer handoff commit.
+```
+
+## 01M7P8GFDYS6R9YQP20HZ9B74W
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0.18.1`
+- scope: private
+- created: 2026-11-18T02:41:54Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1794973762,"_mnemo.key":"status.v0.18.1","_mnemo.superseded_by":"01M7PCC0NQXNNBPZ4JENGG42Q2","area":"release","topic":"v0.18.1"}`
+
+```text
+v0.18.1 READY (2026-11-17): release-0.18.1 at 7c93da4 after 88c3c37 (AGENTS.md WAITING pointer), PR 130 (inspector findings/tasks tabs), 131 (task refs), 132 (bump, mobile false), 133 (docs/brain.md re-exported by installed mnemo 0.18.0: 292 records; tests/brain_backup.rs header check). Dry run 44213067706 on 72d78b5 succeeded with mobile off. Left: Planner HANDOFF of README/index.html, coordination-file commit, main fast-forward, tag v0.18.1, user approval (log WAITING: at the stop).
+```
+
+## 01M7PCC0NQXNNBPZ4JENGG42Q2
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0.18.1`
+- scope: private
+- created: 2026-11-18T03:49:22Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"status.v0.18.1","_mnemo.supersedes":"01M7P8GFDYS6R9YQP20HZ9B74W","area":"release","topic":"v0.18.1"}`
+
+```text
+v0.18.1 released 2026-11-17: tag v0.18.1 at 863c6fe, release run 44225322609 (user approved after a WAITING: pointer, the first), mobile off: crates.io and PyPI 0.18.1, GitHub Release 12 assets, mnemo-swift stays 0.18.0; release-0.18.1 deleted. Then the README/site rework (three layers, mnemo inspect as hero step 3) merged to main as PR 134 9fb1191 (docs-only, no CI by paths-ignore), live on Pages. Next: v0.19.0 (PERF-2, #[non_exhaustive] on 13a types, inspector date filter, a Findings screenshot from a demo brain).
 ```
 
 ## 01M7NT5YYT1X243FM6KGJ4RZQ5
@@ -2221,12 +2640,201 @@ PLAN.md: 2026-11-17 PLANNER-A DISPATCH v0.18.1 INSPECT-COORD and task refs
 - scope: shared
 - created: 2026-11-17T23:20:24Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0181-1","v0181-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0181-3","_mnemo.status":"active","_mnemo.status_history":[{"at":1794963080,"by":"worker-a","from":"queued","to":"active"},{"at":1794966582,"by":"worker-a","from":"active","note":"WAITING: the user's install of v0.18.x for step 7","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0181-1","v0181-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0181-3","_mnemo.status":"done","_mnemo.status_history":[{"at":1794963080,"by":"worker-a","from":"queued","to":"active"},{"at":1794966582,"by":"worker-a","from":"active","note":"WAITING: the user's install of v0.18.x for step 7","to":"active"},{"at":1794969706,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — READY — v0181-3: v0.18.1 (PR 132 72d78b5, PR 133 7c93da4; dry run green)","to":"ready"},{"at":1794969758,"by":"planner-a","from":"ready","to":"done"}]}`
 
 ```text
 v0.18.1: READY
 
 PLAN.md: 2026-11-17 PLANNER-A DISPATCH v0.18.1 INSPECT-COORD and task refs
+```
+
+## 01M7PEZDGXHG6Y806A4CDJGJTV
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["AGENTS.md","PLAN.md","reviewer_notes.md","decision.run-2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-0","_mnemo.status":"done","_mnemo.status_history":[{"at":1794976530,"by":"worker-a","from":"queued","to":"active"},{"at":1794976559,"by":"worker-a","from":"active","note":"report.v0190-0","to":"ready"},{"at":1794976575,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: d3f828a is AGENTS.md alone, 72ae920 is PLAN.md and reviewer_notes.md alone, origin/release-0.19.0 at 72ae920 on main 9fb1191. Tally: partial (decision.run-2 missed the top 5 for the task's title).","to":"done"}]}`
+
+```text
+v0.19.0 setup: the release branch, the Run 2 rules commit, and the archives frozen
+
+Run 2 starts here (decision.run-2; AGENTS.md subsection 'The brain is the ledger'). First step: recall, and say what came back in your report.
+1. Branch release-0.19.0 from main (9fb1191).
+2. Commit AGENTS.md alone (the Planner's protocol text, the user's yes 2026-11-17): 'docs(agents): the brain is the ledger (HARNESS-DOGFOOD-1 Run 2)'.
+3. Commit PLAN.md and reviewer_notes.md by path, as they stand, as the last coordination commit: 'chore(plan): freeze the coordination files as archives (Run 2)'. Both now carry an archive head note. After this nobody edits them.
+4. Push the branch. No PR is needed for these two commits on the release branch's start, as with v0.18.1's first commit.
+Report: report.v0190-0 (hashes), then task update v0190-0 --status ready --note report.v0190-0, then the pointer DONE: v0190-0.
+```
+
+## 01M7PEZDK4GDA0XXXQGP8NYYCY
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-0"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.perf-2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1794976589,"by":"worker-a","from":"queued","to":"active"},{"at":1794977998,"by":"worker-a","from":"active","note":"report.v0190-1","to":"ready"},{"at":1794978033,"by":"planner-a","from":"ready","note":"REVIEWED by planner-a: design accepted with the order and scope in decision.perf-2-design (merge PR 135 first; stage A before lazy partitions; 3f deferred; no parallel warm scan). Tally: found.","to":"done"}]}`
+
+```text
+PERF-2 step 1: baseline on v0.18.1 and the design note
+
+Read spec.perf-2 (mnemo history --key spec.perf-2, or recall). First step: recall, and say what came back.
+Do step 1 only: the baseline numbers on v0.18.1 (each from a command you ran) and docs/design/perf-2.md, on a branch from release-0.19.0 with a PR into it. No engine change. Report in report.v0190-1 with the numbers table and the note's choices; ready for the Planner's review. The build (v0190-2) waits for my done here.
+```
+
+## 01M7PEZDN4DHAEEEPFDGV1NKJS
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.perf-2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1794978053,"by":"worker-a","from":"queued","to":"active"},{"at":1794981945,"by":"worker-a","from":"active","note":"built; local gates running, then the final measurements","to":"active"},{"at":1794987107,"by":"worker-a","from":"active","note":"final numbers measured; re-checking after the RunReader fix","to":"active"},{"at":1794989040,"by":"worker-a","from":"active","note":"report.v0190-2","to":"ready"},{"at":1794989083,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR 136 merged as 8a63540 into release-0.19.0, PR checks 26 of 26; perf_v0.19.0.json matches report.v0190-2. First recall 100K 11.5 ms (target 15) and 10K 4.2 ms (target 5) met; open and RSS held or better; ranking and recall@10 unchanged; compat with published 0.18.1 tested in CI. Warm 10K 2.3 ms against a 2 ms target: accepted as not met, reported honestly (decision.perf-2-design point 5); no further work this release. The root README's old first-search numbers and the site roadmap line go in v0190-5. Tally: found.","to":"done"}]}`
+
+```text
+PERF-2 step 2: the build
+
+Build the design accepted in v0190-1 (my done note there may add changes). Spec: spec.perf-2, step 2. First step: recall. A PR into release-0.19.0; measured numbers in test/scripts/perf_v0.19.0.json and in report.v0190-2 against every target and every must-not-regress line.
+```
+
+## 01M7PEZDQ69H4Y7P7QPC3DF659
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-0"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["decision.non-exhaustive-0.19"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-3","_mnemo.status":"done","_mnemo.status_history":[{"at":1794989113,"by":"worker-a","from":"queued","to":"active"},{"at":1794991374,"by":"worker-a","from":"active","note":"report.v0190-3","to":"ready"},{"at":1794991400,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR 137 merged as b97e689 into release-0.19.0, PR checks 20 of 20; all 13 types carry #[non_exhaustive] on the branch. The correction is right: E0639 refuses ..Default::default() outside the crate, so TaskSpec::new and FindingSpec::new plus Default are the way in; accepted. Branch CI for 8a63540 is green; b97e689's runs were still going and get checked at READY. Tally: found.","to":"done"}]}`
+
+```text
+13a and findings public types become non_exhaustive
+
+First step: recall (decision.non-exhaustive-0.19). Mark #[non_exhaustive] the public structs in mnemo/src/store/coordination.rs and findings.rs that callers build or match: TaskSpec, Task, TaskTaken, TaskClaim, NewWork, Message, Claim, Presence, Stale, KindCounts, FindingSpec, Finding, FindingFilter (say in the report if one shouldn't be, and why). Where a struct literal was the only way to build one outside the crate, give it Default and/or a constructor so ..Default::default() or new() works. Update the CLI, MCP, Python and any uniffi callers; doc tests compile. CHANGELOG Changed: what struct-literal and exhaustive-match code needs. A PR into release-0.19.0. Report: report.v0190-3.
+```
+
+## 01M7PEZDS5V5NTEE4S8ZZMEEBE
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-0"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.inspect-date-filter","decision.positioning"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-4","_mnemo.status":"done","_mnemo.status_history":[{"at":1794991408,"by":"worker-a","from":"queued","to":"active"},{"at":1794993004,"by":"worker-a","from":"active","note":"report.v0190-4","to":"ready"},{"at":1794993078,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR 138 merged as dabb5fc into release-0.19.0, PR checks 20 of 20. Screenshot viewed: synthetic DEMO ids, role names only, header shows only demo.mnemo, 101,720 bytes, 1200x540. The local branch slip touched only the Worker's own unpushed commit; noted, no harm. v0190-5 opens: README.md and index.html are edited in the working tree (the screenshot in both; the first-search row and known-limitation numbers from v0.19.0; the site's two first-search roadmap lines removed and the shipped list now v0.13 to v0.19). Commit those two paths alone as the task says. Tally: found.","to":"done"}]}`
+
+```text
+inspect: a date range filter, and a Findings screenshot from a demo brain
+
+First step: recall. (1) The date filter: spec.inspect-date-filter. (2) A screenshot of the Findings tab for the README and the site, taken from a demo brain built by a small script (synthetic findings and tasks, ids like DEMO-1.1; nothing from the project brain, no real names or paths), light theme, PNG under 300 KB, at docs/img/inspect-findings.png; commit the script beside the fixture tooling so it can be retaken. A PR into release-0.19.0. Report: report.v0190-4. After my review I add the image to README.md and index.html and fix the roadmap's duplicate line; that hand-off is v0190-5.
+```
+
+## 01M7PEZDV55PPXYJX38F174YP8
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-5","_mnemo.status":"done","_mnemo.status_history":[{"at":1794993088,"by":"worker-a","from":"queued","to":"active"},{"at":1794993110,"by":"worker-a","from":"active","note":"report.v0190-5","to":"ready"},{"at":1794993122,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: 3ba2f7b on origin/release-0.19.0, README.md and index.html alone, matching the working-tree edits; tree clean. Tally: partial (as reported).","to":"done"}]}`
+
+```text
+Hand-off: README.md and index.html (the inspector screenshot, the roadmap's duplicate line)
+
+The Planner's edits to README.md and index.html are in the working tree when v0190-4 is done (this task opens then). Commit those two paths alone on release-0.19.0: 'docs(site): the inspector screenshot; one roadmap line'. Report: report.v0190-5.
+```
+
+## 01M7PEZDX45SF50M212BHMN43P
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T04:34:55Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-2","v0190-3","v0190-4","v0190-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-6","_mnemo.status":"active","_mnemo.status_history":[{"at":1794993138,"by":"worker-a","from":"queued","to":"active"}]}`
+
+```text
+v0.19.0 READY: the bump, the CHANGELOG, the backup, the dry run
+
+First step: recall. As RELEASING.md: the bump (mobile by its rule: v0190-3 may change a public type the bindings use), the CHANGELOG's [0.19.0], docs/brain.md exported by the installed release (step 7), the dry run. No chore(plan) commit: the archives are frozen. Report: report.v0190-6, then ready. REVIEWER-B's READY pass follows (I call it).
+```
+
+## 01M7PEZYWFKE4Y6NHMM8XZSN57
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.positioning"],"_mnemo.section":"decisions","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+
+```text
+Positioning: MNemo doesn't compete with vector databases; it competes with CLAUDE.md and a notes folder. Explained in three layers. Say coordinate, never orchestration. Free if it runs on one machine.
+```
+
+## 01M7PEZYYBAR4N4936PS8EW9PQ
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","decision.security-finding-private-until-verified"],"_mnemo.section":"decisions","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+
+```text
+Every task starts with a recall; its report says found, partial, not stored or not found. Unfixed SECURITY findings are private records, named by id only anywhere else.
+```
+
+## 01M7PEZYPDHB7CVQMFQJ01P16S
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+
+```text
+v0.18.1 released 2026-11-17 (inspector Findings and Tasks tabs, task refs). Site reworked: three layers, mnemo inspect as a key command. Run 2 (HARNESS-DOGFOOD-1) has started: the brain is the ledger; PLAN.md and reviewer_notes.md are frozen archives.
+```
+
+## 01M7PEZZ06ZB9C0VRTDF2P6PE5
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.section":"open","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976513,"status":"open"}]}`
+
+```text
+Carried: the shared_lock and EmbedQueueTests timing flakes (logged, change only if they recur); KEYCHAIN-REPROMPT; WAKE-SOCKET; PY-SDIST; RB-006.12 (daemon design, SECURITY.local.md); the Planner's sync design note.
+```
+
+## 01M7PEZYRGDWXEZWMFNTQQY338
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+
+```text
+v0.19.0, Run 2's release: tasks v0190-0 to v0190-6 (setup; PERF-2 design then build; non_exhaustive types; inspect date filter and screenshot; site hand-off; READY). REVIEWER-B's pass at READY.
+```
+
+## 01M7PEZYTHY4K8FJG46J6CTCVF
+
+- type: semantic
+- agent: `default`
+- scope: private
+- created: 2026-11-18T04:35:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["status.roadmap"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+
+```text
+After v0.19.0: judge Run 2 (passes if dispatch to tag needed no hand-edited PLAN.md or reviewer_notes.md); then sync, decided on the waitlist's numbers and the Planner's sync design note.
 ```
 
 ## 01KSGPG9WA2CP74CWHH44SRE4D

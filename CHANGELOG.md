@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-18
+
+A faster first search after opening (PERF-2): 11.5 ms at 100K memories,
+from 116 to 118 ms, and 4.2 ms at 10K, from 9.2 to 10.4 ms, with the ANN
+index stored in a new layout behind the existing layout byte. There's no
+format bump. The inspector gets a date range, and the coordination and
+findings types become `#[non_exhaustive]`. The mobile packages publish at
+0.19.0, as every minor version does: their bindings are unchanged since
+0.18.0, over this release's engine.
+
 ### Added
 
 - **A date range in `mnemo inspect`** (the user's request): From and To
@@ -4829,7 +4839,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/toarchkumar/mnemo/compare/v0.17.1...v0.17.2
