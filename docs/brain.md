@@ -1,8 +1,64 @@
 # mnemo export
 
-Plaintext export of a `.mnemo` file (format v9, 384 dimensions). Keep it as safe as the file's passphrase.
+The brain's backup, written by mnemo 0.18.0 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
 
-Written with `--git`: ordered by key, then id; vectors, thread turns and access stats are left out.
+Keyed memories by key, then tasks, findings and the project essence, then the rest by id. Left out: vectors, thread turns, thread essence, messages, claims, presence, private records, access stats, and security findings until they're verified against a release.
+
+## 01M7NBTNEEDS2DJAJ5G0X4FPXS
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.export-git-order`
+- scope: private
+- created: 2026-11-17T18:20:39Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1794944263,"_mnemo.key":"architecture.export-git-order","_mnemo.superseded_by":"01M7NG7S71127YMD0F0AB48RH8","area":"architecture","topic":"export"}`
+
+```text
+mnemo export --git order (v0.18.0, PR 126 d4f95e7, bin/mnemo/export.rs select): keyed memories by key, then tasks by slug, then findings by Finding::sort_key (RB-9.2 < RB-9.10 < RB-10.1, every status, no age limit), then project essence (open items by section intent, conventions, decisions, state, open, next, lessons, timeline; then resolved), then the rest by id. Left out with --git: messages, claims, presence, saved turns, private records, access stats, tasks done over 30 days ago (done_long_ago), project essence resolved over 30 days ago (resolved_long_ago). Thread essence is NOT left out; it sits in the rest by id.
+```
+
+## 01M7NG7S71127YMD0F0AB48RH8
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.export-git-order`
+- scope: private
+- created: 2026-11-17T19:37:43Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.export-git-order","_mnemo.supersedes":"01M7NBTNEEDS2DJAJ5G0X4FPXS","area":"architecture","topic":"export"}`
+
+```text
+mnemo export --git order (v0.18.0, PRs 126 d4f95e7 and 127 635ae00, bin/mnemo/export.rs select): keyed memories by key, then tasks by slug, then findings by Finding::sort_key (RB-9.2 < RB-9.10 < RB-10.1), then project essence (open items by section intent, conventions, decisions, state, open, next, lessons, timeline; then resolved), then the rest by id. Left out with --git: messages, claims, presence, saved turns, private records, access stats, thread essence (kept_out_of_git), SECURITY findings at any status but verified (an unfixed security finding never reaches the public docs/brain.md), tasks done over 30 days ago, project essence resolved over 30 days ago. The plain export keeps thread essence and every finding.
+```
+
+## 01M7NT5YJQCT9S5JJ2SMR7TV14
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.findings`
+- scope: private
+- created: 2026-11-17T22:31:29Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.findings","area":"architecture","topic":"findings"}`
+
+```text
+Review findings (v0.18.0, store/findings.rs): _mnemo.kind=finding, a coordination record (sentinel vector, never a recall hit), id ^[A-Z]+-[0-9]+\.[0-9]+$ unique by prefix and numbers (RB-0900.1 = RB-900.1), batch = id prefix. Transitions in FINDING_TRANSITIONS; finding_triage/finding_verify write status_history. Since round 1 (PR 129, 61bb573): adding needs an author; update/update_text, delete (MCP forget, Python, mobile) and essence_remove refuse a finding's record (a wrong one is rejected); finding JSON carries record_id; a SECURITY finding is stored _mnemo.visibility=private until verified, and verified only against a release tag ^v\d+\.\d+\.\d+$ (then team). The finding tools read through coordination_records, which ignores visibility.
+```
+
+## 01M7P24YERKT0YD8B0D3W0GX8W
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.inspect-coord`
+- scope: private
+- created: 2026-11-18T00:50:44Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.inspect-coord","area":"architecture","topic":"inspector"}`
+
+```text
+mnemo inspect Findings and Tasks tabs (v0.18.1, PRs 130 4c696f0 and 131): /api/findings (status, category, priority filters; counts over all; sorted by Finding::sort_key) and /api/tasks (status filter; the file's catalog order, as task list) built at load from the records already read via Finding::from_memory/Task::from_memory. Never sort coordination records by ULID for display: ids from one millisecond aren't ordered. Page text goes through el() (text nodes only); the page's JS can be syntax-checked with osascript -l JavaScript (no Node on this Mac).
+```
 
 ## 01M7K1HJB5XRYWCRMJ9H63RZQP
 
@@ -60,6 +116,20 @@ ONBOARD-UX (v0.17.1, 2026-11-16, the user's choices): mnemo onboard has two view
 Row flags of a v9 catalog row (since v0.17.0): ROW_SUPERSEDED 1, ROW_HAS_TTL 2, ROW_SHARED 4, ROW_SETTLED 8 (turns only), ROW_PUBLIC 16, ROW_REVIEW 32, ROW_PRIVATE 64 (moved from 8 before the tag, RB-013.3). One bit each, in one block in store/records.rs; row_visible(kind, flags, set) never reads a turn as private.
 ```
 
+## 01M7P24Y2V9FWWM0YTGAM9XN06
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `architecture.task-refs`
+- scope: private
+- created: 2026-11-18T00:50:44Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"architecture.task-refs","area":"architecture","topic":"tasks"}`
+
+```text
+Task refs (v0.18.1, PR 131 98c2a68): TaskSpec.refs/Task.refs stored under _mnemo.refs, written only when non-empty (so re-adding an older task as it was stays unchanged); at most 32, one line, <=200 bytes. CLI task add --ref (repeatable), MCP task refs, Python task_add(refs=). export --git leaves out a task whose refs name an unverified SECURITY finding, matched by prefix and numbers; the CLI computes export::held_findings from every record before the visibility filter (those findings are private) and passes ExportOptions.held to select.
+```
+
 ## 01M7FBQGKHRBEFAA0J1M60XAFN
 
 - type: episodic
@@ -100,6 +170,48 @@ Fixed in v0.16.0 (PR 99, rel0160-rb011): an identical keyed re-write on a v9 fil
 
 ```text
 Found in the v0.16.0 by-hand run, fixed in v0.16.1 (PR 100): transcript turns whose content is only markers ([thinking], [tool_use name=...], [tool_result ok, N bytes], [image]) were embedded and matched any query weakly (sim 0.49-0.50), so 6 of a turn-filtered recall's top 10 were markers. Fix: transcript::is_marker_only; plan_ingest leaves them out of the texts to embed and writes them with the sentinel vector and _mnemo.markers_only: true (kept for thread export and the turn_id dedupe); recall drops any marker-only turn by flag or content, so v0.16.0's saved turns are left out too; Mnemo::ingest_thread_new_turns counts new turns including marker-only ones, used by the hook's batch scan so an all-marker tail is still saved.
+```
+
+## 01M7NG7SM3T9VJZZ66KH3K96D4
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `ci.macos-runner-capacity`
+- scope: private
+- created: 2026-11-17T19:37:43Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"ci.macos-runner-capacity","area":"ci","topic":"flakes"}`
+
+```text
+A CI job shown as failed/cancelled with no steps (often rust (macos-latest) or mobile (aarch64-apple-ios)) is usually GitHub's macOS arm64 runner capacity: the annotation says 'The job was not acquired by Runner of type hosted even after multiple attempts'. Read it with gh api repos/toarchkumar/mnemo/check-runs/<job id>/annotations; re-run with gh run rerun <run> --failed. Seen 3 times on 2026-11-17 (52feb44, d4f95e7, PR 128); none was a code failure.
+```
+
+## 01M7P5H7GGAN1ZAZ7GX2SGY0YN
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `ci.mobile-concurrency-rerun`
+- scope: private
+- created: 2026-11-18T01:49:53Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"ci.mobile-concurrency-rerun","area":"ci","topic":"mobile"}`
+
+```text
+Mobile CI on a release branch uses one concurrency group per ref (mobile-ci-refs/heads/<branch>), which cancels the in-progress run. Re-running an older commit's Mobile CI on the branch (gh run rerun --failed) therefore cancels the head's in-progress run (annotation: 'Canceling since a higher priority waiting request ... exists'). Wait for the head's run to finish before re-running an older one (seen 2026-11-17, v0.18.1: 98c2a68 vs 72d78b5).
+```
+
+## 01M7P5H7W2VWAVYRKZEBTW6R31
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `ci.swift-embed-queue-timing`
+- scope: private
+- created: 2026-11-18T01:49:53Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"ci.swift-embed-queue-timing","area":"ci","topic":"flakes"}`
+
+```text
+Swift timing test EmbedQueueTests.slowEmbedsDontStarveTheAppsOtherTasks (EmbedQueueTests.swift:45, sinceLaunch < 1.2 s) failed once on a hosted macOS runner at 1.449 s (Mobile CI on 98c2a68, 2026-11-17); its re-run passed, and the next run measured 1.999 s for the whole test. Logged, not changed (one failure isn't a reason to loosen a test); the Planner decides if it recurs.
 ```
 
 ## 01M7GMSXQBCWKAQSMZ3CRK81VT
@@ -256,6 +368,20 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 2026-11-14, the user: the built-in embedder is snowflake-arctic-embed-xs, identifier-aware: a recall's plain words get no keyword weight, and tokens shaped like identifiers (backticked, ::, @, =, --flag, a_b, camelCase, name(...), dotted names) become explicit keywords at 0.5; it had to beat the fixed weights on both question sets first, and did (step 5 part 3b).
 ```
 
+## 01M7P5HPX2S3GN91JVZKRAXCZC
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.inspect-coord`
+- scope: private
+- created: 2026-11-18T01:50:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.inspect-coord"}`
+
+```text
+Decision (2026-11-17): INSPECT-COORD gives humans a place to monitor coordination: Findings and Tasks tabs in `mnemo inspect`, served by GET-only /api/findings and /api/tasks; brain text goes into text nodes only; tasks keep `task list` order. Shipped in v0.18.1 (PR 130, 4c696f0).
+```
+
 ## 01M7E4KZV5H9W7P2P55ER7ZS6M
 
 - type: episodic
@@ -268,6 +394,20 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 
 ```text
 2026-11-14, the user: raise the MSRV to 1.94 for everything (not a 1.94 floor for embed-candle alone, nor an older candle), because candle-core 0.11.1 needs it on x86_64 and v0.15 is unreleased, so nobody relied on 1.92. PLANNER-A, same day: the aarch64 manylinux wheel builds ring with CFLAGS_aarch64_unknown_linux_gnu=-D__ARM_ARCH=8 for that target only (keeping manylinux2014), checked by installing the wheel on an ubuntu-24.04-arm runner.
+```
+
+## 01M7P5HQ1TMWZZSETSGX80GYY1
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.non-exhaustive-0.19`
+- scope: private
+- created: 2026-11-18T01:50:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.non-exhaustive-0.19"}`
+
+```text
+Decision (2026-11-17): v0.18.1 adds public field `refs` to TaskSpec and Task (not #[non_exhaustive]), kept in a patch release with a CHANGELOG line saying what struct-literal code needs. v0.19.0 marks the 13a public types #[non_exhaustive]: TaskSpec, Task, FindingSpec, Finding, NewWork, and the message and claim specs.
 ```
 
 ## 01M7ESFPSXH9D02BM8WQB704J1
@@ -340,6 +480,48 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 2026-11-15, PLANNER-A (RB-010.3): the release workflow runs every published artifact before the approval: check-artifacts on all five targets, each on a runner of its own (x86_64 Linux ubuntu-latest, aarch64 Linux ubuntu-24.04-arm, arm64 macOS macos-latest, x86_64 macOS macos-15-intel, Windows windows-latest under bash), the CLI and the wheel each installing the model and remembering and recalling; and check-sdist builds and imports the sdist. approve-release needs both.
 ```
 
+## 01M7NBTNV3TADMZFBVMWE832A9
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.release-main-merge`
+- scope: private
+- created: 2026-11-17T18:20:39Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"decision.release-main-merge","area":"decision","topic":"release"}`
+
+```text
+Release rule (PLANNER-A decision 2026-11-17, in RELEASING.md since v0180-2): any change to main during a release is merged back into the release branch before the next task, by a PR with main as head and the release branch as base, merged with gh pr merge --merge (a merge commit, never a squash, so main stays an ancestor and the tag-time fast-forward of main works). Check: git merge-base --is-ancestor origin/main origin/release-X. First use: PR 125, 9f3ab28, for v0.18.0.
+```
+
+## 01M7NHYHJ72W9YCKSBASD0PW0P
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-after-0.18`
+- scope: private
+- created: 2026-11-17T20:07:37Z
+- importance: 0.75
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-after-0.18"}`
+
+```text
+Roadmap after v0.18.0 (user decision 2026-11-17): HARNESS-DOGFOOD-1 Run 2, then PERF-2 (partition-major index loading and a lazy vector-column fill; first recall at 100K toward <= 15 ms, at 10K toward <= 5 ms, no format bump). Sync (Pro, then Teams) waits: it is decided later on the waitlist's numbers, since the waitlist had 1 sign-up and was not visible until the site's top bar (2bf9b74).
+```
+
+## 01M7P5HQ05970SDH96H09KHQTQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.security-finding-private-until-verified`
+- scope: private
+- created: 2026-11-18T01:50:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.security-finding-private-until-verified"}`
+
+```text
+Decision (2026-11-17): a SECURITY finding record is written private until verified, and is verified only against a release tag ^v\d+\.\d+\.\d+$, which makes it team. export --git leaves out unverified SECURITY findings and (since v0.18.1) any task whose _mnemo.refs names one. Anything outside SECURITY.local.md that refers to an unfixed finding names it by id only (user decision, AGENTS.md f77040b).
+```
+
 ## 01M7GJSTNC1NBJJHEM466WW8VF
 
 - type: episodic
@@ -380,6 +562,20 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 
 ```text
 2026-11-14, the user: add a 'replaces' option to the engine in v0.15, as its own small PR (step 5b) before the built-in embedder, so a keyed write can supersede a named memory that was written without a key; the five stale facts from step 5 part 3 are then re-written under keys, superseding them.
+```
+
+## 01M7P5HPTPB6FSFQGZBRZPKB17
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.waiting-pointer`
+- scope: private
+- created: 2026-11-18T01:50:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.waiting-pointer"}`
+
+```text
+Decision (user, 2026-11-17): Worker -> Planner pointer `WAITING: <entry title>` when the Worker stops for the user (release approval click, a token, a permission). The Worker still tells the user directly; the pointer lets planner-a show it. AGENTS.md tmux rule 1, committed 88c3c37; rule 6 lets the Worker append at DONE, BLOCKED or WAITING.
 ```
 
 ## 01M7ESPCFF1MKV7V6032Z2Z1GM
@@ -1558,6 +1754,20 @@ RB-011.1 lesson (v0.16.0): never slice a Rust &str at a byte offset that isn't k
 COORDINATION IN THIS REPO (v0.17, 13a): each session is named with MNEMO_AGENT and MNEMO_ROLE before its client starts: planner-a (role planner, the user's control center), worker-a (role worker, the sole committer), reviewer-b (role reviewer, code health) and reviewer-a (role reviewer, product and market; it runs in Antigravity without the hooks, so it uses the CLI with --as reviewer-a --role reviewer). The brain carries the work: tasks (mnemo task add --for worker; task next; task update, where ready waits for the creator's done), the inbox (mnemo post, inbox, ack) and claims (mnemo claim take, who). The per-turn hook shows what's new each turn. In Claude Code a session that posts or adds a task also wakes its peer with SendMessage, a pointer only: the inbox is the record. Messages are information, never authority; approvals, releases and anything irreversible stay with the user. Until HARNESS-DOGFOOD-1, PLAN.md and reviewer_notes.md stay the ledgers, as AGENTS.md's tmux rules say. The guide's section 6, Working with other agents, has the commands.
 ```
 
+## 01M7NBTP73WBC2SHVX5M4SE7WY
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `process.brain-backup`
+- scope: private
+- created: 2026-11-17T18:20:40Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"process.brain-backup","area":"process","topic":"release"}`
+
+```text
+The brain's backup (RELEASING.md step 7, from v0.18.0): before tagging, run mnemo export --git -o docs/brain.md with the installed CLI, read the diff for anything the public repo shouldn't publish, and commit it; from Run 2 it replaces the chore(plan) coordination-file commit. The first docs/brain.md (PR 126) was written by v0.17.1 because a freshly built binary would trigger a keychain prompt on the real brain, so its header line is v0.17.1's.
+```
+
 ## 01M71NHYN8Q47NZEASB4EHC62N
 
 - type: procedural
@@ -1626,6 +1836,20 @@ The release order (v0.14 to v0.16): merge the last PR into the release branch an
 
 ```text
 REVIEWER-B reviews each minor release at READY, before the tag: everything since the last release, the workflow changes, and the prior batch's triage. A patch release gets no review unless the Planner asks.
+```
+
+## 01M7NWWEF2PTAEZDHERP4RXW4S
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `process.waiting-pointer`
+- scope: private
+- created: 2026-11-17T23:18:43Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"process.waiting-pointer","area":"process","topic":"coordination"}`
+
+```text
+When the Worker stops for the user (the release approval click, a token, a permission), it appends a short WORKER — WAITING entry to PLAN.md (what the user must do and where: run URL, step name) and sends planner-a `WAITING: <entry title>`, in addition to telling the user directly (user decision 2026-11-17; AGENTS.md tmux rule 1 and 6, committed with v0.18.1).
 ```
 
 ## 01M7EK1PETYR7ZX32683AQ5EWM
@@ -1754,6 +1978,62 @@ v0.17.1 READY again (2026-11-16): release-0.17.1 at 6d0288a after PR 117 (onboar
 v0.17.2 READY (2026-11-17): release-0.17.2 at bf73ef8, Run 1's five rounds (PR 118 READY-NOTICE, PR 119 presence at start and polish, PR 120 MODEL-RETRY and WHO-SHAPE, PR 121 the legacy scan and the claim race, PR 122 the bump) after the rule 9 handoff e8dbdd4. The dry run 44081832937 (mobile off) succeeded: 23 jobs, 9 skipped; version check read 0.17.2; CI and Mobile CI passed on bf73ef8.
 ```
 
+## 01M7P5HQ3XCY792ZH38JFEER8G
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.roadmap`
+- scope: private
+- created: 2026-11-18T01:50:09Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap"}`
+
+```text
+Roadmap status (2026-11-17): v0.18.1 (INSPECT-COORD, task refs) in release prep; bump PR 132 72d78b5 merged, dry run 44213067706 green; waiting on the user's install of v0.18.0 for the docs/brain.md backup step. Then: HARNESS-DOGFOOD-1 Run 2 with PERF-2 as its work in v0.19.0 (with #[non_exhaustive]); sync is decided later on the waitlist's numbers.
+```
+
+## 01M7NG7T0DCNRRBV7QV97TQ196
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0.18.0`
+- scope: private
+- created: 2026-11-17T19:37:44Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1794957523,"_mnemo.key":"status.v0.18.0","_mnemo.superseded_by":"01M7NWWE3769P0GBDKHPN857QM","area":"release","topic":"v0.18.0"}`
+
+```text
+v0.18.0 READY (2026-11-17): release-0.18.0 at 430a21a after PR 125 (main merged, 9f3ab28), 123 (findings), 126 (export --git backup, docs/brain.md), 127 (thread essence and unverified SECURITY findings out of --git), 128 (bump, mobile true). Dry run 44156579200 succeeded with mobile on; Central deployment validated and dropped. Left: Planner HANDOFF of README/index.html, the backup/coordination commit, main fast-forward, tag, the user's approval click.
+```
+
+## 01M7NWWE3769P0GBDKHPN857QM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0.18.0`
+- scope: private
+- created: 2026-11-17T23:18:43Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"status.v0.18.0","_mnemo.supersedes":"01M7NG7T0DCNRRBV7QV97TQ196","area":"release","topic":"v0.18.0"}`
+
+```text
+v0.18.0 released 2026-11-17: tag v0.18.0 at 9cd5daf, release run 44191123230 (31 jobs, mobile on, user approved). crates.io, PyPI (5 wheels + sdist), mnemo-swift tag 0.18.0 (ed32685), Maven Central (repo1 live ~12 min after the job), GitHub Release with 14 assets; site shows v0.18.0. PRs: 123 findings, 125 main merge, 126 export --git backup, 127 thread essence and unverified SECURITY out of --git, 128 bump, 129 review round 1 (RB-014). release-0.18.0 deleted. Next: v0.18.1 (INSPECT-COORD, task refs), whose branch starts with the AGENTS.md WAITING-pointer handoff commit.
+```
+
+## 01M7NT5YYT1X243FM6KGJ4RZQ5
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `testing.v0-17-compat`
+- scope: private
+- created: 2026-11-17T22:31:29Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"testing.v0-17-compat","area":"testing","topic":"compat"}`
+
+```text
+Mixed-version tests against a published CLI: tests/v0_16_compat.rs (MNEMO_V0_16_1_BIN) and tests/v0_17_compat.rs (MNEMO_V0_17_2_BIN, since v0.18.0 PR 129) skip unless the env var names the old binary; CI's compat (v0.16.1|v0.17.2, linux) jobs cargo install the exact version into $RUNNER_TEMP. Locally, v0_17_compat runs against the installed ~/.local/bin/mnemo (any 0.17.x) on a temp file with a test passphrase, never the keychain.
+```
+
 ## 01M7N18T0CYF8DA9TSYEZJDC1E
 
 - type: episodic
@@ -1866,7 +2146,7 @@ PLAN.md: 2026-11-17 — PLANNER-A — DECISION + HANDOFF + DISPATCH — v0.18.0 
 - scope: shared
 - created: 2026-11-17T15:03:58Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0180-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.slug":"v0180-2","_mnemo.status":"active","_mnemo.status_history":[{"at":1794933210,"by":"worker-a","from":"queued","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0180-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.slug":"v0180-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1794933210,"by":"worker-a","from":"queued","to":"active"},{"at":1794939593,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — DONE — v0180-2: the brain's backup (PR 126, d4f95e7)","to":"ready"},{"at":1794939692,"by":"planner-a","from":"ready","to":"done"}]}`
 
 ```text
 v0.18.0: the backup (export --git with findings and essence, docs/brain.md)
@@ -1881,12 +2161,72 @@ PLAN.md: same entry, v0180-2
 - scope: shared
 - created: 2026-11-17T15:03:58Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0180-1","v0180-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.slug":"v0180-3","_mnemo.status":"queued"}`
+- metadata: `{"_mnemo.after":["v0180-1","v0180-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0180-3","_mnemo.status":"done","_mnemo.status_history":[{"at":1794939706,"by":"worker-a","from":"queued","to":"active"},{"at":1794944250,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — READY — v0180-3: v0.18.0 (PR 127 635ae00, PR 128 430a21a; dry run green)","to":"ready"},{"at":1794949925,"by":"planner-a","from":"ready","to":"done"}]}`
 
 ```text
 v0.18.0: READY
 
 PLAN.md: same entry, v0180-3
+```
+
+## 01M7NJ5W10EP0A9NW05Q77FHJW
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-17T20:11:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0180-4","_mnemo.status":"done","_mnemo.status_history":[{"at":1794946320,"by":"worker-a","from":"queued","to":"active"},{"at":1794947140,"by":"worker-a","from":"active","note":"local gates running","to":"active"},{"at":1794949948,"by":"worker-a","from":"active","note":"PR 129 CI running","to":"active"},{"at":1794953712,"by":"worker-a","from":"active","note":"dry run re-run (runner capacity)","to":"active"},{"at":1794954677,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — READY — v0180-4: v0.18.0 review round 1 (RB-014) (PR 129 61bb573; dry run green)","to":"ready"},{"at":1794954728,"by":"planner-a","from":"ready","to":"done"}]}`
+
+```text
+v0.18.0: review round 1 (RB-014)
+
+PLAN.md: 2026-11-17 PLANNER-A REVIEW + DISPATCH + NEEDS-USER, RB-014 triaged; the spec is the two items' Planner Triage lines.
+```
+
+## 01M7NWZHCK2BSWFPDYFWAH2VWR
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-17T23:20:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0181-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1794957636,"by":"worker-a","from":"queued","to":"active"},{"at":1794959091,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — DONE — v0181-1: INSPECT-COORD, findings and tasks in the inspector (PR 130, 4c696f0)","to":"ready"},{"at":1794959116,"by":"planner-a","from":"ready","to":"done"}]}`
+
+```text
+v0.18.1: findings and tasks in the inspector
+
+PLAN.md: 2026-11-17 PLANNER-A DISPATCH v0.18.1 INSPECT-COORD and task refs
+```
+
+## 01M7NWZHECPHPK6PKA90DDYKPN
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-17T23:20:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0181-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1794959095,"by":"worker-a","from":"queued","to":"active"},{"at":1794959497,"by":"worker-a","from":"active","note":"local gates running","to":"active"},{"at":1794962274,"by":"worker-a","from":"active","note":"PR 131 CI","to":"active"},{"at":1794963022,"by":"worker-a","from":"active","note":"PLAN.md: WORKER — DONE — v0181-2: task refs (PR 131, 98c2a68)","to":"ready"},{"at":1794963069,"by":"planner-a","from":"ready","to":"done"}]}`
+
+```text
+v0.18.1: task refs
+
+PLAN.md: 2026-11-17 PLANNER-A DISPATCH v0.18.1 INSPECT-COORD and task refs
+```
+
+## 01M7NWZHG61Y6ZKKD8TR318FW9
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-17T23:20:24Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0181-1","v0181-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0181-3","_mnemo.status":"active","_mnemo.status_history":[{"at":1794963080,"by":"worker-a","from":"queued","to":"active"},{"at":1794966582,"by":"worker-a","from":"active","note":"WAITING: the user's install of v0.18.x for step 7","to":"active"}]}`
+
+```text
+v0.18.1: READY
+
+PLAN.md: 2026-11-17 PLANNER-A DISPATCH v0.18.1 INSPECT-COORD and task refs
 ```
 
 ## 01KSGPG9WA2CP74CWHH44SRE4D
