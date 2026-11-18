@@ -61,15 +61,22 @@ pub(crate) mod failpoints {
         if page == u64::MAX || page < first || page >= first + n {
             return Ok(());
         }
-        let took = READ_FAILS_LEFT.fetch_update(SeqCst, SeqCst, |left| left.checked_sub(1));
-        match took {
-            Ok(1) => {
-                READ_FAIL_PAGE.store(u64::MAX, SeqCst);
-                Err(std::io::Error::other("injected read failure"))
+        // A compare-exchange loop: `fetch_update` is deprecated on newer
+        // toolchains and its rename `try_update` is newer than the MSRV.
+        let mut left = READ_FAILS_LEFT.load(SeqCst);
+        loop {
+            if left == 0 {
+                return Ok(());
             }
-            Ok(_) => Err(std::io::Error::other("injected read failure")),
-            Err(_) => Ok(()),
+            match READ_FAILS_LEFT.compare_exchange(left, left - 1, SeqCst, SeqCst) {
+                Ok(_) => break,
+                Err(now) => left = now,
+            }
         }
+        if left == 1 {
+            READ_FAIL_PAGE.store(u64::MAX, SeqCst);
+        }
+        Err(std::io::Error::other("injected read failure"))
     }
 
     /// Fail exactly the writes numbered in `ns`, counting from 0 at this
