@@ -141,7 +141,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.18.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.18.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -162,6 +162,21 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.18.1: watch your agents' work in the browser
+
+- **`mnemo inspect` shows review findings and tasks,** each in its own
+  tab: findings by id with their status, triage and verification, and
+  tasks with their owner, what they wait for and their history. Filter
+  either by status. The inspector still only reads the file.
+- **Tasks have refs:** what a task is about, such as a finding's id, a
+  file or a PR (`mnemo task add --ref RB-014.1`, the MCP `task` tool,
+  Python's `task_add(refs=...)`).
+- **The backup leaves out a task that refs a security finding** until
+  that finding is verified, as it already does for the finding.
+- **Rust:** `TaskSpec` and `Task` have a new field, `refs`. Code that
+  uses `..Default::default()` is unaffected.
+- The iOS and Android packages stay at 0.18.0.
 
 ## What's new in v0.18.0: review findings in the brain, and a backup you can commit
 
