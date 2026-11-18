@@ -851,8 +851,10 @@ fn handle(
             }
         } else {
             match route(&st.loaded, &req) {
-                Some(v) => ("200 OK", v),
-                None => ("404 Not Found", json!({ "error": "not found" })),
+                Ok(Some(v)) => ("200 OK", v),
+                Ok(None) => ("404 Not Found", json!({ "error": "not found" })),
+                // v0.19.0: a malformed parameter (a date) is the caller's.
+                Err(e) => ("400 Bad Request", json!({ "error": e })),
             }
         }
     };
@@ -865,7 +867,40 @@ fn about(l: &Loaded) -> Value {
     a
 }
 
-fn route(l: &Loaded, req: &Request) -> Option<Value> {
+/// v0.19.0: the date range a request asks for: `since` and `until`, each a
+/// number of unix seconds, inclusive, either left out for open-ended. The
+/// page turns the viewer's local From and To dates into these.
+fn date_range(req: &Request) -> Result<(Option<i64>, Option<i64>), String> {
+    let get = |k: &str| -> Result<Option<i64>, String> {
+        match req.query.get(k).map(String::as_str) {
+            None | Some("") => Ok(None),
+            Some(v) => v
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| format!("{k}: {v:?} isn't a time in unix seconds")),
+        }
+    };
+    Ok((get("since")?, get("until")?))
+}
+
+/// Whether `t` (unix seconds, or JSON null) is in the range.
+fn in_range(t: &Value, (since, until): (Option<i64>, Option<i64>)) -> bool {
+    let Some(t) = t.as_i64() else {
+        return since.is_none() && until.is_none();
+    };
+    since.is_none_or(|s| t >= s) && until.is_none_or(|u| t <= u)
+}
+
+fn route(l: &Loaded, req: &Request) -> Result<Option<Value>, String> {
+    let range = date_range(req)?;
+    match req.query.get("date").map(String::as_str) {
+        None | Some("") | Some("created") | Some("updated") => {}
+        Some(v) => return Err(format!("date: {v:?} isn't created or updated")),
+    }
+    Ok(route_in(l, req, range))
+}
+
+fn route_in(l: &Loaded, req: &Request, range: (Option<i64>, Option<i64>)) -> Option<Value> {
     let q = |k: &str| {
         req.query
             .get(k)
@@ -886,9 +921,10 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
             };
             let types: Option<Vec<&str>> = q("type").map(|t| t.split(',').collect());
             let keep = |m: &Value| {
-                types
-                    .as_ref()
-                    .is_none_or(|ts| ts.contains(&m["type"].as_str().unwrap_or("")))
+                in_range(&m["created_at"], range)
+                    && types
+                        .as_ref()
+                        .is_none_or(|ts| ts.contains(&m["type"].as_str().unwrap_or("")))
                     && q("agent").is_none_or(|a| m["agent"] == a)
                     && q("thread").is_none_or(|t| m["thread"] == t)
                     && match q("keyed") {
@@ -980,8 +1016,15 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
         // v0.18.1 (INSPECT-COORD): the counts are over every finding (or
         // task); the list is the filtered one.
         "/api/findings" => {
-            let list: Vec<Value> = l
+            // v0.19.0: the date range narrows the counts and the total too;
+            // the other filters narrow only the list.
+            let dated: Vec<Value> = l
                 .findings
+                .iter()
+                .filter(|f| in_range(&f["created_at"], range))
+                .cloned()
+                .collect();
+            let list: Vec<Value> = dated
                 .iter()
                 .filter(|f| {
                     ["status", "category", "priority"]
@@ -991,8 +1034,8 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
                 .cloned()
                 .collect();
             Some(json!({
-                "total": l.findings.len(),
-                "counts": status_counts(&l.findings, &FINDING_STATUS_ORDER),
+                "total": dated.len(),
+                "counts": status_counts(&dated, &FINDING_STATUS_ORDER),
                 "findings": list,
                 // The filters' choices, from the engine's own lists.
                 "statuses": FINDING_STATUS_ORDER,
@@ -1001,15 +1044,27 @@ fn route(l: &Loaded, req: &Request) -> Option<Value> {
             }))
         }
         "/api/tasks" => {
-            let list: Vec<Value> = l
+            // v0.19.0: by when a task was added (`date=created`, the
+            // default) or last changed (`date=updated`).
+            let field = if q("date") == Some("updated") {
+                "updated_at"
+            } else {
+                "created_at"
+            };
+            let dated: Vec<Value> = l
                 .tasks
+                .iter()
+                .filter(|t| in_range(&t[field], range))
+                .cloned()
+                .collect();
+            let list: Vec<Value> = dated
                 .iter()
                 .filter(|t| q("status").is_none_or(|want| t["status"] == want))
                 .cloned()
                 .collect();
             Some(json!({
-                "total": l.tasks.len(),
-                "counts": status_counts(&l.tasks, &TASK_STATUS_ORDER),
+                "total": dated.len(),
+                "counts": status_counts(&dated, &TASK_STATUS_ORDER),
                 "tasks": list,
                 "statuses": TASK_STATUS_ORDER,
             }))

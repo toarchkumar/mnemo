@@ -8,6 +8,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **A date range in `mnemo inspect`** (the user's request): From and To
+  dates, inclusive, in the viewer's local time, on the Memories, Findings
+  and Tasks tabs. Either may be left empty. Memories and findings are
+  filtered by when they were made; tasks by when they were added or last
+  changed (a choice on the tab). It combines with the other filters, and
+  the counts follow it. The server filters (`since` and `until`, in unix
+  seconds, on `/api/memories`, `/api/findings` and `/api/tasks`), and a
+  malformed value is a 400.
+- **A link can open a tab of the inspector** (`#findings`, `#tasks`, …),
+  and the address follows the tab you pick.
+- `docs/img/inspect-findings.png`, the Findings tab on a synthetic demo
+  brain, and `test/scripts/inspect_screenshot.sh`, which retakes it
+  (`examples/inspect_demo_brain.rs` builds the brain).
+
 ### Changed
 
 - **A faster first search after opening** (PERF-2). Measured on an M1
