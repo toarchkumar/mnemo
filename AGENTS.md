@@ -398,6 +398,45 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
      (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
      `recall` before a task, and gets its pointers relayed by the user.
 
+### The brain is the ledger (HARNESS-DOGFOOD-1 Run 2, from v0.19.0; user decision 2026-11-17)
+
+From v0.19.0's dispatch, the project brain carries the work. Where this
+subsection and the rules above differ, this subsection wins.
+
+1. **`PLAN.md` and `reviewer_notes.md` are archives.** Each has a head
+   note pointing at the brain. Nobody edits them again, and they're never
+   deleted. The Worker stops committing them: the backup committed at
+   each release is `docs/brain.md` (`mnemo export --git`, written by the
+   installed release).
+2. **Where things live now:**
+   - **status and order:** the project essence (`state`, `next`,
+     `decisions`), kept by the Planner;
+   - **a dispatch:** a task (`mnemo task add --for worker`), whose body is
+     the spec; a longer spec is a keyed `spec.<slug>` fact that the body
+     names;
+   - **a decision, a verification or a review triage by the Planner:** a
+     keyed `decision.<topic>` or `status.<topic>` fact, or the task's
+     note;
+   - **the Worker's DONE, READY, BLOCKED or WAITING:** a keyed
+     `report.<slug>` fact, named in the task's update (`task update
+     <slug> --status ready|blocked --note "report.<slug>"`);
+   - **review findings:** records (`mnemo finding add|triage|verify`). An
+     unfixed `SECURITY` finding is a `private` record and never appears
+     in a public file; anything else names it by id only.
+     `SECURITY.local.md` keeps RB-006.12 until the daemon ships;
+   - **a hand-off of a Planner-owned file:** a task for the Worker whose
+     body lists the paths and the commit message.
+3. **Pointers name a record, not an entry:** `DONE: <slug>`, `BLOCKED:
+   <slug>`, `WAITING: <slug>`, `READ: <slug or key>`, `REVIEW DONE:
+   <batch id>`, `NEEDS-USER: <key>`. The receiver reads the record in the
+   brain (`task get`, `history --key`, `finding list`) and acts on it,
+   never on the message. Rule 1's other limits still apply.
+4. **Every task starts with a recall,** and its report says what came
+   back: found, partial, not stored, or not found.
+5. **What doesn't change:** roles, the sole committer, rule 4's stops for
+   the user, the hop cap, the Reviewer cadence, and every release step
+   except the `chore(plan)` commit.
+
 ### `Planner` rules
 
 1. **Own sequencing, specs, and repo-level docs:** Maintain `PLAN.md`
