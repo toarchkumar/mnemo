@@ -8,6 +8,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-11-17
+
+A patch so a person can watch the agents' work in the browser: the
+inspector shows the review findings and the tasks. Tasks also get refs,
+and the brain's backup leaves out a task that refs a security finding
+until it's verified. There's no format change. The mobile packages aren't
+published in this release: they stay at 0.18.0, which has the same mobile
+code.
+
 ### Added
 
 - **The inspector shows review findings and tasks** (`mnemo inspect`,
@@ -33,7 +42,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
 ### Changed
 
 - **Rust:** `TaskSpec` and `Task` have a new field, `refs`. Code that
-  builds a `TaskSpec` with `..Default::default()` is unaffected.
+  builds a `TaskSpec` with `..Default::default()` is unaffected; a full
+  struct literal or a pattern on `Task` needs the field.
 
 ## [0.18.0] — 2026-11-17
 
@@ -4746,7 +4756,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/toarchkumar/mnemo/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/toarchkumar/mnemo/compare/v0.17.0...v0.17.1
