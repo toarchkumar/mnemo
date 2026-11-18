@@ -818,6 +818,7 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
             body: evil.into(),
             role: Some("worker".into()),
             slug: Some("first".into()),
+            refs: vec![format!("RB-9.2 {evil}")],
             ..Default::default()
         })
         .unwrap();
@@ -886,13 +887,18 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
     let tasks = t["tasks"].as_array().unwrap();
     assert_eq!(t["total"].as_u64().unwrap() as usize, tasks.len());
     let first = &tasks[0];
-    assert_eq!(first["title"], format!("first {evil}"), "oldest first");
+    assert_eq!(
+        first["title"],
+        format!("first {evil}"),
+        "as `task list` orders them"
+    );
     assert_eq!(first["body"], evil);
     assert_eq!(first["status"], "active");
     assert_eq!(first["owner"], "worker-a");
     assert_eq!(first["role"], "worker");
     assert_eq!(first["creator"], "planner-a");
     assert_eq!(first["history"][0]["to"], "active");
+    assert_eq!(first["refs"][0], format!("RB-9.2 {evil}"));
     let ship = &tasks[1];
     assert_eq!(
         (ship["slug"].as_str(), ship["status"].as_str()),

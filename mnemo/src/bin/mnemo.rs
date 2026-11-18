@@ -1402,6 +1402,11 @@ enum TaskCmd {
         /// Its name (else made from the title).
         #[arg(long)]
         slug: Option<String>,
+        /// What it's about: a finding's id (`RB-014.1`), a file, a PR
+        /// (repeatable). `export --git` leaves out a task that refs a
+        /// SECURITY finding until that finding is verified.
+        #[arg(long = "ref", value_name = "REF")]
+        refs: Vec<String>,
     },
     /// Take the next task for your role (`--role`, else `MNEMO_ROLE`).
     /// Prints its slug, the claim token, the expiry and the title; exits 1
@@ -4134,6 +4139,12 @@ fn run() -> std::result::Result<(), String> {
             };
             let mut all = db.memories().map_err(fmt)?;
             drop(db);
+            // v0.18.1: before the private records leave the list.
+            let held = if git {
+                export::held_findings(&all)
+            } else {
+                Default::default()
+            };
             // 13a (13.5): private records only when asked, never with --git.
             let vis = mnemo_engine::VisibilitySet::parse(&visibility).map_err(fmt)?;
             let vis = if git {
@@ -4171,6 +4182,7 @@ fn run() -> std::result::Result<(), String> {
                 git,
                 types,
                 agent,
+                held,
             };
             let selected = export::select(all, &opts);
             let body = export::render(&selected, &opts, &facts);
@@ -4653,7 +4665,7 @@ fn run() -> std::result::Result<(), String> {
                 serde_json::json!({
                     "slug": t.slug, "title": t.title, "body": t.body, "role": t.role,
                     "status": t.status, "owner": t.owner, "creator": t.creator,
-                    "after": t.after, "pre_approved": t.pre_approved,
+                    "after": t.after, "pre_approved": t.pre_approved, "refs": t.refs,
                     "created_at": t.created_at, "history": t.history,
                 })
             };
@@ -4681,6 +4693,7 @@ fn run() -> std::result::Result<(), String> {
                     after,
                     pre_approved,
                     slug,
+                    refs,
                 } => {
                     let spec = mnemo_engine::TaskSpec {
                         title: title.clone(),
@@ -4689,6 +4702,7 @@ fn run() -> std::result::Result<(), String> {
                         after: after.clone(),
                         pre_approved: *pre_approved,
                         slug: slug.clone(),
+                        refs: refs.clone(),
                     };
                     let (t, o) = db.task_add(&spec).map_err(fmt)?;
                     let o = match o {
@@ -4801,6 +4815,9 @@ fn run() -> std::result::Result<(), String> {
                                 }
                                 if !t.after.is_empty() {
                                     println!("    after: {}", t.after.join(", "));
+                                }
+                                if !t.refs.is_empty() {
+                                    println!("    refs: {}", t.refs.join(", "));
                                 }
                                 for h in &t.history {
                                     println!(

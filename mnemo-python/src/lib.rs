@@ -595,6 +595,7 @@ fn task_dict(py: Python<'_>, t: &mnemo_core::Task) -> PyResult<PyObject> {
     d.set_item("creator", &t.creator)?;
     d.set_item("after", t.after.clone())?;
     d.set_item("pre_approved", t.pre_approved)?;
+    d.set_item("refs", t.refs.clone())?;
     d.set_item("created_at", t.created_at)?;
     let h: Vec<PyObject> = t
         .history
@@ -2521,7 +2522,7 @@ impl Mnemo {
     /// 13a (13.1): queue a task, created by this handle's author. A slug
     /// that exists updates it in place. Returns `{"slug", "status",
     /// "outcome"}` (`added`, `updated` or `unchanged`).
-    #[pyo3(signature = (title, body="", *, role=None, after=None, pre_approved=false, slug=None))]
+    #[pyo3(signature = (title, body="", *, role=None, after=None, pre_approved=false, slug=None, refs=None))]
     #[allow(clippy::too_many_arguments)]
     fn task_add(
         &mut self,
@@ -2532,6 +2533,7 @@ impl Mnemo {
         after: Option<Vec<String>>,
         pre_approved: bool,
         slug: Option<String>,
+        refs: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
         let spec = mnemo_core::TaskSpec {
             title,
@@ -2540,6 +2542,7 @@ impl Mnemo {
             after: after.unwrap_or_default(),
             pre_approved,
             slug,
+            refs: refs.unwrap_or_default(),
         };
         let (t, o) = self.wr(move |db| db.task_add(&spec))?;
         let d = PyDict::new_bound(py);

@@ -1640,3 +1640,45 @@ fn findings_round_trip_through_the_cli() {
         .fails(&main, &["finding", "get", "RB-1.1"])
         .contains("no finding"));
 }
+
+/// v0.18.1: `task add --ref` (repeatable); `task get` shows the refs, and
+/// its JSON and `list`'s carry them.
+#[test]
+fn task_refs_through_the_cli() {
+    let e = Env::new();
+    e.init();
+    let main = e.p("main");
+    assert_eq!(
+        e.ok(
+            &main,
+            &[
+                "task",
+                "add",
+                "Fix RB-014.1",
+                "--slug",
+                "fix-1",
+                "--ref",
+                "RB-014.1",
+                "--ref",
+                "src/a.rs:1",
+                "--as",
+                "planner-a",
+            ],
+        )
+        .trim(),
+        "fix-1\tadded\tqueued"
+    );
+    let g = e.ok(&main, &["task", "get", "fix-1"]);
+    assert!(g.contains("refs: RB-014.1, src/a.rs:1"), "{g}");
+    let v: Value =
+        serde_json::from_str(&e.ok(&main, &["task", "get", "fix-1", "--format", "json"])).unwrap();
+    assert_eq!(v["refs"], serde_json::json!(["RB-014.1", "src/a.rs:1"]));
+    let l: Value =
+        serde_json::from_str(&e.ok(&main, &["task", "list", "--format", "json"])).unwrap();
+    assert_eq!(l[0]["refs"][0], "RB-014.1");
+    let err = e.fails(
+        &main,
+        &["task", "add", "Bad", "--ref", "", "--as", "planner-a"],
+    );
+    assert!(err.contains("refs"), "{err}");
+}

@@ -396,7 +396,9 @@ only against a published release tag (`--ref v0.18.0`), so verified means
 shipped. `mnemo export --git` leaves it out until then, so an unfixed one
 never reaches a backup you commit. Anything else that refers to an
 unverified one (a task, a fact, an essence item, a commit, a PR) names it
-by its id only.
+by its id only. Dispatch a fix as a task with `--ref <id>` (`task add "Fix
+RB-014.1" --ref RB-014.1`): the backup leaves that task out too until the
+finding is verified.
 
 ```json mcp
 {"name": "finding", "arguments": {"op": "list", "status": "open"}}

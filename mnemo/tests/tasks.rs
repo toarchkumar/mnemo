@@ -660,3 +660,62 @@ fn rb012_3_blocked_tasks_cycles_and_a_live_requeue() {
         .to_string();
     assert!(err.contains("wait for itself"), "{err}");
 }
+
+/// v0.18.1: a task's refs round trip, re-adding a task as it was is still a
+/// no-op (with or without refs), changing them is an update, and bad refs
+/// are refused.
+#[test]
+fn a_tasks_refs_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = Mnemo::open(brain(dir.path()), PW).unwrap();
+    as_agent(&mut db, "planner-a");
+    let plain = spec("No refs", None, &[]);
+    let (t, o) = db.task_add(&plain).unwrap();
+    assert_eq!((t.refs.len(), o), (0, WriteOutcome::Added));
+    // No `_mnemo.refs` key at all when there are none, so an older task
+    // re-added as it was stays unchanged.
+    assert!(!db.get(&t.id).unwrap().metadata.contains_key("_mnemo.refs"));
+    assert_eq!(db.task_add(&plain).unwrap().1, WriteOutcome::Unchanged);
+
+    let mut with = spec("Fix RB-014.1", Some("worker"), &[]);
+    with.refs = vec!["RB-014.1".into(), " src/a.rs:1 ".into()];
+    let (t, o) = db.task_add(&with).unwrap();
+    assert_eq!(o, WriteOutcome::Added);
+    assert_eq!(t.refs, ["RB-014.1", "src/a.rs:1"], "trimmed");
+    assert_eq!(db.task(&t.slug).unwrap().unwrap().refs, t.refs);
+    assert_eq!(db.task_add(&with).unwrap().1, WriteOutcome::Unchanged);
+    with.refs.push("PR 131".into());
+    assert_eq!(db.task_add(&with).unwrap().1, WriteOutcome::Updated);
+    assert_eq!(db.task(&t.slug).unwrap().unwrap().refs.len(), 3);
+    with.refs.clear();
+    assert_eq!(db.task_add(&with).unwrap().1, WriteOutcome::Updated);
+    assert!(db.task(&t.slug).unwrap().unwrap().refs.is_empty());
+
+    for bad in [
+        vec!["".to_string()],
+        vec!["two\nlines".into()],
+        vec!["x".repeat(201)],
+        (0..33).map(|i| format!("r{i}")).collect(),
+    ] {
+        let mut s = spec("Bad refs", None, &[]);
+        s.refs = bad;
+        let e = db.task_add(&s).unwrap_err().to_string();
+        assert!(e.contains("refs"), "{e}");
+    }
+    // Survives a reopen.
+    db.close().unwrap();
+    let mut db = Mnemo::open(dir.path().join("t.mnemo"), PW).unwrap();
+    let mut with = spec("Fix RB-014.1", Some("worker"), &[]);
+    with.refs = vec!["RB-014.1".into()];
+    as_agent(&mut db, "planner-a");
+    let (t, o) = db.task_add(&with).unwrap();
+    assert_eq!(
+        o,
+        WriteOutcome::Updated,
+        "its refs were cleared before the reopen"
+    );
+    assert_eq!(
+        db.task(&t.slug).unwrap().map(|t| t.refs),
+        Some(vec!["RB-014.1".to_string()])
+    );
+}

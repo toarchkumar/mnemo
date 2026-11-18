@@ -1523,6 +1523,10 @@ def test_tasks():
             assert [h["to"] for h in g["history"]] == ["active", "active", "ready", "done"], g
             assert [x["slug"] for x in db.tasks(status="done")] == ["step-1"]
             assert db.task_get("nope") is None
+            # v0.18.1: refs.
+            db.task_add("Fix it", slug="fix-it", refs=["RB-014.1", "src/a.rs:1"])
+            assert db.task_get("fix-it")["refs"] == ["RB-014.1", "src/a.rs:1"]
+            assert db.task_get("step-1")["refs"] == []
         finally:
             db.close()
 

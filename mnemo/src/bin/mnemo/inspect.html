@@ -328,6 +328,7 @@ function taskDetail(t) {
     ["Added", `${when(t.created_at)} by ${t.creator || "—"}`],
   ];
   if (t.after.length) rows.push(["After", t.after.join(", ")]);
+  if (t.refs && t.refs.length) rows.push(["Refs", el("div", {}, t.refs.map(r => el("div", { class: "mono" }, r)))]);
   return el("div", { class: "card" },
     el("div", { class: "meta" }, el("span", { class: "tag mono" }, t.slug), el("span", { class: "mono" }, t.record_id)),
     el("pre", { class: "content" }, el("b", {}, t.title)),
@@ -351,7 +352,7 @@ async function showTasks() {
     : el("p", { class: "empty" }, "Nothing matches.");
   main.replaceChildren(countsLine(data, "task"),
     el("div", { class: "filters" }, choose("tStatus", "Any status", data.statuses)),
-    el("p", { class: "count" }, "Oldest first. Click one for its body and history."),
+    el("p", { class: "count" }, "In the order they were added. Click one for its body and history."),
     ...(pick ? [taskDetail(pick)] : []), table);
 }
 
