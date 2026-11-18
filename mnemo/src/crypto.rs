@@ -24,7 +24,7 @@
 //! that could ever share one DEK, including the "two forks of the same file
 //! after a backup" case that an on-disk `write_counter`-based scheme leaks.
 
-use aes_gcm::aead::{Aead, KeyInit, Payload};
+use aes_gcm::aead::{Aead, AeadInPlace, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use zeroize::Zeroizing;
@@ -174,6 +174,33 @@ pub fn derive_kek(
 
 fn cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
     Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key))
+}
+
+/// PERF-2 (v0.19.0): one AES-256-GCM instance for many decrypts (a batch of
+/// pages), so the key schedule runs once, not per page. It's `Sync`, so
+/// scoped threads can share it.
+pub(crate) fn page_cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
+    cipher(key)
+}
+
+/// PERF-2 (v0.19.0): decrypt one sealed page where it lies. `buf` holds
+/// the ciphertext and becomes the plaintext; `tag` is the 16 bytes after
+/// it. Nothing is allocated. On failure `buf` is left as it was.
+pub(crate) fn aead_decrypt_in_place(
+    cipher: &Aes256Gcm,
+    nonce: &[u8; NONCE_LEN],
+    aad: &[u8],
+    buf: &mut [u8],
+    tag: &[u8],
+) -> Result<()> {
+    cipher
+        .decrypt_in_place_detached(
+            Nonce::from_slice(nonce),
+            aad,
+            buf,
+            aes_gcm::Tag::from_slice(tag),
+        )
+        .map_err(|_| MnemoError::Crypto("authentication failed".into()))
 }
 
 /// AES-256-GCM encrypt with **Associated Authenticated Data**. The AAD is not

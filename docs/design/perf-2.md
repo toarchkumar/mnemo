@@ -1,8 +1,9 @@
 # PERF-2: a faster first search after opening
 
-Status: **step 1, for PLANNER-A's review** (2026-11-17). No engine change
-yet. The spec is the brain's `spec.perf-2`; this note is task `v0190-1`.
-Step 2 (task `v0190-2`) builds what's agreed here.
+Status: **built in step 2** (task `v0190-2`, 2026-11-17), as
+`decision.perf-2-design` scoped it. See section 7, "As built", for what
+step 2 changed against the plan below. The spec is the brain's
+`spec.perf-2`; step 1 was task `v0190-1`.
 
 **The constraint:** no file-format bump. The v9 ANN index run already starts
 with a layout byte (`V9_INDEX_LAYOUT = 1`, `store/mod.rs`). A reader that
@@ -306,3 +307,71 @@ CHANGELOG quote only those.
 2. **3f (the fsync):** in v0.19.0 with its crash tests, or its own step?
 3. **3d's parallel warm scan:** in scope only if the two single-thread
    levers miss 2 ms?
+
+## 7. As built (step 2)
+
+Numbers are from `test/scripts/perf_v0.19.0.json`: the same machine and
+commands as section 1, with the load average logged per run (5 to 15,
+from macOS background work).
+
+**The 100K load split, before and after** (medians of fresh handles,
+`examples/perf2_split.rs` through the dev hook `__index_load_split`):
+
+| Stage, ms | v0.18.1, layout 1 | v0.19.0, layout 2 |
+|---|---|---|
+| Read and decrypt the run | 15.69 | 4.22 |
+| Decode | 70.76 | 0.70 |
+| `id -> partition` map | 1.08 (in the load) | 1.02 (only when a write needs it) |
+| Delta chain | 0.00 | 0.00 |
+| Reconcile | 3.32 | 3.02 |
+| The first recall that follows | 30.22 | 4.19 |
+| Plain first recall, for comparison | 114.98 | 11.54 |
+| Run size | 17,298,907 bytes | 12,082,189 bytes |
+
+The decode was the largest share, as section 2 guessed.
+
+**What was built:**
+- **Stage A only.** Layout 2 is loaded whole: the head, then the postings
+  partition by partition, straight into their arrays. With it, first
+  recall at 100K is 11.5 ms, under the 15 ms target. So stage B (lazy
+  partitions) wasn't built, as the decision said, and neither was 3e's
+  shared-mode test, which was only for stage B.
+- **3c:** `Pager::read_pages_uncached` (one positioned read per run of
+  adjacent pages, decrypted in place, on scoped threads at 64 pages or
+  more) serves `RunReader`, 256 pages at a time. `RunReader` reads the
+  decrypted buffer as a plain slice. Serving it through the batch's
+  per-page lookup slowed the catalog decode, and with it opening a 100K
+  file, by about 10 ms (36.18 against 26.98 ms), so that was changed
+  before the final runs.
+- **The 64-page threshold** for going parallel was chosen, not measured.
+  The single-thread numbers above are the floor it protects; tuning it is
+  open.
+- **3b, the column fill,** is `Pager::for_each_page`. Threads are started
+  once per fill, and each reads and decrypts its share of the pages 15 at
+  a time (120 KiB buffers), handing them over a bounded channel. The first
+  try read 256-page batches. It was fast, but the allocator kept the 2 MiB
+  buffers, which added 2.4 to 3.7 MB to a 10K handle's memory. Smaller
+  batches fixed the memory but started threads per batch, and first recall
+  at 10K went to 7.3 ms. Streaming fixed both: 4.2 ms and 17.2 MB.
+- **3d:** sixteen lanes in `dot_f16` measured no change in warm recall at
+  10K (2.35 against 2.25 to 2.28 ms), so it was reverted, and the second
+  lever wasn't tried. Warm recall at 10K is 2.3 ms, above the 2 ms target,
+  and the time isn't in the dot product. A profile of the warm path is
+  the next step if the target stays.
+- **3f** is deferred (the decision), not built.
+
+**Against section 4's targets:**
+- First recall at 100K: 11.50 / 11.50 ms ✓. Single-thread: 17.66 ms.
+- First recall at 10K: 4.22 / 4.20 ms ✓. Single-thread: 8.19 ms.
+- Warm recall at 10K: 2.35 / 2.31 ms ✗, reported as it stands.
+- Everything on the must-not-regress list holds:
+  - warm recall at 100K: 2.39 / 2.38 ms;
+  - opening 100K: 25.78 / 25.70 ms;
+  - a 100K handle's RSS: 111.6 / 110.9 MB;
+  - a durable single write: 12.0 to 16.8 ms;
+  - ranking_v2: 0.9231 / 0.9487;
+  - recall@10 at 100K: 0.978;
+  - v0.18.1 on a layout-2 file: no error, exact recall
+    (`tests/v0_18_compat.rs`).
+- A 1K handle's RSS is 3.7 MB, against 2.9 MB in v0.18.1.
+

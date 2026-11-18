@@ -14,14 +14,20 @@
 //!    legacy sentinel `(8, 64)` triggers auto). Shows what a user
 //!    gets *before* running `mnemo index --rebuild`.
 //!
-//! Writes `test/scripts/perf_v0.5.0.json["ann_defaults_v0_6_0"]`
-//! with per-tier `{fresh_install, upgrade_path}` cells carrying
-//! `recall_at_10` + `mean_query_ms` + the exact `n_probe` / `n_rerank`
-//! values the formulas picked.
+//! Prints `{"ann_defaults_v0_6_0": …}` with per-tier `{fresh_install,
+//! upgrade_path}` cells carrying `recall_at_10` + `mean_query_ms` + the
+//! exact `n_probe` / `n_rerank` values the formulas picked. With `--out
+//! <file>` it also writes that block into the JSON file (merged with what's
+//! there); it never writes a tracked perf file unless asked to (PERF-2).
+//!
+//! On v9 a tier below `V9_ANN_MIN_FACTS` (20,000) has no index: recall is
+//! an exact scan there. Such a tier is skipped and labelled, unless
+//! `MNEMO_DEV_ANN_MIN_FACTS` lowers the threshold (a forced index).
 //!
 //! Run:
 //! ```sh
-//! cargo run --release --example ann_defaults_v0_6_0
+//! cargo run --release --features benches --example ann_defaults_v0_6_0
+//! cargo run --release --features benches --example ann_defaults_v0_6_0 -- --out test/scripts/perf_v0.19.0.json
 //! ```
 
 use std::collections::HashSet;
@@ -31,6 +37,7 @@ use std::time::Instant;
 
 use mnemo_engine::{
     IndexConfig, KdfParams, Memory, MemoryType, Metric, Mnemo, MnemoConfig, RecallRequest,
+    V9_ANN_MIN_FACTS,
 };
 use serde_json::{json, Value};
 
@@ -228,6 +235,19 @@ fn measure_scenario(
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let out_path: Option<PathBuf> = args
+        .iter()
+        .position(|a| a == "--out")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
+    // PERF-2: the threshold the engine uses (a forced one when the dev
+    // switch sets it), below which a v9 file has no index.
+    let ann_min: usize = std::env::var("MNEMO_DEV_ANN_MIN_FACTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(V9_ANN_MIN_FACTS);
+    let mut skipped: Vec<Value> = Vec::new();
     // Tiers to measure. 1M is "if feasible" — the harness tries it if
     // the cached corpus is already on disk; otherwise it's skipped
     // with a note. Avoids the 20-minute first-build cost unless the
@@ -255,6 +275,14 @@ fn main() {
 
     let mut tiers_json: Vec<Value> = Vec::new();
     for n in tiers_to_measure {
+        if n < ann_min {
+            println!(
+                "\n[ann-defaults] tier={n}: skipped, below V9_ANN_MIN_FACTS ({ann_min}): \
+                 v9 recalls exactly there, with no index"
+            );
+            skipped.push(json!({ "corpus_size": n, "skipped": "below V9_ANN_MIN_FACTS: exact recall, no index" }));
+            continue;
+        }
         println!("\n[ann-defaults] tier={n}");
         let cached = ensure_corpus(n);
         let cells = vec![
@@ -274,22 +302,7 @@ fn main() {
         }));
     }
 
-    let perf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("test/scripts/perf_v0.5.0.json");
-    let mut out: Value = if perf_path.exists() {
-        let txt = fs::read_to_string(&perf_path).unwrap();
-        let v: Value = serde_json::from_str(&txt).unwrap();
-        if v.is_array() {
-            json!({ "legacy_rows": v })
-        } else {
-            v
-        }
-    } else {
-        json!({})
-    };
-    out["ann_defaults_v0_6_0"] = json!({
+    let block = json!({
         "methodology":
             "Per-tier (10K, 100K, 1M-if-cached): rebuild the ANN index in \
              memory under two scenarios — 'fresh_install' = IndexConfig::default() \
@@ -301,13 +314,34 @@ fn main() {
              Index is rebuilt in memory only — cached corpus on disk is \
              untouched. See CHANGELOG `## [Unreleased]` → ANN-1.1.",
         "tiers": tiers_json,
+        "skipped_tiers": skipped,
+        "v9_ann_min_facts": ann_min,
     });
-    fs::write(
-        &perf_path,
-        serde_json::to_string_pretty(&out).unwrap() + "\n",
-    )
-    .unwrap();
-    println!("\n[ann-defaults] wrote {}", perf_path.display());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({ "ann_defaults_v0_6_0": block })).unwrap()
+    );
+    // Only with `--out`: never a tracked perf file by default.
+    if let Some(perf_path) = out_path {
+        let mut out: Value = if perf_path.exists() {
+            let txt = fs::read_to_string(&perf_path).unwrap();
+            let v: Value = serde_json::from_str(&txt).unwrap();
+            if v.is_array() {
+                json!({ "legacy_rows": v })
+            } else {
+                v
+            }
+        } else {
+            json!({})
+        };
+        out["ann_defaults_v0_6_0"] = block;
+        fs::write(
+            &perf_path,
+            serde_json::to_string_pretty(&out).unwrap() + "\n",
+        )
+        .unwrap();
+        println!("\n[ann-defaults] wrote {}", perf_path.display());
+    }
 }
 
 fn round4(x: f64) -> Value {

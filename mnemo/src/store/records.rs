@@ -1306,39 +1306,63 @@ impl Mnemo {
         if r.vec_page == 0 {
             return Ok(());
         }
-        let d = self.dimensions;
         let bytes = self.pager.read_page_uncached(r.vec_page, r.vec_gen)?;
-        let rows = self
-            .col
-            .page_rows
-            .get(&r.vec_page)
-            .cloned()
-            .unwrap_or_default();
-        for i in rows.into_iter().chain(std::iter::once(idx)) {
-            if i >= self.col.have.len() || self.col.have[i] {
+        self.decode_column_page(r.vec_page, &bytes, &[idx])
+    }
+
+    /// PERF-2 (v0.19.0): fill the resident column for every scored row in
+    /// `rows` that isn't filled yet, reading all their vector pages in one
+    /// batch ([`Pager::read_pages_uncached`]: one read per run of adjacent
+    /// pages, decrypted in parallel when there are enough). A no-op unless
+    /// the column is resident; fewer than two pages go one at a time.
+    pub(super) fn fill_column_rows(&mut self, rows: &[usize]) -> Result<()> {
+        if !self.col.resident {
+            return Ok(());
+        }
+        let mut pages: Vec<(u64, u64)> = Vec::new();
+        let mut wanted: std::collections::HashMap<u64, Vec<usize>> =
+            std::collections::HashMap::new();
+        for &idx in rows {
+            if idx >= self.col.have.len() || self.col.have[idx] || self.col.hot.contains_key(&idx) {
                 continue;
             }
-            // MOBILE-2d: a page also holds turns and essence items; recall
-            // never reads them from the column, so they stay unfilled.
-            if i != idx && !scored_row(&self.catalog[i]) {
-                continue;
-            }
-            let Some(ri) = self.catalog[i].v9 else {
+            let Some(r) = self.catalog[idx].v9 else {
                 continue;
             };
-            if ri.vec_page != r.vec_page {
+            if r.vec_page == 0 || !scored_row(&self.catalog[idx]) {
                 continue;
             }
-            let n = veccol::decode_entry_into(
-                &bytes,
-                d,
-                ri.vec_slot as usize,
-                &mut self.col.data[i * d..(i + 1) * d],
-            )?;
-            self.col.norms[i] = n;
-            self.col.have[i] = true;
+            let rows_on_page = wanted.entry(r.vec_page).or_default();
+            if rows_on_page.is_empty() {
+                pages.push((r.vec_page, r.vec_gen));
+            }
+            rows_on_page.push(idx);
         }
-        Ok(())
+        if pages.len() < 2 {
+            return Ok(());
+        }
+        // Streamed (`Pager::for_each_page`): small buffers, decrypted on
+        // threads started once for the fill, decoded here as they arrive.
+        let d = self.dimensions;
+        let (col, catalog) = (&mut self.col, &self.catalog);
+        self.pager.for_each_page(&pages, |i, bytes| {
+            let page = pages[i].0;
+            let extra = wanted.remove(&page).unwrap_or_default();
+            decode_into_column(col, catalog, d, page, bytes, &extra)
+        })
+    }
+
+    /// FMT-9b: decode one vector page's live scored rows (and `extra`, the
+    /// rows asked for) into the resident column.
+    fn decode_column_page(&mut self, page: u64, bytes: &[u8], extra: &[usize]) -> Result<()> {
+        decode_into_column(
+            &mut self.col,
+            &self.catalog,
+            self.dimensions,
+            page,
+            bytes,
+            extra,
+        )
     }
 
     /// FMT-9b: write the staged column entries, plus the live entries of up
@@ -1758,6 +1782,46 @@ impl Mnemo {
     }
 
     // --- public CRUD ------------------------------------------------------
+}
+
+/// FMT-9b: decode one vector page's live scored rows (and `extra`, the
+/// rows asked for) into the resident column. A free function, so a caller
+/// can fill the column while the pager is borrowed (PERF-2).
+fn decode_into_column(
+    col: &mut VecColumn,
+    catalog: &[CatalogEntry],
+    d: usize,
+    page: u64,
+    bytes: &[u8],
+    extra: &[usize],
+) -> Result<()> {
+    let rows = col.page_rows.get(&page).cloned().unwrap_or_default();
+    for i in rows.into_iter().chain(extra.iter().copied()) {
+        if i >= col.have.len() || col.have[i] {
+            continue;
+        }
+        // MOBILE-2d: a page also holds turns and essence items; recall
+        // never reads them from the column, so they stay unfilled (a
+        // row asked for is filled whatever it is).
+        if !extra.contains(&i) && !scored_row(&catalog[i]) {
+            continue;
+        }
+        let Some(ri) = catalog[i].v9 else {
+            continue;
+        };
+        if ri.vec_page != page {
+            continue;
+        }
+        let n = veccol::decode_entry_into(
+            bytes,
+            d,
+            ri.vec_slot as usize,
+            &mut col.data[i * d..(i + 1) * d],
+        )?;
+        col.norms[i] = n;
+        col.have[i] = true;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

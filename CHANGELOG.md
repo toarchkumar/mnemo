@@ -8,6 +8,41 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **A faster first search after opening** (PERF-2). Measured on an M1
+  Pro, release build, 384 dimensions (`test/scripts/perf_v0.19.0.json`):
+  - first recall on a fresh handle at 100K memories (with the ANN
+    index): **11.5 ms**, from 116 to 118 ms in v0.18.1;
+  - at 10K (exact scan, no index): **4.2 ms**, from 9.2 to 10.4 ms;
+  - opening a 100K file: 25.7 ms, from 30.2 ms;
+  - with decryption on one thread (a phone with no spare cores): 17.7 ms
+    at 100K and 8.2 ms at 10K;
+  - warm recall is unchanged: 2.3 ms at 10K, 2.4 ms at 100K.
+- **How:**
+  - **The ANN index is stored in layout 2:** flat, partition-major arrays
+    behind the v9 index run's layout byte, so loading it is a copy per
+    section instead of a msgpack decode per element. At 100K the decode
+    went from 70.8 ms to 0.7 ms, and the run from 17.3 MB to 12.1 MB.
+  - Large page runs and the vector column are read with one positioned
+    read per run of adjacent pages, and decrypted in place on several
+    threads.
+  - The index's `id -> partition` map is built only when a write needs
+    it.
+  - The file format is still v9.
+- **Mixed versions:**
+  - v0.19 still reads a layout-1 index, and writes layout 2 with its next
+    base run.
+  - v0.18 and older read a layout-2 index as no index, so they recall
+    exactly, with the right results and no error, but slower on a large
+    file.
+  - Their writes are picked up by v0.19's next load.
+  - Upgrade every session's `mnemo` together on a brain with 20,000 facts
+    or more.
+- `examples/ann_defaults_v0_6_0` runs on v9 (it skips, and labels, the
+  tiers below 20,000 facts, which have no index) and writes a file only
+  with `--out`.
+
 ## [0.18.1] — 2026-11-17
 
 A patch so a person can watch the agents' work in the browser: the

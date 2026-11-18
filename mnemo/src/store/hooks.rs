@@ -17,6 +17,85 @@ impl Mnemo {
         self.put_coordination(kind, content.to_string(), metadata)
     }
 
+    /// **Not a stable API.** PERF-2 (v0.19.0): load the ANN index and write
+    /// it again as a new base run, in the current layout (or the one
+    /// `__set_index_layout_for_testing` asked for), without retraining it.
+    #[doc(hidden)]
+    pub fn __rewrite_index_base_for_testing(&mut self) -> Result<()> {
+        self.ensure_ann()?;
+        if self.ann.is_some() {
+            self.index_rebase = true;
+            self.dirty_index = true;
+        }
+        self.flush()
+    }
+
+    /// **Not a stable API.** PERF-2 (v0.19.0): load the persisted ANN index
+    /// the way `ensure_ann` does, timing each stage separately (ms): the
+    /// run's pages read and decrypted, the msgpack decode, the `id ->
+    /// partition` map, the delta chain, and the reconcile with the catalog.
+    /// Also the run's length in bytes and the index's vector count. Returns
+    /// an empty list when there's no unloaded v9 index.
+    #[doc(hidden)]
+    pub fn __index_load_split(&mut self) -> Result<Vec<(&'static str, f64)>> {
+        use std::time::Instant;
+        let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+        if !self.ann_unloaded || !self.is_v9() || self.header.index_pages == 0 {
+            return Ok(Vec::new());
+        }
+        let (start, pages, len, gen) = (
+            self.header.index_start,
+            self.header.index_pages,
+            self.header.index_len,
+            self.header.index_gen,
+        );
+        let t = Instant::now();
+        let buf = super::load::read_run_bytes(&mut self.pager, start, pages, len, gen)?;
+        let read = ms(t);
+        let t = Instant::now();
+        let mut idx: crate::index::IvfPqIndex = match buf.first() {
+            Some(&V9_INDEX_LAYOUT) => {
+                crate::index::IvfPqIndex::read_layout2(&mut &buf[1..], buf.len() as u64 - 1)?
+            }
+            Some(&V9_INDEX_LAYOUT_MSGPACK) => rmp_serde::from_slice(&buf[1..])
+                .map_err(|e| MnemoError::Serialize(e.to_string()))?,
+            _ => return Ok(Vec::new()),
+        };
+        let decode = ms(t);
+        let layout = buf[0] as f64;
+        let t = Instant::now();
+        let (chain, n) =
+            super::load::apply_index_chain(&mut self.pager, &mut idx, self.header.index_delta)?;
+        let chain_ms = ms(t);
+        let vectors = idx.info().vectors as f64;
+        // The `id -> partition` map isn't part of the load since PERF-2; it's
+        // timed here on its own, after the rest.
+        let mut probe = idx.clone();
+        let t = Instant::now();
+        probe.ensure_assignment();
+        let assign = ms(t);
+        drop(probe);
+        idx.enable_log();
+        self.ann = Some(idx);
+        self.ann_unloaded = false;
+        self.index_chain = chain;
+        self.index_chain_ops = n;
+        let t = Instant::now();
+        let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
+        self.reconcile_ann_with_catalog(index_start, index_gen)?;
+        let reconcile = ms(t);
+        Ok(vec![
+            ("read_decrypt_ms", read),
+            ("decode_ms", decode),
+            ("assignment_ms", assign),
+            ("delta_chain_ms", chain_ms),
+            ("reconcile_ms", reconcile),
+            ("run_bytes", buf.len() as f64),
+            ("vectors", vectors),
+            ("layout", layout),
+        ])
+    }
+
     /// **Not a stable API.** 12.3: create a file protected by a passphrase on
     /// raw-key KDF parameters, which the public paths refuse, so a test can
     /// check what an open, `info`, `verify` and a compaction do with one.
