@@ -153,7 +153,9 @@ pinned to a commit (Dependabot keeps them current).
    know what `--git` must leave out. Commit it on its own:
    `mnemo export --git -o docs/brain.md` (no path in this repository).
    Check the header's build line (`written by mnemo X.Y.Z`) names this
-   release.
+   release. CI checks it too (`tests/brain_backup.rs`, since v0.18.1): a
+   committed backup whose header names no build, or one below 0.18.0,
+   fails.
    `--git` writes the keyed facts, the tasks, the findings and the project
    essence in a fixed order, and never the saved turns, private records,
    messages, claims, presence, a thread's essence, or a `SECURITY` finding
