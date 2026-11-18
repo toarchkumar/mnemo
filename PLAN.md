@@ -327,7 +327,7 @@ read. From now on:
 
 | Release | Lookups | Hit | Partial | Miss: not stored | Miss: not found |
 |---|---|---|---|---|---|
-| v0.15.0 (from 2026-11-14) | 71 | 29 | 27 | 15 | 0 |
+| v0.15.0 to v0.18.0 (from 2026-11-14; a running total) | 72 | 29 | 28 | 15 | 0 |
 
 First lookup (PLANNER-A, 2026-11-14): "keyword tokenizer 2 and older
 builds opening the file" → hit (rank 1, sim 0.64), the Worker's TOK-1
@@ -40994,3 +40994,644 @@ same turn ("1 task ready"). Awkward:
 5. stop at "approve the release" for the user's click.
 
 Then the after-tag checks, a DONE, and the branch deletions.
+
+### 2026-11-17 — PLANNER-A — DECISION + HANDOFF — a `WAITING:` pointer when the Worker stops for the user (the user: "yes")
+
+**What happened:**
+- At v0.18.0's approval step, the Worker notified the user directly
+  (PushNotification and its pane). The user approved, and run
+  44191123230 is publishing.
+- `planner-a`, the user's control center, heard nothing. The protocol's
+  Worker → Planner pointers are only `DONE` and `BLOCKED`, and a stop
+  for the user's click is neither.
+- My inbox and the WORKLOG agree that nothing was lost in transmission.
+  It's a gap in the protocol.
+
+**The decision (protocol text, approved by the user):** a third Worker
+pointer, `WAITING: <entry title>`, with a short `WORKER — WAITING` entry
+saying what the user must do and where (a run URL, a step name).
+- **When:** whenever the Worker stops for the user: the release approval
+  click, a token, a permission.
+- **The direct notification stays.**
+- **Rule 6** lets the Worker append at WAITING.
+
+**HANDOFF, `AGENTS.md`** (rule 1's list of forms and rule 6, 5+/1-):
+- **Commit:** `docs(agents): a WAITING pointer when the Worker stops for
+  the user`.
+- **When:** on its own, after v0.18.0's after-tag DONE, as the first
+  commit of v0.18.1's branch.
+- **Its first use:** this release's stop has passed, so it's the next
+  stop. Run 2 also puts a waiting stop on the brain's per-turn line.
+
+### 2026-11-17 — WORKER — DONE — v0.18.0 released (tag `v0.18.0` at `9cd5daf`, run 44191123230)
+
+**Before the tag** (your HANDOFF and release order):
+1. `e8efd8c` `docs: v0.18.0 README and site` (root `README.md`,
+   `index.html`), on its own.
+2. `9cd5daf` `chore(plan): sync coordination files` (`PLAN.md`,
+   `reviewer_notes.md`). No brain re-export, as decided.
+3. `main` fast-forwarded `2bf9b74..9cd5daf`, on the first try (with a
+   short wait after the release-branch push).
+4. The annotated tag `v0.18.0` ("MNemo 0.18.0") on `9cd5daf`.
+
+**The release run, 44191123230:**
+- It stopped at "approve the release (v0.18.0, mobile true)", with the 21
+  jobs before it successful. The user approved.
+- **It succeeded**, with 31 jobs succeeded. The one skip was
+  `mobile (skipped, release note)`, as it is with mobile on.
+- Attest, the GitHub Release and `mobile (Swift verify published)` all
+  succeeded.
+- I told the user directly at the stop (the pane and a push
+  notification). Your `WAITING:` rule came after it.
+
+**After the tag** (RELEASING.md's four registries):
+- **crates.io:** `max_version` 0.18.0.
+- **PyPI:** `mnemo-engine` 0.18.0, with 6 files (5 wheels and the sdist).
+- **SPM:** `toarchkumar/mnemo-swift` has tag `0.18.0` (`ed32685`).
+- **Maven Central:**
+  - The Android job's log: deployment `f114ee23-…` "is being validated",
+    then "is being published to Maven Central".
+  - `repo1.maven.org/.../mnemo-android/0.18.0/` answered 404 at first,
+    then 200 about 12 minutes later. It has the `.aar`, `.pom`, `.module`,
+    sources and javadoc, with signatures.
+- **The GitHub Release `v0.18.0`:** not a draft, not a prerelease, 14
+  assets (the 5 CLI binaries, the 5 wheels, the sdist, `SHA256SUMS`,
+  `MnemoFFI-0.18.0.xcframework.zip` and `mnemo-android-0.18.0.aar`).
+- **The push runs on `9cd5daf`:** CI, Mobile CI, Android emulator, Release
+  and the Pages build all succeeded. The live site shows v0.18.0.
+- Nothing installed on this Mac, and the brain wasn't touched.
+
+**Next, by your entries:**
+- **The branch deletion:** `release-0.18.0`, which equals `main`, right
+  after this entry. The PR branches went with their merges.
+- **The `WAITING:` HANDOFF (`AGENTS.md`)** stays unstaged until v0.18.1's
+  dispatch names its branch. It's committed there first, on its own.
+- **Run 2's first backup** is exported by v0.18.0 itself, after the
+  install (yours to dispatch).
+
+**The tally:** found by the `READ:` pointer, with the per-turn line on the
+same turn. Awkward:
+- Maven Central's repository lagged the job by about 12 minutes, within
+  RELEASING.md's hour.
+- The approval stop had no Worker → Planner pointer, now fixed by your
+  `WAITING:` rule.
+
+
+### 2026-11-17 — PLANNER-A — VERIFIED + REVIEW — v0.18.0 released; RB-014.1 moved here from SECURITY.local.md; the lookup tally
+
+**Verified** against the registries, `gh` and `git`:
+- **The tag:** `v0.18.0` is on `9cd5daf`, which `origin/main` equals.
+  `release-0.18.0` is deleted.
+- **The registries:** crates.io and PyPI are at 0.18.0 (PyPI has 6
+  files). `toarchkumar/mnemo-swift` has tag `0.18.0` (`ed32685`).
+  Maven Central's `mnemo-android/0.18.0/` answers 200.
+- **The GitHub Release:** not a draft or a prerelease, with 14 assets.
+- **The site:** live at v0.18.0.
+- **The approval stop's missing pointer** is fixed by `WAITING:`
+  (handed off, committed first on v0.18.1's branch).
+
+**RB-014.1 is moved here,** since its fix shipped in v0.18.0. It stays
+`ACCEPTED` in the ledger until REVIEWER-B marks it `VERIFIED` at its next
+pass.
+- **Still open:** Part B rec 2 (task `refs`), deferred to v0.18.1 below,
+  and Part A rec 2's CI check on the backup's header, deferred to Run
+  2's first backup.
+- **Publishing it is fine:** Part B is a usage caveat that the id-only
+  rule covers, not a weakness an attacker can use.
+- **Still in `SECURITY.local.md`:** RB-006.12 (the daemon).
+
+#### RB-014 (REVIEWER-B, 2026-11-17) — the v0.18.0 scoped READY pass (`release-0.18.0` at `430a21a`): RB-014.1
+
+One item with four parts. A, B and C are tested (this session's scratch directory, `q14/f3.py`, `f5.py`, `f6.py`, `f2.py`); D is about a definition. The rest of the batch is in `reviewer_notes.md`. v0.18.0 isn't published, and the committed `docs/brain.md` holds no finding.
+
+#### RB-014.1 — [SECURITY] [MEDIUM] Four ways the text of an unverified `SECURITY` finding can reach the brain's backup
+
+- **Status:** `OPEN`
+- **What holds:** v0.18's `export --git` leaves out a `SECURITY` finding at `open`, `accepted`, `rejected`, `deferred` and `needs-user`, with its triage text, in both formats and with `--visibility all`. The category is checked exactly when a finding is added, and no ordinary write can change a finding's category, status or kind afterwards (tested with v0.18 and v0.17.2). The four parts below are what's left.
+
+##### Part A: an older build's `export --git` writes every finding
+
+- **Tested** with the published v0.17.2 on a brain v0.18 wrote:
+
+| Export | Unverified security findings' text | Thread essence | Private records |
+|---|---|---|---|
+| v0.18 `export --git` | None | None | None |
+| v0.17.2 `export --git` | **All of it:** the titles and bodies at every status, and the triage texts | **Yes** | None |
+
+- **Finding:**
+  1. The Planner's decision for this release already works around it (no re-export before the tag). After the tag it stays true of any `mnemo` older than 0.18 that's on a PATH: a virtualenv's, a session not yet reinstalled, `reviewer-a`'s CLI. One `export --git > docs/brain.md` from such a build, committed, publishes every open security finding.
+  2. Nothing in the file says which build wrote it, so a review of the commit can't tell.
+  3. **An old build does respect `private`.** I marked one unverified security finding's record private (`update <record id> --visibility private`, v0.18): v0.17.2's `export --git`, its `list` and its recall then left it out, and v0.18's `finding list` still showed it.
+- **Recommendation:**
+  1. **`finding_add` writes a `SECURITY` finding as `private`, and `finding_verify` makes it `team`.** v0.17 builds then leave it out of `--git`, `list` and recall with no change to them, and v0.18's own filter stays as the second check. The finding tools read through the coordination path, which doesn't filter by visibility, so nothing else changes. A test with the v0.17.2 binary beside the other compatibility jobs.
+  2. **The `--git` header names the build that wrote it** ("written by mnemo 0.18.0"), and a check on `docs/brain.md` in CI fails when that's below 0.18.0.
+  3. `RELEASING.md` and the backup's step say which build writes the backup.
+
+##### Part B: a record that quotes the finding is exported
+
+- **Tested:** with `RB-900.2` (`SECURITY`, `accepted`) in the brain, `mnemo task add "Fix RB-900.2: <its title>"`. v0.18's `export --git` has the task, with the title in it.
+- **Finding:**
+  1. A task is how a fix is dispatched from now on, and its natural title is the finding's. The same goes for a fact the Worker writes about the fix and for a project essence item ("open: …"). All three are in the backup.
+  2. The engine can't know what a sentence is about. Until now the rule that covered this was a habit: neutral wording in commits and PRs.
+- **Recommendation:**
+  1. **Say it in the guide and in AGENTS.md's rule:** a task, a fact, an essence item, a commit and a PR name an unverified security finding by its id only.
+  2. **Give tasks a `refs` list** (messages and findings have one), and have `export --git` leave out a task whose refs name a `SECURITY` finding that isn't `verified`. Then "fix RB-900.2" with the ref is safe by construction, and the id-only title costs nothing.
+
+##### Part C: delete the finding and add its id again under another category
+
+- **Tested:** the MCP `forget` tool on the finding's record id (the CLI's `essence remove <id>` does the same), then `finding add RB-900.1 --category DX/DOCS` with the same title and body: accepted, and `export --git` then has both.
+- **Finding:**
+  1. There's no way to change a finding's category, so deleting and re-adding is what an honest Reviewer would do to correct one. In the direction `SECURITY` to something else, that publishes it.
+  2. The deleted record's history goes with it: nothing shows the id was ever a security finding.
+- **Recommendation:**
+  1. **`forget` and `essence remove` refuse a finding** (and `essence remove` checks the kind as `resolve` and `update` do). A finding that's wrong is `rejected`, with its text.
+  2. If re-categorising is wanted, make it a move with a history entry, and refuse `SECURITY` to another category unless the finding is `verified`.
+
+##### Part D: `verified` is checked against a commit, and the old rule was "once the fix has shipped"
+
+- **By reading, and one test:** `finding_verify` takes any ref from any agent (a worker verified its own finding in my run; who may is the protocol's). The export writes a `SECURITY` finding as soon as it's `verified`.
+- **Finding:** a Reviewer can verify a fix on the release branch days before the tag. If the backup is exported in between, the finding is public while every installed build still has the problem. AGENTS.md's rule for the file this replaces is "move them into `PLAN.md` once the fix has shipped".
+- **Recommendation:** one of two. Either the protocol says a `SECURITY` finding is verified only against a published tag, and `finding_verify` on a `SECURITY` finding says so in its message; or the export holds a `SECURITY` finding back until its `verified_ref` is a tag (`v*`), which the engine can check as text.
+
+- **Would I hold the tag for it?** For Part A's recommendation 1, yes: it's small, and it's the only part an agent can trip without doing anything unusual. Parts B and D are wording that should be in place before Run 2 files its first security finding. Part C can follow.
+
+- **Planner Triage:** `ACCEPTED` (PLANNER-A, 2026-11-17), as task `v0180-4`, before the tag, except where marked deferred.
+  - **Part A:**
+    - **Rec 1, before the tag:** `finding_add` writes a `SECURITY` finding as `private`, and `finding_verify` makes it `team`. The finding tools keep reading every finding through the coordination path. Add a test with the published v0.17.2 binary beside the other compatibility jobs: its `export --git`, `list` and recall leave an unverified security finding out.
+    - **Rec 2, before the tag:** the `--git` header names the build that wrote it ("written by mnemo X.Y.Z"). **Deferred to Run 2's first backup:** the CI check that fails on a `docs/brain.md` header below 0.18.0, since today's committed file has v0.17.1's header and would fail it.
+    - **Rec 3, before the tag:** RELEASING.md's step 7 says the backup is written by the release's own `mnemo`, never an older one on the PATH, and that the reader checks the header's build line.
+  - **Part B:**
+    - **Rec 1, before the tag:** the guide's "Review findings" says that a task, a fact, an essence item, a commit and a PR name an unverified security finding by its id only. The same sentence for AGENTS.md's protocol text goes to the user (NEEDS-USER).
+    - **Rec 2:** `DEFERRED` to the first release after v0.18.0 (PERF-2's), with a trigger: before Run 2 files its first `SECURITY` finding. That rec is tasks getting `refs` and `--git` leaving out a task that refs an unverified security finding. Until then the id-only wording carries it.
+  - **Part C:**
+    - **Rec 1, before the tag:** `forget` (MCP and CLI) and `essence remove` refuse a finding's record, with the message that a wrong finding is `rejected` with its text. `essence remove` checks the kind as `resolve` and `update` do (RB-014.2 item 1).
+    - **Rec 2:** `REJECTED` for now. A wrong category is corrected by rejecting the finding and filing a new id, which keeps the history. No re-categorising path is added.
+  - **Part D, before the tag, the engine's option:** `finding_verify` on a `SECURITY` finding takes only a release tag as its ref (`^v[0-9]+\.[0-9]+\.[0-9]+$`) and refuses anything else with "a SECURITY finding is verified against a published release tag". Other categories keep any ref. With Part A rec 1, "verified" then means shipped, which matches the old rule. A Reviewer verifies after the tag, at its next pass, as rule 3 already says.
+  - **Neutral wording:** PLAN.md and the task title name only `RB-014.1` and "held in SECURITY.local.md". The brain's task text is exported to the public `docs/brain.md`, which is Part B itself.
+
+**The brain-lookup tally, and a correction to what I told the user.**
+- **The correction:** the table's one row, `v0.15.0 (from 2026-11-14)`,
+  was the running total, last updated at v0.17.2 (71 lookups). It
+  wasn't stale since v0.15, as I said.
+- **The row now runs through v0.18.0:** one lookup was added, `v0180-1`'s
+  partial. Release-step lookups aren't counted, as before.
+- **A gap:** `v0180-2`, `-3` and `-4`'s DONEs have no `Brain:` line. Of
+  this release's four tasks, the Worker looked up only the first.
+  - In Run 2 the brain is the authority, so **every task's first step is
+    a recall, and its DONE says what came back.** That goes into Run 2's
+    dispatch.
+
+### 2026-11-17 — PLANNER-A — DISPATCH — v0.18.1: INSPECT-COORD (findings and tasks in the inspector) and task `refs`; tasks `v0181-1` to `-3`
+
+**Why now:** the user's "yes" today. Once Run 2 freezes `reviewer_notes.md`
+the user needs a page to watch the work. It's a patch release (no format
+change, mobile off), before Run 2.
+
+**The branch:** `release-0.18.1` from `main` (`9cd5daf`). Its first commit
+is the `WAITING:` HANDOFF (`AGENTS.md`, on its own).
+
+**`v0181-1`: INSPECT-COORD,** two read-only tabs in `mnemo inspect`
+(`inspect.rs`, `inspect.html`).
+- **Findings:**
+  - a table: id, category, priority, status, title, author, last
+    change;
+  - filters for status, category and priority, ordered by id as `finding
+    list` orders them;
+  - a click opens the finding: its body, refs, triage text and who,
+    the verifying ref and who, and its status history with times;
+  - a count by status at the top ("3 open, 2 accepted, …").
+  - Unverified `SECURITY` findings are shown, with a "private until
+    verified" mark. The page is loopback and the owner's own.
+- **Tasks:**
+  - a table: slug, title, status, owner, for, after, last change;
+  - a status filter;
+  - a click shows the body and the status history.
+- **The inspector's rules hold:**
+  - `GET` only;
+  - the file is read once per load or reload, with no handle kept open;
+  - no endpoint that writes;
+  - the existing loader and its errors.
+  - New JSON routes beside the others (for example `/api/findings`,
+    `/api/tasks`), built from `Mnemo::findings` and `Mnemo::tasks` at
+    load time.
+- **Brain text is untrusted:**
+  - every title, body, ref and name is set with `textContent` (or
+    escaped), never `innerHTML`;
+  - a test puts `<script>` and `<img onerror>` in a finding's title and
+    body and checks the page and the JSON carry them as text.
+- **Tests:** `tests/inspect_cli.rs` gets the two routes, both empty and
+  filled, and the escaping case.
+- **Docs:**
+  - `mnemo/README.md`'s inspector lines;
+  - the guide, if it describes the inspector;
+  - CHANGELOG `[Unreleased]`.
+
+**`v0181-2`: task `refs`** (RB-014.1 Part B rec 2, deferred to here).
+- **What:** tasks get a `refs` list, as findings and messages have: the
+  CLI's `task add --ref <id>` (repeatable), the MCP `task` tool's
+  `refs`, and Python. `task get` and `list` JSON show them.
+- **Storage:** a reserved `_mnemo.*` metadata key, never a new field on
+  a persisted struct (the MessagePack rule).
+- **The backup:** `export --git` leaves out a task whose refs name a
+  `SECURITY` finding that isn't `verified`. It comes back once the
+  finding is verified.
+- **Tests:** the task is absent while the finding is `open` or
+  `accepted`, and present once it's `verified`. A ref to an unknown id
+  is kept, and doesn't hide the task.
+- **Docs:** the guide's "Review findings" adds one line: "dispatch a fix
+  as a task with `--ref <id>`". README rows, CHANGELOG.
+
+**`v0181-3`: READY** (after 1 and 2).
+- the bump to 0.18.1 (mobile off, the patch rule), the CHANGELOG's
+  `[0.18.1]`, and the dry run;
+- RELEASING.md's step 7, the brain's backup, **written by the installed
+  v0.18.x**, which needs the user's install first. It's Run 2's first
+  backup:
+  - read the diff;
+  - check the header names 0.18;
+  - add the deferred CI check that fails on a `docs/brain.md` header
+    below 0.18.0 (RB-014.1 Part A rec 2).
+- **If the user hasn't installed v0.18.0 by then,** log `WAITING:` (the
+  new pointer) and stop at that step.
+
+**Every task's first step is a recall,** and its DONE has the `Brain:`
+line. `v0180-2` to `-4` had none, as the tally above notes.
+
+**No REVIEWER-B call:** this is a patch release (rule 4). I verify
+against this entry.
+
+### 2026-11-17 — WORKER — DONE — v0181-1: INSPECT-COORD, findings and tasks in the inspector (PR 130, `4c696f0`)
+
+**Brain:** "mnemo inspect inspector routes findings tasks read-only
+loopback" → miss (nothing on the inspector's internals; read the code).
+
+**The branch:**
+- `release-0.18.1` from `main` (`9cd5daf`).
+- Its first commit is your `WAITING:` HANDOFF, on its own:
+  `88c3c37` `docs(agents): a WAITING pointer when the Worker stops for the
+  user`.
+
+**PR 130** (squash `4c696f0` on `release-0.18.1`; branch deleted):
+- **Routes:**
+  - `/api/findings` (filters `status`, `category`, `priority`) and
+    `/api/tasks` (filter `status`). Each returns `total`, `counts` (by
+    status, in a fixed order, over every item) and the filtered list.
+  - The filter choices come from the engine's `FINDING_CATEGORIES` and
+    `FINDING_PRIORITIES`.
+  - `/api/about` gains `findings` and `tasks` counts.
+- **A deviation from the entry's wording:** the routes aren't built by
+  calling `Mnemo::findings` and `Mnemo::tasks`. The loader parses the
+  records it already reads with `Finding::from_memory` and
+  `Task::from_memory`, the same parsers those methods use. So the file is
+  still read once per load or reload, with no second scan. Findings are
+  sorted by `Finding::sort_key`, as `finding list` sorts them; tasks are
+  oldest first.
+- **The page:** Findings and Tasks tabs.
+  - Findings: a table (id, category, priority, status, title, author,
+    last change), the counts line, three filters, and a click for the
+    body, refs, triage and who, verified ref and who, and the history
+    with times.
+  - An unverified `SECURITY` finding carries a "private until verified"
+    tag.
+  - Tasks: a table (slug, title, status, owner, for, after, last change),
+    a status filter, and a click for the body and history.
+  - Everything goes through the page's `el()`, which appends text nodes.
+- **The rules hold:** GET only, read once per load, no handle kept, no
+  writing endpoint, the same loader and errors.
+- **Docs:** the README's `inspect` row and its "The inspector" section,
+  one line in the guide (`llms-full.txt` regenerated; `llms.txt`
+  unchanged), and CHANGELOG `[Unreleased]` Added.
+
+**Tests:**
+- **`inspect_cli::findings_and_tasks_tabs_serve_read_only_json`:**
+  - both routes empty (the existing fixture) and filled;
+  - the id order (`RB-9.2`, `RB-9.10`, `RB-10.1`), the counts, every
+    filter alone and together, the private mark, the history and
+    `record_id`;
+  - `<script>` and `<img onerror>` in titles, bodies, refs, triage text
+    and a task come back as JSON strings (`application/json`, `nosniff`);
+  - the page has none of `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+    `document.write` or `eval(`;
+  - the file is byte-identical afterwards.
+- **The page's script:**
+  - It parses in JavaScriptCore (`osascript -l JavaScript`).
+  - The new views also ran there against a stub DOM with that hostile
+    text: the findings table, a finding's detail, the tasks table, a
+    task's detail, and the empty state.
+  - None threw, the hostile strings were text nodes only, and no `script`
+    or `img` element was created.
+  - A real browser wasn't driven.
+- **Local:** `cargo fmt --check`; clippy with CI's features; `inspect_cli`
+  10 passed, `guide` 5 passed. The full suite ran in CI only.
+- **PR 130's CI:** 19 of 19.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0181-1 --status ready`, the post, the nudge.
+
+**The tally:** found by the `READ:` pointer, with the per-turn line on the
+same turn ("2 tasks ready"). Awkward: no Node on this Mac, so the page's
+script was checked through `osascript`'s JavaScriptCore. JXA doesn't
+drain promise jobs within a run, so the views were run with their
+`await`s stripped.
+
+### 2026-11-17 — PLANNER-A — VERIFIED — v0181-1: INSPECT-COORD (PR 130, `4c696f0`); task `v0181-1` done
+
+- **PR 130** is merged into `release-0.18.1` as `4c696f0`, over the
+  `WAITING:` HANDOFF `88c3c37` (whose push CI succeeded).
+- **The routes:** `/api/findings` and `/api/tasks` are at
+  `inspect.rs:980` and `:1001`. Every request that isn't a `GET` is
+  refused (`:777`).
+- **The page:** `inspect.html` has no `innerHTML`, `insertAdjacentHTML`
+  or `document.write`.
+- **CI:** PR 130's was 19 of 19. The push runs on `4c696f0` were queued
+  when I checked.
+- **The deviation is accepted:** one scan with the same parsers keeps
+  the "read once" rule better than a second pass would.
+- **Not driven in a real browser:** the user sees the tabs at READY,
+  with the installed v0.18.1 (or the dev build, `cargo run --release
+  --bin mnemo -- inspect --open`). I'll ask the user to look then.
+- **The tally:** one lookup, a miss, not stored. The running total is 73
+  lookups: 29 hits, 28 partial, 16 not stored, 0 not found.
+- Task `v0181-1` is set `done` by me. **Next:** `v0181-2`, as dispatched.
+
+### 2026-11-17 — WORKER — DONE — v0181-2: task refs (PR 131, `98c2a68`)
+
+**Brain:** "task refs export --git leave out a task naming an unverified
+security finding" → partial (the `architecture.export-git-order` fact;
+nothing on task refs).
+
+**PR 131** (squash `98c2a68` on `release-0.18.1`; branch deleted):
+- **Refs:**
+  - `TaskSpec.refs` and `Task.refs` (Rust; a Changed line in the
+    CHANGELOG for the new fields).
+  - Set by `task add --ref <id>` (repeatable), the MCP `task` tool's
+    `refs` (in its schema and description), and Python's `task_add(...,
+    refs=[...])`.
+  - `task get` prints `refs: …`. The JSON of `get` and `list` (CLI and
+    MCP) and Python's dict carry them.
+- **Storage:**
+  - The existing reserved `_mnemo.refs`, with no persisted struct
+    touched.
+  - It's written only when there are refs, so re-adding a pre-0.18.1 task
+    as it was stays `unchanged` (tested).
+  - At most 32 refs, each one line, not empty, at most 200 bytes.
+- **The backup:**
+  - With `--git`, a task whose refs name a `SECURITY` finding that isn't
+    `verified` is left out. Ids match by prefix and numbers, so
+    `RB-050.2` names `RB-50.2`.
+  - Those findings are private, so the CLI collects them
+    (`export::held_findings`) from every record before the visibility
+    filter, and passes them to `select` in `ExportOptions.held`.
+  - The task is back once the finding is verified. A ref to an unknown id,
+    or to another category's finding, hides nothing. The plain export is
+    unchanged.
+- **The inspector:** a task's detail shows its refs.
+- **A fix to PR 130:** the Tasks tab sorted tasks by record id. Two ULIDs
+  from the same millisecond aren't ordered, so the new assert failed once
+  in the full local run (`left: "Ship it"`). It now keeps the file's order,
+  which is `task list`'s. 6 of 6 repeat runs passed.
+- **Docs:**
+  - the guide's "Review findings": "Dispatch a fix as a task with `--ref
+    <id>` …, the backup leaves that task out too until the finding is
+    verified";
+  - the README's `task add`, `task list/get` and `export` rows, and the
+    Python README's `task_add` row;
+  - CHANGELOG `[Unreleased]`; `llms-full.txt` regenerated.
+
+**Tests:**
+- **New:**
+  - `tasks::a_tasks_refs_round_trip`;
+  - `export_cli::git_leaves_out_a_task_that_refs_an_unverified_security_finding`
+    (open, accepted with a leading zero, mixed refs: absent; unknown id,
+    CORRECTNESS ref, no refs: present; the plain export has all 7; back
+    after `verify … v0.18.1`);
+  - `project_brain::task_refs_through_the_cli`;
+  - refs in `mcp_context`'s task test, `inspect_cli` and Python
+    `test_tasks`.
+- **Local** (15:51 to 16:35; load averages 6.39 6.17 5.77 at the end):
+  - `cargo fmt --check`, clippy with CI's features, and clippy on
+    `mnemo-python`;
+  - `cargo test --locked --no-fail-fast --features failpoints`: **768
+    passed, 1 failed, 1 ignored**. The failure is the order assert above.
+    After the fix: clippy again, and `inspect_cli` 10 of 10;
+  - `cargo test -p mnemo-uniffi`: 23 passed. Python's tests ran in CI
+    only.
+- **PR 131's CI:** 19 of 19.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0181-2 --status ready`, the post, the nudge.
+
+**The tally:** found by the Planner's VERIFIED entry for `v0181-1` (its
+"Next"), with the per-turn line earlier ("2 tasks ready"). Awkward: a
+nondeterministic order I'd shipped in PR 130 showed up only in the full
+run, one PR later.
+
+**Next:** `v0181-3`, READY. Its step 7 needs the installed v0.18.x.
+`~/.local/bin/mnemo --version` says 0.17.1 now, so I'll log `WAITING:`
+there unless the user has installed it by then.
+
+*Correction to the entry above:* `~/.local/bin/mnemo --version`, run
+after writing it, says **`mnemo 0.17.2`**, not 0.17.1. It's still below
+0.18, so the `WAITING:` plan for step 7 stands.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + DECISION — v0181-2: task refs (PR 131, `98c2a68`); task `v0181-2` done; new public fields in a patch release
+
+- **PR 131** is merged into `release-0.18.1` as `98c2a68`. Its CI was 19
+  of 19; the push runs were in progress when I checked.
+- **The PR 130 ordering fix is accepted:** the file's order is `task
+  list`'s, and it's deterministic.
+- **The tally:** one lookup, partial. The running total is 74 lookups:
+  29 hits, 29 partial, 16 not stored, 0 not found.
+- Task `v0181-2` is set `done` by me.
+
+**The decision on the new fields:**
+- **The issue:** `TaskSpec` (`coordination.rs:1140`) and `Task`
+  (`:1164`) aren't `#[non_exhaustive]`. A new public field breaks a Rust
+  caller that builds `TaskSpec { … }` without `..Default::default()`, or
+  destructures `Task`. Cargo treats 0.18.0 → 0.18.1 as compatible, so
+  such a caller breaks on `cargo update`.
+- **This release keeps it,** for three reasons:
+  - The coordination API is a month old.
+  - `TaskSpec` has `Default`, which the docs' examples use.
+  - Your CHANGELOG `Changed` line names the new fields.
+- **In `v0181-3`, word that line** as a caller would need it: "Rust:
+  `TaskSpec` and `Task` have a new field, `refs`. Code that builds a
+  `TaskSpec` with `..Default::default()` is unaffected; a full struct
+  literal or a pattern on `Task` needs the field."
+- **At v0.19.0 (PERF-2's release):** mark the 13a public record types
+  `#[non_exhaustive]`, with constructors or `Default` where a caller
+  builds them, so later fields aren't breaking. The types are
+  `TaskSpec`, `Task`, `FindingSpec`, `Finding`, `NewWork`, and the
+  message and claim specs. I'll put it in that release's dispatch.
+
+**Next:** `v0181-3`. Its step 7 waits for the user's install of v0.18.0,
+by `WAITING:` if needed. I've told the user.
+
+### 2026-11-17 — WORKER — WAITING — v0181-3: the backup needs the user's install of v0.18.x (bump PR 132 `72d78b5`; dry run green)
+
+**What the user must do:** install the released v0.18.0 on this Mac,
+then say so:
+- `curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh`, which
+  puts it in `~/.local/bin/mnemo`;
+- `~/.local/bin/mnemo --version` should then print `mnemo 0.18.0`. Now it
+  prints `mnemo 0.17.2`;
+- the new binary reads the brain's key from the keychain, so the first
+  read may ask once. Choose "Always Allow".
+
+I don't install releases on this Mac, so the step waits here.
+
+**Done before the stop:**
+- **Brain:** "patch release bump mobile off release-mobile false
+  CHANGELOG dry run" → partial (the v0.17.2 READY fact had the patch
+  pattern).
+- **PR 132** (squash `72d78b5` on `release-0.18.1`, branch deleted):
+  - every manifest and the lockfiles' own entries at 0.18.1, the samples
+    too;
+  - `.github/release-mobile` `false`: `git diff v0.18.0 HEAD --
+    mnemo/bindings/{uniffi,swift,kotlin} examples/mobile` was empty. The
+    Swift and Kotlin READMEs keep 0.18.0;
+  - the CHANGELOG's `[0.18.1] — 2026-11-17` with an intro, the compare
+    links, and your wording of the `refs` Changed line;
+  - its CI: 25 of 25.
+- **The dry run,** 44213067706 on `72d78b5`, `-f mobile=false`:
+  **success**, with 23 jobs. "engine 0.18.1, mnemo-uniffi 0.18.1,
+  mnemo-android 0.18.1", "the commit says mobile: false", "mobile: off".
+  The mobile, attest, approve, Release and gate jobs were skipped.
+- **Push runs:**
+  - **`98c2a68`'s Mobile CI failed once.** `swift (macos-latest, iOS
+    simulator)`: `slowEmbedsDontStarveTheAppsOtherTasks()` "Expectation
+    failed: (sinceLaunch → 1.4492579698562622) < 1.2"
+    (`EmbedQueueTests.swift:45`); the other 49 of 50 tests passed. PR 131
+    touched no Swift. Its re-run passed.
+  - **My re-run cost the newer run:** that re-run shares the
+    `mobile-ci-refs/heads/release-0.18.1` concurrency group, so it
+    cancelled `72d78b5`'s in-progress Swift job ("Canceling since a
+    higher priority waiting request … exists"), in its iOS simulator
+    step, after macOS `swift test` had passed (50 of 50, the same test in
+    1.999 s). I re-ran that job: **success** (attempt 2). Lesson: don't
+    re-run an older run on a branch while the head's is in progress.
+  - `72d78b5`'s CI succeeded.
+  - **On the timing test:** one failure on the hosted runner, 1.449 s
+    against a 1.2 s limit. By your rule for `shared_lock`, it's logged and
+    not changed; your call if it recurs.
+
+**Ready, uncommitted, on `rel0181-3-backup`** (from `72d78b5`), for after
+the install:
+- `mnemo/tests/brain_backup.rs`, RB-014.1 Part A rec 2's deferred check. It
+  fails when `docs/brain.md`'s header names no build or one below 0.18.0,
+  and skips where `docs/` isn't present (the published crate). Today it
+  fails on the committed file, as it should: v0.17.1's header names no
+  build.
+- RELEASING.md's step 7 names that check.
+
+**After the install** (the rest of step 7, then READY):
+1. `mnemo export --git -o docs/brain.md` with the installed v0.18.x;
+2. read the diff, and check the header says `written by mnemo 0.18.0`;
+3. one PR with the backup, the check and the RELEASING.md line;
+4. CI, merge, then READY.
+
+The task's claim is renewed meanwhile.
+
+**The tally:** found by your VERIFIED entry's "Next", with the per-turn
+line ("1 task ready"). Awkward: the concurrency cancel I caused, above.
+
+### 2026-11-17 — PLANNER-A — VERIFIED — v0181-3's stop: the user installed v0.18.0; the backup step resumes
+
+- **Checked:** PR 132 merged as `72d78b5`; dry run 44213067706 on
+  `72d78b5` (`workflow_dispatch`) concluded `success`.
+- **The user's install:** the user said "done". `~/.local/bin/mnemo
+  --version` prints `mnemo 0.18.0`, and `mnemo about` reads the brain
+  through the keychain with no prompt left (18908 memories).
+- **Next for the Worker:** step 7 as your WAITING entry lists it (export
+  with the installed v0.18.0, check the header names `mnemo 0.18.0`, one
+  PR with the backup, `brain_backup.rs` and the RELEASING.md line, CI,
+  merge), then READY.
+- **The Swift timing failure** (`EmbedQueueTests.swift:45`, 1.449 s against
+  1.2 s): logged, no change, same as `shared_lock`; it comes back to the
+  user if it recurs. The lesson about re-running an older run while the
+  head's run is in progress is noted.
+
+### 2026-11-17 — WORKER — READY — v0181-3: v0.18.1 (PR 132 `72d78b5`, PR 133 `7c93da4`; dry run green)
+
+**`release-0.18.1` is at `7c93da4`.** `origin/main` is an ancestor.
+
+**Step 7, after the user's install** (`~/.local/bin/mnemo --version`:
+`mnemo 0.18.0`):
+- **The export:**
+  - `mnemo export --git` with the installed build, to the scratchpad
+    first: "exported 292 memories".
+  - The stderr note named the build. The header reads "The brain's
+    backup, written by mnemo 0.18.0 with `--git` …", then the
+    left-out line.
+  - A second export was byte-equal (`cmp`).
+- **The diff against the committed v0.17.1 export:** 268 → 292 records.
+  - 24 added: 20 keyed facts by `cursor-agent` (`architecture.*`, `ci.*`,
+    `decision.*`, `process.*`, `status.*`, `testing.*`, with superseded
+    versions) and 4 tasks (`v0180-4`, `v0181-1` to `-3`).
+  - 2 changed: the tasks `v0180-2` and `v0180-3`, now `done`.
+  - None removed.
+- **The review,** by scans and by reading every added and changed record:
+  - **Counted at 0:** findings, essence items, private records, messages,
+    claims, presence, turns, email addresses, home paths.
+  - **One token shape, `github_pat_`:** it's the redaction rules' own
+    description ("github_pat_ + 22"), already in the old file.
+  - **Recovery-code mentions:** only how `mnemo unlock` works. No codes.
+  - **Open security items:** nothing. The one decision fact about security
+    findings describes the shipped rule.
+- **PR 133** (squash `7c93da4`):
+  - `docs/brain.md`;
+  - `mnemo/tests/brain_backup.rs`, RB-014.1 Part A rec 2. It failed on the
+    v0.17.1 file ("doesn't name the build") and passes on this one. In
+    CI's `rust (ubuntu-latest)` log: "test
+    the_committed_backup_was_written_by_0_18_or_newer ... ok";
+  - RELEASING.md's step 7 names the check;
+  - its CI: 19 of 19.
+- **The push runs on `7c93da4`:** CI and Mobile CI succeeded.
+
+**The bump** (PR 132, `72d78b5`) and the dry run 44213067706 (`-f
+mobile=false`) are in the WAITING entry above. The dry run was on
+`72d78b5`. Since then only `RELEASING.md`, `docs/brain.md` and
+`mnemo/tests/brain_backup.rs` changed (`git diff --stat 72d78b5 7c93da4`),
+nothing that's built. A new dry run is yours to ask for.
+
+**Left for the release:**
+- your HANDOFF of root `README.md` and `index.html`;
+- the coordination-file commit;
+- `main`'s fast-forward;
+- the tag `v0.18.1`;
+- the user's approval click. The tag run's stop is the first real use of
+  `WAITING:`.
+
+**The loop:** `plan.md` taken around this entry and released with its
+token; then `task update v0181-3 --status ready`, the post, the nudge.
+
+**The tally:** found by your VERIFIED entry for the stop, with the
+per-turn line. Awkward: none beyond the WAITING entry's.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + HANDOFF — v0181-3: v0.18.1 READY (PR 132 `72d78b5`, PR 133 `7c93da4`); task `v0181-3` done; README and site for v0.18.1
+
+**Verified:**
+- PR 133 merged as `7c93da4` on `release-0.18.1`, touching only
+  `RELEASING.md`, `docs/brain.md` and `mnemo/tests/brain_backup.rs`
+  (`git diff --stat 72d78b5 7c93da4`). Nothing built changed since the
+  dry run 44213067706 (`success` on `72d78b5`), so no new dry run.
+- Push runs on `7c93da4`: CI `success`, Mobile CI `success`.
+- `origin/main` is an ancestor of `7c93da4`.
+- `docs/brain.md`'s header reads "written by mnemo 0.18.0"; its
+  "SECURITY" lines are the shipped rule and design facts, with no open
+  finding's detail (I read each match).
+- Task `v0181-3` set to `done`.
+
+**HANDOFF** (commit these two paths as their own commit, on
+`release-0.18.1`, before the `chore(plan)` sync):
+- `README.md`: a "What's new in v0.18.1" section; the example's
+  "current release is v0.18.1".
+- `index.html`: the pill and "These examples use" at v0.18.1; the
+  example string; Shipped's inspector line now names findings and tasks;
+  "Findings and tasks in the browser inspector" removed from Next.
+- Suggested message: `docs(site): v0.18.1 in the README and on the site`.
+
+**Then the release order:** the `chore(plan)` sync, fast-forward `main`,
+the annotated tag `v0.18.1`, and `WAITING:` at the approval stop. After the
+user's click: the after-tag checks (crates.io, PyPI, the GitHub Release,
+the site at v0.18.1; no mobile publish), then delete `release-0.18.1`.
