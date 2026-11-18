@@ -326,13 +326,6 @@ pre.wrap-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .pr { color: var(--code-c); user-select: none; }
 
 /* ---------- RECALL FORMULA ---------- */
-.formula { display: grid; grid-template-columns: auto 1fr auto repeat(3, 1fr) auto; gap: .8rem; align-items: stretch; }
-.formula .eq { font: 700 1.05rem var(--mono); align-self: center; color: var(--ink-2); padding-right: .3rem; }
-.fterm { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.1rem 1rem; position: relative; }
-.fterm + .fterm::before { content: "+"; position: absolute; left: -0.62rem; top: 50%; transform: translate(-50%, -50%); font: 700 1rem var(--mono); color: var(--ink-3); }
-.fterm .m { font: 600 .95rem var(--mono); color: var(--ink); margin-bottom: .35rem; }
-.fterm .m em { color: var(--accent-ink); font-style: normal; }
-.fterm p { font-size: .85rem; color: var(--ink-2); }
 
 /* ---------- SECURITY ---------- */
 .keyflow { display: grid; gap: .6rem; }
@@ -392,9 +385,6 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 @media (max-width: 980px) {
   .hero-grid, .split { grid-template-columns: 1fr; gap: 2.5rem; }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  .formula { grid-template-columns: 1fr 1fr; }
-  .formula .eq { grid-column: 1 / -1; padding: 0; }
-  .fterm + .fterm::before { display: none; }
   .flow { grid-template-columns: 1fr; }
   .flow .arrow { justify-self: center; transform: rotate(90deg); }
   .trio { grid-template-columns: 1fr; gap: 1.2rem; }
@@ -406,7 +396,7 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
 }
 @media (max-width: 560px) {
   section { padding: 4rem 0; }
-  .grid-4, .formula { grid-template-columns: 1fr; }
+  .grid-4 { grid-template-columns: 1fr; }
   .wrap, .nav-inner { padding-left: 16px; padding-right: 16px; }
   pre.code { font-size: .75rem; padding: 1rem; }
   .term pre { font-size: .72rem; padding: .9rem; }
@@ -499,6 +489,14 @@ footer { border-top: 1px solid var(--line); padding: 2rem 0 2.5rem; }
             <button class="copy" data-copy-target="onboard-text" type="button">Copy</button>
           </div>
         </div>
+        <div class="step">
+          <div class="step-head"><span class="num">3 · See what it remembers</span></div>
+          <div class="step-row">
+            <code><span class="p">$ </span><span id="inspect-text">mnemo inspect</span></code>
+            <span class="hint">opens in your browser, read-only</span>
+            <button class="copy" data-copy-target="inspect-text" type="button">Copy</button>
+          </div>
+        </div>
       </div>
 
       <div class="hero-foot">
@@ -537,6 +535,7 @@ staging-7 environment and is owned by the payments team.</pre>
     <div class="head">
       <p class="eyebrow">Why</p>
       <h2 class="title">Every session starts from zero</h2>
+      <p class="lead">MNemo doesn't compete with vector databases. It competes with <code>CLAUDE.md</code> and a notes folder.</p>
     </div>
     <div class="trio">
       <div>
@@ -590,8 +589,33 @@ staging-7 environment and is owned by the payments team.</pre>
   </div>
 </section>
 
+<!-- ================= LAYERS ================= -->
+<section id="layers" class="alt">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">Three layers</p>
+      <h2 class="title">Start with memory. The rest is there when you need it.</h2>
+      <p class="lead">One file, three things it does for you, each one built on the one before.</p>
+    </div>
+    <div class="trio">
+      <div class="yes">
+        <h3>1 · Memory you can search</h3>
+        <p>Every session is saved and searched by meaning and exact names, so "why did we decide that?" is one recall. Facts saved under a key replace their old version and keep their history.</p>
+      </div>
+      <div>
+        <h3>2 · Agents sharing work</h3>
+        <p>A planner, a worker and a reviewer in Claude Code, Cursor or a terminal share tasks, an inbox, claims and review findings through the same file. <code>mnemo inspect</code> lets you watch.</p>
+      </div>
+      <div>
+        <h3>3 · The engine underneath</h3>
+        <p>AES-256-GCM on every page, a write-ahead log, restorable snapshots, a built-in local model, about 1.5 KB per memory on disk. The same engine runs in your own apps, on desktops and phones.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ================= FEATURES ================= -->
-<section id="features" class="alt">
+<section id="features">
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">What you get</p>
@@ -644,7 +668,7 @@ staging-7 environment and is owned by the payments team.</pre>
 </section>
 
 <!-- ================= AGENT ================= -->
-<section id="agent">
+<section id="agent" class="alt">
   <div class="wrap split">
     <div>
       <p class="eyebrow">For agents</p>
@@ -670,7 +694,7 @@ staging-7 environment and is owned by the payments team.</pre>
 </section>
 
 <!-- ================= SECURITY ================= -->
-<section id="security" class="alt">
+<section id="security">
   <div class="wrap split">
     <div>
       <p class="eyebrow">Security</p>
@@ -706,7 +730,7 @@ staging-7 environment and is owned by the payments team.</pre>
 </section>
 
 <!-- ================= PERFORMANCE ================= -->
-<section id="performance">
+<section id="performance" class="alt">
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">Performance</p>
@@ -716,10 +740,10 @@ staging-7 environment and is owned by the payments team.</pre>
     <div class="grid grid-3">
       <div class="card stat"><div class="v">~3<span> ms</span></div><div class="l">Open a 10K-memory file</div><div class="d">With a key from the OS keychain: 0.4 ms at 1K memories, 30 ms at 100K. A passphrase adds ~15 ms for Argon2id, slow on purpose so guessing is expensive.</div></div>
       <div class="card stat"><div class="v">~2.5<span> ms</span></div><div class="l">Search, 100K memories</div><div class="d">Finds 98% of the true top 10 at the default settings. 2.2 ms at 10K and 0.2 ms at 1K, where every search is exact.</div></div>
-      <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">Memories share pages, vectors are stored at half precision, and saves write only what changed.</div></div>
+      <div class="card stat"><div class="v">~1.5<span> KB</span></div><div class="l">Disk per memory</div><div class="d">About 6 times smaller than before v0.11's format. Memories share pages, vectors are stored at half precision, and week-old session turns are compressed. Our own brain: 18,908 memories in 33 MB.</div></div>
     </div>
     <div class="proof" aria-label="Project facts">
-      <span><b>29</b> tagged releases</span>
+      <span><b>34</b> tagged releases</span>
       <span>Rust core, <b>no unsafe</b></span>
       <span>On <b>PyPI</b>, <b>crates.io</b>, <b>Swift PM</b> and <b>Maven Central</b></span>
       <span>Built using its own memory</span>
@@ -728,7 +752,7 @@ staging-7 environment and is owned by the payments team.</pre>
 </section>
 
 <!-- ================= LIBRARY ================= -->
-<section id="library" class="alt">
+<section id="library">
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">Also a library</p>
@@ -806,21 +830,12 @@ staging-7 environment and is owned by the payments team.</pre>
 <span class="pr">$ </span>mnemo mcp install --client claude-desktop agent.mnemo   <span class="c"># add it to an MCP client, no secret in the config</span></pre>
     </div>
 
-    <div class="formula" style="margin-top:2.4rem" aria-label="How recall ranks">
-      <div class="eq">score =</div>
-      <div class="fterm"><div class="m"><em>α</em> · similarity</div><p>How close the meaning is, combined with keyword matches for text queries.</p></div>
-      <div class="eq">+ similarity<br>× (</div>
-      <div class="fterm"><div class="m"><em>β</em> · recency</div><p>Fades with a 7-day half-life by default.</p></div>
-      <div class="fterm"><div class="m"><em>γ</em> · importance</div><p>A 0–1 weight set when the memory is stored.</p></div>
-      <div class="fterm"><div class="m"><em>δ</em> · uses</div><p>A capped boost for memories the agent keeps coming back to.</p></div>
-      <div class="eq">)</div>
-    </div>
-    <p class="lead" style="margin-top:1rem;font-size:.92rem">The bonuses are scaled by similarity, so an unrelated memory can't win by being new, important or popular. Weights can be set per query.</p>
+    <p class="lead" style="margin-top:1.6rem;font-size:.92rem">Recall ranks by meaning first; recency, importance and use only add to a memory that already matches, so an unrelated one can't win by being new or popular. <a href="https://github.com/toarchkumar/mnemo/tree/main/mnemo#recall">How it's scored</a>.</p>
   </div>
 </section>
 
 <!-- ================= ROADMAP ================= -->
-<section id="roadmap">
+<section id="roadmap" class="alt">
   <div class="wrap">
     <div class="head">
       <p class="eyebrow">Roadmap</p>
@@ -863,7 +878,7 @@ staging-7 environment and is owned by the payments team.</pre>
 </section>
 
 <!-- ================= CTA ================= -->
-<section class="cta alt">
+<section class="cta">
   <div class="wrap">
     <h2>Give your coding agent a memory</h2>
     <p>Free and open source under Apache-2.0. Two commands, and the next session starts where the last one stopped.</p>

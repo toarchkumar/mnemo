@@ -5,36 +5,63 @@
 [![crates.io](https://img.shields.io/crates/v/mnemo-engine)](https://crates.io/crates/mnemo-engine)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**Encrypted memory and cache for on-device AI agents, in one file, from desktop apps to phones. Written in Rust.**
+**Shared memory for your coding agents, in one encrypted file. Written in Rust.**
 
-MNemo gives an agent durable memory and a cache for expensive calls, inside a
-single encrypted `.mnemo` file. There's no server or vector database to run:
-copy the file and the memory comes with it.
+MNemo doesn't compete with vector databases. It competes with `CLAUDE.md`
+and a notes folder. It's a project's memory that every session can search,
+that several agents can share their work through, and that you can open
+and read. It's one encrypted `.mnemo` file inside `.git`, with no server
+and no account, and it's free.
 
-- **Memory that ranks like an agent thinks.** Four memory types (episodic,
-  semantic, procedural, working), recalled on similarity, recency, importance
-  and use, with per-agent scoping and expiry.
-- **Text in, text out.** Hand MNemo plain text. The CLI and the Python
-  package embed it themselves with a small built-in model (v0.15), or call
-  your own model, and check it's the one the file was built with.
-- **A result cache** for LLM responses, tool outputs and API calls: exact keys
-  or near-identical prompts, with namespaces, expiry and size limits.
-- **An MCP server built in**, so Claude Desktop, Cursor or any MCP client can
-  use the file as tools.
-- **Sets itself up in a project (v0.16).** `mnemo onboard` gives a git
-  repository one brain, wires Claude Code and Cursor to it, and adds hooks
-  that load the memory when a session starts and save the session before
-  it's compacted or ends.
-- **Agents coordinate through it (v0.17).** Several sessions on one
-  machine, in Claude Code, Cursor or a terminal, share a task queue with
-  dependencies, an inbox and claims, in the same encrypted file. You run
-  the agents; they remember and coordinate through MNemo.
-- **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM; commits
-  go through a write-ahead log; recent commits are kept as restorable
-  snapshots; OS file locks allow one writer and many readers, and shared
-  mode (v0.14) lets several processes and agents use one file in turn.
-  A new file's key is generated and kept in the OS keychain (v0.15), so
-  there's no passphrase to put in a config file.
+```sh
+curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh
+mnemo onboard     # in your repository: shows the plan, asks once
+mnemo inspect     # see what your agents remember, in your browser
+```
+
+It comes in three layers. Start with the first; the others are there
+when you need them.
+
+**1. Memory you can search.**
+- **Every session is saved** into its own thread, and searched by meaning
+  and keywords together, so "why did we decide X?" is one recall, not
+  scrolling. Exact names like `snapshot_list` or `v0.10.0` are found.
+- **Facts that change keep their history.** Save a fact under a key, like
+  `decision.release-order`, and the new version replaces the old one in
+  recall; every version stays in its history.
+- **It sets itself up.** `mnemo onboard` wires Claude Code and Cursor: the
+  MCP tools, and hooks that brief a new session and save it at the end.
+  One brain per repository, shared by every worktree and every client.
+
+**2. Agents sharing work.**
+- **Several sessions on one machine coordinate through the same file:** a
+  task queue with dependencies, an inbox, claims on files, and review
+  findings with their triage. You run the agents; they remember and
+  coordinate through MNemo.
+- **You can watch it.** `mnemo inspect` shows the memories, the tasks and
+  the findings in your browser, read-only. `mnemo export --git` writes a
+  backup you can commit and diff.
+
+**3. The engine underneath.**
+- **Encrypted and crash-safe.** Every page is sealed with AES-256-GCM;
+  commits go through a write-ahead log; recent commits are kept as
+  restorable snapshots; OS file locks allow one writer and many readers,
+  and shared mode lets several processes use one file in turn. The key is
+  generated and kept in the OS keychain, with a recovery code.
+- **Small on disk.** About 1.5 KB per memory at 100K memories, about 6 times
+  smaller than before v0.11's format: memories share pages, vectors are
+  stored at half precision, and saved conversation turns are compressed
+  once they're a week old. This repository's own brain holds 18,908
+  memories, almost all of them saved session turns, in 33 MB.
+- **Local all the way down.** A small built-in model embeds text on your
+  CPU; a result cache keeps LLM responses and tool outputs; an MCP server
+  is built in.
+- **The same engine in your own apps,** from Python, Rust, Swift and
+  Kotlin, on desktops and phones.
+
+**When `CLAUDE.md` is enough:** one session on a small project. MNemo pays
+off when there are many sessions to remember, or several agents sharing
+the work.
 
 Site: **https://toarchkumar.github.io/mnemo/**
 
@@ -77,16 +104,16 @@ both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
 Windows (x86_64); elsewhere, pip builds from source, without the keychain
 and the built-in embedder.
 
-iOS and Android (from v0.12.0; current 0.17.0):
+iOS and Android (from v0.12.0; current 0.18.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.17.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.18.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.17.0")
+implementation("io.github.toarchkumar:mnemo-android:0.18.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -113,6 +140,11 @@ its key in the OS keychain, installs the built-in model, and wires each
 client it finds: the MCP server, the hooks, and a short guide for the
 agent. Re-running it repairs what's missing, and `mnemo onboard --undo`
 removes what it wrote. `mnemo onboard --guide` prints the guide.
+
+To see what's in it, run `mnemo inspect`. It prints a link to a
+read-only page in your browser: search, each fact's history, and your
+agents' tasks and review findings. It reads the file once and writes
+nothing.
 
 For a file of your own, the CLI. `init` makes a key and keeps it in your OS keychain, and the built-in
 embedder fetches its model (91 MB) once, on first use:
