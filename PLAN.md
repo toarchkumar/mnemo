@@ -1,5 +1,12 @@
 # PLAN.md — MNemo planning & coordination (planner ↔ worker)
 
+> **ARCHIVE, frozen 2026-11-17 (HARNESS-DOGFOOD-1 Run 2, the user's decision).**
+> The project brain (`.git/mnemo/project.mnemo`) is the ledger now: tasks,
+> `spec.*`, `decision.*`, `status.*` and `report.*` facts, findings and the
+> project essence. See AGENTS.md, "The brain is the ledger", and the
+> public backup `docs/brain.md`. Nobody edits this file again; it's kept
+> for its history.
+
 > **Coordination file, tracked in git as a backup (since 2026-11-06). The repo
 > is public: unfixed security findings go in a gitignored `*.local.md` file,
 > not here.**
@@ -41635,3 +41642,139 @@ per-turn line. Awkward: none beyond the WAITING entry's.
 the annotated tag `v0.18.1`, and `WAITING:` at the approval stop. After the
 user's click: the after-tag checks (crates.io, PyPI, the GitHub Release,
 the site at v0.18.1; no mobile publish), then delete `release-0.18.1`.
+
+### 2026-11-17 — WORKER — WAITING — v0.18.1: the release approval click (run 44225322609)
+
+**What the user must do:** approve the release at
+https://github.com/toarchkumar/mnemo/actions/runs/44225322609, the step
+"approve the release (v0.18.1, mobile false)". All 19 jobs before it
+succeeded.
+
+**Done before the stop** (your HANDOFF and release order):
+1. `9bb778a` `docs(site): v0.18.1 in the README and on the site` (root
+   `README.md`, `index.html`), on its own.
+2. `863c6fe` `chore(plan): sync coordination files` (`PLAN.md`;
+   `reviewer_notes.md` had no change).
+3. `main` fast-forwarded `9cd5daf..863c6fe`, on the first try.
+4. The annotated tag `v0.18.1` ("MNemo 0.18.1") on `863c6fe`.
+
+**After the click:** the after-tag checks (crates.io, PyPI, the GitHub
+Release, the site at v0.18.1; no mobile publish), then a DONE, then
+deleting `release-0.18.1`.
+
+### 2026-11-17 — PLANNER-A — VERIFIED + DECISION + HANDOFF — v0.18.1 released; the README and site rework ships now, as a docs PR to `main`; v0.19.0 gets the inspector's date filter
+
+**Verified, v0.18.1** (after the user's approval click): release run
+44225322609 `success`; crates.io and PyPI at 0.18.1 (PyPI: 6 files); the
+GitHub Release `v0.18.1` published, 12 assets (no mobile, as planned);
+the site's pill reads v0.18.1; `mnemo-swift` stays at 0.18.0. Your DONE
+for the after-tag checks and the branch deletion is still to come; this
+entry doesn't replace it.
+
+**DECISION (the user, 2026-11-17: "1. Yes 2. Now. 3. Yes"):**
+1. The README and site rework below is approved as worded.
+2. It ships **now**, not with v0.19.0, as a docs-only PR to `main`: Pages
+   serves the site from `main`, and the root README isn't in any package,
+   so no release is needed.
+3. v0.19.0 adds a **date range filter** to `mnemo inspect`'s tabs (spec
+   comes with v0.19.0's dispatch).
+
+**HANDOFF** (after your release cleanup; a branch from `main`, one PR,
+merged with CI green):
+- `README.md`: the top rewritten as the comparison line ("competes with
+  `CLAUDE.md` and a notes folder"), a three-command start (install,
+  `onboard`, `inspect`), three layers (memory you can search; agents
+  sharing work; the engine underneath, with the measured size line:
+  about 1.5 KB per memory at 100K, the v0.11 numbers, and this brain's
+  18,908 memories in 33 MB), and "When `CLAUDE.md` is enough". Quick start
+  gains an `inspect` paragraph. The iOS and Android lines now say 0.18.0
+  (they said 0.17.0).
+- `index.html`: `mnemo inspect` as hero step 3; the comparison line under
+  "Every session starts from zero"; a new "Three layers" section after
+  "How it works", with the later sections' `alt` backgrounds flipped so
+  they still alternate; the size card names the 6× and our brain; 34
+  tagged releases (it said 29); the recall score formula (its grid was
+  broken, see the user's screenshot) replaced by one sentence and a link
+  to `mnemo/README.md#recall`, with its CSS removed.
+- Suggested message: `docs(site): lead with shared memory for coding
+  agents, in three layers; mnemo inspect as a key command`.
+- Before merging, please check the page at phone width (the hero now
+  has three steps) and that every `#` link still lands.
+
+**Noted for v0.19.0's dispatch:** a screenshot of the inspector's
+Findings tab, taken from a demo brain only (never the project brain),
+for the README and the site.
+
+### 2026-11-17 — WORKER — DONE — v0.18.1 released (tag `v0.18.1` at `863c6fe`, run 44225322609)
+
+- **The release run:** after the user's click it **succeeded**. The skips
+  were the 5 mobile build, publish and verify jobs, as with mobile off.
+- **crates.io:** `max_version` 0.18.1.
+- **PyPI:** `mnemo-engine` 0.18.1, 6 files.
+- **The GitHub Release `v0.18.1`:** not a draft, not a prerelease, 12
+  assets (the 5 CLI binaries, the 5 wheels, the sdist, `SHA256SUMS`). No
+  `.aar`, no XCFramework.
+- **`mnemo-swift`:** newest tag `0.18.0`, unchanged.
+- **The push runs on `863c6fe`:** CI, Mobile CI, Android emulator, Release
+  and the Pages build all succeeded. The live site shows v0.18.1.
+- **`release-0.18.1`** is deleted after this entry (it equals `main`).
+- **The `WAITING:` pointer's first real use:** the approval stop above.
+- Nothing installed on this Mac; the brain wasn't touched by the checks.
+
+**Next:** your HANDOFF (the README and site rework) as a docs PR from
+`main`.
+
+**The tally:** found by your VERIFIED entry. Awkward: none.
+
+### 2026-11-17 — WORKER — DONE — the README and site rework (PR 134, `9fb1191` on `main`)
+
+- **Your HANDOFF** (`README.md`, `index.html`) as one docs-only PR from
+  `main`, squash-merged as `9fb1191`; branch deleted. No CI ran: the
+  workflows' `paths-ignore` skips a change to only these files (as for
+  PR 124). The Pages build of `9fb1191` succeeded. The live page has
+  "Three layers", "See what it remembers" (`mnemo inspect`) and "34 tagged
+  releases".
+- **Every `#` link lands:**
+  - all 18 distinct in-page anchors in `index.html` have their `id`,
+    including the theme icons `#i-sun` and `#i-moon`, built in script;
+  - `mnemo/README.md#security-model` resolves to a heading;
+  - the recall link `tree/main/mnemo#recall` matches `### Recall` in
+    `mnemo/README.md`.
+- **Phone width,** with headless Chrome (no browser tool in this
+  session): the page in a 390 px iframe, read in 11 slices.
+  - The hero's three steps stack, every section fits, and the alternating
+    backgrounds hold.
+  - The document's `scrollWidth` equals its `clientWidth` (390), so
+    nothing scrolls sideways. The only wider elements are syntax spans in
+    code blocks, which scroll inside their boxes.
+  - At 1280 px the hero shows the three steps beside the demo.
+- **Numbers checked:**
+  - `git tag -l 'v*'`: 34 (GitHub lists 33 releases);
+  - the brain file is 33,398,784 bytes (33.4 MB);
+  - `mnemo about` now counts 18,911 memories; the text's 18,908 was taken
+    a little earlier, as the brain grows.
+- **For you, not changed:** the roadmap's "Next" card has "Faster first
+  search in large brains" and "After that" has "A faster first search
+  after opening, by loading only what a search needs". They read as one
+  item twice. Both were on the live site before this PR.
+
+**The tally:** found by your VERIFIED + HANDOFF entry. Awkward: no browser
+tool here, so the phone check used headless Chrome in an iframe (a
+headless window can't be made 390 px wide).
+
+### 2026-11-17 — PLANNER-A — DECISION + DISPATCH — Run 2 starts (the user: "Yes"); this is the last entry; v0.19.0 is in the brain
+
+**The user (2026-11-17): "Yes"** to Run 2 with the rule text now in
+AGENTS.md ("The brain is the ledger"). v0.19.0's go was the user's "Yes"
+of the same day (PERF-2 after v0.18.0).
+
+**This file and `reviewer_notes.md` are frozen** from here, with a head
+note in each. Everything that follows is in the brain:
+- the decision: `decision.run-2`;
+- the specs: `spec.perf-2`, `spec.inspect-date-filter`;
+- the tasks: `v0190-0` (setup, the AGENTS.md commit and this file's last
+  commit) to `v0190-6` (READY), chained with `--after`;
+- the project essence: state, next and decisions.
+
+**The brain-lookup tally** (74 lookups through v0.18.1: 29 found, 29
+partial, 16 not stored, 0 not found) carries on in the tasks' reports.

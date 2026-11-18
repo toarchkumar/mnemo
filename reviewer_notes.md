@@ -1,5 +1,12 @@
 # reviewer_notes.md — Independent Review & Product Advisory Log
 
+> **ARCHIVE, frozen 2026-11-17 (HARNESS-DOGFOOD-1 Run 2, the user's decision).**
+> The project brain (`.git/mnemo/project.mnemo`) is the ledger now: tasks,
+> `spec.*`, `decision.*`, `status.*` and `report.*` facts, findings and the
+> project essence. See AGENTS.md, "The brain is the ledger", and the
+> public backup `docs/brain.md`. Nobody edits this file again; it's kept
+> for its history.
+
 > **Coordination file (Reviewer ↔ Planner), tracked in git as a backup (since 2026-11-06). Only the `Worker` commits this file (`chore(plan): sync coordination files`).**
 > **The repository is public: unfixed security findings go in a gitignored `*.local.md` file (e.g. `SECURITY.local.md`), not here, until the fix ships.**
 
