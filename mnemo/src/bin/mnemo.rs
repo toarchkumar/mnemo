@@ -4695,15 +4695,13 @@ fn run() -> std::result::Result<(), String> {
                     slug,
                     refs,
                 } => {
-                    let spec = mnemo_engine::TaskSpec {
-                        title: title.clone(),
-                        body: body.clone(),
-                        role: for_role.clone(),
-                        after: after.clone(),
-                        pre_approved: *pre_approved,
-                        slug: slug.clone(),
-                        refs: refs.clone(),
-                    };
+                    let mut spec = mnemo_engine::TaskSpec::new(title.clone());
+                    spec.body = body.clone();
+                    spec.role = for_role.clone();
+                    spec.after = after.clone();
+                    spec.pre_approved = *pre_approved;
+                    spec.slug = slug.clone();
+                    spec.refs = refs.clone();
                     let (t, o) = db.task_add(&spec).map_err(fmt)?;
                     let o = match o {
                         mnemo_engine::WriteOutcome::Added => "added",
@@ -4881,14 +4879,14 @@ fn run() -> std::result::Result<(), String> {
                     body,
                     refs,
                 } => {
-                    let spec = mnemo_engine::FindingSpec {
-                        id: id.clone(),
-                        category: category.clone(),
-                        priority: priority.clone(),
-                        title: title.clone(),
-                        body: body.clone(),
-                        refs: refs.clone(),
-                    };
+                    let mut spec = mnemo_engine::FindingSpec::new(
+                        id.clone(),
+                        category.clone(),
+                        priority.clone(),
+                        title.clone(),
+                    );
+                    spec.body = body.clone();
+                    spec.refs = refs.clone();
                     let f = db.finding_add(&spec).map_err(fmt)?;
                     println!("{}\t{}", f.id, f.status);
                     Ok(())
@@ -4910,12 +4908,11 @@ fn run() -> std::result::Result<(), String> {
                     priority,
                     format,
                 } => {
-                    let filter = mnemo_engine::FindingFilter {
-                        status: status.clone(),
-                        batch: batch.clone(),
-                        category: category.clone(),
-                        priority: priority.clone(),
-                    };
+                    let mut filter = mnemo_engine::FindingFilter::default();
+                    filter.status = status.clone();
+                    filter.batch = batch.clone();
+                    filter.category = category.clone();
+                    filter.priority = priority.clone();
                     let fs = db.findings(&filter).map_err(fmt)?;
                     match format {
                         OutputFormat::Json => println!(

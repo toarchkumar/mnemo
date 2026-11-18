@@ -71,10 +71,11 @@ fn a_v0_16_compaction_hides_nothing_from_v0_17() {
         )
         .unwrap();
         db.set_author(Some("planner-a".into()));
-        db.task_add(&TaskSpec {
-            title: "Ship it".into(),
-            role: Some("worker".into()),
-            ..Default::default()
+        db.task_add(&{
+            let mut built = TaskSpec::default();
+            built.title = "Ship it".into();
+            built.role = Some("worker".into());
+            built
         })
         .unwrap();
         db.post("worker-a", "staging seven is up", "", &[], None, None, None)

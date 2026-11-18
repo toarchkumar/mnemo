@@ -880,7 +880,10 @@ impl Embedder for PyFnEmbedder {
     }
 
     fn embed_query(&self, texts: &[&str]) -> mnemo_core::Result<Vec<Vec<f32>>> {
-        call_py_embedder(self.query_callback.as_ref().unwrap_or(&self.callback), texts)
+        call_py_embedder(
+            self.query_callback.as_ref().unwrap_or(&self.callback),
+            texts,
+        )
     }
 }
 
@@ -2215,7 +2218,11 @@ impl Mnemo {
     /// needing any external documentation. Each entry is returned as a dict
     /// matching the shape of `recall`/`get` results.
     #[pyo3(signature = (*, visibility=None))]
-    fn about(&mut self, py: Python<'_>, visibility: Option<Vec<String>>) -> PyResult<Vec<PyObject>> {
+    fn about(
+        &mut self,
+        py: Python<'_>,
+        visibility: Option<Vec<String>>,
+    ) -> PyResult<Vec<PyObject>> {
         let vis = vis_arg(visibility)?;
         let mut out = Vec::new();
         for m in self.rd(move |db| db.about_in(vis))? {
@@ -2458,7 +2465,8 @@ impl Mnemo {
         visibility: Option<Vec<String>>,
     ) -> PyResult<Vec<PyObject>> {
         let vis = vis_arg(visibility)?;
-        let msgs = self.rd(move |db| db.inbox_in(agent.as_deref(), role.as_deref(), unread_only, vis))?;
+        let msgs =
+            self.rd(move |db| db.inbox_in(agent.as_deref(), role.as_deref(), unread_only, vis))?;
         msgs.iter().map(|m| message_dict(py, m)).collect()
     }
 
@@ -2467,7 +2475,11 @@ impl Mnemo {
     /// `since`, `text`, `whose` and `visibility`. Private records only when
     /// `visibility` asks (`["private"]`, `["all"]`).
     #[pyo3(signature = (*, visibility=None))]
-    fn stale(&mut self, py: Python<'_>, visibility: Option<Vec<String>>) -> PyResult<Vec<PyObject>> {
+    fn stale(
+        &mut self,
+        py: Python<'_>,
+        visibility: Option<Vec<String>>,
+    ) -> PyResult<Vec<PyObject>> {
         let vis = vis_arg(visibility)?;
         let rows = self.rd(|db| db.stale())?;
         rows.iter()
@@ -2501,7 +2513,10 @@ impl Mnemo {
     fn mark_seen(&mut self, ids: Vec<String>) -> PyResult<usize> {
         let ids = ids
             .iter()
-            .map(|i| Ulid::from_string(i).map_err(|_| PyValueError::new_err(format!("invalid ULID '{i}'"))))
+            .map(|i| {
+                Ulid::from_string(i)
+                    .map_err(|_| PyValueError::new_err(format!("invalid ULID '{i}'")))
+            })
             .collect::<PyResult<Vec<_>>>()?;
         self.wr(move |db| db.mark_seen(&ids))
     }
@@ -2509,7 +2524,12 @@ impl Mnemo {
     /// 13a (13.1): ack a message, with an optional note. Returns `"acked"`
     /// or `"unchanged"`.
     #[pyo3(signature = (id, note=None, *, by=None))]
-    fn ack(&mut self, id: &str, note: Option<String>, by: Option<String>) -> PyResult<&'static str> {
+    fn ack(
+        &mut self,
+        id: &str,
+        note: Option<String>,
+        by: Option<String>,
+    ) -> PyResult<&'static str> {
         let ulid = Ulid::from_string(id)
             .map_err(|_| PyValueError::new_err(format!("invalid ULID '{id}'")))?;
         let o = self.wr(move |db| db.ack(&ulid, note.as_deref(), by.as_deref()))?;
@@ -2535,14 +2555,16 @@ impl Mnemo {
         slug: Option<String>,
         refs: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
-        let spec = mnemo_core::TaskSpec {
-            title,
-            body: body.to_string(),
-            role,
-            after: after.unwrap_or_default(),
-            pre_approved,
-            slug,
-            refs: refs.unwrap_or_default(),
+        let spec = {
+            let mut built = mnemo_core::TaskSpec::default();
+            built.title = title;
+            built.body = body.to_string();
+            built.role = role;
+            built.after = after.unwrap_or_default();
+            built.pre_approved = pre_approved;
+            built.slug = slug;
+            built.refs = refs.unwrap_or_default();
+            built
         };
         let (t, o) = self.wr(move |db| db.task_add(&spec))?;
         let d = PyDict::new_bound(py);
@@ -2650,13 +2672,15 @@ impl Mnemo {
         body: &str,
         refs: Option<Vec<String>>,
     ) -> PyResult<PyObject> {
-        let spec = mnemo_core::FindingSpec {
-            id,
-            category,
-            priority,
-            title,
-            body: body.to_string(),
-            refs: refs.unwrap_or_default(),
+        let spec = {
+            let mut built = mnemo_core::FindingSpec::default();
+            built.id = id;
+            built.category = category;
+            built.priority = priority;
+            built.title = title;
+            built.body = body.to_string();
+            built.refs = refs.unwrap_or_default();
+            built
         };
         let f = self.wr(move |db| db.finding_add(&spec))?;
         finding_dict(py, &f)
@@ -2694,11 +2718,13 @@ impl Mnemo {
         category: Option<String>,
         priority: Option<String>,
     ) -> PyResult<Vec<PyObject>> {
-        let filter = mnemo_core::FindingFilter {
-            status,
-            batch,
-            category,
-            priority,
+        let filter = {
+            let mut built = mnemo_core::FindingFilter::default();
+            built.status = status;
+            built.batch = batch;
+            built.category = category;
+            built.priority = priority;
+            built
         };
         let fs = self.rd(move |db| db.findings(&filter))?;
         fs.iter().map(|f| finding_dict(py, f)).collect()
@@ -3660,18 +3686,17 @@ fn open_through_chain(
         )));
     }
     let store = keys::default_store();
-    let found = match keys::resolve(path, store.as_deref(), keys::CLI_COMMAND_TIMEOUT)
-        .map_err(to_py)?
-    {
-        Resolution::Found(f) => f,
-        Resolution::NoSource { .. } => {
-            return Err(PyValueError::new_err(format!(
-                "no secret for {path}: pass a passphrase, set MNEMO_PASSPHRASE, MNEMO_KEY, \
+    let found =
+        match keys::resolve(path, store.as_deref(), keys::CLI_COMMAND_TIMEOUT).map_err(to_py)? {
+            Resolution::Found(f) => f,
+            Resolution::NoSource { .. } => {
+                return Err(PyValueError::new_err(format!(
+                    "no secret for {path}: pass a passphrase, set MNEMO_PASSPHRASE, MNEMO_KEY, \
                  MNEMO_KEY_FILE or MNEMO_KEY_COMMAND, or keep its key in the keychain \
                  (`mnemo init`, `mnemo unlock`)"
-            )))
-        }
-    };
+                )))
+            }
+        };
     for n in &found.notes {
         warn_user(py, &format!("mnemo: {n}"));
     }

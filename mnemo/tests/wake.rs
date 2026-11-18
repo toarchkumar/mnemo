@@ -31,11 +31,12 @@ fn db(dir: &tempfile::TempDir, manifest: bool) -> Mnemo {
 
 fn task(db: &mut Mnemo, title: &str, pre: bool) {
     db.set_author(Some("planner-a".into()));
-    db.task_add(&TaskSpec {
-        title: title.into(),
-        role: Some("worker".into()),
-        pre_approved: pre,
-        ..Default::default()
+    db.task_add(&{
+        let mut built = TaskSpec::default();
+        built.title = title.into();
+        built.role = Some("worker".into());
+        built.pre_approved = pre;
+        built
     })
     .unwrap();
 }
@@ -402,10 +403,11 @@ fn a_ready_task_is_new_to_its_creator_once_per_ready() {
     // A creator of the task's own role was shown it queued (`seen_by`);
     // ready, it's still new to it as one to close.
     db.set_author(Some("worker-a".into()));
-    db.task_add(&TaskSpec {
-        title: "Tidy the tests".into(),
-        role: Some("worker".into()),
-        ..Default::default()
+    db.task_add(&{
+        let mut built = TaskSpec::default();
+        built.title = "Tidy the tests".into();
+        built.role = Some("worker".into());
+        built
     })
     .unwrap();
     let w = db.new_work(Some("worker-a"), Some("worker")).unwrap();

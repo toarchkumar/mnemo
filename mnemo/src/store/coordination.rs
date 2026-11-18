@@ -50,7 +50,8 @@ impl Mnemo {
 }
 
 /// 13a (13.1): one message between agents, as [`Mnemo::inbox`] returns it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Message {
     /// The record's id.
     pub id: Ulid,
@@ -670,7 +671,8 @@ pub enum ClaimStatus {
 }
 
 /// 13a (13.3): a live claim, as [`Mnemo::claims`] lists it (no token).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Claim {
     /// What's claimed.
     pub topic: String,
@@ -696,6 +698,7 @@ pub enum Alive {
 
 /// 13a (13.3): one agent, as [`Mnemo::who`] lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Presence {
     /// The agent id.
     pub agent: String,
@@ -1137,6 +1140,7 @@ use crate::memory::{
 
 /// 13a (13.1): a task to add ([`Mnemo::task_add`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TaskSpec {
     /// One line, at most 200 bytes.
     pub title: String,
@@ -1155,12 +1159,25 @@ pub struct TaskSpec {
     pub refs: Vec<String>,
 }
 
+impl TaskSpec {
+    /// v0.19.0: a task titled `title`, for any role, waiting for nothing.
+    /// The type is `#[non_exhaustive]`, so outside this crate set the other
+    /// fields after this (`spec.role = Some("worker".into())`).
+    pub fn new(title: impl Into<String>) -> Self {
+        TaskSpec {
+            title: title.into(),
+            ..Default::default()
+        }
+    }
+}
+
 /// v0.18.1: the most refs a task carries, and the longest one, in bytes.
 const TASK_REFS_MAX: usize = 32;
 const TASK_REF_MAX: usize = 200;
 
 /// 13a (13.1): one task.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Task {
     /// The record's id.
     pub id: Ulid,
@@ -1254,6 +1271,7 @@ impl Task {
 
 /// 13a (13.1): a task [`Mnemo::task_next`] took, with its claim's token.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct TaskTaken {
     /// The task, now `active` and this agent's.
     pub task: Task,
@@ -1269,6 +1287,7 @@ pub struct TaskTaken {
 /// 13a (13.1): the claim an owner holds after a [`Mnemo::task_update`]
 /// (RB-012.1), so it always has the current token.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TaskClaim {
     /// The `task:<slug>` claim's token.
     pub token: String,
@@ -1882,6 +1901,7 @@ use crate::memory::{
 /// 13a (13.1b): what's new for an agent since it was last shown
 /// ([`Mnemo::new_work`]), for the per-turn hook.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct NewWork {
     /// Unread messages to it, its role or everyone, not yet `seen`.
     pub messages: Vec<Message>,
@@ -2276,6 +2296,7 @@ impl Mnemo {
 
 /// 13a (13.6): one stale record ([`Mnemo::stale`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Stale {
     /// The record's id.
     pub id: Ulid,
@@ -2356,6 +2377,7 @@ impl Mnemo {
 
 /// 13a (ABOUT-COUNT): the live records by what they are.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct KindCounts {
     /// Facts and onboarding records (what recall and `about` read).
     pub facts: usize,
