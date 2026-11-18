@@ -224,6 +224,13 @@ enum ServerDb {
 }
 
 impl ServerDb {
+    fn notices(&self) -> &[String] {
+        match self {
+            ServerDb::Plain(db) => db.notices(),
+            ServerDb::Shared(s) => s.notices(),
+        }
+    }
+
     fn len(&mut self) -> Result<usize> {
         match self {
             ServerDb::Plain(db) => Ok(db.len()),
@@ -1083,6 +1090,9 @@ fn serve_inner<R: Read, W: Write>(
     // using it: later requests get an error, and nothing is flushed at
     // shutdown (the file keeps its last committed state).
     let mut broken = false;
+    // RB-015.1: notices the handle meets during a call (a damaged index on
+    // the first recall) are logged once, like the ones at start.
+    let mut notices_shown = db.notices().len();
     for line in reader.lines() {
         let line = line.map_err(MnemoError::Io)?;
         let trimmed = line.trim();
@@ -1123,6 +1133,10 @@ fn serve_inner<R: Read, W: Write>(
                         }
                     }
                 };
+                for n in db.notices().iter().skip(notices_shown) {
+                    eprintln!("mnemo mcp: note: {n}");
+                }
+                notices_shown = notices_shown.max(db.notices().len());
                 if is_notification {
                     // Per JSON-RPC 2.0: notifications get no response.
                     continue;

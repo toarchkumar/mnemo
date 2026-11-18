@@ -65,3 +65,10 @@ path = "fuzz_targets/fuzz_mcp_frame.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_index_layout2"
+path = "fuzz_targets/fuzz_index_layout2.rs"
+test = false
+doc = false
+bench = false

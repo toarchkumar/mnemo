@@ -39,8 +39,14 @@ impl Mnemo {
             .unwrap_or(V9_ANN_MIN_FACTS);
         #[cfg(not(feature = "dev-hooks"))]
         let min_facts = V9_ANN_MIN_FACTS;
+        // A build replaces an index that was never loaded: track its delta
+        // runs first, so this commit frees them with the base.
+        if self.ann_unloaded && self.is_v9() {
+            self.track_index_chain();
+        }
         if self.is_v9() && mems.len() < min_facts {
-            if self.ann.is_some() || self.ann_unloaded {
+            if self.ann.is_some() || self.ann_unloaded || self.index_repair {
+                self.index_repair = false;
                 self.ann = None;
                 self.ann_unloaded = false;
                 self.dirty_index = true;
@@ -64,6 +70,7 @@ impl Mnemo {
         }
         self.ann = Some(idx);
         self.ann_unloaded = false;
+        self.index_repair = false;
         self.dirty_index = true;
         self.index_persist.forced = true;
         Ok(info)
@@ -91,9 +98,18 @@ impl Mnemo {
         if self.read_only {
             return;
         }
+        if self.ann_unloaded && self.is_v9() {
+            self.track_index_chain();
+        }
         if self.ann.is_some() || self.ann_unloaded {
             self.ann = None;
             self.ann_unloaded = false;
+            self.dirty_index = true;
+            self.index_persist.forced = true;
+        }
+        // RB-015.1: dropping a damaged index persists "no index" too.
+        if self.index_repair {
+            self.index_repair = false;
             self.dirty_index = true;
             self.index_persist.forced = true;
         }
@@ -186,28 +202,14 @@ impl Mnemo {
             return Ok(());
         }
         self.ann_unloaded = false;
-        self.ann = load_index(
-            &mut self.pager,
-            self.header.index_start,
-            self.header.index_pages,
-            self.header.index_len,
-            self.header.index_gen,
-            self.dimensions,
-        )?;
-        // FMT-9c.3: replay the v9 index delta chain, then record changes.
-        if self.is_v9() {
-            if let Some(ann) = self.ann.as_mut() {
-                let (chain, n) = apply_index_chain(&mut self.pager, ann, self.header.index_delta)?;
-                self.index_chain = chain;
-                self.index_chain_ops = n;
-                ann.enable_log();
-            } else if self.header.index_pages > 0 {
-                // FMT-9f (the 9d leak): an unknown-layout base loads as no
-                // index; still track its delta runs, so rebuilding or
-                // dropping the index frees them along with the base.
-                self.index_chain = index_chain_runs(&mut self.pager, self.header.index_delta);
-                self.index_chain_ops = 0;
-            }
+        match self.load_persisted_index() {
+            Ok(()) => {}
+            // RB-015.1 (v0.19.1): the index is derived data. A run that
+            // doesn't decrypt or decode loads as no index, like a layout
+            // this build doesn't know: recall scans exactly, the handle
+            // says so once, and a read-write handle rebuilds it.
+            Err(e) if index_damage(&e) => self.index_damaged(&e),
+            Err(e) => return Err(e),
         }
         let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
         self.reconcile_ann_with_catalog(index_start, index_gen)?;
@@ -233,6 +235,89 @@ impl Mnemo {
                 self.dirty_index = true;
                 self.index_persist.changes += pruned;
             }
+        }
+        Ok(())
+    }
+
+    /// Load the header's index run and replay its delta chain into
+    /// `self.ann`, or leave `self.ann` as `None` (no index, or a layout this
+    /// build doesn't know). Nothing is set when it fails.
+    fn load_persisted_index(&mut self) -> Result<()> {
+        let mut ann = load_index(
+            &mut self.pager,
+            self.header.index_start,
+            self.header.index_pages,
+            self.header.index_len,
+            self.header.index_gen,
+            self.dimensions,
+        )?;
+        // FMT-9c.3: replay the v9 index delta chain, then record changes.
+        if self.is_v9() {
+            if let Some(a) = ann.as_mut() {
+                let (chain, n) = apply_index_chain(&mut self.pager, a, self.header.index_delta)?;
+                a.enable_log();
+                self.index_chain = chain;
+                self.index_chain_ops = n;
+            } else if self.header.index_pages > 0 {
+                // FMT-9f (the 9d leak): an unknown-layout base loads as no
+                // index; still track its delta runs, so rebuilding or
+                // dropping the index frees them along with the base.
+                self.track_index_chain();
+            }
+        }
+        self.ann = ann;
+        Ok(())
+    }
+
+    /// FMT-9f: the delta runs of an index that isn't loaded, so the next
+    /// build or drop frees them with the base.
+    fn track_index_chain(&mut self) {
+        self.index_chain = index_chain_runs(&mut self.pager, self.header.index_delta);
+        self.index_chain_ops = 0;
+    }
+
+    /// RB-015.1: the persisted index didn't load. Recall scans exactly; the
+    /// runs stay tracked so a rebuild frees them; the handle's next commit
+    /// that writes rebuilds the index.
+    fn index_damaged(&mut self, e: &MnemoError) {
+        self.ann = None;
+        if self.is_v9() {
+            self.track_index_chain();
+        }
+        // Set on a read-only handle too: a shared handle is read-only only
+        // inside a read window, and its next write window repairs it.
+        self.index_repair = true;
+        let next = if self.read_only {
+            "`mnemo index --rebuild` repairs it"
+        } else {
+            "this handle rebuilds it with its next write, or `mnemo index --rebuild` does now"
+        };
+        let text = format!(
+            "the approximate index is damaged ({e}), so recall scans every memory; \
+             your memories are intact, and {next}"
+        );
+        if !self.notices.contains(&text) {
+            self.notices.push(text);
+        }
+    }
+
+    /// RB-015.1: in a commit that writes, rebuild the index a damaged run
+    /// left this handle without. A file too small for an index (or with no
+    /// facts left) drops the damaged run instead.
+    pub(super) fn repair_index(&mut self) -> Result<()> {
+        if !self.index_repair || self.read_only {
+            return Ok(());
+        }
+        self.index_repair = false;
+        match self.build_index() {
+            Ok(_) => {}
+            Err(MnemoError::Invalid(_)) => {}
+            Err(e) => return Err(e),
+        }
+        if self.ann.is_none() {
+            // Persisted as "no index": frees the damaged base and its chain.
+            self.dirty_index = true;
+            self.index_persist.forced = true;
         }
         Ok(())
     }

@@ -8,6 +8,39 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A damaged ANN index no longer fails recall** (RB-015.1). The index is
+  derived data, so a run that doesn't decrypt or decode now loads as no
+  index, as an unknown layout already did: recall scans every memory and
+  gets the right answer, the handle says so once (`notices()`; the CLI and
+  `mnemo mcp` print it), and the handle's next commit that writes rebuilds
+  the index. Before, the first recall on each handle failed with
+  `PageAuthFailed` naming an index page, later recalls on the same handle
+  went exact without a word, and a write that had to load the index failed.
+  Not new in v0.19: v0.18 did the same.
+- **`mnemo index --rebuild` (and `--drop`) on a fresh handle frees the old
+  index's delta runs.** A rebuild that didn't load the index first left
+  them allocated until the next compaction.
+- **The inspector's `#tab` links** open a tab only for its own names, so
+  `#__proto__` or `#toString` no longer leaves the page with no tab
+  (RB-015.2).
+
+### Added
+
+- **`Mnemo::verify_index`** (and `verify_index()` in Python) reads the
+  persisted index and its delta runs from disk, apart from the records:
+  `IndexCheck::None`, `Ok { vectors, delta_runs }`, `UnknownLayout` or
+  `Damaged`. `mnemo verify` prints it on its own line.
+- **A fuzz target for the index's layout-2 decoder**, `fuzz_index_layout2`,
+  in CI's fuzz smoke and the weekly run, from noise and from edits to a
+  valid run (RB-015.2).
+
+### Changed
+
+- CI's `compat (v0.18.1)` job also has the old build recall and import on a
+  20,100-note file before its own `index` (RB-015.2).
+
 ## [0.19.0] — 2026-11-18
 
 A faster first search after opening (PERF-2): 11.5 ms at 100K memories,

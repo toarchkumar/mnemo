@@ -442,7 +442,8 @@ async function header() {
   } catch (e) { fail(e); }
 }
 function selectTab(name) {
-  if (!views[name]) return false;
+  // RB-015.2: own keys only, so `#__proto__` or `#toString` opens no tab.
+  if (!Object.hasOwn(views, name)) return false;
   view = name;
   for (const x of document.querySelectorAll("#tabs button")) x.classList.toggle("on", x.dataset.view === name);
   return true;

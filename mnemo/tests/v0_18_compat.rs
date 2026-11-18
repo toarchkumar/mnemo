@@ -152,11 +152,31 @@ fn an_older_builds_index_is_read_and_rewritten() {
     let p = dir.path().join("l1.mnemo");
     indexed_file(&p, 20_100);
     let path = p.to_str().unwrap();
+    // RB-015.2 item 2: at this size too, the old build recalls (exactly)
+    // and writes on the layout-2 file before it builds its own index.
+    let out = run_old(
+        &old,
+        &["recall", path, "--query", &csv(&vector(42)), "--top-k", "3"],
+    );
+    assert!(out.contains("note 42"), "v0.18.1 recall: {out}");
+    let jsonl = dir.path().join("old.jsonl");
+    let mine = vec![9.0, -3.0, 4.0, 0.25];
+    std::fs::write(
+        &jsonl,
+        format!(
+            "{{\"content\": \"written by 0.18.1\", \"vector\": [{}]}}\n",
+            csv(&mine)
+        ),
+    )
+    .unwrap();
+    run_old(&old, &["import", path, jsonl.to_str().unwrap()]);
+    assert_eq!(layout_of(&p), 2, "the old build left the index alone");
     run_old(&old, &["index", path]);
     assert_eq!(layout_of(&p), 1, "v0.18.1 writes layout 1");
     let mut db = Mnemo::open(&p, PASS).unwrap();
     assert!(db.has_index());
     assert_eq!(top(&mut db, &vector(7_777)), "note 7777");
+    assert_eq!(top(&mut db, &mine), "written by 0.18.1");
     // The next base this build writes is layout 2, with the same results.
     db.__rewrite_index_base_for_testing().unwrap();
     db.close().unwrap();

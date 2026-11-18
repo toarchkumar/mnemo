@@ -2285,7 +2285,22 @@ fn warn_notices(db: Mnemo) -> Mnemo {
     for n in db.notices() {
         eprintln!("warning: {n}");
     }
+    NOTICES_SHOWN.store(db.notices().len(), std::sync::atomic::Ordering::Relaxed);
     db
+}
+
+/// How many of the open handle's notices [`warn_notices`] has shown.
+static NOTICES_SHOWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// RB-015.1: say what the handle found to tell its owner after it opened
+/// (a damaged index, met on the first recall), once, on stderr.
+fn warn_late_notices(db: &Mnemo) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let shown = NOTICES_SHOWN.load(Relaxed);
+    for n in db.notices().iter().skip(shown) {
+        eprintln!("warning: {n}");
+    }
+    NOTICES_SHOWN.store(shown.max(db.notices().len()), Relaxed);
 }
 
 /// 12.3: where this command's secret came from, and the next source of the
@@ -3597,6 +3612,26 @@ fn run() -> std::result::Result<(), String> {
             if let Some(line) = mistagged_line(&mut db) {
                 eprintln!("warning: {line}");
             }
+            // RB-015.1: the ANN index, apart from the records.
+            match db.verify_index().map_err(fmt)? {
+                mnemo_engine::IndexCheck::None => {}
+                mnemo_engine::IndexCheck::Ok {
+                    vectors,
+                    delta_runs,
+                } => {
+                    println!("verified the ANN index — {vectors} vectors, {delta_runs} delta runs")
+                }
+                mnemo_engine::IndexCheck::UnknownLayout(l) => eprintln!(
+                    "note: the ANN index has layout {l}, which a newer mnemo wrote; this \
+                     build recalls exactly. `mnemo index --rebuild` writes one it reads"
+                ),
+                mnemo_engine::IndexCheck::Damaged(why) => eprintln!(
+                    "warning: the ANN index is damaged ({why}), so recall scans every memory. \
+                     Your memories are intact (checked above); `mnemo index --rebuild` \
+                     repairs the index"
+                ),
+                _ => {}
+            }
         }
         Command::Import {
             path,
@@ -4505,6 +4540,7 @@ fn run() -> std::result::Result<(), String> {
                 req = req.track_access(false);
             }
             let resp = db.recall_budgeted(&req).map_err(fmt)?;
+            warn_late_notices(&db);
             // R-001.4: a tracking recall mutates the catalog's
             // `accessed_at` / `access_count` in memory. Flush before
             // exit so the bumps reach disk — otherwise the usage

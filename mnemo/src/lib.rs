@@ -161,11 +161,11 @@ pub use store::{
 /// v0.18.0 (13a step 8b): review findings.
 pub use store::{valid_finding_id, Finding, FindingFilter, FindingSpec};
 pub use store::{
-    CloseError, CompactReport, Mnemo, MnemoConfig, RecallMode, RecallRequest, RecallResponse,
-    RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary, VerifyReport,
-    DEFAULT_KEYWORD_WEIGHT, DEFAULT_TEXT_KEYWORD_WEIGHT, DEFAULT_TURN_COMPRESS_AFTER_SECS,
-    DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES, INDEX_PERSIST_EVERY_COMMITS,
-    V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
+    CloseError, CompactReport, IndexCheck, Mnemo, MnemoConfig, RecallMode, RecallRequest,
+    RecallResponse, RecallResult, ReembedReport, SharedMnemo, SnapshotInfo, Stats, StatsSummary,
+    VerifyReport, DEFAULT_KEYWORD_WEIGHT, DEFAULT_TEXT_KEYWORD_WEIGHT,
+    DEFAULT_TURN_COMPRESS_AFTER_SECS, DEFAULT_VECTOR_CACHE_BUDGET, INDEX_PERSIST_EVERY_CHANGES,
+    INDEX_PERSIST_EVERY_COMMITS, V9_ANN_MIN_FACTS, V9_RERANK_PER_HIT,
 };
 pub use text::{KeywordIndex, KeywordTokenizer};
 pub use transcript::{
@@ -661,6 +661,78 @@ pub mod __fuzz {
         rmp_serde::from_slice::<Vec<crate::result_cache::CacheDirectoryEntry>>(bytes)
             .map(|_| ())
             .map_err(|e| crate::MnemoError::Serialize(e.to_string()))
+    }
+
+    /// RB-015.2 (v0.19.1): decode a v9 index run body in layout 2 (the
+    /// bytes after its layout byte) from arbitrary bytes. When it decodes,
+    /// the index is queried, changed and written again, and what it writes
+    /// must decode: none of it may panic.
+    pub fn decode_index_layout2(bytes: &[u8]) -> crate::Result<()> {
+        let idx = crate::index::IvfPqIndex::read_layout2(&mut &bytes[..], bytes.len() as u64)?;
+        exercise_index(idx)
+    }
+
+    /// RB-015.2: [`decode_index_layout2`] on a valid layout-2 body (a small
+    /// index built once) with `edits` applied, so the fuzzer starts from a
+    /// well-formed run. Each 3 bytes are a little-endian `u16` offset (taken
+    /// modulo the body's length) and a byte XORed in there; a last byte or
+    /// two cut the body to that fraction of its length (out of 256 or 65536).
+    pub fn mutate_index_layout2(edits: &[u8]) -> crate::Result<()> {
+        static BASE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+        let base = BASE.get_or_init(|| {
+            let vecs: Vec<(u128, Vec<f32>)> = (0..300u32)
+                .map(|i| {
+                    let x = i as f32;
+                    (
+                        i as u128 + 1,
+                        vec![
+                            1.0 + (x * 0.37).sin(),
+                            (x * 0.11).cos(),
+                            (x * 0.07).sin(),
+                            0.5,
+                        ],
+                    )
+                })
+                .collect();
+            let items: Vec<(u128, &[f32])> = vecs.iter().map(|(i, v)| (*i, v.as_slice())).collect();
+            let idx = crate::index::IvfPqIndex::build(4, &items, crate::IndexConfig::default())
+                .expect("the seed index builds");
+            let mut out = Vec::new();
+            idx.write_layout2(&mut out);
+            out
+        });
+        let mut body = base.clone();
+        let mut chunks = edits.chunks_exact(3);
+        for e in chunks.by_ref() {
+            let at = u16::from_le_bytes([e[0], e[1]]) as usize % body.len();
+            body[at] ^= e[2];
+        }
+        match chunks.remainder() {
+            [c] => body.truncate(body.len() * *c as usize / 256),
+            [a, b] => body.truncate(body.len() * u16::from_le_bytes([*a, *b]) as usize / 65536),
+            _ => {}
+        }
+        decode_index_layout2(&body)
+    }
+
+    fn exercise_index(mut idx: crate::index::IvfPqIndex) -> crate::Result<()> {
+        let dims = idx.dims();
+        if dims == 0 || dims > 4096 {
+            return Ok(());
+        }
+        let q = vec![0.5f32; dims];
+        let _ = idx.query(&q, None, None);
+        let first = idx.ids().next();
+        idx.add(u128::MAX - 1, &q);
+        if let Some(id) = first {
+            idx.remove(id);
+        }
+        let _ = idx.query(&q, Some(2), Some(8));
+        let mut out = Vec::new();
+        idx.write_layout2(&mut out);
+        crate::index::IvfPqIndex::read_layout2(&mut &out[..], out.len() as u64)
+            .expect("an index this build wrote decodes again");
+        Ok(())
     }
 
     /// Parse a single MCP stdio JSON-RPC request line. Malformed

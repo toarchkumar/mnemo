@@ -240,6 +240,18 @@ impl Mnemo {
         (self.index_chain.len(), self.header.index_start)
     }
 
+    /// **Not a stable API.** RB-015.1: `[(first page, pages)]` of the base
+    /// index run and the newest index delta run (`(0, 0)` when absent), so
+    /// a test can damage one on disk.
+    #[doc(hidden)]
+    pub fn __index_runs(&self) -> [(u64, u64); 2] {
+        let h = &self.header;
+        [
+            (h.index_start, h.index_pages),
+            (h.index_delta.start, h.index_delta.pages),
+        ]
+    }
+
     /// **Not a stable API.** FMT-9d: BM25 keyword scores for `query`, best
     /// first: `(id, score)`, with k1 1.2 and b 0.75.
     #[doc(hidden)]

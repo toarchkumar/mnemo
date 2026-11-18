@@ -942,6 +942,11 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
     );
     let page = ins.get("/", "").1;
     assert!(page.contains(r#"data-view="findings""#) && page.contains(r#"data-view="tasks""#));
+    // RB-015.2: a `#tab` link opens a tab only for the views' own keys.
+    assert!(
+        page.contains("Object.hasOwn(views, name)") && !page.contains("if (!views[name])"),
+        "selectTab checks own keys"
+    );
     for sink in [
         "innerHTML",
         "outerHTML",
