@@ -382,13 +382,29 @@ pub(super) fn read_run_bytes(
     len: u64,
     gen: u64,
 ) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(len as usize);
-    for i in 0..pages {
-        buf.extend_from_slice(&pager.read_page(start + i, gen)?);
+    // PERF-2: a large run in batches of pages (one read each, parallel
+    // decrypt); a short one through the page cache, as before.
+    if pages < RUN_CHUNK_PAGES {
+        let mut buf = Vec::with_capacity(len as usize);
+        for i in 0..pages {
+            buf.extend_from_slice(&pager.read_page(start + i, gen)?);
+        }
+        buf.truncate(len as usize);
+        return Ok(buf);
     }
-    buf.truncate(len as usize);
+    let err = std::cell::RefCell::new(None);
+    let mut buf = Vec::with_capacity(len as usize);
+    let res = RunReader::new(pager, &err, start, pages, len, gen).read_to_end(&mut buf);
+    if let Some(e) = err.into_inner() {
+        return Err(e);
+    }
+    res?;
     Ok(buf)
 }
+
+/// PERF-2 (v0.19.0): the most pages a [`RunReader`] reads per refill (2 MiB
+/// of pages), so a large run still streams.
+const RUN_CHUNK_PAGES: u64 = 256;
 
 /// FMT-9b: a page run read as a byte stream, one page at a time and
 /// without caching it, so loading a large run (a 100K catalog is several
@@ -399,12 +415,20 @@ pub(super) struct RunReader<'a> {
     /// The first page error, kept so the caller reports it as itself
     /// (e.g. `PageAuthFailed`) rather than as a decode error.
     pub(super) err: &'a std::cell::RefCell<Option<MnemoError>>,
-    pub(super) next_page: u64,
-    pub(super) end_page: u64,
-    pub(super) gen: u64,
-    pub(super) remaining: u64,
-    pub(super) buf: Vec<u8>,
-    pub(super) pos: usize,
+    next_page: u64,
+    end_page: u64,
+    gen: u64,
+    /// Run bytes not yet handed out by a page.
+    remaining: u64,
+    /// PERF-2: the current batch's page images, decrypted in place
+    /// (`PageBatch::into_images`), and the pages it holds.
+    images: Vec<u8>,
+    pages_in: usize,
+    /// The page of `images` being read, and the unread part of its
+    /// plaintext as absolute offsets into `images`.
+    page_i: usize,
+    pos: usize,
+    lim: usize,
 }
 
 impl<'a> RunReader<'a> {
@@ -423,9 +447,52 @@ impl<'a> RunReader<'a> {
             end_page: start + pages,
             gen,
             remaining: len,
-            buf: Vec::new(),
+            images: Vec::new(),
+            pages_in: 0,
+            page_i: 0,
             pos: 0,
+            lim: 0,
         }
+    }
+
+    /// Move to the next page: the next one in the batch, or a new batch of
+    /// up to [`RUN_CHUNK_PAGES`] pages (one positioned read, decrypted in
+    /// parallel when there are enough). `false` at the end of the run.
+    fn advance(&mut self) -> std::io::Result<bool> {
+        if self.remaining == 0 {
+            return Ok(false);
+        }
+        if self.page_i + 1 < self.pages_in {
+            self.page_i += 1;
+        } else {
+            if self.next_page >= self.end_page {
+                return Ok(false);
+            }
+            let n = (self.end_page - self.next_page).min(RUN_CHUNK_PAGES);
+            let want: Vec<(u64, u64)> = (self.next_page..self.next_page + n)
+                .map(|p| (p, self.gen))
+                .collect();
+            // Drop the old batch first, so only one is held at a time.
+            self.images = Vec::new();
+            match self.pager.read_pages_uncached(&want) {
+                Ok(b) => {
+                    self.pages_in = b.len();
+                    self.images = b.into_images();
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    *self.err.borrow_mut() = Some(e);
+                    return Err(std::io::Error::other(msg));
+                }
+            }
+            self.next_page += n;
+            self.page_i = 0;
+        }
+        let avail = (self.remaining as usize).min(PAYLOAD);
+        self.remaining -= avail as u64;
+        self.pos = self.page_i * PAGE_SIZE + crate::crypto::NONCE_LEN;
+        self.lim = self.pos + avail;
+        Ok(true)
     }
 }
 
@@ -434,8 +501,8 @@ impl Read for RunReader<'_> {
     /// from the current page.
     #[inline]
     fn read_exact(&mut self, out: &mut [u8]) -> std::io::Result<()> {
-        if self.buf.len() - self.pos >= out.len() {
-            out.copy_from_slice(&self.buf[self.pos..self.pos + out.len()]);
+        if self.lim - self.pos >= out.len() {
+            out.copy_from_slice(&self.images[self.pos..self.pos + out.len()]);
             self.pos += out.len();
             return Ok(());
         }
@@ -451,26 +518,13 @@ impl Read for RunReader<'_> {
 
     #[inline]
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        if self.pos == self.buf.len() {
-            if self.remaining == 0 || self.next_page >= self.end_page {
+        while self.pos == self.lim {
+            if !self.advance()? {
                 return Ok(0);
             }
-            let mut page = match self.pager.read_page_uncached(self.next_page, self.gen) {
-                Ok(p) => p,
-                Err(e) => {
-                    let msg = e.to_string();
-                    *self.err.borrow_mut() = Some(e);
-                    return Err(std::io::Error::other(msg));
-                }
-            };
-            self.next_page += 1;
-            page.truncate((self.remaining as usize).min(page.len()));
-            self.remaining -= page.len() as u64;
-            self.buf = page;
-            self.pos = 0;
         }
-        let n = out.len().min(self.buf.len() - self.pos);
-        out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+        let n = out.len().min(self.lim - self.pos);
+        out[..n].copy_from_slice(&self.images[self.pos..self.pos + n]);
         self.pos += n;
         Ok(n)
     }
@@ -787,14 +841,14 @@ pub(super) fn load_index(
     // index is ~17 MB), trading decode speed for not holding it twice.
     if pager.version() < VERSION_V9 {
         let buf = read_run_bytes(pager, start, pages, len, gen)?;
-        let mut idx: IvfPqIndex =
+        let idx: IvfPqIndex =
             rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))?;
         if idx.dims() != dims {
             return Err(MnemoError::Invalid(
                 "ANN index dimensionality does not match the database".into(),
             ));
         }
-        idx.rebuild_assignment();
+        // PERF-2: the `id -> partition` map is built when a write needs it.
         return Ok(Some(idx));
     }
     // v9 index runs start with a layout byte. An index is derived data, so
@@ -810,21 +864,26 @@ pub(super) fn load_index(
             None => Ok(None),
         };
     }
-    if layout[0] != V9_INDEX_LAYOUT {
-        return Ok(None);
-    }
-    let res: std::result::Result<IvfPqIndex, _> = rmp_serde::from_read(rd);
-    let mut idx = match (res, err.into_inner()) {
+    // PERF-2 (v0.19.0): layout 2 is flat arrays, read section by section;
+    // layout 1 is one msgpack value. Neither builds the `id -> partition`
+    // map, which waits for a write that needs it.
+    let res: std::result::Result<IvfPqIndex, MnemoError> = match layout[0] {
+        V9_INDEX_LAYOUT => IvfPqIndex::read_layout2(&mut rd, len.saturating_sub(1)),
+        V9_INDEX_LAYOUT_MSGPACK => {
+            rmp_serde::from_read(rd).map_err(|e| MnemoError::Serialize(e.to_string()))
+        }
+        _ => return Ok(None),
+    };
+    let idx = match (res, err.into_inner()) {
         (Ok(i), _) => i,
         (Err(_), Some(page_err)) => return Err(page_err),
-        (Err(e), None) => return Err(MnemoError::Serialize(e.to_string())),
+        (Err(e), None) => return Err(e),
     };
     if idx.dims() != dims {
         return Err(MnemoError::Invalid(
             "ANN index dimensionality does not match the database".into(),
         ));
     }
-    idx.rebuild_assignment();
     Ok(Some(idx))
 }
 

@@ -1,0 +1,232 @@
+{
+  "schema": "perf_v0.19.0/1",
+  "what": "PERF-2 (v0.19.0): a faster first search after opening. Index layout 2, batched page reads with parallel decrypt, a streamed column fill, a lazy id->partition map. No format bump.",
+  "machine": "Apple M1 Pro, 8 cores, 16 GB; release build, --cfg aes_armv8 --cfg polyval_armv8 (.cargo/config.toml)",
+  "commands": {
+    "device_budget": "cargo run --release --features benches --example device_budget -- --sizes 1000,10000,100000 (384 dims, ~300 B text, fast KDF, IVF+PQ at 100K)",
+    "single_thread": "the same with MNEMO_DEV_DECRYPT_THREADS=1 (dev-hooks only)",
+    "split": "cargo run --release --features benches --example perf2_split -- --corpus target/device_budget/corpus_100000_384d_300b_v9.mnemo --cycles 20",
+    "ranking_v2": "cargo run --release --features benches --example ranking_v2 -- --perf-json <scratch copy>",
+    "ann_defaults": "cargo run --release --features benches --example ann_defaults_v0_6_0 -- --out <scratch file>"
+  },
+  "load_average": {
+    "baseline_v0_18_1": "3.2 to 6.4 during the runs (fileproviderd on one core)",
+    "v0_19_0": "device_budget run 1 9.36 at the start, run 2 5.45, single-thread 5.08, split 6.11 (macOS background work: fileproviderd, mediaanalysisd, mlhostd)"
+  },
+  "baseline_v0_18_1": {
+    "engine": "v0.18.1 (release-0.19.0 at 72ae920; git diff v0.18.1 -- src Cargo.toml Cargo.lock empty)",
+    "device_budget_run2": {
+      "1000": {
+        "first_recall_median_ms": 0.92,
+        "first_recall_p95_ms": 0.93,
+        "open_median_ms": 0.52,
+        "warm_recall_median_ms": 0.22,
+        "warm_recall_p95_ms": 0.28,
+        "handle_rss_mb": 2.9,
+        "single_write_median_ms": 14.01,
+        "batch_write_per_memory_ms": 0.28,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "10000": {
+        "first_recall_median_ms": 9.16,
+        "first_recall_p95_ms": 10.21,
+        "open_median_ms": 3.37,
+        "warm_recall_median_ms": 2.28,
+        "warm_recall_p95_ms": 2.52,
+        "handle_rss_mb": 16.2,
+        "single_write_median_ms": 15.17,
+        "batch_write_per_memory_ms": 0.271,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 3,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "100000": {
+        "first_recall_median_ms": 116.45,
+        "first_recall_p95_ms": 122.17,
+        "open_median_ms": 30.16,
+        "warm_recall_median_ms": 2.41,
+        "warm_recall_p95_ms": 3.62,
+        "handle_rss_mb": 112.5,
+        "single_write_median_ms": 15.53,
+        "batch_write_per_memory_ms": 0.388,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "indexed"
+      }
+    },
+    "split_100k_layout1": {
+      "read_decrypt_ms": 15.69,
+      "decode_ms": 70.76,
+      "assignment_ms": 1.08,
+      "delta_chain_ms": 0.0,
+      "reconcile_ms": 3.32,
+      "recall_after_load_ms": 30.22,
+      "first_recall_plain_ms": 114.98,
+      "run_bytes": 17298907,
+      "note": "medians of 15 fresh handles, v0.18.1's engine plus the timing hook only"
+    },
+    "ranking_v2": {
+      "hit_at_1": 0.9231,
+      "mrr": 0.9487
+    },
+    "ann_recall_at_10_100k_default": 0.978
+  },
+  "v0_19_0": {
+    "device_budget_run1": {
+      "1000": {
+        "first_recall_median_ms": 0.6,
+        "first_recall_p95_ms": 0.67,
+        "open_median_ms": 0.53,
+        "warm_recall_median_ms": 0.23,
+        "warm_recall_p95_ms": 0.25,
+        "handle_rss_mb": 3.7,
+        "single_write_median_ms": 13.01,
+        "batch_write_per_memory_ms": 0.23,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "10000": {
+        "first_recall_median_ms": 4.22,
+        "first_recall_p95_ms": 4.53,
+        "open_median_ms": 3.02,
+        "warm_recall_median_ms": 2.35,
+        "warm_recall_p95_ms": 2.58,
+        "handle_rss_mb": 17.3,
+        "single_write_median_ms": 11.97,
+        "batch_write_per_memory_ms": 0.199,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 3,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "100000": {
+        "first_recall_median_ms": 11.5,
+        "first_recall_p95_ms": 12.7,
+        "open_median_ms": 25.78,
+        "warm_recall_median_ms": 2.39,
+        "warm_recall_p95_ms": 3.82,
+        "handle_rss_mb": 111.6,
+        "single_write_median_ms": 12.63,
+        "batch_write_per_memory_ms": 0.327,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "indexed"
+      }
+    },
+    "device_budget_run2": {
+      "1000": {
+        "first_recall_median_ms": 0.61,
+        "first_recall_p95_ms": 0.66,
+        "open_median_ms": 0.55,
+        "warm_recall_median_ms": 0.22,
+        "warm_recall_p95_ms": 0.25,
+        "handle_rss_mb": 3.7,
+        "single_write_median_ms": 12.1,
+        "batch_write_per_memory_ms": 0.25,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "10000": {
+        "first_recall_median_ms": 4.2,
+        "first_recall_p95_ms": 4.32,
+        "open_median_ms": 3.0,
+        "warm_recall_median_ms": 2.31,
+        "warm_recall_p95_ms": 2.55,
+        "handle_rss_mb": 17.2,
+        "single_write_median_ms": 12.96,
+        "batch_write_per_memory_ms": 0.229,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 3,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "100000": {
+        "first_recall_median_ms": 11.5,
+        "first_recall_p95_ms": 12.62,
+        "open_median_ms": 25.7,
+        "warm_recall_median_ms": 2.38,
+        "warm_recall_p95_ms": 3.77,
+        "handle_rss_mb": 110.9,
+        "single_write_median_ms": 16.78,
+        "batch_write_per_memory_ms": 0.386,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "indexed"
+      }
+    },
+    "device_budget_single_thread": {
+      "1000": {
+        "first_recall_median_ms": 0.84,
+        "first_recall_p95_ms": 0.95,
+        "open_median_ms": 0.52,
+        "warm_recall_median_ms": 0.23,
+        "warm_recall_p95_ms": 0.24,
+        "handle_rss_mb": 3.2,
+        "single_write_median_ms": 14.89,
+        "batch_write_per_memory_ms": 0.261,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "10000": {
+        "first_recall_median_ms": 8.19,
+        "first_recall_p95_ms": 8.83,
+        "open_median_ms": 3.05,
+        "warm_recall_median_ms": 2.29,
+        "warm_recall_p95_ms": 2.54,
+        "handle_rss_mb": 14.7,
+        "single_write_median_ms": 12.68,
+        "batch_write_per_memory_ms": 0.219,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 3,
+        "recall_mode_at_16mib": "exact_resident"
+      },
+      "100000": {
+        "first_recall_median_ms": 17.66,
+        "first_recall_p95_ms": 18.5,
+        "open_median_ms": 28.15,
+        "warm_recall_median_ms": 2.4,
+        "warm_recall_p95_ms": 3.99,
+        "handle_rss_mb": 109.1,
+        "single_write_median_ms": 17.94,
+        "batch_write_per_memory_ms": 0.37,
+        "single_write_fsyncs": 3,
+        "batch_write_fsyncs": 4,
+        "recall_mode_at_16mib": "indexed"
+      }
+    },
+    "split_100k_layout2": {
+      "assignment_ms": 1.018,
+      "cycles": 20,
+      "decode_ms": 0.703,
+      "delta_chain_ms": 0.0,
+      "first_recall_plain_ms": 11.544,
+      "layout": 2.0,
+      "read_decrypt_ms": 4.22,
+      "recall_after_load_ms": 4.188,
+      "reconcile_ms": 3.023,
+      "run_bytes": 12082189.0,
+      "vectors": 100000.0
+    },
+    "ranking_v2": {
+      "hit_at_1": 0.9231,
+      "mrr": 0.9487,
+      "phase6_hit_at_1": 0.5667,
+      "phase6_mrr": 0.6779
+    },
+    "ann_100k_fresh_install": {
+      "mean_query_ms": 2.931,
+      "partitions": 317,
+      "pq_subspaces": 96,
+      "recall_at_10": 0.978
+    },
+    "ann_tiers_skipped": [
+      {
+        "corpus_size": 10000,
+        "skipped": "below V9_ANN_MIN_FACTS: exact recall, no index"
+      }
+    ]
+  }
+}

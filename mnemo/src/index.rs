@@ -565,6 +565,11 @@ pub struct IvfPqIndex {
     /// serialized.
     #[serde(skip)]
     assignment: U128Map,
+    /// PERF-2 (v0.19.0): whether `assignment` has been built. A loaded index
+    /// builds it only when a write path needs it ([`Self::ensure_assignment`]),
+    /// so a read-only first recall doesn't pay for it. Never serialized.
+    #[serde(skip)]
+    assignment_ready: bool,
     /// FMT-9c.3: when `Some`, every change is also recorded here, so a v9
     /// commit can persist just the changes (a delta run) instead of the
     /// whole index. Never serialized.
@@ -658,6 +663,7 @@ impl IvfPqIndex {
             pq,
             partitions: vec![Posting::default(); n_partitions],
             assignment: U128Map::with_capacity(n),
+            assignment_ready: true,
             log: None,
         };
         for &(id, v) in items {
@@ -713,7 +719,8 @@ impl IvfPqIndex {
     }
 
     /// Whether `id` is indexed.
-    pub(crate) fn contains(&self, id: u128) -> bool {
+    pub(crate) fn contains(&mut self, id: u128) -> bool {
+        self.ensure_assignment();
         self.assignment.contains_key(id)
     }
 
@@ -778,6 +785,15 @@ impl IvfPqIndex {
                 self.assignment.insert(id, pi as u32);
             }
         }
+        self.assignment_ready = true;
+    }
+
+    /// PERF-2 (v0.19.0): build the `id -> partition` map if it isn't yet:
+    /// before any change, and before `contains`.
+    pub(crate) fn ensure_assignment(&mut self) {
+        if !self.assignment_ready {
+            self.rebuild_assignment();
+        }
     }
 
     fn nearest_centroid(&self, v: &[f32]) -> usize {
@@ -803,6 +819,7 @@ impl IvfPqIndex {
 
     /// Remove a vector if present (no-op otherwise).
     pub fn remove(&mut self, id: u128) {
+        self.ensure_assignment();
         if self.assignment.contains_key(id) {
             if let Some(log) = &mut self.log {
                 log.push(IndexOp::Remove(id));
@@ -834,6 +851,9 @@ impl IvfPqIndex {
     /// index. Not recorded again. A change that doesn't fit this index
     /// (a partition or code length out of range) is an error.
     pub(crate) fn apply_ops(&mut self, ops: Vec<IndexOp>) -> Result<()> {
+        if !ops.is_empty() {
+            self.ensure_assignment();
+        }
         let log = self.log.take();
         let m = self.pq.m();
         let mut res = Ok(());
@@ -1123,6 +1143,179 @@ mod u128_map_tests {
     }
 }
 
+/// PERF-2 (v0.19.0): the most dimensions a layout-2 index run may declare,
+/// so a damaged length can't ask for a huge allocation.
+const L2_MAX_DIMS: usize = 65_536;
+
+/// Read exactly `n` bytes, after checking they fit in what's left of the
+/// run (`used` of `len`), so a damaged count can't force a huge allocation.
+fn l2_take<R: std::io::Read>(r: &mut R, used: &mut u64, len: u64, n: usize) -> Result<Vec<u8>> {
+    let end = (*used)
+        .checked_add(n as u64)
+        .filter(|&e| e <= len)
+        .ok_or_else(|| {
+            MnemoError::Serialize("index layout 2: a section runs past the run".into())
+        })?;
+    let mut b = vec![0u8; n];
+    r.read_exact(&mut b)
+        .map_err(|e| MnemoError::Serialize(format!("index layout 2: {e}")))?;
+    *used = end;
+    Ok(b)
+}
+
+fn l2_u32s<R: std::io::Read>(r: &mut R, used: &mut u64, len: u64, n: usize) -> Result<Vec<usize>> {
+    let b = l2_take(r, used, len, n.checked_mul(4).ok_or_else(l2_overflow)?)?;
+    Ok(b.chunks_exact(4)
+        .map(|c| u32::from_le_bytes(c.try_into().expect("4 bytes")) as usize)
+        .collect())
+}
+
+fn l2_f32s<R: std::io::Read>(r: &mut R, used: &mut u64, len: u64, n: usize) -> Result<Vec<f32>> {
+    let b = l2_take(r, used, len, n.checked_mul(4).ok_or_else(l2_overflow)?)?;
+    Ok(b.chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().expect("4 bytes")))
+        .collect())
+}
+
+fn l2_overflow() -> MnemoError {
+    MnemoError::Serialize("index layout 2: a length overflows".into())
+}
+
+impl IvfPqIndex {
+    /// PERF-2 (v0.19.0): the index as a layout-2 run body (the caller writes
+    /// the layout byte first). Little-endian throughout:
+    ///
+    /// - `u32` × 5: dims, partitions, `n_probe`, `n_rerank`, PQ subspaces `m`;
+    /// - `u32` × (m + 1): the subspace offsets; `u32` × m: codewords per subspace;
+    /// - `f32` × (partitions × dims): the IVF centroids;
+    /// - `f32`: each subspace's codewords, in order;
+    /// - `u32` × partitions: each partition's entry count;
+    /// - `u128` × entries: the ids, partition after partition;
+    /// - `u8` × (entries × m): the PQ codes, in the same order.
+    ///
+    /// Flat arrays, so loading is a copy per section instead of a msgpack
+    /// decode per element (layout 1).
+    pub(crate) fn write_layout2(&self, out: &mut Vec<u8>) {
+        let m = self.pq.m();
+        let total = self.len();
+        out.reserve(
+            20 + (2 * m + 1) * 4
+                + self.centroids.len() * 4
+                + self.pq.centroids.iter().map(|c| c.len() * 4).sum::<usize>()
+                + self.n_partitions * 4
+                + total * (16 + m),
+        );
+        let u32le = |out: &mut Vec<u8>, v: usize| out.extend_from_slice(&(v as u32).to_le_bytes());
+        for v in [self.dims, self.n_partitions, self.n_probe, self.n_rerank, m] {
+            u32le(out, v);
+        }
+        for &o in &self.pq.sub_offsets {
+            u32le(out, o);
+        }
+        for &k in &self.pq.ks {
+            u32le(out, k);
+        }
+        for &c in &self.centroids {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        for cb in &self.pq.centroids {
+            for &c in cb {
+                out.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        for p in &self.partitions {
+            u32le(out, p.ids.len());
+        }
+        for p in &self.partitions {
+            for &id in &p.ids {
+                out.extend_from_slice(&id.to_le_bytes());
+            }
+        }
+        for p in &self.partitions {
+            out.extend_from_slice(&p.codes);
+        }
+    }
+
+    /// PERF-2 (v0.19.0): read a layout-2 run body of `len` bytes (after the
+    /// layout byte) from `r`. Every section's length is checked against
+    /// what's left before it's allocated, and the body must end exactly at
+    /// `len`. The `id -> partition` map isn't built here (see
+    /// [`Self::ensure_assignment`]).
+    pub(crate) fn read_layout2<R: std::io::Read>(r: &mut R, len: u64) -> Result<IvfPqIndex> {
+        let bad = |what: &str| MnemoError::Serialize(format!("index layout 2: {what}"));
+        let mut used = 0u64;
+        let head = l2_u32s(r, &mut used, len, 5)?;
+        let (dims, n_partitions, n_probe, n_rerank, m) =
+            (head[0], head[1], head[2], head[3], head[4]);
+        if dims == 0 || dims > L2_MAX_DIMS || n_partitions == 0 || m == 0 || m > dims {
+            return Err(bad("a bad shape"));
+        }
+        let sub_offsets = l2_u32s(r, &mut used, len, m + 1)?;
+        if sub_offsets[0] != 0
+            || sub_offsets[m] != dims
+            || sub_offsets.windows(2).any(|w| w[1] <= w[0])
+        {
+            return Err(bad("bad subspace offsets"));
+        }
+        let ks = l2_u32s(r, &mut used, len, m)?;
+        if ks.iter().any(|&k| k == 0 || k > PQ_CODEWORDS) {
+            return Err(bad("a bad codeword count"));
+        }
+        let centroids = l2_f32s(
+            r,
+            &mut used,
+            len,
+            n_partitions.checked_mul(dims).ok_or_else(l2_overflow)?,
+        )?;
+        let mut pq_centroids = Vec::with_capacity(m);
+        for s in 0..m {
+            let subdim = sub_offsets[s + 1] - sub_offsets[s];
+            pq_centroids.push(l2_f32s(r, &mut used, len, ks[s] * subdim)?);
+        }
+        let counts = l2_u32s(r, &mut used, len, n_partitions)?;
+        let total = counts
+            .iter()
+            .try_fold(0usize, |a, &c| a.checked_add(c))
+            .ok_or_else(l2_overflow)?;
+        let rest = total.checked_mul(16 + m).ok_or_else(l2_overflow)? as u64;
+        if used.checked_add(rest) != Some(len) {
+            return Err(bad("the postings don't match the run's length"));
+        }
+        // Each partition's ids, then each one's codes, read straight into
+        // their own arrays, so nothing large is held twice.
+        let mut partitions: Vec<Posting> = Vec::with_capacity(n_partitions);
+        for &c in &counts {
+            let ids = l2_take(r, &mut used, len, c * 16)?
+                .chunks_exact(16)
+                .map(|b| u128::from_le_bytes(b.try_into().expect("16 bytes")))
+                .collect();
+            partitions.push(Posting {
+                ids,
+                codes: Vec::new(),
+            });
+        }
+        for (p, &c) in partitions.iter_mut().zip(&counts) {
+            p.codes = l2_take(r, &mut used, len, c * m)?;
+        }
+        Ok(IvfPqIndex {
+            dims,
+            n_partitions,
+            n_probe,
+            n_rerank,
+            centroids,
+            pq: PqCodebook {
+                sub_offsets,
+                centroids: pq_centroids,
+                ks,
+            },
+            partitions,
+            assignment: U128Map::default(),
+            assignment_ready: false,
+            log: None,
+        })
+    }
+}
+
 #[cfg(test)]
 mod adc_tests {
     use super::{adc_distance, PQ_CODEWORDS};
@@ -1155,6 +1348,104 @@ mod adc_tests {
                     "m={m}: {plain} vs {fast}"
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod layout2_tests {
+    use super::{IndexConfig, IvfPqIndex};
+
+    fn index(n: usize, dims: usize) -> IvfPqIndex {
+        let mut x: u32 = 0x1234_5678;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x % 2_000) as f32 / 1_000.0 - 1.0
+        };
+        let vs: Vec<(u128, Vec<f32>)> = (0..n)
+            .map(|i| (i as u128 * 7 + 1, (0..dims).map(|_| next()).collect()))
+            .collect();
+        let items: Vec<(u128, &[f32])> = vs.iter().map(|(i, v)| (*i, v.as_slice())).collect();
+        IvfPqIndex::build(dims, &items, IndexConfig::default()).unwrap()
+    }
+
+    fn encode(idx: &IvfPqIndex) -> Vec<u8> {
+        let mut b = Vec::new();
+        idx.write_layout2(&mut b);
+        b
+    }
+
+    /// PERF-2: layout 2 round-trips the index exactly (the same search
+    /// results), without building the `id -> partition` map, which the
+    /// first change then builds.
+    #[test]
+    fn layout_2_round_trips() {
+        let idx = index(600, 16);
+        let b = encode(&idx);
+        let mut back = IvfPqIndex::read_layout2(&mut b.as_slice(), b.len() as u64).unwrap();
+        assert!(!back.assignment_ready);
+        let shape = |i: &IvfPqIndex| {
+            let x = i.info();
+            (x.vectors, x.partitions, x.subspaces, x.n_probe, x.n_rerank)
+        };
+        assert_eq!(shape(&back), shape(&idx));
+        assert_eq!(back.len(), 600);
+        for q in [vec![0.5f32; 16], vec![-0.25f32; 16]] {
+            assert_eq!(back.query(&q, None, None), idx.query(&q, None, None));
+        }
+        assert!(back.contains(8));
+        assert!(back.assignment_ready);
+        back.remove(8);
+        assert!(!back.contains(8));
+        assert_eq!(encode(&back).len(), b.len() - 16 - back.pq.m());
+    }
+
+    /// A damaged run is an error, never a panic or a huge allocation: cut
+    /// short anywhere, trailing bytes, a count past the run, a bad shape.
+    #[test]
+    fn a_damaged_layout_2_run_is_an_error() {
+        let b = encode(&index(300, 8));
+        let len = b.len() as u64;
+        for cut in [0, 3, 20, 40, b.len() / 2, b.len() - 1] {
+            assert!(
+                IvfPqIndex::read_layout2(&mut &b[..cut], cut as u64).is_err(),
+                "cut at {cut}"
+            );
+            // The declared length still says the whole run.
+            assert!(
+                IvfPqIndex::read_layout2(&mut &b[..cut], len).is_err(),
+                "short read at {cut}"
+            );
+        }
+        let mut long = b.clone();
+        long.push(0);
+        assert!(IvfPqIndex::read_layout2(&mut long.as_slice(), long.len() as u64).is_err());
+        // The first partition's count set huge.
+        let m = u32::from_le_bytes(b[16..20].try_into().unwrap()) as usize;
+        let parts = u32::from_le_bytes(b[4..8].try_into().unwrap()) as usize;
+        let dims = u32::from_le_bytes(b[0..4].try_into().unwrap()) as usize;
+        let ks: Vec<usize> = (0..m)
+            .map(|s| {
+                let at = 20 + (m + 1) * 4 + s * 4;
+                u32::from_le_bytes(b[at..at + 4].try_into().unwrap()) as usize
+            })
+            .collect();
+        let sub = dims / m;
+        let counts_at =
+            20 + (2 * m + 1) * 4 + parts * dims * 4 + ks.iter().map(|k| k * sub * 4).sum::<usize>();
+        let mut huge = b.clone();
+        huge[counts_at..counts_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(IvfPqIndex::read_layout2(&mut huge.as_slice(), len).is_err());
+        // Bad shapes: zero dims, more subspaces than dims, a zero codeword count.
+        for (at, v) in [(0usize, 0u32), (16, 9), (20 + (m + 1) * 4, 0)] {
+            let mut x = b.clone();
+            x[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            assert!(
+                IvfPqIndex::read_layout2(&mut x.as_slice(), len).is_err(),
+                "at {at}"
+            );
         }
     }
 }

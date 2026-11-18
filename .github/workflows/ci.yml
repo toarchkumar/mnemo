@@ -586,6 +586,45 @@ jobs:
           MNEMO_V0_17_2_BIN="$RUNNER_TEMP/v0_17_2/bin/mnemo"
           cargo test --features failpoints --test v0_17_compat -- --nocapture
 
+  # --- Mixed versions (PERF-2, v0.19.0): v0.19 writes the ANN index in
+  # layout 2. v0.18.1 must read such a file as "no index" (exact recall, no
+  # error), its writes must reach v0.19's index, and its own layout-1 index
+  # must still load in v0.19.
+  compat-v0-18-1:
+    name: compat (v0.18.1, linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mnemo
+          key: compat-v0-18-1
+
+      - name: Cache the v0.18.1 CLI
+        id: v0_18_1
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/v0_18_1
+          key: mnemo-cli-0.18.1-${{ runner.os }}
+
+      - name: Install the v0.18.1 CLI
+        if: steps.v0_18_1.outputs.cache-hit != 'true'
+        # Its own published lockfile; see the compat job.
+        env:
+          RUSTFLAGS: ""
+        run: cargo install mnemo-engine --version =0.18.1 --locked --root "$RUNNER_TEMP/v0_18_1"
+
+      - name: cargo test (index layout 2 against v0.18.1)
+        working-directory: mnemo
+        run: >-
+          MNEMO_V0_18_1_BIN="$RUNNER_TEMP/v0_18_1/bin/mnemo"
+          cargo test --features failpoints --test v0_18_compat -- --nocapture
+
   # --- Fuzz smoke: 60s/target on every PR to catch regressions early.
   #     cargo-fuzz needs nightly (`-Zbuild-std`-adjacent sanitizer bits).
   #     `continue-on-error: false` so a new panic fails the build; the

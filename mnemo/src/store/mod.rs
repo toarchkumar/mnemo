@@ -186,11 +186,17 @@ const V9_SNAPSHOT_KEEP_SECS: i64 = 24 * 3600;
 /// FMT-9c: the pin cap never drops below 128 pages (1 MiB).
 const V9_PIN_FLOOR_PAGES: u64 = 128;
 
-/// FMT-9d: the layout byte at the start of a v9 ANN index run (1: the
-/// whole IVF+PQ index, followed by delta runs). A reader treats an unknown
-/// layout as no index, so a later layout (partition-major, PERF-2) ships
-/// without a format bump.
-const V9_INDEX_LAYOUT: u8 = 1;
+/// FMT-9d: the layout byte at the start of a v9 ANN index run. A reader
+/// treats an unknown layout as no index, so a new layout ships without a
+/// format bump. Every new base run is written in this one: since PERF-2
+/// (v0.19.0), layout 2, the index as flat partition-major arrays
+/// (`IvfPqIndex::write_layout2`). v0.18 and older read layout 2 as no
+/// index, and recall exactly.
+const V9_INDEX_LAYOUT: u8 = 2;
+
+/// FMT-9d: layout 1, the whole IVF+PQ index as one msgpack value (v0.13 to
+/// v0.18). Still read; rewritten as layout 2 with the next base run.
+const V9_INDEX_LAYOUT_MSGPACK: u8 = 1;
 
 /// FMT-9b: how many sparse vector pages one commit folds into its new
 /// pages (the vacuum). Bounded so a commit's cost stays bounded.

@@ -499,6 +499,15 @@ impl Mnemo {
             .memory_types
             .as_ref()
             .map(|ts| ts.iter().map(|&t| memory_type_code(t)).collect());
+        // PERF-2: fill the column for every scored candidate up front, in
+        // one batch of page reads, instead of a page at a time below.
+        if !req.query.is_empty() && self.col.resident {
+            let rows: Vec<usize> = entries
+                .iter()
+                .filter_map(|e| self.index.get(e.id, &self.catalog))
+                .collect();
+            self.fill_column_rows(&rows)?;
+        }
         let mut cand: Vec<(f32, f32, usize)> = Vec::with_capacity(entries.len());
         for (pos, e) in entries.iter().enumerate() {
             let Some(r) = e.v9 else { continue };

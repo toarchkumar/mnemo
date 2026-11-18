@@ -719,14 +719,23 @@ impl Mnemo {
             Some(rmp_serde::to_vec(&d).map_err(|e| MnemoError::Serialize(e.to_string()))?)
         } else {
             match &self.ann {
-                Some(ann) => {
-                    let mut b =
-                        rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?;
-                    // FMT-9: v9 index runs carry a layout byte first.
-                    if self.is_v9() {
-                        b.insert(0, self.index_layout_override.unwrap_or(V9_INDEX_LAYOUT));
+                // FMT-9: v9 index runs carry a layout byte first. PERF-2:
+                // layout 2 (flat arrays) unless a test asks for another.
+                Some(ann) if self.is_v9() => {
+                    let layout = self.index_layout_override.unwrap_or(V9_INDEX_LAYOUT);
+                    let mut b = vec![layout];
+                    if layout == V9_INDEX_LAYOUT {
+                        ann.write_layout2(&mut b);
+                    } else {
+                        b.extend(
+                            rmp_serde::to_vec(ann)
+                                .map_err(|e| MnemoError::Serialize(e.to_string()))?,
+                        );
                     }
                     Some(b)
+                }
+                Some(ann) => {
+                    Some(rmp_serde::to_vec(ann).map_err(|e| MnemoError::Serialize(e.to_string()))?)
                 }
                 None => None,
             }

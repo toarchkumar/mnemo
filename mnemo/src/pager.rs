@@ -133,6 +133,102 @@ use crate::crypto::{self, KEY_LEN, NONCE_LEN};
 use crate::error::{MnemoError, Result};
 use crate::format::{PAGE_SIZE, PAYLOAD};
 
+/// PERF-2 (v0.19.0): below this many pages, [`Pager::read_pages_uncached`]
+/// and [`Pager::for_each_page`] decrypt on the calling thread; at or above
+/// it, on scoped threads.
+pub const PARALLEL_DECRYPT_MIN_PAGES: usize = 64;
+
+/// PERF-2 (v0.19.0): the pages one [`Pager::for_each_page`] thread reads and
+/// decrypts per buffer: 15 pages is 120 KiB, under the size at which the
+/// macOS allocator starts keeping freed blocks for reuse, so a handle's
+/// memory doesn't grow with a large fill.
+const STREAM_PAGES: usize = 15;
+
+/// PERF-2 (v0.19.0): the plaintext of a batch of pages
+/// ([`Pager::read_pages_uncached`]): the pages read from disk, decrypted in
+/// place in one buffer, and the cached ones as they were.
+pub(crate) struct PageBatch {
+    disk: Vec<u8>,
+    slots: Vec<Slot>,
+}
+
+enum Slot {
+    /// The page's index in the decrypted disk buffer.
+    Disk(usize),
+    /// A cached (possibly dirty) copy.
+    Cached(Vec<u8>),
+}
+
+impl PageBatch {
+    /// The `i`th requested page's plaintext ([`PAYLOAD`] bytes).
+    pub(crate) fn payload(&self, i: usize) -> &[u8] {
+        match &self.slots[i] {
+            Slot::Disk(j) => {
+                let at = j * PAGE_SIZE + NONCE_LEN;
+                &self.disk[at..at + PAYLOAD]
+            }
+            Slot::Cached(v) => v,
+        }
+    }
+
+    /// How many pages the batch holds.
+    pub(crate) fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// PERF-2: the batch as one buffer of page images, page `i` at `i *
+    /// PAGE_SIZE` with its plaintext at `NONCE_LEN..NONCE_LEN + PAYLOAD`:
+    /// the decrypted read buffer itself when every page came from disk in
+    /// the order asked, a copy laid out the same way otherwise (cached
+    /// pages, or pages asked out of order).
+    pub(crate) fn into_images(self) -> Vec<u8> {
+        let in_place = self
+            .slots
+            .iter()
+            .enumerate()
+            .all(|(i, s)| matches!(s, Slot::Disk(j) if *j == i));
+        if in_place {
+            return self.disk;
+        }
+        let mut out = vec![0u8; self.slots.len() * PAGE_SIZE];
+        for i in 0..self.slots.len() {
+            let at = i * PAGE_SIZE + NONCE_LEN;
+            out[at..at + PAYLOAD].copy_from_slice(self.payload(i));
+        }
+        out
+    }
+}
+
+/// A positioned read of exactly `buf.len()` bytes at `offset`. It doesn't
+/// use the file's cursor, which every other read and write here sets
+/// itself first.
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_exact_at(buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        let mut done = 0;
+        while done < buf.len() {
+            match file.seek_read(&mut buf[done..], offset + done as u64) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "failed to fill whole buffer",
+                    ))
+                }
+                Ok(n) => done += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The database file with the advisory lock its opener took, released
 /// explicitly when this is dropped.
 ///
@@ -483,6 +579,246 @@ impl Pager {
             .map_err(|_| MnemoError::PageAuthFailed(page_no))
     }
 
+    /// PERF-2 (v0.19.0): [`Pager::read_page_uncached`] for many pages at
+    /// once. `pages` is a list of `(page_no, gen)`; [`PageBatch::payload`]
+    /// gives each one's plaintext, in the same order. A cached copy
+    /// (possibly dirty) still wins. The rest are read with one positioned
+    /// read per run of adjacent pages and decrypted in place in that one
+    /// buffer: on up to `available_parallelism()` scoped threads when there
+    /// are at least [`PARALLEL_DECRYPT_MIN_PAGES`] of them, on this thread
+    /// otherwise. The first page (by page number) that fails authentication
+    /// is the error, as it would be one page at a time.
+    pub(crate) fn read_pages_uncached(&mut self, pages: &[(u64, u64)]) -> Result<PageBatch> {
+        let threads = if pages.len() >= PARALLEL_DECRYPT_MIN_PAGES {
+            std::thread::available_parallelism().map_or(1, |n| n.get())
+        } else {
+            1
+        };
+        // `MNEMO_DEV_DECRYPT_THREADS` caps the threads, so a benchmark can
+        // record the single-thread number (a phone without spare cores).
+        // Unsupported and compiled only with `dev-hooks` (HOOKS-1).
+        #[cfg(feature = "dev-hooks")]
+        let threads = std::env::var("MNEMO_DEV_DECRYPT_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map_or(threads, |cap| threads.min(cap.max(1)));
+        self.read_pages_with(pages, threads)
+    }
+
+    /// PERF-2 (v0.19.0): read and decrypt `pages` (`(page_no, gen)`), calling
+    /// `sink(i, plaintext)` once for each, in no particular order (`i` is
+    /// the page's position in `pages`). A cached copy (possibly dirty) still
+    /// wins. The rest are split among up to `available_parallelism()`
+    /// scoped threads, started once for the call when there are at least
+    /// [`PARALLEL_DECRYPT_MIN_PAGES`] pages; each reads its share of the
+    /// pages (sorted, adjacent ones in one positioned read) [`STREAM_PAGES`]
+    /// at a time into a small buffer, decrypts them in place and hands the
+    /// buffer to `sink` on this thread through a bounded channel, so memory
+    /// stays a few small buffers whatever the number of pages. A page that
+    /// fails authentication, or a failing `sink`, stops the call with that
+    /// error.
+    pub(crate) fn for_each_page(
+        &mut self,
+        pages: &[(u64, u64)],
+        sink: impl FnMut(usize, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        self.for_each_page_with(pages, None, sink)
+    }
+
+    /// [`Pager::for_each_page`], with `threads` fixing the thread count
+    /// (tests; `None` chooses as `for_each_page` does).
+    pub(crate) fn for_each_page_with(
+        &mut self,
+        pages: &[(u64, u64)],
+        threads: Option<usize>,
+        mut sink: impl FnMut(usize, &[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let mut todo: Vec<usize> = Vec::with_capacity(pages.len());
+        for (i, &(p, _)) in pages.iter().enumerate() {
+            match self.cache.peek(p) {
+                Some(c) => {
+                    let c = c.to_vec();
+                    sink(i, &c)?;
+                }
+                None => todo.push(i),
+            }
+        }
+        if todo.is_empty() {
+            return Ok(());
+        }
+        todo.sort_by_key(|&i| pages[i].0);
+        let auto = if todo.len() >= PARALLEL_DECRYPT_MIN_PAGES {
+            std::thread::available_parallelism().map_or(1, |n| n.get())
+        } else {
+            1
+        };
+        // `MNEMO_DEV_DECRYPT_THREADS`, as for `read_pages_uncached`.
+        #[cfg(feature = "dev-hooks")]
+        let auto = std::env::var("MNEMO_DEV_DECRYPT_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map_or(auto, |cap| auto.min(cap.max(1)));
+        let threads = threads
+            .unwrap_or(auto)
+            .clamp(1, todo.len().div_ceil(STREAM_PAGES));
+        let aads: Vec<Vec<u8>> = todo
+            .iter()
+            .map(|&i| self.page_aad(pages[i].0, pages[i].1))
+            .collect();
+        let cipher = crypto::page_cipher(&self.dek);
+        let file: &File = self.f()?;
+        // Read and decrypt `todo[lo..hi]` (at most STREAM_PAGES) into a new
+        // buffer, page after page.
+        let read = |lo: usize, hi: usize| -> Result<Vec<u8>> {
+            let mut buf = vec![0u8; (hi - lo) * PAGE_SIZE];
+            let mut k = lo;
+            while k < hi {
+                let first = pages[todo[k]].0;
+                let mut run = 1;
+                while k + run < hi && pages[todo[k + run]].0 == first + run as u64 {
+                    run += 1;
+                }
+                let at = (k - lo) * PAGE_SIZE;
+                read_exact_at(
+                    file,
+                    &mut buf[at..at + run * PAGE_SIZE],
+                    first * PAGE_SIZE as u64,
+                )?;
+                k += run;
+            }
+            for (n, img) in buf.chunks_exact_mut(PAGE_SIZE).enumerate() {
+                let j = lo + n;
+                let mut nonce = [0u8; NONCE_LEN];
+                nonce.copy_from_slice(&img[..NONCE_LEN]);
+                let (body, tag) = img[NONCE_LEN..].split_at_mut(PAYLOAD);
+                crypto::aead_decrypt_in_place(&cipher, &nonce, &aads[j], body, tag)
+                    .map_err(|_| MnemoError::PageAuthFailed(pages[todo[j]].0))?;
+            }
+            Ok(buf)
+        };
+        let mut deliver = |lo: usize, buf: &[u8]| -> Result<()> {
+            for (n, img) in buf.chunks_exact(PAGE_SIZE).enumerate() {
+                sink(todo[lo + n], &img[NONCE_LEN..NONCE_LEN + PAYLOAD])?;
+            }
+            Ok(())
+        };
+        if threads <= 1 {
+            let mut lo = 0;
+            while lo < todo.len() {
+                let hi = (lo + STREAM_PAGES).min(todo.len());
+                deliver(lo, &read(lo, hi)?)?;
+                lo = hi;
+            }
+            return Ok(());
+        }
+        let per = todo.len().div_ceil(threads);
+        std::thread::scope(|s| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(usize, Vec<u8>)>>(2 * threads);
+            let read = &read;
+            for t in 0..threads {
+                let tx = tx.clone();
+                let (start, end) = (t * per, ((t + 1) * per).min(todo.len()));
+                s.spawn(move || {
+                    let mut lo = start;
+                    while lo < end {
+                        let hi = (lo + STREAM_PAGES).min(end);
+                        let msg = read(lo, hi).map(|b| (lo, b));
+                        let stop = msg.is_err();
+                        if tx.send(msg).is_err() || stop {
+                            return;
+                        }
+                        lo = hi;
+                    }
+                });
+            }
+            drop(tx);
+            // Dropping `rx` on an error makes every thread's next send fail,
+            // so they stop.
+            for msg in rx {
+                let (lo, buf) = msg?;
+                deliver(lo, &buf)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// [`Pager::read_pages_uncached`] on at most `threads` threads (1: this
+    /// thread only).
+    pub(crate) fn read_pages_with(
+        &mut self,
+        pages: &[(u64, u64)],
+        threads: usize,
+    ) -> Result<PageBatch> {
+        let mut slots: Vec<Slot> = pages
+            .iter()
+            .map(|&(p, _)| match self.cache.peek(p) {
+                Some(c) => Slot::Cached(c.to_vec()),
+                None => Slot::Disk(usize::MAX),
+            })
+            .collect();
+        // The pages to read, by position in `pages`, sorted by page number so
+        // adjacent pages share one read.
+        let mut todo: Vec<usize> = (0..pages.len())
+            .filter(|&i| matches!(slots[i], Slot::Disk(_)))
+            .collect();
+        todo.sort_by_key(|&i| pages[i].0);
+        for (j, &i) in todo.iter().enumerate() {
+            slots[i] = Slot::Disk(j);
+        }
+        let mut disk = vec![0u8; todo.len() * PAGE_SIZE];
+        let mut k = 0;
+        while k < todo.len() {
+            let first = pages[todo[k]].0;
+            let mut run = 1;
+            while k + run < todo.len() && pages[todo[k + run]].0 == first + run as u64 {
+                run += 1;
+            }
+            let buf = &mut disk[k * PAGE_SIZE..(k + run) * PAGE_SIZE];
+            read_exact_at(self.f()?, buf, first * PAGE_SIZE as u64)?;
+            k += run;
+        }
+        let cipher = crypto::page_cipher(&self.dek);
+        let aads: Vec<Vec<u8>> = todo
+            .iter()
+            .map(|&i| self.page_aad(pages[i].0, pages[i].1))
+            .collect();
+        // Decrypt pages `first..` of `chunk` in place; the first failure is
+        // that page's index in `todo`.
+        let open = |first: usize, chunk: &mut [u8]| -> std::result::Result<(), usize> {
+            for (n, img) in chunk.chunks_exact_mut(PAGE_SIZE).enumerate() {
+                let j = first + n;
+                let mut nonce = [0u8; NONCE_LEN];
+                nonce.copy_from_slice(&img[..NONCE_LEN]);
+                let (body, tag) = img[NONCE_LEN..].split_at_mut(PAYLOAD);
+                crypto::aead_decrypt_in_place(&cipher, &nonce, &aads[j], body, tag)
+                    .map_err(|_| j)?;
+            }
+            Ok(())
+        };
+        let threads = threads.clamp(1, todo.len().max(1));
+        let failed: Option<usize> = if threads <= 1 {
+            open(0, &mut disk).err()
+        } else {
+            let per = todo.len().div_ceil(threads);
+            std::thread::scope(|s| {
+                let open = &open;
+                let parts: Vec<_> = disk
+                    .chunks_mut(per * PAGE_SIZE)
+                    .enumerate()
+                    .map(|(t, chunk)| s.spawn(move || open(t * per, chunk).err()))
+                    .collect();
+                parts
+                    .into_iter()
+                    .filter_map(|h| h.join().expect("a decrypt thread panicked"))
+                    .min()
+            })
+        };
+        if let Some(j) = failed {
+            return Err(MnemoError::PageAuthFailed(pages[todo[j]].0));
+        }
+        Ok(PageBatch { disk, slots })
+    }
+
     /// Stage a plaintext payload for an encrypted page. The payload is padded
     /// (or rejected if too large) to exactly [`PAYLOAD`] bytes. The page is
     /// cached dirty — pinned against eviction — until [`Pager::flush`].
@@ -547,5 +883,181 @@ impl Pager {
         self.dirty_gens.clear();
         self.cache.trim();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GEN: u64 = 7;
+
+    fn pager(path: &std::path::Path) -> Pager {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .unwrap();
+        Pager::new(
+            LockedFile::new(file),
+            Zeroizing::new([7u8; KEY_LEN]),
+            0,
+            crate::format::VERSION_V9,
+        )
+    }
+
+    /// Pages 1..=n, each holding its own number, sealed under `GEN`.
+    fn write_pages(path: &std::path::Path, n: u64) {
+        let mut p = pager(path);
+        for page in 1..=n {
+            let body = page.to_le_bytes();
+            let img = p.seal_page(page, GEN, &body).unwrap();
+            p.write_sealed(page, &img).unwrap();
+        }
+        p.sync().unwrap();
+    }
+
+    /// PERF-2: a batch read gives what page-at-a-time reads give, in the
+    /// order asked, with gaps and on one thread or several; the first page
+    /// that fails authentication is the error on both paths; a read past
+    /// the end fails; a cached (dirty) copy wins.
+    #[test]
+    fn batched_reads_match_single_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.bin");
+        let n = (PARALLEL_DECRYPT_MIN_PAGES as u64) * 2;
+        write_pages(&path, n);
+        let mut want: Vec<(u64, u64)> = (1..=n).filter(|p| p % 5 != 0).map(|p| (p, GEN)).collect();
+        want.reverse();
+        want.swap(3, 40);
+        let mut single = pager(&path);
+        let one: Vec<Vec<u8>> = want
+            .iter()
+            .map(|&(p, g)| single.read_page_uncached(p, g).unwrap())
+            .collect();
+        let all = |b: PageBatch| {
+            (0..b.len())
+                .map(|i| b.payload(i).to_vec())
+                .collect::<Vec<_>>()
+        };
+        for threads in [1, 4] {
+            let mut p = pager(&path);
+            assert_eq!(
+                all(p.read_pages_with(&want, threads).unwrap()),
+                one,
+                "{threads} threads"
+            );
+        }
+        assert_eq!(all(pager(&path).read_pages_uncached(&want).unwrap()), one);
+        for (got, &(page, _)) in one.iter().zip(&want) {
+            assert_eq!(&got[..8], &page.to_le_bytes());
+        }
+
+        // A damaged page (one the batch asks for): its own number in the
+        // error, both paths.
+        let bad = 51u64;
+        assert!(want.iter().any(|&(p, _)| p == bad));
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            f.seek(SeekFrom::Start(bad * PAGE_SIZE as u64 + 100))
+                .unwrap();
+            f.write_all(&[0xA5]).unwrap();
+        }
+        for threads in [1, 4] {
+            let res = pager(&path).read_pages_with(&want, threads);
+            assert!(
+                matches!(res, Err(MnemoError::PageAuthFailed(p)) if p == bad),
+                "{threads} threads: {:?}",
+                res.map(|b| b.len())
+            );
+        }
+        // The wrong generation fails too.
+        let res = pager(&path).read_pages_with(&[(1, GEN + 1)], 1);
+        assert!(
+            matches!(res, Err(MnemoError::PageAuthFailed(1))),
+            "{:?}",
+            res.map(|b| b.len())
+        );
+        // Past the end of the file.
+        assert!(pager(&path).read_pages_with(&[(n + 5, GEN)], 1).is_err());
+        // A dirty cached copy wins over the disk.
+        let mut p = pager(&path);
+        p.write_page(2, GEN, b"in the cache").unwrap();
+        let got = p.read_pages_with(&[(2, GEN), (3, GEN)], 1).unwrap();
+        assert_eq!(&got.payload(0)[..12], b"in the cache");
+        assert_eq!(&got.payload(1)[..8], &3u64.to_le_bytes());
+    }
+
+    /// PERF-2: `for_each_page` hands every page to the sink once, with its
+    /// own plaintext, on one thread or several; a damaged page or a failing
+    /// sink stops it with that error; a cached (dirty) copy wins.
+    #[test]
+    fn streamed_reads_reach_the_sink_once_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.bin");
+        let n = (PARALLEL_DECRYPT_MIN_PAGES as u64) * 3;
+        write_pages(&path, n);
+        let want: Vec<(u64, u64)> = (1..=n)
+            .rev()
+            .filter(|p| p % 7 != 0)
+            .map(|p| (p, GEN))
+            .collect();
+        for threads in [Some(1), Some(4), None] {
+            let mut seen = vec![0u32; want.len()];
+            pager(&path)
+                .for_each_page_with(&want, threads, |i, bytes| {
+                    seen[i] += 1;
+                    assert_eq!(&bytes[..8], &want[i].0.to_le_bytes());
+                    assert_eq!(bytes.len(), PAYLOAD);
+                    Ok(())
+                })
+                .unwrap();
+            assert!(seen.iter().all(|&c| c == 1), "{threads:?}: {seen:?}");
+        }
+        // A failing sink stops the call with its error.
+        for threads in [Some(1), Some(4)] {
+            let mut calls = 0;
+            let res = pager(&path).for_each_page_with(&want, threads, |_, _| {
+                calls += 1;
+                if calls == 10 {
+                    Err(MnemoError::Invalid("stop".into()))
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(matches!(res, Err(MnemoError::Invalid(_))), "{threads:?}");
+            assert_eq!(calls, 10);
+        }
+        // A cached dirty copy wins.
+        let mut p = pager(&path);
+        p.write_page(2, GEN, b"cached").unwrap();
+        let mut got = Vec::new();
+        p.for_each_page_with(&[(2, GEN), (3, GEN)], Some(1), |i, b| {
+            got.push((i, b[..6].to_vec()));
+            Ok(())
+        })
+        .unwrap();
+        got.sort();
+        assert_eq!(got[0], (0, b"cached".to_vec()));
+        assert_eq!(&got[1].1[..6], &3u64.to_le_bytes()[..6]);
+        // A damaged page: its own number in the error.
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            f.seek(SeekFrom::Start(100 * PAGE_SIZE as u64 + 64))
+                .unwrap();
+            f.write_all(&[0x5A]).unwrap();
+        }
+        for threads in [Some(1), Some(4)] {
+            let res = pager(&path).for_each_page_with(&want, threads, |_, _| Ok(()));
+            assert!(
+                matches!(res, Err(MnemoError::PageAuthFailed(100))),
+                "{threads:?}: {:?}",
+                res.err()
+            );
+        }
     }
 }
