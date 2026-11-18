@@ -258,6 +258,9 @@ h2.title { font-size: clamp(1.6rem, 3.2vw, 2.25rem); line-height: 1.2; letter-sp
 .trio > div.yes { border-left-color: var(--accent); }
 .trio h3 { font-size: 1.02rem; letter-spacing: -.01em; margin-bottom: .35rem; }
 .trio p { font-size: .93rem; color: var(--ink-2); }
+.shot { margin: 2rem 0 0; }
+.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line-2); border-radius: var(--radius); }
+.shot figcaption { font-size: .85rem; color: var(--ink-3); margin-top: .6rem; }
 
 /* ---------- FLOW ---------- */
 .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: .8rem; align-items: stretch; }
@@ -611,6 +614,10 @@ staging-7 environment and is owned by the payments team.</pre>
         <p>AES-256-GCM on every page, a write-ahead log, restorable snapshots, a built-in local model, about 1.5 KB per memory on disk. The same engine runs in your own apps, on desktops and phones.</p>
       </div>
     </div>
+    <figure class="shot">
+      <img src="docs/img/inspect-findings.png" width="1200" height="540" loading="lazy" alt="The mnemo inspect page in a browser, on its Findings tab: a table of review findings with their id, category, priority, status, title and author, and filters for status, category, priority and a date range.">
+      <figcaption><code>mnemo inspect</code> on a demo brain: your agents' review findings, with their status. The page only reads the file.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -843,14 +850,15 @@ staging-7 environment and is owned by the payments team.</pre>
     </div>
     <div class="grid grid-3 road">
       <div class="card done-col">
-        <h3>Shipped recently <span class="status done">v0.13 – v0.18</span></h3>
+        <h3>Shipped recently <span class="status done">v0.13 – v0.19</span></h3>
         <ul>
           <li>Agents coordinating on one machine: a task queue with dependencies, an inbox and claims, in the same encrypted file</li>
           <li>Review findings kept in the brain, and a backup of it you can commit to git</li>
           <li>One-command setup for Claude Code and Cursor, with hooks that load and save the memory, and an install script that checks what it downloads</li>
           <li>Keys generated and kept in the OS keychain, with a recovery code; a built-in local embedding model</li>
           <li>Recall by meaning and keywords together, with exact identifiers matched</li>
-          <li>A memory inspector in your browser, now with your agents' findings and tasks, and a git-friendly export</li>
+          <li>A first search about ten times faster in large brains: 12 ms at 100,000 memories</li>
+          <li>A memory inspector in your browser, with your agents' findings and tasks, a date range, and a git-friendly export</li>
           <li>iOS and Android packages</li>
         </ul>
         <p class="more"><a href="https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md">Everything since v0.1, in the changelog</a></p>
@@ -858,7 +866,6 @@ staging-7 environment and is owned by the payments team.</pre>
       <div class="card next-col">
         <h3>Next <span class="status next">in progress</span></h3>
         <ul>
-          <li>Faster first search in large brains</li>
           <li>Sharing one file, continued: catching up on only what changed, and sharing on by default for the MCP server</li>
           <li>Encrypted sync for your brains across your devices and your team; the server never sees your data. <a href="https://forms.gle/zBrWaECk4L7By4Bc6">Join the waitlist</a></li>
         </ul>
@@ -866,7 +873,6 @@ staging-7 environment and is owned by the payments team.</pre>
       <div class="card">
         <h3>After that <span class="status later">planned</span></h3>
         <ul>
-          <li>A faster first search after opening, by loading only what a search needs</li>
           <li>Smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones</li>
           <li>Teams across people and machines: per-agent keys, signed authorship, and merging copies of a file</li>
           <li>Ready-made iOS and Android screens that let an app's users see and delete what it remembers about them</li>

@@ -146,6 +146,8 @@ read-only page in your browser: search, each fact's history, and your
 agents' tasks and review findings. It reads the file once and writes
 nothing.
 
+![mnemo inspect on a demo brain: the Findings tab, a table of review findings with their status, and filters for status, category, priority and a date range](docs/img/inspect-findings.png)
+
 For a file of your own, the CLI. `init` makes a key and keeps it in your OS keychain, and the built-in
 embedder fetches its model (91 MB) once, on first use:
 
@@ -857,7 +859,7 @@ memories or more are indexed):
 |---|---|---|---|
 | Open with a raw key (from a keychain) | 0.4 ms | 2.9 ms | 30 ms |
 | Open with a passphrase (Argon2id, slow on purpose) | ~15 ms | ~17 ms | ~44 ms |
-| First search after opening (loads the vectors and index) | 0.9 ms | 9 ms | 112 ms |
+| First search after opening (loads the vectors and index; v0.19.0) | 0.6 ms | 4.2 ms | 12 ms |
 | Search, warm | 0.2 ms | 2.2 ms | 2.5 ms |
 | Store one memory durably | 16 ms | 15 ms | 16 ms |
 | … each, when 100 are committed together | 0.23 ms | 0.20 ms | 0.32 ms |
@@ -915,9 +917,9 @@ in Rust. Each re-clusters the index with the new defaults.
 ## Known limitations (being fixed)
 
 - **The first search after opening is slower.** It loads the vectors,
-  and the index on large files: about 112 ms at 100K memories, about 9 ms
-  at 10K on a Mac, and about 7 ms at 10K on an iPhone. Searches after that
-  take 2–3 ms. Loading only what a search needs is planned.
+  and the index on large files: about 12 ms at 100K memories and about
+  4 ms at 10K on a Mac (v0.19.0), and about 7 ms at 10K on an iPhone
+  (v0.12.0, not yet measured again). Searches after that take 2–3 ms.
 - **Saved sessions can hold secrets.** Transcripts can contain anything
   that was pasted into them. The hooks save them without tool output
   (only its size) and replace known secret shapes, such as private keys,
