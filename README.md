@@ -104,16 +104,16 @@ both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
 Windows (x86_64); elsewhere, pip builds from source, without the keychain
 and the built-in embedder.
 
-iOS and Android (from v0.12.0; current 0.18.0):
+iOS and Android (from v0.12.0; current 0.19.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.18.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.19.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.18.0")
+implementation("io.github.toarchkumar:mnemo-android:0.19.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -175,7 +175,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.18.1", "semantic", key="current-release")
+    db.remember_text("the current release is v0.19.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -196,6 +196,25 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.19.0: a faster first search
+
+- **The first search after opening is about ten times faster in a large
+  brain:** 11.5 ms at 100K memories instead of about 117 ms, and 4.2 ms
+  at 10K instead of about 10 ms (an M1 Pro). Opening a 100K file takes
+  26 ms instead of 30. Later searches are unchanged, at 2–3 ms.
+- **The search index is stored in a new layout,** inside the same v9
+  file. An older `mnemo` still opens the file and finds the right
+  results, just more slowly on a large one. On a brain with 20,000
+  memories or more, upgrade every session's `mnemo` together.
+- **`mnemo inspect` has a date range** on its Memories, Findings and
+  Tasks tabs, and a link can open a tab (`#findings`).
+- **Rust:** the task, message, claim and findings types are
+  `#[non_exhaustive]`. Code outside the crate builds them with
+  `TaskSpec::new(...)`, `FindingSpec::new(...)` or `Default`, then sets
+  fields; a struct expression, even with `..Default::default()`, no
+  longer compiles. The [CHANGELOG](CHANGELOG.md) has an example.
+- The iOS and Android packages are at 0.19.0, with no API change.
 
 ## What's new in v0.18.1: watch your agents' work in the browser
 
