@@ -727,10 +727,15 @@ pub(super) fn index_chain_runs(pager: &mut Pager, head: RunPtr) -> Vec<RunPtr> {
     let mut runs = Vec::new();
     let mut at = head;
     while !at.is_empty() && runs.len() <= 4096 {
+        // RB-015.1: a run that doesn't read is still the chain's (its
+        // pointer was authenticated), so it's freed too; the runs before
+        // it can't be found, and wait for a compaction.
         let Ok(buf) = read_run_bytes(pager, at.start, at.pages, at.len, at.gen) else {
+            runs.push(at);
             break;
         };
         let Ok(d) = rmp_serde::from_slice::<IndexDeltaOwned>(&buf) else {
+            runs.push(at);
             break;
         };
         runs.push(at);
@@ -826,6 +831,21 @@ pub(super) fn load_cache_directory(
 }
 
 /// Load an ANN index run, validating its dimensionality.
+/// RB-015.1 (v0.19.1): an error loading the persisted ANN index that means
+/// the run itself is bad (a page that fails authentication, bytes that
+/// don't decode, a shape that doesn't fit), as opposed to an I/O error or a
+/// lock, which say nothing about the run and still fail the call.
+pub(super) fn index_damage(e: &MnemoError) -> bool {
+    matches!(
+        e,
+        MnemoError::PageAuthFailed(_)
+            | MnemoError::Crypto(_)
+            | MnemoError::Serialize(_)
+            | MnemoError::Invalid(_)
+            | MnemoError::DimensionMismatch { .. }
+    )
+}
+
 pub(super) fn load_index(
     pager: &mut Pager,
     start: u64,

@@ -2083,6 +2083,39 @@ impl Mnemo {
         self.rd_nogil(py, |db| db.verify())
     }
 
+    /// RB-015.1 (v0.19.1): read the persisted ANN index from disk, apart
+    /// from the records `verify` checks. A dict: `status` is `"none"`,
+    /// `"ok"` (with `vectors` and `delta_runs`), `"unknown-layout"` (with
+    /// `layout`: a newer build wrote it) or `"damaged"` (with `error`).
+    /// The index is derived data: when it's damaged the memories are
+    /// intact, recall scans exactly, and `rebuild_index` replaces it.
+    /// Releases the GIL.
+    fn verify_index<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let check = self.rd_nogil(py, |db| db.verify_index())?;
+        let d = PyDict::new_bound(py);
+        match check {
+            mnemo_core::IndexCheck::None => d.set_item("status", "none")?,
+            mnemo_core::IndexCheck::Ok {
+                vectors,
+                delta_runs,
+            } => {
+                d.set_item("status", "ok")?;
+                d.set_item("vectors", vectors)?;
+                d.set_item("delta_runs", delta_runs)?;
+            }
+            mnemo_core::IndexCheck::UnknownLayout(layout) => {
+                d.set_item("status", "unknown-layout")?;
+                d.set_item("layout", layout)?;
+            }
+            mnemo_core::IndexCheck::Damaged(error) => {
+                d.set_item("status", "damaged")?;
+                d.set_item("error", error)?;
+            }
+            _ => d.set_item("status", "unknown")?,
+        }
+        Ok(d)
+    }
+
     /// What the handle warns about once: for a shared handle (12.4), a
     /// sidecar directory it can't use, a synced folder, an allowed network
     /// filesystem; for any handle (12.3), a passphrase on raw-key KDF

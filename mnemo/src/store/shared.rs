@@ -540,6 +540,13 @@ impl SharedMnemo {
         // resumed. A write window has cleared its stamp before running the
         // closure, so the handle's next call reloads.
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(self)));
+        // RB-015.1: what the handle met inside the call (a damaged index)
+        // joins the notices, once.
+        if let Some(db) = &self.db {
+            for n in db.notices() {
+                self.locks.notice(n.clone());
+            }
+        }
         // The lock-info note (if any) goes before the unlock.
         drop(held);
         if let Some(db) = self.db.as_mut() {

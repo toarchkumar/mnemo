@@ -132,6 +132,8 @@ def test_index_and_snapshots():
                 v = [float(i % 4 == j) for j in range(4)]
                 db.remember(f"m{i}", "semantic", v)
             db.flush()
+            # v0.19.1 (RB-015.1): the index, read apart from the records.
+            assert db.verify_index() == {"status": "none"}
 
             db.build_index()
             assert db.has_index()

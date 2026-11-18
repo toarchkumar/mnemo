@@ -1023,6 +1023,29 @@ pub struct VerifyReport {
     pub keyword_tokenizer: Option<crate::KeywordTokenizer>,
 }
 
+/// RB-015.1 (v0.19.1): what [`Mnemo::verify_index`] found in the persisted
+/// ANN index. The index is derived data: whatever this says, the memories
+/// are intact, and `mnemo index --rebuild` writes a new index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IndexCheck {
+    /// The file has no persisted index; recall scans exactly.
+    None,
+    /// The index run and its delta runs decrypt and decode.
+    Ok {
+        /// Vectors in the index, with the delta runs applied.
+        vectors: usize,
+        /// Delta runs on the chain after the base run.
+        delta_runs: usize,
+    },
+    /// The base run has a layout this build doesn't know (a newer build
+    /// wrote it). Recall scans exactly; the newer build still reads it.
+    UnknownLayout(u8),
+    /// A run didn't decrypt or decode. Recall scans exactly until the index
+    /// is rebuilt. The text is the error.
+    Damaged(String),
+}
+
 /// An encrypted, single-file agent memory database.
 pub struct Mnemo {
     /// 12.4: the lock layer's note for a handle opened through it for a
@@ -1055,6 +1078,10 @@ pub struct Mnemo {
     /// PERF-1 step 3: the header points at a persisted ANN index that
     /// hasn't been loaded yet. It loads on first use (`ensure_ann`).
     ann_unloaded: bool,
+    /// RB-015.1 (v0.19.1): the persisted index run didn't load (a damaged
+    /// page or a run that doesn't decode), so this handle recalls exactly.
+    /// On a read-write handle, the next commit that writes rebuilds it.
+    index_repair: bool,
     /// Append-only manifest of committed snapshots, oldest first. Capped
     /// at [`Mnemo::max_snapshots`] entries on every flush — the oldest
     /// entries are pruned first.

@@ -25,6 +25,7 @@ jobs:
           - fuzz_record_decode
           - fuzz_cache_directory
           - fuzz_mcp_frame
+          - fuzz_index_layout2
     steps:
       - uses: actions/checkout@v7
 

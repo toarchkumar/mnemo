@@ -119,6 +119,8 @@ impl Mnemo {
         self.recs = RecPages::from_catalog(&self.catalog);
         self.ann = ann;
         self.ann_unloaded = false;
+        // RB-015.1: the restored index replaces a damaged one.
+        self.index_repair = false;
         // The handle caches describe the catalog being replaced.
         self.key_index = None;
         self.superseded = None;

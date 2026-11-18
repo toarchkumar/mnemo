@@ -620,6 +620,71 @@ impl Mnemo {
         })
     }
 
+    /// RB-015.1 (v0.19.1): read the persisted ANN index run and its delta
+    /// runs from disk, apart from [`Mnemo::verify_report`]'s records. The
+    /// index is derived data, so a damaged one is reported, not an error:
+    /// the memories are intact and `mnemo index --rebuild` replaces it. An
+    /// I/O error still fails the call. Reads only; this handle's own
+    /// loaded index (if any) isn't touched.
+    pub fn verify_index(&mut self) -> Result<IndexCheck> {
+        let h = &self.header;
+        let (start, pages, len, gen, delta) = (
+            h.index_start,
+            h.index_pages,
+            h.index_len,
+            h.index_gen,
+            h.index_delta,
+        );
+        if pages == 0 {
+            return Ok(IndexCheck::None);
+        }
+        let damaged = |e: MnemoError| -> Result<IndexCheck> {
+            if index_damage(&e) {
+                Ok(IndexCheck::Damaged(e.to_string()))
+            } else {
+                Err(e)
+            }
+        };
+        let buf = match read_run_bytes(&mut self.pager, start, pages, len, gen) {
+            Ok(b) => b,
+            Err(e) => return damaged(e),
+        };
+        let decoded: Result<crate::index::IvfPqIndex> = if !self.is_v9() {
+            rmp_serde::from_slice(&buf).map_err(|e| MnemoError::Serialize(e.to_string()))
+        } else {
+            match buf.first() {
+                Some(&V9_INDEX_LAYOUT) => {
+                    crate::index::IvfPqIndex::read_layout2(&mut &buf[1..], buf.len() as u64 - 1)
+                }
+                Some(&V9_INDEX_LAYOUT_MSGPACK) => rmp_serde::from_slice(&buf[1..])
+                    .map_err(|e| MnemoError::Serialize(e.to_string())),
+                Some(&other) => return Ok(IndexCheck::UnknownLayout(other)),
+                None => Err(MnemoError::Invalid("the index run is empty".into())),
+            }
+        };
+        let mut idx = match decoded {
+            Ok(i) => i,
+            Err(e) => return damaged(e),
+        };
+        if idx.dims() != self.dimensions {
+            return damaged(MnemoError::Invalid(
+                "ANN index dimensionality does not match the database".into(),
+            ));
+        }
+        let delta_runs = if self.is_v9() {
+            match apply_index_chain(&mut self.pager, &mut idx, delta) {
+                Ok((chain, _)) => chain.len(),
+                Err(e) => return damaged(e),
+            }
+        } else {
+            0
+        };
+        Ok(IndexCheck::Ok {
+            vectors: idx.len(),
+            delta_runs,
+        })
+    }
+
     /// FMT-9 (a): fail if the free list (or a pending free) overlaps any
     /// page the current state references.
     pub(super) fn check_free_list_disjoint(&self) -> Result<()> {

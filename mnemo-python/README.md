@@ -211,6 +211,7 @@ db.notices()  # what the handle warns about (also raised as UserWarning at open)
 | `session(agent_id)` | Begin a conversation `Session` |
 | `flush()` / `close()` | Persist pending changes |
 | `verify()` | Decrypt and re-validate every record |
+| `verify_index()` | v0.19.1: read the persisted ANN index apart from the records: `{"status": "none" \| "ok" \| "unknown-layout" \| "damaged", ...}` with `vectors` and `delta_runs`, `layout`, or `error`. A damaged index loses no memories: recall scans exactly, says so once in `notices()`, and the handle's next write rebuilds it |
 | `build_index()` / `drop_index()` / `has_index()` | Approximate index control |
 | `snapshots()` / `restore_to(txn_id)` / `restore_to_time(unix_secs)` | Point-in-time recovery |
 | `set_cache_capacity(pages)` / `page_cache_stats()` | Page-cache tuning (renamed from `cache_stats` in v0.4.0 — that name now belongs to the result cache below) |

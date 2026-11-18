@@ -187,6 +187,12 @@ impl Mnemo {
                 self.ensure_ann()?;
             }
         }
+        // RB-015.1: a damaged index run left this handle without an index;
+        // a commit that writes rebuilds it (or drops the run on a file too
+        // small for one).
+        if self.index_repair && (self.dirty_catalog || self.dirty_cache) {
+            self.repair_index()?;
+        }
         // PERF-1: persist the (derived) ANN index only when forced or due.
         // Otherwise the header keeps pointing at the previous index run, and
         // records written since then are re-assigned when it's next loaded
