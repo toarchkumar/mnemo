@@ -795,13 +795,15 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
         .unwrap();
         db.set_author(Some("reviewer-b".into()));
         let add = |db: &mut Mnemo, id: &str, category: &str, priority: &str, title: &str| {
-            db.finding_add(&FindingSpec {
-                id: id.into(),
-                category: category.into(),
-                priority: priority.into(),
-                title: title.into(),
-                body: format!("body of {id}: {evil}"),
-                refs: vec![format!("ref {evil}")],
+            db.finding_add(&{
+                let mut built = FindingSpec::default();
+                built.id = id.into();
+                built.category = category.into();
+                built.priority = priority.into();
+                built.title = title.into();
+                built.body = format!("body of {id}: {evil}");
+                built.refs = vec![format!("ref {evil}")];
+                built
             })
             .unwrap();
         };
@@ -813,20 +815,22 @@ fn findings_and_tasks_tabs_serve_read_only_json() {
             .unwrap();
         db.finding_triage("RB-9.10", "rejected", "not ours")
             .unwrap();
-        db.task_add(&TaskSpec {
-            title: format!("first {evil}"),
-            body: evil.into(),
-            role: Some("worker".into()),
-            slug: Some("first".into()),
-            refs: vec![format!("RB-9.2 {evil}")],
-            ..Default::default()
+        db.task_add(&{
+            let mut built = TaskSpec::default();
+            built.title = format!("first {evil}");
+            built.body = evil.into();
+            built.role = Some("worker".into());
+            built.slug = Some("first".into());
+            built.refs = vec![format!("RB-9.2 {evil}")];
+            built
         })
         .unwrap();
-        db.task_add(&TaskSpec {
-            title: "Ship it".into(),
-            after: vec!["first".into()],
-            slug: Some("ship-it".into()),
-            ..Default::default()
+        db.task_add(&{
+            let mut built = TaskSpec::default();
+            built.title = "Ship it".into();
+            built.after = vec!["first".into()];
+            built.slug = Some("ship-it".into());
+            built
         })
         .unwrap();
         db.set_author(Some("worker-a".into()));

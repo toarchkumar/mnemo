@@ -42,6 +42,28 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - `examples/ann_defaults_v0_6_0` runs on v9 (it skips, and labels, the
   tiers below 20,000 facts, which have no index) and writes a file only
   with `--out`.
+- **Rust: the coordination and findings types are `#[non_exhaustive]`,**
+  so later fields aren't breaking changes: `TaskSpec`, `Task`,
+  `TaskTaken`, `TaskClaim`, `NewWork`, `Message`, `Claim`, `Presence`,
+  `Stale`, `KindCounts`, `FindingSpec`, `Finding` and `FindingFilter`.
+  What this means for code outside the crate:
+  - It can't build them with a struct expression, not even with
+    `..Default::default()`. Start from a constructor or `Default` and set
+    the fields:
+    ```rust
+    let mut spec = TaskSpec::new("Fix it"); // or TaskSpec::default()
+    spec.role = Some("worker".into());
+    let mut f = FindingSpec::new("RB-1.1", "PERF", "LOW", "Slow");
+    f.body = "Why it matters.".into();
+    let mut filter = FindingFilter::default();
+    filter.status = Some("open".into());
+    ```
+  - `TaskSpec::new(title)` and `FindingSpec::new(id, category, priority,
+    title)` are new. `Message` and `Claim` now implement `Default` (for
+    tests that build one).
+  - A pattern that destructures one needs a trailing `..`
+    (`let Task { slug, status, .. } = task;`). Reading fields is
+    unchanged.
 
 ## [0.18.1] — 2026-11-17
 

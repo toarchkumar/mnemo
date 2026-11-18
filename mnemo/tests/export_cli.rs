@@ -393,12 +393,13 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     let mut db = Mnemo::open(&path, PW).unwrap();
     db.set_author(Some("reviewer-b".into()));
     let finding_in = |db: &mut Mnemo, id: &str, category: &str| {
-        db.finding_add(&FindingSpec {
-            id: id.into(),
-            category: category.into(),
-            priority: "LOW".into(),
-            title: format!("finding {id}"),
-            ..Default::default()
+        db.finding_add(&{
+            let mut built = FindingSpec::default();
+            built.id = id.into();
+            built.category = category.into();
+            built.priority = "LOW".into();
+            built.title = format!("finding {id}");
+            built
         })
         .unwrap()
     };
@@ -423,9 +424,10 @@ fn git_writes_findings_and_the_project_essence_in_order() {
     db.set_author(Some("reviewer-b".into()));
     db.finding_verify("RB-11.4", "v0.18.0").unwrap();
     db.set_author(Some("planner-a".into()));
-    db.task_add(&mnemo_engine::TaskSpec {
-        title: "Ship it".into(),
-        ..Default::default()
+    db.task_add(&{
+        let mut built = mnemo_engine::TaskSpec::default();
+        built.title = "Ship it".into();
+        built
     })
     .unwrap();
     let add = |db: &mut Mnemo, s: EssenceSection, t: &str| {
@@ -581,12 +583,13 @@ fn git_leaves_out_a_task_that_refs_an_unverified_security_finding() {
         ("RB-50.3", "SECURITY"),
         ("RB-50.4", "CORRECTNESS"),
     ] {
-        db.finding_add(&FindingSpec {
-            id: id.into(),
-            category: category.into(),
-            priority: "MEDIUM".into(),
-            title: format!("finding {id}"),
-            ..Default::default()
+        db.finding_add(&{
+            let mut built = FindingSpec::default();
+            built.id = id.into();
+            built.category = category.into();
+            built.priority = "MEDIUM".into();
+            built.title = format!("finding {id}");
+            built
         })
         .unwrap();
     }
@@ -602,11 +605,12 @@ fn git_leaves_out_a_task_that_refs_an_unverified_security_finding() {
         ("fix-correctness", vec!["RB-50.4"]),
         ("no-refs", vec![]),
     ] {
-        db.task_add(&TaskSpec {
-            title: format!("task {slug}"),
-            slug: Some(slug.into()),
-            refs: refs.into_iter().map(str::to_string).collect(),
-            ..Default::default()
+        db.task_add(&{
+            let mut built = TaskSpec::default();
+            built.title = format!("task {slug}");
+            built.slug = Some(slug.into());
+            built.refs = refs.into_iter().map(str::to_string).collect();
+            built
         })
         .unwrap();
     }

@@ -27,13 +27,15 @@ fn db(dir: &tempfile::TempDir) -> Mnemo {
 }
 
 fn spec(id: &str, category: &str, priority: &str, title: &str) -> FindingSpec {
-    FindingSpec {
-        id: id.into(),
-        category: category.into(),
-        priority: priority.into(),
-        title: title.into(),
-        body: "Where it is and why it matters.".into(),
-        refs: vec!["src/store/coordination.rs:206".into()],
+    {
+        let mut built = FindingSpec::default();
+        built.id = id.into();
+        built.category = category.into();
+        built.priority = priority.into();
+        built.title = title.into();
+        built.body = "Where it is and why it matters.".into();
+        built.refs = vec!["src/store/coordination.rs:206".into()];
+        built
     }
 }
 
@@ -182,20 +184,23 @@ fn the_list_filters_and_orders_by_id() {
         ids(&FindingFilter::default(), &mut db),
         ["R-011.1", "RB-9.2", "RB-9.10", "RB-10.1"]
     );
-    let f = FindingFilter {
-        status: Some("open".into()),
-        ..Default::default()
+    let f = {
+        let mut built = FindingFilter::default();
+        built.status = Some("open".into());
+        built
     };
     assert_eq!(ids(&f, &mut db), ["R-011.1", "RB-9.10", "RB-10.1"]);
-    let f = FindingFilter {
-        batch: Some("RB-9".into()),
-        category: Some("PERF".into()),
-        ..Default::default()
+    let f = {
+        let mut built = FindingFilter::default();
+        built.batch = Some("RB-9".into());
+        built.category = Some("PERF".into());
+        built
     };
     assert_eq!(ids(&f, &mut db), ["RB-9.10"]);
-    let f = FindingFilter {
-        priority: Some("IDEA".into()),
-        ..Default::default()
+    let f = {
+        let mut built = FindingFilter::default();
+        built.priority = Some("IDEA".into());
+        built
     };
     assert_eq!(ids(&f, &mut db), ["R-011.1"]);
     assert_eq!(db.finding("RB-9.2").unwrap().unwrap().status, "accepted");
@@ -288,9 +293,10 @@ fn a_security_finding_is_private_until_verified_against_a_tag() {
     assert_eq!(visibility_of(&db.get(&other.record_id).unwrap()), "team");
     // Every finding read sees it.
     assert_eq!(db.finding("RB-014.1").unwrap().unwrap().id, "RB-014.1");
-    let f2 = mnemo_engine::FindingFilter {
-        category: Some("SECURITY".into()),
-        ..Default::default()
+    let f2 = {
+        let mut built = mnemo_engine::FindingFilter::default();
+        built.category = Some("SECURITY".into());
+        built
     };
     assert_eq!(db.findings(&f2).unwrap().len(), 1);
     db.set_author(Some("planner-a".into()));

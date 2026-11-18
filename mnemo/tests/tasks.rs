@@ -37,11 +37,12 @@ fn brain(dir: &Path) -> PathBuf {
 }
 
 fn spec(title: &str, role: Option<&str>, after: &[&str]) -> TaskSpec {
-    TaskSpec {
-        title: title.into(),
-        role: role.map(str::to_string),
-        after: after.iter().map(|a| a.to_string()).collect(),
-        ..Default::default()
+    {
+        let mut built = TaskSpec::default();
+        built.title = title.into();
+        built.role = role.map(str::to_string);
+        built.after = after.iter().map(|a| a.to_string()).collect();
+        built
     }
 }
 
@@ -67,10 +68,11 @@ fn add_next_update_list_and_get() {
         ("queued", "planner-a")
     );
     let (s2, _) = db
-        .task_add(&TaskSpec {
-            body: "messages".into(),
-            slug: Some("step-2".into()),
-            ..spec("Step 2", Some("worker"), &["step-1-the-plumbing"])
+        .task_add(&{
+            let mut built = spec("Step 2", Some("worker"), &["step-1-the-plumbing"]);
+            built.body = "messages".into();
+            built.slug = Some("step-2".into());
+            built
         })
         .unwrap();
     let (_r, _) = db
@@ -78,18 +80,20 @@ fn add_next_update_list_and_get() {
         .unwrap();
     // Re-adding a slug updates it in place, or is unchanged.
     let (_, o) = db
-        .task_add(&TaskSpec {
-            body: "messages".into(),
-            slug: Some("step-2".into()),
-            ..spec("Step 2", Some("worker"), &["step-1-the-plumbing"])
+        .task_add(&{
+            let mut built = spec("Step 2", Some("worker"), &["step-1-the-plumbing"]);
+            built.body = "messages".into();
+            built.slug = Some("step-2".into());
+            built
         })
         .unwrap();
     assert_eq!(o, WriteOutcome::Unchanged);
     let (u, o) = db
-        .task_add(&TaskSpec {
-            body: "messages, with the hop count".into(),
-            slug: Some("step-2".into()),
-            ..spec("Step 2", Some("worker"), &["step-1-the-plumbing"])
+        .task_add(&{
+            let mut built = spec("Step 2", Some("worker"), &["step-1-the-plumbing"]);
+            built.body = "messages, with the hop count".into();
+            built.slug = Some("step-2".into());
+            built
         })
         .unwrap();
     assert_eq!(
@@ -100,13 +104,15 @@ fn add_next_update_list_and_get() {
     for bad in [
         spec("", None, &[]),
         spec("x", None, &["no-such-task"]),
-        TaskSpec {
-            slug: Some("Bad Slug".into()),
-            ..spec("x", None, &[])
+        {
+            let mut built = spec("x", None, &[]);
+            built.slug = Some("Bad Slug".into());
+            built
         },
-        TaskSpec {
-            slug: Some("self".into()),
-            ..spec("x", None, &["self"])
+        {
+            let mut built = spec("x", None, &["self"]);
+            built.slug = Some("self".into());
+            built
         },
         spec("x", Some("bad role"), &[]),
         spec("!!!", None, &[]),
@@ -224,9 +230,10 @@ fn add_next_update_list_and_get() {
         "step-2"
     );
     as_agent(&mut db, "planner-a");
-    db.task_add(&TaskSpec {
-        pre_approved: true,
-        ..spec("Small fix", None, &[])
+    db.task_add(&{
+        let mut built = spec("Small fix", None, &[]);
+        built.pre_approved = true;
+        built
     })
     .unwrap();
     as_agent(&mut db, "worker-b");
@@ -552,9 +559,10 @@ fn rb012_2_a_done_slug_and_a_strangers_re_add_are_refused() {
     as_agent(&mut db, "planner-a");
     db.task_add(&spec("Bump the version", Some("worker"), &[]))
         .unwrap();
-    db.task_add(&TaskSpec {
-        slug: Some("bump-the-version-2".into()),
-        ..spec("taken", None, &[])
+    db.task_add(&{
+        let mut built = spec("taken", None, &[]);
+        built.slug = Some("bump-the-version-2".into());
+        built
     })
     .unwrap();
     as_agent(&mut db, "worker-a");
@@ -565,9 +573,10 @@ fn rb012_2_a_done_slug_and_a_strangers_re_add_are_refused() {
     db.task_update("bump-the-version", Some("done"), None, None)
         .unwrap();
     let err = db
-        .task_add(&TaskSpec {
-            body: "again".into(),
-            ..spec("Bump the version", Some("worker"), &[])
+        .task_add(&{
+            let mut built = spec("Bump the version", Some("worker"), &[]);
+            built.body = "again".into();
+            built
         })
         .unwrap_err()
         .to_string();
@@ -584,9 +593,10 @@ fn rb012_2_a_done_slug_and_a_strangers_re_add_are_refused() {
     db.task_add(&spec("Ship it", Some("worker"), &[])).unwrap();
     as_agent(&mut db, "worker-a");
     let err = db
-        .task_add(&TaskSpec {
-            pre_approved: true,
-            ..spec("Ship it", Some("worker"), &[])
+        .task_add(&{
+            let mut built = spec("Ship it", Some("worker"), &[]);
+            built.pre_approved = true;
+            built
         })
         .unwrap_err()
         .to_string();

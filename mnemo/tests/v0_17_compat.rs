@@ -64,13 +64,14 @@ fn an_older_build_leaves_out_an_unverified_security_finding() {
         .unwrap();
         db.set_author(Some("reviewer-b".into()));
         let add = |db: &mut Mnemo, id: &str, category: &str, title: &str| {
-            db.finding_add(&FindingSpec {
-                id: id.into(),
-                category: category.into(),
-                priority: "MEDIUM".into(),
-                title: title.into(),
-                body: format!("{title}: the body"),
-                ..Default::default()
+            db.finding_add(&{
+                let mut built = FindingSpec::default();
+                built.id = id.into();
+                built.category = category.into();
+                built.priority = "MEDIUM".into();
+                built.title = title.into();
+                built.body = format!("{title}: the body");
+                built
             })
             .unwrap();
         };

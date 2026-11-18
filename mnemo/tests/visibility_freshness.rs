@@ -269,10 +269,11 @@ fn stale_records_by_kind_and_review_date() {
     assert!(!r.contains("recent-ish open [stale"), "{r}");
     // A task and a message, then four days on.
     db.set_author(Some("planner-a".into()));
-    db.task_add(&mnemo_engine::TaskSpec {
-        title: "Step 7".into(),
-        role: Some("worker".into()),
-        ..Default::default()
+    db.task_add(&{
+        let mut built = mnemo_engine::TaskSpec::default();
+        built.title = "Step 7".into();
+        built.role = Some("worker".into());
+        built
     })
     .unwrap();
     db.post("worker-a", "unanswered", "", &[], None, None, None)

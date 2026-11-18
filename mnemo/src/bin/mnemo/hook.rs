@@ -715,10 +715,8 @@ fn your_work(db: &mut Mnemo) -> String {
     }
     // v0.18.0: for a Planner, the findings that wait for its triage.
     if role.as_deref() == Some("planner") {
-        let open = mnemo_engine::FindingFilter {
-            status: Some(mnemo_engine::finding_status::OPEN.into()),
-            ..Default::default()
-        };
+        let mut open = mnemo_engine::FindingFilter::default();
+        open.status = Some(mnemo_engine::finding_status::OPEN.into());
         if let Ok(fs) = db.findings(&open) {
             if !fs.is_empty() {
                 sections.push((
@@ -1558,39 +1556,30 @@ mod tests {
     /// ONBOARD-UX: the per-turn line asks for only what its counts hold.
     #[test]
     fn the_turn_line_names_only_what_is_new() {
-        let msg = |s: &str| mnemo_engine::Message {
-            id: ulid::Ulid::nil(),
-            to: "worker-a".into(),
-            from: "user".into(),
-            subject: s.into(),
-            body: String::new(),
-            refs: Vec::new(),
-            conversation: String::new(),
-            hops: 0,
-            status: "open".into(),
-            delivery: String::new(),
-            created_at: 0,
-            acked_at: None,
+        // v0.19.0: these types are `#[non_exhaustive]`, so a caller outside
+        // the engine builds them from `Default` and sets fields.
+        let msg = |s: &str| {
+            let mut m = mnemo_engine::Message::default();
+            m.to = "worker-a".into();
+            m.from = "user".into();
+            m.subject = s.into();
+            m.status = "open".into();
+            m
         };
-        let claim = mnemo_engine::Claim {
-            topic: "task:ship".into(),
-            holder: "worker-a".into(),
-            expires_at: 600,
-            lease: 900,
-        };
+        let mut claim = mnemo_engine::Claim::default();
+        claim.topic = "task:ship".into();
+        claim.holder = "worker-a".into();
+        claim.expires_at = 600;
+        claim.lease = 900;
         let head = |w: &mnemo_engine::NewWork| turn_text(w, 0).lines().next().unwrap().to_string();
-        let w = mnemo_engine::NewWork {
-            messages: vec![msg("hello")],
-            ..Default::default()
-        };
+        let mut w = mnemo_engine::NewWork::default();
+        w.messages = vec![msg("hello")];
         assert_eq!(
             head(&w),
             "mnemo: new for you: 1 message. Call `inbox` to read it."
         );
-        let w = mnemo_engine::NewWork {
-            lapsing: vec![claim.clone(), claim],
-            ..Default::default()
-        };
+        let mut w = mnemo_engine::NewWork::default();
+        w.lapsing = vec![claim.clone(), claim];
         assert_eq!(
             head(&w),
             "mnemo: new for you: 2 claims lapsing soon. Update the task with `task` to renew \

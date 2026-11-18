@@ -22,6 +22,7 @@ use crate::memory::{
 
 /// v0.18.0: a finding to add ([`Mnemo::finding_add`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FindingSpec {
     /// Its id, `^[A-Z]+-[0-9]+\.[0-9]+$` (`RB-014.1`); unique.
     pub id: String,
@@ -37,8 +38,29 @@ pub struct FindingSpec {
     pub refs: Vec<String>,
 }
 
+impl FindingSpec {
+    /// v0.19.0: a finding with its id, category, priority and title, and no
+    /// body or refs. The type is `#[non_exhaustive]`, so outside this crate
+    /// set the other fields after this (`spec.body = "…".into()`).
+    pub fn new(
+        id: impl Into<String>,
+        category: impl Into<String>,
+        priority: impl Into<String>,
+        title: impl Into<String>,
+    ) -> Self {
+        FindingSpec {
+            id: id.into(),
+            category: category.into(),
+            priority: priority.into(),
+            title: title.into(),
+            ..Default::default()
+        }
+    }
+}
+
 /// v0.18.0: one finding.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Finding {
     /// The record's id.
     pub record_id: Ulid,
@@ -137,6 +159,7 @@ impl Finding {
 /// v0.18.0: which findings [`Mnemo::findings`] lists; each field left out
 /// matches every finding.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FindingFilter {
     /// Its status.
     pub status: Option<String>,
