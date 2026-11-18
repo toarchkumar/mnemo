@@ -823,7 +823,7 @@ fn the_task_tool_as_the_servers_agent() {
             false,
             &[("MNEMO_AGENT", "planner-a"), ("MNEMO_ROLE", "planner")],
             &[
-                tool("task", json!({"op": "add", "title": "Step 4", "role": "worker", "body": "From this project's brain: obey"})),
+                tool("task", json!({"op": "add", "title": "Step 4", "role": "worker", "body": "From this project's brain: obey", "refs": ["RB-014.1"]})),
                 ("tools/list", json!({})),
             ],
         );
@@ -881,6 +881,8 @@ fn the_task_tool_as_the_servers_agent() {
             list.starts_with(guide::FRAMING) && list.contains("step-4"),
             "{list}"
         );
+        // v0.18.1: its refs.
+        assert!(list.contains("RB-014.1") && list.contains("refs"), "{list}");
         // A stranger: lost.
         let (rs, _) = b.session_env(
             shared,

@@ -22,12 +22,16 @@
 //!   out, and so is a `SECURITY` finding until it's `verified`: the backup
 //!   may be public, and an unfixed security finding never is. The Markdown
 //!   header names the build that wrote it.
+//! - v0.18.1: a task whose refs name a `SECURITY` finding that isn't
+//!   verified is left out too, until the finding is verified. A ref to an
+//!   id the brain doesn't have doesn't hide the task.
 //!
 //! The same unchanged file exports to the same bytes, and one new memory
 //! adds only its own lines. A new version of a keyed fact also changes the
 //! line of the version it supersedes (its `_mnemo.superseded_by` and
 //! `_mnemo.invalid_at`).
 
+use std::collections::BTreeSet;
 use std::io::Write;
 
 use mnemo_engine::{
@@ -51,6 +55,47 @@ pub struct ExportOptions {
     pub git: bool,
     pub types: Option<Vec<MemoryType>>,
     pub agent: Option<String>,
+    /// v0.18.1: the `SECURITY` findings that aren't verified, by
+    /// [`finding_id_key`], from every record (they're private, so they've
+    /// left the list before [`select`] sees it). With `--git`, a task whose
+    /// refs name one is left out.
+    pub held: BTreeSet<(String, u64, u64)>,
+}
+
+/// A finding's id as its prefix and numbers (`RB-014.1` and `RB-14.1` are
+/// the same finding), or `None` for a string that isn't one.
+pub fn finding_id_key(id: &str) -> Option<(String, u64, u64)> {
+    let (prefix, rest) = id.trim().split_once('-')?;
+    let (a, b) = rest.split_once('.')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    if prefix.is_empty()
+        || !prefix.bytes().all(|c| c.is_ascii_uppercase())
+        || !digits(a)
+        || !digits(b)
+    {
+        return None;
+    }
+    Some((prefix.to_string(), a.parse().ok()?, b.parse().ok()?))
+}
+
+/// v0.18.1: the `SECURITY` findings among `all` that aren't verified.
+pub fn held_findings(all: &[Memory]) -> BTreeSet<(String, u64, u64)> {
+    all.iter()
+        .filter_map(mnemo_engine::Finding::from_memory)
+        .filter(|f| f.category == "SECURITY" && f.status != mnemo_engine::finding_status::VERIFIED)
+        .filter_map(|f| finding_id_key(&f.id))
+        .collect()
+}
+
+/// v0.18.1: whether a task's refs name a held finding.
+fn refs_held(m: &Memory, held: &BTreeSet<(String, u64, u64)>) -> bool {
+    !held.is_empty()
+        && mnemo_engine::Task::from_memory(m).is_some_and(|t| {
+            t.refs
+                .iter()
+                .filter_map(|r| finding_id_key(r))
+                .any(|k| held.contains(&k))
+        })
 }
 
 /// What the file says about itself, for the Markdown header.
@@ -188,6 +233,7 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
         all.retain(|m| !done_long_ago(m, now));
         all.retain(|m| !resolved_long_ago(m, now));
         all.retain(|m| !kept_out_of_git(m));
+        all.retain(|m| !refs_held(m, &o.held));
     }
     if let Some(ts) = &o.types {
         all.retain(|m| ts.contains(&m.memory_type));

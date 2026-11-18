@@ -20,6 +20,20 @@ Pre-1.0, the minor component carries the breaking-change signal.
   with the body and history. Two new read-only routes, `/api/findings` and
   `/api/tasks`, built when the file is read; the inspector still serves
   only `GET`, holds no handle between requests and writes nothing.
+- **Tasks have refs:** what a task is about, such as a review finding's
+  id, a file or a PR. `mnemo task add --ref <id>` (repeatable), the MCP
+  `task` tool's `refs`, and Python's `task_add(..., refs=[...])`; `task
+  get` and the JSON of `get` and `list` show them. They're kept under a
+  reserved metadata key, with no format change.
+- **`mnemo export --git` leaves out a task whose refs name a `SECURITY`
+  finding that isn't verified** (an id written with leading zeros names
+  the same finding). The task comes back once the finding is verified. A
+  ref to an id the brain doesn't have hides nothing.
+
+### Changed
+
+- **Rust:** `TaskSpec` and `Task` have a new field, `refs`. Code that
+  builds a `TaskSpec` with `..Default::default()` is unaffected.
 
 ## [0.18.0] — 2026-11-17
 

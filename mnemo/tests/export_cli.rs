@@ -563,3 +563,89 @@ fn git_writes_findings_and_the_project_essence_in_order() {
         "{err}"
     );
 }
+
+/// v0.18.1: with `--git`, a task whose refs name a `SECURITY` finding that
+/// isn't verified is left out (an id with leading zeros names the same
+/// finding); it comes back once the finding is verified. A ref to an id the
+/// brain doesn't have, or to another category's finding, hides nothing, and
+/// the plain export keeps every task.
+#[test]
+fn git_leaves_out_a_task_that_refs_an_unverified_security_finding() {
+    use mnemo_engine::{FindingSpec, TaskSpec};
+    let (_d, path) = seed();
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    db.set_author(Some("reviewer-b".into()));
+    for (id, category) in [
+        ("RB-50.1", "SECURITY"),
+        ("RB-50.2", "SECURITY"),
+        ("RB-50.3", "SECURITY"),
+        ("RB-50.4", "CORRECTNESS"),
+    ] {
+        db.finding_add(&FindingSpec {
+            id: id.into(),
+            category: category.into(),
+            priority: "MEDIUM".into(),
+            title: format!("finding {id}"),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    db.set_author(Some("planner-a".into()));
+    db.finding_triage("RB-50.2", "accepted", "yes").unwrap();
+    db.finding_triage("RB-50.3", "accepted", "yes").unwrap();
+    for (slug, refs) in [
+        ("fix-open", vec!["RB-50.1"]),
+        ("fix-accepted", vec!["RB-050.2"]),
+        ("fix-soon-verified", vec!["RB-50.3"]),
+        ("fix-mixed", vec!["src/a.rs:1", "RB-50.1"]),
+        ("fix-unknown", vec!["RB-999.9"]),
+        ("fix-correctness", vec!["RB-50.4"]),
+        ("no-refs", vec![]),
+    ] {
+        db.task_add(&TaskSpec {
+            title: format!("task {slug}"),
+            slug: Some(slug.into()),
+            refs: refs.into_iter().map(str::to_string).collect(),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+    db.close().unwrap();
+
+    let slugs = |args: &[&str]| -> Vec<String> {
+        jsonl(&export(&path, args))
+            .iter()
+            .filter_map(|r| r["metadata"]["_mnemo.slug"].as_str().map(str::to_string))
+            .collect()
+    };
+    assert_eq!(
+        slugs(&["--git", "--format", "jsonl"]),
+        ["fix-correctness", "fix-unknown", "no-refs"]
+    );
+    let md = export(&path, &["--git"]);
+    assert!(
+        !md.contains("task fix-open") && !md.contains("task fix-mixed"),
+        "{md}"
+    );
+    assert!(md.contains("task fix-unknown"));
+    assert_eq!(
+        slugs(&["--format", "jsonl", "--visibility", "all"]).len(),
+        7,
+        "the plain export keeps every task"
+    );
+
+    // Verified: its task comes back; the others stay out.
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    db.set_author(Some("reviewer-b".into()));
+    db.finding_verify("RB-50.3", "v0.18.1").unwrap();
+    db.close().unwrap();
+    assert_eq!(
+        slugs(&["--git", "--format", "jsonl"]),
+        [
+            "fix-correctness",
+            "fix-soon-verified",
+            "fix-unknown",
+            "no-refs"
+        ]
+    );
+}

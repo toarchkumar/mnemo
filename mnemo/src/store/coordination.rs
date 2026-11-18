@@ -1150,7 +1150,14 @@ pub struct TaskSpec {
     pub pre_approved: bool,
     /// Its name; made from the title when left out.
     pub slug: Option<String>,
+    /// v0.18.1: what it's about: finding ids (`RB-014.1`), files, PRs. Each
+    /// is one line, at most 200 bytes, and at most 32 of them.
+    pub refs: Vec<String>,
 }
+
+/// v0.18.1: the most refs a task carries, and the longest one, in bytes.
+const TASK_REFS_MAX: usize = 32;
+const TASK_REF_MAX: usize = 200;
 
 /// 13a (13.1): one task.
 #[derive(Debug, Clone, PartialEq)]
@@ -1175,6 +1182,8 @@ pub struct Task {
     pub after: Vec<String>,
     /// Whether its owner may set `done`.
     pub pre_approved: bool,
+    /// v0.18.1: what it's about (`_mnemo.refs`); empty when it names none.
+    pub refs: Vec<String>,
     /// When it was added, in unix seconds.
     pub created_at: i64,
     /// Its status changes and notes, oldest first (`from`, `to`, `at`,
@@ -1216,6 +1225,16 @@ impl Task {
                 .get(MNEMO_META_PRE_APPROVED)
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            refs: m
+                .metadata
+                .get(crate::memory::MNEMO_META_REFS)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
             created_at: m.created_at,
             history: m
                 .metadata
@@ -1398,6 +1417,17 @@ impl Mnemo {
                 return Err(MnemoError::Invalid(format!("{r:?} isn't a role")));
             }
         }
+        if spec.refs.len() > TASK_REFS_MAX
+            || spec
+                .refs
+                .iter()
+                .any(|r| r.trim().is_empty() || r.contains('\n') || r.len() > TASK_REF_MAX)
+        {
+            return Err(MnemoError::Invalid(format!(
+                "a task's refs: at most {TASK_REFS_MAX}, each one line, not empty, at most \
+                 {TASK_REF_MAX} bytes"
+            )));
+        }
         for a in &spec.after {
             if a == &slug {
                 return Err(MnemoError::Invalid("a task can't wait for itself".into()));
@@ -1436,6 +1466,21 @@ impl Mnemo {
                 MNEMO_META_PRE_APPROVED.into(),
                 Value::Bool(spec.pre_approved),
             );
+            // v0.18.1: only when there are refs, so re-adding an older task
+            // as it was is still a no-op.
+            if spec.refs.is_empty() {
+                meta.remove(crate::memory::MNEMO_META_REFS);
+            } else {
+                meta.insert(
+                    crate::memory::MNEMO_META_REFS.into(),
+                    Value::Array(
+                        spec.refs
+                            .iter()
+                            .map(|r| Value::String(r.trim().to_string()))
+                            .collect(),
+                    ),
+                );
+            }
         };
         if let Some(mut m) = self.task_record(&slug)? {
             let t = Task::from_memory(&m).expect("a task");

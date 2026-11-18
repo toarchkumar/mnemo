@@ -123,7 +123,7 @@ pub struct Loaded {
     /// v0.18.1 (INSPECT-COORD): the review findings, ordered by id as
     /// `finding list` orders them.
     findings: Vec<Value>,
-    /// v0.18.1 (INSPECT-COORD): the tasks, oldest first.
+    /// v0.18.1 (INSPECT-COORD): the tasks, in `task list`'s order.
     tasks: Vec<Value>,
     loaded_at: i64,
 }
@@ -175,6 +175,7 @@ fn task_json(t: &mnemo_engine::Task) -> Value {
         "creator": t.creator,
         "role": t.role,
         "after": t.after,
+        "refs": t.refs,
         "pre_approved": t.pre_approved,
         "created_at": t.created_at,
         "updated_at": last_change(&t.history, t.created_at),
@@ -387,13 +388,14 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         .map(|(f, m)| finding_json(m, f))
         .collect();
     drop(finding_rows);
-    let mut task_rows: Vec<mnemo_engine::Task> = all
+    // In the file's order, as `task list` lists them (the order they were
+    // added; a change keeps a task's place). Not by id: two ids from the
+    // same millisecond aren't ordered.
+    let tasks: Vec<Value> = all
         .iter()
         .filter_map(mnemo_engine::Task::from_memory)
+        .map(|t| task_json(&t))
         .collect();
-    task_rows.sort_by_key(|t| t.id);
-    let tasks: Vec<Value> = task_rows.iter().map(task_json).collect();
-    drop(task_rows);
     let contents = KeywordIndex::new(shown.iter().map(|m| m.content.as_str()));
     let memories: Vec<Value> = shown.iter().map(|m| memory_json(m)).collect();
     let agents: Vec<String> = shown
