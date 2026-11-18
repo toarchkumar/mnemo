@@ -88,7 +88,7 @@ tracks it, every worktree shares it, and its generated key is in the
 user's keychain, so no session handles a passphrase. Every session runs
 `mnemo onboard`'s hooks: they load a brief (the guide's card, the project's
 notes and essence, a short recall) when a session starts, and save the
-session's transcript into its own thread (tmux rule 9).
+session's transcript into its own thread (tmux rule 10).
 
 Before substantive work, orient yourself from the brain. In a git
 repository the commands take no path:
@@ -101,26 +101,24 @@ mnemo recall --text "<your task in one sentence>" --no-track
 Or use the MCP tools the session has (`recall`, `essence` with `op:
 "render"`), which the guide's card describes.
 
-**Only the Worker writes facts**, one per write, each with a key, so a new
-version supersedes the old one instead of sitting beside it. The brain's
-facts belong to the agent `cursor-agent`, and a key's slot is per agent, so
-a write must name it (the CLI's and the MCP server's default agent is
-`default`, which would start a second slot beside the first). The helper
-does that for you:
+**The Worker writes facts**, one per write, each with a key, so a new
+version supersedes the old one instead of sitting beside it. The Planner
+writes only the project essence and keyed `decision.*`, `spec.*` and
+`status.*` facts. Since v0.17 the brain's default agent (`mnemo
+default-agent`, `cursor-agent`) gives a keyed write its slot, so a write
+needn't name the agent:
 
 ```bash
-python test/scripts/project_memory.py remember "<one fact or decision>" \
-  --type episodic --key decision.<topic>
-# or several at once, from a JSON Lines file (content, type, importance,
-# metadata, key per line):
+mnemo remember --text "<one fact or decision>" --type episodic --key decision.<topic>
+# or the helper, which also takes several at once from a JSON Lines file
+# (content, type, importance, metadata, key per line):
 python test/scripts/project_memory.py remember --from-file facts.jsonl
-# the CLI directly: mnemo remember --text "…" --agent cursor-agent --key …
-# the MCP tool: remember with "key" and "agent_id": "cursor-agent"
+# the MCP tool: remember with "key"
 ```
 
 Use `episodic` for dated events and decisions, `procedural` for how-to
-steps, and `semantic` for stable facts. The Planner and the Reviewers only
-read (`recall`, `--no-track`).
+steps, and `semantic` for stable facts. The Reviewers only read (`recall`,
+`--no-track`).
 
 `test/scripts/project_memory.py` runs the installed `mnemo` CLI (the first
 on the PATH that can read the keychain; `$MNEMO_BIN` overrides it). It also
