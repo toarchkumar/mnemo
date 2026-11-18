@@ -354,6 +354,13 @@ pub mod __failpoints {
         crate::pager::failpoints::writes_seen()
     }
 
+    /// v0.19.1: make the next `count` reads that cover page `page` fail
+    /// with an I/O error, in any thread; `count = 0` disarms it. It's
+    /// process-wide, so a test that arms it runs in a binary of its own.
+    pub fn set_page_read_fails(page: u64, count: u32) {
+        crate::pager::failpoints::set_page_read_fails(page, count)
+    }
+
     thread_local! {
         static AFTER_SHARED_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
             const { std::cell::RefCell::new(None) };

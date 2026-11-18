@@ -39,6 +39,46 @@ pub(crate) mod failpoints {
         static FAILING: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
+    // v0.19.1 (task v0191-1b): reads of one page fail, `count` times, in
+    // any thread (the batch reads decrypt and stream on helper threads).
+    // Process-wide, so a test that arms it keeps a binary of its own.
+    static READ_FAIL_PAGE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(u64::MAX);
+    static READ_FAILS_LEFT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    /// Make the next `count` reads that cover page `page` fail with a
+    /// synthetic `io::Error`, in any thread. `count = 0` disarms it.
+    pub fn set_page_read_fails(page: u64, count: u32) {
+        use std::sync::atomic::Ordering::SeqCst;
+        READ_FAILS_LEFT.store(count, SeqCst);
+        READ_FAIL_PAGE.store(if count == 0 { u64::MAX } else { page }, SeqCst);
+    }
+
+    /// Called before every read of pages `first..first + n`.
+    pub(crate) fn check_read(first: u64, n: u64) -> std::io::Result<()> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let page = READ_FAIL_PAGE.load(SeqCst);
+        if page == u64::MAX || page < first || page >= first + n {
+            return Ok(());
+        }
+        // A compare-exchange loop: `fetch_update` is deprecated on newer
+        // toolchains and its rename `try_update` is newer than the MSRV.
+        let mut left = READ_FAILS_LEFT.load(SeqCst);
+        loop {
+            if left == 0 {
+                return Ok(());
+            }
+            match READ_FAILS_LEFT.compare_exchange(left, left - 1, SeqCst, SeqCst) {
+                Ok(_) => break,
+                Err(now) => left = now,
+            }
+        }
+        if left == 1 {
+            READ_FAIL_PAGE.store(u64::MAX, SeqCst);
+        }
+        Err(std::io::Error::other("injected read failure"))
+    }
+
     /// Fail exactly the writes numbered in `ns`, counting from 0 at this
     /// call (each write the pager or the WAL makes is one number). Unlike
     /// [`set_writes_until_fail_n`], the failing writes needn't be
@@ -126,6 +166,20 @@ pub(crate) fn __failpoint_check() -> std::io::Result<()> {
     failpoints::check()
 }
 
+/// v0.19.1: the read-side failpoint ([`failpoints::set_page_read_fails`]),
+/// checked before every read of pages `first..first + n`.
+#[cfg(not(any(test, feature = "failpoints")))]
+#[inline(always)]
+fn read_failpoint(_first: u64, _n: u64) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(any(test, feature = "failpoints"))]
+#[inline(always)]
+fn read_failpoint(first: u64, n: u64) -> std::io::Result<()> {
+    failpoints::check_read(first, n)
+}
+
 use zeroize::Zeroizing;
 
 use crate::cache::PageCache;
@@ -203,6 +257,10 @@ impl PageBatch {
 /// use the file's cursor, which every other read and write here sets
 /// itself first.
 fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    read_failpoint(
+        offset / PAGE_SIZE as u64,
+        (buf.len() as u64).div_ceil(PAGE_SIZE as u64),
+    )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::FileExt;
@@ -547,6 +605,7 @@ impl Pager {
         let mut disk = [0u8; PAGE_SIZE];
         self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        read_failpoint(page_no, 1)?;
         self.f()?.read_exact(&mut disk)?;
 
         let mut nonce = [0u8; NONCE_LEN];
@@ -571,6 +630,7 @@ impl Pager {
         let mut disk = [0u8; PAGE_SIZE];
         self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        read_failpoint(page_no, 1)?;
         self.f()?.read_exact(&mut disk)?;
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&disk[0..NONCE_LEN]);

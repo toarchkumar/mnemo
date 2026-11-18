@@ -19,6 +19,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `PageAuthFailed` naming an index page, later recalls on the same handle
   went exact without a word, and a write that had to load the index failed.
   Not new in v0.19: v0.18 did the same.
+- **An I/O error while the index loads is retried by the handle's next
+  call**, which loads the index, instead of that handle recalling exactly
+  from then on without a word.
 - **`mnemo index --rebuild` (and `--drop`) on a fresh handle frees the old
   index's delta runs.** A rebuild that didn't load the index first left
   them allocated until the next compaction.

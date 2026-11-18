@@ -209,7 +209,12 @@ impl Mnemo {
             // this build doesn't know: recall scans exactly, the handle
             // says so once, and a read-write handle rebuilds it.
             Err(e) if index_damage(&e) => self.index_damaged(&e),
-            Err(e) => return Err(e),
+            // Anything else (an I/O error) says nothing about the run: the
+            // next call tries the load again (task v0191-1b).
+            Err(e) => {
+                self.ann_unloaded = true;
+                return Err(e);
+            }
         }
         let (index_start, index_gen) = (self.header.index_start, self.index_gen_now());
         self.reconcile_ann_with_catalog(index_start, index_gen)?;
