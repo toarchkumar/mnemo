@@ -16,8 +16,9 @@ Pre-1.0, the minor component carries the breaking-change signal.
   brain the user picks (and its passphrase, or none when the key is in
   the keychain), and the registry's `server.json` with the bundle's
   SHA-256, for `io.github.toarchkumar/mnemo`. The release workflow builds
-  both and checks them with the registry's own tools (`mcpb validate`,
-  `mcp-publisher validate`); publishing to the registry is a maintainer's
+  both, checks them with the registry's own tools (`mcpb validate`,
+  `mcp-publisher validate`) in a job of their own, and attests them like
+  the binaries (`gh attestation verify`); publishing to the registry is a maintainer's
   step after the tag (RELEASING.md).
 
 ### Changed

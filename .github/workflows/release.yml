@@ -64,7 +64,7 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, checksums, build-wheels, check-artifacts, build-sdist, check-sdist, mcp-bundle, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, checksums, build-wheels, check-artifacts, build-sdist, check-sdist, mcp-bundle, mcp-bundle-check, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
@@ -75,6 +75,7 @@ jobs:
       && needs.check-sdist.result == 'success'
       && needs.build-sdist.result == 'success'
       && needs.mcp-bundle.result == 'success'
+      && needs.mcp-bundle-check.result == 'success'
       && (needs.mobile-prepare.outputs.mobile != 'true'
           || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
     runs-on: ubuntu-latest
@@ -238,10 +239,11 @@ jobs:
 
   # --- v0200-d3: the MCP bundle for the official MCP registry, the five
   #     binaries with a launcher (integrations/mcpb/), and the registry's
-  #     server.json with the bundle's SHA-256. `attach` puts both on the
-  #     release; publishing to the registry is the maintainer's step after
-  #     the tag (RELEASING.md). Both files are checked with the pinned tools
-  #     the registry documents.
+  #     server.json with the bundle's SHA-256. This job builds and uploads
+  #     them and runs nothing else; `mcp-bundle-check` validates them in its
+  #     own job (v0200-d3h), `attest` attests them and `attach` checks the
+  #     hash again before it puts them on the release. Publishing to the
+  #     registry is the maintainer's step after the tag (RELEASING.md).
   mcp-bundle:
     name: MCP bundle and server.json
     needs: [mobile-prepare, build-cli]
@@ -270,17 +272,6 @@ jobs:
           ls -l mcp
           { echo '```'; jq . mcp/server.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check the manifest (mcpb 2.1.2) and server.json (mcp-publisher 1.8.7)
-        timeout-minutes: 5
-        run: |
-          set -euo pipefail
-          npx --yes @anthropic-ai/mcpb@2.1.2 validate mcp/manifest.json
-          url=https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz
-          curl --proto '=https' --tlsv1.2 -fsSL "$url" -o /tmp/mcp-publisher.tar.gz
-          echo "00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579  /tmp/mcp-publisher.tar.gz" | sha256sum -c -
-          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
-          /tmp/mcp-publisher validate mcp/server.json
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         timeout-minutes: 10
         with:
@@ -289,9 +280,48 @@ jobs:
             mcp/mnemo-v*.mcpb
             mcp/server.json
 
+  # --- v0200-d3h: the registry's own tools check the bundle's manifest and
+  #     server.json, on copies, in a job of their own: `npx` resolves its
+  #     dependencies at run time, so nothing it runs is on a runner that
+  #     uploads what we ship. It uploads nothing; `approve-release` and
+  #     `attach` wait for it.
+  mcp-bundle-check:
+    name: MCP bundle check (mcpb, mcp-publisher)
+    needs: [mobile-prepare, mcp-bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: mcp-bundle
+          path: mcp
+
+      - name: Check the manifest (mcpb 2.1.2) and server.json (mcp-publisher 1.8.7)
+        timeout-minutes: 5
+        env:
+          VERSION: ${{ needs.mobile-prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The tools read copies; the downloaded files are only hashed.
+          work=$(mktemp -d)
+          cp "mcp/mnemo-v$VERSION.mcpb" mcp/server.json "$work/"
+          cd "$work"
+          echo "$(jq -r '.packages[0].fileSha256' server.json)  mnemo-v$VERSION.mcpb" | sha256sum -c -
+          mkdir bundle && unzip -q "mnemo-v$VERSION.mcpb" -d bundle
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate bundle/manifest.json
+          url=https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz
+          curl --proto '=https' --tlsv1.2 -fsSL "$url" -o mcp-publisher.tar.gz
+          echo "00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579  mcp-publisher.tar.gz" | sha256sum -c -
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher validate server.json
+
   # --- The five binaries' build provenance, which the install scripts
   #     check with `gh attestation verify` (this workflow, at the tag) when
-  #     `gh` is signed in. Made only after the approval, so a build that
+  #     `gh` is signed in, and since v0200-d3h the MCP bundle's and its
+  #     server.json's, which RELEASING.md checks before the registry publish. Made only after the approval, so a build that
   #     failed a check or wasn't approved carries none (attestations are
   #     public and permanent). Tag runs only: a dry run attests nothing.
   #     `attach` and both publish jobs wait for it, so nothing is published
@@ -315,11 +345,21 @@ jobs:
           path: cli
           merge-multiple: true
 
-      - name: Attest the binaries' build provenance
+      # v0200-d3h: the MCP bundle and its server.json too.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          name: mcp-bundle
+          path: mcp
+
+      - name: Attest the binaries' and the bundle's build provenance
         timeout-minutes: 10
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: cli/mnemo-v*
+          subject-path: |
+            cli/mnemo-v*
+            mcp/mnemo-v*.mcpb
+            mcp/server.json
 
   # --- Build Python wheels for each platform via maturin-action (the
   #     `attach` job puts them on the release). The `publish-pypi` job below optionally uploads
@@ -656,7 +696,7 @@ jobs:
   #     pattern and lists them instead.
   attach:
     name: attach engine assets
-    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist, mcp-bundle, attest]
+    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist, mcp-bundle, mcp-bundle-check, attest]
     if: >-
       ${{ !cancelled()
       && needs.build-cli.result == 'success'
@@ -664,6 +704,7 @@ jobs:
       && needs.build-wheels.result == 'success'
       && needs.build-sdist.result == 'success'
       && needs.mcp-bundle.result == 'success'
+      && needs.mcp-bundle-check.result == 'success'
       && ((needs.create-release.result == 'success' && needs.attest.result == 'success')
           || needs.mobile-prepare.outputs.dry_run == 'true') }}
     runs-on: ubuntu-latest
@@ -677,6 +718,16 @@ jobs:
           pattern: "{cli-*,wheel-*,sdist,sha256sums,mcp-bundle}"
           path: dist
           merge-multiple: true
+
+      # v0200-d3h: the bundle we attach is the one server.json names.
+      - name: The bundle's SHA-256 matches server.json
+        timeout-minutes: 5
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          n=$(ls mnemo-v*.mcpb | wc -l)
+          [ "$n" -eq 1 ] || { echo "::error::expected 1 MCP bundle, got $n"; exit 1; }
+          echo "$(jq -r '.packages[] | select(.registryType == "mcpb") | .fileSha256' server.json)  $(ls mnemo-v*.mcpb)" | sha256sum -c -
 
       - name: What a tag attaches (dry run)
         timeout-minutes: 10
