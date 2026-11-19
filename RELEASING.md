@@ -206,6 +206,12 @@ one, which has no hash, so the registry refuses it:
 d=$(mktemp -d) && cd "$d"
 gh release download vX.Y.Z -R toarchkumar/mnemo -p server.json -p 'mnemo-vX.Y.Z.mcpb'
 jq -r '.packages[0].fileSha256' server.json; shasum -a 256 mnemo-vX.Y.Z.mcpb   # the same
+# Both were attested by the release workflow at the tag, like the binaries:
+for f in mnemo-vX.Y.Z.mcpb server.json; do
+  gh attestation verify "$f" --repo toarchkumar/mnemo \
+    --signer-workflow toarchkumar/mnemo/.github/workflows/release.yml \
+    --source-ref refs/tags/vX.Y.Z
+done
 mcp-publisher login github     # as toarchkumar: the name is io.github.toarchkumar/mnemo
 mcp-publisher publish server.json
 ```
