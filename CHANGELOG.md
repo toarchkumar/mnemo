@@ -10,6 +10,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **The crates.io and PyPI listings describe MNemo plainly** (v0200-d2):
+  "Shared memory for your coding agents, in one encrypted file", with
+  keywords people search for (`mcp`, `agent-memory`, `encryption`,
+  `vector-search`, `embedded-database`), the `database-implementations`
+  and `development-tools` categories, and PyPI classifiers for the topic,
+  the status and the operating systems, plus Documentation, Changelog and
+  Issues links.
 - **`mnemo serve --mcp` is shared by default** (12.4 step 8). A bare
   `serve --mcp` holds no lock between tool calls, as `--shared` did since
   v0.14, so several servers, the CLI and Python can use one brain.

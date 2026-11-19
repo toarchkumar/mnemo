@@ -16,19 +16,36 @@ build-backend = "maturin"
 # CHANGELOG.md for the full migration.
 name = "mnemo-engine"
 version = "0.19.1"
-description = "Encrypted, portable agent-memory engine — Python bindings"
+description = "Shared memory for your coding agents, in one encrypted file: Python bindings for the embedded MNemo engine, with recall"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
+keywords = ["mcp", "agent-memory", "encryption", "vector-search", "embedded-database"]
+# Checked against PyPI's list (pypi.org/pypi?:action=list_classifiers).
+# The OS list is the release's wheel targets (release.yml, build-wheels).
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries",
 ]
 
 [project.urls]
 Homepage = "https://github.com/toarchkumar/mnemo"
 Repository = "https://github.com/toarchkumar/mnemo"
+Documentation = "https://github.com/toarchkumar/mnemo/blob/main/mnemo-python/README.md"
+Changelog = "https://github.com/toarchkumar/mnemo/blob/main/CHANGELOG.md"
+Issues = "https://github.com/toarchkumar/mnemo/issues"
 
 [tool.maturin]
 # NAME-1 (Option A): the wheel ships one package, the Rust extension
