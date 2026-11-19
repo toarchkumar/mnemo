@@ -567,3 +567,84 @@ fn the_cli_embeds_before_it_takes_the_lock() {
         "the CLI wrote before the shared write: it held the lock while embedding. {why}"
     );
 }
+
+/// v0.20 (step 8): a bare `serve --mcp` is shared, so a CLI write gets in
+/// while it's up; `--exclusive` holds the file for the server's whole life,
+/// as before; `--shared` is still accepted.
+#[test]
+fn serve_is_shared_by_default_and_exclusive_keeps_the_lifetime_lock() {
+    if refused() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let p = brain(dir.path(), 1);
+    let path = p.to_str().unwrap().to_string();
+    // Start a server with `flags`, wait for its initialize, then try a CLI
+    // write with a 500 ms wait; returns that write's output and the
+    // server's stderr.
+    let run = |flags: &[&str], text: &str| -> (Output, String) {
+        let mut args = vec!["serve", "--mcp"];
+        args.extend_from_slice(flags);
+        args.push(&path);
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mnemo"))
+            .args(&args)
+            .env("MNEMO_PASSPHRASE", PW)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+        writeln!(
+            stdin,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{{}}}}}}"#
+        )
+        .unwrap();
+        stdin.flush().unwrap();
+        let init: serde_json::Value =
+            serde_json::from_str(&stdout.next().unwrap().unwrap()).unwrap();
+        assert!(init["result"].is_object(), "{init}");
+        let f = jsonl(dir.path(), text);
+        let (out, _) = mnemo(&["--wait", "500ms", "import", &path, &f]);
+        drop(stdin);
+        assert!(child.wait().unwrap().success());
+        let mut err = String::new();
+        std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+        (out, err)
+    };
+
+    let (out, err) = run(&[], "beside a bare server");
+    ok(&out);
+    assert!(err.contains("shared mode"), "{err}");
+
+    let (out, err) = run(&["--shared"], "beside a shared server");
+    ok(&out);
+    assert!(err.contains("shared mode"), "{err}");
+
+    let (out, err) = run(&["--exclusive"], "beside an exclusive server");
+    assert!(!out.status.success(), "the write got in");
+    let why = String::from_utf8_lossy(&out.stderr);
+    assert!(why.contains("locked"), "{why}");
+    assert!(!err.contains("shared mode"), "{err}");
+
+    let (got, _) = mnemo(&["list", &path]);
+    let got = ok(&got);
+    assert!(got.contains("beside a bare server"), "{got}");
+    assert!(got.contains("beside a shared server"), "{got}");
+    assert!(!got.contains("beside an exclusive server"), "{got}");
+
+    // The flags that contradict each other are refused before anything opens.
+    for flags in [
+        &["--shared", "--exclusive"][..],
+        &["--exclusive", "--allow-network-fs"][..],
+    ] {
+        let mut args = vec!["serve", "--mcp"];
+        args.extend_from_slice(flags);
+        args.push(&path);
+        let (out, _) = mnemo(&args);
+        assert!(!out.status.success(), "{flags:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("cannot be used with"), "{flags:?}: {err}");
+    }
+}

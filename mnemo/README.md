@@ -120,18 +120,29 @@ file that records another embedder, or when the model can't be loaded
 (offline, first use), it serves without one and says so on stderr:
 `recall`'s `text` is then matched by keyword only (v9 files).
 
-The server holds the file's lock for its whole life by default, so a second
-server or a CLI write on the same file gets `Locked`. **`--shared`** (v0.14,
-12.4 shared mode) holds nothing between tool calls instead: each call takes
-the lock for itself (a read runs alongside other readers, a write waits with
-writer preference) for up to `--wait` (default 10 s), so several servers,
-the CLI and Python can use one brain. What the server warns about (a sidecar
-directory it can't use, a synced folder) goes to stderr once at start.
-Update every `mnemo` on the machine before you turn it on; see
-`docs/shared-mode.md`.
+**The server is shared by default since v0.20** (12.4 shared mode, behind
+`--shared` since v0.14): it holds nothing between tool calls, and each call
+takes the lock for itself (a read runs alongside other readers, a write
+waits with writer preference) for up to `--wait` (default 10 s), so several
+servers, the CLI and Python can use one brain. What the server warns about
+(a sidecar directory it can't use, a synced folder) goes to stderr once at
+start. It refuses a network or synced folder unless you pass
+`--allow-network-fs`. `--shared` is still accepted, so existing configs
+keep working.
+
+**`--exclusive`** keeps the behaviour from before v0.20: the server holds
+the file's lock for its whole life, so a second server or a CLI write on
+the same file gets `Locked`.
+
+**Update every `mnemo` on the machine** before you rely on shared mode:
+every CLI, the `mnemo-engine` wheel in every virtualenv, and any app built
+on an older binding. A `mnemo compact` from before v0.14 releases its lock
+before it renames, so a shared write in that gap is lost; it's reported
+(`ReplacedDuringWrite`), never acknowledged. See `docs/shared-mode.md`.
 
 ```sh
-MNEMO_PASSPHRASE=... mnemo serve --mcp --shared team.mnemo
+MNEMO_PASSPHRASE=... mnemo serve --mcp team.mnemo              # shared
+MNEMO_PASSPHRASE=... mnemo serve --mcp --exclusive solo.mnemo  # holds the file
 ```
 
 #### Resources, prompts and instructions (v0.16, 12.2)
@@ -336,10 +347,11 @@ parts: `nosync` finds `mnemo.nosync`, `icloud` finds `iCloud's`. A file
 written before v0.15 keeps tokenizer 1 (whole words) until `mnemo compact`
 rebuilds its index; `mnemo info` shows which (`keywords:`).
 
-The server holds an exclusive write lock on the file for its lifetime
-(see [Concurrency](#concurrency--read-only-opens)), so two MCP servers
-on the same file will conflict — one will fail to start with
-`Locked`. That's intentional.
+Since v0.20 the server is shared by default, so two MCP servers on the
+same file work side by side. With `--exclusive` it holds an exclusive write
+lock on the file for its lifetime (see
+[Concurrency](#concurrency--read-only-opens)), and a second server fails
+to start with `Locked`.
 
 ### Result caching
 

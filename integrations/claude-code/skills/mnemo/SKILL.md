@@ -22,8 +22,9 @@ description: Use the mnemo MCP tools to recall project context before a task, an
 
 ## 2. Use the tools
 
-The MCP server is `mnemo serve --mcp --shared`. `onboard` starts it for
-your client. The tools you'll use most:
+The MCP server is `mnemo serve --mcp`, in shared mode: each tool call
+takes the brain's lock for itself, so several sessions and the CLI can use
+one brain. `onboard` starts it for your client. The tools you'll use most:
 
 | Tool | What it does |
 |---|---|

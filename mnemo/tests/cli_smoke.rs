@@ -425,6 +425,10 @@ fn mcp_serve_initialize_list_and_call_tools() {
         let mut child = Command::new(bin())
             .args(["serve", path.to_str().unwrap(), "--mcp"])
             .env("MNEMO_PASSPHRASE", pp)
+            // A shared server (the default since v0.20) with an agent name
+            // writes a presence record, which `stats` counts.
+            .env_remove("MNEMO_AGENT")
+            .env_remove("MNEMO_ROLE")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
