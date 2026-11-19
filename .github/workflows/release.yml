@@ -64,7 +64,7 @@ jobs:
   approve-release:
     # RB-004.4: the pending approval shows what it releases.
     name: approve the release (v${{ needs.mobile-prepare.outputs.version }}, mobile ${{ needs.mobile-prepare.outputs.mobile }})
-    needs: [mobile-prepare, build-cli, checksums, build-wheels, check-artifacts, build-sdist, check-sdist, build-swift, build-android]
+    needs: [mobile-prepare, build-cli, checksums, build-wheels, check-artifacts, build-sdist, check-sdist, mcp-bundle, build-swift, build-android]
     if: >-
       ${{ !cancelled() && github.event_name == 'push'
       && needs.mobile-prepare.result == 'success'
@@ -74,6 +74,7 @@ jobs:
       && needs.check-artifacts.result == 'success'
       && needs.check-sdist.result == 'success'
       && needs.build-sdist.result == 'success'
+      && needs.mcp-bundle.result == 'success'
       && (needs.mobile-prepare.outputs.mobile != 'true'
           || (needs.build-swift.result == 'success' && needs.build-android.result == 'success')) }}
     runs-on: ubuntu-latest
@@ -234,6 +235,59 @@ jobs:
         with:
           name: sha256sums
           path: cli/SHA256SUMS
+
+  # --- v0200-d3: the MCP bundle for the official MCP registry, the five
+  #     binaries with a launcher (integrations/mcpb/), and the registry's
+  #     server.json with the bundle's SHA-256. `attach` puts both on the
+  #     release; publishing to the registry is the maintainer's step after
+  #     the tag (RELEASING.md). Both files are checked with the pinned tools
+  #     the registry documents.
+  mcp-bundle:
+    name: MCP bundle and server.json
+    needs: [mobile-prepare, build-cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 10
+        with:
+          pattern: cli-*
+          path: cli
+          merge-multiple: true
+
+      - name: Build the bundle
+        timeout-minutes: 5
+        env:
+          VERSION: ${{ needs.mobile-prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          sh integrations/mcpb/build.sh "$VERSION" cli mcp
+          ls -l mcp
+          { echo '```'; jq . mcp/server.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the manifest (mcpb 2.1.2) and server.json (mcp-publisher 1.8.7)
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate mcp/manifest.json
+          url=https://github.com/modelcontextprotocol/registry/releases/download/v1.8.7/mcp-publisher_linux_amd64.tar.gz
+          curl --proto '=https' --tlsv1.2 -fsSL "$url" -o /tmp/mcp-publisher.tar.gz
+          echo "00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579  /tmp/mcp-publisher.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
+          /tmp/mcp-publisher validate mcp/server.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 10
+        with:
+          name: mcp-bundle
+          path: |
+            mcp/mnemo-v*.mcpb
+            mcp/server.json
 
   # --- The five binaries' build provenance, which the install scripts
   #     check with `gh attestation verify` (this workflow, at the tag) when
@@ -602,13 +656,14 @@ jobs:
   #     pattern and lists them instead.
   attach:
     name: attach engine assets
-    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist, attest]
+    needs: [mobile-prepare, create-release, build-cli, checksums, build-wheels, build-sdist, mcp-bundle, attest]
     if: >-
       ${{ !cancelled()
       && needs.build-cli.result == 'success'
       && needs.checksums.result == 'success'
       && needs.build-wheels.result == 'success'
       && needs.build-sdist.result == 'success'
+      && needs.mcp-bundle.result == 'success'
       && ((needs.create-release.result == 'success' && needs.attest.result == 'success')
           || needs.mobile-prepare.outputs.dry_run == 'true') }}
     runs-on: ubuntu-latest
@@ -619,7 +674,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 10
         with:
-          pattern: "{cli-*,wheel-*,sdist,sha256sums}"
+          pattern: "{cli-*,wheel-*,sdist,sha256sums,mcp-bundle}"
           path: dist
           merge-multiple: true
 
@@ -631,7 +686,7 @@ jobs:
           ls -l dist/
           n=$(ls dist/ | wc -l)
           echo "$n files would be attached" | tee -a "$GITHUB_STEP_SUMMARY"
-          [ "$n" -eq 12 ] || { echo "::error::expected 12 files (5 CLI, SHA256SUMS, 5 wheels, 1 sdist), got $n"; exit 1; }
+          [ "$n" -eq 14 ] || { echo "::error::expected 14 files (5 CLI, SHA256SUMS, 5 wheels, 1 sdist, the MCP bundle, server.json), got $n"; exit 1; }
 
       - name: Attach to the release
         timeout-minutes: 10
@@ -847,8 +902,15 @@ jobs:
           engine=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/Cargo.toml | head -1)
           uniffi=$(sed -n 's/^version = "\(.*\)"/\1/p' mnemo/bindings/uniffi/Cargo.toml | head -1)
           kotlin=$(sed -n 's/^VERSION_NAME=//p' mnemo/bindings/kotlin/gradle.properties)
-          echo "engine $engine, mnemo-uniffi $uniffi, mnemo-android $kotlin"
-          if [ "$engine" != "$uniffi" ] || [ "$engine" != "$kotlin" ]; then
+          # v0200-d3: the MCP registry's server.json, its version and its
+          # bundle's URL.
+          registry=$(jq -r .version server.json)
+          bundle=$(jq -r '.packages[] | select(.registryType == "mcpb") | .identifier' server.json)
+          echo "engine $engine, mnemo-uniffi $uniffi, mnemo-android $kotlin, server.json $registry"
+          if [ "$bundle" != "https://github.com/toarchkumar/mnemo/releases/download/v$engine/mnemo-v$engine.mcpb" ]; then
+            echo "::error::server.json's bundle URL doesn't name v$engine: $bundle"; exit 1
+          fi
+          if [ "$engine" != "$uniffi" ] || [ "$engine" != "$kotlin" ] || [ "$engine" != "$registry" ]; then
             echo "::error::the manifests disagree on the version"; exit 1
           fi
           if [ "${{ github.event_name }}" = push ]; then

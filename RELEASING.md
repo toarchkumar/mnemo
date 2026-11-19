@@ -104,6 +104,9 @@ pinned to a commit (Dependabot keeps them current).
    - Node's `Cargo.toml`;
    - `mnemo-uniffi`;
    - `VERSION_NAME` in `mnemo/bindings/kotlin/gradle.properties`;
+   - the root `server.json` (the MCP registry's): its `version` and the
+     bundle URL in `packages` (`.../download/vX.Y.Z/mnemo-vX.Y.Z.mcpb`);
+     `tests/release_names.rs` checks both;
    - the samples (`MARKETING_VERSION` in `examples/mobile/ios/project.yml`,
      and the `mnemo-android` version in the Android sample).
 2. **The changelog.** Cut `[Unreleased]` into `[X.Y.Z] - <date>`.
@@ -191,6 +194,25 @@ Check all four registries:
   The search index can lag the repository by up to an hour;
   `https://repo1.maven.org/maven2/io/github/toarchkumar/mnemo-android/X.Y.Z/`
   shows it first.
+
+**The MCP registry (the maintainer's step, after the release is out).**
+The release carries `mnemo-vX.Y.Z.mcpb` (the MCP bundle: the five
+binaries and a launcher) and `server.json` (the root one, with the
+bundle's SHA-256 filled in). Publish that `server.json`, never the root
+one, which has no hash, so the registry refuses it:
+
+```bash
+# mcp-publisher from https://github.com/modelcontextprotocol/registry/releases
+d=$(mktemp -d) && cd "$d"
+gh release download vX.Y.Z -R toarchkumar/mnemo -p server.json -p 'mnemo-vX.Y.Z.mcpb'
+jq -r '.packages[0].fileSha256' server.json; shasum -a 256 mnemo-vX.Y.Z.mcpb   # the same
+mcp-publisher login github     # as toarchkumar: the name is io.github.toarchkumar/mnemo
+mcp-publisher publish server.json
+```
+
+Check it's listed: `curl -s
+"https://registry.modelcontextprotocol.io/v0/servers?search=io.github.toarchkumar/mnemo"`
+shows `X.Y.Z`. A published version can't change: a fix is a new version.
 
 **If a mobile job fails after the engine jobs succeeded,** re-run only the
 failed jobs:

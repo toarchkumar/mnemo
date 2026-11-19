@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.toarchkumar/mnemo",
+  "title": "MNemo",
+  "description": "Shared memory for your coding agents, in one encrypted file: recall, tasks, an inbox and claims.",
+  "version": "0.19.1",
+  "websiteUrl": "https://toarchkumar.github.io/mnemo/",
+  "repository": {
+    "url": "https://github.com/toarchkumar/mnemo",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/toarchkumar/mnemo/releases/download/v0.19.1/mnemo-v0.19.1.mcpb",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
