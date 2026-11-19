@@ -1,0 +1,57 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "mnemo",
+  "display_name": "MNemo",
+  "description": "Shared memory for your coding agents, in one encrypted file",
+  "long_description": "MNemo keeps what your coding agents learn in one encrypted `.mnemo` file: every session's turns, facts that keep their history, and a project essence, searched by meaning and keywords together. Several sessions coordinate through the same file with a task queue, an inbox, claims and review findings. This bundle runs `mnemo serve --mcp --shared` on the brain you choose, so other sessions and the `mnemo` CLI can use it at the same time. Create the brain first with `mnemo onboard` (in a repository) or `mnemo init`.",
+  "author": {
+    "name": "Arch Kumar",
+    "url": "https://github.com/toarchkumar"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/toarchkumar/mnemo"
+  },
+  "homepage": "https://toarchkumar.github.io/mnemo/",
+  "documentation": "https://github.com/toarchkumar/mnemo/blob/main/mnemo/README.md",
+  "support": "https://github.com/toarchkumar/mnemo/issues",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "agent-memory", "encryption", "recall", "coding-agents"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/mnemo.sh",
+    "mcp_config": {
+      "command": "/bin/sh",
+      "args": ["${__dirname}/server/mnemo.sh", "serve", "--mcp", "--shared", "${user_config.brain}"],
+      "env": {
+        "MNEMO_PASSPHRASE": "${user_config.passphrase}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}${/}server${/}mnemo-x86_64-pc-windows-msvc.exe",
+          "args": ["serve", "--mcp", "--shared", "${user_config.brain}"]
+        }
+      }
+    }
+  },
+  "user_config": {
+    "brain": {
+      "type": "file",
+      "title": "Brain",
+      "description": "The .mnemo file to serve, on a local disk (shared mode refuses network and synced folders). Create it first with `mnemo onboard` or `mnemo init`.",
+      "required": true
+    },
+    "passphrase": {
+      "type": "string",
+      "title": "Passphrase",
+      "description": "The brain's passphrase. Leave it empty when the brain's key is in the system keychain, as `mnemo onboard` sets it up.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"]
+  }
+}

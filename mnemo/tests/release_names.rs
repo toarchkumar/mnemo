@@ -83,3 +83,50 @@ fn the_binstall_template_names_every_release_binary() {
         }
     }
 }
+
+/// v0200-d3: the MCP registry's `server.json` names this version's bundle,
+/// and the bundle's build script, launcher and manifest cover exactly the
+/// binaries the release builds.
+#[test]
+fn the_mcp_bundle_names_this_version_and_every_release_binary() {
+    let v = env!("CARGO_PKG_VERSION");
+    let server: serde_json::Value = serde_json::from_str(&read("../server.json")).unwrap();
+    assert_eq!(server["name"], "io.github.toarchkumar/mnemo");
+    assert_eq!(server["version"], v, "bump server.json with the manifests");
+    let bundles: Vec<&serde_json::Value> = server["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["registryType"] == "mcpb")
+        .collect();
+    assert_eq!(bundles.len(), 1);
+    assert_eq!(
+        bundles[0]["identifier"],
+        format!("https://github.com/toarchkumar/mnemo/releases/download/v{v}/mnemo-v{v}.mcpb")
+    );
+    // The release fills in the hash; a checked-in one would be stale.
+    assert!(bundles[0].get("fileSha256").is_none());
+    assert!(server["description"].as_str().unwrap().len() <= 100);
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read("../integrations/mcpb/manifest.json")).unwrap();
+    assert!(manifest.get("version").is_none(), "build.sh sets it");
+    let win = manifest["server"]["mcp_config"]["platform_overrides"]["win32"]["command"]
+        .as_str()
+        .unwrap();
+    let build = read("../integrations/mcpb/build.sh");
+    let launcher = read("../integrations/mcpb/mnemo.sh");
+    let targets = release_targets();
+    assert_eq!(targets.len(), 5);
+    for (target, ext) in &targets {
+        assert!(build.contains(target.as_str()), "build.sh misses {target}");
+        if ext.is_empty() {
+            assert!(
+                launcher.contains(&format!("target={target}")),
+                "mnemo.sh misses {target}"
+            );
+        } else {
+            assert!(win.ends_with(&format!("mnemo-{target}{ext}")), "{win}");
+        }
+    }
+}

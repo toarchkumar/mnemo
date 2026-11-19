@@ -8,6 +8,18 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **An MCP bundle for the official MCP registry** (v0200-d3). Each release
+  now carries `mnemo-vX.Y.Z.mcpb`, the five CLI binaries with a launcher
+  that picks this machine's, running `mnemo serve --mcp --shared` on the
+  brain the user picks (and its passphrase, or none when the key is in
+  the keychain), and the registry's `server.json` with the bundle's
+  SHA-256, for `io.github.toarchkumar/mnemo`. The release workflow builds
+  both and checks them with the registry's own tools (`mcpb validate`,
+  `mcp-publisher validate`); publishing to the registry is a maintainer's
+  step after the tag (RELEASING.md).
+
 ### Changed
 
 - **The crates.io and PyPI listings describe MNemo plainly** (v0200-d2):
