@@ -1259,15 +1259,31 @@ proptest! {
         let res = db.flush();
         mnemo_engine::__failpoints::set_writes_failing(&[]);
         mnemo_engine::__failpoints::set_syncs_until_fail(-1);
+        // v0200-1r: retry on the same handle. It commits (a failure before
+        // the commit point, or none), or it's refused with `MaybeStored`
+        // and the open decides; never a third state.
+        let retry = db.flush();
+        let retried = match &retry {
+            Ok(()) => true,
+            Err(mnemo_engine::MnemoError::MaybeStored(_)) => false,
+            Err(e) => panic!("the retry after {fail:?} failed with {e:?}"),
+        };
+        prop_assert!(retried || res.is_err(), "a refusal follows a failure");
+        if retried {
+            prop_assert_eq!(db.stats().unwrap().fsyncs_last_flush, if res.is_err() { 3 } else { 0 });
+        }
         let mut db = reopen(db, &path);
         let observed = observed_set(&mut db);
         prop_assert!(
             observed == pre_set || observed == post_set,
-            "a third state after {:?} ({:?}): {} memories, pre {}, post {}",
-            fail, res.err(), observed.len(), pre_set.len(), post_set.len(),
+            "a third state after {:?} ({:?}, retry {:?}): {} memories, pre {}, post {}",
+            fail, res.err(), retry, observed.len(), pre_set.len(), post_set.len(),
         );
+        if retried {
+            prop_assert!(observed == post_set, "a retried commit is stored");
+        }
         if matches!(fail, BigFail::Sync(0)) {
-            prop_assert!(observed == pre_set, "a failed barrier commits nothing");
+            prop_assert!(retried, "a failed barrier is before the commit point");
         }
         db.verify().unwrap();
     }

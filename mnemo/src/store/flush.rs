@@ -161,9 +161,22 @@ impl Mnemo {
     /// A crash before step 4 leaves the previous state intact. A crash
     /// after step 4 is repaired by [`Mnemo::open`] replaying the WAL.
     /// Safe to call repeatedly.
+    ///
+    /// A flush that fails before the commit point can be retried on the
+    /// same handle. One that fails at or after it (the WAL commit, the
+    /// checkpoint) may be in the file, and this handle can't tell, so
+    /// every later flush returns [`MnemoError::MaybeStored`] until the file
+    /// is reopened; the open finishes the commit or drops it (v0.20.0).
     pub fn flush(&mut self) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
+        }
+        if let Some(txn) = self.commit_failed {
+            return Err(MnemoError::MaybeStored(format!(
+                "commit {txn} failed after its commit point, so this handle can't \
+                 tell whether it's in the file; reopen the file, which finishes \
+                 the commit or drops it"
+            )));
         }
         // Snapshot the thread-local fsync counter. Every `sync_all` the
         // pager / wal / checkpoint path makes between here and the end
@@ -282,18 +295,17 @@ impl Mnemo {
                 return Err(e);
             }
         };
-        let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
         // 12.4: from here a failure may leave the transaction committed.
+        // v0.20.0 (v0200-1r): and this handle's header and free list then
+        // describe this attempt, not the file. Putting the old ones back is
+        // unsafe once the commit may be durable (a retry would reuse pages
+        // and a generation the commit references), and a retry built on
+        // these links its deltas to runs that may never have been written.
+        // So the handle refuses to commit again until it's reopened.
         self.commit_point = Some(txn_id);
-        wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
-
-        // 5. Checkpoint — fold the WAL into the home pages.
-        self.checkpoint(&frames)?;
-        // FMT-9c: the committed header no longer covers the tail; cut it.
-        // A crash before this leaves a longer file, which is harmless.
-        if shrink {
-            let len = self.header.next_page * PAGE_SIZE as u64;
-            self.pager.file_mut().set_len(len)?;
+        if let Err(e) = self.commit_and_checkpoint(txn_id, &frames, shrink) {
+            self.commit_failed = Some(txn_id);
+            return Err(e);
         }
 
         self.manifest = manifest;
@@ -366,6 +378,28 @@ impl Mnemo {
             (crate::fsync_count().wrapping_sub(fsync_before)).min(u32::MAX as u64) as u32;
         // 12.4 shared mode (RB-007.5): this commit is in the file.
         self.window_committed = true;
+        Ok(())
+    }
+
+    /// Steps 4 and 5 of [`Mnemo::flush`], from the commit point: log the
+    /// frames and fsync (the commit), fold them into their home pages (the
+    /// checkpoint), then cut a shrunk tail.
+    fn commit_and_checkpoint(
+        &mut self,
+        txn_id: u64,
+        frames: &[wal::Frame],
+        shrink: bool,
+    ) -> Result<()> {
+        let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
+        wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, frames)?;
+        // 5. Checkpoint — fold the WAL into the home pages.
+        self.checkpoint(frames)?;
+        // FMT-9c: the committed header no longer covers the tail; cut it.
+        // A crash before this leaves a longer file, which is harmless.
+        if shrink {
+            let len = self.header.next_page * PAGE_SIZE as u64;
+            self.pager.file_mut().set_len(len)?;
+        }
         Ok(())
     }
 
@@ -952,6 +986,9 @@ impl Mnemo {
     /// error carries the handle back, with every unflushed write still in
     /// it, as [`std::io::BufWriter::into_inner`] does. Retry with
     /// [`Mnemo::flush`] or another `try_close` once the cause is fixed.
+    /// Unless the flush failed at or after its commit point: then the
+    /// retry returns [`MnemoError::MaybeStored`], and the file must be
+    /// reopened (see [`Mnemo::flush`]).
     /// A read-only handle never flushes, so it always closes. Added in
     /// v0.12.2 (RB-001.22).
     ///

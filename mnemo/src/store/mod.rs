@@ -1173,6 +1173,12 @@ pub struct Mnemo {
     /// reached the WAL with, when it fails after that point. A shared write
     /// uses it to tell a lost write from one that may be in the file.
     commit_point: Option<u64>,
+    /// v0.20.0 (v0200-1r): the transaction id of a commit that failed at or
+    /// after its commit point. The handle can't tell whether it's in the
+    /// file, and its header and free list describe the failed attempt, so
+    /// every later `flush` refuses with [`MnemoError::MaybeStored`] until
+    /// the file is reopened (the open finishes the commit or drops it).
+    commit_failed: Option<u64>,
     /// 12.4 shared mode (RB-007.5): a `flush` since the window started
     /// committed. Set by every committing flush; a shared write window
     /// clears it first, and then knows that part of the window is in the
