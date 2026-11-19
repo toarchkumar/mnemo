@@ -115,8 +115,15 @@ pinned to a commit (Dependabot keeps them current).
    leaves mobile out, they keep the newest published version, since the
    new one won't exist on `mnemo-swift` or Maven Central (the samples build
    the libraries from this repository, so they still take the new version).
-4. **CI is green** on the release commit.
-5. **The dry run.** It publishes nothing and never waits for an approval,
+4. **The terminal demo.** Re-record `docs/img/demo.gif`, so it shows this
+   release's output: run the `demo` workflow (`gh workflow run demo.yml
+   --ref <release branch>`; a pull request that changes `docs/demo/` runs
+   it too), download its `demo-gif` artifact (`gh run download <run id> -n
+   demo-gif -D docs/img`), look at it, and commit it by its path. The tape
+   is `docs/demo/demo.tape`; every command in it runs for real against a
+   throwaway brain (`docs/demo/setup.sh`).
+5. **CI is green** on the release commit.
+6. **The dry run.** It publishes nothing and never waits for an approval,
    so run it on the release branch, with `mobile` set as
    `.github/release-mobile` says (the run summary prints what the commit
    says, and `version check` warns if the input differs):
@@ -148,9 +155,9 @@ pinned to a commit (Dependabot keeps them current).
      refuses a version it already has, so a dry run on a version that's
      already published (between releases, to test a workflow change)
      skips this step with a notice.
-6. **The coordination files.** Commit `PLAN.md` and `reviewer_notes.md` as
+7. **The coordination files.** Commit `PLAN.md` and `reviewer_notes.md` as
    `chore(plan): sync coordination files` (see AGENTS.md).
-7. **The brain's backup (from v0.18.0).** Export the project brain with
+8. **The brain's backup (from v0.18.0).** Export the project brain with
    the release's own `mnemo`, never an older one that's on the PATH (a
    virtualenv's, a session not yet reinstalled): an older build doesn't
    know what `--git` must leave out. Commit it on its own:
@@ -163,7 +170,7 @@ pinned to a commit (Dependabot keeps them current).
    essence in a fixed order, and never the saved turns, private records,
    messages, claims, presence, a thread's essence, or a `SECURITY` finding
    that isn't `verified` yet. Read the diff before committing: the
-   repository is public. From Run 2 this replaces step 6.
+   repository is public. From Run 2 this replaces step 7.
 
 **`main` changes during a release** (the site, say) are merged back into
 the release branch before the next task: a PR with `main` as head and the
