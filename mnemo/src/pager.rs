@@ -663,6 +663,25 @@ impl Pager {
         Ok(buf)
     }
 
+    /// v0200-3r: drop every clean cached page sealed under a generation
+    /// above `gen` (v9; a v8 pager caches everything under 0).
+    pub(crate) fn drop_cached_newer_than(&mut self, gen: u64) {
+        let g = self.cache_gen(gen);
+        self.cache.drop_newer_than(g);
+    }
+
+    /// v0200-3r: the nonce `page_no` has on disk, read past the cache. SEC-1
+    /// gives every session a random nonce prefix, so a page written again,
+    /// by any process, in any copy of the file, never has the same one.
+    pub(crate) fn page_nonce(&mut self, page_no: u64) -> Result<[u8; NONCE_LEN]> {
+        let mut nonce = [0u8; NONCE_LEN];
+        self.f()?
+            .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
+        read_failpoint(page_no, 1)?;
+        self.f()?.read_exact(&mut nonce)?;
+        Ok(nonce)
+    }
+
     /// Encrypt `payload` into a finished on-disk page image **without writing
     /// it**. Advances the nonce counter and refreshes the page cache (as a
     /// clean entry) so later reads see the new content. Used by the WAL path:

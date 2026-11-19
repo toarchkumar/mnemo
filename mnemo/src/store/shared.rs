@@ -193,6 +193,122 @@ impl Stamp {
     }
 }
 
+/// v0200-3r: a run a header points at.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Run {
+    CatalogBase,
+    CatalogHead,
+    IndexBase,
+    IndexHead,
+    Manifest,
+    Cache,
+    Free,
+    Keys,
+    Bm25,
+}
+
+/// A run's pointer: start, pages, length, generation.
+type Ptr = (u64, u64, u64, u64);
+
+/// The runs `h` points at.
+fn runs(h: &Header) -> Vec<(Run, Ptr)> {
+    let p = |r: RunPtr| (r.start, r.pages, r.len, r.gen);
+    [
+        (
+            Run::CatalogBase,
+            (
+                h.catalog_start,
+                h.catalog_pages,
+                h.catalog_len,
+                h.catalog_gen,
+            ),
+        ),
+        (Run::CatalogHead, p(h.catalog_delta)),
+        (
+            Run::IndexBase,
+            (h.index_start, h.index_pages, h.index_len, h.index_gen),
+        ),
+        (Run::IndexHead, p(h.index_delta)),
+        (
+            Run::Manifest,
+            (
+                h.manifest_start,
+                h.manifest_pages,
+                h.manifest_len,
+                h.manifest_gen,
+            ),
+        ),
+        (
+            Run::Cache,
+            (h.cache_start, h.cache_pages, h.cache_len, h.cache_gen),
+        ),
+        (Run::Free, p(h.free)),
+        (Run::Keys, p(h.keys)),
+        (Run::Bm25, p(h.bm25)),
+    ]
+    .into_iter()
+    .filter(|&(_, (start, pages, _, _))| start != 0 && pages > 0)
+    .collect()
+}
+
+/// v0200-3r: what proves a handle's state is still the file's timeline:
+/// the on-disk nonce of the first page of each run its header points at,
+/// read when it took that state. A copy of the file restored in place
+/// keeps the file's identity and its key, and its next commits reuse page
+/// numbers and generations (the free list hands the same pages out again,
+/// and the generations follow `wal_seq`), so a pointer the handle holds can
+/// come back exactly, with other bytes behind it. A nonce can't: every run
+/// is written whole in one commit, and SEC-1 gives each session its own
+/// random nonce prefix.
+type Anchors = Vec<(Run, Ptr, [u8; crypto::NONCE_LEN])>;
+
+/// The anchors of `db`'s state, read from its attached file. `None` (an I/O
+/// error) means the state is never trusted past this stamp.
+fn anchors_of(db: &mut Mnemo) -> Option<Anchors> {
+    runs(&db.header)
+        .into_iter()
+        .map(|(run, ptr)| db.pager.page_nonce(ptr.0).ok().map(|n| (run, ptr, n)))
+        .collect()
+}
+
+/// Whether the state `db` holds may be built on to reach `new`: every held
+/// run that the state after `new` keeps is still on disk, read past the
+/// page cache. Those are the catalog's base and head (a catch-up appends
+/// to them, and a reload's `adopt_column` keeps the vector entries their
+/// rows name), a loaded index's base and head when `new` keeps its base,
+/// and every other run whose pointer `new` still has. A run `new` no
+/// longer points at isn't checked: nothing of it is kept (the catch-up
+/// reads the new one), and on the handle's own timeline its pages may be
+/// in use again.
+///
+/// `Some(g)`: they are, and `g` is the newest generation among them. Every
+/// run that passes predates any copy written over the file, so a cached
+/// page newer than `g` is one the copy may not have: the caller drops
+/// those from the page cache. On the handle's own timeline they're the
+/// few pages of commits after its last catalog change.
+fn anchors_hold(db: &mut Mnemo, new: &Header, anchors: Option<&Anchors>) -> Option<u64> {
+    let anchors = anchors?;
+    let now = runs(new);
+    let index_base = |h: &Header| (h.index_start, h.index_pages, h.index_len, h.index_gen);
+    let index_kept = db.ann.is_some() && index_base(&db.header) == index_base(new);
+    let mut newest = 0;
+    for &(run, ptr, nonce) in anchors {
+        let kept = match run {
+            Run::CatalogBase | Run::CatalogHead => true,
+            Run::IndexBase | Run::IndexHead => index_kept,
+            _ => now.contains(&(run, ptr)),
+        };
+        if !kept {
+            continue;
+        }
+        if db.pager.page_nonce(ptr.0).ok()? != nonce {
+            return None;
+        }
+        newest = newest.max(ptr.3);
+    }
+    Some(newest)
+}
+
 #[cfg(unix)]
 fn identity(file: &File) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
@@ -292,6 +408,8 @@ pub struct SharedMnemo {
     db: Option<Mnemo>,
     /// `None` means "reload at the next call" (12.4 protocol step 7).
     stamp: Option<Stamp>,
+    /// v0200-3r: the stamped state's [`Anchors`].
+    anchors: Option<Anchors>,
     delta: AccessDelta,
     embedder: Option<Arc<dyn Embedder>>,
     /// 13a: the author stamped on new records, kept across reloads.
@@ -326,6 +444,7 @@ impl SharedMnemo {
             secret: Zeroizing::new(secret.to_vec()),
             db: None,
             stamp: None,
+            anchors: None,
             delta: AccessDelta::default(),
             embedder: None,
             author: None,
@@ -609,6 +728,9 @@ impl SharedMnemo {
             return self.load(file);
         }
         let stamp = Stamp::of(&file, &header);
+        // Whether the held state may be carried into a reload: set only by
+        // the checks below.
+        let mut trusted = false;
         if let (Some(db), Some(held)) = (self.db.as_mut(), self.stamp) {
             if held == stamp {
                 db.pager.attach_file(file);
@@ -620,16 +742,33 @@ impl SharedMnemo {
             // or any error, falls through to the full reload below.
             if held.identity == stamp.identity && header.validate_seal(db.pager.dek()).is_ok() {
                 db.pager.attach_file(file);
-                match db.catch_up_to(&header) {
-                    Ok(true) => {
-                        self.stamp = Some(stamp);
-                        self.incremental += 1;
-                        return Ok(Next::Ready);
+                // v0200-3r: and the file is still on the handle's timeline:
+                // its transaction didn't go back, and every held run the new
+                // state keeps is still on disk (`anchors_hold`). Then cached
+                // pages newer than those runs go, since a copy written over
+                // the file may not have them. Otherwise nothing held is
+                // trusted: the full reload below, with a fresh page cache and
+                // no `adopt_column`.
+                let hold = if header.wal_seq >= db.header.wal_seq {
+                    anchors_hold(db, &header, self.anchors.as_ref())
+                } else {
+                    None
+                };
+                trusted = hold.is_some();
+                if let Some(newest) = hold {
+                    db.pager.drop_cached_newer_than(newest);
+                    match db.catch_up_to(&header, newest) {
+                        Ok(true) => {
+                            self.stamp = Some(stamp);
+                            self.anchors = anchors_of(db);
+                            self.incremental += 1;
+                            return Ok(Next::Ready);
+                        }
+                        Ok(false) => {}
+                        // Half caught up: no longer the file's state at any
+                        // point, so nothing of it is carried into the reload.
+                        Err(_) => trusted = false,
                     }
-                    Ok(false) => {}
-                    // Half caught up: no longer the file's state at any
-                    // point, so nothing of it is carried into the reload.
-                    Err(_) => self.stamp = None,
                 }
                 file = db.pager.detach_file().expect("attached above");
             }
@@ -644,11 +783,11 @@ impl SharedMnemo {
                     t_cost: header.t_cost,
                     p_cost: header.p_cost,
                 };
-                let trusted = self.stamp.is_some_and(|h| h.identity == stamp.identity);
                 let mut new = Mnemo::from_locked(self.path.clone(), file, header, dek, kdf, false)?;
                 // v0200-3: the same file, and the old state was the file's
-                // as of its stamp: the new state takes its vector column,
-                // keeping the rows whose entries didn't move.
+                // as of its stamp, on the timeline the file is still on
+                // (v0200-3r): the new state takes its vector column, keeping
+                // the rows whose entries didn't move.
                 if trusted {
                     if let Some(old) = self.db.as_mut() {
                         new.adopt_column(old);
@@ -704,6 +843,7 @@ impl SharedMnemo {
         new.presence_held = self.presence.is_some();
         new.shared = true;
         self.stamp = Some(Stamp::of(new.pager.file(), &new.header));
+        self.anchors = anchors_of(&mut new);
         self.db = Some(new);
         self.reloads += 1;
     }
@@ -788,6 +928,7 @@ impl SharedMnemo {
             });
         }
         self.stamp = Some(Stamp::of(db.pager.file(), &db.header));
+        self.anchors = self.db.as_mut().and_then(anchors_of);
         Ok(r)
     }
 
