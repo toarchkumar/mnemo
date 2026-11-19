@@ -1277,8 +1277,13 @@ impl Mnemo {
         }
         self.col.scored_rows = scored;
         // Allocated for every catalog row, zeroed: the OS maps the pages
-        // lazily, and only scored rows are ever filled.
-        self.col.data = vec![0u16; rows * d];
+        // lazily, and only scored rows are ever filled. v0200-3: with room
+        // for an eighth more rows, mapped lazily too, so the rows that later
+        // commits add (a shared handle's catch-ups, this handle's own
+        // writes) grow it in place instead of copying it into a new block.
+        let room = rows + rows / 8 + 64;
+        self.col.data = vec![0u16; room * d];
+        self.col.data.truncate(rows * d);
         self.col.norms = vec![0f32; rows];
         self.col.have = vec![false; rows];
         let hot: Vec<(usize, Vec<u16>, f32)> = self

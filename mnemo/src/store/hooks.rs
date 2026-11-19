@@ -447,4 +447,147 @@ impl Mnemo {
             + r.ram_vector_column;
         Ok(r)
     }
+
+    /// **Not a stable API.** v0200-3: the parts of the handle's state that
+    /// an incremental catch-up must leave as a fresh open of the file
+    /// builds them, as `(name, value)` to compare. Lazily built parts (the
+    /// BM25 stats and dicts, the ANN index) are listed only when built;
+    /// [`Mnemo::__warm_for_testing`] builds them.
+    #[doc(hidden)]
+    pub fn __catch_up_parts(&self) -> Vec<(String, String)> {
+        fn sorted(m: &std::collections::HashMap<u64, Vec<usize>>) -> String {
+            let mut v: Vec<(u64, Vec<usize>)> = m
+                .iter()
+                .map(|(&p, rows)| {
+                    let mut rows = rows.clone();
+                    rows.sort_unstable();
+                    (p, rows)
+                })
+                .collect();
+            v.sort();
+            format!("{v:?}")
+        }
+        let bad_ids: Vec<usize> = (0..self.catalog.len())
+            .filter(|&r| self.index.get(self.catalog[r].id, &self.catalog) != Some(r))
+            .collect();
+        let mut parts = vec![
+            ("header".to_string(), format!("{:?}", self.header)),
+            ("catalog".to_string(), format!("{:?}", self.catalog)),
+            (
+                "id_index".to_string(),
+                format!("{} entries, rows not found: {bad_ids:?}", self.index.len),
+            ),
+            ("record_pages".to_string(), sorted(&self.recs.page_rows)),
+            ("vector_pages".to_string(), sorted(&self.col.page_rows)),
+            ("manifest".to_string(), format!("{:?}", self.manifest)),
+            ("free".to_string(), format!("{:?}", self.free)),
+            ("key_slots".to_string(), format!("{:?}", self.key_slots)),
+            ("cache_dir".to_string(), format!("{:?}", self.cache_dir)),
+            (
+                "bm25_manifest".to_string(),
+                format!("{:?}", self.bm25.manifest),
+            ),
+            (
+                "delta_chain".to_string(),
+                format!("{:?} ({} rows)", self.delta_chain, self.delta_rows),
+            ),
+        ];
+        if let Some(s) = &self.bm25.stats {
+            let mut docs: Vec<_> = s.docs.iter().map(|(&d, &v)| (d, v)).collect();
+            docs.sort_unstable();
+            parts.push((
+                "bm25_stats".to_string(),
+                format!("{docs:?} total {} avgdl {}", s.total, s.avgdl),
+            ));
+        }
+        if let Some(d) = &self.bm25.dicts {
+            parts.push(("bm25_dicts".to_string(), format!("{d:?}")));
+        }
+        if let Some(a) = &self.ann {
+            parts.push((
+                "ann".to_string(),
+                format!(
+                    "{:?} chain {:?} ({} ops)",
+                    a.sorted_entries(),
+                    self.index_chain,
+                    self.index_chain_ops
+                ),
+            ));
+        }
+        parts
+    }
+
+    /// **Not a stable API.** v0200-3: build what a recall builds lazily:
+    /// the ANN index, the resident vector column (every scored row filled)
+    /// and the BM25 stats and dicts.
+    #[doc(hidden)]
+    pub fn __warm_for_testing(&mut self) -> Result<()> {
+        self.ensure_ann()?;
+        self.ensure_column()?;
+        let rows: Vec<usize> = (0..self.catalog.len()).collect();
+        self.fill_column_rows(&rows)?;
+        self.ensure_bm25()
+    }
+
+    /// **Not a stable API.** v0200-3: the resident column's filled rows,
+    /// as `(row, fp16 values, norm bits)`.
+    #[doc(hidden)]
+    pub fn __column_filled(&self) -> Vec<(usize, Vec<u16>, u32)> {
+        let d = self.dimensions;
+        (0..self.col.have.len())
+            .filter(|&i| self.col.have[i])
+            .map(|i| {
+                (
+                    i,
+                    self.col.data[i * d..(i + 1) * d].to_vec(),
+                    self.col.norms[i].to_bits(),
+                )
+            })
+            .collect()
+    }
+
+    /// **Not a stable API.** v0200-3: each live row's id, record page and
+    /// vector page, so a test can see a page freed and reused.
+    #[doc(hidden)]
+    pub fn __row_pages(&self) -> Vec<(Ulid, u64, u64)> {
+        self.catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .map(|e| {
+                (
+                    Ulid::from(e.id),
+                    e.start_page,
+                    e.v9.map_or(0, |r| r.vec_page),
+                )
+            })
+            .collect()
+    }
+
+    /// **Not a stable API.** v0200-3 (addition (d)): drop one lazily built
+    /// part, as a catch-up that changed rows would, so a bench can time
+    /// what the next recall pays to build it again. `which`: `key_index`,
+    /// `superseded`, `layers`, `agent_set`, `bm25_stats`, `bm25_dicts`,
+    /// `ann` or `column`.
+    #[doc(hidden)]
+    pub fn __drop_lazy_for_testing(&mut self, which: &str) -> Result<()> {
+        match which {
+            "key_index" => self.key_index = None,
+            "superseded" => self.superseded = None,
+            "layers" => self.layers = None,
+            "agent_set" => self.agent_set = None,
+            "bm25_stats" => self.bm25.stats = None,
+            "bm25_dicts" => self.bm25.dicts = None,
+            "ann" => {
+                self.ann = None;
+                self.ann_unloaded = self.header.index_pages > 0;
+                self.dirty_index = false;
+                self.index_persist = IndexPersist::default();
+                self.index_chain = Vec::new();
+                self.index_chain_ops = 0;
+            }
+            "column" => self.col = VecColumn::from_catalog(&self.catalog),
+            _ => return Err(MnemoError::Invalid(format!("no lazy part {which:?}"))),
+        }
+        Ok(())
+    }
 }

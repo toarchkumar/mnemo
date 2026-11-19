@@ -74,6 +74,7 @@ pub use findings::{valid_finding_id, Finding, FindingFilter, FindingSpec};
 
 mod ann;
 mod cache_api;
+mod catchup;
 mod continuation;
 mod crud;
 mod essence;
