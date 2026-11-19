@@ -3,6 +3,8 @@
 [![CI](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mnemo-engine)](https://pypi.org/project/mnemo-engine/)
 [![crates.io](https://img.shields.io/crates/v/mnemo-engine)](https://crates.io/crates/mnemo-engine)
+[![PyPI downloads](https://img.shields.io/pypi/dm/mnemo-engine?label=PyPI%20downloads)](https://pypi.org/project/mnemo-engine/)
+[![crates.io downloads](https://img.shields.io/crates/d/mnemo-engine?label=crates.io%20downloads)](https://crates.io/crates/mnemo-engine)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Shared memory for your coding agents, in one encrypted file. Written in Rust.**
@@ -18,6 +20,8 @@ curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh
 mnemo onboard     # in your repository: shows the plan, asks once
 mnemo inspect     # see what your agents remember, in your browser
 ```
+
+![A terminal demo: Claude Code saves a keyed decision into an encrypted .mnemo file, then Cursor recalls it from the same file and saves a refined version, which replaces the old one while its history is kept.](docs/img/demo.gif)
 
 It comes in three layers. Start with the first; the others are there
 when you need them.
@@ -51,8 +55,8 @@ when you need them.
 - **Small on disk.** About 1.5 KB per memory at 100K memories, about 6 times
   smaller than before v0.11's format: memories share pages, vectors are
   stored at half precision, and saved conversation turns are compressed
-  once they're a week old. This repository's own brain holds 18,908
-  memories, almost all of them saved session turns, in 33 MB.
+  once they're a week old. This repository's own brain holds about
+  26,000 memories, almost all of them saved session turns, in 45 MB.
 - **Local all the way down.** A small built-in model embeds text on your
   CPU; a result cache keeps LLM responses and tool outputs; an MCP server
   is built in.
@@ -104,16 +108,16 @@ both). Wheels cover Linux (x86_64, ARM), macOS (Intel, Apple Silicon) and
 Windows (x86_64); elsewhere, pip builds from source, without the keychain
 and the built-in embedder.
 
-iOS and Android (from v0.12.0; current 0.19.0):
+iOS and Android (from v0.12.0; current 0.20.0):
 
 ```swift
 // Swift Package Manager (Xcode: File > Add Package Dependencies)
-.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.19.0")
+.package(url: "https://github.com/toarchkumar/mnemo-swift", from: "0.20.0")
 ```
 
 ```kotlin
 // Android, from Maven Central (arm64-v8a and x86_64)
-implementation("io.github.toarchkumar:mnemo-android:0.19.0")
+implementation("io.github.toarchkumar:mnemo-android:0.20.0")
 ```
 
 The package is `mnemo-engine` everywhere, and from v0.7.0 the Python module and
@@ -175,7 +179,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.19.1", "semantic", key="current-release")
+    db.remember_text("the current release is v0.20.0", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -196,6 +200,26 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.20.0: sessions sharing a brain stay fast
+
+- **Several sessions on one brain keep up with each other quickly.** When
+  another session saves something, the next call reads only what changed:
+  about 0.4 ms at 10K memories and 0.8 ms at 100K, instead of 3.6 and
+  31 ms. Over 700 commits at 100K, memory use stays at about 250 MB,
+  where v0.19.1's grew past 1 GB (an M1 Pro).
+- **`mnemo serve --mcp` is shared by default,** so several servers, the
+  CLI and Python can use one brain. `--exclusive` keeps the old lock for
+  the server's whole life. `mnemo onboard` already set this up, so only
+  configs written by hand change. Update every `mnemo` on the machine
+  before relying on it.
+- **Safer writes:** a flush retried after a failed write leaves a sound
+  file, a big commit makes one fsync fewer, and a copy of the file
+  restored over it is noticed rather than trusted.
+- **Easier to find:** MNemo comes as an MCP bundle for the official MCP
+  registry, the PyPI and crates.io listings say what it is, and this page
+  has a demo.
+- The iOS and Android packages are at 0.20.0. There's no format change.
 
 ## What's new in v0.19.1: a damaged search index repairs itself
 
