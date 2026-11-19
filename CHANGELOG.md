@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-19
+
+Shared access gets faster and becomes the MCP server's default. A shared
+handle now catches up with another process's commit by reading only what
+changed, keeping its vector column, page cache and index, instead of
+reloading the file: about 0.4 ms at 10K memories and 0.8 ms at 100K. It
+never trusts what it holds when an older copy of the file was restored
+in place. `mnemo serve --mcp` is shared by default (`--exclusive` keeps
+the old lifetime lock). A batch commit with a big run makes one fsync
+fewer, and a flush retried after a failed commit write leaves a sound
+file. Releases now carry an MCP bundle for the official MCP registry. The
+mobile packages are published at 0.20.0. There's no format change.
+
 ### Added
 
 - **A terminal demo** (v0200-d4): `docs/img/demo.gif`, 32 seconds, with
@@ -4983,7 +4996,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...v0.18.1
