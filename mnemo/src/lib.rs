@@ -529,6 +529,9 @@ pub mod __shared {
     pub const LOCK_INFO: &str = crate::shared::testing::LOCK_INFO;
     /// LOCK-2's valve file name.
     pub const VALVE: &str = crate::shared::testing::VALVE;
+    /// LOCK-2's threshold: how long a writer waits before it takes the
+    /// valve, and how long a reader defers to it.
+    pub const VALVE_AFTER: std::time::Duration = crate::shared::testing::VALVE_AFTER;
 
     /// Whether this build refuses shared mode (Windows, Rust before 1.85).
     pub const WINDOWS_OLD_RENAME: bool = crate::shared::WINDOWS_OLD_RENAME;
