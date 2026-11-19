@@ -151,7 +151,24 @@ fn a_reader_backs_off_while_the_valve_is_held() {
 }
 
 /// Test 5: two writers and four readers looping. Both writers commit, and
-/// readers keep getting in throughout.
+/// no reader waits much longer than the design lets it (v0200-t1).
+///
+/// A read can wait for two reasons. Behind a write window that holds the
+/// lock: that's the commit, not starvation, so it doesn't count. And while
+/// writers hand the lock on to each other through the intent lock or the
+/// valve: a reader defers for up to `VALVE_AFTER` of its own wait, then
+/// hurries and queues (LOCK-2 round 3). So each read's *idle wait*, its
+/// wait less the time write windows held the lock during it, must stay
+/// under `VALVE_AFTER` plus 500 ms of scheduler slack. A fixed 500 ms
+/// sample with no reads isn't a failure: the design allows that much.
+///
+/// That hurry caps any one read's idle wait, so readers starved by a
+/// regression show in throughput instead: over the run, readers must get
+/// in at least as often as writers commit. Healthy runs have about 30
+/// times as many reads as write windows. With the pre-step-5 behaviour
+/// back (a reader drops the intent lock while the main lock is busy),
+/// there were 0.15 to 0.21 reads per window, with every idle wait under
+/// the bound (v0200-t1).
 #[test]
 fn two_writers_and_four_readers_all_get_their_turns() {
     if refused() {
@@ -160,40 +177,93 @@ fn two_writers_and_four_readers_all_get_their_turns() {
     let dir = tempdir().unwrap();
     let p = brain(dir.path());
     let stop = Arc::new(AtomicBool::new(false));
-    let (rs, reads) = readers(&p, 4, Duration::from_millis(1), &stop);
-    let writers: Vec<_> = (0..2)
+    let t0 = Instant::now();
+    // Each read's (started waiting, got the lock), from t0.
+    let rs: Vec<_> = (0..4)
+        .map(|_| {
+            let (p, stop) = (p.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut r = Locks::new(&p, &opts(10_000)).unwrap();
+                let mut reads = Vec::new();
+                while !stop.load(Ordering::Relaxed) {
+                    let asked = t0.elapsed();
+                    let held = r.shared(&opts(10_000)).unwrap();
+                    reads.push((asked, t0.elapsed()));
+                    std::thread::sleep(Duration::from_millis(1));
+                    drop(held);
+                }
+                reads
+            })
+        })
+        .collect();
+    // Each write window's (got the lock, let it go), from t0.
+    let ws: Vec<_> = (0..2)
         .map(|_| {
             let (p, stop) = (p.clone(), stop.clone());
             std::thread::spawn(move || {
                 let mut w = Locks::new(&p, &opts(10_000)).unwrap();
-                let mut commits = 0u64;
+                let mut windows = Vec::new();
                 while !stop.load(Ordering::Relaxed) {
                     let held = w.exclusive(&opts(10_000)).unwrap();
+                    let got = t0.elapsed();
                     std::thread::sleep(Duration::from_millis(5));
+                    windows.push((got, t0.elapsed()));
                     drop(held);
-                    commits += 1;
                 }
-                commits
+                windows
             })
         })
         .collect();
-    let mut samples = Vec::new();
-    for _ in 0..6 {
-        let before = reads.load(Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(500));
-        samples.push(reads.load(Ordering::Relaxed) - before);
-    }
+    std::thread::sleep(Duration::from_secs(3));
     stop.store(true, Ordering::Relaxed);
-    let commits: Vec<u64> = writers.into_iter().map(|w| w.join().unwrap()).collect();
-    let longest_read: Duration = rs.into_iter().map(|r| r.join().unwrap()).max().unwrap();
+    let windows: Vec<Vec<(Duration, Duration)>> =
+        ws.into_iter().map(|w| w.join().unwrap()).collect();
+    let reads: Vec<(Duration, Duration)> = rs.into_iter().flat_map(|r| r.join().unwrap()).collect();
+    let all: Vec<(Duration, Duration)> = windows.iter().flatten().copied().collect();
+
+    // Per read: its wait, and the part of it no write window held the lock.
+    let (mut longest, mut idlest) = (Duration::ZERO, (Duration::ZERO, Duration::ZERO));
+    for &(asked, got) in &reads {
+        let waited = got - asked;
+        let held: Duration = all
+            .iter()
+            .filter(|&&(a, b)| a < got && b > asked)
+            .map(|&(a, b)| b.min(got) - a.max(asked))
+            .sum();
+        let idle = waited.saturating_sub(held);
+        longest = longest.max(waited);
+        if idle > idlest.0 {
+            idlest = (idle, waited);
+        }
+    }
+    let longest_window = all.iter().map(|&(a, b)| b - a).max().unwrap_or_default();
     eprintln!(
-        "commits {commits:?}; reads per 500 ms {samples:?}; longest read wait {longest_read:?}"
+        "commits {:?}; {} reads; longest read wait {longest:?}; longest idle wait {:?} \
+         (of a {:?} wait); longest write window {longest_window:?}",
+        windows.iter().map(Vec::len).collect::<Vec<_>>(),
+        reads.len(),
+        idlest.0,
+        idlest.1,
     );
-    assert!(commits.iter().all(|&c| c > 0), "a writer never committed");
-    assert!(samples.iter().all(|&n| n > 0), "readers stopped getting in");
     assert!(
-        longest_read < Duration::from_secs(5),
-        "a read waited {longest_read:?}"
+        windows.iter().all(|w| !w.is_empty()),
+        "a writer never committed"
+    );
+    assert!(
+        reads.len() >= all.len(),
+        "readers got in {} times while writers committed {} times",
+        reads.len(),
+        all.len()
+    );
+    let bound = __shared::VALVE_AFTER + Duration::from_millis(500);
+    assert!(
+        idlest.0 < bound,
+        "a read waited {:?} while no writer held the lock (bound {bound:?})",
+        idlest.0
+    );
+    assert!(
+        longest < Duration::from_secs(5),
+        "a read waited {longest:?}"
     );
 }
 

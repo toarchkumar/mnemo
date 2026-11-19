@@ -84,7 +84,7 @@ pub(crate) struct BrainLocks {
 /// LOCK-2: how long a writer waits before it takes the valve. 500 ms, by
 /// the bench's sweep rule (12.4 design note, "LOCK-2"); a `dev-hooks` build
 /// reads `MNEMO_DEV_VALVE_MS` for the sweep.
-const VALVE_AFTER: Duration = Duration::from_millis(500);
+pub(crate) const VALVE_AFTER: Duration = Duration::from_millis(500);
 
 /// The bench's baseline: a `dev-hooks` build with `MNEMO_DEV_NO_VALVE` set
 /// runs without the valve (readers don't check it, writers don't take it).
