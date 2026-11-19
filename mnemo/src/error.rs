@@ -100,6 +100,10 @@ pub enum MnemoError {
     /// couldn't finish the commit itself, so the write **may have been
     /// stored**: the next process to open the file finishes it. Don't retry
     /// the same write blindly; check whether it's there.
+    ///
+    /// Since v0.20.0, also every `flush` on an exclusive handle after one
+    /// failed at or after its commit point: reopen the file, which finishes
+    /// that commit or drops it, then check whether the write is there.
     #[error("the write may have been stored: {0}")]
     MaybeStored(String),
 

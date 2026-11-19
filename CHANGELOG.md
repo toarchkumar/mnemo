@@ -18,6 +18,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
   handle's header and free list back, so retrying it on the same handle
   commits over the stored state.
 
+### Fixed
+
+- **A flush retried after a failed commit write no longer damages the
+  file.** On a handle that isn't shared, a flush that failed at the WAL
+  commit or during the checkpoint and was then retried on the same handle
+  returned `Ok`, but the file then failed to open (`PageAuthFailed`): the
+  retry's catalog delta linked to the failed attempt's run, which was never
+  written. Now, after such a failure, the handle knows it can't tell
+  whether that commit is in the file, so every later flush on it, and
+  `close`, returns `MaybeStored`.
+  Reopen the file: the open finishes the commit or drops it, then check
+  whether the write is there. A flush that fails before the commit point is
+  still retried on the same handle. Shared handles weren't affected: they
+  reload after such a failure. v0.19.1 has the bug.
+
 ## [0.19.1] — 2026-11-18
 
 A patch for a damaged ANN index. The index is derived data, so a run that
