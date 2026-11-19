@@ -7,6 +7,9 @@
 //! reports, instead of failing the rekey).
 //!
 //! The failpoint counter is thread-local, so each test arms its own.
+//! Failpoints builds only (the test hooks), so a plain `cargo clippy
+//! --all-targets` compiles without them (v0200-5).
+#![cfg(feature = "failpoints")]
 
 use std::path::Path;
 

@@ -29,6 +29,7 @@
 //! Tempfiles + `fast_cfg()` (Argon2 fast params) keep each iteration
 //! cheap; reopens follow the strict close → drop → `Mnemo::open`
 //! sequence so `fs4`'s exclusive lock is released cleanly on Windows.
+#![cfg(feature = "failpoints")]
 
 use mnemo_engine::{
     CacheFlushPolicy, CachePutOpts, KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, Ulid,
