@@ -250,6 +250,20 @@ impl PageCache {
         v
     }
 
+    /// v0200-3r: drop every clean page cached under a generation above
+    /// `gen`. A dirty page is this transaction's own write and stays.
+    pub fn drop_newer_than(&mut self, gen: u64) {
+        let doomed: Vec<usize> = self
+            .map
+            .values()
+            .copied()
+            .filter(|&i| self.slots[i].gen > gen && !self.slots[i].dirty)
+            .collect();
+        for i in doomed {
+            self.remove_node(i);
+        }
+    }
+
     /// Mark every cached page clean — called after a flush has written them.
     /// Evictable pages then become available again.
     pub fn mark_all_clean(&mut self) {
@@ -337,6 +351,22 @@ mod tests {
     /// v0200-3: a page cached under one generation isn't served for
     /// another. A clean stale entry is dropped on the miss; a dirty one
     /// (this transaction's own write) stays.
+    /// v0200-3r: only clean pages newer than the generation go.
+    #[test]
+    fn drop_newer_than_keeps_older_and_dirty_pages() {
+        let mut c = PageCache::new(8);
+        c.insert(1, 3, page(1), false);
+        c.insert(2, 5, page(2), false);
+        c.insert(3, 6, page(3), true);
+        c.insert(4, 4, page(4), false);
+        c.drop_newer_than(4);
+        assert!(c.peek(1, 3).is_some());
+        assert!(c.peek(4, 4).is_some());
+        assert!(c.peek(2, 5).is_none());
+        assert!(c.peek(3, 6).is_some(), "a dirty page stays");
+        assert_eq!(c.len(), 3);
+    }
+
     #[test]
     fn another_generation_is_a_miss() {
         let mut c = PageCache::new(4);

@@ -386,8 +386,9 @@ That runs as sections 3 and 4 say, with these choices:
   lazily, `ensure_column`), so the rows that later commits add grow it in
   place.
 
-**The tests.** `tests/catch_up.rs` has 9 cases, covering section 7's 1 to 8
-and the crash injection: a writer that dies at each of its 11 writes,
+**The tests.** `tests/catch_up.rs` has 9 cases (13 with v0200-3r's four
+below), covering section 7's 1 to 8 and the crash injection: a writer
+that dies at each of its 11 writes,
 then a catch-up that must reach a state equal to a fresh open. Each case
 checks equivalence part by part and which path ran. The proptest's second
 shared handle (`prop_two_shared_handles`) checks the reader against a
@@ -398,12 +399,64 @@ fresh open after each read window. Mutations that each made a test fail:
 - the cache ignoring the generation, skipping the `have` clearing, and
   skipping the BM25 statistics.
 
-**A known edge.** An older copy of the file restored in place (same
-inode, same key), then committed past the reader's transaction, could
-reuse page and generation numbers the reader holds. The identity check
-can't tell it from the file the reader knew, and that limits both the
-catch-up and `adopt_column`. Off Unix the identity is always equal, so
-the seal and the chain walk decide.
+**A copy restored in place (v0200-3r).** An older copy of the file
+written over it in place (`cp` keeps the inode) has the file's identity
+and its key, so it passes the identity and seal checks. Its next commits
+reuse page numbers and generations: the free list hands out the same pages
+again, and generations follow `wal_seq`. So a pointer the reader holds can
+come back exactly, with other bytes behind it. The walk back then stops at
+what looks like the reader's head, and the page cache and `adopt_column`
+could keep bytes from the timeline that was overwritten. The tests show
+all three: a catch-up that applied only the last delta, a column row kept
+from the old timeline, and a result-cache value served from the page
+cache.
+
+The guard needs no format change. When a shared handle takes a state
+(a load, a catch-up, its own commit), it reads the on-disk nonce of the
+first page of every run its header points at (`Anchors` in
+`store/shared.rs`). Before a catch-up, or a reload that keeps the column,
+it checks two things:
+- **The transaction didn't go back:** the new `wal_seq` is at least the
+  held one.
+- **Every held run the new state keeps is still on disk, read past the
+  cache.** These are the catalog base and head, a loaded index's base and
+  head when the new header keeps its base, and every other run whose
+  pointer the new header still has.
+
+Every run is written whole in one commit, and SEC-1 gives each session
+its own random nonce prefix. So a run written again, in any timeline, has
+another nonce. A run the new header no longer points at isn't checked:
+nothing of it is kept, and on the reader's own timeline its pages may be
+in use again. That's why the reused-page case (section 7, case 4) still
+catches up incrementally.
+
+When the check passes, every run it checked predates any copy that might
+have been written over the file. So the handle also drops cached pages
+newer than the newest of those runs, and BM25 dictionaries keyed by such a
+segment. On its own timeline those are the few pages of commits since its
+last catalog change. When the check fails, the handle does the full
+reload, with a fresh page cache and no `adopt_column`.
+
+The cost is two short reads per checked run (at most nine runs), one when
+the state is taken and one at the check. Over two alternating runs of
+cell 10 (load 2.9 to 5.0, p50), the catch-up took 0.450 and 0.403 ms at
+10K with the check, against 0.455 and 0.413 without it, and 0.808 and
+0.824 ms at 100K, against 0.802 and 0.846. That's within the noise.
+
+`tests/catch_up.rs` has four cases. Each first asserts that the pointers
+really coincide (the held head is in the restored chain, the vector
+entries or the cache value page are at the same page and generation),
+then requires the full path, or the incremental path with the right
+bytes, and a state equal to a fresh open:
+- the catalog: the walk back;
+- a new base: `adopt_column`;
+- a result-cache put only, where the catalog head alone wouldn't tell;
+- a run that moved: the page-cache drop.
+
+Mutations, each failing the cases it should:
+- no on-disk check (all four);
+- checking the catalog's runs only (the cache-put case);
+- no page-cache drop (the moved-run case).
 
 **Where it was measured.** The same M1 Pro, release builds, `shared_bench`
 cells 10 to 12 and 1 to 3 (`--features failpoints` for the path counter).

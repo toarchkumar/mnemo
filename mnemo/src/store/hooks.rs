@@ -195,6 +195,16 @@ impl Mnemo {
         (!e.deleted).then_some((e.start_page, e.page_count, e.gen))
     }
 
+    /// **Not a stable API.** v0200-3r: where a memory's vector entry lives:
+    /// `(vec_page, vec_slot, vec_gen)` (v9).
+    #[doc(hidden)]
+    pub fn __vector_location(&self, id: &Ulid) -> Option<(u64, u32, u64)> {
+        let idx = self.index.get(id.0, &self.catalog)?;
+        let e = &self.catalog[idx];
+        e.v9.filter(|_| !e.deleted)
+            .map(|r| (r.vec_page, r.vec_slot as u32, r.vec_gen))
+    }
+
     /// **Not a stable API.** FMT-9e: how many thread-hash buckets of turn
     /// records the handle caches hold undecoded (`None` until built).
     #[doc(hidden)]

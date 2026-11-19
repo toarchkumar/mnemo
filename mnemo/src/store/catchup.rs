@@ -153,7 +153,12 @@ impl Mnemo {
     ///
     /// The caller has checked that `new`'s seal verifies under the handle's
     /// data key and that the file is the one the handle was built from.
-    pub(super) fn catch_up_to(&mut self, new: &Header) -> Result<bool> {
+    ///
+    /// `trusted_gen` (v0200-3r): the newest generation the caller proved is
+    /// on this handle's timeline (`anchors_hold` in `shared.rs`). Held data
+    /// that a new pointer names again, and that is newer than it, is read
+    /// again instead of kept.
+    pub(super) fn catch_up_to(&mut self, new: &Header, trusted_gen: u64) -> Result<bool> {
         let old = &self.header;
         if !self.is_v9()
             || new.version != old.version
@@ -177,7 +182,7 @@ impl Mnemo {
         let Some(plan) = self.plan_catch_up(new)? else {
             return Ok(false);
         };
-        self.apply_catch_up(new, plan)?;
+        self.apply_catch_up(new, plan, trusted_gen)?;
         Ok(true)
     }
 
@@ -344,7 +349,7 @@ impl Mnemo {
 
     /// Apply a plan: from here an error leaves the handle half caught up,
     /// and the caller reloads.
-    fn apply_catch_up(&mut self, new: &Header, plan: Plan) -> Result<()> {
+    fn apply_catch_up(&mut self, new: &Header, plan: Plan, trusted_gen: u64) -> Result<()> {
         // 1. The catalog rows, keeping each changed row's first old entry.
         // The index generation the handle's entries were reconciled under.
         let old_index_gen = self.index_gen_now();
@@ -465,7 +470,7 @@ impl Mnemo {
                         .manifest
                         .segments
                         .iter()
-                        .position(|&s| s == seg)
+                        .position(|&s| s == seg && s.3 <= trusted_gen)
                         .and_then(|j| old_dicts[j].take());
                     match kept {
                         Some(d) => dicts.push(d),

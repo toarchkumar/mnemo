@@ -27,6 +27,14 @@ Pre-1.0, the minor component carries the breaking-change signal.
   v0.19.1's reached 1.1 to 1.4 GB. Measured on an Apple M1 Pro; the
   design note's "As built" section has the runs, their load, and the
   targets met and missed.
+- **A catch-up never trusts held state across a copy restored in place**
+  (v0200-3r). An older copy of the file written over it in place keeps
+  its identity and key, and its next commits can reuse the page numbers
+  and generations the handle holds. Before it builds on what it holds,
+  the handle now checks that the file's transaction didn't go back and
+  that the runs it keeps still have, on disk, the page nonces it read.
+  Otherwise it reloads in full, with a fresh page cache. No format change.
+  The check's cost was within the noise of the catch-up.
 - **The page cache is keyed by page and generation.** A hit needs the
   generation the pointer expects, so a page another process freed and
   reused is never served from the cache. This is what lets a shared

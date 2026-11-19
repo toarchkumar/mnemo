@@ -579,3 +579,341 @@ fn a_writer_that_dies_at_each_write_is_caught_up_soundly() {
     assert_eq!(catch_up(&mut r), INCREMENTAL, "after the crashes");
     check(&mut r, &p, "pw", "after the crashes");
 }
+
+/// v0200-3r: a vector no other test writes, `k` apart, in one of two
+/// timelines.
+fn timeline_vector(timeline: usize, k: usize) -> Vec<f32> {
+    (0..DIMS)
+        .map(|j| {
+            ((j * (5 + timeline * 2) + k * 3) % 13) as f32 * 0.3 + 0.2 + timeline as f32 * 0.05
+        })
+        .collect()
+}
+
+fn set_vector(id: Ulid, v: Vec<f32>) -> impl FnOnce(&mut Mnemo) -> mnemo_engine::Result<()> {
+    move |db: &mut Mnemo| {
+        db.update(
+            &id,
+            MemoryPatch {
+                vector: Some(v),
+                ..Default::default()
+            },
+        )
+        .map(|_| ())
+    }
+}
+
+fn set_importance(id: Ulid, x: f32) -> impl FnOnce(&mut Mnemo) -> mnemo_engine::Result<()> {
+    move |db: &mut Mnemo| {
+        db.update(
+            &id,
+            MemoryPatch {
+                importance: Some(x),
+                ..Default::default()
+            },
+        )
+        .map(|_| ())
+    }
+}
+
+/// The head of the handle's catalog delta chain, as the parts print it.
+fn chain_head(parts: &[(String, String)]) -> String {
+    let chain = &parts.iter().find(|(n, _)| n == "delta_chain").unwrap().1;
+    let at = chain.rfind("RunPtr").expect("a delta chain");
+    chain[at..chain[at..].find('}').unwrap() + at + 1].to_string()
+}
+
+/// The commits of one timeline between the copy and the reader's state: a
+/// batch of new vectors for `ids[..60]`, which fills vector pages (a later
+/// commit rewrites only the tail one, so the full ones stay where they
+/// are), then two more vectors.
+fn timeline_commits(w: &mut SharedMnemo, ids: &[Ulid], timeline: usize) {
+    let batch: Vec<Ulid> = ids[..60].to_vec();
+    w.write(move |db| {
+        for (k, id) in batch.into_iter().enumerate() {
+            set_vector(id, timeline_vector(timeline, k))(db)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    for (k, id) in [ids[100], ids[120]].into_iter().enumerate() {
+        w.write(set_vector(id, timeline_vector(timeline, 100 + k)))
+            .unwrap();
+    }
+}
+
+/// How many of `ids[..60]` have their vector entry at the same place in
+/// both states.
+fn coinciding(a: &Mnemo, b: &Mnemo, ids: &[Ulid]) -> usize {
+    ids[..60]
+        .iter()
+        .filter(|id| a.__vector_location(id) == b.__vector_location(id))
+        .count()
+}
+
+/// A reader at `t`; an older copy of the file (taken at `s`) written over
+/// it in place, so the file keeps its identity and its key; then the same
+/// shape of commits in the restored timeline, with other vectors, so the
+/// pointers the reader holds come back with other bytes behind them.
+/// Returns the reader, the path, and the file's ids.
+fn restored_in_place(dir: &Path) -> (SharedMnemo, PathBuf, Vec<Ulid>) {
+    // Big enough that these commits' rows stay under a quarter of the
+    // catalog, so no commit here writes a new base.
+    let p = base(dir, 1000);
+    let mut w = shared(&p, "pw");
+    let mut r = shared(&p, "pw");
+    warm(&mut r);
+    let ids: Vec<Ulid> = r
+        .read(|db| Ok(db.memories()?.into_iter().map(|m| m.id).collect()))
+        .unwrap();
+    // `s`: the copy. `t`: the reader's timeline after it.
+    let copy = std::fs::read(&p).unwrap();
+    timeline_commits(&mut w, &ids, 0);
+    assert_eq!(catch_up(&mut r), INCREMENTAL, "the reader at t");
+    // Its column filled again, as recalls would: every vector it holds.
+    warm(&mut r);
+    let held_head = chain_head(&r.__state().unwrap().__catch_up_parts());
+    drop(w);
+
+    // The copy written over the file in place: the same inode.
+    #[cfg(unix)]
+    let ino = {
+        use std::os::unix::fs::MetadataExt;
+        let ino = std::fs::metadata(&p).unwrap().ino();
+        std::fs::write(&p, &copy).unwrap();
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().ino(),
+            ino,
+            "restored in place"
+        );
+        ino
+    };
+    #[cfg(not(unix))]
+    std::fs::write(&p, &copy).unwrap();
+
+    // The restored timeline: the same commits with other vectors, then one
+    // more that writes no new vector, so it passes the reader's
+    // transaction.
+    let mut w2 = shared(&p, "pw");
+    timeline_commits(&mut w2, &ids, 1);
+    w2.write(set_importance(ids[150], 0.9)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(std::fs::metadata(&p).unwrap().ino(), ino);
+    }
+
+    // The test bites only if the pointers really coincide: the reader's
+    // delta head is in the restored chain, and vector entries it holds are
+    // where the restored timeline wrote other vectors.
+    let fresh = Mnemo::open_read_only(&p, "pw").unwrap();
+    let parts = fresh.__catch_up_parts();
+    let chain = &parts.iter().find(|(n, _)| n == "delta_chain").unwrap().1;
+    assert!(
+        chain.contains(&held_head),
+        "the reader's head {held_head} is in the restored chain {chain}"
+    );
+    let same = coinciding(r.__state().unwrap(), &fresh, &ids);
+    assert!(same >= 20, "{same} of 60 vector entries coincide");
+    drop(fresh);
+    drop(w2);
+    (r, p, ids)
+}
+
+/// v0200-3r: the catch-up never trusts held state across a copy restored
+/// in place; it takes the full path, and the state equals a fresh open.
+/// Then the restored timeline is the reader's, and catch-ups are
+/// incremental again, after another handle's commit and after its own.
+#[test]
+fn a_copy_restored_in_place_is_never_caught_up_incrementally() {
+    let dir = tempdir().unwrap();
+    let (mut r, p, ids) = restored_in_place(dir.path());
+    assert_eq!(catch_up(&mut r), FULL, "restored in place");
+    check(&mut r, &p, "pw", "restored in place");
+
+    let mut w = shared(&p, "pw");
+    w.write(set_vector(ids[160], timeline_vector(1, 11)))
+        .unwrap();
+    assert_eq!(catch_up(&mut r), INCREMENTAL, "the restored timeline");
+    check(&mut r, &p, "pw", "the restored timeline");
+    r.write(set_vector(ids[170], timeline_vector(1, 12)))
+        .unwrap();
+    w.write(set_vector(ids[180], timeline_vector(1, 13)))
+        .unwrap();
+    assert_eq!(
+        catch_up(&mut r),
+        INCREMENTAL,
+        "after the reader's own write"
+    );
+    check(&mut r, &p, "pw", "after the reader's own write");
+}
+
+/// v0200-3r: the same for a reload that would keep the vector column
+/// (`adopt_column`): the restored timeline writes a new catalog base, so
+/// the catch-up can't apply, and the reload must not keep the rows whose
+/// vector entries coincide.
+#[test]
+fn a_copy_restored_in_place_keeps_no_vector_column() {
+    let dir = tempdir().unwrap();
+    let (mut r, p, ids) = restored_in_place(dir.path());
+    // More than a quarter of the catalog in one commit, with no new vector
+    // (so the coinciding vector entries stay where they are): a new base.
+    let mut w = shared(&p, "pw");
+    let others: Vec<Ulid> = ids[300..600].to_vec();
+    w.write(move |db| {
+        for id in others {
+            set_importance(id, 0.7)(db)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let fresh = Mnemo::open_read_only(&p, "pw").unwrap();
+    let parts = fresh.__catch_up_parts();
+    assert!(
+        parts
+            .iter()
+            .any(|(n, v)| n == "delta_chain" && v.starts_with("[]")),
+        "a new base"
+    );
+    let same = coinciding(r.__state().unwrap(), &fresh, &ids);
+    assert!(same >= 20, "{same} of 60 vector entries still coincide");
+    drop(fresh);
+    assert_eq!(catch_up(&mut r), FULL, "a new base");
+    check(&mut r, &p, "pw", "a new base after the restore");
+}
+
+/// `name: value` from a struct's `Debug` text.
+fn field<'a>(debug: &'a str, name: &str) -> &'a str {
+    let at = debug.find(&format!("{name}: ")).expect(name) + name.len() + 2;
+    let end = debug[at..].find([',', ' ', '}']).unwrap() + at;
+    &debug[at..end]
+}
+
+/// v0200-3r: the same when only a run other than the catalog changed
+/// between the copy and the reader's state (a result-cache put): the
+/// catalog chain the reader holds is still on disk, and the cache
+/// directory's pointer comes back with other bytes behind it.
+#[test]
+fn a_copy_restored_in_place_with_only_a_cache_put_is_never_trusted() {
+    let dir = tempdir().unwrap();
+    let p = base(dir.path(), 300);
+    let mut w = shared(&p, "pw");
+    let mut r = shared(&p, "pw");
+    warm(&mut r);
+    let ids: Vec<Ulid> = r
+        .read(|db| Ok(db.memories()?.into_iter().map(|m| m.id).collect()))
+        .unwrap();
+    let copy = std::fs::read(&p).unwrap();
+    w.write(|db| db.cache_put("ns", "k", &[b'a'; 64], CachePutOpts::default()))
+        .unwrap();
+    assert_eq!(catch_up(&mut r), INCREMENTAL, "the reader at t");
+    assert_eq!(
+        r.read(|db| db.cache_get("ns", "k"))
+            .unwrap()
+            .map(|v| v.value),
+        Some(vec![b'a'; 64])
+    );
+    let held = r.__state().unwrap().__catch_up_parts()[0].1.clone();
+    drop(w);
+    std::fs::write(&p, &copy).unwrap();
+
+    let mut w2 = shared(&p, "pw");
+    w2.write(|db| db.cache_put("ns", "k", &[b'b'; 64], CachePutOpts::default()))
+        .unwrap();
+    w2.write(set_importance(ids[5], 0.9)).unwrap();
+    drop(w2);
+    let fresh = Mnemo::open_read_only(&p, "pw").unwrap();
+    let now = fresh.__catch_up_parts()[0].1.clone();
+    drop(fresh);
+    for f in ["cache_start", "cache_pages", "cache_len", "cache_gen"] {
+        assert_eq!(
+            field(&held, f),
+            field(&now, f),
+            "the cache pointer coincides: {f}"
+        );
+    }
+
+    assert_eq!(catch_up(&mut r), FULL, "restored in place");
+    check(&mut r, &p, "pw", "restored in place, a cache put");
+    assert_eq!(
+        r.read(|db| db.cache_get("ns", "k"))
+            .unwrap()
+            .map(|v| v.value),
+        Some(vec![b'b'; 64])
+    );
+}
+
+/// v0200-3r: a run the restored timeline writes under another pointer
+/// isn't checked (nothing of the held one is kept), but its pages can
+/// still take the page numbers and generations of pages the reader
+/// cached. Those cached pages must not be served.
+#[test]
+fn a_copy_restored_in_place_never_serves_a_cached_page_of_the_old_timeline() {
+    let dir = tempdir().unwrap();
+    let p = base(dir.path(), 300);
+    let mut w = shared(&p, "pw");
+    let mut r = shared(&p, "pw");
+    warm(&mut r);
+    let ids: Vec<Ulid> = r
+        .read(|db| Ok(db.memories()?.into_iter().map(|m| m.id).collect()))
+        .unwrap();
+    let copy = std::fs::read(&p).unwrap();
+    w.write(|db| db.cache_put("ns", "k", &[b'a'; 3000], CachePutOpts::default()))
+        .unwrap();
+    assert_eq!(catch_up(&mut r), INCREMENTAL, "the reader at t");
+    assert_eq!(
+        r.read(|db| db.cache_get("ns", "k"))
+            .unwrap()
+            .map(|v| v.value),
+        Some(vec![b'a'; 3000])
+    );
+    let held = r.__state().unwrap().__catch_up_parts();
+    drop(w);
+    std::fs::write(&p, &copy).unwrap();
+
+    // The same key with another value, and a second key, in one commit:
+    // the directory is another size, so another pointer.
+    let mut w2 = shared(&p, "pw");
+    w2.write(|db| {
+        db.cache_put("ns", "k", &[b'b'; 3000], CachePutOpts::default())?;
+        db.cache_put("ns", "k2", b"x", CachePutOpts::default())
+    })
+    .unwrap();
+    w2.write(set_importance(ids[5], 0.9)).unwrap();
+    drop(w2);
+    let fresh = Mnemo::open_read_only(&p, "pw").unwrap();
+    let now = fresh.__catch_up_parts();
+    drop(fresh);
+    // The test bites only if the value's page coincides while the
+    // directory's pointer doesn't.
+    let part = |parts: &[(String, String)], name: &str| {
+        parts.iter().find(|(n, _)| n == name).unwrap().1.clone()
+    };
+    let (was, is) = (part(&held, "cache_dir"), part(&now, "cache_dir"));
+    for f in ["start_page", "gen"] {
+        assert_eq!(field(&was, f), field(&is, f), "the value's {f} coincides");
+    }
+    assert_ne!(
+        field(&held[0].1, "cache_start"),
+        field(&now[0].1, "cache_start"),
+        "the directory moved"
+    );
+
+    // Nothing the reader holds was written after the copy, except the
+    // cache directory, which it doesn't keep: the catch-up applies, and
+    // only the cached pages newer than the copy go.
+    assert_eq!(catch_up(&mut r), INCREMENTAL, "the catch-up applies");
+    check(
+        &mut r,
+        &p,
+        "pw",
+        "restored in place, a cache put under another pointer",
+    );
+    assert_eq!(
+        r.read(|db| db.cache_get("ns", "k"))
+            .unwrap()
+            .map(|v| v.value),
+        Some(vec![b'b'; 3000]),
+        "the restored timeline's value"
+    );
+}
