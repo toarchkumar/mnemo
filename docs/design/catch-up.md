@@ -1,7 +1,8 @@
 # Incremental catch-up: the design note
 
-Status: **draft by the Worker, 2026-11-18** (task `v0200-2`), for the
-Planner's review before the build. The spec is the brain's
+Status: **approved for the build** (task `v0200-3`) by the Planner's
+`decision.catch-up-design`, 2026-11-18, with its additions (a) to (d)
+folded in below. Drafted by the Worker in task `v0200-2`. The spec is the brain's
 `spec.v0.20.0`, part (B): step 6 of `12.4-shared-access.md`'s
 implementation order (incremental catch-up) and step 8's open question
 (whether to gate older binaries). Section 9 is that answer.
@@ -165,8 +166,9 @@ fresh open would.
 **Built lazily, dropped when `C` isn't empty:** the key index, the
 supersession index, the layers and the agent set (`key_index`,
 `superseded`, `layers`, `agent_set`), as `apply_snapshot` does. Each is
-rebuilt on its next use. The build measures what that costs at 100K and
-makes the expensive ones incremental only if the numbers say so.
+rebuilt on its next use. The build measures the first-recall cost of
+each one dropped, at 100K, and reports it before choosing which to make
+incremental (addition (d)).
 
 **The small runs:** the snapshot manifest, the free list, the key slots,
 the cache directory (and its `DirectoryIndex`) and the BM25 manifest are
@@ -294,7 +296,15 @@ assert which path ran. The cases:
 5. the index: a delta applied to a loaded index; a rebuild (the index
    drops to "not loaded"); an index chain past 64 runs;
 6. a refused write, then another handle's commit (full reload: no trusted
-   state).
+   state);
+7. **several commits behind** (addition (a)): the reader misses commits
+   from two different writers, with a lease-only transaction between
+   them, so the walk covers more than one delta; and a reader behind
+   across a base rewrite followed by more deltas (full reload);
+8. **a retried write on the writer's own handle** (addition (b)): a write
+   fails before its commit point, and the retry rewrites the same page
+   under the same generation (v0200-1r's restore path); the page cache
+   must hold the retry's bytes.
 
 **The proptest model** (`tests/proptest_store.rs`) gets a second shared
 handle: random interleavings of the two handles' writes and reads, and
@@ -325,10 +335,17 @@ another handle, at 10K and 100K):
 | The first recall after it | 4.8 / 24.7 ms | **at most 1.5 times a warm recall** (2.4 / 2.7 ms today) |
 | A recall as the first call after the commit | 11.7 / 64.6 ms | **at most 5 ms** at both |
 | Physical footprint after 100 catch-ups | +54 / +472 MB | **under +10 MB** at 100K |
+| Physical footprint over 500 one-memory commits (about 8 fallbacks) | not measured | **under +20 MB** at 100K (addition (c)) |
 | A fallback (a base rewrite) | the catch-up row | no slower than today's full reload (within the noise of two runs) |
 
 If dropping the lazy indexes (section 4) keeps the first recall over its
 target, the build makes the costly ones incremental and says which.
+
+**The footprint (addition (c)).** `fact.shared-reload-footprint` is
+folded into this build. The 500-commit run includes the fallbacks, so it
+shows whether the full reload alone still grows about 4.7 MB per reload
+with no plateau. If it does, the report says so, and the Planner decides
+whether that gets its own task.
 
 **And kept:** a commit's fsyncs (3, `device_budget`); the per-call check
 on an unchanged file (0.048 ms, cell 1); the write window (cell 2).
