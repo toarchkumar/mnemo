@@ -12,7 +12,7 @@ Require mnemo
 Set Shell "bash"
 Set FontSize 20
 Set Width 1400
-Set Height 620
+Set Height 540
 Set Padding 28
 Set TypingSpeed 28ms
 Set Theme { "name": "MNemo", "black": "#151A1D", "red": "#F27A7A", "green": "#2BB3A6", "yellow": "#F0A35A", "blue": "#8AB4FF", "magenta": "#C4A7FF", "cyan": "#6FD6CB", "white": "#E8EAED", "brightBlack": "#848C96", "brightRed": "#F27A7A", "brightGreen": "#6FD6CB", "brightYellow": "#E8C37A", "brightBlue": "#8AB4FF", "brightMagenta": "#C4A7FF", "brightCyan": "#6FD6CB", "brightWhite": "#FFFFFF", "background": "#0E1113", "foreground": "#E8EAED", "selection": "#252C31", "cursor": "#2BB3A6" }
