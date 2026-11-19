@@ -358,7 +358,8 @@ The decode was the largest share, as section 2 guessed.
   lever wasn't tried. Warm recall at 10K is 2.3 ms, above the 2 ms target,
   and the time isn't in the dot product. A profile of the warm path is
   the next step if the target stays.
-- **3f** is deferred (the decision), not built.
+- **3f** is deferred (the decision), not built. (Built in v0.20.0, task
+  v0200-1: see the CHANGELOG.)
 
 **Against section 4's targets:**
 - First recall at 100K: 11.50 / 11.50 ms ✓. Single-thread: 17.66 ms.

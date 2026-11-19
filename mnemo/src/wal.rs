@@ -202,6 +202,10 @@ pub fn commit(
     crate::pager::__failpoint_check()?;
     file.seek(SeekFrom::Start(wal_start * PAGE_SIZE as u64))?;
     file.write_all(&buf)?;
+    crate::pager::__io_trace(crate::pager::IoEvent::WalCommit);
+    // PERF-2 3f: the commit's own sync, after the caller's barrier; never
+    // merged with it.
+    crate::pager::__sync_failpoint()?;
     file.sync_all()?;
     crate::bump_fsync();
     Ok(())

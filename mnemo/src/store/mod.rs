@@ -1253,9 +1253,6 @@ pub struct Mnemo {
     /// FMT-9c: the snapshot count was set explicitly (config or
     /// `set_max_snapshots`), which replaces v9's default retention policy.
     snapshot_cap_explicit: bool,
-    /// FMT-9c: this flush wrote big runs straight to their home pages,
-    /// which must be fsynced before the commit.
-    direct_writes: bool,
     /// FMT-9b: keep the column resident while it fits this many bytes.
     vector_cache_budget: usize,
 }
