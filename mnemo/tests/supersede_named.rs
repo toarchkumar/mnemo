@@ -4,8 +4,8 @@
 
 use mnemo_engine::{
     EssenceScope, EssenceSection, KdfParams, KeyScope, Memory, MemoryType, Mnemo, MnemoConfig,
-    MnemoError, RecallRequest, Scope, SharedOptions, Ulid, WriteOutcome, MNEMO_META_INVALID_AT,
-    MNEMO_META_KEY, MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
+    MnemoError, RecallRequest, Scope, Ulid, WriteOutcome, MNEMO_META_INVALID_AT, MNEMO_META_KEY,
+    MNEMO_META_SUPERSEDED_BY, MNEMO_META_SUPERSEDES,
 };
 use tempfile::tempdir;
 
@@ -243,6 +243,7 @@ fn it_holds_across_a_reopen_and_a_compaction() {
     }
 }
 
+#[cfg(feature = "failpoints")]
 #[test]
 fn a_shared_handle_writes_it_in_a_write_window() {
     if mnemo_engine::__shared::WINDOWS_OLD_RENAME {
@@ -258,7 +259,7 @@ fn a_shared_handle_writes_it_in_a_write_window() {
         db.close().unwrap();
         old
     };
-    let mut s = Mnemo::open_shared(&p, PW, SharedOptions::default()).unwrap();
+    let mut s = Mnemo::open_shared(&p, PW, mnemo_engine::SharedOptions::default()).unwrap();
     let (_, outcome) = s
         .write(|db| {
             db.remember_keyed_superseding(

@@ -1,4 +1,4 @@
-#![cfg(any(test, feature = "failpoints"))]
+#![cfg(feature = "failpoints")]
 //! DUR-1 — torn-header recovery after WAL-logged header commits.
 //!
 //! Every post-`create` page-0 write (WAL relocation, rekey) now goes

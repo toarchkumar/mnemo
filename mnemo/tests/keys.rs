@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use mnemo_engine::keys::{self, recovery, KeyStore, Secret, StoredSecret};
-use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, SharedOptions};
+use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 use tempfile::tempdir;
 use zeroize::Zeroizing;
 
@@ -139,6 +139,7 @@ fn a_v8_fixture_compacted_to_v9_keeps_its_salt() {
 
 // --- Test 4: a shared-mode compaction keeps the salt and is followed ---
 
+#[cfg(feature = "failpoints")]
 #[test]
 fn a_shared_compaction_keeps_the_salt_and_a_shared_handle_follows_it() {
     if mnemo_engine::__shared::WINDOWS_OLD_RENAME {
@@ -148,20 +149,27 @@ fn a_shared_compaction_keeps_the_salt_and_a_shared_handle_follows_it() {
     let p = dir.path().join("b.mnemo");
     let key = brain_with_key(&p);
     let s = salt(&p);
-    let mut shared = Mnemo::open_shared_with_key(&p, &key, SharedOptions::default()).unwrap();
+    let mut shared =
+        Mnemo::open_shared_with_key(&p, &key, mnemo_engine::SharedOptions::default()).unwrap();
     assert_eq!(shared.read(|db| Ok(db.len())).unwrap(), 3);
-    Mnemo::compact_file_waiting_with_key(p.to_str().unwrap(), &key, SharedOptions::default())
-        .unwrap();
+    Mnemo::compact_file_waiting_with_key(
+        p.to_str().unwrap(),
+        &key,
+        mnemo_engine::SharedOptions::default(),
+    )
+    .unwrap();
     assert_eq!(salt(&p), s);
     assert_eq!(shared.read(|db| Ok(db.len())).unwrap(), 3);
 }
 
 // --- Test 5: the KDF rules ---
 
+#[cfg(feature = "failpoints")]
 fn is_invalid(r: mnemo_engine::Result<impl Sized>) -> bool {
-    matches!(r, Err(MnemoError::Invalid(_)))
+    matches!(r, Err(mnemo_engine::MnemoError::Invalid(_)))
 }
 
+#[cfg(feature = "failpoints")]
 #[test]
 fn a_passphrase_is_refused_raw_key_parameters_on_every_path() {
     let dir = tempdir().unwrap();
@@ -198,7 +206,8 @@ fn a_passphrase_is_refused_raw_key_parameters_on_every_path() {
     if !mnemo_engine::__shared::WINDOWS_OLD_RENAME {
         let p = dir.path().join("shared.mnemo");
         let key = brain_with_key(&p);
-        let mut s = Mnemo::open_shared_with_key(&p, &key, SharedOptions::default()).unwrap();
+        let mut s =
+            Mnemo::open_shared_with_key(&p, &key, mnemo_engine::SharedOptions::default()).unwrap();
         assert!(is_invalid(s.rekey(PW, raw)));
         s.rekey(PW, KdfParams::raw_key().for_passphrase()).unwrap();
         drop(s);
@@ -212,6 +221,7 @@ fn a_passphrase_is_refused_raw_key_parameters_on_every_path() {
     assert!(!KdfParams::secure().is_test_grade());
 }
 
+#[cfg(feature = "failpoints")]
 #[test]
 fn a_file_below_the_floor_is_reported_and_a_compaction_raises_it() {
     let dir = tempdir().unwrap();
@@ -234,7 +244,7 @@ fn a_file_below_the_floor_is_reported_and_a_compaction_raises_it() {
     drop(db);
     assert_eq!(Mnemo::open_read_only(&p, PW).unwrap().notices().len(), 1);
     if !mnemo_engine::__shared::WINDOWS_OLD_RENAME {
-        let s = Mnemo::open_shared(&p, PW, SharedOptions::default()).unwrap();
+        let s = Mnemo::open_shared(&p, PW, mnemo_engine::SharedOptions::default()).unwrap();
         assert!(
             s.notices().iter().any(|n| n.contains("raw-key KDF")),
             "{:?}",
