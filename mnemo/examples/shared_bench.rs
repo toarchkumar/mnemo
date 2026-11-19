@@ -6,7 +6,19 @@
 //! cargo run --release --example shared_bench -- --cells 1,2,3,4 --sizes 1000,10000,100000
 //! cargo run --release --example shared_bench -- --cells 5,6,7,8 --sizes 10000,100000 --secs 8
 //! cargo run --release --example shared_bench -- --cells 9 --sizes 10000 --secs 20 --valve-ms 250,500,1000,2000
+//! cargo run --release --features failpoints --example shared_bench -- --cells 10,11 --sizes 10000,100000
+//! cargo run --release --example shared_bench -- --cells 12 --sizes 10000,100000
+//! cargo run --release --features failpoints --example shared_bench -- --cells 10 --sizes 100000 --commits 500
 //! ```
+//!
+//! Cells 10 and 11 (v0.20.0, v0200-3) are the incremental catch-up's
+//! (`docs/design/catch-up.md`): 10 is a reader's catch-up after another
+//! handle's one-memory commit, the recalls after it and the memory it
+//! keeps (`--commits N` for the long run, `--reps N` for its loops); 11 is what the first recall
+//! pays to rebuild each lazily built part a catch-up may drop; 12 is cell
+//! 10's footprint control (as many recalls, no commit). With the
+//! `failpoints` feature, cell 10 also counts incremental and full
+//! catch-ups.
 //!
 //! Child processes are this binary run again with `MNEMO_SB_ROLE` set
 //! (writers, readers, a compactor, an opener). Each child writes its counts
@@ -24,7 +36,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use mnemo_engine::{Memory, MemoryType, Mnemo, MnemoError, SharedMnemo, SharedOptions, Ulid};
+use mnemo_engine::{
+    Memory, MemoryType, Mnemo, MnemoError, RecallRequest, SharedMnemo, SharedOptions, Ulid,
+};
 use rand::{Rng, SeedableRng};
 use serde_json::{json, Value};
 
@@ -434,6 +448,280 @@ fn cell4(n: usize, reps: usize, scratch: &Path) -> Value {
     })
 }
 
+/// The physical footprint in MB (`vmmap --summary`, macOS): what memory
+/// pressure acts on. `ps`'s RSS also counts freed pages the allocator
+/// hasn't returned. `None` elsewhere.
+fn footprint_mb() -> Option<f64> {
+    let o = Command::new("vmmap")
+        .args(["--summary", &std::process::id().to_string()])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&o.stdout);
+    let v = s
+        .lines()
+        .find(|l| l.starts_with("Physical footprint:"))?
+        .split_whitespace()
+        .last()?
+        .to_string();
+    let (num, unit) = v.split_at(v.len() - 1);
+    let x: f64 = num.parse().ok()?;
+    match unit {
+        "K" => Some(x / 1024.0),
+        "M" => Some(x),
+        "G" => Some(x * 1024.0),
+        _ => None,
+    }
+}
+
+fn recall_req(rng: &mut impl Rng) -> RecallRequest {
+    RecallRequest::new(vector(rng))
+        .top_k(10)
+        .track_access(false)
+}
+
+#[cfg(feature = "failpoints")]
+fn catch_ups(s: &SharedMnemo) -> Value {
+    let (inc, full) = s.__catch_ups();
+    json!({ "incremental": inc, "full": full })
+}
+
+#[cfg(not(feature = "failpoints"))]
+fn catch_ups(_: &SharedMnemo) -> Value {
+    Value::Null
+}
+
+/// The handle's full reloads so far (0 without the counter).
+#[cfg(feature = "failpoints")]
+fn full_reloads(s: &SharedMnemo) -> u64 {
+    s.__catch_ups().1
+}
+
+#[cfg(not(feature = "failpoints"))]
+fn full_reloads(_: &SharedMnemo) -> u64 {
+    0
+}
+
+/// What the handle holds (the dev-hooks budget report, MB), with the
+/// vector column's filled rows: live data, to set against the footprint.
+fn held(s: &mut SharedMnemo) -> Value {
+    let (r, filled) = s
+        .read(|db| Ok((db.__budget_report()?, db.__column_filled().len())))
+        .unwrap();
+    let mb = |b: u64| round(b as f64 / 1_048_576.0);
+    json!({
+        "total_mb": mb(r.ram_total),
+        "catalog_mb": mb(r.ram_catalog),
+        "id_map_mb": mb(r.ram_id_map),
+        "ann_mb": mb(r.ram_ann_centroids
+            + r.ram_ann_codebook
+            + r.ram_ann_posting_ids
+            + r.ram_ann_posting_codes
+            + r.ram_ann_assignment),
+        "vector_column_mb": mb(r.ram_vector_column),
+        "column_rows_filled": filled,
+    })
+}
+
+/// Cell 10: a reader's catch-up after another handle's one-memory commit,
+/// the recalls after it, and the memory the process keeps.
+fn cell10(n: usize, reps: usize, commits: usize, scratch: &Path) -> Value {
+    let dir = tempfile::tempdir_in(scratch).unwrap();
+    let p = copy_of(dir.path(), n, "c10");
+    let mut rng = rand::rngs::StdRng::seed_from_u64(10);
+    let mut a = shared(&p);
+    let mut b = shared(&p);
+    for _ in 0..20 {
+        let q = recall_req(&mut rng);
+        a.read(|db| db.recall(&q)).unwrap();
+    }
+    let mut warm = Vec::new();
+    for _ in 0..reps {
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        warm.push(ms(t.elapsed()));
+    }
+    // The control: a warm recall after the thread sleeps about as long as a
+    // commit takes, with no commit. On the machine this was measured on, a
+    // recall after any such pause runs slower, whatever the engine does,
+    // so the recalls after a commit are read against this row too.
+    let mut idle = Vec::new();
+    for _ in 0..reps {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        idle.push(ms(t.elapsed()));
+    }
+    let start = (rss_kb() as f64 / 1024.0, footprint_mb());
+    let held_start = held(&mut a);
+    let (mut empty, mut first, mut second, mut direct) = (vec![], vec![], vec![], vec![]);
+    for i in 0..reps {
+        let m = mem(&mut rng, format!("other's write {i}"));
+        b.write(move |db| db.remember(m)).unwrap();
+        let t = Instant::now();
+        a.read(|_| Ok(())).unwrap();
+        empty.push(ms(t.elapsed()));
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        first.push(ms(t.elapsed()));
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        second.push(ms(t.elapsed()));
+    }
+    for i in 0..reps {
+        let m = mem(&mut rng, format!("other's write b{i}"));
+        b.write(move |db| db.remember(m)).unwrap();
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        direct.push(ms(t.elapsed()));
+    }
+    // Warm recalls again, back to back with no commit: does the caught-up
+    // state recall as fast as the state it started from?
+    let mut warm_after = Vec::new();
+    for _ in 0..reps {
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        warm_after.push(ms(t.elapsed()));
+    }
+    let after = (rss_kb() as f64 / 1024.0, footprint_mb());
+    let held_after = held(&mut a);
+    let counts = catch_ups(&a);
+    // The long run: `commits` more one-memory commits, each followed by a
+    // catch-up and a recall, with the footprint every 25.
+    let mut series = Vec::new();
+    let long_start = (rss_kb() as f64 / 1024.0, footprint_mb());
+    let mut long = Vec::new();
+    // Each commit's catch-up (an empty read) and the recall after it, split
+    // by the path the catch-up took: the full reloads here are the fallback
+    // that section 8 compares with today's reload.
+    let (mut cu_inc, mut cu_full, mut rec_inc, mut rec_full) = (vec![], vec![], vec![], vec![]);
+    for i in 0..commits {
+        let m = mem(&mut rng, format!("long run {i}"));
+        b.write(move |db| db.remember(m)).unwrap();
+        let before = full_reloads(&a);
+        let t = Instant::now();
+        a.read(|_| Ok(())).unwrap();
+        let cu = ms(t.elapsed());
+        let full = full_reloads(&a) != before;
+        let q = recall_req(&mut rng);
+        let t = Instant::now();
+        a.read(|db| db.recall(&q)).unwrap();
+        let r = ms(t.elapsed());
+        long.push(r);
+        if full {
+            cu_full.push(cu);
+            rec_full.push(r);
+        } else {
+            cu_inc.push(cu);
+            rec_inc.push(r);
+        }
+        if (i + 1) % 25 == 0 {
+            series.push(json!({
+                "commits": i + 1,
+                "rss_mb": round(rss_kb() as f64 / 1024.0),
+                "footprint_mb": footprint_mb().map(round),
+            }));
+        }
+    }
+    let long_end = (rss_kb() as f64 / 1024.0, footprint_mb());
+    json!({
+        "reps": reps,
+        "warm_recall_no_commit": stats(&mut warm),
+        "warm_recall_after_the_catch_ups": stats(&mut warm_after),
+        "warm_recall_after_20ms_sleep_no_commit": stats(&mut idle),
+        "catch_up_empty_read_after_commit": stats(&mut empty),
+        "first_recall_after_catch_up": stats(&mut first),
+        "second_recall_after_catch_up": stats(&mut second),
+        "recall_as_first_call_after_commit": stats(&mut direct),
+        "rss_mb_before_after": [round(start.0), round(after.0)],
+        "footprint_mb_before_after": [start.1.map(round), after.1.map(round)],
+        "held_before_after": [held_start, held_after],
+        "catch_ups": counts,
+        "long_run": {
+            "commits": commits,
+            "recall_after_each_catch_up": stats(&mut long),
+            "catch_up_incremental": stats(&mut cu_inc),
+            "catch_up_full": stats(&mut cu_full),
+            "recall_after_incremental": stats(&mut rec_inc),
+            "recall_after_full": stats(&mut rec_full),
+            "rss_mb_before_after": [round(long_start.0), round(long_end.0)],
+            "footprint_mb_before_after": [long_start.1.map(round), long_end.1.map(round)],
+            "series": series,
+            "catch_ups": catch_ups(&a),
+        },
+    })
+}
+
+/// Cell 12 (v0200-3): the control for cell 10's footprint, the same warm-up
+/// and as many recalls as cell 10 makes, with no commit, so what the
+/// recalls themselves fill (the vector column, the page cache) is measured
+/// apart from what the catch-ups keep.
+fn cell12(n: usize, reps: usize, scratch: &Path) -> Value {
+    let dir = tempfile::tempdir_in(scratch).unwrap();
+    let p = copy_of(dir.path(), n, "c12");
+    let mut rng = rand::rngs::StdRng::seed_from_u64(10);
+    let mut a = shared(&p);
+    for _ in 0..20 + 2 * reps {
+        let q = recall_req(&mut rng);
+        a.read(|db| db.recall(&q)).unwrap();
+    }
+    let start = (rss_kb() as f64 / 1024.0, footprint_mb());
+    for _ in 0..4 * reps {
+        let q = recall_req(&mut rng);
+        a.read(|db| db.recall(&q)).unwrap();
+    }
+    let after = (rss_kb() as f64 / 1024.0, footprint_mb());
+    json!({
+        "recalls": 4 * reps,
+        "rss_mb_before_after": [round(start.0), round(after.0)],
+        "footprint_mb_before_after": [start.1.map(round), after.1.map(round)],
+    })
+}
+
+/// Cell 11 (v0200-3, addition (d)): what the first recall pays to rebuild
+/// each lazily built part, dropped alone on a warm handle.
+fn cell11(n: usize, reps: usize, scratch: &Path) -> Value {
+    let dir = tempfile::tempdir_in(scratch).unwrap();
+    let p = copy_of(dir.path(), n, "c11");
+    let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+    let mut a = shared(&p);
+    for _ in 0..20 {
+        let q = recall_req(&mut rng);
+        a.read(|db| db.recall(&q)).unwrap();
+    }
+    let mut out = serde_json::Map::new();
+    for which in [
+        "none",
+        "key_index",
+        "superseded",
+        "layers",
+        "agent_set",
+        "bm25_stats",
+        "bm25_dicts",
+        "ann",
+        "column",
+    ] {
+        let mut lat = Vec::new();
+        for _ in 0..reps {
+            if which != "none" {
+                a.read(|db| db.__drop_lazy_for_testing(which)).unwrap();
+            }
+            let q = recall_req(&mut rng);
+            let t = Instant::now();
+            a.read(|db| db.recall(&q)).unwrap();
+            lat.push(ms(t.elapsed()));
+        }
+        out.insert(which.into(), stats(&mut lat));
+    }
+    Value::Object(out)
+}
+
 /// Cell 8: the open wait under compaction: an opener against a compaction every
 /// ~100 ms and three writers.
 fn cell8(n: usize, secs: f64, scratch: &Path) -> Value {
@@ -471,6 +759,13 @@ fn main() {
         .map(|c| c.parse().unwrap())
         .collect();
     let secs: f64 = arg("--secs", "8").parse().unwrap();
+    let commits: usize = arg("--commits", "0").parse().unwrap();
+    // Cell 10's loop count (default: 200 at 10K, 100 at 100K).
+    let reps10: Option<usize> = args
+        .iter()
+        .position(|a| a == "--reps")
+        .and_then(|i| args.get(i + 1))
+        .map(|r| r.parse().unwrap());
     let out_path = arg("--out", "");
     let scratch = PathBuf::from(arg(
         "--scratch",
@@ -501,6 +796,24 @@ fn main() {
                 "4_reload_and_rss".into(),
                 cell4(n, reps_for(n, 60), &scratch),
             );
+        }
+        if cells.contains(&10) {
+            eprintln!("cell 10 at {n}");
+            cellv.insert(
+                "10_catch_up".into(),
+                cell10(n, reps10.unwrap_or(reps_for(n, 100) * 2), commits, &scratch),
+            );
+        }
+        if cells.contains(&12) {
+            eprintln!("cell 12 at {n}");
+            cellv.insert(
+                "12_recalls_alone".into(),
+                cell12(n, reps_for(n, 100) * 2, &scratch),
+            );
+        }
+        if cells.contains(&11) {
+            eprintln!("cell 11 at {n}");
+            cellv.insert("11_lazy_parts".into(), cell11(n, 20, &scratch));
         }
         let mixes: [(&str, &[(&str, usize)]); 4] = [
             ("1w_1r", &[("writer", 1), ("reader", 1)]),

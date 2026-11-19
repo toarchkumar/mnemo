@@ -299,6 +299,8 @@ pub struct SharedMnemo {
     /// 13a (13.3): the author's presence lock, held for the handle's life.
     presence: Option<crate::shared::PresenceLock>,
     reloads: u64,
+    /// v0200-3: catch-ups that applied only what changed (no reload).
+    incremental: u64,
     /// What the last [`SharedMnemo::rekey`] couldn't scrub.
     rekey_cleanup: Option<String>,
 }
@@ -309,6 +311,7 @@ impl std::fmt::Debug for SharedMnemo {
             .field("path", &self.path)
             .field("loaded", &self.db.is_some())
             .field("reloads", &self.reloads)
+            .field("incremental", &self.incremental)
             .finish()
     }
 }
@@ -328,6 +331,7 @@ impl SharedMnemo {
             author: None,
             presence: None,
             reloads: 0,
+            incremental: 0,
             rekey_cleanup: None,
         };
         // Load now, so a wrong secret or an old format fails at open.
@@ -482,6 +486,16 @@ impl SharedMnemo {
         self.reloads
     }
 
+    /// **Not a stable API** (failpoints builds only). v0200-3: how the
+    /// handle caught up after other processes' commits: `(incremental,
+    /// full)`, where full counts every rebuild from the file (the first
+    /// load included), as [`SharedMnemo::__reloads`] does.
+    #[cfg(any(test, feature = "failpoints"))]
+    #[doc(hidden)]
+    pub fn __catch_ups(&self) -> (u64, u64) {
+        (self.incremental, self.reloads)
+    }
+
     /// **Not a stable API** (failpoints builds only). The page cache's
     /// occupancy and capacity.
     #[cfg(any(test, feature = "failpoints"))]
@@ -600,6 +614,25 @@ impl SharedMnemo {
                 db.pager.attach_file(file);
                 return Ok(Next::Ready);
             }
+            // v0200-3: the same file and the same data key, and the handle's
+            // state is the file's as of its stamp: apply only what changed
+            // since (`docs/design/catch-up.md`). Anything it can't prove,
+            // or any error, falls through to the full reload below.
+            if held.identity == stamp.identity && header.validate_seal(db.pager.dek()).is_ok() {
+                db.pager.attach_file(file);
+                match db.catch_up_to(&header) {
+                    Ok(true) => {
+                        self.stamp = Some(stamp);
+                        self.incremental += 1;
+                        return Ok(Next::Ready);
+                    }
+                    Ok(false) => {}
+                    // Half caught up: no longer the file's state at any
+                    // point, so nothing of it is carried into the reload.
+                    Err(_) => self.stamp = None,
+                }
+                file = db.pager.detach_file().expect("attached above");
+            }
         }
         // Another commit (the seal verifies under the key the handle
         // holds): rebuild from the file without the KDF.
@@ -611,7 +644,16 @@ impl SharedMnemo {
                     t_cost: header.t_cost,
                     p_cost: header.p_cost,
                 };
-                let new = Mnemo::from_locked(self.path.clone(), file, header, dek, kdf, false)?;
+                let trusted = self.stamp.is_some_and(|h| h.identity == stamp.identity);
+                let mut new = Mnemo::from_locked(self.path.clone(), file, header, dek, kdf, false)?;
+                // v0200-3: the same file, and the old state was the file's
+                // as of its stamp: the new state takes its vector column,
+                // keeping the rows whose entries didn't move.
+                if trusted {
+                    if let Some(old) = self.db.as_mut() {
+                        new.adopt_column(old);
+                    }
+                }
                 self.install(new);
                 return Ok(Next::Ready);
             }

@@ -477,11 +477,10 @@ pub struct Pager {
     /// migration the pager flips from 5 to 6 mid-flight via
     /// [`Pager::set_version`].
     version: u16,
-    /// Bounded LRU cache of decrypted page payloads.
+    /// Bounded LRU cache of decrypted page payloads, keyed by page and
+    /// generation (v0200-3). A dirty page is sealed under the generation it
+    /// was written with (v9 binds it into the page AAD).
     cache: PageCache,
-    /// FMT-9: the generation each dirty page is to be sealed under (v9
-    /// binds it into the page AAD). Drained by [`Pager::write_dirty`].
-    dirty_gens: std::collections::HashMap<u64, u64>,
     /// PERF-2 3f (v0.20.0): pages were written since the last
     /// [`Pager::sync`]. Set by every page write, cleared only by a sync,
     /// so a commit that failed after writing pages still syncs them on its
@@ -511,7 +510,6 @@ impl Pager {
             } else {
                 DEFAULT_CACHE_PAGES
             }),
-            dirty_gens: std::collections::HashMap::new(),
             unsynced: false,
         }
     }
@@ -567,6 +565,23 @@ impl Pager {
         } else {
             Vec::new()
         }
+    }
+
+    /// v0200-3: the generation a page is cached under: the pointer's on v9,
+    /// 0 before (whose page AAD has no generation, and whose pointers may
+    /// not carry one).
+    #[inline]
+    fn cache_gen(&self, gen: u64) -> u64 {
+        if self.version >= crate::format::VERSION_V9 {
+            gen
+        } else {
+            0
+        }
+    }
+
+    /// v0200-3: whether a page write is waiting for [`Pager::write_dirty`].
+    pub(crate) fn has_dirty_pages(&self) -> bool {
+        self.cache.has_dirty()
     }
 
     /// The format version the pager encrypts for.
@@ -680,7 +695,8 @@ impl Pager {
 
         // The plaintext is now the live content of this page; it is clean
         // because the WAL/checkpoint — not Pager::write_dirty — will write it.
-        self.cache.insert(page_no, padded, false);
+        let cg = self.cache_gen(gen);
+        self.cache.insert(page_no, cg, padded, false);
         Ok(disk)
     }
 
@@ -715,7 +731,8 @@ impl Pager {
     /// Read and decrypt the plaintext payload of an encrypted page. `gen` is
     /// the generation the referencing pointer expects (v9; ignored before).
     pub fn read_page(&mut self, page_no: u64, gen: u64) -> Result<Vec<u8>> {
-        if let Some(p) = self.cache.get(page_no) {
+        let cg = self.cache_gen(gen);
+        if let Some(p) = self.cache.get(page_no, cg) {
             return Ok(p);
         }
         let mut disk = [0u8; PAGE_SIZE];
@@ -732,7 +749,11 @@ impl Pager {
         let payload = crypto::aead_decrypt(&self.dek, &nonce, ciphertext, &aad)
             .map_err(|_| MnemoError::PageAuthFailed(page_no))?;
 
-        self.cache.insert(page_no, payload.clone(), false);
+        // Never over this transaction's own write to the page (an older
+        // pointer read it from disk, under its own generation).
+        if !self.cache.is_dirty(page_no) {
+            self.cache.insert(page_no, cg, payload.clone(), false);
+        }
         Ok(payload)
     }
 
@@ -740,7 +761,7 @@ impl Pager {
     /// reads (loading the vector column) that would otherwise push every
     /// cached record page out. A cached copy (possibly dirty) still wins.
     pub fn read_page_uncached(&mut self, page_no: u64, gen: u64) -> Result<Vec<u8>> {
-        if let Some(p) = self.cache.peek(page_no) {
+        if let Some(p) = self.cache.peek(page_no, self.cache_gen(gen)) {
             return Ok(p.to_vec());
         }
         let mut disk = [0u8; PAGE_SIZE];
@@ -810,8 +831,8 @@ impl Pager {
         mut sink: impl FnMut(usize, &[u8]) -> Result<()>,
     ) -> Result<()> {
         let mut todo: Vec<usize> = Vec::with_capacity(pages.len());
-        for (i, &(p, _)) in pages.iter().enumerate() {
-            match self.cache.peek(p) {
+        for (i, &(p, g)) in pages.iter().enumerate() {
+            match self.cache.peek(p, self.cache_gen(g)) {
                 Some(c) => {
                     let c = c.to_vec();
                     sink(i, &c)?;
@@ -927,7 +948,7 @@ impl Pager {
     ) -> Result<PageBatch> {
         let mut slots: Vec<Slot> = pages
             .iter()
-            .map(|&(p, _)| match self.cache.peek(p) {
+            .map(|&(p, g)| match self.cache.peek(p, self.cache_gen(g)) {
                 Some(c) => Slot::Cached(c.to_vec()),
                 None => Slot::Disk(usize::MAX),
             })
@@ -1010,8 +1031,8 @@ impl Pager {
         }
         let mut padded = vec![0u8; PAYLOAD];
         padded[..payload.len()].copy_from_slice(payload);
-        self.cache.insert(page_no, padded, true);
-        self.dirty_gens.insert(page_no, gen);
+        let cg = self.cache_gen(gen);
+        self.cache.insert(page_no, cg, padded, true);
         Ok(())
     }
 
@@ -1031,15 +1052,14 @@ impl Pager {
         if pages.is_empty() {
             return Ok(());
         }
-        for page_no in pages {
+        for (page_no, gen) in pages {
             let payload = self
                 .cache
-                .peek(page_no)
+                .peek(page_no, gen)
                 .expect("dirty page must be cached")
                 .to_vec();
             self.write_counter += 1;
             let nonce = self.next_nonce();
-            let gen = self.dirty_gens.get(&page_no).copied().unwrap_or(0);
             let aad = self.page_aad(page_no, gen);
             let ciphertext = crypto::aead_encrypt(&self.dek, &nonce, &payload, &aad)?;
 
@@ -1059,7 +1079,6 @@ impl Pager {
         // bytes are in the file; `unsynced` keeps the sync due); settle the
         // cache back within its bound.
         self.cache.mark_all_clean();
-        self.dirty_gens.clear();
         self.cache.trim();
         Ok(())
     }

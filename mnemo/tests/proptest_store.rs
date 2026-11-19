@@ -1142,6 +1142,24 @@ fn shared_set(s: &mut SharedMnemo) -> BTreeSet<Fingerprint> {
         .collect()
 }
 
+/// v0200-3: a shared handle's state, part by part, against a fresh open
+/// of the file (`docs/design/catch-up.md` section 7): after an incremental
+/// catch-up it must be what the full reload would have built.
+fn matches_a_fresh_open(s: &mut SharedMnemo, path: &Path) -> Result<(), String> {
+    let parts = s.__state().expect("loaded").__catch_up_parts();
+    let mut fresh = Mnemo::open_read_only(path, "pw").map_err(|e| e.to_string())?;
+    fresh.__warm_for_testing().map_err(|e| e.to_string())?;
+    let theirs: BTreeMap<String, String> = fresh.__catch_up_parts().into_iter().collect();
+    for (name, mine) in parts {
+        match theirs.get(&name) {
+            Some(f) if *f == mine => {}
+            Some(_) => return Err(format!("{name} differs")),
+            None => return Err(format!("a fresh open has no {name}")),
+        }
+    }
+    Ok(())
+}
+
 fn two_handle_cases() -> u32 {
     if std::env::var("MNEMO_STRESS").as_deref() == Ok("1") {
         256
@@ -1163,6 +1181,9 @@ proptest! {
         drop(db);
         let mut a = Mnemo::open_shared(&path, "pw", SharedOptions::default()).unwrap();
         let mut b = Mnemo::open_shared(&path, "pw", SharedOptions::default()).unwrap();
+        // v0200-3: with the lazy parts built, so the catch-ups carry them.
+        a.read(|db| db.__warm_for_testing()).unwrap();
+        b.read(|db| db.__warm_for_testing()).unwrap();
         let mut model: BTreeSet<Fingerprint> = BTreeSet::new();
         for (i, op) in ops.iter().enumerate() {
             match op {
@@ -1200,6 +1221,12 @@ proptest! {
             }
             prop_assert_eq!(&shared_set(&mut a), &model, "the first handle after {:?}", op);
             prop_assert_eq!(&shared_set(&mut b), &model, "the second handle after {:?}", op);
+            if let Err(e) = matches_a_fresh_open(&mut a, &path) {
+                prop_assert!(false, "the first handle after {:?}: {}", op, e);
+            }
+            if let Err(e) = matches_a_fresh_open(&mut b, &path) {
+                prop_assert!(false, "the second handle after {:?}: {}", op, e);
+            }
         }
         let mut reopened = Mnemo::open(&path, "pw").unwrap();
         prop_assert_eq!(&observed_set(&mut reopened), &model);

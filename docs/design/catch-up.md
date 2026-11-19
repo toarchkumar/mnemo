@@ -5,7 +5,9 @@ Status: **approved for the build** (task `v0200-3`) by the Planner's
 folded in below. Drafted by the Worker in task `v0200-2`. The spec is the brain's
 `spec.v0.20.0`, part (B): step 6 of `12.4-shared-access.md`'s
 implementation order (incremental catch-up) and step 8's open question
-(whether to gate older binaries). Section 9 is that answer.
+(whether to gate older binaries). Section 9 is that answer. **Built** in
+task `v0200-3`: section 8a says what was built, and gives the measurements
+and which targets were met or missed.
 
 **The constraint:** no format change. v9 already writes the catalog and
 the ANN index as delta chains, and every run pointer carries the
@@ -349,6 +351,167 @@ whether that gets its own task.
 
 **And kept:** a commit's fsyncs (3, `device_budget`); the per-call check
 on an unchanged file (0.048 ms, cell 1); the write window (cell 2).
+
+## 8a. As built (v0200-3)
+
+**What the build does.** `SharedMnemo::catch_up` (`store/shared.rs`)
+tries `Mnemo::catch_up_to` (`store/catchup.rs`) whenever the file is the
+one the handle was built from and the new seal verifies under its key.
+That runs as sections 3 and 4 say, with these choices:
+- **It applies only a catalog delta chain on the same base**, with a
+  handle that has nothing waiting to commit (`clean_for_catch_up`).
+  Anything else returns `Ok(false)`, and an error after it started
+  changing the handle clears the stamp, so the reload that follows keeps
+  nothing of it.
+- **The lazy parts it drops** when rows changed are the key index, the
+  superseded set, the layers and the agent set. Addition (d) below showed
+  them cheap. It keeps and updates the BM25 statistics and dictionaries,
+  the vector column (moved rows lose their filled entry) and a loaded
+  ANN index.
+- **The ANN index**: the new index deltas, then each changed row as
+  `reconcile_ann_with_catalog` would treat it on a fresh open. A
+  repacked row whose vector is unchanged is skipped only when a fresh
+  open would skip it too: the row was written after the index under both
+  the old and the new index generation, and its fp16 entry is bit for bit
+  the same. An entry from the index build isn't equal to `add` of the
+  same vector (k-means assignment against the nearest centroid), so a
+  row the build placed is always re-added. Without the skip, a catch-up
+  at 100K cost 4 to 9 ms, re-adding the 25 to 65 rows each commit repacks.
+- **The fallback keeps the column.** On a full reload of the same file
+  from a trusted state, the new state takes the old one's vector column
+  (`adopt_column`), keeping each row whose vector entry is where it was.
+  This is part of section 6's middle path. The rest (diffing the new base
+  against the held catalog) isn't built.
+- **The vector column leaves room for an eighth more rows** (mapped
+  lazily, `ensure_column`), so the rows that later commits add grow it in
+  place.
+
+**The tests.** `tests/catch_up.rs` has 9 cases, covering section 7's 1 to 8
+and the crash injection: a writer that dies at each of its 11 writes,
+then a catch-up that must reach a state equal to a fresh open. Each case
+checks equivalence part by part and which path ran. The proptest's second
+shared handle (`prop_two_shared_handles`) checks the reader against a
+fresh open after each read window. Mutations that each made a test fail:
+- dropping the "re-added under both generations" rule, or treating fp16
+  entries as always equal (`the_index_follows`);
+- `adopt_column` keeping every row (`tombstones_and_compaction_fall_back`);
+- the cache ignoring the generation, skipping the `have` clearing, and
+  skipping the BM25 statistics.
+
+**A known edge.** An older copy of the file restored in place (same
+inode, same key), then committed past the reader's transaction, could
+reuse page and generation numbers the reader holds. The identity check
+can't tell it from the file the reader knew, and that limits both the
+catch-up and `adopt_column`. Off Unix the identity is always equal, so
+the seal and the chain walk decide.
+
+**Where it was measured.** The same M1 Pro, release builds, `shared_bench`
+cells 10 to 12 and 1 to 3 (`--features failpoints` for the path counter).
+The corpora were built fresh by the build under test (`CARGO_TARGET_DIR`
+pointing at an empty directory; an older cached corpus has a layout-1
+index, which loads in about 87 ms at 100K against about 9.5 ms). Each size
+ran in its own process, two runs (A, B). Load: 3.0 to 4.3 for cells 10
+to 12 and 1 to 3; 2.7 to 7.4 for the two long runs; 5.0 to 11.9 for the
+v0.19.1 long run. Cell 10 makes 200 one-memory commits by handle `b`,
+with 100 in each loop; the long run adds 500 more. p50 / p99 in ms.
+
+| After a one-memory commit by another handle | 10K, A / B | 100K, A / B | v0.19.1, 10K / 100K | Target |
+|---|---|---|---|---|
+| The catch-up (an empty read window) | 0.39 / 0.44 | 0.83 / 0.82 | 3.6 / 30.8 | at most 1 ms: **met** |
+| The first recall after it | 5.80 / 6.74 | 5.80 / 5.93 | 4.8 / 24.7 | at most 1.5 times warm: **missed** |
+| The second recall after it | 5.72 / 5.87 | 5.19 / 5.23 | 2.7 / 3.4 | |
+| A recall as the first call after the commit | 10.6 / 11.0 | 8.16 / 8.19 (p99 66 / 69) | 11.7 / 64.6 | at most 5 ms: **missed** |
+| A warm recall, no commit | 2.43 / 2.41 | 2.82 / 2.77 | 2.4 / 2.7 | |
+| The control: a warm recall after a 20 ms sleep, no commit | 11.8 / 16.0 | 17.5 / 18.3 | not measured | |
+| Warm recalls after all the catch-ups, no commit | 2.41 / 2.45 | 2.21 / 2.22 | | |
+| Catch-ups, incremental / full | 394 / 7 | 197 / 4 | all full | |
+
+**The recalls after a commit miss their targets.** The cause isn't
+proven, but the control row suggests the machine more than the engine.
+On this machine, a recall after any pause of about a commit's length is
+slower, with no commit and no catch-up at all, and spinning instead of
+sleeping didn't help. The caught-up state itself recalls as fast as the
+warm one (the "after all the catch-ups" row). What isn't explained is
+the second recall: v0.19.1's ran at 2.7 ms at 10K, against 5.7 to 5.9 ms
+here. At 100K, the p99 of a direct recall is the fallbacks.
+
+**The fallback.** Over the long run at 100K (two runs, 7 fallbacks
+each), against v0.19.1 on the same shape (200 commits, then 500, every
+call a reload):
+
+| 100K | This build, run 1 / run 2 | v0.19.1 (n = 500) |
+|---|---|---|
+| The full catch-up (the reload) | 37.3 / 38.3 (max 43 / 48) | 27.6 (p99 32.8) |
+| The recall after it | 73.6 / 73.0 | 73.6 (p99 103.9) |
+| An incremental catch-up, after cell 10's 200 commits | 1.18 / 1.22 (p99 3.2 / 3.4) | |
+| The recall after an incremental one | 5.6 / 6.8 | |
+
+**The fallback misses "no slower than today" by about 10 ms.** The time
+is in the reload itself (`from_locked`, 28 to 38 ms); `adopt_column` and
+the swap take about 1 ms each. Probes of process CPU time (`ps`, 10 ms
+resolution) showed about the same user time as v0.19.1 (about 30 against
+28.9 ms) and more system time (about 10 against 4.8 ms per reload).
+That fits fresh page faults: v0.19.1 reuses the freed blocks its earlier
+reloads left resident, and this build doesn't keep them. The recall
+after a fallback costs what v0.19.1's does. Most of that is the persisted
+index's re-adds: the bench's writer never loads the index, so every
+memory written since the corpus was built is re-added on each load.
+
+The incremental catch-up also rises over the long run, to about 1.2 ms
+(p50) after 200 commits, against 0.8 ms in cell 10. Why wasn't measured.
+
+**The footprint** (`vmmap --summary`, physical footprint, MB; both
+handles live in one process, as in section 1a). Run A's start includes
+building the corpus in the same process, so only run B is shown for
+cell 10:
+
+| | 10K | 100K | Target |
+|---|---|---|---|
+| Cell 10, 200 commits (201 catch-ups) | 18.6 → 36.9 | 131.3 → 240.9 | under +10 MB after 100: **missed** |
+| What the handle holds (the budget report), same span | 9.6 → 11.0 | 107.2 → 129.8 | |
+| Cell 12, recalls alone, no commit | 15.3 → 16.1 | 111.8 → 111.8 | |
+| The long run, 500 more commits (11 fallbacks), three runs | | 167.0 → 262.4, 168.2 → 244.8, 165.1 → 225.5 | under +20 MB: **missed** |
+| v0.19.1, the same shape | | 1,433.6 after 300 commits, 1,126.4 after 700 | |
+| v0.19.1, 100 reloads (section 1a) | +54 | +472 | |
+
+**Addition (c): does the fallback alone still grow about 4.7 MB per
+reload with no plateau?** No. In the long runs, the footprint steps up
+at fallbacks by about 2 to 34 MB (largest at the first; the series is
+every 25 commits), stays flat between them, and falls back twice: 272.0 to 244.8 and 250.5 to 224.8.
+Net, that's about 5 to 9 MB per fallback over 500 commits. Whether it levels
+off past 500 commits wasn't measured. What remains, from the budget report and
+`vmmap`, is capacity the allocator keeps. The first catch-ups after a
+load double the capacity of the catalog, the ANN lists and the id map
+(live data rose 22.6 MB over cell 10), and each fallback builds a new
+state beside the old one. Carrying more of the state across a reload
+(section 6's middle path) is the next step if the Planner wants the
+target. It isn't built.
+
+**Addition (d): the first recall after each lazy part is dropped**
+(cell 11, p50 ms, 20 recalls each; "none" ran first and includes the
+warm-up):
+
+| Dropped | 10K, A / B | 100K, A / B |
+|---|---|---|
+| none | 2.45 / 2.46 | 3.45 / 3.51 |
+| key_index | 2.33 / 2.45 | 3.35 / 3.31 |
+| superseded | 2.41 / 2.35 | 2.54 / 2.64 |
+| layers | 2.32 / 2.45 | 2.56 / 2.47 |
+| agent_set | 2.40 / 2.34 | 2.39 / 2.28 |
+| bm25_stats | 2.34 / 2.45 | 2.27 / 2.35 |
+| bm25_dicts | 2.41 / 2.45 | 2.18 / 2.13 |
+| ann | 2.33 / 2.35 | 9.54 / 9.41 |
+| column | 4.20 / 4.20 | 4.51 / 4.47 |
+
+The four parts the catch-up drops cost at most about 0.6 ms over a warm
+recall at 100K, so none was made incremental. The two that cost more (the
+index, the column) are kept.
+
+**Kept.** A commit's fsyncs: 3 (`device_budget`, single and batch;
+cell 2's plain write averages 3.01 / 3.02). The per-call check on an
+unchanged file: 0.039 ms at 10K and 0.037 at 100K (cell 1; 0.048
+before). The shared write window: 24.9 ms at 10K and 32.0 at 100K
+(cell 2, 5 fsyncs; "about 24 ms" at 10K in `docs/shared-mode.md`).
 
 ## 9. Step 8: gating older binaries
 

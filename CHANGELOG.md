@@ -10,6 +10,30 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **A shared handle catches up with another process's commit instead of
+  reloading** (12.4 step 6, `docs/design/catch-up.md`). It reads only the
+  catalog and index deltas newer than its own transaction, applies them,
+  and keeps its vector column, its page cache and its loaded ANN index.
+  After a one-memory commit by another handle, the next call's catch-up
+  takes about 0.4 ms at 10K and 0.8 ms at 100K (p50), from 3.6 and
+  30.8 ms. A recall as the first call after the commit takes about 11 ms
+  at 10K and 8 ms at 100K, from 11.7 and 64.6 ms. When it can't apply the
+  deltas (a new catalog base about every 65 commits, moved rows, another
+  file, a refused or half-applied write), it reloads as before. A reload
+  of the same file now keeps the old state's vector column for the rows
+  whose vectors didn't move. That reload is about 10 ms slower than
+  v0.19.1's at 100K (38 ms p50, from 28), and the physical footprint over
+  700 commits by another handle at 100K stays at 225 to 272 MB, where
+  v0.19.1's reached 1.1 to 1.4 GB. Measured on an Apple M1 Pro; the
+  design note's "As built" section has the runs, their load, and the
+  targets met and missed.
+- **The page cache is keyed by page and generation.** A hit needs the
+  generation the pointer expects, so a page another process freed and
+  reused is never served from the cache. This is what lets a shared
+  handle keep its cache across a catch-up.
+- **The vector column leaves room for an eighth more rows**, mapped
+  lazily, so later commits grow it in place instead of copying it.
+
 - **A batch commit with a big run makes 3 fsyncs, from 4** (PERF-2 3f).
   One fsync before the WAL commit now makes both the data pages and the
   runs too big for the WAL durable, where each had its own. It stays apart

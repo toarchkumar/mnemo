@@ -729,6 +729,26 @@ impl IvfPqIndex {
         self.partitions.iter().flat_map(|p| p.ids.iter().copied())
     }
 
+    /// v0200-3 (tests): every entry as `(id, partition, code)`, sorted by
+    /// id, so two indexes built in different orders compare equal.
+    #[cfg(feature = "dev-hooks")]
+    pub(crate) fn sorted_entries(&self) -> Vec<(u128, usize, Vec<u8>)> {
+        let m = self.pq.m();
+        let mut v: Vec<(u128, usize, Vec<u8>)> = self
+            .partitions
+            .iter()
+            .enumerate()
+            .flat_map(|(p, post)| {
+                post.ids
+                    .iter()
+                    .enumerate()
+                    .map(move |(k, &id)| (id, p, post.codes[k * m..(k + 1) * m].to_vec()))
+            })
+            .collect();
+        v.sort();
+        v
+    }
+
     /// Heap bytes held by the index, by part (P-0 device budget). Counts
     /// buffer capacities; the hash map is estimated from its capacity.
     /// Returns `(coarse_centroids, pq_codebook, posting_ids, posting_codes,

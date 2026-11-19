@@ -95,8 +95,12 @@ Measured in v0.14.0's bench on an M1 Pro at 10K memories, with every
 process looping as fast as it can (`shared_v0_14_0` in
 `test/scripts/perf_v0.5.0.json`):
 - **A call costs about 0.05 ms** when nobody else wrote since this handle's
-  last call. After another process's commit, the next call reloads: about
-  5 ms at 10K, 34 ms at 100K.
+  last call. After another process's commit, the next call catches up
+  with it (v0.20): about 0.4 ms at 10K and 0.8 ms at 100K, keeping the
+  vector column, the page cache and the loaded index. About once every 65
+  commits (a new catalog base) it reloads instead, as every call after a
+  commit did before v0.20 (3.6 ms at 10K, 31 ms at 100K, on v0.19.1).
+  `docs/design/catch-up.md` has the measurements.
 - **A shared write** takes about 24 ms (5 fsyncs), against about 15 ms for a
   plain write and flush. Several writers together make 15 to 20 commits a
   second per file.
