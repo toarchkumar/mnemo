@@ -175,7 +175,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.19.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.19.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -196,6 +196,18 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.19.1: a damaged search index repairs itself
+
+- **A damaged search index no longer makes recall fail.** The index is
+  rebuilt from your memories, so recall now reads every memory, gets the
+  right answer, says once that the index is damaged, and rebuilds it with
+  the next write. `mnemo index --rebuild` repairs it at once. Your
+  memories were never at risk.
+- **`mnemo verify` checks the search index** and reports it on its own
+  line (`verify_index()` in Rust and Python).
+- The iOS and Android packages stay at 0.19.0, which has the same mobile
+  code.
 
 ## What's new in v0.19.0: a faster first search
 
