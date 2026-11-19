@@ -301,9 +301,9 @@ fn every_missing_state_exits_zero_with_a_note() {
 #[test]
 fn a_brain_locked_past_the_wait_is_busy_not_blocking() {
     let e = Env::new();
-    // A server without --shared holds the lock for its whole life.
+    // A server with --exclusive holds the lock for its whole life.
     let mut server = e
-        .cmd(&e.p("repo"), &["serve", "--mcp"])
+        .cmd(&e.p("repo"), &["serve", "--mcp", "--exclusive"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

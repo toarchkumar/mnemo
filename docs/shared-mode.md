@@ -30,7 +30,7 @@ before you use shared mode on it:
 | Rust | `Mnemo::open_shared(path, passphrase, SharedOptions::default())` (or `open_shared_with_key`) returns a `SharedMnemo`; call `read(\|db\| ...)` and `write(\|db\| ...)` | v0.14 |
 | Python | `mnemo_engine.open(path, passphrase, shared=True, wait=10.0, allow_network_fs=False)` (or `open_with_key(...)`); the same methods as a plain handle, each one read or one write | v0.14 |
 | CLI | Nothing to turn on: every command waits up to `--wait` (default 10 s) for the lock, reads alongside other readers, and readers come first ("The wait"). A hook that only reads should pass `--wait 2s`, so a busy file delays a session's start by at most about two seconds; a hook that saves keeps the default, because a busy file can hold a write longer than that ("How busy a file can get") | v0.14 |
-| MCP server | `mnemo serve --mcp --shared <file>` holds no lock between tool calls; each call is one read or one write window, waiting up to `--wait`. `--allow-network-fs` with it. Off by default in v0.14: without `--shared` the server holds the file for its whole life | v0.14 |
+| MCP server | `mnemo serve --mcp <file>` holds no lock between tool calls; each call is one read or one write window, waiting up to `--wait`. `--allow-network-fs` with it. The default since v0.20 (`--shared` before, still accepted); `--exclusive` holds the file for the server's whole life, as before | v0.14, default v0.20 |
 | `inspect` | Its read-only open waits up to `--wait`. A pending WAL or a torn header it can't recover (it never writes) is explained: any writer's next call recovers it | v0.14 |
 | Swift, Kotlin | not in v0.14 | later |
 
@@ -66,7 +66,7 @@ a new one with `set_cancel`.
 **Notices.** What a handle warns about once: a sidecar directory it can't
 use, a synced folder, an allowed network filesystem. Rust: `notices()`.
 Python: `notices()`, and each one raised as a `UserWarning` at open.
-`serve --mcp --shared`: stderr, once at start.
+`serve --mcp`: stderr, once at start.
 
 ## The long plain operations wait too
 
@@ -77,8 +77,8 @@ note while it holds the file, so a shared caller that times out learns what
 holds it. `Mnemo::open_exclusive` does the same for your own long
 operations, and `Mnemo::open_read_only_waiting` for reads;
 `compact_file_waiting` takes the options. A plain `Mnemo::open` still tries
-the lock once and fails at once with `Locked`, and so does a `serve --mcp`
-started without `--shared`.
+the lock once and fails at once with `Locked`, and so does a `serve --mcp
+--exclusive` (before v0.20, a `serve --mcp` without `--shared`).
 
 These plain callers use the sidecar directory only if a shared handle has
 already made it, so a brain nobody opens in shared mode gains no sibling.

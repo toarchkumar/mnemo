@@ -10,6 +10,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Changed
 
+- **`mnemo serve --mcp` is shared by default** (12.4 step 8). A bare
+  `serve --mcp` holds no lock between tool calls, as `--shared` did since
+  v0.14, so several servers, the CLI and Python can use one brain.
+  `--shared` is still accepted. **`--exclusive`** keeps the old behaviour,
+  holding the file's lock for the server's whole life. `mnemo onboard` and
+  `mnemo mcp install` already wrote `--shared`, so only configs written by
+  hand change. Shared mode refuses a network or synced folder: pass
+  `--allow-network-fs` to use it anyway, or `--exclusive`. A shared server
+  started with `MNEMO_AGENT` writes that agent's presence record, as
+  `--shared` did. The library's `serve_stdio_*` functions are unchanged.
+  **Update every `mnemo` on the machine before you rely on shared mode:**
+  every CLI, the `mnemo-engine` wheel in every virtualenv, and any app
+  built on an older binding. A `mnemo compact` from before v0.14 releases
+  its lock before it renames, so a shared write in that gap is lost; the
+  writer reports it (`ReplacedDuringWrite`) and never acknowledges it.
 - **A shared handle catches up with another process's commit instead of
   reloading** (12.4 step 6, `docs/design/catch-up.md`). It reads only the
   catalog and index deltas newer than its own transaction, applies them,

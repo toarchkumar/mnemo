@@ -75,10 +75,12 @@ impl Brain {
         requests: &[(&str, Value)],
     ) -> (Vec<Value>, String) {
         let mut c = Command::new(env!("CARGO_BIN_EXE_mnemo"));
-        c.args(["serve", "--mcp"]);
-        if shared {
-            c.arg("--shared");
-        }
+        // Both modes by name: a bare `serve --mcp` is shared since v0.20.
+        c.args([
+            "serve",
+            "--mcp",
+            if shared { "--shared" } else { "--exclusive" },
+        ]);
         c.arg(self.path());
         let cmd = self.embed_cmd();
         if embed {

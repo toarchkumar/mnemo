@@ -1312,16 +1312,19 @@ enum Command {
         /// Prevents a stuck child from freezing the MCP agent.
         #[arg(long, default_value_t = 60)]
         embed_timeout: u64,
-        /// 12.4 shared mode: hold no lock between tool calls, so other
-        /// servers, the CLI and Python can use the file meanwhile; each tool
-        /// call takes the lock for itself, waiting up to `--wait`. Off by
-        /// default: without it the server holds the file for its whole life,
-        /// as before.
+        /// 12.4 shared mode, the default since v0.20: hold no lock between
+        /// tool calls, so other servers, the CLI and Python can use the file
+        /// meanwhile; each tool call takes the lock for itself, waiting up to
+        /// `--wait`. The flag is kept so configs that name it keep working.
         #[arg(long)]
         shared: bool,
-        /// With `--shared`: use shared mode on a network or synced folder
-        /// anyway, where the lock may not reach every process.
-        #[arg(long, requires = "shared")]
+        /// Hold the file's lock for the server's whole life, as before v0.20:
+        /// a second server or a CLI write on the same file gets `Locked`.
+        #[arg(long, conflicts_with = "shared")]
+        exclusive: bool,
+        /// In shared mode: use it on a network or synced folder anyway,
+        /// where the lock may not reach every process.
+        #[arg(long, conflicts_with = "exclusive")]
         allow_network_fs: bool,
     },
     /// 12.3 step 5: the built-in embedder (snowflake-arctic-embed-xs on
@@ -5510,7 +5513,8 @@ fn run() -> std::result::Result<(), String> {
             embed_normalize,
             embed_query,
             embed_timeout,
-            shared,
+            shared: _,
+            exclusive,
             allow_network_fs,
         } => {
             if !mcp {
@@ -5522,7 +5526,8 @@ fn run() -> std::result::Result<(), String> {
             // stdio JSON-RPC handshake. Stderr is safe for diagnostics.
             let resolved = serve_path(&path)?;
             let p = resolved.as_path();
-            let shared = shared.then(|| {
+            // v0.20 (step 8): shared unless `--exclusive`.
+            let shared = (!exclusive).then(|| {
                 let mut o = wait_opts();
                 o.allow_network_fs = allow_network_fs;
                 o
@@ -5541,7 +5546,21 @@ fn run() -> std::result::Result<(), String> {
                 (None, None) => serve_builtin(p, shared),
                 _ => return Err("--embed-cmd and --embed-name go together".into()),
             }
-            .map_err(fmt)?;
+            .map_err(|e| {
+                // v0.20: a bare `serve --mcp` is shared now, so a folder shared
+                // mode refuses names the way to the old behaviour too.
+                let refused = !exclusive && matches!(e, mnemo_engine::MnemoError::Unsupported(_));
+                let msg = fmt(e);
+                if refused {
+                    format!(
+                        "{msg} (serve --mcp is shared by default since v0.20: \
+                         --allow-network-fs uses shared mode anyway, \
+                         --exclusive holds the file for the server's whole life instead)"
+                    )
+                } else {
+                    msg
+                }
+            })?;
         }
         Command::Onboard {
             guide,
