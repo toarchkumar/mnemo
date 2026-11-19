@@ -10,6 +10,12 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Added
 
+- **A terminal demo** (v0200-d4): `docs/img/demo.gif`, 32 seconds, with
+  Claude Code saving a keyed decision and Cursor recalling and refining it
+  in the same encrypted file. It's recorded with VHS from
+  `docs/demo/demo.tape` by the `demo` workflow, against that commit's
+  `mnemo` and a throwaway brain, and re-recorded with each release
+  (RELEASING.md).
 - **An MCP bundle for the official MCP registry** (v0200-d3). Each release
   now carries `mnemo-vX.Y.Z.mcpb`, the five CLI binaries with a launcher
   that picks this machine's, running `mnemo serve --mcp --shared` on the

@@ -1,0 +1,66 @@
+name: demo
+
+# v0200-d4: records docs/img/demo.gif from docs/demo/demo.tape with VHS,
+# against this commit's mnemo. Every command in the tape runs for real
+# against a throwaway brain (docs/demo/setup.sh); the GIF comes back as the
+# run's `demo-gif` artifact and is committed by hand (RELEASING.md). It
+# runs on a pull request that changes the tape, and on demand.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - docs/demo/**
+      - .github/workflows/demo.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    name: record the demo GIF
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        timeout-minutes: 10
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      # The release CLI's features, less the keychain: the demo never
+      # touches one.
+      - name: Build mnemo
+        timeout-minutes: 30
+        working-directory: mnemo
+        run: |
+          cargo build --release --locked --features embed-candle --bin mnemo
+          echo "$PWD/target/release" >> "$GITHUB_PATH"
+
+      - name: Record
+        timeout-minutes: 15
+        uses: charmbracelet/vhs-action@f6d7db07a432fcd3b06772628d36a57f96d95dcf # v2.1.1
+        with:
+          version: v0.12.1
+          path: docs/demo/demo.tape
+          install-fonts: true
+
+      - name: Size
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          bytes=$(stat -c %s docs/img/demo.gif)
+          echo "docs/img/demo.gif: $bytes bytes" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$bytes" -lt 3000000 ] || { echo "::error::the GIF is over 3 MB"; exit 1; }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        timeout-minutes: 10
+        with:
+          name: demo-gif
+          path: docs/img/demo.gif
