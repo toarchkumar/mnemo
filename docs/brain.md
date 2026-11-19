@@ -228,6 +228,20 @@ A CI job shown as failed/cancelled with no steps (often rust (macos-latest) or m
 Mobile CI on a release branch uses one concurrency group per ref (mobile-ci-refs/heads/<branch>), which cancels the in-progress run. Re-running an older commit's Mobile CI on the branch (gh run rerun --failed) therefore cancels the head's in-progress run (annotation: 'Canceling since a higher priority waiting request ... exists'). Wait for the head's run to finish before re-running an older one (seen 2026-11-17, v0.18.1: 98c2a68 vs 72d78b5).
 ```
 
+## 01M7Q1R5FB1AWK45B52YEC9ZSF
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `ci.shared-valve-timing`
+- scope: private
+- created: 2026-11-18T10:03:00Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"ci.shared-valve-timing","area":"ci","topic":"flakes"}`
+
+```text
+shared_valve::two_writers_and_four_readers_all_get_their_turns (tests/shared_valve.rs:193, readers stopped getting in) failed once on a hosted macOS runner (PR 139, 2026-11-18): reads per 500 ms [140, 47, 0, 103, 79, 33] under GitHub macOS capacity constraints; it passed on the six runs before and on the re-run. Logged, not changed (like shared_lock and the Swift EmbedQueueTests timing); the Planner decides if it recurs.
+```
+
 ## 01M7P5H7W2VWAVYRKZEBTW6R31
 
 - type: episodic
@@ -595,10 +609,24 @@ Roadmap after v0.18.0 (user decision 2026-11-17): HARNESS-DOGFOOD-1 Run 2, then 
 - scope: private
 - created: 2026-11-18T04:34:31Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.run-2"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795031603,"_mnemo.key":"decision.run-2","_mnemo.superseded_by":"01M7R3H66X0PAAPQXPS7CYVXZH"}`
 
 ```text
 Decision (user, 2026-11-17: "Yes"): HARNESS-DOGFOOD-1 Run 2 runs on v0.19.0. The brain is the ledger: PLAN.md and reviewer_notes.md are frozen archives with head notes; status and order are the project essence; dispatches are tasks (spec in the body or a spec.<slug> fact); Planner decisions and verifications are decision.* or status.* facts or task notes; the Worker's reports are report.<slug> facts named in task updates; review findings are records; hand-offs of Planner-owned files are tasks. Pointers name a slug or key. Every task starts with a recall and its report says what came back. docs/brain.md replaces the chore(plan) commit. The rules are AGENTS.md's subsection "The brain is the ledger". Run 2 passes if v0.19.0 goes dispatch to tag with no hand-edited PLAN.md or reviewer_notes.md.
+```
+
+## 01M7R3H66X0PAAPQXPS7CYVXZH
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.run-2`
+- scope: private
+- created: 2026-11-18T19:53:23Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.run-2","_mnemo.supersedes":"01M7PEYPSTKP6NTD4E8NBCMWV8"}`
+
+```text
+Decision (user, 2026-11-18): Run 2's way of working is permanent: the project brain carries the work (tasks, report.* facts, decision/spec/status facts, finding records, the project essence); PLAN.md and reviewer_notes.md stay frozen archives. The user chose option 1: rewrite AGENTS.md's whole 'Multi-agent roles & coordination' section to describe only this (approved text, handed off as v0191-0), rather than just renaming the Run 2 heading.
 ```
 
 ## 01M7P5HQ05970SDH96H09KHQTQ
@@ -665,10 +693,24 @@ Decision (2026-11-17): a SECURITY finding record is written private until verifi
 - scope: private
 - created: 2026-11-18T01:50:08Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.waiting-pointer"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795015163,"_mnemo.key":"decision.waiting-pointer","_mnemo.superseded_by":"01M7QKVF7TM8DP3W2FYED18SNQ"}`
 
 ```text
 Decision (user, 2026-11-17): Worker -> Planner pointer `WAITING: <entry title>` when the Worker stops for the user (release approval click, a token, a permission). The Worker still tells the user directly; the pointer lets planner-a show it. AGENTS.md tmux rule 1, committed 88c3c37; rule 6 lets the Worker append at DONE, BLOCKED or WAITING.
+```
+
+## 01M7QKVF7TM8DP3W2FYED18SNQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.waiting-pointer`
+- scope: private
+- created: 2026-11-18T15:19:23Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.waiting-pointer","_mnemo.supersedes":"01M7P5HPTPB6FSFQGZBRZPKB17"}`
+
+```text
+Decision (user, 2026-11-17; resume step added by planner-a 2026-11-18): Worker -> Planner pointer `WAITING: <slug>` when the Worker stops for the user (release approval click, a token, a permission); the Worker still tells the user directly, and planner-a shows it. The way back: when the user tells planner-a it's done ("Approved"), planner-a notes it on the task (task update <slug> --note "user reports approved in planner-a at <time>; check run <id>") and sends worker-a `READ: <slug>`. The Worker then checks the run or setting itself (gh run view), never acting on the message alone. Release task bodies also tell the Worker to watch the run in the background after WAITING, so the click alone wakes it. Missed at v0.19.0: the user had to tell the Worker.
 ```
 
 ## 01M7ESPCFF1MKV7V6032Z2Z1GM
@@ -1147,6 +1189,20 @@ PR 3 shipped: format v7 -> v8, exact-key result cache (Phase 10.1 + 10.3). New M
 test/project.mnemo is gitignored and format v9, and the Planner opens it read-only. Passphrases come only from test/.env, read by the scripts; no agent types or pastes one.
 ```
 
+## 01M7RGNSJ8BVKBVABTB5MRSGYH
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `fact.ci-toolchain-gap`
+- scope: private
+- created: 2026-11-18T23:43:05Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"fact.ci-toolchain-gap","area":"ci","topic":"toolchain-gap"}`
+
+```text
+CI installs the latest stable Rust (rustc 1.100.0 on 2026-11-18) and builds with warnings denied, while this Mac has rustc 1.95.0, so a newly deprecated std API passes locally and fails every CI job (AtomicU32::fetch_update in v0191-1b). Prefer APIs stable at the MSRV (1.94) and not deprecated since; for atomics, a compare_exchange loop.
+```
+
 ## 01KSGPG9WCMM57ZBF937DVVCMK
 
 - type: procedural
@@ -1215,6 +1271,20 @@ Dogfooding sandbox: test/ holds project.mnemo (local encrypted brain). Tracked i
 
 ```text
 Dogfooding layout (since the v0.16 switch, 2026-11-15): the brain is .git/mnemo/project.mnemo, untracked and shared by every worktree, with its key in the user's keychain. Tracked in git: test/scripts/seed.json, project_memory.py, test/README.md. Gitignored: test/.venv, test/.cache/, test/project-memory.jsonl; test/.env and test/project.mnemo are the retired old layout. Embeddings: the built-in snowflake-arctic-embed-xs, 384 dim (all-MiniLM-L6-v2 before v0.15).
+```
+
+## 01M7RFVKYN260JXTEXAHN28YCP
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `fact.fuzz-local`
+- scope: private
+- created: 2026-11-18T23:28:48Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"fact.fuzz-local","area":"testing","topic":"fuzz-local"}`
+
+```text
+This Mac has no nightly toolchain or cargo-fuzz, so fuzz targets are checked only with `cargo check` in mnemo/fuzz (delete the untracked fuzz/Cargo.lock it creates) and run in CI's fuzz-smoke.
 ```
 
 ## 01KSGPG9WAMTF19MPQAS0F01RX
@@ -1539,6 +1609,20 @@ Binding-parity gap (tracked as PR BP): the Python binding lacks set_cache_flush_
 v0.4.1 released — first successful live PyPI Trusted Publishing (OIDC) release. Publisher registration required correcting Repository from mnemo-engine to mnemo (owner/repo, not PyPI project name). crates.io + PyPI both at 0.4.1. Bundles PR 7 fuzz + PR 8 proptest + PR 9 deny/fmt/TP + PR BP binding parity. attestations:true on the pypa action also minted PEP-740 attestations.
 ```
 
+## 01M7RFVMA0PQRT5PBTRKSVHHNY
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `fact.read-failpoint`
+- scope: private
+- created: 2026-11-18T23:28:48Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"fact.read-failpoint","area":"testing","topic":"read-failpoint"}`
+
+```text
+Since v0191-1b, __failpoints::set_page_read_fails(page, count) injects an I/O error on reads of a page (read_exact_at, read_page, read_page_uncached). It's process-wide, so a test that arms it lives in a test binary of its own (tests/index_load_retry.rs). Disarm with (0, 0).
+```
+
 ## 01M7BAMSQB14EKM6KMQ2QGAXSX
 
 - type: episodic
@@ -1817,6 +1901,34 @@ v0.16.0 by-hand run (2026-11-15): after install.sh put mnemo 0.16.0 in ~/.local/
 
 ```text
 strip = "symbols" in the engine's release profile breaks the Kotlin bindings: UniFFI's binding generator reads its metadata (UNIFFI_META_* symbols) from the built libmnemo_uniffi library, and the strip removes them ('No UniFFI metadata found', Mobile CI 2026-11-15). Since v0.15 [profile.release.package.mnemo-uniffi] strip = "none" keeps them; the CLI and the wheels are stripped. Two artifacts don't change with the strip: the Windows ones (MSVC keeps symbols in a .pdb that isn't shipped) and the aarch64 Linux CLI, which cargo-zigbuild's link already strips.
+```
+
+## 01M7RFVKKMKZ2H1BWWPZE3YMFH
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `howto.python-test-wheel`
+- scope: private
+- created: 2026-11-18T23:28:47Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"howto.python-test-wheel","area":"testing","topic":"python-wheel"}`
+
+```text
+The Python binding tests (mnemo-python/test_mnemo.py) need a wheel built with `maturin build --release --features dev-hooks,embed-candle` in a scratch venv; without dev-hooks, test_index_and_snapshots fails on has_index.
+```
+
+## 01M7RFVK83HK1BXJ0FH94FAD8M
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `howto.task-blocked-to-ready`
+- scope: private
+- created: 2026-11-18T23:28:47Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"howto.task-blocked-to-ready","area":"coordination","topic":"task-transitions"}`
+
+```text
+mnemo task update: a blocked task can't go straight to ready (refused). Move it to active first, then ready.
 ```
 
 ## 01M7FZP1BKZ03Y1E2W3DQQ1FSX
@@ -2314,6 +2426,134 @@ Checked before committing: the README's new first-search row (0.6 / 4.2 / 12 ms)
 Tally: found by READ: v0190-4 and the per-turn line. Awkward: none.
 ```
 
+## 01M7Q1QTX4XHDRKBRYAXWE1JCC
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-6`
+- scope: private
+- created: 2026-11-18T10:02:49Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-6","area":"report","topic":"v0190-6"}`
+
+```text
+WORKER READY v0190-6 (2026-11-18): v0.19.0 READY. release-0.19.0 at 9b78312 (PR 139, branch deleted); origin/main is an ancestor.
+
+Brain: "v0.19.0 READY release bump mobile rule CHANGELOG backup docs/brain.md dry run" -> found (process.brain-backup).
+
+The bump (PR 139, squash 9b78312): every manifest and the lockfiles' own entries at 0.19.0 (engine, Python Cargo and pyproject, Node, mnemo-uniffi, Kotlin VERSION_NAME, the iOS and Android samples). Mobile by RELEASING.md's rule: .github/release-mobile true (every minor version publishes mobile once; v0190-3 changed no type the bindings use, and git diff --stat v0.18.0 -- mnemo/bindings/{uniffi,swift,kotlin} shows version lines only); the Swift and Kotlin READMEs name 0.19.0. CHANGELOG [0.19.0] — 2026-11-18 with an intro (numbers from perf_v0.19.0.json) and the compare links.
+
+The backup (step 7): docs/brain.md re-exported by the installed mnemo 0.18.1 (the task's "installed release"; 0.19.0 isn't installable before the tag; 0.18.1's export --git has every filter this release needs, none were added in v0.19.0). 326 records (292 before): 34 added (20 keyed facts: reports, specs, decisions, status, process; 7 tasks; 6 project-essence items, the first in a backup), 2 changed, none removed. Reviewed by scans and by reading every added essence item: 0 findings, private records, messages, claims, presence, turns, thread essence; no emails, no home or temp paths; the one github_pat_ match is the redaction rules' description, as before; RB-006.12 appears by id only (the essence's open item, "daemon design, SECURITY.local.md"). A second export was byte-equal; tests/brain_backup.rs passes (header "written by mnemo 0.18.1"). No chore(plan) commit: the archives are frozen.
+
+CI: PR 139 26 of 26 after one re-run. Attempt 1: rust (macos-latest) failed shared_valve::two_writers_and_four_readers_all_get_their_turns at tests/shared_valve.rs:193, "readers stopped getting in": reads per 500 ms [140, 47, 0, 103, 79, 33], commits [13, 14], longest read wait 739 ms, on a runner with GitHub's macOS capacity notice. The test passed on PRs 136, 137 and 138 and on the push runs of 8a63540, b97e689 and dabb5fc since PERF-2 merged; PR 139 touched only versions and docs. Re-run of the failed job passed. Logged like shared_lock: no change unless it recurs.
+
+The dry run: 44278116677 on 9b78312, -f mobile=true, success, 27 jobs. version check: "engine 0.19.0, mnemo-uniffi 0.19.0, mnemo-android 0.19.0", "the commit says mobile: true", "mobile: on". Maven Central: deployment 4835d2de-... VALIDATED, then dropped (HTTP 204). Skipped, as a dry run does: approve, attest, the Release, the gate, the mobile-off note. Push runs on 9b78312: CI and Mobile CI success.
+
+Left for the release, as RELEASING.md and Run 2 order it: REVIEWER-B's READY pass (you call it); your hand-off of the version text, still 0.18.1 at: index.html line 466 (the pill), 767 ("These examples use v0.18.1"), 792 (the example string); README.md 178 (the example string) and a "What's new in v0.19.0" section (the README's newest is v0.18.1's, line 200); then main's fast-forward, the tag v0.19.0, and the user's approval click (WAITING: at the stop).
+
+Tally: found by READ: v0190-5 and the per-turn line. Awkward: the macOS timing flake.
+```
+
+## 01M7Q2RXY1YJXY7KHVPAQCWRQD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-7`
+- scope: private
+- created: 2026-11-18T10:20:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-7","area":"report","topic":"v0190-7"}`
+
+```text
+WORKER DONE v0190-7 (2026-11-18): the v0.19.0 version text. b345073 'docs: v0.19.0 version text' on release-0.19.0, README.md and index.html alone (27 insertions, 8 deletions), pushed; no PR (a hand-off commit), no CI for these paths.
+
+Brain: "v0.19.0 version text README index.html hand-off" -> found (report.v0190-5 and the v0.14.0 hand-off note).
+
+Opened after REVIEWER-B's pass (v0190-review done; RB-015.1 and RB-015.2 LOW, accepted for v0.19.1 as v0191-1, neither holds the tag).
+
+Checked before committing: the README's What's new in v0.19.0 numbers match perf_v0.19.0.json (11.5 ms vs about 117: 116.45 to 118.29; 4.2 ms vs about 10: 9.16 to 10.38; opening 26 vs 30: 25.70/25.78 vs 30.16/30.47); the mobile lines at 0.19.0; the example string. index.html: the pill, 'These examples use v0.19.0', the example string, and 35 tagged releases (git tag -l 'v*' counts 34 now; the v0.19.0 tag makes 35).
+
+Tally: found by READ: v0190-7 and the per-turn line. Awkward: none.
+```
+
+## 01M7Q3X89EFAYCE0S6BS5VX2T1
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-8`
+- scope: private
+- created: 2026-11-18T10:40:44Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795015067,"_mnemo.key":"report.v0190-8","_mnemo.superseded_by":"01M7QKRHFG0CTHV506XNDGTH85","area":"report","topic":"v0190-8"}`
+
+```text
+WORKER WAITING v0190-8 (2026-11-18): the v0.19.0 release waits for the user's approval click.
+
+What the user must do: approve the release at https://github.com/toarchkumar/mnemo/actions/runs/44284629207, the step "approve the release (v0.19.0, mobile true)". All 21 jobs before it succeeded.
+
+Brain: "v0.19.0 release fast-forward main tag approval stop WAITING after-tag checks" -> found (status.v0.19.0, and the v0.18.0 and v0.18.1 release records).
+
+Done before the stop: main fast-forwarded 9fb1191..b345073 (9 commits, first try; origin/main was an ancestor); the annotated tag v0.19.0 ("MNemo 0.19.0") on b345073, pushed; release run 44284629207 on b345073. b345073 itself has no CI run (README.md and index.html only, paths-ignore); 9b78312, the last code commit, is green on CI and Mobile CI, and its dry run 44278116677 succeeded with mobile on.
+
+After the click: crates.io, PyPI, mnemo-swift 0.19.0, Maven Central, the GitHub Release's assets, the site's pill; then delete release-0.19.0; this report is superseded by the DONE.
+```
+
+## 01M7QKRHFG0CTHV506XNDGTH85
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0190-8`
+- scope: private
+- created: 2026-11-18T15:17:47Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0190-8","_mnemo.supersedes":"01M7Q3X89EFAYCE0S6BS5VX2T1","area":"release","topic":"v0.19.0"}`
+
+```text
+report.v0190-8 DONE (2026-11-18): v0.19.0 released. Recall at start: found (status.v0.19.0, the task body). main fast-forwarded 9fb1191..b345073; annotated tag v0.19.0 on b345073. Release run 44284629207 (mobile true) approved by the user and concluded success; the only non-success job is 'mobile (skipped, release note)', skipped as designed. After-tag checks, each from a command: crates.io mnemo-engine max_version 0.19.0; PyPI mnemo-engine 0.19.0 with 6 files; toarchkumar/mnemo-swift tag 0.19.0 (950d7b7); Maven Central repo1 maven-metadata latest and release 0.19.0; GitHub Release v0.19.0 not draft, not prerelease, 14 assets including mnemo-android-0.19.0.aar, MnemoFFI-0.19.0.xcframework.zip, 5 CLI binaries, 5 wheels, the sdist and SHA256SUMS; the site names v0.19.0 (the pill). release-0.19.0 deleted on origin and locally; the working tree is on main at b345073. Supersedes the WAITING version of this report.
+```
+
+## 01M7R3NC3BHJJV2B2S634K01G3
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0191-0`
+- scope: private
+- created: 2026-11-18T19:55:40Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0191-0","area":"release","topic":"v0.19.1"}`
+
+```text
+report.v0191-0 DONE (2026-11-18): v0.19.1 setup. Recall at start: found (status.run-2: Run 2 PASSED; the user's decision 01M7R3H66X0PAAPQXPS7CYVXZH that the brain carries the work permanently, AGENTS.md rewritten as option 1). (1) release-0.19.1 branched from main at b345073 and pushed. (2) The Planner's AGENTS.md rewrite of 'Multi-agent roles & coordination' committed alone as 470b9de 'docs(agents): the brain carries the work (Run 2 made permanent)'; the diff touched only that section (one hunk from line 265). (3) My own commit 74e0569 'docs(agents): the dogfood section matches the coordination rewrite', a direct commit on release-0.19.1 (no PR): tmux rule 9 is now rule 10; the Worker writes facts, the Planner the project essence and keyed decision.*, spec.* and status.* facts, the Reviewers only read; since v0.17 the default agent cursor-agent gives a keyed write its slot, so the examples no longer name the agent. No other 'tmux rule 9' reference is left in AGENTS.md. (4) Pushed both. No cloud-sync conflict files found.
+```
+
+## 01M7RA4HAYE1C6WTT48Y9G14RG
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0191-1`
+- scope: private
+- created: 2026-11-18T21:48:48Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0191-1","area":"release","topic":"v0.19.1"}`
+
+```text
+report.v0191-1 DONE (2026-11-18): RB-015.1 and RB-015.2, PR 140 squash-merged into release-0.19.1 as ac8725b (branch deleted). Recall at start: partial (the PERF-2 and layout-2 facts came back; the findings themselves came from finding list and finding get, which recall doesn't return). RB-015.1, as triaged: a damaged index run of a known layout (PageAuthFailed, Crypto, Serialize, Invalid, dimension mismatch; an I/O error still fails) loads as no index in ensure_ann; recall scans exactly; the handle adds one notice ('the approximate index is damaged (...), so recall scans every memory; your memories are intact, and ... mnemo index --rebuild ...'), which the CLI prints after recall, mnemo mcp logs after the call, and a shared handle carries into its notices; the handle's next commit that writes (dirty catalog or cache) rebuilds the index in flush (repair_index), or drops the damaged run below the ANN threshold. A writer that had to load the index inside flush no longer fails on damage. verify: new additive Mnemo::verify_index() -> IndexCheck (non_exhaustive: None, Ok{vectors, delta_runs}, UnknownLayout, Damaged); VerifyReport is unchanged; mnemo verify prints the index on its own line (a damaged index is a warning, exit 0); Python verify_index() returns a dict. Also found and fixed: build_index or drop_index on a handle that never loaded the index left the old delta runs allocated (a test measured 18 free pages against 21); a damaged delta run's own pages are now tracked and freed. Not changed: restore_to on a snapshot with a damaged index still errors (an explicit restore). RB-015.2: (1) fuzz_index_layout2 via __fuzz decode_index_layout2 and mutate_index_layout2, in the ci.yml fuzz-smoke and fuzz-weekly matrices, plus a seeded test (20,000 edit lists, 2,000 random buffers); no local nightly or cargo-fuzz, the target type-checks on stable and CI fuzz-smoke passed; (2) v0_18_compat at 20,100 notes: v0.18.1 recalls and imports before its index, and v0.19 finds the import; (3) selectTab uses Object.hasOwn, with an inspect_cli assertion; (4) no change. Tests: local cargo test --features failpoints 787 passed, 0 failed, 1 ignored; clippy with CI features and on mnemo-uniffi clean; v0_18_compat against the installed 0.18.1 on temp files 2 passed, 0 skipped; Python tests on a dev-hooks,embed-candle wheel all passed. CI on PR 140: 27 pass, after re-running two macOS jobs (rust macos, swift iOS simulator) cancelled for runner capacity ('not acquired by Runner'). CHANGELOG Unreleased has Fixed, Added and Changed entries; mnemo/README verify row and mnemo-python/README verify_index row updated.
+```
+
+## 01M7RHH1P3BPPEJ4H3ZFNX1E40
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0191-1b`
+- scope: private
+- created: 2026-11-18T23:57:58Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0191-1b","area":"report","topic":"v0191-1b"}`
+
+```text
+report.v0191-1b DONE (2026-11-18): PR 141 squash-merged into release-0.19.1 as 5503e3c (branch deleted). Recall at start: found (report.v0191-1 and the RB-015.1 design came back). Change: in store/ann.rs ensure_ann, a load_persisted_index error that isn't index damage (an I/O error) sets ann_unloaded back to true before it's returned, so the handle's next call tries the load again; a damaged run still loads as no index with the notice. Test support: a process-wide page read failpoint, __failpoints::set_page_read_fails(page, count) (failpoints feature only), checked in read_exact_at, read_page and read_page_uncached. Test: tests/index_load_retry.rs, its own binary (1000 notes, index built; first recall after reopen gets an injected read failure on the base run's middle page, so MnemoError::Io with no damage notice; the next recall returns the right note, RecallMode::Indexed, verify_index Ok with 1000 vectors). With the fix taken out it failed at 'the index is still to load'. CHANGELOG [Unreleased] Fixed: one bullet. Local: cargo test -q --features failpoints gave 788 passed, 0 failed, 1 ignored over 71 suites (load average 11.55 at start); fmt and CI-feature clippy clean. Deviation: the first CI run failed in all 9 build jobs because CI's stable rustc 1.100.0 deprecates AtomicU32::fetch_update and builds with warnings denied (this Mac has rustc 1.95.0). The second commit (016797f) uses a compare_exchange loop; after it, 21 of 21 checks passed on the head. Saved as fact.ci-toolchain-gap.
+```
+
 ## 01M7PEYPQ3MXR42MYWFEHJCE0J
 
 - type: procedural
@@ -2377,10 +2617,38 @@ Roadmap status (2026-11-17): v0.18.1 (INSPECT-COORD, task refs) in release prep;
 - scope: private
 - created: 2026-11-18T04:35:18Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap","_mnemo.supersedes":"01M7P5HQ3XCY792ZH38JFEER8G"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795015123,"_mnemo.key":"status.roadmap","_mnemo.superseded_by":"01M7QKT8F0XB7Z4K8R9QNRYTKX","_mnemo.supersedes":"01M7P5HQ3XCY792ZH38JFEER8G"}`
 
 ```text
 Roadmap status (2026-11-17): v0.18.1 released; the README/site rework is live (PR 134). HARNESS-DOGFOOD-1 Run 2 started: the brain is the ledger, PLAN.md and reviewer_notes.md frozen. v0.19.0 is Run 2's release: tasks v0190-0 (setup) to v0190-6 (READY): PERF-2 (spec.perf-2, design then build), non_exhaustive on the coordination and findings types, the inspect date filter (spec.inspect-date-filter) and a Findings screenshot from a demo brain, a site hand-off. Then judge Run 2, then sync, decided on the waitlist's numbers.
+```
+
+## 01M7QKT8F0XB7Z4K8R9QNRYTKX
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.roadmap`
+- scope: private
+- created: 2026-11-18T15:18:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap","_mnemo.supersedes":"01M7PF04H3SXFRVZH441NFR94F"}`
+
+```text
+Roadmap status (2026-11-18): v0.19.0 released (tag on b345073, run 44284629207): PERF-2 (first search 11.5 ms at 100K, 4.2 ms at 10K; warm 10K 2.3 ms, target 2 not met, accepted), index layout 2 in v9, inspect date range and screenshot, non_exhaustive coordination and findings types, mobile 0.19.0. REVIEWER-B RB-015: two LOW findings accepted for v0.19.1 (v0191-1). Run 2's whole release ran from brain tasks, reports and facts, with no hand-edited PLAN.md or reviewer_notes.md. Next: judge Run 2, v0.19.1, the 3f fsync merge, the sync design note.
+```
+
+## 01M7QKTKNR4YSV3KC0EE8CM0HM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.run-2`
+- scope: private
+- created: 2026-11-18T15:18:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.run-2"}`
+
+```text
+Run 2 (HARNESS-DOGFOOD-1) result, judged by planner-a 2026-11-18: PASSED on its test. From dispatch (v0190-0) to the v0.19.0 tag, nobody edited PLAN.md or reviewer_notes.md (git log 9fb1191..v0.19.0 shows only the freeze, 72ae920). 10 tasks plus a REVIEWER-B task, 10 report.* facts, 2 findings as records (RB-015.1, RB-015.2), all pointers named a slug. Recall at task start: 9 found, 2 partial (v0190-0: decision.run-2 not in the top 5 for its title; v0190-5: older hand-off notes came back), 0 not found. Friction: recall of a just-written decision by a differently worded title; one Worker local-branch slip; one macOS CI timing flake. Keeping the rule permanently (and the AGENTS.md wording) is the user's call.
 ```
 
 ## 01M7NG7T0DCNRRBV7QV97TQ196
@@ -2437,6 +2705,20 @@ v0.18.1 READY (2026-11-17): release-0.18.1 at 7c93da4 after 88c3c37 (AGENTS.md W
 
 ```text
 v0.18.1 released 2026-11-17: tag v0.18.1 at 863c6fe, release run 44225322609 (user approved after a WAITING: pointer, the first), mobile off: crates.io and PyPI 0.18.1, GitHub Release 12 assets, mnemo-swift stays 0.18.0; release-0.18.1 deleted. Then the README/site rework (three layers, mnemo inspect as hero step 3) merged to main as PR 134 9fb1191 (docs-only, no CI by paths-ignore), live on Pages. Next: v0.19.0 (PERF-2, #[non_exhaustive] on 13a types, inspector date filter, a Findings screenshot from a demo brain).
+```
+
+## 01M7Q1R53H1DN8BP1CBXTSYRRC
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0.19.0`
+- scope: private
+- created: 2026-11-18T10:03:00Z
+- importance: 0.7
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"status.v0.19.0","area":"release","topic":"v0.19.0"}`
+
+```text
+v0.19.0 READY (2026-11-18), Run 2 release: release-0.19.0 at 9b78312 after d3f828a and 72ae920 (Run 2 rules, archives frozen), PR 135 (PERF-2 design), 136 (PERF-2 build 8a63540: first recall 11.5 ms at 100K, 4.2 ms at 10K), 137 (non_exhaustive types b97e689), 138 (inspector date range and screenshot dabb5fc), 3ba2f7b (site hand-off), 139 (bump, mobile true, CHANGELOG, docs/brain.md by installed 0.18.1, 326 records). Dry run 44278116677 succeeded with mobile on. Left: REVIEWER-B READY pass, the version-text hand-off (README, index.html still name 0.18.1), main fast-forward, tag, the user approval click.
 ```
 
 ## 01M7NT5YYT1X243FM6KGJ4RZQ5
@@ -2751,12 +3033,186 @@ The Planner's edits to README.md and index.html are in the working tree when v01
 - scope: shared
 - created: 2026-11-18T04:34:55Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0190-2","v0190-3","v0190-4","v0190-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-6","_mnemo.status":"active","_mnemo.status_history":[{"at":1794993138,"by":"worker-a","from":"queued","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0190-2","v0190-3","v0190-4","v0190-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-6","_mnemo.status":"done","_mnemo.status_history":[{"at":1794993138,"by":"worker-a","from":"queued","to":"active"},{"at":1794993278,"by":"worker-a","from":"active","note":"PR 139 (bump, CHANGELOG, backup) in CI; dry run next","to":"active"},{"at":1794996169,"by":"worker-a","from":"active","note":"report.v0190-6","to":"ready"},{"at":1794996208,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: release-0.19.0 at 9b78312 (PR 139, checks 26 of 26 after the logged macOS shared_valve re-run); origin/main an ancestor; dry run 44278116677 success on 9b78312 with mobile on; push CI and Mobile CI green on 9b78312; docs/brain.md scanned: no home or temp paths, no email, RB-006.12 by id only. Next: REVIEWER-B's READY pass (v0190-review), then my version-text hand-off (v0190-7), then the release (v0190-8). shared_valve flake logged with shared_lock: change only if it recurs. Tally: found.","to":"done"}]}`
 
 ```text
 v0.19.0 READY: the bump, the CHANGELOG, the backup, the dry run
 
 First step: recall. As RELEASING.md: the bump (mobile by its rule: v0190-3 may change a public type the bindings use), the CHANGELOG's [0.19.0], docs/brain.md exported by the installed release (step 7), the dry run. No chore(plan) commit: the archives are frozen. Report: report.v0190-6, then ready. REVIEWER-B's READY pass follows (I call it).
+```
+
+## 01M7Q1T5BDRQMBNYWCKMJSJT9J
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:04:05Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-review"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-7","_mnemo.status":"done","_mnemo.status_history":[{"at":1794997235,"by":"worker-a","from":"queued","to":"active"},{"at":1794997254,"by":"worker-a","from":"active","note":"report.v0190-7","to":"ready"},{"at":1794997263,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: b345073 on origin/release-0.19.0, README.md and index.html alone, matching my edits; tree clean. v0190-8 (the release) opens. Tally: found.","to":"done"}]}`
+
+```text
+Hand-off: README.md and index.html, the v0.19.0 version text
+
+First step: recall. The Planner's edits to README.md and index.html are in the working tree: the site's pill, the examples line and example string at v0.19.0, 35 tagged releases; the README's example string, mobile versions at 0.19.0, and a 'What's new in v0.19.0' section. Commit those two paths alone on release-0.19.0: 'docs: v0.19.0 version text'. This opens after REVIEWER-B's pass and any fixes it needs. Report: report.v0190-7.
+```
+
+## 01M7Q1T5D59TW997D3KVC449H9
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:04:05Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-7"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0190-8","_mnemo.status":"done","_mnemo.status_history":[{"at":1794997270,"by":"worker-a","from":"queued","to":"active"},{"at":1794998444,"by":"worker-a","from":"active","note":"report.v0190-8","to":"blocked"},{"at":1795015070,"by":"worker-a","from":"blocked","to":"active"},{"at":1795015070,"by":"worker-a","from":"active","note":"report.v0190-8","to":"ready"},{"at":1795015089,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: run 44284629207 success; crates.io 0.19.0, PyPI 0.19.0 with 6 files, mnemo-swift tag 0.19.0, Maven Central 0.19.0 (repo1 200), GitHub Release 14 assets, the site's pill v0.19.0; release-0.19.0 gone from origin. Tally: found.","to":"done"}]}`
+
+```text
+v0.19.0: the release
+
+First step: recall. As RELEASING.md and decision.release-order: fast-forward main to release-0.19.0, the annotated tag v0.19.0, the release run; at the approval stop set this task blocked with report.v0190-8 and send WAITING: v0190-8 (the user clicks). After the run: crates.io, PyPI, mnemo-swift 0.19.0, Maven Central, the GitHub Release's assets, the site's pill; then delete release-0.19.0. Report: report.v0190-8.
+```
+
+## 01M7Q1S9G1T05HEZ6KFMSCW4N8
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:03:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0190-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-b","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["9fb1191..9b78312","decision.perf-2-design"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"v0190-review","_mnemo.status":"done","_mnemo.status_history":[{"at":1794996284,"by":"reviewer-b","from":"queued","to":"active"},{"at":1794997190,"by":"reviewer-b","from":"active","note":"RB-015 done at 9b78312 (diff 9fb1191..9b78312). No HIGH or MEDIUM; I wouldn't hold the tag. Two LOW findings: RB-015.1, RB-015.2. Recall first: found (report.v0190-2, architecture.page-batch-reads, decision.perf-2-design).\nBaseline on this Mac: cargo test --locked --features failpoints: 778 passed, 0 failed, 1 ignored (the compat tests return early without the old binary).\n(1) index.rs layout 2: holds. Every length is checked before its allocation, the body must end at the run's length, layout 1 is still read, an unknown byte is no index. 300,000 mutated runs: no panic. v9 caps vectors at 4,072 dimensions, so the 65,536 limit can't be reached.\n(2) pager.rs and crypto.rs: holds. The nonce comes from each page, the AAD is page and generation as before, the tag is checked before the plaintext is used. A flipped nonce, ciphertext or tag byte, two pages swapped, a wrong generation: PageAuthFailed on the single, batch and streamed paths, on 1 and 8 threads; 200 runs with three bad pages, no hang. A cut file is an error. A cached dirty page wins. Whole-file: a damaged vector page fails recall and verify by name, indexed and exact.\n(3) The lazy map: every path that reads it builds it first (contains, remove, add through remove, apply_ops); a fresh handle's delete and remember are right after reopening.\n(4) inspect: GET only, the token is checked before the route, a bad since, until or date is a 400 as JSON, no HTML sink in the page.\n(5) The compat test does make v0.18.1 read a layout-2 run. I also ran the published v0.18.1 on a 20,100-note file by hand: holds (RB-015.2 item 2).\n(6) docs/brain.md: written by 0.18.1, 20 tasks, 6 essence items, no findings, no private or security text, no secrets, no local paths.\nRB-014.1 and RB-014.2 (accepted in the archive): confirmed fixed at this head on a scratch brain, with v0.18.1's and v0.17.2's export too.\nNot done: Linux and Windows (the Windows positioned read is by reading), benchmarks, Python, mobile.","to":"ready"},{"at":1794997218,"by":"planner-a","from":"ready","note":"Triaged by planner-a: RB-015.1 and RB-015.2 LOW, both ACCEPTED for v0.19.1 (v0191-1); neither holds the tag. v0190-7 opens.","to":"done"}]}`
+
+```text
+REVIEWER-B: v0.19.0 READY pass (batch RB-015)
+
+First step: recall. REVIEWER-B's scheduled READY pass (Reviewer rule 4; this release touches the page crypto path and the index's on-disk layout). Scope, and only this: the diff 9fb1191..9b78312 on release-0.19.0. (1) mnemo/src/index.rs layout 2: decoding an untrusted or damaged base (lengths checked before allocating, trailing bytes, layout 1 still read, unknown layout falls back to exact). (2) mnemo/src/pager.rs read_pages_uncached, RunReader and for_each_page: per-page AES-GCM nonce and generation checks kept, cached dirty pages, the scoped-thread path, errors not swallowed; crypto.rs. (3) store/load.rs and records.rs: the lazy id->partition map before a write. (4) inspect.rs date range: since/until parsing, GET only, no HTML sink. (5) tests/v0_18_compat.rs and the compat CI job really exercise v0.18.1 on a layout-2 file. (6) docs/brain.md: nothing private. Out of scope: benchmarks (the Worker's numbers are in test/scripts/perf_v0.19.0.json), non_exhaustive beyond a glance, docs wording. CARGO_TARGET_DIR=/tmp/rb-target and --locked. Findings as records: mnemo finding add RB-015.<n> (a SECURITY one is private until verified; SECURITY.local.md as usual). Then set this task ready and send REVIEW DONE: RB-015 to planner-a.
+```
+
+## 01M7R3H185S8A7F8E7N9PGAZNZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T19:53:18Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0191-0","_mnemo.status":"done","_mnemo.status_history":[{"at":1795031611,"by":"worker-a","from":"queued","to":"active"},{"at":1795031740,"by":"worker-a","from":"active","note":"report.v0191-0","to":"ready"},{"at":1795031760,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: release-0.19.1 from b345073; 470b9de is AGENTS.md alone and its coordination section matches the approved text byte for byte; 74e0569 aligns the dogfood section (rule 10, who writes facts, default agent; the remember flags exist). Tree clean. v0191-1 opens. Tally: found.","to":"done"}]}`
+
+```text
+v0.19.1 setup: the release branch and the AGENTS.md coordination rewrite (hand-off)
+
+First step: recall (status.run-2). (1) Branch release-0.19.1 from main (b345073). (2) The Planner's rewrite of AGENTS.md's 'Multi-agent roles & coordination' section is in the working tree (the user approved it 2026-11-18: the brain is the permanent way of working). Commit AGENTS.md alone: 'docs(agents): the brain carries the work (Run 2 made permanent)'. (3) Then, as your own separate commit, fix your 'Dogfood the engine on yourself' section to match: 'tmux rule 9' is now 'tmux rule 10'; the Worker writes facts, and the Planner writes the project essence and keyed decision.*, spec.* and status.* facts; since v0.17 the brain's default agent (cursor-agent) gives a keyed write its slot, so a write needn't name the agent; the Reviewers only read. (4) Push. No PR for (2); a PR into release-0.19.1 or a direct commit for (3), your choice. Report: report.v0191-0.
+```
+
+## 01M7Q2QVFQJRAD4BE19QZGYEF6
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:20:18Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0191-0"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["RB-015.1","RB-015.2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0191-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1795031764,"by":"worker-a","from":"queued","to":"active"},{"at":1795038499,"by":"worker-a","from":"active","to":"active"},{"at":1795038528,"by":"worker-a","from":"active","note":"report.v0191-1","to":"ready"},{"at":1795038561,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR 140 merged as ac8725b into release-0.19.1, PR checks 27 of 27 (two macOS jobs re-run for runner capacity); ensure_ann on the branch matches the triage for damage. One gap left: on a non-damage error (I/O) ensure_ann has already cleared ann_unloaded, so the first recall fails and later ones on that handle recall exactly with no notice, RB-015.1's item 1 for that case. Follow-up v0191-1b (round 1 of 3). Recall partial: findings aren't returned by recall (they're coordination records); noted for the product. Tally: partial.","to":"done"}]}`
+
+```text
+v0.19.1: RB-015.1 and RB-015.2 (a damaged index run; layout-2 fuzz target; compat at 20K; tab link)
+
+First step: recall. Do what the triage notes on RB-015.1 and RB-015.2 say (mnemo finding list). A PR into release-0.19.1. Report: report.v0191-1.
+```
+
+## 01M7RA5H1MK3T875PVXTTB09R6
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T21:49:21Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0191-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["RB-015.1"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0191-1b","_mnemo.status":"done","_mnemo.status_history":[{"at":1795038565,"by":"worker-a","from":"queued","to":"active"},{"at":1795044533,"by":"worker-a","from":"active","to":"active"},{"at":1795046278,"by":"worker-a","from":"active","note":"report.v0191-1b","to":"ready"},{"at":1795046305,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR 141 merged as 5503e3c into release-0.19.1, PR checks 21 of 21 after the deprecation fix (016797f); ensure_ann sets ann_unloaded back on a non-damage error; the read failpoint is a no-op outside test or the failpoints feature. RB-015.1 is complete for v0.19.1. fact.ci-toolchain-gap noted (CI stable ahead of the local rustc). Tally: found.","to":"done"}]}`
+
+```text
+v0.19.1: ensure_ann retries after a non-damage error
+
+First step: recall. In mnemo/src/store/ann.rs ensure_ann (release-0.19.1, ac8725b): when load_persisted_index fails with an error that isn't index damage (an I/O error), set ann_unloaded back to true before returning it, so the next call on that handle tries the load again instead of recalling exactly with no notice. A test with the failpoints feature: an I/O failure on the first recall, then a recall that loads the index (indexed, not exact). CHANGELOG Fixed, one line. A PR into release-0.19.1. Report: report.v0191-1b.
+```
+
+## 01M7R3P6TKR1P1FMQS6DRYJ21F
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T19:56:07Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0191-1b"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0191-2","_mnemo.status":"active","_mnemo.status_history":[{"at":1795046312,"by":"worker-a","from":"queued","to":"active"}]}`
+
+```text
+v0.19.1 READY: the bump, the CHANGELOG, the backup, the dry run
+
+First step: recall. As RELEASING.md: the bump (mobile by its rule for a patch), the CHANGELOG's [0.19.1], docs/brain.md exported by the installed release (0.19.0) and committed by path, the dry run. In the report, list the version text the Planner must hand off (README.md, index.html). Report: report.v0191-2. A patch: no Reviewer pass.
+```
+
+## 01M7R3P6WQ3PBW8PT1P2QAJHM1
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T19:56:07Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0191-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.slug":"v0191-3","_mnemo.status":"queued"}`
+
+```text
+v0.19.1: the release
+
+First step: recall. As RELEASING.md and decision.release-order: fast-forward main, the annotated tag v0.19.1, the release run. At the approval stop: set this task blocked with report.v0191-3, send WAITING: v0191-3, and watch the run in the background (gh run watch) so the click itself wakes you; the Planner also sends READ: v0191-3 when the user reports it approved. Check the run yourself before going on. After it: the registries, the GitHub Release, the site; delete release-0.19.1. Report: report.v0191-3.
+```
+
+## 01M7Q2PG6MWEMS2V21TFFSKKJF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:19:34Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-015.1","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/store/ann.rs","mnemo/src/store/load.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","to":"accepted"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+A damaged index run: the first recall on a handle fails, later ones silently recall exactly, and verify passes (not new in v0.19)
+
+**Context / Evidence:** tested at `9b78312` (release build, a scratch unit test in my clone), on a 20,101-fact file of 64 dimensions whose layout-2 index run is 92 pages. One byte flipped in the run's first page, a middle page, the last page, and the last page's tag. Each time:
+- read-write handle: the first `recall` is `PageAuthFailed(<that page>)`; the second `recall` on the same handle is `Ok` with the right top hit (an exact scan); `verify()` is `Ok(20101)`; `build_index()` succeeds and recall is right after it.
+- read-only handle: `PageAuthFailed(<that page>)`.
+- So the CLI, which opens a new handle per command, fails every `mnemo recall` until `mnemo index --rebuild`, while `mnemo verify` says every page decrypts.
+
+**Finding:**
+1. `ensure_ann` (`mnemo/src/store/ann.rs:184-196`) clears `ann_unloaded` before `load_index(...)?`, so after a failed load the handle behaves as if the file had no index. A long-lived handle (the MCP server) errors once and is then slower with no word of why.
+2. The index is derived data. An unknown layout byte already loads as "no index" and recalls exactly; a damaged run of a known layout is an error instead, and the error names a page, which reads as "the brain is corrupt".
+3. `verify` doesn't read the index run, so it can't tell the user what's wrong.
+4. `ann.rs` isn't in this release's diff: this is how v0.18 behaves too. The new read path reports the right page on every path I tried (see the task's note).
+
+**Recommendation:** pick one behaviour for a damaged index run.
+- Either treat it like an unknown layout: recall exactly, warn once ("the index is damaged; `mnemo index --rebuild` repairs it; your memories are intact"), and on a read-write handle mark the index for a rebuild;
+- or keep the error on every call (set `ann_unloaded` back on failure), with that hint in the message.
+- Either way, have `verify` read the index run and report it apart from the records.
+
+**Would I hold the tag for it?** No. Derived data, an authenticated-page failure only, and one command repairs it.
+```
+
+## 01M7Q2PG7R3PX8RAPQPRARF3EF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-18T10:19:34Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"DX/DOCS","_mnemo.finding_id":"RB-015.2","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/index.rs","mnemo/tests/v0_18_compat.rs","mnemo/src/bin/mnemo/inspect.html","mnemo/src/pager.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","to":"accepted"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+v0.19.0 at READY, smaller points: no fuzz target for the layout-2 decoder; the compat job's 20,000-fact case; a tab link; which damaged page a streamed read names
+
+**Context / Evidence:** at `9b78312`. One line each.
+1. **No fuzz target for `IvfPqIndex::read_layout2`** (`mnemo/src/index.rs`), the one new hand-written decoder; the header, record, WAL, cache-directory and MCP-frame decoders each have one. My own run: 300,000 random mutations of a valid run (bit flips, head words set to 0, 1, `u32::MAX` and random values, cuts, trailing bytes, a wrong claimed length, counts moved between partitions) gave no panic; 229,015 were refused, and the 70,985 that still decoded were then queried, changed and written again without one.
+2. **CI's `compat (v0.18.1)` job runs the old build's recall and import on a 300-note layout-2 file; at 20,100 notes it runs only the old `index`.** It does make v0.18.1 read the layout byte (the index loads on the first recall at any size). By hand, with the published v0.18.1 binary (SHA-256 checked against the release) on a 20,100-note layout-2 file: a tracked recall, a 1,500-record import, one MCP session that recalls, remembers three and forgets one, then `verify`, `index` and `compact`. Every result was right, v0.19 kept its index and picked up each write (21,600 vectors after the import and the forget), and both builds' `verify` pass after the other's commits.
+3. **A link ending `#__proto__`, `#constructor` or `#toString` passes `selectTab`'s check** (`views[name]` on a plain object, `inspect.html:444-449`), and the page then shows no tab (by reading; nothing reaches the DOM, so it's cosmetic).
+4. **`for_each_page` names whichever damaged page arrives first; the batch read names the lowest.** With three damaged pages, 200 runs on 8 threads: the batch read said page 50 every time; the streamed read said 301 (198 times), 300 (once) and 390 (once). In 95 of the 200, some pages had reached the sink before the error. That's what its doc says; the pages delivered are authentic.
+
+**Recommendation:** item 1: a `fuzz_index_layout2` target through `__fuzz`, in the smoke matrix. Item 2: in `an_older_builds_index_is_read_and_rewritten`, have the old build recall and import on the 20,100-note file before its `index`. Item 3: `Object.hasOwn(views, name)`. Item 4: nothing to change; it's here so nobody reads the page number in that error as "the first bad page".
+
+**Would I hold the tag for it?** No.
 ```
 
 ## 01M7PEZYWFKE4Y6NHMM8XZSN57
@@ -2792,10 +3248,10 @@ Every task starts with a recall; its report says found, partial, not stored or n
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795015123}`
 
 ```text
-v0.18.1 released 2026-11-17 (inspector Findings and Tasks tabs, task refs). Site reworked: three layers, mnemo inspect as a key command. Run 2 (HARNESS-DOGFOOD-1) has started: the brain is the ledger; PLAN.md and reviewer_notes.md are frozen archives.
+v0.19.0 released 2026-11-18 (Run 2's release): first search 11.5 ms at 100K (from ~117), 4.2 ms at 10K; index layout 2 in v9; inspect date range; non_exhaustive coordination and findings types; mobile 0.19.0. The brain is the ledger.
 ```
 
 ## 01M7PEZZ06ZB9C0VRTDF2P6PE5
@@ -2818,10 +3274,10 @@ Carried: the shared_lock and EmbedQueueTests timing flakes (logged, change only 
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}]}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795015123}`
 
 ```text
-v0.19.0, Run 2's release: tasks v0190-0 to v0190-6 (setup; PERF-2 design then build; non_exhaustive types; inspect date filter and screenshot; site hand-off; READY). REVIEWER-B's pass at READY.
+v0.19.1 (patch): task v0191-1, RB-015.1 (a damaged index run loads as no index with a rebuild hint; verify reads the index) and RB-015.2 (layout-2 fuzz target, compat at 20K, tab link). Then the deferred 3f fsync merge.
 ```
 
 ## 01M7PEZYTHY4K8FJG46J6CTCVF

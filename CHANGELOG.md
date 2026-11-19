@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-11-18
+
+A patch for a damaged ANN index. The index is derived data, so a run that
+doesn't decrypt or decode now loads as no index: recall scans every memory,
+the handle says so once, and its next write rebuilds the index. An I/O
+error while the index loads is retried by the next call. `verify_index`
+reads the index from disk. There's no format change. The mobile packages
+aren't published in this release: they stay at 0.19.0, which has the same
+mobile code.
+
 ### Fixed
 
 - **A damaged ANN index no longer fails recall** (RB-015.1). The index is
@@ -4875,7 +4885,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/toarchkumar/mnemo/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/toarchkumar/mnemo/compare/v0.17.2...v0.18.0
