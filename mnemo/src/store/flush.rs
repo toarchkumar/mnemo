@@ -37,6 +37,8 @@ impl Mnemo {
             !self.is_v9() || self.gen_leased,
             "a v9 run sealed before the generation lease"
         );
+        // FMT-9c: a big run goes straight to its home pages. They're
+        // unsynced until the commit's barrier (`Pager::unsynced`, PERF-2 3f).
         let direct = self.is_v9() && pages > V9_WAL_RUN_MAX_PAGES;
         for i in 0..pages as usize {
             let lo = (i * PAYLOAD).min(bytes.len());
@@ -48,9 +50,6 @@ impl Mnemo {
             } else {
                 frames.push((page_no, sealed.to_vec()));
             }
-        }
-        if direct {
-            self.direct_writes = true;
         }
         Ok(())
     }
@@ -144,15 +143,19 @@ impl Mnemo {
     ///    bump `header.write_counter` and `header.next_page` by upper
     ///    bounds on this transaction's consumption and persist that
     ///    *leased* header to disk before any encrypted page is written.
-    /// 2. **Data pages.** [`Pager::flush`] writes dirty record pages
-    ///    copy-on-write under fresh nonces and fsyncs them. The orphan-page
-    ///    nonce-reuse window (see [Phase 1.1 of the improvement plan])
-    ///    is closed because the leased header on disk already records a
-    ///    `write_counter` past anything this step can produce.
+    /// 2. **Data pages.** `Pager::write_dirty` writes dirty record pages
+    ///    copy-on-write under fresh nonces, not yet synced. A page written
+    ///    and orphaned by a crash can't reuse a nonce: SEC-1's per-session
+    ///    random prefix (the DUR-1 note in `prepare_for_flush`).
     /// 3. **Control plane.** Seal the new catalog / ANN index / snapshot
-    ///    manifest into fresh home page runs.
-    /// 4. **Commit.** Log all of step 3's frames plus the final header
-    ///    frame into the WAL and fsync — the durability point.
+    ///    manifest into fresh home page runs (FMT-9c: a big run goes
+    ///    straight to its home pages, also not yet synced).
+    /// 4. **Commit.** One fsync, the barrier, makes steps 2 and 3's pages
+    ///    durable (PERF-2 3f, v0.20.0: one sync for both, where there were
+    ///    two). Then log step 3's frames plus the final header frame into
+    ///    the WAL and fsync again — the durability point. The barrier is
+    ///    never merged into the commit's own fsync: within one fsync the
+    ///    disk may persist the commit frame before the pages it names.
     /// 5. **Checkpoint.** Fold the WAL into the home pages.
     ///
     /// A crash before step 4 leaves the previous state intact. A crash
@@ -249,11 +252,134 @@ impl Mnemo {
         //    page hits the disk.
         let ctx = self.prepare_for_flush(persist_index)?;
 
-        // 2. Record (vector) data pages: copy-on-write to fresh pages, fsynced.
-        //    Safe: the lease guarantees that even if we crash here, reopen
-        //    will see a `write_counter` past every nonce this step uses.
-        self.pager.flush()?;
+        // 2. Record (vector) data pages: copy-on-write to fresh pages. Not
+        //    synced here (PERF-2 3f): the barrier before the commit covers
+        //    them and step 3's direct runs with one fsync. Fresh pages are
+        //    referenced by nothing until the commit, so a crash before it
+        //    leaves orphans, and SEC-1's nonce prefix keeps them harmless.
+        self.pager.write_dirty()?;
 
+        // 3 and the barrier of 4 (`stage_commit`). Until the commit point
+        // nothing is stored, so a failure here puts back the header and the
+        // free list it changed: a retry on this handle then starts from the
+        // committed state instead of this attempt's runs (PERF-2 3f, v0.20.0;
+        // the barrier now fails after step 3, where the data pages' own sync
+        // used to fail before it).
+        let saved = (self.header.clone(), self.free.clone(), self.free_dirty);
+        let StagedCommit {
+            txn_id,
+            frames,
+            manifest,
+            staged_free,
+            shrink,
+            new_chain,
+            new_ichain,
+            new_bm25,
+        } = match self.stage_commit(&ctx, persist_index, is_memory_or_index_flush) {
+            Ok(staged) => staged,
+            Err(e) => {
+                (self.header, self.free, self.free_dirty) = saved;
+                return Err(e);
+            }
+        };
+        let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
+        // 12.4: from here a failure may leave the transaction committed.
+        self.commit_point = Some(txn_id);
+        wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
+
+        // 5. Checkpoint — fold the WAL into the home pages.
+        self.checkpoint(&frames)?;
+        // FMT-9c: the committed header no longer covers the tail; cut it.
+        // A crash before this leaves a longer file, which is harmless.
+        if shrink {
+            let len = self.header.next_page * PAGE_SIZE as u64;
+            self.pager.file_mut().set_len(len)?;
+        }
+
+        self.manifest = manifest;
+        if let Some(staged) = staged_free {
+            self.free = staged;
+        }
+        self.pending_free.clear();
+        self.free_dirty = false;
+        self.dirty_keys = false;
+        if let Some((chain, rows)) = new_chain {
+            self.delta_chain = chain;
+            self.delta_rows = rows;
+        }
+        if let Some((chain, n)) = new_ichain {
+            self.index_chain = chain;
+            self.index_chain_ops = n;
+        }
+        if let Some((segs, seg_docs)) = new_bm25 {
+            // FMT-9f: keep the loaded dicts and read only the new segment's
+            // (a merge replaced the segments from `kept` on), instead of
+            // dropping them all and reloading every dict on next use.
+            let kept = self
+                .bm25
+                .manifest
+                .segments
+                .iter()
+                .zip(&segs)
+                .take_while(|(a, b)| a == b)
+                .count();
+            if let Some(mut dicts) = self.bm25.dicts.take() {
+                dicts.truncate(kept);
+                let mut ok = dicts.len() == kept;
+                for &t in &segs[kept..] {
+                    match load_segment_dict(&mut self.pager, tuple_ptr(t)) {
+                        Ok(d) if ok => dicts.push(d),
+                        _ => ok = false,
+                    }
+                }
+                if ok {
+                    self.bm25.dicts = Some(dicts);
+                }
+            }
+            self.bm25.manifest.segments = segs;
+            self.bm25.manifest.seg_docs = seg_docs;
+            self.bm25.pending.clear();
+            self.bm25.pending_tokens = None;
+        }
+        if persist_index {
+            self.index_rebase = false;
+            self.index_delta_ops = None;
+        }
+        if ctx.cat_bytes.is_some() {
+            self.dirty_rows.clear();
+            self.catalog_rewrite = false;
+        }
+        self.dirty_catalog = false;
+        if persist_index {
+            self.dirty_index = false;
+            self.index_persist = IndexPersist::default();
+        } else if self.dirty_index {
+            self.index_persist.commits += 1;
+        }
+        self.dirty_cache = false;
+        // Batched policy: successful flush consumes the pending batch.
+        self.cache_batch.reset();
+        // Record how many fsyncs this flush issued, for Stats reporting.
+        // Thread-local counter guarantees we see only this handle's own
+        // sync_all calls between the snapshot above and this read.
+        self.fsyncs_last_flush =
+            (crate::fsync_count().wrapping_sub(fsync_before)).min(u32::MAX as u64) as u32;
+        // 12.4 shared mode (RB-007.5): this commit is in the file.
+        self.window_committed = true;
+        Ok(())
+    }
+
+    /// Steps 3 and the barrier of step 4 of [`Mnemo::flush`]: seal the
+    /// control plane into fresh runs, stage the snapshot manifest, the key
+    /// slots and the free list, stamp the header frame, then make every page
+    /// written so far durable. Changes `self.header` and `self.free` in
+    /// place; [`Mnemo::flush`] puts them back if this fails.
+    fn stage_commit(
+        &mut self,
+        ctx: &FlushPrelude,
+        persist_index: bool,
+        is_memory_or_index_flush: bool,
+    ) -> Result<StagedCommit> {
         // 3. Seal the catalog / index control pages into fresh home runs.
         //    FMT-9: `txn_id` is this transaction's id and the generation
         //    of every run it seals. A v9 run replaced here is freed by this
@@ -571,100 +697,26 @@ impl Mnemo {
         self.header.apply_seal(&mut hpage, self.pager.dek())?;
         frames.push((0, hpage.to_vec()));
 
-        // 4. COMMIT — log the transaction and fsync. Nothing at a home page
-        //    other than the leased header has changed yet; this single
-        //    fsync is what makes the rest durable.
-        // FMT-9c: big runs went straight to their home pages; make them
-        // durable before the header that references them can be.
-        if self.direct_writes {
+        // 4. COMMIT. The barrier first (PERF-2 3f): one fsync makes step
+        //    2's data pages and step 3's direct runs durable before the
+        //    header that references them can be. `unsynced` stays set until
+        //    a sync succeeds, so a retry after a failed commit syncs pages an
+        //    earlier attempt wrote. It must stay a sync of its own: never
+        //    fold it into the commit's fsync below, since within one fsync
+        //    the disk may persist the commit frame before those pages.
+        if self.pager.unsynced() {
             self.pager.sync()?;
-            self.direct_writes = false;
         }
-        let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
-        // 12.4: from here a failure may leave the transaction committed.
-        self.commit_point = Some(txn_id);
-        wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, &frames)?;
-
-        // 5. Checkpoint — fold the WAL into the home pages.
-        self.checkpoint(&frames)?;
-        // FMT-9c: the committed header no longer covers the tail; cut it.
-        // A crash before this leaves a longer file, which is harmless.
-        if shrink {
-            let len = self.header.next_page * PAGE_SIZE as u64;
-            self.pager.file_mut().set_len(len)?;
-        }
-
-        self.manifest = manifest;
-        if let Some(staged) = staged_free {
-            self.free = staged;
-        }
-        self.pending_free.clear();
-        self.free_dirty = false;
-        self.dirty_keys = false;
-        if let Some((chain, rows)) = new_chain {
-            self.delta_chain = chain;
-            self.delta_rows = rows;
-        }
-        if let Some((chain, n)) = new_ichain {
-            self.index_chain = chain;
-            self.index_chain_ops = n;
-        }
-        if let Some((segs, seg_docs)) = new_bm25 {
-            // FMT-9f: keep the loaded dicts and read only the new segment's
-            // (a merge replaced the segments from `kept` on), instead of
-            // dropping them all and reloading every dict on next use.
-            let kept = self
-                .bm25
-                .manifest
-                .segments
-                .iter()
-                .zip(&segs)
-                .take_while(|(a, b)| a == b)
-                .count();
-            if let Some(mut dicts) = self.bm25.dicts.take() {
-                dicts.truncate(kept);
-                let mut ok = dicts.len() == kept;
-                for &t in &segs[kept..] {
-                    match load_segment_dict(&mut self.pager, tuple_ptr(t)) {
-                        Ok(d) if ok => dicts.push(d),
-                        _ => ok = false,
-                    }
-                }
-                if ok {
-                    self.bm25.dicts = Some(dicts);
-                }
-            }
-            self.bm25.manifest.segments = segs;
-            self.bm25.manifest.seg_docs = seg_docs;
-            self.bm25.pending.clear();
-            self.bm25.pending_tokens = None;
-        }
-        if persist_index {
-            self.index_rebase = false;
-            self.index_delta_ops = None;
-        }
-        if ctx.cat_bytes.is_some() {
-            self.dirty_rows.clear();
-            self.catalog_rewrite = false;
-        }
-        self.dirty_catalog = false;
-        if persist_index {
-            self.dirty_index = false;
-            self.index_persist = IndexPersist::default();
-        } else if self.dirty_index {
-            self.index_persist.commits += 1;
-        }
-        self.dirty_cache = false;
-        // Batched policy: successful flush consumes the pending batch.
-        self.cache_batch.reset();
-        // Record how many fsyncs this flush issued, for Stats reporting.
-        // Thread-local counter guarantees we see only this handle's own
-        // sync_all calls between the snapshot above and this read.
-        self.fsyncs_last_flush =
-            (crate::fsync_count().wrapping_sub(fsync_before)).min(u32::MAX as u64) as u32;
-        // 12.4 shared mode (RB-007.5): this commit is in the file.
-        self.window_committed = true;
-        Ok(())
+        Ok(StagedCommit {
+            txn_id,
+            frames,
+            manifest,
+            staged_free,
+            shrink,
+            new_chain,
+            new_ichain,
+            new_bm25,
+        })
     }
 
     /// Pre-flush prelude shared by [`Mnemo::flush`] and the
@@ -947,8 +999,9 @@ impl Mnemo {
     /// **TEST ONLY — do not use.** Reproduces a crash inside
     /// [`Mnemo::flush`] *after* the prelude has leased counter+page slots
     /// and persisted the leased header, but *before* the WAL is committed.
-    /// Runs `prepare_for_flush` + `pager.flush` and returns — leaving
-    /// data pages and a leased header on disk, with no commit frame.
+    /// Runs `prepare_for_flush`, `pager.write_dirty` and `pager.sync`, then
+    /// returns, leaving data pages and a leased header on disk with no
+    /// commit frame.
     ///
     /// Used by `tests/integration.rs::nonce_unique_after_crashed_data_flush`
     /// to verify that this window (Phase 1.1 of the improvement plan) does
@@ -969,7 +1022,8 @@ impl Mnemo {
         self.pack_records()?;
         self.pack_vectors()?;
         let _prelude = self.prepare_for_flush(self.dirty_index)?;
-        self.pager.flush()
+        self.pager.write_dirty()?;
+        self.pager.sync()
     }
 
     /// Bound the in-memory page cache to `pages` decrypted pages.
@@ -1010,4 +1064,17 @@ impl Mnemo {
     }
 
     // === Result cache (Phase 10.1 + 10.3) ============================
+}
+
+/// What [`Mnemo::stage_commit`] hands back to [`Mnemo::flush`] for the
+/// commit itself and for adopting the new state once it succeeds.
+struct StagedCommit {
+    txn_id: u64,
+    frames: Vec<wal::Frame>,
+    manifest: Vec<Snapshot>,
+    staged_free: Option<FreeList>,
+    shrink: bool,
+    new_chain: Option<(Vec<RunPtr>, usize)>,
+    new_ichain: Option<(Vec<RunPtr>, usize)>,
+    new_bm25: Option<Bm25Segments>,
 }

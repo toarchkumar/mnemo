@@ -455,7 +455,6 @@ impl Mnemo {
             index_rebase: false,
             index_delta_ops: None,
             snapshot_cap_explicit: config.max_snapshots != DEFAULT_MAX_SNAPSHOTS,
-            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -947,7 +946,6 @@ impl Mnemo {
             index_rebase: false,
             index_delta_ops: None,
             snapshot_cap_explicit: false,
-            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }
@@ -1278,7 +1276,6 @@ impl Mnemo {
             index_rebase: false,
             index_delta_ops: None,
             snapshot_cap_explicit: false,
-            direct_writes: false,
             vector_cache_budget: DEFAULT_VECTOR_CACHE_BUDGET,
         })
     }

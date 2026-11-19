@@ -196,6 +196,7 @@ mod fsync_counter {
     /// Call once per `sync_all`.
     pub(crate) fn bump() {
         COUNT.with(|c| c.set(c.get().wrapping_add(1)));
+        crate::pager::__io_trace(crate::pager::IoEvent::Sync);
     }
 
     /// Monotonic counter snapshot for this thread.
@@ -353,6 +354,26 @@ pub mod __failpoints {
     pub fn writes_seen() -> u64 {
         crate::pager::failpoints::writes_seen()
     }
+
+    /// v0.20.0 (PERF-2 3f): the Nth `sync_all` from now (`0` is the
+    /// next) fails without syncing, once; `-1` disarms it. Per thread.
+    pub fn set_syncs_until_fail(n: i64) {
+        crate::pager::failpoints::set_syncs_until_fail(n)
+    }
+
+    /// v0.20.0 (PERF-2 3f): start (`true`, emptying it) or stop recording
+    /// this thread's page writes, WAL commits and syncs; read them with
+    /// [`io_trace`]. Per thread.
+    pub fn set_io_trace(on: bool) {
+        crate::pager::failpoints::set_io_trace(on)
+    }
+
+    /// The events recorded since [`set_io_trace`]`(true)`.
+    pub fn io_trace() -> Vec<IoEvent> {
+        crate::pager::failpoints::io_trace()
+    }
+
+    pub use crate::pager::failpoints::IoEvent;
 
     /// v0.19.1: make the next `count` reads that cover page `page` fail
     /// with an I/O error, in any thread; `count = 0` disarms it. It's

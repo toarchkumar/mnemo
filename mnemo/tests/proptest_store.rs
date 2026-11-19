@@ -1206,3 +1206,69 @@ proptest! {
         reopened.verify().unwrap();
     }
 }
+
+// ---------------------------------------------------------------------
+// PERF-2 3f (v0.20.0): batch commits with big runs, one barrier.
+//
+// A few batch commits, each big enough that its catalog delta (and, with
+// the ANN on, the index runs) go outside the WAL (FMT-9c), then one more
+// batch that fails at a random write or at one of its three syncs. The
+// reopened set is the state before that batch or after it.
+// ---------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+enum BigFail {
+    Write(u64),
+    Sync(i64),
+}
+
+fn big_batch(db: &mut Mnemo, b: usize, n: usize, set: &mut BTreeSet<Fingerprint>) {
+    for i in 0..n {
+        let content = format!("big{b}-{i}");
+        let mtype = memory_type_of(i as u8);
+        set.insert((content.clone(), format!("{mtype:?}")));
+        db.remember(Memory::new(content, mtype, seed_vec((i % 250) as u8 + 1)))
+            .unwrap();
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 12, ..ProptestConfig::default() })]
+    #[test]
+    fn prop_big_batch_commits_crash_pre_or_post(
+        batches in prop::collection::vec(400usize..1200, 1..=3),
+        last in 400usize..1200,
+        fail in prop_oneof![
+            (0u64..400).prop_map(BigFail::Write),
+            (0i64..3).prop_map(BigFail::Sync),
+        ],
+    ) {
+        let (_dir, path, mut db) = fresh_db();
+        let mut pre_set = BTreeSet::new();
+        for (b, &n) in batches.iter().enumerate() {
+            big_batch(&mut db, b, n, &mut pre_set);
+            db.flush().unwrap();
+            prop_assert_eq!(db.stats().unwrap().fsyncs_last_flush, 3);
+        }
+        let mut post_set = pre_set.clone();
+        big_batch(&mut db, batches.len(), last, &mut post_set);
+        match fail {
+            BigFail::Write(k) => mnemo_engine::__failpoints::set_writes_failing(&[k]),
+            BigFail::Sync(k) => mnemo_engine::__failpoints::set_syncs_until_fail(k),
+        }
+        let res = db.flush();
+        mnemo_engine::__failpoints::set_writes_failing(&[]);
+        mnemo_engine::__failpoints::set_syncs_until_fail(-1);
+        let mut db = reopen(db, &path);
+        let observed = observed_set(&mut db);
+        prop_assert!(
+            observed == pre_set || observed == post_set,
+            "a third state after {:?} ({:?}): {} memories, pre {}, post {}",
+            fail, res.err(), observed.len(), pre_set.len(), post_set.len(),
+        );
+        if matches!(fail, BigFail::Sync(0)) {
+            prop_assert!(observed == pre_set, "a failed barrier commits nothing");
+        }
+        db.verify().unwrap();
+    }
+}

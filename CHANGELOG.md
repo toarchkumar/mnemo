@@ -8,6 +8,16 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Changed
+
+- **A batch commit with a big run makes 3 fsyncs, from 4** (PERF-2 3f).
+  One fsync before the WAL commit now makes both the data pages and the
+  runs too big for the WAL durable, where each had its own. It stays apart
+  from the commit's own fsync. Every other commit makes 3, as before. A
+  commit that fails before the WAL commit, that fsync included, puts the
+  handle's header and free list back, so retrying it on the same handle
+  commits over the stored state.
+
 ## [0.19.1] — 2026-11-18
 
 A patch for a damaged ANN index. The index is derived data, so a run that

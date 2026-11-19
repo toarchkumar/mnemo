@@ -571,17 +571,21 @@ would need monotonic counters tracked outside the file.
 
 `flush()` is one **atomic transaction**, committed through a write-ahead log:
 
-1. Record (vector) data pages are written copy-on-write to fresh pages and
-   fsynced. Being unreferenced until the catalog below commits, they are
-   crash-safe by construction.
+1. Record (vector) data pages are written copy-on-write to fresh pages, and
+   so is any control-plane run too big for the WAL (FMT-9c). Being
+   unreferenced until the catalog below commits, they are crash-safe by
+   construction. **One fsync, the barrier, makes them all durable** before
+   the commit (since v0.20.0; before, the big runs had a second one).
 2. The transaction's control plane — the new catalog, the ANN index, and the
    new header — is written into the WAL region as a run of
    `(txn_id, page_no, page_image)` frames followed by a checksummed `COMMIT`
    frame.
 3. **One fsync of the WAL is the commit point.** Before it the transaction
    does not exist; after it the transaction is durable even though no home
-   page has changed.
-4. A *checkpoint* copies each frame to its home page and rewrites page 0.
+   page has changed. It's never merged with the barrier: within one fsync
+   the disk may persist the commit frame before the pages it names.
+4. A *checkpoint* copies each frame to its home page and rewrites page 0,
+   and fsyncs: three fsyncs a commit.
 
 A crash *before* the commit fsync leaves the previous state untouched. A crash
 *after* it is repaired on open: [`recover`](src/wal.rs) replays the committed

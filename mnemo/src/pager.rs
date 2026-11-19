@@ -4,7 +4,7 @@
 //! deal in *plaintext payloads*; the pager transparently encrypts on write and
 //! decrypts on read. Decrypted pages are kept in a **bounded LRU cache**
 //! ([`crate::cache::PageCache`]) so repeated reads skip a decrypt and writes
-//! are batched until [`Pager::flush`]. The cache caps retained *clean* pages;
+//! are batched until [`Pager::write_dirty`]. The cache caps retained *clean* pages;
 //! dirty (un-flushed) pages are pinned until a flush makes them clean.
 
 use std::fs::File;
@@ -77,6 +77,66 @@ pub(crate) mod failpoints {
             READ_FAIL_PAGE.store(u64::MAX, SeqCst);
         }
         Err(std::io::Error::other("injected read failure"))
+    }
+
+    /// An event in the I/O trace ([`set_io_trace`]): a page written, the
+    /// WAL's commit written, or a sync.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum IoEvent {
+        /// A page written at its home location (data, a direct run, a
+        /// checkpointed frame, the header).
+        Page(u64),
+        /// A WAL transaction (its frames and commit frame) written.
+        WalCommit,
+        /// A `sync_all`.
+        Sync,
+    }
+
+    thread_local! {
+        static TRACE: std::cell::RefCell<Option<Vec<IoEvent>>> =
+            const { std::cell::RefCell::new(None) };
+        // -1 => disabled; N >= 0 => the Nth sync from now fails, once.
+        static SYNCS_UNTIL_FAIL: Cell<i64> = const { Cell::new(-1) };
+    }
+
+    /// PERF-2 3f: start (`true`, emptying it) or stop recording this
+    /// thread's writes and syncs.
+    pub fn set_io_trace(on: bool) {
+        TRACE.with(|t| *t.borrow_mut() = on.then(Vec::new));
+    }
+
+    /// The events recorded since [`set_io_trace`]`(true)`.
+    pub fn io_trace() -> Vec<IoEvent> {
+        TRACE.with(|t| t.borrow().clone().unwrap_or_default())
+    }
+
+    pub(crate) fn trace(ev: IoEvent) {
+        TRACE.with(|t| {
+            if let Some(v) = t.borrow_mut().as_mut() {
+                v.push(ev);
+            }
+        });
+    }
+
+    /// PERF-2 3f: the Nth `sync_all` from now (`0` is the next) fails
+    /// without syncing, once; `-1` disarms it. Covers the pager's syncs
+    /// and the WAL commit's.
+    pub fn set_syncs_until_fail(n: i64) {
+        SYNCS_UNTIL_FAIL.with(|c| c.set(n));
+    }
+
+    pub(crate) fn check_sync() -> std::io::Result<()> {
+        SYNCS_UNTIL_FAIL.with(|c| match c.get() {
+            0 => {
+                c.set(-1);
+                Err(std::io::Error::other("injected sync failure"))
+            }
+            v if v > 0 => {
+                c.set(v - 1);
+                Ok(())
+            }
+            _ => Ok(()),
+        })
     }
 
     /// Fail exactly the writes numbered in `ns`, counting from 0 at this
@@ -164,6 +224,44 @@ pub(crate) fn __failpoint_check() -> std::io::Result<()> {
 #[inline(always)]
 pub(crate) fn __failpoint_check() -> std::io::Result<()> {
     failpoints::check()
+}
+
+/// PERF-2 3f: the sync failpoint ([`failpoints::set_syncs_until_fail`]),
+/// checked before every `sync_all` of a commit.
+#[cfg(not(any(test, feature = "failpoints")))]
+#[inline(always)]
+pub(crate) fn __sync_failpoint() -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(any(test, feature = "failpoints"))]
+#[inline(always)]
+pub(crate) fn __sync_failpoint() -> std::io::Result<()> {
+    failpoints::check_sync()
+}
+
+/// PERF-2 3f: the I/O trace ([`failpoints::set_io_trace`]).
+#[cfg(not(any(test, feature = "failpoints")))]
+#[inline(always)]
+pub(crate) fn __io_trace(_ev: IoEvent) {}
+
+#[cfg(any(test, feature = "failpoints"))]
+#[inline(always)]
+pub(crate) fn __io_trace(ev: IoEvent) {
+    failpoints::trace(ev)
+}
+
+#[cfg(any(test, feature = "failpoints"))]
+pub(crate) use failpoints::IoEvent;
+
+/// What the trace records; without the failpoints it's never built.
+#[cfg(not(any(test, feature = "failpoints")))]
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
+pub(crate) enum IoEvent {
+    Page(u64),
+    WalCommit,
+    Sync,
 }
 
 /// v0.19.1: the read-side failpoint ([`failpoints::set_page_read_fails`]),
@@ -382,8 +480,13 @@ pub struct Pager {
     /// Bounded LRU cache of decrypted page payloads.
     cache: PageCache,
     /// FMT-9: the generation each dirty page is to be sealed under (v9
-    /// binds it into the page AAD). Drained by [`Pager::flush`].
+    /// binds it into the page AAD). Drained by [`Pager::write_dirty`].
     dirty_gens: std::collections::HashMap<u64, u64>,
+    /// PERF-2 3f (v0.20.0): pages were written since the last
+    /// [`Pager::sync`]. Set by every page write, cleared only by a sync,
+    /// so a commit that failed after writing pages still syncs them on its
+    /// retry.
+    unsynced: bool,
 }
 
 impl Pager {
@@ -409,6 +512,7 @@ impl Pager {
                 DEFAULT_CACHE_PAGES
             }),
             dirty_gens: std::collections::HashMap::new(),
+            unsynced: false,
         }
     }
 
@@ -523,9 +627,11 @@ impl Pager {
     /// Used only for the header (page 0).
     pub fn write_raw(&mut self, page_no: u64, data: &[u8; PAGE_SIZE]) -> Result<()> {
         __failpoint_check()?;
+        self.unsynced = true;
         self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.f()?.write_all(data)?;
+        __io_trace(IoEvent::Page(page_no));
         Ok(())
     }
 
@@ -573,7 +679,7 @@ impl Pager {
         disk[NONCE_LEN..].copy_from_slice(&ciphertext);
 
         // The plaintext is now the live content of this page; it is clean
-        // because the WAL/checkpoint — not Pager::flush — will write it.
+        // because the WAL/checkpoint — not Pager::write_dirty — will write it.
         self.cache.insert(page_no, padded, false);
         Ok(disk)
     }
@@ -583,17 +689,27 @@ impl Pager {
     /// or the plaintext header) to their home locations.
     pub fn write_sealed(&mut self, page_no: u64, bytes: &[u8; PAGE_SIZE]) -> Result<()> {
         __failpoint_check()?;
+        self.unsynced = true;
         self.f()?
             .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
         self.f()?.write_all(bytes)?;
+        __io_trace(IoEvent::Page(page_no));
         Ok(())
     }
 
     /// Flush OS buffers to stable storage.
     pub fn sync(&mut self) -> Result<()> {
+        __sync_failpoint()?;
         self.f()?.sync_all()?;
         crate::bump_fsync();
+        self.unsynced = false;
         Ok(())
+    }
+
+    /// PERF-2 3f (v0.20.0): whether pages were written since the last
+    /// [`Pager::sync`], so a commit's barrier knows it has work to do.
+    pub fn unsynced(&self) -> bool {
+        self.unsynced
     }
 
     /// Read and decrypt the plaintext payload of an encrypted page. `gen` is
@@ -881,9 +997,9 @@ impl Pager {
 
     /// Stage a plaintext payload for an encrypted page. The payload is padded
     /// (or rejected if too large) to exactly [`PAYLOAD`] bytes. The page is
-    /// cached dirty — pinned against eviction — until [`Pager::flush`].
+    /// cached dirty — pinned against eviction — until [`Pager::write_dirty`].
     ///
-    /// [`Pager::flush`] seals it under generation `gen` (v9; ignored before).
+    /// [`Pager::write_dirty`] seals it under generation `gen` (v9; ignored before).
     pub fn write_page(&mut self, page_no: u64, gen: u64, payload: &[u8]) -> Result<()> {
         if payload.len() > PAYLOAD {
             return Err(MnemoError::Invalid(format!(
@@ -899,7 +1015,9 @@ impl Pager {
         Ok(())
     }
 
-    /// Encrypt and write every dirty page, then fsync.
+    /// Encrypt and write every dirty page, without the fsync (PERF-2 3f):
+    /// the caller syncs ([`Pager::sync`]) before anything that references
+    /// the pages can be durable. [`Pager::unsynced`] says it's due.
     ///
     /// Each page gets a fresh nonce from the per-session random prefix +
     /// per-session counter (`Pager::next_nonce` → `crypto::session_page_nonce`
@@ -908,7 +1026,7 @@ impl Pager {
     /// wrap, so no nonce ever repeats across writes in this session or
     /// across copies of the file. Once written, pages become clean and
     /// the cache is trimmed back to its cap.
-    pub fn flush(&mut self) -> Result<()> {
+    pub fn write_dirty(&mut self) -> Result<()> {
         let pages = self.cache.dirty_pages();
         if pages.is_empty() {
             return Ok(());
@@ -931,13 +1049,14 @@ impl Pager {
             debug_assert_eq!(disk.len(), PAGE_SIZE);
 
             __failpoint_check()?;
+            self.unsynced = true;
             self.f()?
                 .seek(SeekFrom::Start(page_no * PAGE_SIZE as u64))?;
             self.f()?.write_all(&disk)?;
+            __io_trace(IoEvent::Page(page_no));
         }
-        self.f()?.sync_all()?;
-        crate::bump_fsync();
-        // The pages just written are now clean and so evictable; settle the
+        // The pages just written are now clean and so evictable (their
+        // bytes are in the file; `unsynced` keeps the sync due); settle the
         // cache back within its bound.
         self.cache.mark_all_clean();
         self.dirty_gens.clear();
