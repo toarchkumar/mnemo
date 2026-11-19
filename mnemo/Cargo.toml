@@ -18,7 +18,7 @@ rust-version = "1.94"
 # auto-discovery so cargo doesn't try to build it as its own bench
 # executable; the `[[bench]]` entries below list every real target.
 autobenches = false
-description = "Encrypted, single-file, portable agent memory engine with multi-signal recall, sessions, snapshots, and an IVF+PQ index"
+description = "Shared memory for your coding agents, in one encrypted file: an embedded Rust engine with recall, an MCP server and a CLI"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
 homepage = "https://toarchkumar.github.io/mnemo/"
@@ -41,11 +41,19 @@ exclude = [
     "examples/device_budget.rs",
     "examples/fmt9_proto.rs",
 ]
-# crates.io shows 5 keywords; pick the ones most likely to match how
-# people search for this. Each keyword must be ≤20 chars and lowercase.
-keywords = ["database", "encryption", "vector", "ai", "memory"]
-# Standard crates.io category slugs (https://crates.io/category_slugs).
-categories = ["database", "cryptography", "command-line-utilities"]
+# crates.io takes at most 5 keywords, each at most 20 characters of ASCII
+# letters, digits, `_`, `-` or `+`, starting with a letter; pick the ones
+# people search for (v0200-d2).
+keywords = ["mcp", "agent-memory", "encryption", "vector-search", "embedded-database"]
+# Standard crates.io category slugs (https://crates.io/category_slugs), at
+# most 5.
+categories = [
+    "database-implementations",
+    "database",
+    "cryptography",
+    "development-tools",
+    "command-line-utilities",
+]
 
 # The core crate is the workspace root. The Node binding lives here as a
 # workspace member but is NOT a default member: a plain `cargo build` /

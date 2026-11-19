@@ -7,13 +7,13 @@ name = "mnemo-python"
 version = "0.19.1"
 edition = "2021"
 rust-version = "1.94"
-description = "Python (PyO3) bindings for the Mnemo encrypted agent-memory engine; built by maturin into the mnemo-engine wheel on PyPI"
+description = "Python (PyO3) bindings for MNemo, shared memory for your coding agents in one encrypted file; built by maturin into the mnemo-engine wheel on PyPI"
 license = "Apache-2.0"
 repository = "https://github.com/toarchkumar/mnemo"
 homepage = "https://toarchkumar.github.io/mnemo/"
 readme = "README.md"
-keywords = ["database", "encryption", "vector", "ai", "memory"]
-categories = ["database", "cryptography"]
+keywords = ["mcp", "agent-memory", "encryption", "vector-search", "embedded-database"]
+categories = ["database-implementations", "cryptography"]
 # Per https://doc.rust-lang.org/cargo/reference/manifest.html#the-publish-field
 # this prevents an accidental `cargo publish` — the wheel is the real
 # artifact, not a crates.io upload.

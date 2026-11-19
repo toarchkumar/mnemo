@@ -11,7 +11,7 @@ version = "0.19.1"
 edition = "2021"
 rust-version = "1.94"
 license = "Apache-2.0"
-description = "UniFFI (Swift and Kotlin) bindings for the MNemo encrypted agent-memory engine"
+description = "UniFFI (Swift and Kotlin) bindings for MNemo, agent memory in one encrypted file"
 repository = "https://github.com/toarchkumar/mnemo"
 publish = false
 
