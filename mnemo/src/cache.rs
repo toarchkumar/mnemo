@@ -11,6 +11,13 @@
 //! pages clean again; the cap bounds retained *clean* pages, and is never a
 //! licence to drop unwritten data.
 //!
+//! **Written isn't clean** (v0.20.0, RB-016.1). A page the flush has written
+//! but no sync has covered yet is *written*: still pinned, and not written
+//! again by the next flush. A sync that succeeds makes it clean. One that
+//! fails makes it dirty again, because after a failed `fsync` the OS may
+//! have dropped the write (and a later `fsync` can still succeed), so the
+//! retry must write it again.
+//!
 //! **Keyed by page and generation** (v0.20.0, v0200-3). A v9 page is
 //! sealed under its writer's generation, and every pointer to it says which
 //! generation it expects. The cache keeps each page's generation and serves
@@ -29,13 +36,25 @@
 
 use std::collections::HashMap;
 
+/// Where a cached page stands against the file.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum State {
+    /// The file holds it, synced: evictable.
+    Clean,
+    /// An un-flushed write, the only copy: pinned, and on the flush's list.
+    Dirty,
+    /// Written to the file, but no sync has covered it yet: pinned, and
+    /// off the flush's list until a failed sync puts it back (RB-016.1).
+    Written,
+}
+
 /// One cached page plus its intrusive LRU-list links.
 struct Node {
     page: u64,
     /// The generation the page was read or written under.
     gen: u64,
     payload: Vec<u8>,
-    dirty: bool,
+    state: State,
     /// Toward the more-recently-used end (`None` at the MRU head).
     prev: Option<usize>,
     /// Toward the less-recently-used end (`None` at the LRU tail).
@@ -51,7 +70,7 @@ pub struct PageCache {
     head: Option<usize>, // most-recently-used
     tail: Option<usize>, // least-recently-used
     capacity: usize,
-    /// Count of non-dirty entries — the pool eviction can draw from.
+    /// Count of clean entries — the pool eviction can draw from.
     clean: usize,
 }
 
@@ -69,7 +88,7 @@ impl PageCache {
         }
     }
 
-    /// Number of pages currently cached (clean plus dirty).
+    /// Number of pages currently cached (clean, dirty and written).
     pub fn len(&self) -> usize {
         self.map.len()
     }
@@ -132,11 +151,11 @@ impl PageCache {
         self.detach(i);
         let page = self.slots[i].page;
         self.map.remove(&page);
-        if !self.slots[i].dirty {
+        if self.slots[i].state == State::Clean {
             self.clean -= 1;
         }
         self.slots[i].payload = Vec::new();
-        self.slots[i].dirty = false;
+        self.slots[i].state = State::Clean;
         self.free.push(i);
     }
 
@@ -148,7 +167,7 @@ impl PageCache {
         }
         let mut cur = self.tail;
         while let Some(i) = cur {
-            if !self.slots[i].dirty {
+            if self.slots[i].state == State::Clean {
                 self.remove_node(i);
                 return true;
             }
@@ -172,11 +191,12 @@ impl PageCache {
     /// Fetch a page's payload cached under `gen`, marking it
     /// most-recently-used. A clean entry under another generation is stale
     /// (the page was freed and reused since): it's dropped, and this is a
-    /// miss. A dirty one is this transaction's own write and stays.
+    /// miss. A dirty or written one is this transaction's own write and
+    /// stays.
     pub fn get(&mut self, page: u64, gen: u64) -> Option<Vec<u8>> {
         let i = *self.map.get(&page)?;
         if self.slots[i].gen != gen {
-            if !self.slots[i].dirty {
+            if self.slots[i].state == State::Clean {
                 self.remove_node(i);
             }
             return None;
@@ -199,15 +219,16 @@ impl PageCache {
     /// insertion may evict the least-recently-used clean page to stay within
     /// the cap.
     pub fn insert(&mut self, page: u64, gen: u64, payload: Vec<u8>, dirty: bool) {
+        let state = if dirty { State::Dirty } else { State::Clean };
         if let Some(&i) = self.map.get(&page) {
-            match (self.slots[i].dirty, dirty) {
-                (true, false) => self.clean += 1,
-                (false, true) => self.clean -= 1,
+            match (self.slots[i].state == State::Clean, dirty) {
+                (false, false) => self.clean += 1,
+                (true, true) => self.clean -= 1,
                 _ => {}
             }
             self.slots[i].gen = gen;
             self.slots[i].payload = payload;
-            self.slots[i].dirty = dirty;
+            self.slots[i].state = state;
             self.touch(i);
             return;
         }
@@ -215,7 +236,7 @@ impl PageCache {
             page,
             gen,
             payload,
-            dirty,
+            state,
             prev: None,
             next: None,
         });
@@ -227,23 +248,28 @@ impl PageCache {
         self.trim();
     }
 
-    /// Whether any cached page is dirty.
+    /// Whether any cached page isn't clean: dirty, or written and not yet
+    /// synced.
     pub fn has_dirty(&self) -> bool {
         self.clean < self.map.len()
     }
 
-    /// Whether `page` is cached dirty (under any generation).
+    /// Whether `page` is cached dirty or written-unsynced (under any
+    /// generation): this transaction's own write, which a read from disk
+    /// must not replace.
     pub fn is_dirty(&self, page: u64) -> bool {
-        self.map.get(&page).is_some_and(|&i| self.slots[i].dirty)
+        self.map
+            .get(&page)
+            .is_some_and(|&i| self.slots[i].state != State::Clean)
     }
 
     /// Every dirty page's number and generation, sorted by page — the
-    /// flush work list.
+    /// flush work list. Written pages aren't on it.
     pub fn dirty_pages(&self) -> Vec<(u64, u64)> {
         let mut v: Vec<(u64, u64)> = self
             .map
             .iter()
-            .filter(|&(_, &i)| self.slots[i].dirty)
+            .filter(|&(_, &i)| self.slots[i].state == State::Dirty)
             .map(|(&p, &i)| (p, self.slots[i].gen))
             .collect();
         v.sort_unstable();
@@ -251,26 +277,49 @@ impl PageCache {
     }
 
     /// v0200-3r: drop every clean page cached under a generation above
-    /// `gen`. A dirty page is this transaction's own write and stays.
+    /// `gen`. A dirty or written page is this transaction's own write and
+    /// stays.
     pub fn drop_newer_than(&mut self, gen: u64) {
         let doomed: Vec<usize> = self
             .map
             .values()
             .copied()
-            .filter(|&i| self.slots[i].gen > gen && !self.slots[i].dirty)
+            .filter(|&i| self.slots[i].gen > gen && self.slots[i].state == State::Clean)
             .collect();
         for i in doomed {
             self.remove_node(i);
         }
     }
 
-    /// Mark every cached page clean — called after a flush has written them.
-    /// Evictable pages then become available again.
-    pub fn mark_all_clean(&mut self) {
+    /// The flush wrote every dirty page: they're written, still pinned,
+    /// until a sync covers them (RB-016.1).
+    pub fn mark_dirty_written(&mut self) {
         for &i in self.map.values() {
-            self.slots[i].dirty = false;
+            if self.slots[i].state == State::Dirty {
+                self.slots[i].state = State::Written;
+            }
         }
-        self.clean = self.map.len();
+    }
+
+    /// A sync succeeded: every written page is clean, so evictable again.
+    pub fn mark_written_clean(&mut self) {
+        for &i in self.map.values() {
+            if self.slots[i].state == State::Written {
+                self.slots[i].state = State::Clean;
+                self.clean += 1;
+            }
+        }
+    }
+
+    /// A sync failed, or the commit did before its commit point: every
+    /// written page is dirty again, so the next flush writes it again
+    /// (RB-016.1).
+    pub fn mark_written_dirty(&mut self) {
+        for &i in self.map.values() {
+            if self.slots[i].state == State::Written {
+                self.slots[i].state = State::Dirty;
+            }
+        }
     }
 }
 
@@ -314,11 +363,44 @@ mod tests {
         }
         assert_eq!(c.dirty_pages(), vec![(1, 1), (2, 1), (3, 1)]);
 
-        // Once a flush marks them clean, the cache trims back to the cap.
-        c.mark_all_clean();
+        // Written, they stay pinned until a sync covers them.
+        c.mark_dirty_written();
+        c.trim();
+        assert_eq!(c.len(), 3);
+        assert!(c.dirty_pages().is_empty());
+        // Once a sync marks them clean, the cache trims back to the cap.
+        c.mark_written_clean();
         c.trim();
         assert_eq!(c.len(), 2);
         assert!(c.dirty_pages().is_empty());
+    }
+
+    /// RB-016.1: a written page stays pinned and off the flush's list until
+    /// a sync covers it; a failed sync puts it back on the list.
+    #[test]
+    fn a_written_page_is_pinned_until_a_sync_and_dirty_again_if_it_fails() {
+        let mut c = PageCache::new(1);
+        c.insert(1, 1, page(1), true);
+        c.insert(2, 1, page(2), true);
+        c.mark_dirty_written();
+        assert!(c.dirty_pages().is_empty());
+        assert!(c.has_dirty() && c.is_dirty(1) && c.is_dirty(2));
+        // Pinned: a clean page goes first, and the written ones stay.
+        c.insert(3, 1, page(3), false);
+        assert_eq!(c.len(), 2);
+        assert!(c.peek(1, 1).is_some() && c.peek(2, 1).is_some());
+        // A read under another generation doesn't drop a written page.
+        assert!(c.get(1, 2).is_none());
+        assert!(c.peek(1, 1).is_some());
+        // The sync failed: both go back on the flush's list.
+        c.mark_written_dirty();
+        assert_eq!(c.dirty_pages(), vec![(1, 1), (2, 1)]);
+        // Written again, then synced: clean, and trimmed to the cap.
+        c.mark_dirty_written();
+        c.mark_written_clean();
+        assert!(!c.has_dirty());
+        c.trim();
+        assert_eq!(c.len(), 1);
     }
 
     #[test]

@@ -483,8 +483,8 @@ pub struct Pager {
     cache: PageCache,
     /// PERF-2 3f (v0.20.0): pages were written since the last
     /// [`Pager::sync`]. Set by every page write, cleared only by a sync,
-    /// so a commit that failed after writing pages still syncs them on its
-    /// retry.
+    /// so a commit that failed after writing pages still syncs on its
+    /// retry. The data pages it wrote are written again too (RB-016.1).
     unsynced: bool,
 }
 
@@ -579,7 +579,8 @@ impl Pager {
         }
     }
 
-    /// v0200-3: whether a page write is waiting for [`Pager::write_dirty`].
+    /// v0200-3: whether a page write is waiting for [`Pager::write_dirty`],
+    /// or for a sync to cover it.
     pub(crate) fn has_dirty_pages(&self) -> bool {
         self.cache.has_dirty()
     }
@@ -733,12 +734,34 @@ impl Pager {
     }
 
     /// Flush OS buffers to stable storage.
+    ///
+    /// RB-016.1 (v0.20.0): the pages [`Pager::write_dirty`] wrote are clean
+    /// only once this succeeds. If it fails they're dirty again: after a
+    /// failed `fsync` the OS may have dropped those writes, and a later
+    /// `fsync` can still succeed, so the next flush must write them again.
     pub fn sync(&mut self) -> Result<()> {
-        __sync_failpoint()?;
-        self.f()?.sync_all()?;
+        if let Err(e) = self.sync_file() {
+            self.cache.mark_written_dirty();
+            return Err(e);
+        }
         crate::bump_fsync();
         self.unsynced = false;
+        self.cache.mark_written_clean();
+        self.cache.trim();
         Ok(())
+    }
+
+    fn sync_file(&mut self) -> Result<()> {
+        __sync_failpoint()?;
+        self.f()?.sync_all()?;
+        Ok(())
+    }
+
+    /// RB-016.1 (v0.20.0): a commit failed before its commit point, so the
+    /// pages [`Pager::write_dirty`] wrote for it go back on the next flush's
+    /// list. Whatever failed, no sync has covered them.
+    pub(crate) fn rewrite_unsynced(&mut self) {
+        self.cache.mark_written_dirty();
     }
 
     /// PERF-2 3f (v0.20.0): whether pages were written since the last
@@ -1064,8 +1087,9 @@ impl Pager {
     /// since v0.5.2 / SEC-1). The counter advances per write; the random
     /// prefix is drawn once per writable open and regenerated on counter
     /// wrap, so no nonce ever repeats across writes in this session or
-    /// across copies of the file. Once written, pages become clean and
-    /// the cache is trimmed back to its cap.
+    /// across copies of the file. Once written, pages are *written*: still
+    /// pinned, and not written again, until [`Pager::sync`] makes them clean
+    /// (or, failing, dirty again: RB-016.1).
     pub fn write_dirty(&mut self) -> Result<()> {
         let pages = self.cache.dirty_pages();
         if pages.is_empty() {
@@ -1094,11 +1118,11 @@ impl Pager {
             self.f()?.write_all(&disk)?;
             __io_trace(IoEvent::Page(page_no));
         }
-        // The pages just written are now clean and so evictable (their
-        // bytes are in the file; `unsynced` keeps the sync due); settle the
+        // The pages just written stay pinned until a sync covers them
+        // (RB-016.1): if that sync fails, the next flush writes them again,
+        // as v0.19.1 did. `unsynced` keeps the sync due; the sync settles the
         // cache back within its bound.
-        self.cache.mark_all_clean();
-        self.cache.trim();
+        self.cache.mark_dirty_written();
         Ok(())
     }
 }
