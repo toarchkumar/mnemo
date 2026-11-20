@@ -1045,3 +1045,76 @@ fn findings_round_trip_over_mcp() {
             .contains("\"verified\""));
     });
 }
+
+/// v0.20.1 (v0201-2, status.mcp-recall-vectors): the tools that return
+/// memories (`recall`, `history`, `about`, `list`) leave each one's vector
+/// out unless the call passes `include_vector: true` (`list` also takes its
+/// older `include_vectors`).
+#[test]
+fn no_tool_returns_vectors_unless_asked() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        seed(&b, shared);
+        let onboarding = b.session(
+            shared,
+            true,
+            &[tool(
+                "remember",
+                json!({"content": "How to use this brain: recall first.",
+                "memory_type": "procedural", "metadata": {"area": "onboarding"}}),
+            )],
+        );
+        ok(&onboarding[1]);
+        let calls = [
+            ("recall", json!({"text": "release branch", "top_k": 10})),
+            (
+                "recall",
+                json!({"text": "release branch", "top_k": 10, "max_bytes": 100000}),
+            ),
+            ("history", json!({"key": "process.release"})),
+            ("about", json!({})),
+            ("list", json!({})),
+        ];
+        let mut reqs = Vec::new();
+        for (name, args) in &calls {
+            reqs.push(tool(name, args.clone()));
+            let mut with = args.clone();
+            with["include_vector"] = json!(true);
+            reqs.push(tool(name, with));
+        }
+        reqs.push(tool("list", json!({"include_vectors": true})));
+        let rs = b.session(shared, true, &reqs);
+        // The memories in one tool result (a bare array, or recall's
+        // `{hits}` under max_bytes; about's essence element isn't one).
+        let memories = |r: &Value| -> Vec<Value> {
+            let t = ok(r)["content"][0]["text"].as_str().unwrap().to_string();
+            let v: Value = serde_json::from_str(&t).unwrap();
+            let arr = v.get("hits").cloned().unwrap_or(v);
+            arr.as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m.get("kind") != Some(&json!("essence")))
+                .cloned()
+                .collect()
+        };
+        for (i, (name, _)) in calls.iter().enumerate() {
+            let without = memories(&rs[1 + 2 * i]);
+            let with = memories(&rs[2 + 2 * i]);
+            assert!(!without.is_empty(), "{name}: no memories returned");
+            for m in &without {
+                assert!(m.get("vector").is_none(), "{name} returned a vector: {m}");
+                assert!(m.get("content").is_some(), "{name}: {m}");
+            }
+            assert_eq!(with.len(), without.len(), "{name}");
+            for m in &with {
+                assert_eq!(
+                    m["vector"].as_array().map(Vec::len),
+                    Some(4),
+                    "{name} with include_vector: {m}"
+                );
+            }
+        }
+        let legacy = memories(&rs[1 + 2 * calls.len()]);
+        assert!(legacy.iter().all(|m| m["vector"].is_array()));
+    });
+}

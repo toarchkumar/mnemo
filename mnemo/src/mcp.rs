@@ -1277,6 +1277,7 @@ fn tools_list() -> Value {
                     "type": "object",
                     "properties": {
                         "stale": { "type": "boolean", "description": "List the stale records instead of the briefing." },
+                        "include_vector": { "type": "boolean", "default": false, "description": "v0.20.1: include each memory's `vector` (left out by default)." },
                         "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "The visibility levels shown (default public and team)." }
                     },
                     "additionalProperties": false
@@ -1536,14 +1537,15 @@ fn tools_list() -> Value {
                         "key": { "type": "string" },
                         "agent": { "type": "string", "description": "Query the private slot for this agent. Mutually exclusive with `shared`." },
                         "shared": { "type": "boolean", "default": false, "description": "Query the shared slot (one per file). Mutually exclusive with `agent`." },
-                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team)." }
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team)." },
+                        "include_vector": { "type": "boolean", "default": false, "description": "v0.20.1: include each memory's `vector` (left out by default)." }
                     },
                     "additionalProperties": false
                 }
             },
             {
                 "name": "recall",
-                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). Keyword matching (v9 files): a recall by `text` also matches the text's words (hybrid by default, since v0.15); put identifiers the text doesn't contain (a version like v0.9.0, a PR number, a function name) in `keywords`, which then replace the text for keyword matching, or pass `keywords: \"\"` for vector-only recall. Parts of dotted names and possessives match too (`nosync` finds `mnemo.nosync`). `keywords` alone (no `query`/`text`) is keyword-only recall.",
+                "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). Keyword matching (v9 files): a recall by `text` also matches the text's words (hybrid by default, since v0.15); put identifiers the text doesn't contain (a version like v0.9.0, a PR number, a function name) in `keywords`, which then replace the text for keyword matching, or pass `keywords: \"\"` for vector-only recall. Parts of dotted names and possessives match too (`nosync` finds `mnemo.nosync`). `keywords` alone (no `query`/`text`) is keyword-only recall. Hits leave out their `vector` unless `include_vector` is true (since v0.20.1).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -1556,6 +1558,7 @@ fn tools_list() -> Value {
                         "agent": { "type": "string" },
                         "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" },
                         "max_bytes": { "type": "integer", "minimum": 1, "description": "Phase 12.8 budget: stop adding hits once the UTF-8 bytes of their `content` fields would exceed N. Always returns at least the top hit. When set, the response is `{hits, truncated}` instead of a bare array." },
+                        "include_vector": { "type": "boolean", "default": false, "description": "v0.20.1: include each memory's `vector` (left out by default)." },
                         "filter": {
                             "type": "object",
                             "description": "Phase 12.6 pre-scoring filter. All conditions AND together. Shape: `{\"session_id\": \"...\", \"metadata\": {key: value | {\"$in\": [...]} | {\"$exists\": true} | {\"$gte\": n, \"$lte\": n}}}`.",
@@ -1583,11 +1586,12 @@ fn tools_list() -> Value {
             },
             {
                 "name": "list",
-                "description": "Return every live memory as JSON. Sorted by creation time, oldest first. Vectors are omitted by default to keep payloads small. Private records are left out unless `visibility` asks for them (`[\"all\"]` or `[\"private\"]`).",
+                "description": "Return every live memory as JSON. Sorted by creation time, oldest first. Vectors are left out unless `include_vector` is true, to keep payloads small. Private records are left out unless `visibility` asks for them (`[\"all\"]` or `[\"private\"]`).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "include_vectors": { "type": "boolean", "default": false },
+                        "include_vector": { "type": "boolean", "default": false, "description": "v0.20.1: include each memory's `vector` (left out by default)." },
+                        "include_vectors": { "type": "boolean", "default": false, "description": "The older name of `include_vector`." },
                         "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "v0.17: the visibility levels returned (default public and team)." }
                     },
                     "additionalProperties": false
@@ -1954,10 +1958,11 @@ fn tool_about(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcEr
     }
     let mems = db.about_in(vis).map_err(mnemo_err)?;
     let now = db.coordination_now();
+    let with_vector = include_vector_arg(args);
     let mut arr: Vec<Value> = mems
         .iter()
         .map(|m| {
-            let mut v = memory_to_json(m);
+            let mut v = memory_to_json(m, with_vector);
             if let (Some(t), Some(o)) = (crate::stale_since(m, now), v.as_object_mut()) {
                 o.insert("stale_since".into(), json!(crate::date_of(t)));
             }
@@ -2696,12 +2701,13 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
     // RB-013.2: each version's state first, then the levels shown.
     let vis = visibility_arg(args)?;
     let chain = db.history_in(key, scope).map_err(mnemo_err)?;
+    let with_vector = include_vector_arg(args);
     let out: Vec<Value> = chain
         .iter()
         .enumerate()
         .filter(|(_, m)| vis.shows(m))
         .map(|(i, m)| {
-            let mut v = memory_to_json(m);
+            let mut v = memory_to_json(m, with_vector);
             if let Some(obj) = v.as_object_mut() {
                 obj.insert(
                     "state".into(),
@@ -2846,11 +2852,12 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     }
 
     let resp = db.recall_budgeted(&req).map_err(mnemo_err)?;
+    let with_vector = include_vector_arg(args);
     let out: Vec<Value> = resp
         .hits
         .into_iter()
         .map(|h| {
-            let mut obj = memory_to_json(&h.memory);
+            let mut obj = memory_to_json(&h.memory, with_vector);
             if let Some(map) = obj.as_object_mut() {
                 map.insert("score".into(), json!(h.score));
                 map.insert("similarity".into(), json!(h.similarity));
@@ -2985,25 +2992,14 @@ fn tool_forget(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
 }
 
 fn tool_list(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
-    let include_vectors = args
-        .get("include_vectors")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let with_vector = include_vector_arg(args);
     // RB-013.2: private records only when asked.
     let vis = visibility_arg(args)?;
     let mems = db.memories().map_err(mnemo_err)?;
     let out: Vec<Value> = mems
         .iter()
         .filter(|m| vis.shows(m))
-        .map(|m| {
-            let mut v = memory_to_json(m);
-            if !include_vectors {
-                if let Some(o) = v.as_object_mut() {
-                    o.remove("vector");
-                }
-            }
-            v
-        })
+        .map(|m| memory_to_json(m, with_vector))
         .collect();
     Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".into()))
 }
@@ -3305,14 +3301,29 @@ fn tool_cache_get_semantic(db: &mut Mnemo, args: &Value) -> std::result::Result<
     }
 }
 
-/// Serialize a `Memory` into the JSON shape MCP tool responses use.
-/// Serde on `Memory` produces the canonical shape; we mirror what the
-/// CLI's `memory_to_json` does but without the CLI-only vector-stripping
-/// switch (that lives in the individual tools that care).
-fn memory_to_json(m: &Memory) -> Value {
-    serde_json::to_value(m).unwrap_or_else(|_| {
+/// Serialize a `Memory` into the JSON shape MCP tool responses use: serde's
+/// canonical shape, without the vector unless `include_vector` (v0.20.1,
+/// v0201-2): a 384-wide vector is several KB of numbers in an agent's
+/// context for every memory returned.
+fn memory_to_json(m: &Memory, include_vector: bool) -> Value {
+    let mut v = serde_json::to_value(m).unwrap_or_else(|_| {
         let mut map = Map::new();
         map.insert("id".into(), json!(m.id.to_string()));
         Value::Object(map)
-    })
+    });
+    if !include_vector {
+        if let Some(o) = v.as_object_mut() {
+            o.remove("vector");
+        }
+    }
+    v
+}
+
+/// v0.20.1: whether a tool that returns memories should include their
+/// vectors: `include_vector: true` (`list` also takes its older name,
+/// `include_vectors`).
+fn include_vector_arg(args: &Value) -> bool {
+    ["include_vector", "include_vectors"]
+        .iter()
+        .any(|k| args.get(*k).and_then(Value::as_bool).unwrap_or(false))
 }
