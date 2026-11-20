@@ -1953,6 +1953,33 @@ pub enum Wake {
     Held(&'static str),
 }
 
+/// v0.20.1 (RB-017.1): what [`Mnemo::wake_items`] decided, with the items
+/// it marked `delivered`, so a caller can name them (`mnemo wait`).
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum WakeItems {
+    /// Wake the agent for these, now marked `delivered`.
+    Now {
+        /// Pre-approved tasks ready for its role.
+        tasks: Vec<Task>,
+        /// Messages to it by id.
+        messages: Vec<Message>,
+    },
+    /// Nothing that may wake it.
+    Nothing,
+    /// Something waits, but a guardrail holds it (as [`Wake::Held`]).
+    Held(&'static str),
+}
+
+/// The items that may wake an agent, before the guardrails: its role's
+/// pre-approved tasks and the messages to it by id, still `sent`; and every
+/// message, for the pair-burst count.
+struct WakeCandidates {
+    tasks: Vec<Task>,
+    messages: Vec<Message>,
+    all_msgs: Vec<Message>,
+}
+
 impl Mnemo {
     /// 13a (13.1b): what's new for `agent` (and `role`) since it was last
     /// shown. Reads only; [`Mnemo::mark_shown`] records that it was.
@@ -2179,11 +2206,28 @@ impl Mnemo {
     ///
     /// On [`Wake::Now`] the items are marked `delivered` and the wake-up is
     /// recorded on the recipient's presence record, in place.
+    /// [`Mnemo::wake_items`] does the same and returns the items.
     pub fn wake(&mut self, agent: &str, role: Option<&str>) -> Result<Wake> {
-        if self.read_only {
-            return Err(MnemoError::ReadOnly);
-        }
-        let now = self.coordination_now();
+        Ok(match self.wake_items(agent, role)? {
+            WakeItems::Now { tasks, messages } => Wake::Now {
+                tasks: tasks.len(),
+                messages: messages.len(),
+            },
+            WakeItems::Nothing => Wake::Nothing,
+            WakeItems::Held(why) => Wake::Held(why),
+        })
+    }
+
+    /// v0.20.1 (RB-017.4): whether anything may wake `agent` (and `role`):
+    /// a pre-approved task or a message to it by id, still `sent`, before
+    /// the guardrails. Reads only, so it runs on a read-only handle; when
+    /// it's `false`, [`Mnemo::wake`] would return [`Wake::Nothing`].
+    pub fn may_wake(&mut self, agent: &str, role: Option<&str>) -> Result<bool> {
+        let c = self.wake_candidates(agent, role)?;
+        Ok(!c.tasks.is_empty() || !c.messages.is_empty())
+    }
+
+    fn wake_candidates(&mut self, agent: &str, role: Option<&str>) -> Result<WakeCandidates> {
         let sent = crate::memory::delivery::SENT;
         let mut tasks = Vec::new();
         for t in self.ready_tasks(role)? {
@@ -2192,7 +2236,7 @@ impl Mnemo {
                 && meta_string(&m, MNEMO_META_DELIVERY).as_deref() == Some(sent)
                 && !seen_by(&m).iter().any(|s| s == agent)
             {
-                tasks.push(t.id);
+                tasks.push(t);
             }
         }
         let all_msgs: Vec<Message> = self
@@ -2200,16 +2244,37 @@ impl Mnemo {
             .iter()
             .filter_map(Message::from_memory)
             .collect();
-        let candidates: Vec<&Message> = all_msgs
+        let messages = all_msgs
             .iter()
             .filter(|m| m.to == agent && m.from != agent)
             .filter(|m| m.status == crate::memory::MESSAGE_UNREAD && m.delivery == sent)
+            .cloned()
             .collect();
+        Ok(WakeCandidates {
+            tasks,
+            messages,
+            all_msgs,
+        })
+    }
+
+    /// v0.20.1 (RB-017.1): [`Mnemo::wake`], returning the items it marked
+    /// `delivered` instead of their counts. The same guardrails, the same
+    /// writes, in the same window.
+    pub fn wake_items(&mut self, agent: &str, role: Option<&str>) -> Result<WakeItems> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        let now = self.coordination_now();
+        let WakeCandidates {
+            tasks,
+            messages: candidates,
+            all_msgs,
+        } = self.wake_candidates(agent, role)?;
         if tasks.is_empty() && candidates.is_empty() {
-            return Ok(Wake::Nothing);
+            return Ok(WakeItems::Nothing);
         }
         if self.wake_paused()?.is_some() {
-            return Ok(Wake::Held("paused"));
+            return Ok(WakeItems::Held("paused"));
         }
         let burst = |a: &str, b: &str| {
             all_msgs
@@ -2220,8 +2285,8 @@ impl Mnemo {
                 >= PAIR_BURST
         };
         let mut reason = None;
-        let messages: Vec<Ulid> = candidates
-            .iter()
+        let messages: Vec<Message> = candidates
+            .into_iter()
             .filter(|m| {
                 let reply = m.conversation != m.id.to_string();
                 if reply && m.hops > HOP_CAP {
@@ -2234,10 +2299,9 @@ impl Mnemo {
                 }
                 true
             })
-            .map(|m| m.id)
             .collect();
         if tasks.is_empty() && messages.is_empty() {
-            return Ok(Wake::Held(reason.unwrap_or("a guardrail")));
+            return Ok(WakeItems::Held(reason.unwrap_or("a guardrail")));
         }
         // The recipient's rate and cooldown, from its presence record.
         let presence = self
@@ -2252,14 +2316,19 @@ impl Mnemo {
             .unwrap_or_default();
         wakes.retain(|t| now - t < 3600 && *t <= now);
         if wakes.len() >= WAKE_PER_HOUR {
-            return Ok(Wake::Held("the hourly limit of wake-ups"));
+            return Ok(WakeItems::Held("the hourly limit of wake-ups"));
         }
         if wakes.iter().any(|t| now - t < WAKE_COOLDOWN_SECS) {
-            return Ok(Wake::Held("the cooldown between wake-ups"));
+            return Ok(WakeItems::Held("the cooldown between wake-ups"));
         }
         wakes.push(now);
         let delivered = Value::String(crate::memory::delivery::DELIVERED.into());
-        for id in tasks.iter().chain(messages.iter()) {
+        let ids: Vec<Ulid> = tasks
+            .iter()
+            .map(|t| t.id)
+            .chain(messages.iter().map(|m| m.id))
+            .collect();
+        for id in &ids {
             let mut m = self.get(id)?;
             m.metadata
                 .insert(MNEMO_META_DELIVERY.into(), delivered.clone());
@@ -2285,10 +2354,7 @@ impl Mnemo {
                 )?;
             }
         }
-        Ok(Wake::Now {
-            tasks: tasks.len(),
-            messages: messages.len(),
-        })
+        Ok(WakeItems::Now { tasks, messages })
     }
 }
 

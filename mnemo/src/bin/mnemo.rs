@@ -19,6 +19,8 @@ mod mcp_install;
 mod onboard;
 #[path = "mnemo/project.rs"]
 mod project;
+#[path = "mnemo/wait.rs"]
+mod wait;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mnemo_engine::{
@@ -85,6 +87,7 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::Finding { brain: path, .. }
         | Command::Task { brain: path, .. }
         | Command::Wake { brain: path, .. }
+        | Command::Wait { path, .. }
         | Command::Search { path, .. }
         | Command::Snapshots { path, .. }
         | Command::History { path, .. }
@@ -706,6 +709,43 @@ enum Command {
         visibility: Vec<String>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
+        #[command(flatten)]
+        who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// v0.20.1: wait until the brain has work that may wake you, then print
+    /// it and exit 0.
+    ///
+    /// The work is what wakes a session at the end of a turn: a pre-approved
+    /// task ready for your role, or a message to you by id (not to your
+    /// role or `all`), within the wake-up limits (up to 12 wake-ups an hour
+    /// and 60 s apart; `mnemo wake pause` stops them all). It's marked
+    /// `delivered` and printed as ids, senders and task names, never a
+    /// message's text: call `inbox`. Delivery is at most once.
+    ///
+    /// Run it as a background command (Claude Code, Google Antigravity):
+    /// its exit starts a turn in an idle session. Start it again after
+    /// every exit 0, never after 1 or 4. It checks the file once a second
+    /// without holding it, and starting a new one for the same agent
+    /// retires the old one.
+    ///
+    /// Exit codes: 0 woken; 1 it can't wait (no agent, `MNEMO_WAKE=off`,
+    /// no key or a wrong one, an old format, a refused network or synced folder, a
+    /// missing file); 3 `--timeout` passed; 4 a newer `mnemo wait` for the
+    /// same agent took over, or the process that started it is gone.
+    Wait {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        /// Give up after this long (`30s`, `10m`; exit 3). Keep it at least
+        /// 10 s under a tool's own time limit.
+        #[arg(long, value_name = "DURATION", value_parser = parse_wait)]
+        timeout: Option<std::time::Duration>,
+        /// One JSON object: the agent, the tasks (id, slug) and the
+        /// messages (id, from).
+        #[arg(long)]
+        json: bool,
         #[command(flatten)]
         who: AsArgs,
         #[arg(long)]
@@ -4618,6 +4658,37 @@ fn run() -> std::result::Result<(), String> {
                         );
                     }
                 }
+            }
+        }
+        Command::Wait {
+            path,
+            timeout,
+            json,
+            who,
+            passphrase: pp,
+        } => {
+            // RB-017.2: the per-session switch stops a waiter too.
+            if std::env::var("MNEMO_WAKE").is_ok_and(|v| v.eq_ignore_ascii_case("off")) {
+                return Err(
+                    "MNEMO_WAKE=off: this session wakes for nothing, so `mnemo wait` \
+                            doesn't wait"
+                        .into(),
+                );
+            }
+            let (agent, role) = who.resolve()?;
+            let agent = agent.ok_or("`mnemo wait` needs an agent: --as or MNEMO_AGENT")?;
+            // RB-017.5: the key, once.
+            let secret = secret_for(&path, &pp, &None)?;
+            let code = wait::run(wait::Opts {
+                path: std::path::PathBuf::from(&path),
+                agent,
+                role,
+                timeout,
+                json,
+                secret,
+            });
+            if code != 0 {
+                std::process::exit(code);
             }
         }
         Command::Wake {
