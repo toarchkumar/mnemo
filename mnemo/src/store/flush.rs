@@ -108,6 +108,12 @@ impl Mnemo {
         self.header.apply_seal(&mut page, self.pager.dek())?;
         let txn_id = self.header.wal_seq;
         let frames = vec![(0u64, page.to_vec())];
+        // RB-018.1: the WAL's fsync below doesn't go through `Pager::sync`,
+        // so a page written and not yet synced must not exist here.
+        debug_assert!(
+            !self.pager.has_written_unsynced(),
+            "a WAL commit with written, unsynced pages"
+        );
         wal::commit(
             self.pager.file_mut(),
             self.header.wal_start,
@@ -398,6 +404,12 @@ impl Mnemo {
         shrink: bool,
     ) -> Result<()> {
         let (wal_start, wal_pages) = (self.header.wal_start, self.header.wal_pages);
+        // RB-018.1: the barrier synced every page `write_dirty` wrote, and
+        // the WAL's fsync below doesn't go through `Pager::sync`.
+        debug_assert!(
+            !self.pager.has_written_unsynced(),
+            "a WAL commit with written, unsynced pages"
+        );
         wal::commit(self.pager.file_mut(), wal_start, wal_pages, txn_id, frames)?;
         // 5. Checkpoint — fold the WAL into the home pages.
         self.checkpoint(frames)?;

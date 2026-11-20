@@ -130,7 +130,10 @@ mobile packages are published at 0.20.0. There's no format change.
   its own error, `MaybeStored` (retryable), and a call refused with it,
   `close()` included, drops the binding's handle without flushing. The
   stores report it for the call that failed and reopen the file on the next
-  call; the open finishes the commit or drops it.
+  call; the open finishes the commit or drops it. `MnemoError` (the Swift
+  enum, the Kotlin sealed class `MnemoException`) has a new case,
+  `MaybeStored`, so an app with an exhaustive `switch` or `when` over it
+  needs a branch for it.
 - **A flush retried after a failed barrier fsync writes its data pages
   again** (RB-016.1, found in this release's review, never released).
   With the one-fsync barrier above, the pages were counted as clean once

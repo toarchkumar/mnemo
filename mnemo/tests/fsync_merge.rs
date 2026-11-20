@@ -409,3 +409,77 @@ fn a_retry_after_a_failed_write_before_the_barrier_commits_cleanly() {
         assert_eq!(state(&p), (4500, 4500), "write {k}");
     }
 }
+
+/// RB-018.1: a failed direct-run write, then a retry whose new lease fails
+/// at its WAL fsync. That fsync isn't `Pager::sync`, so the pager isn't
+/// told; the restore after the first failure is what put attempt 1's data
+/// pages back on the list. Model the kernel dropping every write since the
+/// last sync (none of them was synced) by putting the whole file back,
+/// then a third flush. Unix only: see `put_back`.
+#[cfg(unix)]
+#[test]
+fn a_failed_run_write_then_a_failed_lease_fsync_writes_the_pages_again() {
+    let dir = tempdir().unwrap();
+    let b = base(dir.path(), 3000);
+    // The last write before the barrier is a direct run's, after
+    // `write_dirty` has written every data page.
+    let last_before_barrier = {
+        let p = dir.path().join("count.mnemo");
+        std::fs::copy(&b, &p).unwrap();
+        let mut db = Mnemo::open(&p, "pw").unwrap();
+        stage(&mut db, 1500).unwrap();
+        fp::set_io_trace(true);
+        db.flush().unwrap();
+        let trace = fp::io_trace();
+        fp::set_io_trace(false);
+        db.close().unwrap();
+        let before = &trace[..trace.iter().position(|e| *e == IoEvent::Sync).unwrap()];
+        assert!(
+            before
+                .iter()
+                .filter(|e| matches!(e, IoEvent::Page(_)))
+                .count()
+                > 2,
+            "{before:?}"
+        );
+        before.len() as u64 - 1
+    };
+
+    let p = dir.path().join("r.mnemo");
+    std::fs::copy(&b, &p).unwrap();
+    let mut db = Mnemo::open(&p, "pw").unwrap();
+    stage(&mut db, 1500).unwrap();
+    let earlier = std::fs::read(&p).unwrap();
+    fp::set_writes_failing(&[last_before_barrier]);
+    assert!(db.flush().is_err(), "the direct run's write failed");
+    fp::set_writes_failing(&[]);
+    fp::set_syncs_until_fail(0);
+    assert!(db.flush().is_err(), "the new lease's fsync failed");
+    fp::set_syncs_until_fail(-1);
+    // Nothing was synced since `earlier`: drop all of it.
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_len(earlier.len() as u64).unwrap();
+        f.write_all(&earlier).unwrap();
+        f.sync_all().unwrap();
+    }
+    db.flush().unwrap();
+    db.close().unwrap();
+
+    let mut db = Mnemo::open(&p, "pw").unwrap();
+    assert_eq!(db.len(), 4500);
+    assert_eq!(db.verify().unwrap(), 4500);
+    let all = db.memories().unwrap();
+    for m in &all {
+        assert_eq!(db.get(&m.id).unwrap().content, m.content);
+    }
+    let mut want: Vec<String> = (0..3000)
+        .chain(100_000..101_500)
+        .map(|i| format!("memory {i}"))
+        .collect();
+    let mut got: Vec<String> = all.into_iter().map(|m| m.content).collect();
+    want.sort();
+    got.sort();
+    assert_eq!(got, want);
+}
