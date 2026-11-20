@@ -764,6 +764,15 @@ impl Pager {
         self.cache.mark_written_dirty();
     }
 
+    /// Whether a page [`Pager::write_dirty`] wrote is still waiting for a
+    /// sync. A WAL commit's fsync isn't [`Pager::sync`], so it doesn't
+    /// settle such a page: if that fsync failed, nothing would put the page
+    /// back on the next flush's list. So none may exist when one runs
+    /// (RB-018.1; checked with `debug_assert!`).
+    pub(crate) fn has_written_unsynced(&self) -> bool {
+        self.cache.has_written()
+    }
+
     /// PERF-2 3f (v0.20.0): whether pages were written since the last
     /// [`Pager::sync`], so a commit's barrier knows it has work to do.
     pub fn unsynced(&self) -> bool {

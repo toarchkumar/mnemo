@@ -321,6 +321,14 @@ impl PageCache {
             }
         }
     }
+
+    /// Whether a page is written and not yet covered by a sync (RB-018.1:
+    /// checked before a WAL commit's own fsync). A walk; for debug checks.
+    pub fn has_written(&self) -> bool {
+        self.map
+            .values()
+            .any(|&i| self.slots[i].state == State::Written)
+    }
 }
 
 #[cfg(test)]
@@ -382,9 +390,11 @@ mod tests {
         let mut c = PageCache::new(1);
         c.insert(1, 1, page(1), true);
         c.insert(2, 1, page(2), true);
+        assert!(!c.has_written());
         c.mark_dirty_written();
         assert!(c.dirty_pages().is_empty());
         assert!(c.has_dirty() && c.is_dirty(1) && c.is_dirty(2));
+        assert!(c.has_written());
         // Pinned: a clean page goes first, and the written ones stay.
         c.insert(3, 1, page(3), false);
         assert_eq!(c.len(), 2);
@@ -394,11 +404,12 @@ mod tests {
         assert!(c.peek(1, 1).is_some());
         // The sync failed: both go back on the flush's list.
         c.mark_written_dirty();
+        assert!(!c.has_written());
         assert_eq!(c.dirty_pages(), vec![(1, 1), (2, 1)]);
         // Written again, then synced: clean, and trimmed to the cap.
         c.mark_dirty_written();
         c.mark_written_clean();
-        assert!(!c.has_dirty());
+        assert!(!c.has_dirty() && !c.has_written());
         c.trim();
         assert_eq!(c.len(), 1);
     }
