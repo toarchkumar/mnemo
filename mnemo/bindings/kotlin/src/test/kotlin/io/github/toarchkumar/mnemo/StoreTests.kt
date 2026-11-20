@@ -249,6 +249,35 @@ class StoreTests {
         store.close()
     }
 
+    @Test fun aMaybeStoredRefusalDropsTheHandleAndTheNextCallReopens(): Unit = runBlocking {
+        val keys = InMemoryKeyStorage()
+        val store = store("refused", keys = keys)
+        store.remember("one", vec(0))
+        store.flush()
+
+        // After a commit that failed past its commit point, the engine
+        // refuses every later write on that handle (RB-016.3). The call
+        // reports it, and the store lets go of the file.
+        store.nextCommitFault = MnemoException.MaybeStored("commit 7 failed after its commit point; reopen the file")
+        val refused = try {
+            store.flush()
+            null
+        } catch (e: MnemoException.MaybeStored) {
+            e
+        }
+        assertNotNull(refused)
+        assertTrue(refused!!.isRetryable())
+        assertFalse(store.isOpen)
+        assertUnlockedAndDurable(store.file, keys, 1uL)
+
+        // The next call reopens the file.
+        store.remember("two", vec(1))
+        assertTrue(store.isOpen)
+        assertEquals(2uL, store.count())
+        store.close()
+        assertUnlockedAndDurable(store.file, keys, 2uL)
+    }
+
     @Test fun callsRacingClosesNeverSeeClosed(): Unit = runBlocking {
         val store = store("race")
         coroutineScope {

@@ -362,9 +362,17 @@ name. Nothing else is needed.
   `HeaderTampered`, `UnsupportedVersion`, `NotFound`, `ReadOnly`,
   `DimensionMismatch`, `Invalid`, `Io`, `Corrupt`, `Closed` and `Embedder`,
   since v0.12.2 `NotAMnemoFile`, `NeedsWriteOpen`, `Kdf` and `Crypto`, and
-  since v0.13 `EmbedderMismatch` and `FormatTooOld`.
+  since v0.13 `EmbedderMismatch` and `FormatTooOld`, and since v0.20.0
+  `MaybeStored`.
   `MnemoStore` never surfaces `Closed`: it reopens the file and retries once,
   and a handle a panic poisoned is treated the same way.
+- **`MnemoException.MaybeStored`**: an earlier commit on the handle failed
+  past its commit point (a full disk at the checkpoint, say), so the engine
+  can't tell whether it's in the file and refuses every later write. The
+  call that hits it throws, `MnemoStore` drops the handle without flushing,
+  and the next call reopens the file, which finishes that commit or drops
+  it. Writes made after that commit are lost; check what's there before
+  writing them again.
 - **`MnemoStoreException`** comes from this layer: `KeyMissing(keyId,
   path)` (the key is gone), `Keystore(operation)` (retryable; see above)
   and `File`.
@@ -374,7 +382,7 @@ apart for `MnemoException`):
 
 | Class | Errors | What to do |
 |---|---|---|
-| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `MnemoStoreException.Keystore` | Try again later, on the next launch, say. The data is fine. |
+| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`, `MaybeStored` (check first; see above); `MnemoStoreException.Keystore` | Try again later, on the next launch, say. The data is fine. |
 | Fix the call | `Invalid`, `DimensionMismatch`, `EmbedderMismatch`, `FormatTooOld` (a v8 file: convert it with `mnemo compact` on a Mac), `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
 | The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `MnemoStoreException.KeyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |
 

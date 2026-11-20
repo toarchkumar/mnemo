@@ -88,7 +88,11 @@ mobile packages are published at 0.20.0. There's no format change.
   the handle now checks that the file's transaction didn't go back and
   that the runs it keeps still have, on disk, the page nonces it read.
   Otherwise it reloads in full, with a fresh page cache. No format change.
-  The check's cost was within the noise of the catch-up.
+  The check's cost was within the noise of the catch-up. It assumes the
+  copy replaced the whole file, as `cp` and a snapshot rollback do; a copy
+  written over the start of the file without cutting it isn't caught, so
+  restore a copy by replacing the file (RB-016.3, in `docs/shared-mode.md`
+  and `docs/design/catch-up.md` 8a).
 - **The page cache is keyed by page and generation.** A hit needs the
   generation the pointer expects, so a page another process freed and
   reused is never served from the cache. This is what lets a shared
@@ -118,6 +122,15 @@ mobile packages are published at 0.20.0. There's no format change.
   whether the write is there. A flush that fails before the commit point is
   still retried on the same handle. Shared handles weren't affected: they
   reload after such a failure. v0.19.1 has the bug.
+- **The Swift and Kotlin stores recover from that refusal** (RB-016.3,
+  found in this release's review, never released). The mobile binding
+  reported `MaybeStored` as `Io` and kept the handle, so after one such
+  failure every write and `close()` failed, for the rest of the process on
+  Android and until the app next went to the background on iOS. It's now
+  its own error, `MaybeStored` (retryable), and a call refused with it,
+  `close()` included, drops the binding's handle without flushing. The
+  stores report it for the call that failed and reopen the file on the next
+  call; the open finishes the commit or drops it.
 - **A flush retried after a failed barrier fsync writes its data pages
   again** (RB-016.1, found in this release's review, never released).
   With the one-fsync barrier above, the pages were counted as clean once

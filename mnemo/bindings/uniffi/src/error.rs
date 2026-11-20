@@ -6,7 +6,7 @@
 ///
 /// Three classes (`is_retryable` tells the first apart):
 /// - **retry later:** `Locked`, `Io`, `Kdf` (the KDF couldn't get its
-///   memory), `Closed` (reopen);
+///   memory), `Closed` and `MaybeStored` (reopen);
 /// - **fix the call:** `Invalid`, `DimensionMismatch`, `EmbedderMismatch`,
 ///   `FormatTooOld`, `ReadOnly`, `NeedsWriteOpen`, `NotFound`,
 ///   `WrongPassphrase`, `Embedder`;
@@ -85,6 +85,14 @@ pub enum MnemoError {
     /// file again (the Swift and Kotlin stores do that themselves).
     #[error("database is closed")]
     Closed,
+    /// An earlier commit on this handle failed at or after its commit point,
+    /// so the handle can't tell whether that commit is in the file, and it
+    /// refuses every write (v0.20.0). The binding has dropped the handle
+    /// without flushing, so later calls are `Closed`: open the file again,
+    /// which finishes the commit or drops it (the Swift and Kotlin stores do
+    /// that on the next call). Writes made since that commit are lost.
+    #[error("{message}")]
+    MaybeStored { message: String },
     /// The app's embedder callback threw or returned the wrong shape.
     /// Nothing was written.
     #[error("embedder failed: {message}")]
@@ -101,15 +109,19 @@ impl From<mnemo_engine::MnemoError> for MnemoError {
             E::Locked { path, .. } => MnemoError::Locked {
                 path: path.display().to_string(),
             },
+            // v0.20.0 (RB-016.3): an exclusive handle returns this after a
+            // commit that failed at or after its commit point.
+            other @ E::MaybeStored(_) => MnemoError::MaybeStored {
+                message: other.to_string(),
+            },
             // 12.4 step 2a. The mobile shared mode arrives with mobile's
             // opt-in; until then these come only from the Rust API. `Io`
             // keeps the engine's message without a new binding variant.
-            other @ (E::Cancelled
-            | E::Unsupported(_)
-            | E::MaybeStored(_)
-            | E::ReplacedDuringWrite { .. }) => MnemoError::Io {
-                message: other.to_string(),
-            },
+            other @ (E::Cancelled | E::Unsupported(_) | E::ReplacedDuringWrite { .. }) => {
+                MnemoError::Io {
+                    message: other.to_string(),
+                }
+            }
             // v0.14.0 step 1: the file at the handle's path was replaced, and
             // nothing was written. `Io` with the engine's message, which says
             // to reopen. Not `Closed`: the stores retry a `Closed` call on a
@@ -173,8 +185,9 @@ fn identity(i: mnemo_engine::EmbedderIdentity) -> crate::types::EmbedderIdentity
 #[uniffi::export]
 impl MnemoError {
     /// Whether the same call may succeed later with nothing changed: `Locked`,
-    /// `Io`, `Kdf` and `Closed` (reopen first). Everything else needs a
-    /// different call, or means the data can't be read (v0.12.2).
+    /// `Io`, `Kdf`, and `Closed` and `MaybeStored` (reopen first). Everything
+    /// else needs a different call, or means the data can't be read
+    /// (v0.12.2).
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
@@ -182,6 +195,7 @@ impl MnemoError {
                 | MnemoError::Io { .. }
                 | MnemoError::Kdf { .. }
                 | MnemoError::Closed
+                | MnemoError::MaybeStored { .. }
         )
     }
 }

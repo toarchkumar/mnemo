@@ -90,6 +90,12 @@ public struct MnemoStoreConfiguration: Sendable, Equatable {
 ///   - once the app is active again, the file stays open between calls.
 ///
 ///   A call never sees ``MnemoError/Closed`` because of a transition.
+/// - After a commit that failed past its commit point (a full disk at the
+///   checkpoint, say), the engine refuses every later write on that handle.
+///   The call that hits the refusal throws ``MnemoError/MaybeStored(message:)``,
+///   the store drops the handle without flushing, and the next call reopens
+///   the file, which finishes that commit or drops it. Writes made after it
+///   are lost (v0.20.0).
 /// - **Durability:** a write is in memory until the store commits it. Under
 ///   the default ``FlushPolicy/coalesced(maxDelay:maxWrites:)`` that's within
 ///   about a second (or after 64 writes); ``FlushPolicy/everyWrite`` commits
@@ -386,12 +392,20 @@ public actor MnemoStore {
     ///
     /// If the final flush fails (a full disk, say), the file stays open with
     /// every unflushed write and the error is thrown: free space and call
-    /// ``flush()`` or `close()` again (v0.12.2).
+    /// ``flush()`` or `close()` again (v0.12.2). A
+    /// ``MnemoError/MaybeStored(message:)`` refusal closes it anyway (v0.20.0).
     public func close() throws {
         guard let db else { return }
         cancelPendingCommit()
-        // The binding's close flushes first and keeps its handle on failure.
-        try db.close()
+        // The binding's close flushes first and keeps its handle on failure,
+        // except on a `MaybeStored` refusal, which no retry gets past: then
+        // it has dropped its handle, and the store drops its own.
+        do {
+            try db.close()
+        } catch let error as MnemoError {
+            if case .MaybeStored = error { self.db = nil }
+            throw error
+        }
         self.db = nil
         commits += 1
     }
@@ -525,6 +539,14 @@ public actor MnemoStore {
     /// Whether the file is open (tests).
     var isOpen: Bool { db != nil }
 
+    /// The next commit throws this instead of flushing (tests of the
+    /// ``MnemoError/MaybeStored(message:)`` path, which needs a commit that
+    /// fails past its commit point).
+    var nextCommitFault: MnemoError?
+
+    /// Sets ``nextCommitFault`` (tests).
+    func setNextCommitFault(_ fault: MnemoError?) { nextCommitFault = fault }
+
     /// Whether the store treats the app as active (tests).
     nonisolated var appIsActive: Bool { lifecycle.isForeground }
 
@@ -602,11 +624,22 @@ public actor MnemoStore {
     }
 
     /// Flushes the open file and clears the coalesced state. A no-op while
-    /// the file is closed.
+    /// the file is closed. A ``MnemoError/MaybeStored(message:)`` refusal
+    /// drops the handle (the binding already let go of the file) and is
+    /// thrown.
     private func commit() throws {
         cancelPendingCommit()
         guard let db else { return }
-        try db.flush()
+        do {
+            if let fault = nextCommitFault {
+                nextCommitFault = nil
+                throw fault
+            }
+            try db.flush()
+        } catch let error as MnemoError {
+            if case .MaybeStored = error { self.db = nil }
+            throw error
+        }
         commits += 1
     }
 
@@ -646,13 +679,19 @@ public actor MnemoStore {
     /// Actor isolation means nothing closes the handle while `body` runs; if
     /// the engine reports `Closed` anyway, the store reopens once and
     /// retries (`Closed` is reported before any work is done, so the retry
-    /// is safe).
+    /// is safe). A ``MnemoError/MaybeStored(message:)`` refusal drops the
+    /// handle and is thrown: the next call reopens.
     private func onHandle<T>(_ body: (MnemoDb) throws -> T) throws -> T {
         do {
-            return try body(try handle())
-        } catch MnemoError.Closed {
-            db = nil
-            return try body(try handle())
+            do {
+                return try body(try handle())
+            } catch MnemoError.Closed {
+                db = nil
+                return try body(try handle())
+            }
+        } catch let error as MnemoError {
+            if case .MaybeStored = error { db = nil }
+            throw error
         }
     }
 
