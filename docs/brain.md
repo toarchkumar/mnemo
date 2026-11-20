@@ -1,6 +1,6 @@
 # mnemo export
 
-The brain's backup, written by mnemo 0.19.1 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
+The brain's backup, written by mnemo 0.20.0 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
 
 Keyed memories by key, then tasks, findings and the project essence, then the rest by id. Left out: vectors, thread turns, thread essence, messages, claims, presence, private records, access stats, and security findings until they're verified against a release.
 
@@ -380,6 +380,20 @@ R-006.1 (REVIEWER-A, accepted modified by PLANNER-A 2026-11-11): Phase 13 splits
 
 ```text
 2026-11-15 (RB-012.6 item 4, closing SEEN-PER-AGENT): messages to a role or all, and a role's ready tasks, are new on each agent's per-turn line until that agent was shown them (_mnemo.seen_by); direct messages keep the delivery field; NewWork carries its agent and mark_shown records it; wake() skips a task the agent has seen.
+```
+
+## 01M7VCJPBQVCX95SR0ACEHK35R
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.brand`
+- scope: private
+- created: 2026-11-20T02:29:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.brand"}`
+
+```text
+decision.brand (user, 2026-11-19, through REVIEWER-A's REV-013.1): the MNemo mark is locked: A3, the sealed-file M (amber #F0A35A shackle, teal #0E7C74 file, mint #5FD0C4 fold, white 45-degree M); the palette, type and radii are index.html's tokens. No deviation on the site, inspect, social preview, docs or app screens without a brand rethink the user starts. Reference: docs/brand.md and docs/img/logo.svg (plus mono variants). Wordmark MNemo; code names stay mnemo.
 ```
 
 ## 01M7SBNAYDTJHH726WDYE03506
@@ -763,10 +777,38 @@ Roadmap order (user decision 2026-11-18, "Aligned"): paid features on hold (rela
 - scope: private
 - created: 2026-11-19T20:06:04Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-order","_mnemo.supersedes":"01M7RWJ2ZVHTNN3BBEYFHD69A6"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795128816,"_mnemo.key":"decision.roadmap-order","_mnemo.superseded_by":"01M7V07X0H53ZA4XESGER8YR4D","_mnemo.supersedes":"01M7RWJ2ZVHTNN3BBEYFHD69A6"}`
 
 ```text
 Roadmap order (user decisions 2026-11-18, "Aligned", and 2026-11-19, "Yes" to REV-011.6's swap): paid features on hold (relay protocol, hosted relay Pro, 13.2 key slots, 13.4 signatures, Teams). After v0.20.0, the free work in this order: (1) 13.7 mnemo merge; (2) sync change sets on disk (mnemo sync export/import through any folder; designed as sequential immutable files fit for object-storage conditional writes, REV-011.4); (3) smarter memory (merge duplicates, summarise sessions, link related memories, forget stale ones; MCP elicitation and mnemo doctor); (4) Node.js package and framework integrations (the AI SDK memory package first, then eve, then the sandbox guide); (5) mobile see-and-delete screens. Hosted brains for an agent harness: not now (user, 2026-11-19; status.rev-011). Carried items ride as patches: KEYCHAIN-REPROMPT, PY-SDIST, WAKE-SOCKET, RB-006.12, whether recall returns findings, the timing flakes.
+```
+
+## 01M7V07X0H53ZA4XESGER8YR4D
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-order`
+- scope: private
+- created: 2026-11-19T22:53:36Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795142268,"_mnemo.key":"decision.roadmap-order","_mnemo.superseded_by":"01M7VD2D87P32164ST1J8PPB1T","_mnemo.supersedes":"01M7TPN4QN1ZWBZVR5BGHMNW61"}`
+
+```text
+Roadmap order (user decisions 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.6; 2026-11-19 REV-012 answers and "Switch merge and more editors, 1 and 2, and go"). Paid features on hold: relay protocol, hosted relay (Pro), 13.2 key slots, 13.4 signatures, Teams, hosted brains (REV-011). After v0.20.0, in this order. Core: (1) 13.7 mnemo merge; (2) more editors in mnemo onboard (REV-012.2): Codex and Google Antigravity first, then VS Code and Windsurf/Devin Desktop, each with MCP, hooks where the client has them, and the guide; (3) sync change sets on disk (mnemo sync export/import through any folder; sequential immutable files fit for object-storage conditional writes, REV-011.4); (4) smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones, opt-in turn-to-fact consolidation as keyed deltas (REV-012.1), MCP elicitation, mnemo doctor, status.backlog-small; (5) public benchmarks against CLAUDE.md plus notes, claude-mem and Mem0 (REV-012.3). Reach: (6) Node.js (AI SDK memory package first, then eve, then the sandbox guide). Bonus: (7) mobile see-and-delete screens (not held; last as a bonus, REV-012.4). Mobile releases stay decoupled from engine-only releases. Ideas explored: docs/ideas.md.
+```
+
+## 01M7VD2D87P32164ST1J8PPB1T
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-order`
+- scope: private
+- created: 2026-11-20T02:37:48Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-order","_mnemo.supersedes":"01M7V07X0H53ZA4XESGER8YR4D"}`
+
+```text
+Roadmap order (user decisions 2026-11-18 "Aligned"; 2026-11-19 "Yes" to REV-011.6; 2026-11-19 REV-012 answers and "Switch merge and more editors, 1 and 2, and go"; 2026-11-19 "let do it" to v0.20.1 mnemo wait first, with a reviewer spec check before the Worker builds). Paid features on hold: relay protocol, hosted relay (Pro), 13.2 key slots, 13.4 signatures, Teams, hosted brains (REV-011). After v0.20.0, in this order. Core: (0) v0.20.1 mnemo wait, one wake signal from the brain for every editor (spec.v0201-wait, status.cross-editor-wake); (1) 13.7 mnemo merge; (2) more editors in mnemo onboard (REV-012.2): Codex and Google Antigravity first, then VS Code and Windsurf/Devin Desktop, each with MCP, hooks where the client has them, the guide, and its way to wake (REV-014 verifies each editor); (3) sync change sets on disk (sequential immutable files fit for object-storage conditional writes, REV-011.4); wake-ups across devices ride these; (4) smarter memory: merge duplicates, summarise sessions, link related memories, forget stale ones, opt-in turn-to-fact consolidation as keyed deltas (REV-012.1), MCP elicitation, mnemo doctor, status.backlog-small; (5) public benchmarks against CLAUDE.md plus notes, claude-mem and Mem0 (REV-012.3). Reach: (6) Node.js (AI SDK memory package first, then eve, then the sandbox guide). Bonus: (7) mobile see-and-delete screens (REV-012.4). Mobile releases stay decoupled from engine-only releases. Ideas explored: docs/ideas.md.
 ```
 
 ## 01M7PEYPSTKP6NTD4E8NBCMWV8
@@ -1539,6 +1581,20 @@ Dogfooding layout (since the v0.16 switch, 2026-11-15): the brain is .git/mnemo/
 fact.flake-cli-shared-embed (worker-a, 2026-11-19): cli_shared::a_shared_mcp_server_embeds_before_it_takes_the_lock (tests/cli_shared.rs:470) failed once on a hosted Windows runner (PR 154, job 135826405514): 'the import waited 1.9746906s' against a 1.2 s cap, while the import got the lock within its --wait 500ms. The time was the CLI process (start, KDF, open), not the lock. It passed on the re-run. The sibling the_cli_embeds_before_it_takes_the_lock had the same kind of Ubuntu failure in v0.15 (01M7DQC8). Logged, not changed; the Planner decides if it recurs (a fix would split the process time from the lock wait, as that sibling's message does).
 ```
 
+## 01M7W6N36EJBM8RVHK4J11VAPY
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `fact.flake-shared-fixes-heal-deadline`
+- scope: private
+- created: 2026-11-20T10:04:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"fact.flake-shared-fixes-heal-deadline","area":"testing","topic":"flake"}`
+
+```text
+shared_fixes::a_read_that_heals_waits_one_deadline_in_all (mnemo/tests/shared_fixes.rs:531) failed once on CI's rust (macos-latest), run 44714003409, PR #158 (v0200-8t, 2026-11-20): it waited 757.95 ms against a 700 ms bound (one 500 ms deadline; two would be 800). The PR didn't touch shared mode, so it's a wall-clock flake on a slow runner. Re-run with `gh run rerun <id> --failed`. If it recurs, the bound could be loosened toward 800 ms, which still tells one deadline from two.
+```
+
 ## 01M7TGKZHC2KH79WJKGNAGPNHJ
 
 - type: semantic
@@ -2155,6 +2211,20 @@ cargo install mnemo-engine with no features builds a CLI with no OS keychain and
 2026-11-15 (RB-012.6 item 3): the presence probe's 20 ms retry inside the exclusive claim window cost task next 79.3 ms facing 3 live workers and 167.1 ms facing 6 (load near 6); the claim path now probes once (probe_once), giving 1.4 and 1.5 ms (load near 3); who keeps the retry.
 ```
 
+## 01M7W5SV844DBTAV5H4N8S7Z2T
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `finding.compact-time-100k`
+- scope: private
+- created: 2026-11-20T09:50:01Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"finding.compact-time-100k","area":"performance","topic":"compact"}`
+
+```text
+2026-11-20 (v0200-8t, RB-018.2): Mnemo::compact_file on a 100K-memory file (384-dim, ~400-byte texts, 167,829,504 bytes), release builds, 3 alternated runs each on worker-a's Mac: 7f52d54 median 4912.3 ms (5036.4, 4912.3, 4876.2); fa8f88f (after v0200-8's Written page state) median 4954.6 ms (4954.6, 4998.0, 4928.3), +0.9%. The Written state's pinning didn't measurably slow compaction.
+```
+
 ## 01M7GTRM7JAFHQA4GD6D8NAEM4
 
 - type: episodic
@@ -2223,6 +2293,20 @@ A keyed write (Mnemo::remember_keyed, mnemo/src/store/keyed.rs) supersedes only 
 
 ```text
 2026-11-15 (13a step 3): the 1,000-round two-process claim race takes about 80 s on this Mac (load near 9) because each round is two durable commits and macOS's sync_all is a full fsync (~37 ms per shared write window measured at 200 rounds). The FLAKE-1 spawner thread costs nothing measurable. CL_RACE_ROUNDS overrides the count.
+```
+
+## 01M7W5STTZ84EGH5C2FSZZ6JD3
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `finding.macos-test-launch-scan`
+- scope: private
+- created: 2026-11-20T09:50:01Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"finding.macos-test-launch-scan","area":"testing","topic":"macos-launch-scan"}`
+
+```text
+On worker-a's Mac (2026-11-20, v0200-8t), the full `cargo test --features failpoints` took over 3 hours of wall time, though no suite ran longer than 27 s: each newly linked test binary sat at _dyld_start at 0% CPU while syspolicyd ran at about 69% CPU (macOS checks every new executable before it launches). The fix is the user's to make: add the terminal app that runs tmux under System Settings > Privacy & Security > Developer Tools (it probably needs a terminal and tmux restart). Until then, expect a full local run to take hours, and check `sample <pid>` for _dyld_start before suspecting a hung test.
 ```
 
 ## 01M7EH1AEM21V79Y8TN1MWEM2N
@@ -2307,6 +2391,20 @@ v0.16.0 by-hand run (2026-11-15): after install.sh put mnemo 0.16.0 in ~/.local/
 
 ```text
 strip = "symbols" in the engine's release profile breaks the Kotlin bindings: UniFFI's binding generator reads its metadata (UNIFFI_META_* symbols) from the built libmnemo_uniffi library, and the strip removes them ('No UniFFI metadata found', Mobile CI 2026-11-15). Since v0.15 [profile.release.package.mnemo-uniffi] strip = "none" keeps them; the CLI and the wheels are stripped. Two artifacts don't change with the strip: the Windows ones (MSVC keeps symbols in a .pdb that isn't shipped) and the aarch64 Linux CLI, which cargo-zigbuild's link already strips.
+```
+
+## 01M7VKSMQP6ZZ57WT6E9AXNVN8
+
+- type: semantic
+- agent: `cursor-agent`
+- key: `finding.windows-test-file-lock`
+- scope: private
+- created: 2026-11-20T04:35:20Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"finding.windows-test-file-lock"}`
+
+```text
+Tests that read, copy or write a .mnemo file while a Mnemo handle on it is still open fail on Windows CI with os error 33 ('another process has locked a portion of the file'), because Windows enforces byte-range locks. Gate such tests #[cfg(unix)] (with any helper and import only they use), or close the handle first. Found in v0200-8 (tests/fsync_merge.rs put_back, 2026-11-19).
 ```
 
 ## 01M7RFVKKMKZ2H1BWWPZE3YMFH
@@ -3044,6 +3142,48 @@ report.v0200-0 DONE (2026-11-18): v0.20.0 setup. Recall at start: found (spec.v0
 report.v0200-1 DONE (2026-11-18): the fsync merge, PERF-2 3f, part (A) of spec.v0.20.0. Recall at start: found (spec.v0.20.0 by history --key; docs/design/perf-2.md section 3f). PR 143 (commit 0a8f8fe) squash-merged into release-0.20.0 as f2898a9, CI 21 of 21 passed. The change: Pager::write_dirty writes the data pages unsynced; the new stage_commit writes FMT-9c's direct runs and ends with one barrier (Pager::sync when Pager::unsynced) before wal::commit; the commit keeps its own fsync, never merged with the barrier; Pager::flush and the direct_writes field are gone. flush saves (header, free, free_dirty) before stage_commit and restores them on its error, so a retry on the same handle commits over the stored state; without the restore, the barrier-retry test fails with PageAuthFailed on reopen. Measured (device_budget --sizes 1000,10000,100000, this Mac): batch of 100 fsyncs before->after 1K 4->3, 10K 3->3, 100K 4->3; single write 3->3 at every size. Batch median ms 26.19->21.02, 55.98->20.86, 34.61->32.77; single median ms 14.97->13.06, 34.06->13.02, 17.48->13.57. Load before 4.86->8.08, after 5.35->3.28: the times are noisy and not a claim. Tests: tests/fsync_merge.rs, 6 tests: an I/O trace showing one barrier before each commit; 3 fsyncs; a crash at every write and a failed sync at each of the three leave the file pre or post (a failed barrier leaves it pre); retries after a failed barrier and after every write before it commit cleanly. Also prop_big_batch_commits_crash_pre_or_post (12 cases). Without the barrier, three fsync_merge tests fail. Local, rustc 1.95.0: cargo test --features failpoints 795 passed, 0 failed, 1 ignored, 72 suites; fmt clean; clippy -D warnings clean with CI's features, for -p mnemo-uniffi, and with no features. New failpoints: set_syncs_until_fail and an I/O trace (fact.io-trace-failpoints). No format change. Deviation: none from the spec. For triage, pre-existing and not fixed: fact.post-commit-retry-bug. On an exclusive handle, a flush that fails at the WAL commit write or the first checkpoint page write, retried on the same handle, returns Ok, but the reopen fails PageAuthFailed. It's the same on release-0.20.0 at 2d21ac6 and on this branch (temporary test, deleted).
 ```
 
+## 01M7VQ99AC3ZJDK7FAJAGJ75XV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-10h`
+- scope: private
+- created: 2026-11-20T05:36:19Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-10h","area":"decision","topic":"report.v0200-10h"}`
+
+```text
+report.v0200-10h (worker-a, 2026-11-19): DONE. fa8f88f 'docs: the locked MNemo logo and the brand guide (REV-013.1)' on release-0.20.0, pushed. No PR: a hand-off commit. It has exactly the five listed paths: index.html (4 insertions, 4 deletions: the favicon and the nav mark are the A3 SVG, and .brand-mark has no teal box), docs/brand.md (new, 109 lines), and docs/img/logo.svg, logo-mono-dark.svg and logo-mono-light.svg (new, 6 lines each). RECALL: found decision.brand (01M7VCJP). CHECKED: the SVGs have no script or external link, and brand.md holds no private detail. task next served v0200-10h before v0200-8t (the pointer's task), so it was done first. v0200-8t is next.
+```
+
+## 01M7W7NGT6K66J94GQVC2W9S7E
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-11`
+- scope: private
+- created: 2026-11-20T10:22:37Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795189607,"_mnemo.key":"report.v0200-11","_mnemo.superseded_by":"01M7WT73A8R1GA1SWV3DVMH1Q5","area":"report","topic":"v0200-11"}`
+
+```text
+report.v0200-11 (worker-a, 2026-11-20): WAITING for the user (step 1 done). RECALL: found decision.dogfood (item 4: release candidates installed to ~/.local/bin/mnemo before the tag, every session reconnects with /mcp, and the Planner checks the server start times), report.v0200-10h and report.v0200-4. BUILD: release-0.20.0 at ea15d8cb15d56af6218e8b7f6c1a6b756088c74b (after v0200-9 e8389f2, v0200-10h fa8f88f and v0200-8t ea15d8c), built with `cargo build --release --locked --features keychain,embed-candle` from mnemo/ (release.yml's features), finished in 2m 09s; the tree was clean apart from the untracked .claude/. INSTALL: copied to ~/.local/bin/.mnemo-rc.tmp, then one `mv -f` onto ~/.local/bin/mnemo. `mnemo --version` gives mnemo 0.20.0; the size is 10,799,632 bytes; mtime 2026-11-20T02:22:10-0800; SHA-256 2d46a13a2f0c64fef310ee7b306ee4ede62425f0edd6170ad29f102ad124afef (equal to target/release/mnemo). The previous binary (mnemo 0.19.1, mtime Nov 19 09:40, SHA-256 a78683336a94f05667306467505d574863f4d487739701f562b4dda3bb0cd1cf) is kept in worker-a's scratchpad as mnemo-0.19.1.bak for a rollback. RUNNING SERVERS at the install, all started before it, so all still run the old build: pid 2701 (started Nov 19 13:43:24), 2747 (Nov 19 13:43:52) and 82491 (Nov 19 14:51:08), all `mnemo serve --mcp --shared`. KEYCHAIN: the new binary's first brain command (02:2x, the Mac in dark wake) failed with 'io error: the macOS keychain (reading): Platform failure: In dark wake, no UI possible': macOS asks again before a newly built binary reads the brain's key (KEYCHAIN-REPROMPT), and no dialog can show while the Mac sleeps. This report, the task update and the post were written with the 0.19.1 backup through MNEMO_BIN. The user approves the keychain prompt for ~/.local/bin/mnemo (Always Allow) when the Mac is awake, at the /mcp reconnects. NEXT: the user reconnects mnemo in every session (/mcp), worker-a included; planner-a checks each serve start time against 02:22:10. On READ: v0200-11, worker-a runs mnemo about and one recall on the project brain with the new build and reports them.
+```
+
+## 01M7WT73A8R1GA1SWV3DVMH1Q5
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-11`
+- scope: private
+- created: 2026-11-20T15:46:47Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-11","_mnemo.supersedes":"01M7W7NGT6K66J94GQVC2W9S7E","area":"report","topic":"v0200-11"}`
+
+```text
+report.v0200-11 (worker-a, 2026-11-20): DONE (updated after READ: v0200-11). RECALL: found decision.dogfood (item 4: release candidates installed to ~/.local/bin/mnemo before the tag, every session reconnects with /mcp, and the Planner checks the server start times), report.v0200-10h and report.v0200-4. BUILD: release-0.20.0 at ea15d8cb15d56af6218e8b7f6c1a6b756088c74b (after v0200-9 e8389f2, v0200-10h fa8f88f and v0200-8t ea15d8c), built with `cargo build --release --locked --features keychain,embed-candle` from mnemo/ (release.yml's features), finished in 2m 09s; the tree was clean apart from the untracked .claude/. INSTALL: copied to ~/.local/bin/.mnemo-rc.tmp, then one `mv -f` onto ~/.local/bin/mnemo. `mnemo --version` gives mnemo 0.20.0; the size is 10,799,632 bytes; mtime 2026-11-20T02:22:10-0800; SHA-256 2d46a13a2f0c64fef310ee7b306ee4ede62425f0edd6170ad29f102ad124afef (equal to target/release/mnemo). The previous binary (mnemo 0.19.1, mtime Nov 19 09:40, SHA-256 a78683336a94f05667306467505d574863f4d487739701f562b4dda3bb0cd1cf) is kept in worker-a's scratchpad as mnemo-0.19.1.bak for a rollback. RUNNING SERVERS at the install, all started before it, so all still run the old build: pid 2701 (started Nov 19 13:43:24), 2747 (Nov 19 13:43:52) and 82491 (Nov 19 14:51:08), all `mnemo serve --mcp --shared`. KEYCHAIN: the new binary's first brain command (02:2x, the Mac in dark wake) failed with 'io error: the macOS keychain (reading): Platform failure: In dark wake, no UI possible': macOS asks again before a newly built binary reads the brain's key (KEYCHAIN-REPROMPT), and no dialog can show while the Mac sleeps. This report, the task update and the post were written with the 0.19.1 backup through MNEMO_BIN. The user approves the keychain prompt for ~/.local/bin/mnemo (Always Allow) when the Mac is awake, at the /mcp reconnects. RECONNECT (planner-a's note, 15:46Z): the user reconnected /mcp in all three sessions; the servers are now pid 19170 (planner-a, Nov 20 07:43:19), 19186 (reviewer-b, 07:43:25) and 19464 (worker-a, 07:45:32), all after the install at 02:22:10, and worker-a's ps shows the same three. The keychain read now works with the new build (the user approved it). CHECKS with ~/.local/bin/mnemo 0.20.0 (SHA-256 2d46a13a...afef, rechecked): `mnemo about` exit 0, 8,358 bytes, 0.348 s total; header: 27951 memories (413 facts, 27320 turns, 7 essence, 211 coordination), 384-dim, encrypted, 109 snapshots; the onboarding briefing listed 10 entries, MANIFEST first. One `mnemo recall --text "the v0.20.0 release candidate is installed for dogfooding before the tag" --no-track`: exit 0, 10 results, 0.392 s total; the top results were report.v0200-11 (score 0.899) and decision.dogfood (0.827). No friction found beyond the keychain re-prompt for a new binary, which is KEYCHAIN-REPROMPT, already carried in the essence's open list. The sessions run on 0.20.0 until the tag.
+```
+
 ## 01M7S4ZZA69GFYANM0AHNXXC3X
 
 - type: episodic
@@ -3180,6 +3320,90 @@ report.v0200-3r (worker-a, 2026-11-19): READY. A catch-up never trusts held stat
 
 ```text
 report.v0200-4 (worker-a, 2026-11-19): READY. mnemo serve --mcp is shared by default (step 8 of spec.v0.20.0). PR #148 was squash-merged into release-0.20.0 as 54afc04, with CI green on all 21 checks. No gate and no format change (catch-up.md section 9). RECALL: found spec.v0.20.0 (step 8), decision.catch-up-design (no gate, no format change; the release notes repeat v0.14's update-every-mnemo line), decision.catch-up-results and the catch-up.md section 9 text. BUILD: a bare serve --mcp is shared. --shared is still accepted, so existing configs work. --exclusive keeps the lifetime lock and conflicts with --shared. --allow-network-fs no longer requires --shared and conflicts with --exclusive. When shared mode refuses a network or synced folder (Unsupported), the CLI error adds that serve is shared by default since v0.20 and names --allow-network-fs and --exclusive. The library's serve_stdio_* functions are unchanged (None is still a plain handle). DOCS: guide.md section 2 (llms-full.txt and the plugin SKILL.md regenerated; llms.txt, the card, unchanged), the serve --help text, mnemo/README.md (serve section and lock note), docs/shared-mode.md (surface table, plain callers), and CHANGELOG [Unreleased] with the planner's release-notes line: update every mnemo on the machine before relying on shared mode. TESTS: new cli_shared::serve_is_shared_by_default_and_exclusive_keeps_the_lifetime_lock. A CLI write with a 500 ms wait gets in beside a bare server and beside a --shared one, and is locked beside --exclusive; list confirms; --shared --exclusive and --exclusive --allow-network-fs are refused. Mutation: with the old default restored, the test fails at the bare server's write (cli_shared.rs:62). Tests that meant the plain server now name --exclusive: mcp_context's session helper, and hook_cli::a_brain_locked_past_the_wait_is_busy_not_blocking. cli_smoke::mcp_serve_initialize_list_and_call_tools now removes MNEMO_AGENT and MNEMO_ROLE: with an agent name, a shared server writes a presence record (since v0.17.2), which stats counts as a memory, and the test failed from this session's environment. GATES: cargo test --features failpoints 814 passed, 0 failed, 1 ignored across 74 suites; fmt clean; CI's clippy (failpoints,benches,keychain,embed-candle) and -p mnemo-uniffi clean. NOTE for the Planner: a plain cargo clippy --all-targets with no features fails to compile tests/rekey_cut.rs, which uses mnemo::__failpoints without a cfg gate. It's untouched here and not run by CI; logged, not fixed. Possible follow-up for the Planner to decide: stats.memories counts coordination records such as presence, which recall leaves out.
+```
+
+## 01M7TZG3JH88T457HNGV7JDE49
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-5`
+- scope: private
+- created: 2026-11-19T22:40:36Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-5","area":"release","topic":"v0200-5"}`
+
+```text
+report.v0200-5 (worker-a, 2026-11-19): READY. v0.20.0 READY. release-0.20.0 at c702f39 (PR #155 squash-merged, branch deleted), with CI, Mobile CI and the Release dry run all success on it. RECALL: found: the backup procedure 01M7NBTP, the v0.19.0 READY reports 01M7Q1R5/01M7Q1QT, report.v0191-2 (01M7RKJ2), the export --git order fact 01M7NG7S, and report.v0200-d4 (re-record the demo at READY). task next served v0200-5 first; nothing was held. THE BUMP (commit 6a3c20d in PR 155): 0.19.1 -> 0.20.0 in mnemo/Cargo.toml, mnemo/Cargo.lock (the engine, mnemo-node and mnemo-uniffi entries), mnemo-python/Cargo.toml, its Cargo.lock and pyproject.toml, bindings/node and bindings/uniffi Cargo.toml, the Kotlin gradle.properties, the iOS project.yml, the Android build.gradle.kts, and the root server.json (its version and bundle URL .../download/v0.20.0/mnemo-v0.20.0.mcpb). Both lockfiles pass cargo metadata --locked, and no 0.19.1 version string is left. MOBILE: .github/release-mobile is true (every minor publishes mobile once). The only mobile change since v0.19.1 is the uniffi Cargo.toml description. The Swift and Kotlin README install lines say 0.20.0. CHANGELOG: [Unreleased] cut into [0.20.0] — 2026-11-19 with an intro and the compare links. TEST GATES (commit 8463fb9): an integration-test crate always has cfg(test), so these are gated on cfg(feature = "failpoints"): rekey_cut.rs; dur1_torn_header.rs (its old any(test, failpoints) gate did nothing); proptest_store.rs; and, in keys.rs and supersede_named.rs, the shared-handle tests plus keys' is_invalid helper. A plain cargo clippy --all-targets showed all five failing with --keep-going, not just rekey_cut. LOCAL GATES on this Mac: cargo fmt --check; plain cargo clippy --all-targets -- -D warnings (now compiles); clippy with --features failpoints,benches,keychain,embed-candle; clippy -p mnemo-uniffi; and cargo test --features failpoints: 79 suites, 815 passed, 0 failed, 1 ignored. format.rs is unchanged since v0.19.1. PR 155: 27 of 27 checks passed on 6aeb431. THE BACKUP (commit 5011ad5, on its own): docs/brain.md from the installed mnemo 0.19.1 (mnemo export --git -o docs/brain.md), 442 memories. The only file changed since v0.19.1 that could touch the export is mnemo/src/bin/mnemo.rs, and its 41-line diff is v0200-4's serve flags. I read the diff: no secrets (the only passphrase is the demo's synthetic demo-passphrase-not-a-secret), and no SECURITY-category records. RB-006.12 appears by id only. THE DEMO (commit 6aeb431): re-recorded from v0200-5-ready in demo run 44622685387. Attempt 1 failed in VHS ('could not start browser: browser exited unexpectedly before its debugging endpoint was ready'), so I re-ran the failed job and attempt 2 succeeded: 388,887 bytes, 1400x540, 797 frames. I looked at its frames: the same story as d4, the recall score is 0.921, and no line wraps. THE DRY RUN: 44627738054 on c702f39 with -f dry_run=true -f mobile=true, success: 29 jobs succeeded and 5 were skipped (approve, Create GitHub Release, attest the binaries, mobile release note, engine published gate). version check printed 'engine 0.20.0, mnemo-uniffi 0.20.0, mnemo-android 0.20.0, server.json 0.20.0', 'the commit says mobile: true' and 'mobile: on'. attach: '14 files would be attached'. PyPI: '5 wheels and 1 sdist'. crates.io: 'aborting upload due to dry run'. MCP bundle check: 'server.json is valid'. Central: 'the signed bundle validated on the Central Portal and was dropped'. Swift: the dry-run-0.20.0 branch was pushed and deleted. VERSION TEXT FOR THE PLANNER'S HAND-OFF (the lines as they are now): index.html 466 (the pill, v0.19.1); 753 ('36 tagged releases': git tag -l 'v*' counts 36, so 37 after v0.20.0); 767 ('These examples use v0.19.1.'); 792 (the example string, v0.19.1); 853 ('Shipped recently v0.13 – v0.19'). README.md 107 ('current 0.19.0'), 111 (Swift from: "0.19.0") and 116 (mnemo-android:0.19.0): all three go to 0.20.0, since mobile is on; 178 (the example string, v0.19.1); a 'What's new in v0.20.0' section if wanted (the newest is v0.19.1's, at 200; 209 and 229 talk about the mobile packages at 0.19.0). Not version text: 893 and 952 (v0.19.0 measurements). README 192 and 506 ('serve --mcp --shared') are still right: onboard.rs:534 and mcp_install.rs:257 still write --shared, even though it's now serve's default. The decision.discoverability placements (the demo GIF, the badges) are yours too. NOTES: RELEASING.md 'Before the tag' step 7 still says to commit PLAN.md and reviewer_notes.md, but AGENTS.md has frozen both, so I skipped it; the text should change on a later docs pass. vhs-action installs 'ttyd latest' and 'latest ffmpeg' (seen in the demo log), so the demo's tools aren't fully pinned; it's harmless, since the GIF is committed by hand. LEFT: REVIEWER-B's READY pass (you call it), your hand-off of README.md and index.html, main's fast-forward, the tag, the MCP registry publish (needs the user), and the user's approval click.
+```
+
+## 01M7TZPQWNR2R21BG7H7GVMR2Y
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-6h`
+- scope: private
+- created: 2026-11-19T22:44:14Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-6h","area":"release","topic":"v0200-6h"}`
+
+```text
+report.v0200-6h (worker-a, 2026-11-19): DONE. 249ece9 'docs: v0.20.0 version text and the ideas explored' on release-0.20.0, pushed. It has README.md, index.html and docs/ideas.md alone (3 files, 106 insertions, 17 deletions) and no PR: a hand-off commit, as with v0191-2h. The push started no workflow runs (README.md, index.html and docs/** are paths-ignored). RECALL: found report.v0191-2h (01M7RKKT, a hand-off commit pushed straight to the release branch), report.v0190-7, the v0190-5 hand-off, and status.ideas-file (01M7TPNR). task next served v0200-6h first; nothing was held. CHECKED BEFORE COMMITTING. What's new in v0.20.0 against CHANGELOG [0.20.0]: none of the numbers is wrong. 0.4 ms at 10K and 0.8 ms at 100K match. 'instead of 3.6 and 31 ms' is the CHANGELOG's 3.6 and 30.8 ms, rounded. 'about 250 MB' over 700 commits at 100K lies inside its 225 to 272 MB. 'grew past 1 GB' matches its 1.1 to 1.4 GB. The 'one fsync fewer', '--exclusive', 'onboard already set this up', 'update every mnemo', restored-copy, MCP bundle, mobile at 0.20.0 and no-format-change lines all match it. The own-brain stat: mnemo about prints 26154 memories, and stat prints 44,580,864 bytes for .git/mnemo/project.mnemo, so 'about 26,000 memories in 45 MB' holds. index.html's '37 tagged releases': git tag -l 'v*' counts 36, so 37 with v0.20.0. Every referenced path exists: docs/img/demo.gif (1400x540, matching the img's width and height), docs/demo/, docs/design/sync.md (tracked). docs/ideas.md names REV-011 as a batch id only, with no security finding detail and no secrets. The mobile lines and the example strings are at 0.20.0. LEFT: REVIEWER-B's READY pass, main's fast-forward, the tag, the user's approval click, then the MCP registry publish and its badge.
+```
+
+## 01M7V098E7KP0W0HDYDA6VRHBY
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-7h`
+- scope: private
+- created: 2026-11-19T22:54:21Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-7h","area":"release","topic":"v0200-7h"}`
+
+```text
+report.v0200-7h (worker-a, 2026-11-19): DONE. 7f52d54 'docs: the roadmap on the site follows the new order' on release-0.20.0, pushed. It has index.html alone (3 insertions, 1 deletion) and no PR: a hand-off commit. RECALL: found decision.roadmap-order (live 01M7V07X, which supersedes 01M7TPN4) and status.roadmap-proposal-rev012 (01M7V07X). task next served v0200-7h first; nothing was held. CHECKED: the cards follow the live decision. Next has (1) mnemo merge, (2) one-command setup for Codex, Antigravity, VS Code and Windsurf, and (3) change sets through a shared folder. After that has (4) smarter memory, now with 'turn sessions into facts', (5) public benchmarks, (6) Node.js, (7) the mobile screens, and encrypted sync with the waitlist (on hold). The working tree is clean apart from the untracked .claude/. LEFT: REVIEWER-B's READY pass, main's fast-forward, the tag, the user's approval click, then the MCP registry publish and its badge.
+```
+
+## 01M7VKS8KFC14QFTHVZ2H8KS1K
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-8`
+- scope: private
+- created: 2026-11-20T04:35:08Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-8","area":"decision","topic":"report.v0200-8"}`
+
+```text
+report.v0200-8 (worker-a, 2026-11-19): DONE. PR #156 squash-merged into release-0.20.0 as de3f53c (branch commits d1ac103, d4c5ace; branch deleted). RECALL: found: status.rb-016 and the findings RB-016.1 and RB-016.2 (read in full with mnemo finding get). FIX (a) RB-016.1: the page cache has a third state, Written (cache.rs). write_dirty marks its pages Written, not clean. They are pinned (never evicted) until a sync covers them. A successful Pager::sync turns them Clean and trims the cache back to its bound. A failed sync turns them Dirty again, and so does flush's restore after stage_commit fails (Pager::rewrite_unsynced), so the retry writes them again, as v0.19.1 did. has_dirty_pages still counts any non-clean page, so the catch-up guard (catchup.rs:146) is unchanged. (b) RB-016.2, per its recommendation: the restore clears gen_leased, so a retried flush seals its runs under a new generation after one header-only lease commit. Interaction with (a): the pages written again keep their own generation and bytes (data pages always go to fresh pages, so none is changed in place before the retry). TESTS (tests/fsync_merge.rs): a_retry_after_a_failed_barrier_writes_dropped_pages_again at (200,1), (3000,1) and (3000,1500) (put attempt 1's pages back to their earlier bytes, retry, reopen: len, verify, every memory by get, and the content set); a_retry_after_a_failed_barrier_seals_under_a_new_generation (RB-016.2's case: 3,000 + 1,500, a failed barrier, a copy, delete one, retry, put attempt 1's pages back from the copy). DEVIATION: the record expected PageAuthFailed. With the fix, the retry's runs aren't at those pointers, so the open succeeds with len 4499 and the deleted memory is NotFound. The test accepts PageAuthFailed or that outcome, and fails if the change is lost. The retry-trace test is updated for the lease commit, and the cache has a unit test for Written. Both put-back tests are #[cfg(unix)]: they write under the open handle's lock, which Windows CI refused (os error 33). They run on the ubuntu and macos jobs. MUTATIONS: pages clean once written, no rewrite on restore -> writes_dropped_pages_again fails (PageAuthFailed) and so does the trace test. No new lease -> seals_under_a_new_generation fails ('the delete was undone') and so does the trace test. FSYNCS: a batch commit with a big run still makes 3 (a_batch_with_a_big_run_makes_three_fsyncs_with_one_barrier, and prop_big_batch_commits_crash_pre_or_post asserts 3 on every committed batch). A retry after a failed barrier now makes 5 (the lease's 2 plus 3). The proptest's retry assertion changed from 3 to: 5 after a failed barrier, 3 or 5 after a failed write. A shrunk seed (batches [400], Sync(0)) found it; the seed is in the regressions file. CHANGELOG [0.20.0] Fixed: a line for RB-016.1 that also names RB-016.2 by id, plus the retry's extra commit. GATES (local, macOS): cargo test --features failpoints --no-fail-fast 818 passed, 0 failed, 1 ignored (815 + 3 new); fmt --check ok; clippy -D warnings ok (plain, with failpoints,benches,keychain,embed-candle, and -p mnemo-uniffi). CI on d4c5ace: 21 checks pass. Mobile CI didn't run (engine-only paths). Not touched: index.html and docs/brand.md, docs/img/* (the Planner's, uncommitted). NEXT per status.rb-016: REVIEWER-B's narrow check, the RC install, the release; v0200-9 for RB-016.3.
+```
+
+## 01M7W7F48M83M20P0NSWE66ZK3
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-8t`
+- scope: private
+- created: 2026-11-20T10:19:07Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-8t","area":"report","topic":"v0200-8t"}`
+
+```text
+report.v0200-8t (worker-a, 2026-11-20): DONE. PR #158 squash-merged into release-0.20.0 as ea15d8c (branch commit 2e22761; branch deleted). RECALL: found: RB-018.1 and RB-018.2 (read in full with mnemo finding get), report.v0200-8 and the v0200-8 fsync_merge put-back tests. (1) RB-018.1: new #[cfg(unix)] test mnemo/tests/fsync_merge.rs a_failed_run_write_then_a_failed_lease_fsync_writes_the_pages_again, beside a_retry_after_a_failed_write_before_the_barrier_commits_cleanly, written from the finding text. It starts from 3,000 memories and stages 1,500 more. Flush 1 fails on the last direct-run write before the barrier. Flush 2, with set_syncs_until_fail(0), fails on the lease's WAL fsync. The file is put back to its bytes from before flush 1, and flush 3 succeeds. After a reopen: 4,500 memories, verify passes, every get works, and the content set is 0..3000 plus 100000..101500. MUTATIONS (rewrite_unsynced removed from flush's restore; the file was restored and checked with cmp): with the debug_asserts in, 2 tests fail, the new one and a_retry_after_a_failed_write_before_the_barrier_commits_cleanly, both panicking with 'a WAL commit with written, unsynced pages' (flush.rs:113). Without the asserts, the new test fails with PageAuthFailed(81) at fsync_merge.rs:472. With the fix, all 9 fsync_merge tests pass. DEBUG_ASSERT: before wal::commit in relocate_header_through_wal and in commit_and_checkpoint, debug_assert!(!self.pager.has_written_unsynced()). New helpers: Pager::has_written_unsynced (pub(crate)) and PageCache::has_written; the cache unit test checks has_written. (2) RB-018.2: Mnemo::compact_file on a 100K-memory file (384-dim, ~400-byte texts, 167,829,504 bytes, built in 4.42 s), release builds (--locked, separate target dirs) of 7f52d54 and the head (fa8f88f), 3 runs each, alternated. 7f52d54: 5036.4, 4912.3 and 4876.2 ms, median 4912.3. Head: 4954.6, 4998.0 and 4928.3 ms, median 4954.6, +0.9%, under the 10% stop line. No cache change. Fact: finding.compact-time-100k. CHANGELOG [0.20.0]: one sentence added to the v0200-9 Fixed bullet: MnemoError (the Swift enum, the Kotlin sealed class MnemoException) has a new case, MaybeStored, so an app with an exhaustive switch or when over it needs a branch. The debug_assert got no line. TESTS (local, macOS): cargo fmt --check is clean. cargo test --features failpoints --no-fail-fast: 819 passed, 0 failed, 1 ignored across 79 suites. Clippy is clean three ways: default, --features failpoints,benches,keychain,embed-candle, and -p mnemo-uniffi. CI: 21 of 21 green after one re-run of the failed job. rust (macos-latest) first failed on shared_fixes::a_read_that_heals_waits_one_deadline_in_all (waited 757.95 ms against a 700 ms bound, a wall-clock test this PR doesn't touch). It passed on the re-run (run 44714003409). Logged as fact.flake-shared-fixes-heal-deadline. NOTE for the user/Planner: the full local suite took over 3 hours because macOS syspolicyd checks each new test binary before launch (fact finding.macos-test-launch-scan). The fix is a Developer Tools entry for the terminal in System Settings, which is the user's to make.
+```
+
+## 01M7VQ695H4R0BZ4ASYZWMK5SY
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0200-9`
+- scope: private
+- created: 2026-11-20T05:34:40Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0200-9","area":"decision","topic":"report.v0200-9"}`
+
+```text
+report.v0200-9 (worker-a, 2026-11-19): DONE. PR #157 squash-merged into release-0.20.0 as e8389f2 (branch commit 8001f42; branch deleted). RECALL: found: fact.flush-commit-failed (01M7S9DD: the first failing flush returns its own error, later ones MaybeStored), report.v0200-1r and status.v0200-review-scope; RB-016.3 read in full with mnemo finding get. ITEM 1 (mnemo-uniffi): MnemoError::MaybeStored { message } is a new variant (retryable). Kotlin renames its field to reason in uniffi.toml. Before, the engine's MaybeStored was mapped to Io. A call refused with it drops the binding's handle without flushing (MnemoDb::with sets the slot to None), so later calls on that MnemoDb are Closed and the lock is free. MnemoDb::close drops on MaybeStored too, and keeps its put-back contract for every other error: this is the way to drop without flushing. error.rs's comment is fixed; Cancelled, Unsupported and ReplacedDuringWrite still map to Io. Kotlin MnemoStore: withDatabase, withSession, commitLocked and closeLocked catch MaybeStored, call dropHandle and rethrow, so the next call reopens through handle(). Swift MnemoStore: onHandle, commit() and close() set db = nil on MaybeStored and rethrow. Both stores have a test-only seam, nextCommitFault: the next commit throws it instead of flushing, because the mobile libraries have no failpoints. NOTE: the first flush that fails past the commit point still returns its own error (Io), so the handle is dropped on the next call that hits the refusal. That is the engine's existing contract (fact.flush-commit-failed). READMEs (swift, kotlin, uniffi) list the new error. ITEM 2: docs/design/catch-up.md 8a has a paragraph on the guard's limit, and docs/shared-mode.md has a bullet, 'Restore a copy by replacing the file'. No guard and no numbers: the reviewer's figures aren't restated. CHANGELOG [0.20.0]: a Fixed bullet for the stores, and a sentence in the Changed v0200-3r entry for the limit. TESTS: bindings/uniffi/tests/maybe_stored.rs (engine failpoints; the commit fails at sync 2, the checkpoint): a refused flush is MaybeStored and retryable, then len is Closed, close is Ok, and a fresh open while the old MnemoDb is alive finds 11 notes. A refused close is MaybeStored, then Closed, then reopen finds 11. Kotlin JVM and Swift: aMaybeStoredRefusalDropsTheHandleAndTheNextCallReopens (the refusal is thrown and retryable, isOpen is false, the file is unlocked with 1 note, the next call reopens, 2 after close). MUTATIONS, each fails its test: with() keeping the handle fails a_refused_flush (line 70); close putting it back fails close_after_a_failed_commit (line 93); the Swift commit() not dropping fails (isOpen, then Locked on reopen). Kotlin wasn't mutation-run (no JVM on this machine). COVERAGE: CI's kotlin job ran the JVM test (PASSED). swift (macos-latest, iOS simulator) ran it under swift test (51 tests in 8 suites passed) and under xcodebuild test on the iOS simulator through TestHost (passed). The Android emulator workflow runs androidTest only (Keystore, ON_STOP, page sizes), so it doesn't cover this test. msrv-uniffi ran maybe_stored.rs (2 passed). LOCAL: cargo test -p mnemo-uniffi 25 passed, 1 ignored; swift test 41 tests in 5 suites and 10 in 3 passed; fmt --check and clippy -p mnemo-uniffi -D warnings clean. CI: 27 checks pass on 8001f42. Not touched: index.html, docs/brand.md and docs/img/* (the Planner's).
 ```
 
 ## 01M7T8TXG1R7CBZAGVW1W1HQ4X
@@ -3363,6 +3587,48 @@ spec.rev-011 (planner-a, 2026-11-19; the user called it: "we should do deep rese
 spec.v0.20.0 (planner-a, 2026-11-18; the user's go "Aligned with your recommendation"): v0.20.0 ships two things that change how saves and shared access work, with one REVIEWER-B pass at READY. (A) 3f, the fsync merge (docs/design/perf-2.md section 3f): defer Pager::flush's sync until after FMT-9c's direct writes, so one barrier covers the data pages and the direct runs before wal::commit; batch commits with a big run go from 4 fsyncs to 3, everything else stays 3. Must not fold that barrier into the commit's own fsync. Tests: failpoint crashes at every write around the merged sync (no committed memory lost, no uncommitted one visible after reopen), a proptest round of batch commits with big runs, fsync counts measured (device_budget) at 1K, 10K, 100K. (B) Sharing one file, continued (docs/design/12.4-shared-access.md implementation order steps 6 and 8): step 6, incremental catch-up: a shared handle at transaction t applies only the catalog and index deltas newer than t, keeps the resident vector column (adds new facts' vectors, drops deleted and superseded), keeps its page cache only if keyed by page and generation or after dropping every page a changed row names, and falls back to the full reload when the chain doesn't reach t; built behind the full reload with an equivalence test (a base rewrite, a tombstone compaction, a page reused between the two points) and measured against step 5's 5.2 ms at 10K and 34 ms at 100K per call after another process's commit. Step 8: `mnemo serve --mcp` with no flag becomes --shared (installers already write --shared); --exclusive keeps today's lifetime lock; the note decides whether to gate older binaries, and a format change for that comes to the user first. Order: a short design note and baseline for step 6 first (like PERF-2's v0190-1), reviewed by the Planner, then the builds.
 ```
 
+## 01M7VD2CQRKQ0RSNEFEX4WMCZG
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `spec.v0201-wait`
+- scope: private
+- created: 2026-11-20T02:37:47Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795142873,"_mnemo.key":"spec.v0201-wait","_mnemo.superseded_by":"01M7VDMWPPZYFXW6R004SPV42Z"}`
+
+```text
+spec.v0201-wait (planner-a, 2026-11-19, draft for REVIEWER-B RB-017 before build; user go 2026-11-19 "let do it"). v0.20.1: mnemo wait, one wake signal from the brain for every editor (status.cross-editor-wake). WHAT: `mnemo wait [PATH] [--as AGENT] [--role ROLE] [--timeout DUR] [--json]`. Agent and role default to MNEMO_AGENT and MNEMO_ROLE; no agent is an error. It blocks until Mnemo::wake(agent, role) returns Wake::Now, then prints one line per item (the pointer: message id, sender and first line; or the pre-approved task slug) and exits 0. Exit 3 on --timeout (default: none). Wake::Held keeps waiting (paused, hop cap, burst, hourly limit, cooldown) and prints the reason once to stderr; Wake::Nothing keeps waiting. It reuses wake() unchanged, so the same items wake as the Stop hook (messages to the agent by id, pre-approved tasks for its role), the 13a guardrails and the kill switch apply, and the items are marked delivered exactly as the Stop hook does; the per-turn hook still shows them. HOW IT WAITS: never holds the brain lock or a handle between checks. A cheap change check (the file metadata and header transaction id, no decryption) every 1 s; on a change, open shared, call wake(), close. Also re-check every 60 s while Held, so a cooldown or hourly limit clearing is seen. No new dependency unless the review argues for a file watcher. Keychain: reads the key once at start; never prompts in the loop; errors exit 1 with one line. Windows, macOS, Linux; a network or synced folder is refused as in shared mode. CLIENT USE (the guide, the plugin skill, AGENTS.md tmux rules): Claude Code runs it as a background command, so its exit re-invokes an idle session; editors that cannot be woken while idle (Cursor, Antigravity) run it in the foreground with a --timeout under their terminal tool limit when they have nothing else to do, and run it again on exit 3. DOGFOOD: planner-a replaces its polling loop with a background mnemo wait; reviewer-a in Antigravity runs it in the foreground when idle; worker-a and reviewer-b keep SendMessage and add mnemo wait. TESTS: CLI tests with two processes: a message by id wakes within 3 s; one to a role or all does not; a pre-approved task wakes, a plain one does not; paused holds and resume releases; --timeout exits 3; the brain is never locked while waiting (another writer commits during the wait); --json shape. OUT OF SCOPE (step 2): an MCP wait tool (the stdio server serves one request at a time, so a blocking tool would stall the session other calls), per-editor onboard wiring, OS notifications to the user.
+```
+
+## 01M7VDMWPPZYFXW6R004SPV42Z
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `spec.v0201-wait`
+- scope: private
+- created: 2026-11-20T02:47:53Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795143755,"_mnemo.key":"spec.v0201-wait","_mnemo.superseded_by":"01M7VEFSANMDPSZPXE8Y0A78NQ","_mnemo.supersedes":"01M7VD2CQRKQ0RSNEFEX4WMCZG"}`
+
+```text
+spec.v0201-wait (planner-a, 2026-11-19, revised after RB-017; the user go 2026-11-19). v0.20.1: mnemo wait, one wake signal from the brain for every editor (status.cross-editor-wake). COMMAND: mnemo wait [PATH] [--as AGENT] [--role ROLE] [--timeout DUR] [--json]. Agent and role default to MNEMO_AGENT and MNEMO_ROLE; no agent: exit 1. MNEMO_WAKE=off: exit at once with one line (RB-017.2). ENGINE (RB-017.1): split Mnemo::wake into a function that returns the ids it marked delivered (task ids, message ids, or the Held reason), with wake() a wrapper that keeps its signature and behaviour for the Stop hook; no public type changes shape. Add a read-only candidates check so an idle check takes a read window and the write window only when something may wake (RB-017.4). OUTPUT: on Now print the message ids and senders and the task slugs, escaped; no message text unless after guide::FRAMING through escape_brain, cut to a fixed length (default: no text; the agent calls inbox). Same fields in --json. Print, flush, exit 0, nothing in between. DELIVERY is at most once; say so in the guide (RB-017.3). NEWEST WAITER WINS: at start a waiter writes a sidecar note for its agent with a random token (beside the hooks hook.turn notes); before each full check it reads it and exits 4 without calling wake when the token is not its own. On Unix it also exits 4 when its parent changes. THE CHECK (RB-017.4): poll Mnemo::file_stamp by path every 1 s with jitter, no handle or lock kept between checks, no file watcher (RB-017.5). Rules: read the stamp before the open, never after; compare for different, not newer, None counts as changed; the first check is unconditional; wait writes nothing but wake (no touch_presence, no hold_presence). A floor between full checks that grows to about 5 s while checks return Nothing on a file that keeps changing. While Held, re-check every 15 s. Locked or a passing I/O error: keep waiting, owe a check, back off 2 s to 30 s, say it once on stderr; use the hooks 2 s lock wait. Exit 1 only for what cannot clear by itself: no key, wrong key (the line says to start it again after a rekey), old or unknown format, a refused network or synced folder, a missing file. Each shared-mode notice once per process. Look for a change before looking at the timeout. Exit 3 on --timeout. KEY: read once at start, held like the MCP server in a zeroizing buffer, nothing derived kept (RB-017.5). LIMITS stated in the guide (RB-017.2): up to 12 wake-ups an hour per agent and 60 s between them (wake limits), stopped by mnemo wake pause; a pre-approved task wakes one waiter per role. CLIENT USE (the guide, the plugin skill, AGENTS.md tmux rules): Claude Code runs it as a background command and starts it again after every exit 0; editors that cannot be woken while idle (Cursor, Antigravity) run it in the foreground with --timeout at least 10 s under the terminal tool limit, re-run on exit 3 up to the user-set bound (status.v0201-wait-bound), never after exit 1 or 4. DOGFOOD: planner-a swaps its polling loop for a background mnemo wait; reviewer-a uses the foreground loop in Antigravity; worker-a and reviewer-b add it beside SendMessage; the release dogfood check counts running waiters with the servers. TESTS (RB-017.6): an item sent before start wakes at once; a message by id wakes (assert order, generous bound); one to a role or all does not; a pre-approved task wakes, a plain one does not; two waiters, one message: exactly one exits 0, the older exits 4; a commit between the stamp and the check (dev-hooks pause) still wakes; an exclusive holder: keeps waiting, wakes after it closes (Windows too); compact during the wait then a message: woken; a restore in place: one check, carries on; cooldown and hourly limit held then woken (dev-hooks switches for the tick and the re-check); paused holds, resume releases; MNEMO_WAKE=off, no agent, a wrong key; output escaping (a fake framing line, control characters, 10 KB); a waiter killed while idle leaves items sent; idle waiter: a plain Mnemo::open without wait succeeds repeatedly and the stamp is unchanged after 5 s; --timeout exits 3; --json shape. Not testable in CI, as dogfood checks: a background exit starts a Claude Code turn; the foreground wait fits each editor tool limit. OUT OF SCOPE (step 2): an MCP wait tool (needs a reader thread and per-request cancel in serve_inner), per-editor onboard wiring, OS notifications.
+```
+
+## 01M7VEFSANMDPSZPXE8Y0A78NQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `spec.v0201-wait`
+- scope: private
+- created: 2026-11-20T03:02:35Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.v0201-wait","_mnemo.supersedes":"01M7VDMWPPZYFXW6R004SPV42Z"}`
+
+```text
+spec.v0201-wait (planner-a, 2026-11-19, revised after RB-017; the user go 2026-11-19). v0.20.1: mnemo wait, one wake signal from the brain for every editor (status.cross-editor-wake). COMMAND: mnemo wait [PATH] [--as AGENT] [--role ROLE] [--timeout DUR] [--json]. Agent and role default to MNEMO_AGENT and MNEMO_ROLE; no agent: exit 1. MNEMO_WAKE=off: exit at once with one line (RB-017.2). ENGINE (RB-017.1): split Mnemo::wake into a function that returns the ids it marked delivered (task ids, message ids, or the Held reason), with wake() a wrapper that keeps its signature and behaviour for the Stop hook; no public type changes shape. Add a read-only candidates check so an idle check takes a read window and the write window only when something may wake (RB-017.4). OUTPUT: on Now print the message ids and senders and the task slugs, escaped; no message text unless after guide::FRAMING through escape_brain, cut to a fixed length (default: no text; the agent calls inbox). Same fields in --json. Print, flush, exit 0, nothing in between. DELIVERY is at most once; say so in the guide (RB-017.3). NEWEST WAITER WINS: at start a waiter writes a sidecar note for its agent with a random token (beside the hooks hook.turn notes); before each full check it reads it and exits 4 without calling wake when the token is not its own. On Unix it also exits 4 when its parent changes. THE CHECK (RB-017.4): poll Mnemo::file_stamp by path every 1 s with jitter, no handle or lock kept between checks, no file watcher (RB-017.5). Rules: read the stamp before the open, never after; compare for different, not newer, None counts as changed; the first check is unconditional; wait writes nothing but wake (no touch_presence, no hold_presence). A floor between full checks that grows to about 5 s while checks return Nothing on a file that keeps changing. While Held, re-check every 15 s. Locked or a passing I/O error: keep waiting, owe a check, back off 2 s to 30 s, say it once on stderr; use the hooks 2 s lock wait. Exit 1 only for what cannot clear by itself: no key, wrong key (the line says to start it again after a rekey), old or unknown format, a refused network or synced folder, a missing file. Each shared-mode notice once per process. Look for a change before looking at the timeout. Exit 3 on --timeout. KEY: read once at start, held like the MCP server in a zeroizing buffer, nothing derived kept (RB-017.5). LIMITS stated in the guide (RB-017.2): up to 12 wake-ups an hour per agent and 60 s between them (wake limits), stopped by mnemo wake pause; a pre-approved task wakes one waiter per role. CLIENT USE (revised after REV-015, 2026-11-19; the guide, the plugin skill, AGENTS.md tmux rules): Claude Code and Google Antigravity run it as a background command; its exit starts a turn in an idle session (Antigravity live-tested by reviewer-a, REV-015.2: run_command with a short WaitMsBeforeAsync, not a daemon). They start it again after every exit 0, never after exit 1 or 4. No foreground loop in v0.20.1: the other editors cap a foreground command at about 15 to 120 s (Codex about 30 s, Cursor about 25 to 30 s, VS Code unconfirmed, Devin Desktop unconfirmed), so each timeout would cost a model turn, up to hundreds an hour. For Codex, Cursor, VS Code and Devin Desktop the guide says they are not woken while idle yet; step 2 wires their end-of-turn hooks (which keep an active session going) and a notification to the user as the fallback. The user bound (status.v0201-wait-bound) applies to any later foreground use. DOGFOOD: planner-a swaps its polling loop for a background mnemo wait; reviewer-a runs a background mnemo wait in Antigravity; worker-a and reviewer-b add it beside SendMessage; the release dogfood check counts running waiters with the servers. TESTS (RB-017.6): an item sent before start wakes at once; a message by id wakes (assert order, generous bound); one to a role or all does not; a pre-approved task wakes, a plain one does not; two waiters, one message: exactly one exits 0, the older exits 4; a commit between the stamp and the check (dev-hooks pause) still wakes; an exclusive holder: keeps waiting, wakes after it closes (Windows too); compact during the wait then a message: woken; a restore in place: one check, carries on; cooldown and hourly limit held then woken (dev-hooks switches for the tick and the re-check); paused holds, resume releases; MNEMO_WAKE=off, no agent, a wrong key; output escaping (a fake framing line, control characters, 10 KB); a waiter killed while idle leaves items sent; idle waiter: a plain Mnemo::open without wait succeeds repeatedly and the stamp is unchanged after 5 s; --timeout exits 3; --json shape. Not testable in CI, as dogfood checks: a background exit starts a Claude Code turn; the foreground wait fits each editor tool limit. OUT OF SCOPE (step 2): an MCP wait tool (needs a reader thread and per-request cancel in serve_inner), per-editor onboard wiring, OS notifications.
+```
+
 ## 01M7T8MPYWH528MY8WC0AYSD8Y
 
 - type: episodic
@@ -3385,10 +3651,80 @@ status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory
 - scope: private
 - created: 2026-11-19T20:11:35Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.backlog-small","_mnemo.supersedes":"01M7T8MPYWH528MY8WC0AYSD8Y"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795128190,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7TZMSJEZ4VDK0Z31319NSND","_mnemo.supersedes":"01M7T8MPYWH528MY8WC0AYSD8Y"}`
 
 ```text
 status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' three `mnemo serve --mcp --shared` processes started 2026-11-17 20:30 and still run that build (v0.18.x), while ~/.local/bin/mnemo is 0.19.1 (installed 2026-11-19 09:40). Hooks and CLI calls use the new binary; the MCP tools don't. A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then: after each install, each session reconnects mnemo (/mcp in Claude Code), a user step.
+```
+
+## 01M7TZMSJEZ4VDK0Z31319NSND
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-19T22:43:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795141757,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7VCJTVZPT2EPA05A72QJCYM","_mnemo.supersedes":"01M7TPZ7WHD2EBBYT4G7PP5E5G"}`
+
+```text
+status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability).
+```
+
+## 01M7VCJTVZPT2EPA05A72QJCYM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-20T02:29:17Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795142343,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7VD4PSW09Z1ZGY8E5A96ZTN","_mnemo.supersedes":"01M7TZMSJEZ4VDK0Z31319NSND"}`
+
+```text
+status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand).
+```
+
+## 01M7VD4PSW09Z1ZGY8E5A96ZTN
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-20T02:39:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.backlog-small","_mnemo.supersedes":"01M7VCJTVZPT2EPA05A72QJCYM"}`
+
+```text
+status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand). (10) mnemo task has no cancelled status, so a task added by mistake or superseded can only be noted (rev-014, 2026-11-19). (11) Review batch ids have no allocator: REVIEWER-A used REV-014 for a user-called review while the Planner had named a task's batch REV-014; a 'mnemo finding next-batch REV' or a check at finding add would catch it.
+```
+
+## 01M7VCPBA62E61X32SMQ76BCXM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.cross-editor-wake`
+- scope: private
+- created: 2026-11-20T02:31:12Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795141879,"_mnemo.key":"status.cross-editor-wake","_mnemo.superseded_by":"01M7VCPJ3RZTE91TN6GQCYD54A"}`
+
+```text
+status.cross-editor-wake (planner-a, 2026-11-19, dogfood finding raised by the user): a brain message from a session in another editor doesn't wake an idle Claude Code session. Evidence: reviewer-a (Antigravity, CLI only) posted REVIEW DONE: REV-013 to planner-a at 18:24:13; planner-a was idle and saw it only when the user typed. REV-012's (14:43:03) was seen at 14:44 only because worker-a's SendMessage happened to wake planner-a. Cause: the brain inbox reaches a Claude Code session only through hooks (UserPromptSubmit when the user types; the Stop-hook wake at the end of a turn), and nothing runs in an idle session. worker-a and reviewer-b also send a Claude Code cross-session message, which starts a turn; Antigravity can't. Options: (a) a CLI wait, e.g.  or , that blocks until new work for MNEMO_AGENT and exits, so any client that can run a background command is re-invoked (works across editors; proposed for roadmap step 2, more editors); (b) mnemo serve as a Claude Code channel (pushes events into a session), but channels are a research preview with an allowlist, so not for users yet; (c) WAKE-SOCKET, posting to the session's own messaging socket: the docs (read 2026-11-19) still don't give the message line's format. Workaround in use now: planner-a runs a background loop polling no messages every 30 s for unread messages from senders other than worker-a and reviewer-b.
+```
+
+## 01M7VCPJ3RZTE91TN6GQCYD54A
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.cross-editor-wake`
+- scope: private
+- created: 2026-11-20T02:31:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.cross-editor-wake","_mnemo.supersedes":"01M7VCPBA62E61X32SMQ76BCXM"}`
+
+```text
+status.cross-editor-wake (planner-a, 2026-11-19, dogfood finding raised by the user): a brain message from a session in another editor does not wake an idle Claude Code session. Evidence: reviewer-a (Antigravity, CLI only) posted REVIEW DONE: REV-013 to planner-a at 18:24:13; planner-a was idle and saw it only when the user typed. REV-012 (14:43:03) was seen at 14:44 only because worker-a happened to wake planner-a with a SendMessage. Cause: the brain inbox reaches a Claude Code session only through hooks (UserPromptSubmit when the user types; the Stop-hook wake at the end of a turn), and nothing runs in an idle session. worker-a and reviewer-b also send a Claude Code cross-session message, which starts a turn; Antigravity cannot. Options: (a) a CLI wait, such as mnemo inbox --watch or mnemo wait, that blocks until new work for MNEMO_AGENT and then exits, so any client that can run a background command is re-invoked; works across editors; proposed for roadmap step 2 (more editors). (b) mnemo serve as a Claude Code channel, which pushes events into a session; channels are a research preview with an allowlist, so not for users yet. (c) WAKE-SOCKET, posting to the session own messaging socket: the docs (read 2026-11-19) still do not give the message line format. Workaround in use now: planner-a runs a background loop polling mnemo inbox every 30 s for unread messages from senders other than worker-a and reviewer-b.
 ```
 
 ## 01M7RWMBXZ973G264CW4B4J37N
@@ -3447,6 +3783,62 @@ status.discoverability (planner-a, 2026-11-19): done: the repo description ("Sha
 status.ideas-file (planner-a, 2026-11-19): the user asked for a succinct list of the ideas we've explored. docs/ideas.md (Planner-owned, uncommitted) covers hosted brains (REV-011, on hold), encrypted sync's relay, Pro and Teams (on hold), public benchmarks (backlog), and demo and launch (GIF chosen; video, in-browser demo and launch day not now). It replaces the long untracked docs/design/hosted-brains.md, now removed; the full report stays outside the repo at ~/mnemo-reviews/REV-011.md. Hand it off with the v0.20.0 version-text hand-off (README.md, index.html, docs/ideas.md). Add each newly explored idea there.
 ```
 
+## 01M7VDN9AP588S24HVJ18GDW4X
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.mcp-recall-vectors`
+- scope: private
+- created: 2026-11-20T02:48:06Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.mcp-recall-vectors"}`
+
+```text
+status.mcp-recall-vectors (planner-a, 2026-11-19, dogfood; raised by REVIEWER-B in RB-017 as an aside, confirmed by the Planner): the MCP recall tool returns each hit whole, including its 384-number vector, so one hit is several KB of numbers in the agent context. max_bytes caps only the content fields and always returns the top hit, so it does not help. Every MCP user pays this on every recall. Planned for v0.20.1 beside mnemo wait (v0201-2): hits leave out the vector by default (an opt-in flag returns it), and the tools that return whole memories get the same check.
+```
+
+## 01M7V0QCY6TWYFVPCNGWJSG208
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.metrics`
+- scope: private
+- created: 2026-11-19T23:02:04Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.metrics"}`
+
+```text
+status.metrics (planner-a, 2026-11-19, baseline before v0.20.0): GitHub: 2 stars, 0 forks, 0 watchers, 0 issues; views 14 days 201 total / 22 unique (one 62-view day 11-15 from 1 visitor); clones 12,668 / 746 unique (mostly CI runners); referrers aocr.org 7, github.com 4, toarchkumar.github.io 3; release assets about 16-24 downloads per release. crates.io mnemo-engine: 814 total, 796 in 90 days, 12-31 a day. PyPI mnemo-engine (pypistats, no mirrors): 7,751 last month, 4,064 last week; 7,596 of 8,674 have no OS or Python version (bots, scanners, caches); with an OS: Linux 689, macOS 387, Windows 2. Our CI does not pip install from PyPI. No launch yet (user decision).
+```
+
+## 01M7V63PZEV1P84FP7MBDY2CYD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.rb-016`
+- scope: private
+- created: 2026-11-20T00:36:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795149397,"_mnemo.key":"status.rb-016","_mnemo.superseded_by":"01M7VKVZ22JTHSZN7X6NW5VNCQ"}`
+
+```text
+status.rb-016 (planner-a, 2026-11-19): REVIEWER-B's v0.20.0 READY pass RB-016 at c702f39 (4 findings). RB-016.1 CORRECTNESS MEDIUM, holds the tag: a flush retried after a failed barrier fsync doesn't rewrite its pages (write_dirty marks clean before the sync; regression from f2898a9); fix v0200-8. RB-016.2 (id only): fixed in the same change, v0200-8. RB-016.3 CORRECTNESS LOW: mobile stores can't recover after the new MaybeStored refusal; the restore guard's notrunc limit to document; v0200-9. RB-016.4 (id only): deferred to the next release.yml change or v0.21.0. Fix round 1 of 3. After v0200-8 the Planner asks REVIEWER-B for a narrow check of that diff only (it touches the generation binding), then the RC install for dogfood (decision.dogfood 4), then the release.
+```
+
+## 01M7VKVZ22JTHSZN7X6NW5VNCQ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.rb-016`
+- scope: private
+- created: 2026-11-20T04:36:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.rb-016","_mnemo.supersedes":"01M7V63PZEV1P84FP7MBDY2CYD"}`
+
+```text
+status.rb-016 (planner-a, 2026-11-19): REVIEWER-B pass RB-016 at c702f39. RB-016.1 (holds the tag) and RB-016.2 (id only) fixed in v0200-8, PR #156, de3f53c, verified by planner-a; fix round 1 of 3. RB-016.3: v0200-9 (active next). RB-016.4 (id only): deferred to the next release.yml change or v0.21.0. Chain to the tag: v0200-9 and REVIEWER-B narrow check v0200-8-check (batch RB-018, diff 7f52d54..de3f53c) in parallel; then v0200-10h hand-off; v0200-11 release-candidate install (decision.dogfood item 4, WAITING for /mcp reconnects); v0200-12 the release (WAITING for the approval click). v0201-1 now waits for v0200-12.
+```
+
 ## 01M7TP71W90HCRC0EA6S25ARZ1
 
 - type: episodic
@@ -3459,6 +3851,20 @@ status.ideas-file (planner-a, 2026-11-19): the user asked for a succinct list of
 
 ```text
 status.rev-011 (planner-a, 2026-11-19): REVIEWER-A's REV-011 is done (report ~/mnemo-reviews/REV-011.md, findings REV-011.1-.6). Verdict: (B) MNemo selling hosted brains: no-go (Turso with BYOK on Pro, Cloudflare Durable Objects and turbopuffer already sell per-tenant isolation cheaply; a router, leases, 24/7 SRE and SOC 2 don't pay for a small team). (A) The user's own consultancy on MNemo: prove first, with a 1-week pilot on v0.20.0 with no engine change (keys wrapped by KMS outside the engine via open_with_key, a read-only playbook file plus one file per client, one sticky host or Vercel Sandbox with Drives, S3 conditional writes), gated on 2-3 paid pilot commitments from 5-10 buyers. Memory infra is under 0.5% of consulting revenue; LLM tokens and compliance dominate. Guardrails: never full-file write-back per commit; one shared KMS key wrapping per-tenant data keys. Part B: the roadmap after v0.20.0 stays; optional swap of Node.js ahead of mobile. Triage: .4 accepted into roadmap step 2's design (change sets as immutable files fit for conditional writes); .2, .3 deferred; .1, .5, .6 needs-user. Spot-checked and confirmed: Vercel Drives GA, Turso BYOK on Pro, Claude Managed Agents memory stores. Not confirmed: Turso's $417 Pro price, the Harvey and Hebbia seat prices.
+```
+
+## 01M7TZR88HAHKRGG52VBPQA75A
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.rev-012`
+- scope: private
+- created: 2026-11-19T22:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.rev-012"}`
+
+```text
+status.rev-012 (planner-a, 2026-11-19): REVIEWER-A's off-cycle REV-012 (user-requested; report ~/mnemo-reviews/REV-012.md, 4 findings, none holds the v0.20.0 tag). Triage: REV-012.1 accepted into step 3's spec (opt-in local turn-to-fact consolidation as keyed deltas). NEEDS-USER: REV-012.2 add Codex and VS Code/Windsurf to mnemo onboard (new roadmap item; note mcp install covers only Claude Code, Cursor, Claude Desktop); REV-012.3 public benchmarks right after step 3 instead of backlog; REV-012.4 hold roadmap step 5 (mobile see-and-delete) until mobile users ask.
 ```
 
 ## 01M7P5HQ3XCY792ZH38JFEER8G
@@ -3515,6 +3921,34 @@ Roadmap status (2026-11-18): v0.19.0 released (tag on b345073, run 44284629207):
 
 ```text
 Roadmap status (2026-11-18): v0.19.1 released (tag on 2d21ac6, run 44430183319, mobile off; crates.io and PyPI 0.19.1, GitHub Release 12 assets; mobile stays 0.19.0): RB-015.1 (a damaged index run loads as no index, notice, rebuilt by the next write; verify_index; I/O errors retried) and RB-015.2 (layout-2 fuzz target, compat at 20K, tab link). v0.19.0 the same day (PERF-2). Run 2 made permanent (AGENTS.md 470b9de). Next per decision.roadmap-order: the 3f fsync merge (the user picks patch or v0.20.0), the sync design note, sharing one file continued.
+```
+
+## 01M7V03KZY3KSSXK3RX3FR2C6V
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.roadmap-proposal-rev012`
+- scope: private
+- created: 2026-11-19T22:51:16Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795128817,"_mnemo.key":"status.roadmap-proposal-rev012","_mnemo.superseded_by":"01M7V07XDW75YEEEBEP1BCH5KS"}`
+
+```text
+status.roadmap-proposal-rev012 (planner-a, 2026-11-19), NEEDS-USER go: after the user's REV-012 answers (2026-11-19: 1 yes to more onboard clients plus Google Antigravity, Planner to recommend when; 2 yes to public benchmarks after smarter memory; 3 don't hold mobile screens, order by core vs bonus). Proposed order after v0.20.0: core: (1) more clients in mnemo onboard: Codex and Antigravity first, then VS Code and Windsurf/Devin Desktop (no engine change; reviewer-a in Antigravity gets hooks, a dogfood gain); (2) 13.7 mnemo merge; (3) sync change sets on disk; (4) smarter memory, with opt-in turn-to-fact consolidation (REV-012.1); (5) public benchmarks; reach: (6) Node.js (AI SDK memory, eve, sandbox guide); bonus: (7) mobile see-and-delete screens. On hold unchanged: relay, Pro, 13.2, 13.4, Teams, hosted brains.
+```
+
+## 01M7V07XDW75YEEEBEP1BCH5KS
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.roadmap-proposal-rev012`
+- scope: private
+- created: 2026-11-19T22:53:37Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.roadmap-proposal-rev012","_mnemo.supersedes":"01M7V03KZY3KSSXK3RX3FR2C6V"}`
+
+```text
+status.roadmap-proposal-rev012 (planner-a, 2026-11-19): resolved. The user swapped steps 1 and 2 (merge first, then more editors) and said go; the order is in decision.roadmap-order.
 ```
 
 ## 01M7QKTKNR4YSV3KC0EE8CM0HM
@@ -3671,6 +4105,20 @@ status.v0200-review-scope (planner-a, 2026-11-19): items for REVIEWER-B's scoped
 status.v0200-review-scope (planner-a, 2026-11-19): items for REVIEWER-B's scoped v0.20.0 READY pass, gathered as the release builds. (1) v0200-1 (f2898a9): the barrier fsync before wal::commit, and the (header, free, free_dirty) restore when staging fails before the commit point. (2) v0200-1r (3a295ed): commit_failed refuses later flushes with MaybeStored until reopen; check every path past the commit point sets it, and close/try_close. (3) The Worker's question: after a restore before the commit point, the retry rewrites the same page numbers under the same generation without renewing the lease (nonces unique via SEC-1's per-session prefix); does that weaken what ensure_gen_lease protects? (4) v0200-3 (ed4e5b1) incremental catch-up: store/catchup.rs and shared.rs; the (page, generation) page-cache key in cache.rs and pager.rs; the generation walk-back rule; adopt_column; the ANN reconcile skip rule (fact.catch-up-ann-reconcile). (5) v0200-3r (b2a2dc0): the restore-in-place guard (anchors_hold: wal_seq not going back, on-disk nonces of kept runs; superseded runs skipped; drop_newer_than). (6) v0200-4 (54afc04): serve --mcp shared by default, --exclusive, --allow-network-fs. (7) The release workflow: v0200-d3 (45d811e) adds the mcp-bundle job, a /bin/sh launcher in the bundle that runs the release binaries (integrations/mcpb/mnemo.sh), and server.json; v0200-d3h moves the validators out of the building job and attests the bundle.
 ```
 
+## 01M7VDQSJ2E9JKH8D26KY3QQZG
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.v0201-wait-bound`
+- scope: private
+- created: 2026-11-20T02:49:28Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.v0201-wait-bound"}`
+
+```text
+status.v0201-wait-bound (user, 2026-11-19, answering RB-017.2): keep the existing wake limits for mnemo wait (up to 12 wake-ups an hour per agent, at least 60 s apart, mnemo wake pause stops all). Editors that wait in the foreground (Antigravity, Cursor) stop re-running after 1 hour with no work and say so.
+```
+
 ## 01M7NT5YYT1X243FM6KGJ4RZQ5
 
 - type: procedural
@@ -3698,6 +4146,21 @@ Mixed-version tests against a published CLI: tests/v0_16_compat.rs (MNEMO_V0_16_
 REVIEWER-A: REV-011, hosted brains research and the pre-phase check
 
 For REVIEWER-A only (REVIEWER-B: leave it). The user called this review on 2026-11-19. First step: recall. The scope is the keyed fact spec.rev-011 (mnemo history --key spec.rev-011, then mnemo get <id>), with docs/design/hosted-brains.md. Part A, deep research: is a .mnemo file per tenant an efficient backend for an agent harness giving standardized consultation? Part B: a short pre-phase check of the roadmap after v0.20.0. Output: REV-011.N finding records plus the full report at ~/mnemo-reviews/REV-011.md. Then set this task ready with a summary note.
+```
+
+## 01M7VD2WM64J64Y2AR58KZKKDE
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:38:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["status.cross-editor-wake","decision.roadmap-order"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"rev-014","_mnemo.status":"done","_mnemo.status_history":[{"at":1795142334,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: this task's findings use batch REV-015, not REV-014: REVIEWER-A already used REV-014 for the file-size review (REV-014.1). Read REV-015 wherever the body says REV-014; post REVIEW DONE: REV-015.","to":"queued"},{"at":1795143051,"by":"reviewer-a","from":"queued","to":"active"},{"at":1795143680,"by":"reviewer-a","from":"active","note":"Recall: found (spec.v0201-wait 0.996, status.cross-editor-wake 0.965, decision.roadmap-order 0.921). Recorded REV-015.1 to REV-015.5 (one PRODUCT finding per editor) plus full summary table and sources at ~/mnemo-reviews/REV-015.md. Major correction to spec.v0201-wait: live-tested Google Antigravity (task-261) — foreground WaitMsBeforeAsync caps at 10s (cannot hold a multi-minute foreground wait), AND a non-daemon background run_command exit DOES reactively wake an idle Antigravity turn automatically (Tier 1 background mnemo wait, same as Claude Code, plus full project-scoped plugin wiring via .agents/plugins/mnemo/). Codex (~20s), Cursor (~15s), VS Code Copilot (~120s), and Devin Desktop/Windsurf (transitioned June 2, 2026; ~60s) lack reliable idle background-exit wakeup and need foreground mnemo wait loops plus Stop hooks while active.","to":"ready"},{"at":1795143755,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: REV-015 triaged, all accepted. REV-015.2 corrected spec.v0201-wait: Antigravity wakes from a background command's exit (live test).","to":"done"}]}`
+
+```text
+REVIEWER-A: how each editor can be woken and wired (batch REV-014)
+
+First step: recall. Groundwork for roadmap step 2 (more editors) and v0.20.1 (mnemo wait). Read status.cross-editor-wake, spec.v0201-wait and decision.roadmap-order. For each of Codex (CLI and IDE), Google Antigravity, VS Code (Copilot agent mode), Windsurf / Devin Desktop and Cursor, from official docs and release notes (cite each; mark third-party sources as such, and say when you could not confirm): (a) MCP config file locations and scopes, and how a server is added; (b) hooks: which events (session start, per prompt, end of turn), whether an end-of-turn hook can keep the agent going and with what fields and loop limits, and the input it gets; (c) whether anything can wake an idle agent (a background command's exit, a socket, a channel, an API); (d) the terminal tool's timeout for a foreground command, and whether the agent may run background commands; (e) the MCP tool-call timeout; (f) a project-level instructions file (AGENTS.md, rules) it reads. Then try what you can in Antigravity itself, where you run: does a foreground command of a few minutes keep your turn open, and is there any way for an outside event to start a turn? One finding per editor (REV-014.1, ...), category PRODUCT, plus a summary table in ~/mnemo-reviews/REV-014.md. Recommend for each editor the best way to wake it, from the ladder in status.cross-editor-wake. Then set this task ready and post REVIEW DONE: REV-014 to planner-a (mnemo post --as reviewer-a --role reviewer --to planner-a).
 ```
 
 ## 01M7N18T0CYF8DA9TSYEZJDC1E
@@ -4171,6 +4634,51 @@ v0.20.0: the fsync merge (PERF-2 3f)
 First step: recall. Build part (A) of spec.v0.20.0, as docs/design/perf-2.md section 3f describes, with its crash tests and the measured fsync counts before and after. A PR into release-0.20.0. Report: report.v0200-1.
 ```
 
+## 01M7VCJPJRFBNWQXG07P6JPMN8
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:29:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-9"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["REV-013.1","decision.brand"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-10h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795152943,"by":"worker-a","from":"queued","to":"active"},{"at":1795152979,"by":"worker-a","from":"active","note":"report.v0200-10h","to":"ready"},{"at":1795152989,"by":"planner-a","from":"ready","note":"VERIFIED (planner-a): fa8f88f on origin/release-0.20.0 has exactly the five listed paths; the working tree is clean of them. Taken before v0200-8t because task next served it first; harmless, both precede v0200-11.","to":"done"}]}`
+
+```text
+Hand-off: the locked logo on the site, and docs/brand.md
+
+First step: recall. The Planner's files are in the working tree: index.html (the favicon and the nav mark are the locked A3 SVG; .brand-mark has no teal box), docs/brand.md (new), docs/img/logo.svg, docs/img/logo-mono-dark.svg and docs/img/logo-mono-light.svg (new). Commit those five paths alone on release-0.20.0: 'docs: the locked MNemo logo and the brand guide (REV-013.1)'. Report: report.v0200-10h.
+```
+
+## 01M7VKV9PTFZX2R2KRKXZZ6G6X
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T04:36:15Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-10h","v0200-8-check","v0200-8t"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-11","_mnemo.status":"done","_mnemo.status_history":[{"at":1795169976,"by":"worker-a","from":"queued","to":"active"},{"at":1795170157,"by":"worker-a","from":"active","note":"report.v0200-11","to":"blocked"},{"at":1795189582,"by":"planner-a","from":"blocked","note":"planner-a: the user reconnected /mcp in all three sessions. Checked: ~/.local/bin/mnemo 0.20.0 (mtime 2026-11-20 02:22:10, sha256 2d46a13a...afef, release head ea15d8c); mnemo serve 19170 (planner-a) 07:43:19, 19186 (reviewer-b) 07:43:25, 19464 (worker-a) 07:45:32, all after the binary. Go on.","to":"blocked"},{"at":1795189592,"by":"worker-a","from":"blocked","to":"active"},{"at":1795189607,"by":"worker-a","from":"active","note":"report.v0200-11","to":"ready"},{"at":1795189619,"by":"planner-a","from":"ready","note":"VERIFIED (planner-a): ~/.local/bin/mnemo 0.20.0 sha256 2d46a13a...afef from ea15d8c; all three mnemo serve processes restarted after the install (19170, 19186, 19464); my own mnemo about on 0.20.0 works (27,953 memories). KEYCHAIN-REPROMPT seen again for a new binary (dark wake); carried. Next: v0200-12, the release.","to":"done"}]}`
+
+```text
+v0.20.0: install the release-candidate build for dogfooding
+
+First step: recall. decision.dogfood item 4. On release-0.20.0 at its head after v0200-9, v0200-10h and any RB-018 fixes: build the release CLI (cargo build --release --locked from mnemo/ with the release features) and install it to ~/.local/bin/mnemo by one atomic move; report the commit, mnemo --version, the binary mtime and SHA-256. Then set this task blocked with report.v0200-11 and send WAITING: v0200-11: the user reconnects mnemo in every session (/mcp), and planner-a checks every mnemo serve start time against the binary. When planner-a sends READ: v0200-11, run mnemo about and one recall on the project brain with the new build and report them. Report: report.v0200-11.
+```
+
+## 01M7VKV9RWK84AXSKTJ9QNXF8S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T04:36:15Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-11"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-12","_mnemo.status":"active","_mnemo.status_history":[{"at":1795189626,"by":"worker-a","from":"queued","to":"active"}]}`
+
+```text
+v0.20.0: the release
+
+First step: recall. As RELEASING.md and decision.release-order: commit docs/brain.md (exported by the installed release candidate) by its path; fast-forward main, the annotated tag v0.20.0, the release run. At the approval stop: set this task blocked with report.v0200-12, send WAITING: v0200-12, and watch the run in the background (gh run watch) so the click itself wakes you; the Planner also sends READ: v0200-12 when the user reports it approved. Check the run yourself before going on. After it: the registries (crates.io, PyPI, the Swift mirror, Maven Central), the GitHub Release with the MCP bundle, the site; install the released binary to ~/.local/bin/mnemo and report its version and SHA-256 (planner-a then checks the servers); delete release-0.20.0. The MCP registry publish stays the user step. Report: report.v0200-12.
+```
+
 ## 01M7S2MWHQJ0D6YWRQCXTJX4V6
 
 - type: episodic
@@ -4268,12 +4776,72 @@ First step: recall. Step 8 of spec.v0.20.0 as decided on v0200-2: a bare serve -
 - scope: shared
 - created: 2026-11-19T02:55:52Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0200-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-5","_mnemo.status":"active","_mnemo.status_history":[{"at":1795065822,"by":"planner-a","from":"queued","note":"planner-a 2026-11-18: READY also waits for v0200-1h, v0200-d1, v0200-d2 and v0200-d3 (user go on discoverability).","to":"queued"},{"at":1795066183,"by":"planner-a","from":"queued","note":"planner-a 2026-11-18: READY also waits for v0200-d4 (the demo GIF).","to":"queued"},{"at":1795104065,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also gate tests/rekey_cut.rs on the failpoints feature (or cfg) so AGENTS.md's plain 'cargo clippy --all-targets -- -D warnings' compiles (found in v0200-4); include that build in the READY gates.","to":"queued"},{"at":1795104074,"by":"worker-a","from":"queued","to":"active"},{"at":1795104081,"by":"worker-a","from":"active","note":"worker-a: served by task next (oldest first) while picking up v0200-d1 (the READ pointer); released untouched, no work done","to":"queued"},{"at":1795104086,"by":"worker-a","from":"queued","to":"active"},{"at":1795104091,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795104303,"by":"worker-a","from":"queued","to":"active"},{"at":1795104307,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d2 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795106109,"by":"worker-a","from":"queued","to":"active"},{"at":1795106113,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795108104,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also wait for v0200-d3h. The bump includes the root server.json version and bundle URL (report.v0200-d3).","to":"queued"},{"at":1795108113,"by":"worker-a","from":"queued","to":"active"},{"at":1795108113,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3h with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795108119,"by":"worker-a","from":"queued","to":"active"},{"at":1795108123,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3h with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795112452,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also wait for v0200-t1 (the shared_valve test).","to":"queued"},{"at":1795112462,"by":"worker-a","from":"queued","to":"active"},{"at":1795112462,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d4 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115452,"by":"worker-a","from":"queued","to":"active"},{"at":1795115452,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795118306,"by":"worker-a","from":"queued","to":"active"},{"at":1795124946,"by":"worker-a","from":"active","note":"worker-a: renewing the claim; suite done, committing next","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0200-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-5","_mnemo.status":"done","_mnemo.status_history":[{"at":1795065822,"by":"planner-a","from":"queued","note":"planner-a 2026-11-18: READY also waits for v0200-1h, v0200-d1, v0200-d2 and v0200-d3 (user go on discoverability).","to":"queued"},{"at":1795066183,"by":"planner-a","from":"queued","note":"planner-a 2026-11-18: READY also waits for v0200-d4 (the demo GIF).","to":"queued"},{"at":1795104065,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also gate tests/rekey_cut.rs on the failpoints feature (or cfg) so AGENTS.md's plain 'cargo clippy --all-targets -- -D warnings' compiles (found in v0200-4); include that build in the READY gates.","to":"queued"},{"at":1795104074,"by":"worker-a","from":"queued","to":"active"},{"at":1795104081,"by":"worker-a","from":"active","note":"worker-a: served by task next (oldest first) while picking up v0200-d1 (the READ pointer); released untouched, no work done","to":"queued"},{"at":1795104086,"by":"worker-a","from":"queued","to":"active"},{"at":1795104091,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795104303,"by":"worker-a","from":"queued","to":"active"},{"at":1795104307,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d2 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795106109,"by":"worker-a","from":"queued","to":"active"},{"at":1795106113,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795108104,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also wait for v0200-d3h. The bump includes the root server.json version and bundle URL (report.v0200-d3).","to":"queued"},{"at":1795108113,"by":"worker-a","from":"queued","to":"active"},{"at":1795108113,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3h with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795108119,"by":"worker-a","from":"queued","to":"active"},{"at":1795108123,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d3h with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795112452,"by":"planner-a","from":"queued","note":"planner-a 2026-11-19: also wait for v0200-t1 (the shared_valve test).","to":"queued"},{"at":1795112462,"by":"worker-a","from":"queued","to":"active"},{"at":1795112462,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-d4 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115447,"by":"worker-a","from":"queued","to":"active"},{"at":1795115447,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795115452,"by":"worker-a","from":"queued","to":"active"},{"at":1795115452,"by":"worker-a","from":"active","note":"worker-a: held only to reach v0200-t1 with task next (oldest first); released untouched, no work done","to":"queued"},{"at":1795118306,"by":"worker-a","from":"queued","to":"active"},{"at":1795124946,"by":"worker-a","from":"active","note":"worker-a: renewing the claim; suite done, committing next","to":"active"},{"at":1795125526,"by":"worker-a","from":"active","note":"worker-a: PR 155 open (bump, gates, backup); demo re-record on attempt 2 after a VHS browser start failure","to":"active"},{"at":1795126866,"by":"worker-a","from":"active","note":"worker-a: PR 155 merged as c702f39; dry run 44627738054 running","to":"active"},{"at":1795128037,"by":"worker-a","from":"active","note":"report.v0200-5","to":"ready"},{"at":1795128062,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: VERIFIED. origin/release-0.20.0 at c702f39 (#155); CI, Mobile CI and Release dry run 44627738054 all success on c702f39. server.json 0.20.0 with the v0.20.0 .mcpb URL; mnemo/Cargo.toml 0.20.0, no 0.19.1 in manifests; rekey_cut.rs gated on feature failpoints; CHANGELOG [0.20.0] 2026-11-19; docs/brain.md updated. Next: REVIEWER-B READY pass (rb-v0200), then the RC install for dogfood (decision.dogfood item 4).","to":"done"}]}`
 
 ```text
 v0.20.0 READY: the bump, the CHANGELOG, the backup, the dry run
 
 First step: recall. As RELEASING.md: the bump (mobile by its rule: every minor publishes mobile once), the CHANGELOG's [0.20.0], docs/brain.md exported by the installed release and committed by path, the dry run. List the version text for my hand-off. Report: report.v0200-5. REVIEWER-B's READY pass follows (I call it).
+```
+
+## 01M7TZMA58APHM7KMJHDSQSYAT
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:42:54Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["decision.discoverability","status.ideas-file"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-6h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795128184,"by":"worker-a","from":"queued","to":"active"},{"at":1795128254,"by":"worker-a","from":"active","note":"report.v0200-6h","to":"ready"},{"at":1795128268,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: VERIFIED. 249ece9 on origin/release-0.20.0 has README.md, index.html, docs/ideas.md only (106+/17-); working tree clean of them. Numbers checked by the Worker against CHANGELOG [0.20.0].","to":"done"}]}`
+
+```text
+Hand-off: README.md, index.html and docs/ideas.md, the v0.20.0 version text
+
+First step: recall. The Planner's edits are in the working tree. README.md: PyPI and crates.io downloads badges; the demo GIF (docs/img/demo.gif) under the install block; the own-brain line at about 26,000 memories in 45 MB (mcp stats today: 26,150, 44,580,864 bytes); mobile lines at 0.20.0; the example string at v0.20.0; a 'What's new in v0.20.0' section. index.html: the pill, examples line and example string at v0.20.0; 37 tagged releases; the own-brain stat; the roadmap (shipped v0.13 - v0.20 with the catch-up item; Next: mnemo merge, change sets through a folder, smarter memory; After that: Node.js, mobile screens, encrypted sync with the waitlist); the demo GIF as a second figure in the 'Start with memory' section. docs/ideas.md (new): the ideas we've explored (status.ideas-file). Check the numbers in the What's new section against CHANGELOG [0.20.0] and say in the report if any is wrong rather than fixing it. Commit those three paths alone on release-0.20.0: 'docs: v0.20.0 version text and the ideas explored'. The MCP registry badge waits until the listing exists (after the tag). Report: report.v0200-6h.
+```
+
+## 01M7V08CV5N8Y78NAY5M8ZEZ2J
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:53:52Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-6h"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["decision.roadmap-order"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-7h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795128839,"by":"worker-a","from":"queued","to":"active"},{"at":1795128861,"by":"worker-a","from":"active","note":"report.v0200-7h","to":"ready"},{"at":1795128871,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: VERIFIED. 7f52d54 on origin/release-0.20.0, index.html only (3+/1-); no diff left against the working tree.","to":"done"}]}`
+
+```text
+Hand-off: index.html, the roadmap after the user's new order
+
+First step: recall. The Planner's edit to index.html is in the working tree: the roadmap cards follow decision.roadmap-order (user go 2026-11-19). Next: mnemo merge, setup for more editors (Codex, Antigravity, VS Code, Windsurf), change sets through a shared folder. After that: smarter memory (with turning sessions into facts), public benchmarks, Node.js, the mobile screens, encrypted sync with the waitlist. Commit index.html alone on release-0.20.0: 'docs: the roadmap on the site follows the new order'. Report: report.v0200-7h.
+```
+
+## 01M7VND5N529EVV2D90F3794JH
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T05:03:29Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-9"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["RB-018.1","RB-018.2"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-8t","_mnemo.status":"done","_mnemo.status_history":[{"at":1795152916,"by":"planner-a","from":"queued","note":"planner-a addition from verifying v0200-9: also add one CHANGELOG [0.20.0] sentence that MnemoError (Swift enum, Kotlin sealed class) has a new case, MaybeStored, so an app with an exhaustive switch or when over it needs a branch.","to":"queued"},{"at":1795152984,"by":"worker-a","from":"queued","to":"active"},{"at":1795159804,"by":"worker-a","from":"active","to":"active"},{"at":1795169948,"by":"worker-a","from":"active","note":"report.v0200-8t","to":"ready"},{"at":1795169968,"by":"planner-a","from":"ready","note":"VERIFIED (planner-a): PR #158 MERGED as ea15d8c on origin/release-0.20.0; 21 checks, none failing (macOS rust job passed on a re-run; the first failure was a wall-clock flake in shared_fixes, logged as fact.flake-shared-fixes-heal-deadline). Two debug_asserts added. compact_file at 100K: median 4954.6 ms vs 4912.3 ms (+0.9 percent), under the 10 percent line, so no cache change; RB-018.2 LRU idea goes to backlog. CHANGELOG has the MaybeStored exhaustive-switch sentence. Fix round 2 closed; no further review. Next: v0200-11.","to":"done"}]}`
+
+```text
+v0.20.0 fix round 2: a test for the restore rewrite, and compact timed (RB-018.1, RB-018.2)
+
+First step: recall. Read RB-018.1 and RB-018.2 in full (mnemo finding get). (1) RB-018.1: add the case to mnemo/tests/fsync_merge.rs beside a_retry_after_a_failed_write_before_the_barrier_commits_cleanly, cfg(unix) like the other put-back tests: 3,000 memories, add 1,500, fail one direct-run write, retry with set_syncs_until_fail(0) so the lease WAL fsync fails, put the file back to its bytes before the flush, a third flush, reopen, read every memory. REVIEWER-B has a scratch version (a_failed_run_write_then_a_failed_lease_fsync_all_dropped, in its scratchpad rb018/); write your own from the finding text. Show in the report that it fails with rewrite_unsynced removed. Add the debug_assert the finding names (no written-unsynced page when the WAL own fsync runs) in relocate_header_through_wal and commit_and_checkpoint. (2) RB-018.2: time compact_file (mnemo compact) on a 100K-memory file, built at 7f52d54 and at the head, 3 runs each, release build; report the medians. No cache change in this task. If the head is more than 10 percent slower, set this task blocked with the numbers and stop. CHANGELOG: nothing user-visible unless the debug_assert needs a line. One PR into release-0.20.0. Report: report.v0200-8t.
+```
+
+## 01M7V63PGKVBPQVH4GKT5ZYD45
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T00:36:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-8"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["RB-016.3"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0200-9","_mnemo.status":"done","_mnemo.status_history":[{"at":1795149395,"by":"worker-a","from":"queued","to":"active"},{"at":1795152880,"by":"worker-a","from":"active","note":"report.v0200-9","to":"ready"},{"at":1795152916,"by":"planner-a","from":"ready","note":"VERIFIED (planner-a): PR #157 MERGED as e8389f2 on origin/release-0.20.0; 27 checks, none failing. uniffi error.rs has MnemoError::MaybeStored (retryable, mapped from the engine; Cancelled/Unsupported/ReplacedDuringWrite still Io); 14 files incl. Kotlin and Swift stores, tests, READMEs, catch-up.md 8a and shared-mode.md; CHANGELOG [0.20.0] lines present. Coverage gap accepted: the Android emulator run does not exercise this test (the JVM test does). RB-016.3 fixed; stays accepted until verified at the tag.","to":"done"}]}`
+
+```text
+v0.20.0 fix round 1: the mobile stores recover after a refused flush; the restore-guard limit documented (RB-016.3)
+
+First step: recall. Read RB-016.3. Item 1: in the Kotlin MnemoStore and the Swift MnemoStore, treat the MaybeStored refusal (the uniffi binding maps it to Io today) like Closed: drop the handle, reopen on the next call (the open finishes or drops the commit), and report it for the call that failed. Give the binding a distinct error or variant for it so the stores can tell it from other I/O errors, and a way to drop without flushing if close must keep its contract. Fix the comment in bindings/uniffi/src/error.rs. Tests: Kotlin JVM unit test and swift test (macOS) with the failpoints or the uniffi test hooks; say in the report what the emulator and simulator runs cover. Item 2: state the limit in docs/design/catch-up.md 8a and docs/shared-mode.md (replace the file, don't patch it in place); no new guard. CHANGELOG [0.20.0] lines for both. One PR into release-0.20.0. Report: report.v0200-9.
 ```
 
 ## 01M7S45FHE7D9B8QJQ9GQEJNSW
@@ -4351,6 +4919,21 @@ v0.20.0: the terminal demo GIF
 First step: recall. User go 2026-11-18 (decision.discoverability, option 1). A scripted, re-recordable terminal demo, about 30 seconds: one agent saves a decision with a key, a second agent (labelled as a different tool, e.g. '# in Cursor' after '# in Claude Code') recalls it from the same encrypted file, then one more step that shows what's inside (mnemo about, or the essence render). Every command really runs against a throwaway brain in a temp dir, with a test passphrase from the environment or a dev key store; never the project brain or the real keychain; outputs are real, never typed in by hand. Use VHS (charmbracelet/vhs) or an equivalent: commit the script (docs/demo/demo.tape plus any setup script) and the output docs/img/demo.gif (aim under 3 MB, legible at 800 px wide). Add the re-record step to RELEASING.md's checklist. Never the words orchestration, orchestrator or swarm. The Planner places it in README.md and index.html at the version-text hand-off; don't edit those. Own PR into release-0.20.0. Report: report.v0200-d4.
 ```
 
+## 01M7TZHANZJV4XX2NE9Z8MMMEX
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:41:16Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-b","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["2d21ac6..c702f39","status.v0200-review-scope"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"v0200-review","_mnemo.status":"done","_mnemo.status_history":[{"at":1795128091,"by":"reviewer-b","from":"queued","to":"active"},{"at":1795134475,"by":"reviewer-b","from":"active","note":"RB-016 in progress (recall: found). Baseline at c702f39: 815 passed, 0 failed, 1 ignored. Items 1-3, 6-8 read and tested; items 4-5 under test. Findings follow as records.","to":"active"},{"at":1795134929,"by":"reviewer-b","from":"active","note":"RB-016 done, at c702f39 (diff from 2d21ac6). RECALL: found (status.v0200-review-scope, fact.flush-stage-commit, fact.flush-commit-failed, fact.catch-up-ann-reconcile, decision.catch-up-results, the v0200 reports).\nVERDICT: one MEDIUM I'd hold the tag for, a small fix: RB-016.1. Nothing HIGH.\nFINDINGS: RB-016.1 (CORRECTNESS, MEDIUM, hold: yes): a flush retried after a failed barrier fsync doesn't write the data pages again; v0.19.1 did. RB-016.2 (SECURITY, LOW, private; the answer to scope item 3 is yes; fix beside RB-016.1). RB-016.3 (CORRECTNESS, LOW): the mobile stores can't act on \"reopen the file\"; a copy written over the head of the file without cutting it passes the restore guard. RB-016.4 (SECURITY, IDEA, private; release workflow, by reading).\nWHAT HELD: (1) the barrier is its own sync before the WAL commit, and the restore before the commit point is sound when the OS keeps the pages. (2) every failure at or after the commit point is refused until reopen, close and try_close included; 400 random runs with 10,496 armed write or sync failures and 5,758 reopens never lost an acknowledged memory or showed an unwritten one (WAL growth and the lease included). (4) 40 random runs gave 453 incremental and 301 full catch-ups, each equal to a fresh open part by part and in recall; a v0.20 shared server stayed equal to a fresh open through 45 steps of writes by the published v0.18.1 on a 20,100-note indexed file. (5) whole-file restores in place are caught (the Worker's tests, my reading); only the uncut partial overwrite gets through. (6) bare serve --mcp is shared, --shared still accepted, --exclusive holds the lock; the CHANGELOG says who is affected. (7) the bundle builds, its zip keeps the 755 modes, the launcher runs from paths with spaces, an empty passphrase falls through to the key store, mcp-publisher is pinned by hash. (8) docs/brain.md: no secrets, no emails, no local paths, no SECURITY finding, RB-006.12 by id only.\nBASELINE: cargo test --locked --features failpoints --no-fail-fast: 815 passed, 0 failed, 1 ignored.\nEARLIER: RB-015.1 and RB-015.2 confirmed fixed and marked verified against v0.19.1 (a damaged index page: recall works with a warning, verify reports the index apart, the next write rebuilds it).\nNOT DONE: Linux (the fsync behaviour in RB-016.1 is from the literature and a model, not a run), Windows, benchmarks, Python, the mobile packages (by reading only), the registry publish and a real MCP host for the bundle. The branch has two docs commits after c702f39 (249ece9, 7f52d54) that I didn't review.","to":"ready"},{"at":1795134956,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: RB-016 triaged (status.rb-016). 1 and 2 accepted, fixed in v0200-8 before the tag; 3 accepted in v0200-9; 4 deferred.","to":"done"}]}`
+
+```text
+REVIEWER-B: v0.20.0 READY pass (batch RB-016)
+
+First step: recall. REVIEWER-B's scheduled READY pass (Reviewer rule 4; this release touches the flush/commit path, the page cache keyed by generation, restore and the release workflow). Scope, and only this: the diff 2d21ac6..c702f39 on release-0.20.0, the items in status.v0200-review-scope: (1) v0200-1 f2898a9: the barrier fsync before wal::commit; the (header, free, free_dirty) restore when staging fails before the commit point. (2) v0200-1r 3a295ed: commit_failed refuses later flushes with MaybeStored until reopen; every path past the commit point sets it; close/try_close. (3) The Worker's question: after a restore before the commit point, the retry rewrites the same page numbers under the same generation without renewing the lease (nonces unique via SEC-1's per-session prefix): does that weaken what ensure_gen_lease protects? (4) v0200-3 ed4e5b1, incremental catch-up: store/catchup.rs and shared.rs; the (page, generation) cache key in cache.rs and pager.rs; the generation walk-back; adopt_column; the ANN reconcile skip rule (fact.catch-up-ann-reconcile). (5) v0200-3r b2a2dc0: the restore-in-place guard (anchors_hold, superseded runs skipped, drop_newer_than). (6) v0200-4 54afc04: serve --mcp shared by default, --exclusive, --allow-network-fs. (7) Release workflow v0200-d3 45d811e and d3h 75eeca2: the mcp-bundle job, integrations/mcpb/mnemo.sh launcher, server.json, the separate mcp-bundle-check job, the bundle attestation and attach's hash check. (8) docs/brain.md at c702f39: nothing private. Out of scope: benchmarks (decision.catch-up-results has the numbers), the demo GIF, docs wording, the v0200-5 bump. CARGO_TARGET_DIR=/tmp/rb-target and --locked; no benchmarks while a Worker PR is open. Findings as records: mnemo finding add RB-016.<n> (a SECURITY one is private until verified; SECURITY.local.md as usual), each saying whether you'd hold the tag. Then set this task ready and send REVIEW DONE: RB-016 to planner-a.
+```
+
 ## 01M7TGMGP5WM4PJFFKSZMRNCSX
 
 - type: episodic
@@ -4366,6 +4949,51 @@ v0.20.0: shared_valve tells a slow write window from starved readers
 First step: recall. shared_valve::two_writers_and_four_readers_all_get_their_turns failed a second time (PR 152's first attempt, job 135737720437, macos-latest: one 500 ms window with 0 reads, longest read wait 688.6 ms; the first was PR 139, record 01M7Q1R5). Neither PR changed the locking. Likely cause, to check: one write window on a slow CI disk held the lock longer than the 500 ms sample, so readers waited behind it, which is the design, not starvation. Make the test measure what it means: record each write window's held time and each read's wait. Fail when a read waits much longer than the longest write window held while it waited (say more than that plus 250 ms), or when readers get no turn across two writer windows in a row. Don't fail just because a fixed 500 ms bucket was empty. Keep a check that catches real starvation: show that the test fails with readers-first turned off, or with a writer that loops without yielding. No change to the locking itself unless the numbers show real starvation; if they do, stop and report. Own PR into release-0.20.0. Report: report.v0200-t1.
 ```
 
+## 01M7VDQSMQ44F9MSG7G2K3JCBY
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:49:28Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0200-12"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.slug":"v0201-1","_mnemo.status":"queued"}`
+
+```text
+v0.20.1: mnemo wait, one wake signal from the brain for every editor
+
+First step: recall. Starts after v0.20.0 is tagged (the release task comes first). Build spec.v0201-wait as revised after RB-017 (read RB-017.1 to RB-017.6 for the reasons), with the user bound in status.v0201-wait-bound. Branch release-0.20.1 from the v0.20.0 tag; one PR into it. Docs: mnemo/README.md CLI table, guide.md (regenerate llms.txt, llms-full.txt, the plugin skill), docs/shared-mode.md, CHANGELOG [Unreleased]. Name the editor limits as the guide's per-client lines; per-editor onboard wiring is step 2. Report the dogfood checks you can run on this Mac (a background mnemo wait exit starting a Claude Code turn) and say which are left for planner-a and reviewer-a. Report: report.v0201-1.
+```
+
+## 01M7VDQSPS92322Y3W6ZQW4D52
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:49:29Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0201-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.pre_approved":false,"_mnemo.refs":["status.mcp-recall-vectors"],"_mnemo.role":"worker","_mnemo.slug":"v0201-2","_mnemo.status":"queued"}`
+
+```text
+v0.20.1: MCP tools stop returning vectors by default
+
+First step: recall. Read status.mcp-recall-vectors. The MCP recall tool returns each hit with its full vector (384 numbers), several KB per hit in the agent context; max_bytes does not cap it. Leave the vector out of every MCP tool result that returns memories (recall, get, list, history, and any other), unless the call asks for it with an opt-in flag (name it include_vector). Measure the bytes of a recall of 10 hits on this brain before and after. Tests in the MCP test suite: no vector by default, present with the flag. CHANGELOG [Unreleased] under Changed, saying callers that read vectors must pass the flag. One PR into release-0.20.1. Report: report.v0201-2.
+```
+
+## 01M7VD2WHQXW76P4FF3NPW020D
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:38:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":[],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"reviewer-b","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.refs":["spec.v0201-wait","status.cross-editor-wake"],"_mnemo.role":"reviewer","_mnemo.seen_by":["reviewer-b"],"_mnemo.slug":"v0201-spec-review","_mnemo.status":"done","_mnemo.status_history":[{"at":1795142314,"by":"reviewer-b","from":"queued","to":"active"},{"at":1795142847,"by":"reviewer-b","from":"active","note":"reviewer-b 2026-11-19, RB-017 done, by reading only at c702f39 (no build, nothing run, nothing on Windows). RECALL: found spec.v0201-wait, status.cross-editor-wake, decision.roadmap-order (the user's \"let do it\" with a spec check) and finding.per-turn-hook-cost. VERDICT: the design is sound (poll Mnemo::file_stamp by path, no handle or lock kept, open shared and call wake on a change), but the spec should change before build in four places. RB-017.1 (MEDIUM): wake() returns counts, so \"unchanged\" can't print the items; a message's first line is brain text and needs the framing line and escaping. RB-017.2 (MEDIUM): MNEMO_WAKE=off and \"never twice in a row\" are in the Stop hook, not in wake(); a waiter leaves 12 wake-ups an hour per agent as the bound, which the user should see. RB-017.3 (MEDIUM): delivery is at most once, so an orphaned or duplicate waiter loses the wake-up; newest waiter wins through a sidecar note. RB-017.4 (MEDIUM): four rules for the check (stamp before the open, \"different\" not \"newer\", first check unconditional, no presence writes), and a locked brain must keep waiting, not exit 1. RB-017.5 (LOW): poll, no watcher; the key once at start is right; an MCP wait tool needs a server that reads while it works. RB-017.6 (LOW): tests to add, and two that don't prove what they say. Aside, outside the scope: the MCP recall tool returned each hit's 384-number vector in this session, which made two recalls very large.","to":"ready"},{"at":1795142874,"by":"planner-a","from":"ready","note":"planner-a 2026-11-19: RB-017 triaged, all accepted into the revised spec.v0201-wait; one bound for the user (status.v0201-wait-bound).","to":"done"}]}`
+
+```text
+REVIEWER-B: the v0.20.1 mnemo wait spec, before build (batch RB-017)
+
+First step: recall. The user asked for a spec check before the Worker builds (2026-11-19). Read spec.v0201-wait and status.cross-editor-wake. Reading only: no build or benchmarks needed (worker-a has v0200-8 open). Scope, and only this: (1) Is reusing Mnemo::wake (store/coordination.rs ~2182) unchanged right for a long-lived waiter: the delivered marking, the guardrails, the hourly limit and cooldown counted on the presence record, and Held vs Nothing? Anything that makes a waiter spin, miss a wake, or wake twice? (2) The change check without decrypting (file metadata and the header's transaction id) and never holding the lock or a handle between checks: is it sound in shared mode and with an exclusive holder, after compact (rename) and after a restore in place? Polling every 1 s versus a file watcher (a new dependency): which, and why. (3) Races: a message committed between a check and the sleep; two waiters for one agent. (4) Windows, and a network or synced folder. (5) The keychain read once at start, and a long-lived process holding the key. (6) Whether an MCP wait tool is feasible later given serve_inner's one-request-at-a-time loop (step 2; a sentence is enough). (7) Anything in the tests list that's missing or untestable. Findings as records RB-017.<n>, each saying whether the spec should change before build. Then set this task ready and send REVIEW DONE: RB-017 to planner-a.
+```
+
 ## 01M7Q2PG6MWEMS2V21TFFSKKJF
 
 - type: episodic
@@ -4373,7 +5001,7 @@ First step: recall. shared_valve::two_writers_and_four_readers_all_get_their_tur
 - scope: shared
 - created: 2026-11-18T10:19:34Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-015.1","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/store/ann.rs","mnemo/src/store/load.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","to":"accepted"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","_mnemo.triaged_by":"planner-a"}`
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-015.1","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/store/ann.rs","mnemo/src/store/load.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"verified","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","to":"accepted"},{"at":1795134891,"by":"reviewer-b","from":"accepted","note":"v0.19.1","to":"verified"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the v0.19.0 tag (LOW, derived data, not new in v0.19; ensure_ann at store/ann.rs:188 clears ann_unloaded before load_index, confirmed). Behaviour chosen: a damaged index run of a known layout loads as no index, like an unknown layout: recall exactly, warn once with the mnemo index --rebuild hint and 'your memories are intact', and a read-write handle rebuilds the index with its next base write. verify reads the index run and reports it apart from the records.","_mnemo.triaged_by":"planner-a","_mnemo.verified_by":"reviewer-b","_mnemo.verified_ref":"v0.19.1"}`
 
 ```text
 A damaged index run: the first recall on a handle fails, later ones silently recall exactly, and verify passes (not new in v0.19)
@@ -4404,7 +5032,7 @@ A damaged index run: the first recall on a handle fails, later ones silently rec
 - scope: shared
 - created: 2026-11-18T10:19:34Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"DX/DOCS","_mnemo.finding_id":"RB-015.2","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/index.rs","mnemo/tests/v0_18_compat.rs","mnemo/src/bin/mnemo/inspect.html","mnemo/src/pager.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","to":"accepted"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","_mnemo.triaged_by":"planner-a"}`
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-015","_mnemo.category":"DX/DOCS","_mnemo.finding_id":"RB-015.2","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/src/index.rs","mnemo/tests/v0_18_compat.rs","mnemo/src/bin/mnemo/inspect.html","mnemo/src/pager.rs","v0190-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"verified","_mnemo.status_history":[{"at":1794997218,"by":"planner-a","from":"open","note":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","to":"accepted"},{"at":1795134891,"by":"reviewer-b","from":"accepted","note":"v0.19.1","to":"verified"}],"_mnemo.triage":"ACCEPTED for v0.19.1 (task v0191-1), not holding the tag: item 1 a fuzz_index_layout2 target through __fuzz in the smoke and weekly matrices; item 2 the old build recalls and imports on the 20,100-note file in an_older_builds_index_is_read_and_rewritten before its index; item 3 Object.hasOwn(views, name) in selectTab; item 4 no change (documented behaviour).","_mnemo.triaged_by":"planner-a","_mnemo.verified_by":"reviewer-b","_mnemo.verified_ref":"v0.19.1"}`
 
 ```text
 v0.19.0 at READY, smaller points: no fuzz target for the layout-2 decoder; the compat job's 20,000-fact case; a tab link; which damaged page a streamed read names
@@ -4416,6 +5044,361 @@ v0.19.0 at READY, smaller points: no fuzz target for the layout-2 decoder; the c
 4. **`for_each_page` names whichever damaged page arrives first; the batch read names the lowest.** With three damaged pages, 200 runs on 8 threads: the batch read said page 50 every time; the streamed read said 301 (198 times), 300 (once) and 390 (once). In 95 of the 200, some pages had reached the sink before the error. That's what its doc says; the pages delivered are authentic.
 
 **Recommendation:** item 1: a `fuzz_index_layout2` target through `__fuzz`, in the smoke matrix. Item 2: in `an_older_builds_index_is_read_and_rewritten`, have the old build recall and import on the 20,100-note file before its `index`. Item 3: `Object.hasOwn(views, name)`. Item 4: nothing to change; it's here so nobody reads the page number in that error as "the first bad page".
+
+**Would I hold the tag for it?** No.
+```
+
+## 01M7V5WEZCAXPR0KFMWG6D4Q2W
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T00:32:13Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-016","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-016.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/pager.rs","mnemo/src/store/flush.rs","v0200-review","f2898a9"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795134956,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: confirmed in code at c702f39: write_dirty marks every page clean right after writing (pager.rs ~1100), and a failure in stage_commit restores (header, free, free_dirty) (flush.rs ~293) with the pages already clean, so a retry only re-syncs. Holds the v0.20.0 tag. Fix in v0200-8: pages stay dirty until a sync covers them; the dropped-pages case in tests/fsync_merge.rs.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: confirmed in code at c702f39: write_dirty marks every page clean right after writing (pager.rs ~1100), and a failure in stage_commit restores (header, free, free_dirty) (flush.rs ~293) with the pages already clean, so a retry only re-syncs. Holds the v0.20.0 tag. Fix in v0200-8: pages stay dirty until a sync covers them; the dropped-pages case in tests/fsync_merge.rs.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+A flush retried after its barrier fsync failed doesn't write the data pages again; if the OS dropped them, the retry commits a file that can't be read (new in v0.20.0)
+
+**Context / Evidence:** at `c702f39`, scope item 1 (v0200-1, f2898a9).
+- `Pager::write_dirty` marks every page clean as soon as it's written (`mnemo/src/pager.rs:1100`), before any sync. The barrier comes later (`store/flush.rs:741-743`). When the barrier fails, `flush` puts back the header and free list (`flush.rs:293-296`) and the doc says the flush "can be retried on the same handle". The retry finds no dirty page, so it only syncs again (`unsynced` is still set) and commits.
+- v0.19.1 did write them again: `Pager::flush` synced before `mark_all_clean` (`pager.rs:938-942` at `2d21ac6`), so a failed sync left the pages dirty and the retry rewrote them.
+- Why that matters: on Linux a failed `fsync` can mark the unwritten pages clean and drop them, and the next `fsync` then returns success (ext4, XFS and Btrfs all do one or the other; Rebello et al., "Can Applications Recover from fsync Failures?", USENIX ATC 2020; LWN, "PostgreSQL's fsync() surprise", 2018). So "sync again" isn't enough; the pages must be written again, or the handle must stop.
+- A scratch test with the failpoints (`set_syncs_until_fail(0)`, the I/O trace), exclusive handle. After the failed barrier I model the dropped pages by writing the file's earlier bytes back over exactly the pages the trace says attempt 1 wrote, then retry:
+
+| base + new | attempt 1 wrote | the retry | after reopen |
+|---|---|---|---|
+| 200 + 1 | pages 18, 19 | `Ok`, 0 pages before its commit | `len` 201, `verify`: page 18 fails authentication, `memories()` fails, the new memory and 15 of the 200 earlier ones unreadable |
+| 3000 + 1 | pages 81, 82 | `Ok`, 0 pages | `verify`: page 81 fails; the new memory unreadable |
+| 3000 + 1500 | 59 pages | `Ok`, wrote 38 again (the direct runs), not the 21 data pages | `verify`: page 81 fails; 1,500 of 1,500 new memories unreadable |
+
+- The earlier memories are lost because a commit repacks its tail record page: rows that were committed long ago now live on a page that never reached the disk.
+- Not tried on Linux: the model stands in for the kernel's behaviour, which I take from the two sources above. On this Mac a real failing fsync can't be made.
+
+**Finding:**
+1. After one failed barrier fsync, the next flush on the same handle returns `Ok` over a commit whose data pages may not be on disk. No explicit retry is needed: any later write on a long-lived exclusive handle flushes again.
+2. Who is exposed: exclusive handles that live past the error (the Rust and Python APIs, the mobile stores, `serve --mcp --exclusive`). A shared handle isn't: `run_write` clears its stamp first (`store/shared.rs:870`), so it reloads from the file after any failed window. A one-shot CLI command exits.
+3. It's a regression on the path this release changed: v0.19.1's retry rewrote the pages.
+4. Everything else I tried on this path held: 400 random runs (10,496 armed write or sync failures, 5,758 reopens) never lost an acknowledged memory or showed one that wasn't written, with the failed pages left in the OS cache as the failpoints do.
+
+**Recommendation:** keep the pages dirty until a sync has covered them: `write_dirty` writes but doesn't mark clean, and the pages are marked clean when the barrier (or any `Pager::sync`) succeeds. A retry then writes them again, as v0.19.1 did, and the one-fsync saving stays. Add the dropped-pages case to `tests/fsync_merge.rs` (put the earlier bytes back after a failed barrier, retry, reopen, read every memory). The other choice is to refuse like `commit_failed` after a failed barrier, which gives up the retry that `try_close` promises. See RB-016.2 before choosing: the two fixes touch the same lines.
+
+**Would I hold the tag for it?** Yes, for the small fix. It's rare (it needs an fsync error), but it's silent, it can take earlier memories with it, and it's new in this release.
+```
+
+## 01M7V61V60F110BNJN4JH6M9BG
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T00:35:09Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-016","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-016.3","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["mnemo/bindings/uniffi/src/db.rs","mnemo/bindings/kotlin/src/main/kotlin/io/github/toarchkumar/mnemo/MnemoStore.kt","mnemo/bindings/swift/Sources/Mnemo/MnemoStore.swift","mnemo/src/store/shared.rs","docs/design/catch-up.md","v0200-review"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795134956,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted for v0.20.0 (v0200-9), since the refusal that strands the mobile stores is new in this release and mobile publishes at 0.20.0. Item 1: the Kotlin and Swift stores treat the refusal like Closed (drop, reopen, report MaybeStored for the failed call), error.rs comment. Item 2: document the limit in docs/design/catch-up.md 8a and docs/shared-mode.md; no guard.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted for v0.20.0 (v0200-9), since the refusal that strands the mobile stores is new in this release and mobile publishes at 0.20.0. Item 1: the Kotlin and Swift stores treat the refusal like Closed (drop, reopen, report MaybeStored for the failed call), error.rs comment. Item 2: document the limit in docs/design/catch-up.md 8a and docs/shared-mode.md; no guard.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+v0.20.0 at READY, two smaller points: the mobile stores can't act on "reopen the file"; a copy written over the head of the file without cutting it passes the restore guard
+
+**Context / Evidence:** at `c702f39`. Item 1 is by reading (scope item 2, close and try_close); item 2 is tested (scope item 5).
+
+1. **After a failed commit, a mobile store can't get the fresh handle the error asks for.**
+   - v0200-1r: once a commit fails at or after its commit point, every later `flush` on that handle returns `MaybeStored` ("reopen the file"), and so does `close`.
+   - The binding's `close` uses `try_close` and puts the handle back on any error (`bindings/uniffi/src/db.rs:345-358`), and maps `MaybeStored` to `Io` (`error.rs:104-111`, whose comment still says these come only from the Rust API).
+   - Kotlin: `closeLocked` keeps the handle when `closeFile()` throws (`MnemoStore.kt:527-537`), the `ON_STOP` flush keeps it too (`:412-420`), and only `Closed` makes the store drop and reopen (`:446-457`). So after one failed commit (a full disk at the checkpoint, say) every write and every `close()` fails for the rest of the process.
+   - Swift: `close()` keeps the handle the same way (`MnemoStore.swift:390-397`); `closeForBackground` drops it (`:533-549`), so the store recovers when the app next goes to the background.
+   - Python's `close` drops the handle either way, so `close()` then open works. `serve --mcp --exclusive` refuses writes until the server is restarted; the default shared server finishes the commit itself (`finish_failed_commit`).
+   - Before v0.20.0 the retry returned `Ok` over a file that might not open, so this is the better failure. What's missing is the way out.
+
+2. **The restore guard assumes the copy replaced the whole file.**
+   - `anchors_hold` trusts held state when the first page of each kept run still has the nonce the handle saw. `docs/design/catch-up.md` 8a: "every run it checked predates any copy that might have been written over the file". That holds for `cp`, `std::fs::write`, a snapshot rollback: they cut the file, so a page past the copy's end reads as nothing or zeros.
+   - A copy written over the head of the file without cutting it (`dd conv=notrunc`, a block-level restore) leaves the old timeline's tail on disk. A scratch test in `tests/catch_up.rs`' style: 1,000 memories, a reader that caught up to a state whose catalog base lies past the copy's end (the copy is 90 pages, the file 145), the copy written over the first 90 pages, then the restored timeline's commits with other vectors (44 of 60 vector entries land where the reader holds entries). The reader's next call reloads and keeps its column: 44 rows differ from a fresh open's, and 60 of 60 recalls for those vectors differ. With the same copy written by `std::fs::write` (which cuts the file): 0 and 0.
+   - Everything else in items 4 and 5 held: 40 random runs of 80 steps (two shared writers, an exclusive session, the reader's own writes, deletes, vector and importance updates, keyed writes, cache puts, index builds and drops, snapshot restores, compactions) gave 453 incremental and 301 full catch-ups, each equal to a fresh open part by part and in recall. A v0.20 shared server stayed equal to a fresh open through 45 steps of writes by the published v0.18.1 (imports, MCP writes and forgets, tracked recalls, `index`, `compact`) on a 20,100-note indexed file, and both builds' `verify` pass after.
+
+**Recommendation:**
+- Item 1: in the stores, treat this refusal like `Closed`: drop the handle, reopen (the open finishes or drops the commit), and report `MaybeStored` for the call that failed. Give `MnemoDb` a way to drop without flushing if `close` should keep its contract. Fix the comment in `error.rs`.
+- Item 2: say the limit in catch-up.md 8a and in `docs/shared-mode.md` (replace the file, don't patch it in place). A guard that covers it needs something per commit that can't repeat, which is a format change; not worth it for this.
+
+**Would I hold the tag for it?** No.
+```
+
+## 01M7VDKV1N9VHZYNRW91CDH8Q4
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-017.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/store/coordination.rs","mnemo/src/bin/mnemo/hook.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142873,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec: wake() unchanged can't name the items it delivered, and a message's first line is brain text in the agent's context
+
+**Context / Evidence:** `spec.v0201-wait`, scope item 1; code at `c702f39`, by reading.
+- `Wake::Now { tasks, messages }` carries two counts (`store/coordination.rs:1940-1954`). `wake` marks the items `delivered` before it returns (`:2261-2267`). Nothing tells the caller which items they were.
+- After the call they can't be picked out again: `new_work` returns every unseen message, including ones to the role or `all` and ones delivered earlier (`:1961-1976`).
+- The Stop hook prints "fixed text and counts, never brain content" (`bin/mnemo/hook.rs:1251`, `:1293-1310`). Everywhere else, brain text reaches an agent only after `guide::FRAMING`, through `guide::escape_brain`, under a byte budget (the per-turn hook, `hook.rs:1092`; AGENTS.md's rule for the MCP resources).
+- The spec asks for both: "one line per item (the pointer: message id, sender and first line; or the pre-approved task slug)" and "It reuses wake() unchanged".
+
+**Finding:**
+1. The two can't both hold. To print ids, `wait` has to learn them inside the same write window that marks them.
+2. A message's first line is text another agent wrote. Printed bare on stdout, it lands in the woken agent's context as a command's output, with no framing line. The Stop hook was written to avoid exactly that.
+
+**Recommendation:**
+- Split `wake` in the engine and keep its signature and behaviour for the Stop hook: one function that returns the ids it marked (tasks, messages, or the reason it's held), with `wake` a wrapper that counts them. No public type changes shape.
+- Print ids, senders and slugs (escaped anyway). Print a first line only after the framing line, through `escape_brain`, cut to a fixed length; or leave it out and let the agent call `inbox`. The same fields in `--json`.
+
+**Should the spec change before build?** Yes.
+```
+
+## 01M7VDKV2QFESKBXBPSE17Q1PR
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-017.2","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/bin/mnemo/hook.rs","mnemo/src/store/coordination.rs","mnemo/src/memory.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142873,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec: two of the Stop hook's brakes aren't in wake(): MNEMO_WAKE=off and "never twice in a row"
+
+**Context / Evidence:** `spec.v0201-wait`, scope item 1 (the guardrails, Held and Nothing); code at `c702f39`, by reading.
+- `stop()` returns early when the turn was itself a continuation (`stop_hook_active`, `loop_count`; `bin/mnemo/hook.rs:1253-1262`) and when `MNEMO_WAKE=off` (`:1263-1265`). Both checks are in the hook.
+- `wake()` has the pause, the hop cap, the pair burst, the hourly limit and the cooldown (`store/coordination.rs:2211-2259`). The numbers (`memory.rs:645-654`): 12 wake-ups an hour and 60 s between them per recipient; 8 messages a pair in 10 minutes; replies past 8 hops.
+- The spec: "It reuses wake() unchanged, so ... the 13a guardrails and the kill switch apply".
+
+**Finding:**
+1. `MNEMO_WAKE=off`, the per-session switch that `mnemo wake status` reports as "this session wakes for nothing", wouldn't stop a waiter.
+2. "Never twice in a row" is what ends an unattended exchange today: a session the Stop hook continued stops at the end of that turn. A waiter removes that on purpose. What's left is `wake`'s own limits: an agent that starts `mnemo wait` again after each wake-up can be woken 12 times an hour for as long as messages keep arriving, each a full turn. Two agents that answer each other with new messages (not replies, so no hop count) are held only by the pair burst, about 8 messages per 10 minutes between them, until someone runs `mnemo wake pause`.
+3. That may be what the user wants (SendMessage has no brake at all), but it's the user's usage, so the spec should state the bound.
+4. The foreground loop for Cursor and Antigravity ("run it again on exit 3") has no bound either. Each timeout is a model turn with nothing to do.
+5. Smaller points on Held:
+   - A reply past the hop cap never clears, so a waiter with one in its inbox opens the brain every 60 s until the message is read. Harmless.
+   - After a wake-up, the next message inside the 60 s cooldown waits for the next 60 s re-check: up to about 2 minutes. A 15 s re-check while Held costs one open per 15 s, and only while something waits.
+   - A pre-approved task is marked `delivered` once for the whole role (`:2189-2196`, `:2262-2267`). With two agents of one role, only the first waiter wakes. Same as the Stop hook; the guide should say it.
+
+**Recommendation:**
+- `mnemo wait` exits at once, with one line, under `MNEMO_WAKE=off`.
+- The spec and the guide state the bound (up to 12 wake-ups an hour per agent, stopped by `mnemo wake pause`). If the user wants a tighter one for waiters, it's one more number to decide before build.
+- The guide's foreground loop: never retry after exit 1; a number of re-runs or a total time after which the agent stops and says so.
+
+**Should the spec change before build?** Yes, a few lines, and one question for the user (item 3).
+```
+
+## 01M7VDKV3W2BKBFVSXT2BVMYB5
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-017.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/store/coordination.rs","mnemo/src/bin/mnemo.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142874,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec: a wake-up is delivered at most once, so a waiter nobody reads (an orphan, a duplicate, a killed one) loses it
+
+**Context / Evidence:** `spec.v0201-wait`, scope items 1 and 3 (miss a wake, wake twice, two waiters); code at `c702f39`, by reading.
+- `wake` marks the items `delivered` inside the write window (`store/coordination.rs:2261-2267`), and only `sent` items are candidates (`:2192`, `:2206`). So an item wakes once. For the Stop hook, the reader is the session that ran the hook. For `mnemo wait`, it's whoever reads the process's exit.
+- Two waiters for one agent: both see the change, their windows are serialized by the brain's lock, the first gets `Now` and the second `Nothing`. Exactly one exits. The Stop hook and a waiter are serialized the same way. So nothing wakes twice (except after a restore in place of an older copy, where the items are `sent` again; that's the restored brain's truth).
+
+**Finding:** cases where the wake-up is used up and nobody is woken:
+1. A waiter left over from a session that ended or was resumed, if the background command outlives its client. It takes the next wake-up and prints to nobody; the new session's waiter gets `Nothing`.
+2. Two sessions that share an agent name: one misses.
+3. The waiter is killed, or its stdout is closed, between the commit and the print: a terminal tool's time limit that fires just then (when `--timeout` isn't well under it), or a closed pipe (the CLI exits 141, `bin/mnemo.rs:6248-6269`).
+4. The agent doesn't start `mnemo wait` again after a wake-up. Nothing is lost then, but nothing wakes it either.
+
+In each case the item still shows at the session's next prompt (the per-turn hook lists `delivered` items), so no message is lost. The idle session just isn't woken, which is what the feature is for.
+
+**Recommendation:**
+- Newest waiter wins. At start, a waiter writes a sidecar note for its agent holding a random token (the hooks already keep their `hook.turn.*` notes there). Before each full check it reads the note, and when the token isn't its own it exits with its own code, without calling `wake`. A resumed session's new waiter then retires the orphan at the orphan's next check. No new file kind, no dependency, every platform.
+- On Unix, also exit when the parent changes (`std::os::unix::process::parent_id`).
+- After `Now`: print, flush, exit, with nothing in between. Look for a change before looking at the timeout, so a change at the deadline is delivered and not dropped.
+- The guide: start it again after every exit 0; `--timeout` at least 10 s under the tool's limit.
+- Say "at most once" in the spec.
+
+**Should the spec change before build?** Yes.
+```
+
+## 01M7VDKV56VADKP32KTECQS033
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-017.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/store/shared.rs","mnemo/src/shared/lock.rs","mnemo/src/bin/mnemo/hook.rs","finding.per-turn-hook-cost"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142874,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec: the change check is sound with four rules written down; a locked brain must not be an exit 1
+
+**Context / Evidence:** `spec.v0201-wait`, scope items 2, 3 and 4; code at `c702f39`, by reading. Nothing here was run on Windows.
+- The check already exists: `Mnemo::file_stamp` (`store/shared.rs:324-350`) reads page 0's seal nonce and tag, the file's identity (Unix), its length and mtime, with no key and no lock, and returns `None` when page 0 can't be read. The per-turn hook uses it (`bin/mnemo/hook.rs:1161`), with RB-012.5's rule that the stamp is read before the open.
+- A write window that seals nothing commits nothing (`shared.rs:876-882`), and `wake` writes only on `Now`. So a check that returns `Nothing` or `Held` leaves the file as it was: a waiter doesn't trigger itself or the other waiters. `touch_presence` is the one thing nearby that would (the CLI's coordination commands call it, `bin/mnemo.rs:4701` and five more places).
+- Shared handles hold the lock for one window. A plain open holds the exclusive lock for its life: `serve --mcp --exclusive`, a Python or Rust app, a long `import`, `compact` or `rekey`. The hooks wait 2 s for the lock (`hook.rs:80`), other calls 10 s.
+- The lock is on the brain file itself, through fs4. On Windows that's `LockFileEx`, which is mandatory: while a writer holds it, another handle's read of the file fails (error 33, which `is_lock_conflict` knows, `store/load.rs:359-374`).
+- Compaction renames a new file over the path (`store/maintenance.rs:968-1017`). A restore in place puts back an older header.
+
+**Finding:** by path, with no handle kept, the check is right for every case in scope: shared writers, compaction (the path names a new file with another seal), a restore in place (an older seal differs too), and a WAL a crashed writer left (length or mtime). It needs four rules in the spec:
+1. Read the stamp before the open, never after. A commit between the stamp and `wake` then costs one extra check. A stamp read after `wake` would miss a commit that lands in between, for good.
+2. Compare for "different", not "newer". `None` counts as changed.
+3. The first check is unconditional. An item sent before the waiter started is otherwise found only at the next commit by anyone.
+4. `wait` calls `wake` and nothing else that writes: no `touch_presence`, and no `hold_presence` (a waiter isn't the agent's session; holding its presence lock would keep a dead session's claims from lapsing early).
+
+And one gap, "errors exit 1":
+- A check that finds the brain locked past its wait isn't an error for a waiter. Under an exclusive holder every check ends in `Locked`. On Windows the stamp is also `None` through every write window, so each tick becomes a full check.
+- Exit 1 there would end every waiter whenever someone runs a long import or a compaction, and in Claude Code each exit starts a turn.
+
+**Recommendation:**
+- On `Locked` or a passing I/O error: keep waiting, remember that a check is owed, try again with a growing gap (2 s up to 30 s), and say it once on stderr. Use the hooks' 2 s lock wait. Exit 1 only for what can't clear by itself: no key, a wrong key, an old or unknown format, a refused folder, a missing file.
+- Jitter on the 1 s tick, and a floor between full checks that grows (to about 5 s) while checks keep returning `Nothing` on a file that keeps changing. Each waiter does one fresh open and one exclusive window per change. With five sessions and a busy writer that's up to five opens a second, each taking the write lock ahead of readers. (The per-turn hook's path without the stamp was 22.8 ms on this brain at 11,000 records, `finding.per-turn-hook-cost`; not measured now.)
+- Better, with RB-017.1's split: look for candidates in a read window first, and take the write window only when there is one. Idle checks then share the lock.
+
+**Should the spec change before build?** Yes.
+```
+
+## 01M7VDKV64AHHRSG9TWF7HRAHM
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-017.5","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/store/shared.rs","mnemo/src/mcp.rs","mnemo/src/shared/fscheck.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142874,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: poll, no watcher; key once at start; MCP wait tool needs a reader thread and per-request cancel (step 2); notices once per process: all in spec.v0201-wait. Waiters join the release dogfood check (decision.dogfood).","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: poll, no watcher; key once at start; MCP wait tool needs a reader thread and per-request cancel (step 2); notices once per process: all in spec.v0201-wait. Waiters join the release dogfood check (decision.dogfood).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec, the short answers: poll (no watcher); the key once at start is right; an MCP wait tool needs a server that reads while it works
+
+**Context / Evidence:** `spec.v0201-wait`, scope items 2 (polling or a watcher), 4, 5 and 6; code at `c702f39`, by reading.
+
+1. **Poll every 1 s; no file watcher.**
+   - The check is one small read a second (`Mnemo::file_stamp`). The cooldown between wake-ups is 60 s, so a 1 s delay doesn't show.
+   - A watcher wouldn't remove the poll: the Held re-check, events lost across sleep, and a watch on a file that compaction has replaced all need it.
+   - Watchers differ by platform where it matters here: a per-file watch follows the old file after a rename, nothing fires on a network filesystem, macOS groups events, and on Windows a watch keeps a directory handle open.
+   - `notify` would bring a tree of platform crates into a crate that pins every dependency and forbids unsafe code.
+
+2. **Windows.** Rust opens files with full sharing, so the one-second read doesn't block another open or compaction's rename (builds since Rust 1.85; the MSRV is 1.94). Off Unix the stamp has no file identity; the seal covers it. The lock point is RB-017.4. The hooks were untested on Windows at v0.16.0, so `wait`'s two-process tests on the Windows runner would be the first to run `file_stamp` beside writers there.
+
+3. **A network or synced folder.** Refusing at start matches the hooks, which pass no `allow_network_fs`. For a brain under `~/Desktop` or `~/Documents` shared mode gives a warning per handle (`shared/fscheck.rs`); with a fresh handle per check it would repeat, so print each notice once per process.
+
+4. **The key.**
+   - Reading it once at start is right. Reading it again later could raise a keychain dialog from a background process, for example after the binary is upgraded (KEYCHAIN-REPROMPT).
+   - Holding it is the same exposure as the MCP server, which keeps the secret for its life in a zeroizing buffer (`store/shared.rs:407`). Hold it the same way and keep nothing derived from it.
+   - After another process's `rekey`, the next open fails and the waiter exits 1; the line should say to start it again.
+   - A passphrase brain pays the passphrase KDF (19 MiB, 2 passes) on each check; a raw-key brain doesn't.
+   - A waiter can outlive an upgrade of `mnemo`, and is then an old build writing to the brain. The dogfood check of running servers at each release should count waiters too.
+
+5. **An MCP wait tool (step 2).** `serve_inner` reads a request, answers it and reads the next, so a blocking tool would hold every other call and couldn't be cancelled (the cancel is behind it in the same stream). It needs a reader thread and per-request cancel first. A tool call also runs only inside a turn, under the host's tool timeout, so it could replace the foreground loop, never the background wake-up.
+
+6. **Exit 3.** `mnemo onboard` already exits 3 when it writes nothing without a terminal (`bin/mnemo.rs:1198`). No clash: both mean "nothing happened".
+
+**Should the spec change before build?** No, apart from the notice (item 3) and the two lines in item 4.
+```
+
+## 01M7VDKV72E9QRKSAQWDKVZT4N
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:47:19Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-017","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"RB-017.6","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["spec.v0201-wait","v0201-spec-review","mnemo/src/store/coordination.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142874,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: folded into spec.v0201-wait (revised the same day) for v0.20.1.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+mnemo wait spec: tests to add, and two in the list that don't prove what they say
+
+**Context / Evidence:** `spec.v0201-wait`'s TESTS list, scope item 7; code at `c702f39`, by reading.
+
+**Two that don't prove what they say:**
+1. "The brain is never locked while waiting (another writer commits during the wait)". A shared writer commits even when the waiter takes the lock for a moment each second. Stronger: while a waiter idles on an unchanged brain, a plain `Mnemo::open` with no wait succeeds several times in a row, and the file's stamp is the same after 5 s. That also catches a waiter that writes while idle.
+2. "A message by id wakes within 3 s". On a loaded runner (Windows most of all) a new process and an open can take longer. Assert the order of events with a generous bound.
+
+**To add:**
+1. An item sent before the waiter starts: it exits at once (RB-017.4 rule 3).
+2. Two waiters for one agent and one message: exactly one exits 0. With newest-wins (RB-017.3), the older one exits with its code.
+3. A commit between the stamp and the check, held open with a dev-hooks pause like `run_before_shared_commit`: still woken.
+4. An exclusive holder: the waiter keeps waiting and wakes after the holder closes. On Windows too.
+5. `compact` during the wait, then a message: woken. A restore in place of an older copy: one check runs and the waiter carries on.
+6. The cooldown and the hourly limit: held, then woken. The clock can be shifted (`MNEMO_DEV_CLOCK_OFFSET`, `store/coordination.rs:778-787`), but the tick and the Held re-check need dev-hooks switches of their own, or the test takes a minute.
+7. `MNEMO_WAKE=off`; no agent; a wrong key (exit 1).
+8. Output: a first line that imitates the framing line, one with control characters, one of 10 KB (RB-017.1).
+9. A waiter killed while idle leaves every item `sent`.
+
+**Not testable in CI:** that a background exit starts a turn in Claude Code, and that a foreground wait fits under each editor's tool limit. List them as dogfood checks with what was seen.
+
+**Should the spec change before build?** Add them to the list.
+```
+
+## 01M7VNBNZ61TSC50SF53D1R9ZF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T05:02:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-018","_mnemo.category":"CORRECTNESS","_mnemo.finding_id":"RB-018.1","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["de3f53c","mnemo/src/store/flush.rs","mnemo/src/pager.rs","mnemo/tests/fsync_merge.rs","v0200-8-check","RB-016.1"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795151009,"by":"planner-a","from":"open","note":"Accepted for v0.20.0, task v0200-8t (fix round 2 of 3, test only): add the failed-run-write then failed-lease-fsync case to tests/fsync_merge.rs (cfg(unix)), plus the debug_assert that no page is written-unsynced when a WAL fsync runs.","to":"accepted"}],"_mnemo.triage":"Accepted for v0.20.0, task v0200-8t (fix round 2 of 3, test only): add the failed-run-write then failed-lease-fsync case to tests/fsync_merge.rs (cfg(unix)), plus the debug_assert that no page is written-unsynced when a WAL fsync runs.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+v0200-8: the restore's rewrite_unsynced is needed and right, but no test fails without it (the code is correct; a test gap)
+
+**Context / Evidence:** at `de3f53c`, in my clone (macOS, `--features failpoints --locked`, debug). Scope item 4.
+- The fix puts written pages back on the flush's list in two places: `Pager::sync` when the sync fails (`pager.rs:743-746`), and `flush`'s restore after `stage_commit` fails (`flush.rs:297`, `rewrite_unsynced`).
+- Mutations, each alone, against `tests/fsync_merge.rs` (8), `tests/flush_retry.rs` (3) and `prop_big_batch_commits_crash_pre_or_post`:
+
+| Mutation | Result |
+|---|---|
+| pages clean once written (the code before the fix) | 2 fail: `..._writes_dropped_pages_again`, `..._syncs_before_its_commit` |
+| no new lease on the restore | 3 fail: `..._seals_under_a_new_generation`, `..._syncs_before_its_commit`, the proptest |
+| no `rewrite_unsynced` on the restore | all pass |
+| a failed `Pager::sync` doesn't put them back | all pass |
+| both of the last two | the same 2 fail as the first row |
+
+- So the report's first mutation holds as a pair. Its two halves cover for each other in every test, because the only failure the tests make before the commit point with dropped pages is the barrier, where both run.
+- `rewrite_unsynced` is not redundant. A scratch test: 3,000 memories, add 1,500, fail one write of a direct run (no fsync has failed, so nothing is dropped; the 21 data pages are written and unsynced). Retry: the new lease's WAL fsync fails. That fsync is `wal.rs:208-209`, not `Pager::sync`, so the pager isn't told. Model the drop by putting the whole file back to its bytes before the flush (nothing was synced since). Third attempt: `Ok`. As shipped the file reads back whole (4,500 memories, `verify`, every `get`), for two failing writes. Without `rewrite_unsynced` the reopen fails with `PageAuthFailed(81)`: RB-016.1 again.
+- Why the shipped code is safe here: a written-unsynced page exists only inside `flush`, between `write_dirty` and either the barrier or the restore. `stage_commit` makes no other sync (I read lines 418-760). So no fsync outside `Pager::sync` (`wal.rs:209, 229, 245`) runs while one exists. That is by construction, not checked anywhere.
+
+**Finding:**
+1. The code is right. One line that RB-016.1's fix depends on has no test: remove it and the suite stays green.
+2. The line in `Pager::sync`'s failure path is covered only together with it. Today the restore always runs after a failed barrier, so it's a second guard.
+
+**Recommendation:**
+- Add the case above to `tests/fsync_merge.rs` beside `a_retry_after_a_failed_write_before_the_barrier_commits_cleanly` (Unix only, like the other put-back tests): a failed direct-run write, then `set_syncs_until_fail(0)` on the retry, the file put back, a third flush, reopen, read every memory. My scratch version is `a_failed_run_write_then_a_failed_lease_fsync_all_dropped` in `rb018_probe.rs` (scratchpad `rb018/`), free to copy.
+- Optional: a `debug_assert` in `relocate_header_through_wal` and `commit_and_checkpoint` that no page is written-unsynced when the WAL's own fsync runs, so a later change can't break the rule silently.
+- `cfg(unix)` on the put-back tests is acceptable. They need a second handle to write under the first one's lock, which Windows refuses. The parts that run everywhere still fail on the two main mutations: `a_retry_after_a_failed_barrier_syncs_before_its_commit` (every page of attempt 1 is written again, and the lease commit is there) and the cache's unit test.
+
+**Would I hold the tag for it?** No. A test to add in v0200-9 or v0.20.1.
+```
+
+## 01M7VNBP08897QA7M1KKEHZZ2S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T05:02:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-b","_mnemo.batch":"RB-018","_mnemo.category":"PERF","_mnemo.finding_id":"RB-018.2","_mnemo.kind":"finding","_mnemo.priority":"LOW","_mnemo.refs":["de3f53c","mnemo/src/cache.rs","mnemo/src/pager.rs","v0200-8-check"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795151009,"by":"planner-a","from":"open","note":"Accepted: the Worker times compact_file at 100K before (7f52d54) and after (de3f53c) in v0200-8t, since the Worker may benchmark. If slower by more than 10 percent, it reports and stops, and the Planner decides fix-now or v0.20.1; otherwise the LRU change (pinned pages off the list) goes to the backlog for v0.20.1 or later.","to":"accepted"}],"_mnemo.triage":"Accepted: the Worker times compact_file at 100K before (7f52d54) and after (de3f53c) in v0200-8t, since the Worker may benchmark. If slower by more than 10 percent, it reports and stops, and the Planner decides fix-now or v0.20.1; otherwise the LRU change (pinned pages off the list) goes to the backlog for v0.20.1 or later.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+v0200-8: with written pages pinned through stage_commit, the page cache's eviction walks all of them for each control page sealed (counted, not timed)
+
+**Context / Evidence:** at `de3f53c`. Scope item 2.
+- Memory is bounded as before. Pinned pages are the commit's own data pages, which were already in the cache as dirty when they were packed. The fix keeps them pinned from `write_dirty` to the barrier instead of releasing them at `write_dirty`, so the peak is the same. A read-only handle never has one. A sync that keeps failing leaves them dirty, as v0.19.1 did: five failed barriers in a row left the count unchanged (109, 109, 109, 111, 111 cached pages, the last two after 40 more memories). After a sync succeeds, `Pager::sync` marks them clean and trims (`pager.rs:748-750`); the cache's unit test covers that.
+- The cost is time, in one place. `seal_page` inserts each control page as a clean entry (`pager.rs:719`), and `insert` trims (`cache.rs`, `trim` then `evict_one`). `evict_one` walks from the least recently used end until it finds a clean page. During `stage_commit` the cache is now over its cap with pinned pages at that end, so each sealed page walks past all of them to evict the page just inserted. Before the fix the pages were clean and trimmed by then.
+- Counted with a scratch counter in `evict_one` (my clone only), 384-dimension memories with about 400 bytes of text, one commit, then `compact_file` (which copies everything and commits once, `maintenance.rs:448-449`):
+
+| Memories in the commit | Pages written before the barrier | Nodes visited, as shipped | With pages clean once written (before the fix) |
+|---|---|---|---|
+| 4,000 | 729 | 66,220 | 475 |
+| 8,000 | 1,451 | 251,817 | 1,197 |
+| 16,000 | 2,895 | 978,285 | 2,673 |
+
+  `compact_file` on the same files: 66,592, 252,816 and 980,539 as shipped; 847, 2,196 and 4,927 before.
+- It grows with the square of the commit's size: about (control pages sealed) x (data pages written). From these three points, about 38 million visits at 100,000 such memories in one commit and about 3.8 billion at 1,000,000. That is an extrapolation.
+- Not timed: no benchmarks while the Worker has a PR open. Each visit is one read of a small node, so I'd expect this to be small next to the commit itself at 100,000 and to show at 1,000,000. That is a guess until someone times it.
+
+**Finding:** a big single commit (an import, `mnemo compact`, `export_rekeyed`) now does work in the page cache that grows quadratically. Ordinary commits (a few pages) are unaffected: the walk is as long as the commit's own data pages.
+
+**Recommendation:**
+- When benchmarks are allowed again, time `mnemo compact` at 100K before and after `de3f53c`. If it shows, keep pinned pages off the LRU list (they're never evicted, so their order doesn't matter) and put them on it when they turn clean; eviction is then one step. That also removes the same walk during a long batch's reads, which was there before the fix.
+- No change needed for v0.20.0.
 
 **Would I hold the tag for it?** No.
 ```
@@ -4510,6 +5493,171 @@ Part B pre-phase check: decision.roadmap-order after v0.20.0 stays right (option
 EVIDENCE: decision.roadmap-order (2026-11-18), decision.vercel-supabase-ideas (2026-11-18), Part A findings REV-011.1 to REV-011.5 (~/mnemo-reviews/REV-011.md), and 2025-2026 agent harness platforms (Anthropic Claude Managed Agents Dreaming background consolidation, Vercel AI SDK and Sandbox Drives GA Oct 2026, LangGraph JS, Cloudflare Agents). FINDING: The post-v0.20.0 free roadmap — (1) 13.7 mnemo merge, (2) sync change sets on disk, (3) smarter memory (dedupe, summarize, link, prune, mnemo doctor, MCP elicitation), (4) mobile see-and-delete, (5) Node.js package and Vercel AI SDK + sandbox/drives guide; paid features on hold — is strongly validated by Part A. Steps 1 and 2 serve local multi-machine users now and simultaneously remove the top two hosted-brains risks (delta S3 writes and split-brain reconciliation). Step 3 directly answers the market shift toward background memory consolidation (Claude Managed Agents Dreaming, Mem0/Zep consolidation) and keeps long-lived brains below the 100K-memory ceiling. Keeping relay, Pro, 13.2, 13.4 and Teams on hold remains right because Reading (B) is a no-go and Reading (A) does not need 13.2 to prototype. The one trade-off worth surfacing for the user is Steps 4 vs 5: 2026 agent harnesses are overwhelmingly TypeScript/Node.js-first, so Node.js + Vercel AI SDK + Sandbox/Drives guide (1 RW client drive + 1 RO playbook drive) has higher immediate ecosystem leverage for both local builders and Reading (A) pilots than mobile see-and-delete, unless mobile users are actively pulling for Step 4. RECOMMENDATION: Keep Steps 1 -> 2 -> 3 intact and keep paid features on hold. Surface one optional decision for the user: whether to swap Step 5 (Node.js / Vercel AI SDK + sandbox/drives guide) ahead of Step 4 (mobile see-and-delete).
 ```
 
+## 01M7TZHA9CDV3T27X19WD4PA3D
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:41:16Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-012","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"REV-012.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["README.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795128303,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted into roadmap step 3 (smarter memory). Its spec will include an opt-in, local turn-to-fact consolidation that emits discrete keyed deltas (engineering rule 1), using the user's own agent or a local model; design note before build. Checked: the brain has 26,150 memories, almost all saved turns, with facts mainly from explicit keyed remembers; claude-mem 118K stars, mem0 69K, hindsight 62K (gh api today). Not a tag hold.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted into roadmap step 3 (smarter memory). Its spec will include an opt-in, local turn-to-fact consolidation that emits discrete keyed deltas (engineering rule 1), using the user's own agent or a local model; design note before build. Checked: the brain has 26,150 memories, almost all saved turns, with facts mainly from explicit keyed remembers; claude-mem 118K stars, mem0 69K, hindsight 62K (gh api today). Not a tag hold.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Smarter-memory scope gap: passive transcript capture vs. automatic turn-to-fact consolidation
+
+EVIDENCE: Live project brain .git/mnemo/project.mnemo holds 24,838 memories — 24,326 raw saved turns vs. 369 facts (facts exist mainly because repo agents follow explicit remember --key conventions). Competitive late-2026 baseline (full report: ~/mnemo-reviews/REV-012.md): claude-mem (~96K-108K stars, https://claude-mem.ai/) runs a background observer compressing sessions into searchable timelines automatically; Anthropic Claude Managed Agents Dreaming (https://www.anthropic.com/) consolidates, merges and prunes memories across completed sessions; Mem0 (~50K-68K stars, https://mem0.ai/) extracts ADD/UPDATE/DELETE facts automatically; vectorize-io/hindsight (~56K-61K stars, https://vectorize.io/) runs retain/recall/reflect automatically. FINDING: decision.roadmap-order Step 3 (smarter memory) currently covers dedupe, session summarization, linking, forgetting stale facts, MCP elicitation, mnemo doctor and status.backlog-small, but leaves typical mnemo onboard users relying on agents manually calling remember to populate keyed facts. In late 2026, automatic curation without manual prompting is table stakes for coding-agent memory adoption. RECOMMENDATION: Refine the Step 3 (smarter memory) spec to include an opt-in, local-first turn-to-fact consolidation flow (e.g. a mnemo consolidate command or MCP prompt/hook trigger using the user existing coding agent or local model, strictly honoring Engineering Rule 1 by emitting discrete keyed deltas rather than rewriting blobs wholesale). Hold v0.20.0 tag? No (post-v0.20.0 Step 3 scope).
+```
+
+## 01M7TZHMTTA1BCVS3PDTRKP24Y
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:41:27Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-012","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-012.2","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["mnemo/src/bin/mnemo/onboard.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795128303,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: adding onboard clients (Codex, VS Code, Windsurf) is a new roadmap item, the user's call. Evidence correction: mcp_install.rs's Client enum is Claude Code, Cursor and Claude Desktop only; it does not cover Codex or VS Code today. Not a tag hold.","to":"needs-user"},{"at":1795128675,"by":"planner-a","from":"needs-user","note":"planner-a 2026-11-19: user yes, and add Google Antigravity. Clients: Codex (hooks stable since v0.124, config.toml), Antigravity (MCP in ~/.gemini/config/mcp_config.json, hooks reported), VS Code, Windsurf (now Devin Desktop). Placement: the Planner proposes it as roadmap step 1 (status.roadmap-proposal-rev012); awaits the user's go.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: user yes, and add Google Antigravity. Clients: Codex (hooks stable since v0.124, config.toml), Antigravity (MCP in ~/.gemini/config/mcp_config.json, hooks reported), VS Code, Windsurf (now Devin Desktop). Placement: the Planner proposes it as roadmap step 1 (status.roadmap-proposal-rev012); awaits the user's go.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Onboarding client breadth: mnemo onboard wires only Claude Code and Cursor while developers mix Codex, VS Code and Windsurf
+
+EVIDENCE: mnemo/src/bin/mnemo/onboard.rs wires Claude Code and Cursor (while mcp_install.rs covers Claude Desktop, Codex and VS Code for MCP-only without hooks or guide wiring). Competitive late-2026 baseline (full report: ~/mnemo-reviews/REV-012.md): native tool memory is fragmented across islands — Claude Code MEMORY.md (200-line/25 KB cap), Cursor .cursor/rules/*.mdc (v2.1 hid automated Memories UI), and OpenAI Codex ~/.codex/memories_v2/ + AGENTS.md (32 KiB cap) — while competitors like vectorize-io/hindsight (https://vectorize.io/) hook 20+ harnesses and OpenMemory/Mem0 (https://mem0.ai/) pitch cross-editor memory across Cursor, Claude and Windsurf. FINDING: Cross-tool shared memory is one of MNemo strongest differentiators against both vendor-native memory and Claude-Code-only tools like claude-mem, yet mnemo onboard stops at two clients, leaving Codex, VS Code, Windsurf and OpenCode users on manual setup. RECOMMENDATION: Schedule an incremental onboard expansion (after v0.20.0 or alongside the Node.js step) to wire OpenAI Codex and VS Code / Windsurf (MCP config plus AGENTS.md guide-card wiring, and hooks wherever the client supports them). Hold v0.20.0 tag? No.
+```
+
+## 01M7TZHXBXWB1E3J6C3R1H0C8S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:41:36Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-012","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-012.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["test/scripts/perf_v0.19.0.json"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795128303,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: moving public benchmarks from backlog to right after step 3 changes the roadmap order, the user's call. Not a tag hold.","to":"needs-user"},{"at":1795128675,"by":"planner-a","from":"needs-user","note":"planner-a 2026-11-19: user yes. Public benchmarks go right after smarter memory, against CLAUDE.md plus notes, claude-mem and Mem0 (status.roadmap-proposal-rev012).","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: user yes. Public benchmarks go right after smarter memory, against CLAUDE.md plus notes, claude-mem and Mem0 (status.roadmap-proposal-rev012).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Public benchmark backlog: scope against CLAUDE.md, claude-mem and Mem0, and pull off backlog right after Step 3 (smarter memory)
+
+EVIDENCE: decision.vercel-supabase-ideas item 5 and status.ideas-file (docs/ideas.md) park public repeatable benchmarks on backlog; internal engine numbers are already elite (test/scripts/perf_v0.19.0.json: 2.4-11.5 ms recall at 100K, recall@10=0.978, 41 MiB for 24.8K memories; v0.20.0 0.4-0.8 ms shared catch-up). Market evidence (full report: ~/mnemo-reviews/REV-012.md): Mem0, Zep, Hindsight and Letta drive developer trust and adoption largely via public LoCoMo/LongMemEval accuracy, latency and token-savings benchmarks, whereas coding-agent tools like claude-mem (~96K-108K stars) dominate mindshare without encryption or crash-safety rigor. FINDING: MNemo engineering quality outclasses most popular agent-memory repos, yet outsiders have no reproducible head-to-head proof. Running a public benchmark before Step 3 (smarter memory) would under-represent MNemo on curated fact extraction; leaving it indefinitely on backlog keeps MNemo strongest differentiator invisible. RECOMMENDATION: Keep public benchmarks on backlog through Steps 1-2, then trigger them right after Step 3 (smarter memory) — scoping a repeatable coding-agent suite comparing MNemo against (a) CLAUDE.md + notes folder, (b) claude-mem, and (c) OpenMemory/Mem0 on recall accuracy (exact identifiers + decision supersession), token budget consumed, p50/p95 latency, disk footprint, and crash/encryption guarantees. Hold v0.20.0 tag? No.
+```
+
+## 01M7TZJ627RWW5B4PFRQBHSHXT
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-19T22:41:45Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-012","_mnemo.category":"PLAN-REFINEMENT","_mnemo.finding_id":"REV-012.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["README.md"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795128303,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: mobile releases are already decoupled (v0.19.1 kept mobile at 0.19.0; release-mobile flag). The live question is roadmap step 5 (mobile see-and-delete): keep, or hold until mobile users ask. The user's call. Not a tag hold.","to":"needs-user"},{"at":1795128675,"by":"planner-a","from":"needs-user","note":"planner-a 2026-11-19: user: don't hold mobile see-and-delete, order it by core need vs bonus. Mobile stays decoupled from engine-only releases; the screens go last, as a bonus beside the coding-agent core (status.roadmap-proposal-rev012).","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: user: don't hold mobile see-and-delete, order it by core need vs bonus. Mobile stays decoupled from engine-only releases; the screens go last, as a bonus beside the coding-agent core (status.roadmap-proposal-rev012).","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Surface-area discipline: protect the local coding-agent wedge against Turso (storage peer) and mobile maintenance drag
+
+EVIDENCE: Live repo audit (~108K LOC across Rust core, Python, UniFFI, Swift/iOS, Kotlin/Android, CLI, MCP server, browser inspector and 8 CI workflows including iOS simulator and Android emulator). Competitive late-2026 baseline (full report: ~/mnemo-reviews/REV-012.md): Turso (https://turso.tech/pricing, https://docs.turso.tech/) now ships a Rust SQLite core with native vector search (vector8/DiskANN), Tantivy FTS, 4 KiB page-level AEAD BYOK encryption and bottomless S3 from $4.99-$25/mo, matching MNemo encrypted embedded-storage capabilities while lacking MNemo agent-memory semantics (onboard, MCP, redaction, keyed supersession, essence, tasks, findings, inspect). FINDING: Maintaining 4 language bindings across desktop, iOS and Android creates parity pressure on every new engine feature (merge, change sets, smarter memory). Because Turso now covers general-purpose encrypted vector SQLite, MNemo durable moat is NOT generic embedded storage — it is the opinionated, local-first coding-agent memory and cross-tool coordination layer built on top. RECOMMENDATION: Keep mobile releases decoupled from engine-only releases (as done in v0.19.1), avoid porting coding-agent coordination or sync UIs to mobile unless active mobile users pull for them, and concentrate engineering bandwidth on the local coding-agent wedge (13.7 merge, change sets, smarter memory, Node.js/AI SDK and broader onboard clients). Roadmap prioritization remains the user decision. Hold v0.20.0 tag? No.
+```
+
+## 01M7VC97EEAPM3GRFPJP1FXE7X
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:24:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-013","_mnemo.category":"DX/DOCS","_mnemo.finding_id":"REV-013.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["index.html"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795141753,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: (1) index.html favicon and nav mark replaced with the A3 SVG, the old teal box dropped; (2) docs/brand.md (the guideline, its tokens checked equal to index.html's, the private business note left out) and docs/img/logo.svg, logo-mono-dark.svg, logo-mono-light.svg; decision.brand recorded. Both ride v0.20.0 in hand-off v0200-10h. (3) inspect.html's favicon and palette, and the social preview with the mark: a Worker task in v0.21.0.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: (1) index.html favicon and nav mark replaced with the A3 SVG, the old teal box dropped; (2) docs/brand.md (the guideline, its tokens checked equal to index.html's, the private business note left out) and docs/img/logo.svg, logo-mono-dark.svg, logo-mono-light.svg; decision.brand recorded. Both ride v0.20.0 in hand-off v0200-10h. (3) inspect.html's favicon and palette, and the social preview with the mark: a Worker task in v0.21.0.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Locked MNemo logo (A3 Sealed-File M) and codified index.html brand palette for planner-a handoff
+
+EVIDENCE: User locked logo variant A3 (Sealed-File M Monogram: warm amber #F0A35A top padlock shackle, deep teal #0E7C74 portrait single-file body, mint #5FD0C4 folded top-right corner, white 45-degree M matching index.html, pixel-centered on x=32) and directed on 2026-11-19 that the full index.html color scheme (Light, Dark, Terminal, and Code tokens plus sans/mono stacks and radii) be codified as the canonical brand guideline with no deviation in future iterations without an intentional user-approved brand rethink. Full brand guideline and ready-to-paste HTML/CSS snippets are at ~/mnemo-reviews/BRAND-GUIDELINE.md; canonical SVGs are at ~/mnemo-reviews/brand/mnemo-mark.svg, mnemo-mark-mono-dark.svg, and mnemo-mark-mono-light.svg. FINDING: index.html currently uses a placeholder plain-M teal square in two places — line 14 (<link rel="icon">) and lines 156-157 / 444 (.brand-mark) — and the palette exists only inline inside index.html CSS rather than a codified brand doc. Note: because the locked A3 mark already has a solid teal file body with an amber shackle rising above it, .brand-mark in index.html must drop its old background: #0E7C74 box and render the 30x30 SVG directly. RECOMMENDATION: (1) Apply the locked A3 SVG to index.html favicon (line 14) and navbar .brand-mark (lines 156-157, 444) using the exact snippets in ~/mnemo-reviews/BRAND-GUIDELINE.md (can ride with the v0.20.0 version-text hand-off); (2) Codify ~/mnemo-reviews/BRAND-GUIDELINE.md into the repo (e.g. docs/brand.md plus docs/img/logo.svg) and record a decision.brand fact in the project brain enforcing the no-deviation rule; (3) Align inspect.html favicon/palette and future UI/social-preview assets to the same tokens. Hold v0.20.0 tag? No.
+```
+
+## 01M7VD16PKFYY17638ZC2HRYPF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:37:08Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-014","_mnemo.category":"PERF","_mnemo.finding_id":"REV-014.1","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["mnemo/src/store/records.rs"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795142334,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: checked: the turn cutoff is a per-handle setting (FMT-9e, open.rs set_turn_compress_after; 7 days so live sessions read recent turns at full speed; 0 compresses at write), and the brain pins 8.6 MB in 99 snapshots (mcp stats). Accepted into roadmap step 4 (smarter memory), measured first: the zero-format items (1) a shorter turn cutoff for the hooks' writes, with the read-speed cost measured, and (2) a time-bucketed snapshot retention; (3) is already step 4. Items (4) to (6) need a format bump: deferred until the next format version is opened. Neural compressors ruled out, as the finding says. Not a tag hold.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: checked: the turn cutoff is a per-handle setting (FMT-9e, open.rs set_turn_compress_after; 7 days so live sessions read recent turns at full speed; 0 compresses at write), and the brain pins 8.6 MB in 99 snapshots (mcp stats). Accepted into roadmap step 4 (smarter memory), measured first: the zero-format items (1) a shorter turn cutoff for the hooks' writes, with the read-speed cost measured, and (2) a time-bucketed snapshot retention; (3) is already step 4. Items (4) to (6) need a format bump: deferred until the next format version is opened. Neural compressors ruled out, as the finding says. Not a tag hold.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+File-size optimization roadmap: zero-format-bump v9 wins now, v10 vector/dict levers later, and ruling out neural compressors (tufazip)
+
+EVIDENCE: Live project brain measurement (mnemo info, 2026-11-19): 26,842 memories in 46,456,832 bytes (44.3 MiB, 1,731 B/mem; created 4 days ago). Byte breakdown from live code: (a) fp16 vector column (mnemo/src/veccol.rs:7, 772 B/entry = 819.2 B on disk at 10/page) is staged for every row including all ~26,300 turns, essence, thread links and coordination records (mnemo/src/store/records.rs:1748) = ~22.0 MB (47.3% of the entire file); (b) 98 snapshots from the last few hours pin 6,643,712 bytes (14.3% of the file); (c) turns stay uncompressed for 7 days before settling (records.rs:1637-1648), so ~100% of this 4-day-old brain turns are currently uncompressed — even though decode_memory (records.rs:1526-1532) already decodes ZSTD_MAGIC transparently on any v9 record regardless of kind. Also evaluated Tufa Labs tufazip (https://tufalabs.ai/research/tufazip/, 163M Transformer, 0.843 bits/byte on enwik9, ~7.5 days/GB per direction on 2x B200 GPUs). FINDING: Neural/LLM lossless compression like tufazip is ruled out (6+ orders of magnitude too slow, needs GPU, breaks cross-platform FP determinism, leaks across records violating R-004.5, and cannot compress the 47% fp16 vector column). Meanwhile, real high-leverage file-size wins sit right in MNemo own byte profile. RECOMMENDATION (for optimization roadmap, split by format impact): ZERO-FORMAT-BUMP (v9 compatible): (1) Compress turns immediately at write time (lower default turn_compress_after from 7 days to 0) and compress large non-turn records (>512 B facts, findings, reports) — decode_memory already reads ZSTD_MAGIC on any v9 record, shrinking young brains immediately and removing later 256-row rewrite churn; (2) Time-bucketed or byte-capped snapshot retention (keep newest 16 + 1/hr for 24 h instead of every rapid multi-agent commit) to cut the 14% snapshot pin bloat; (3) Step 3 smarter-memory turn consolidation and optional pruning. FUTURE FORMAT v10 (requires format bump + benchmarks): (4) Optional/vectorless rows (0 vector bytes) for non-recalled kinds (coordination, essence, thread_link) and aged/consolidated turns kept BM25-only (saves ~35-45% disk and RAM on turn-heavy brains); (5) Static pre-trained zstd dictionary (~32 KB bundled in binary, public/fixed so zero cross-record privacy leak under R-004.5) to lift short-record compression from ~2.15x toward 3-4x; (6) Benchmark per-vector affine int8 (min+scale+u8, 392 B vs 772 B = 49% smaller) against FMT-9a 0.005 recall@10 gate (uniform int8 failed FMT-9a at -0.0115/-0.0165, veccol.rs:9-11). Hold v0.20.0 tag? No.
+```
+
+## 01M7VE6200HDPBTJMJHX516VC4
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:57:16Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-015","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-015.1","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["status.cross-editor-wake"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795143755,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Editor wiring and wake: OpenAI Codex (CLI and IDE)
+
+EVIDENCE: Official OpenAI Codex docs (https://developers.openai.com/codex, https://github.com/openai/codex) plus openai/codex GitHub issues (3P/issue-derived where marked); full table in ~/mnemo-reviews/REV-015.md. (a) MCP: unified config.toml across CLI and IDE — global ~/.codex/config.toml and trusted-project .codex/config.toml, added via codex mcp add or [mcp_servers.<name>] TOML table. (b) Hooks: .codex/hooks.json (trusted project), ~/.codex/hooks.json, /etc/codex/hooks.json or [hooks] in config.toml; SHA-256 hash-verified under [hooks.state] in ~/.codex/config.toml (manual edits are skipped until re-trusted). Events: SessionStart, SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, PreCompact, PostCompact, PreModelRequest, PostModelRequest, Stop, Interrupt. End-of-turn Stop CAN keep agent going via {"decision":"block","reason":"..."} or exit 2; stdin passes stop_hook_active:true (no fixed runtime loop cap confirmed — script must guard on stop_hook_active). (c) Idle wake: background command exits do NOT reliably wake an idle TUI session (ExecCommandEnd dropped while idle, GitHub issues); Codex v0.157+ runs a persistent app-server daemon by default, but a stable public external wake API is unconfirmed. (d) Terminal timeout & background: foreground exec_command yield_time_ms is clamped around ~30s (MAX_YIELD_TIME_MS, GitHub issues; exact official default unconfirmed); background terminals supported (background_terminal_max_timeout ~300,000 ms / 5 min default, configurable up to hours in config.toml). (e) MCP timeout: startup_timeout_sec=10s, tool_timeout_sec=60s defaults, both configurable per server in config.toml. (f) Instructions: AGENTS.md (root, 32 KiB default cap) and ~/.agents/AGENTS.md. FINDING: Codex has rich hooks and configurable MCP timeouts, but mnemo onboard must account for SHA-256 hook trust verification, and idle background-exit wakeup is not reliable yet. RECOMMENDATION: Wake from ladder: foreground mnemo wait --timeout 20s loop (under ~30s yield_time_ms clamp) plus Stop hook while active; monitor openai/codex background-exit wake / app-server to upgrade to background mnemo wait later.
+```
+
+## 01M7VE7QBZQJZB1JTPX1AH6TX1
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:58:10Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-015","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-015.2","_mnemo.kind":"finding","_mnemo.priority":"HIGH","_mnemo.refs":["spec.v0201-wait"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795143755,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Editor wiring and wake: Google Antigravity — LIVE-TESTED background wake works (corrects spec.v0201-wait)
+
+EVIDENCE: Official built-in Antigravity docs (agy-customizations/docs/{hooks,mcp_servers,rules,plugins}.md, https://antigravity.google/docs/{hooks,mcp,plugins}) plus live empirical test in Antigravity on 2026-11-19 (task-261); full table in ~/mnemo-reviews/REV-015.md. (a) MCP: global ~/.gemini/config/mcp_config.json; project-scoped via native plugin .agents/plugins/<name>/mcp_config.json (with plugin.json manifest; also .agent/, _agents/, _agent/). Key "mcpServers"; Stdio or Streamable HTTP (legacy SSE unsupported). agy plugin install can also import Claude Code .claude-plugin/plugin.json. (b) Hooks: .agents/hooks.json, .agents/plugins/<name>/hooks.json (strictly at plugin root for native plugins), or ~/.gemini/config/hooks.json. 6 events: SessionStart, PreToolUse, PostToolUse, PreInvocation, PostInvocation, Stop. Sync command hooks only (timeout default 30s). Stdin JSON is camelCase (conversationId, workspacePaths, transcriptPath, artifactDirectoryPath, modelName, lastUserInput, hookEventName, cwd). SessionStart and PreInvocation inject context via {"injectSteps":[{"systemMessage":{"systemMessage":"..."}}]}. End-of-turn Stop CAN keep agent going via {"decision":"continue","reason":"..."} (PostInvocation also supports "terminationBehavior":"force_continue"); stdin passes executionNum, terminationReason, fullyIdle and continuationActive (boolean loop guard), with built-in MAX_INVOCATIONS / MAX_FORCED_INVOCATIONS caps (exact counts not published). (c) Idle wake — LIVE-VERIFIED: launching a 4s Python command with run_command (WaitMsBeforeAsync=500, IsDaemon=false), ending the turn with zero tool calls, caused Antigravity to reactively wake the idle conversation 4s later via MESSAGE_PRIORITY_HIGH with exit code 0 and stdout (task-261), zero user input. Also has built-in schedule tool (timer/cron) and Python SDK (google-antigravity). (d) Terminal timeout & background: run_command WaitMsBeforeAsync is hard-capped at 500-10,000 ms (10s max foreground — a multi-minute foreground command CANNOT stay open and auto-backgrounds). Long background task max wall-clock cap not published (verify in dogfood). (e) MCP timeout: ~180s (3 min) tool call, ~5 min connect (official reports; configurability unconfirmed). (f) Instructions: AGENTS.md, GEMINI.md, .agents/rules/*.md, plugin rules/AGENTS.md (24 KB/file, 20K-token budget). FINDING: Directly corrects spec.v0201-wait, which assumed Antigravity cannot wake while idle and prescribed a foreground loop for reviewer-a (which cannot even run foreground past 10s). Antigravity is Tier 1 background-wake, just like Claude Code, AND supports full project-scoped MCP + hooks + rules via .agents/plugins/mnemo/. RECOMMENDATION: Update spec.v0201-wait CLIENT USE and DOGFOOD so Antigravity uses Option (a) background mnemo wait (WaitMsBeforeAsync=500, IsDaemon=false, BypassSandbox=true on macOS with one-time Always Allow), re-arming after exit 0. In Step 2, wire Antigravity cleanly via .agents/plugins/mnemo/.
+```
+
+## 01M7VE97DXHFM89V9EWXX2TGWY
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:59:00Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-015","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-015.3","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["status.cross-editor-wake"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795143755,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Editor wiring and wake: VS Code (GitHub Copilot agent mode)
+
+EVIDENCE: Official VS Code Copilot docs (https://code.visualstudio.com/docs/copilot) plus microsoft/vscode and GitHub Copilot issues (3P/issue-derived where marked); full table in ~/mnemo-reviews/REV-015.md. (a) MCP: transitioning in 2026 — legacy workspace .vscode/mcp.json (key "servers", not "mcpServers") vs newer shared Copilot harness workspace root .mcp.json and user-level ~/.copilot/mcp-config.json ($COPILOT_HOME/mcp-config.json), managed via Chat: Open Customizations > MCP Servers. (b) Hooks: preview in shared Copilot runtime — .github/hooks/*.json (project) and ~/.copilot/hooks/ (user). Events: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop (SubagentStop). Stdin/stdout JSON; default hook timeout 30s. End-of-turn Stop CAN keep agent going via {"decision":"block","reason":"..."} with stop_hook_active:true guard (exact built-in loop limit unconfirmed; GitHub issues report Stop firing parity bugs between IDE extension and CLI, plus UserPromptSubmit additionalContext overwrite issues). (c) Idle wake: NO confirmed mechanism to wake an idle VS Code Copilot Agent Mode chat turn from a background command exit, socket or channel. (d) Terminal timeout & background: run_in_terminal supports foreground and background; exact foreground timeout cap unconfirmed in official docs (GitHub issues report hangs/false timeouts after ~3-5 minutes, often from shell-integration prompt detection misfires); background exits do not wake an idle chat turn. (e) MCP timeout: ~90-180s default reported in GitHub issues/3P; adding "timeout" in workspace mcp.json causes schema errors or is ignored (exact official cap unconfirmed). (f) Instructions: .github/copilot-instructions.md, .github/instructions/*.instructions.md and AGENTS.md. FINDING: Config paths are mid-migration between .vscode/mcp.json and Copilot native .mcp.json / ~/.copilot/, and idle chat cannot be woken externally. RECOMMENDATION: Wake from ladder: foreground mnemo wait --timeout 120s loop (conservative ceiling below 3-5 min hang reports) plus Stop hook while active once IDE parity stabilizes. In Step 2, verify active VS Code stable MCP path before writing.
+```
+
+## 01M7VEB0310QKSG3H1XA21TV3W
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T02:59:58Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-015","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-015.4","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["status.cross-editor-wake"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795143755,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Editor wiring and wake: Windsurf / Devin Desktop (Cognition; transitioned June 2, 2026)
+
+EVIDENCE: Official Devin documentation (https://docs.devin.ai/) plus 3P references where marked; full table in ~/mnemo-reviews/REV-015.md. IMPORTANT SHIFT: Following Cognition acquisition of Windsurf, Windsurf officially transitioned to Devin Desktop via OTA update on June 2, 2026 (Devin Local replaces Cascade, sharing the Devin CLI harness while remaining backward-compatible with legacy .windsurf/ rules). (a) MCP: project .devin/mcp_config.json (shared) and .devin/mcp_config.local.json (gitignored); user ~/.config/devin/mcp_config.json (macOS/Linux) or %APPDATA%\devin\mcp_config.json (Windows); legacy Windsurf ~/.codeium/windsurf/mcp_config.json. Supports stdio, Streamable HTTP and SSE. (b) Hooks: .devin/hooks.v1.json (project) or global config — Claude Code-compatible schema. Events: SessionStart, SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, PostCompaction, Stop. Stdin JSON passes session_id, prompt_id and last_assistant_message (for Stop). End-of-turn Stop CAN keep agent going via exit code 2 (reason on stderr) or stdout {"decision":"block","reason":"..."}; per-hook timeout in seconds (exact built-in loop limit and stop_hook_active field unconfirmed in official snippets — verify before Step 2 build). (c) Idle wake: NO confirmed mechanism in official docs for a background shell exit or external local event to wake an idle Devin Desktop session. (d) Terminal timeout & background: tracked foreground and background shell IDs (logs wait duration before timeout/backgrounding), but exact numeric default timeout caps are unconfirmed in official public docs. (e) MCP timeout: server init timeout documented up to 60s (official); per-tool-call timeout cap unconfirmed. (f) Instructions: AGENTS.md (root), .devin/rules/ (frontmatter triggers: always_on, model_decision, glob, manual), plus legacy .windsurf/rules/ and .windsurfrules. FINDING: Devin Desktop Claude-compatible .devin/hooks.v1.json and gitignored .devin/mcp_config.local.json make Step 2 wiring clean, but idle sessions cannot be woken by background exit. RECOMMENDATION: Wake from ladder: foreground mnemo wait --timeout 60s loop (conservative until local terminal cap is probed) plus Claude-compatible Stop hook while active. Target .devin/ in mnemo onboard (with legacy ~/.codeium/windsurf/ fallback only if present).
+```
+
+## 01M7VEBZ1QM25Q2GY1066PZEGZ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-20T03:00:29Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"reviewer-a","_mnemo.batch":"REV-015","_mnemo.category":"PRODUCT","_mnemo.finding_id":"REV-015.5","_mnemo.kind":"finding","_mnemo.priority":"MEDIUM","_mnemo.refs":["status.cross-editor-wake"],"_mnemo.seen_by":["planner-a"],"_mnemo.status":"accepted","_mnemo.status_history":[{"at":1795143755,"by":"planner-a","from":"open","note":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","to":"accepted"}],"_mnemo.triage":"planner-a 2026-11-19: accepted. Feeds roadmap step 2 (more editors): its config paths, hooks, end-of-turn continue and instruction files go into step 2's spec, each re-checked against the editor's docs at build. For v0.20.1 (spec.v0201-wait revised): background mnemo wait for Claude Code and Antigravity only; no foreground loop, since the short foreground caps would cost a model turn per timeout.","_mnemo.triaged_by":"planner-a"}`
+
+```text
+Editor wiring and wake: Cursor
+
+EVIDENCE: Official Cursor docs (https://docs.cursor.com/) plus Cursor Community Forum / 3P reports where marked; full table in ~/mnemo-reviews/REV-015.md. (a) MCP: project .cursor/mcp.json and user ~/.cursor/mcp.json (key "mcpServers", supports ${env:NAME} and envFile; already wired by mnemo onboard). (b) Hooks: project .cursor/hooks.json and user ~/.cursor/hooks.json (already wired by mnemo onboard). Events: sessionStart (fire-and-forget, supports additional_context), beforeSubmitPrompt (can block/modify), stop, plus tool hooks (also maps Claude Code hook schemas). End-of-turn stop CAN keep agent going by outputting {"followup_message":"..."} (auto-submitted visually as a new turn); stdin includes loop_count and Cursor enforces loop_limit (default 5 consecutive follow-ups). Note Windows unbuffered-stdout quirk on hook scripts. (c) Idle wake: NO confirmed mechanism for a background command exit, socket or local API to wake an idle local Cursor Agent tab (Cloud/Background Agents run remotely). (d) Terminal timeout & background: foreground commands hit an internal threshold of ~25-30s (Cursor forum/3P; exact official SLA unconfirmed), after which Cursor treats them as timed out or backgrounds them; background commands are supported via detaching/polling, but exit does not wake an idle turn. (e) MCP timeout: strict client timeout (-32001 Request timed out, reported ~60s in Cursor forums/3P; exact official value unconfirmed, notably short for MCP elicitation waits). (f) Instructions: .cursor/rules/*.mdc, AGENTS.md (root), plus User/Team dashboard rules. FINDING: Cursor ~25-30s foreground terminal ceiling severely constrains foreground wait durations, and idle tabs cannot be woken externally. RECOMMENDATION: Wake from ladder: foreground mnemo wait --timeout 15s loop (safely >=10s under Cursor ~25-30s ceiling — suitable for active short-burst multi-agent coordination, not overnight idle) plus stop hook followup_message (bounded by loop_limit=5).
+```
+
 ## 01M7PEZYWFKE4Y6NHMM8XZSN57
 
 - type: semantic
@@ -4582,10 +5730,10 @@ v0.20.0 (user's go 2026-11-18, spec.v0.20.0): tasks v0200-0 to v0200-5: setup; t
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["status.roadmap"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795118764}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["status.roadmap"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795142289}`
 
 ```text
-After v0.20.0 (decision.roadmap-order): 13.7 mnemo merge; sync change sets on disk; smarter memory (elicitation, mnemo doctor); Node.js (AI SDK memory first); mobile see-and-delete. On hold: relay, Pro, 13.2, 13.4, Teams, hosted brains (REV-011). Ideas explored: docs/ideas.md.
+After v0.20.0 (decision.roadmap-order): v0.20.1 mnemo wait (spec.v0201-wait, RB-017 spec check, REV-014 editors); merge; more editors in onboard; sync change sets; smarter memory; public benchmarks; Node.js; mobile screens. Paid work on hold. Ideas: docs/ideas.md.
 ```
 
 ## 01M7RXSCBD05ZRF8W7CR9BEY43
