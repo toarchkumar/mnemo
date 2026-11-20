@@ -8,6 +8,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-11-20
+
+A wake signal from the brain, and smaller MCP results. `mnemo wait`
+blocks until the brain has work that may wake its agent, prints the ids
+and exits, so a Claude Code or Google Antigravity session that runs it in
+the background is woken even while idle. The MCP tools that return
+memories leave out each one's vector unless asked, which cuts a 10-hit
+recall from about 119 KB to 21 KB. There's no format change. The mobile
+packages aren't published in this release: they stay at 0.20.0, which
+has the same mobile code.
+
 ### Added
 
 - **`mnemo wait`** (v0201-1, spec.v0201-wait, after RB-017): one wake
@@ -5062,7 +5073,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/toarchkumar/mnemo/compare/v0.18.1...v0.19.0
