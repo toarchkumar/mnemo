@@ -9,7 +9,9 @@
 #![cfg(feature = "failpoints")]
 
 use mnemo_engine::__failpoints::{self as fp, IoEvent};
-use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError};
+#[cfg(unix)]
+use mnemo_engine::MnemoError;
+use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 use std::path::Path;
 use tempfile::tempdir;
 
@@ -260,6 +262,11 @@ fn pages_written(trace: &[IoEvent]) -> Vec<u64> {
 /// Put `pages` of `p` back to their bytes in `earlier` (zeros past its
 /// end): a stand-in for a kernel that dropped those writes after a failed
 /// fsync (RB-016.1).
+///
+/// It writes under the open handle's lock, which Windows enforces (a
+/// byte-range lock there refuses other handles' reads and writes), so it
+/// and the two tests that use it run on Unix only.
+#[cfg(unix)]
 fn put_back(p: &Path, earlier: &[u8], pages: &[u64]) {
     use std::io::{Seek, SeekFrom, Write};
     const PAGE: usize = mnemo_engine::__wal::PAGE_SIZE;
@@ -281,7 +288,8 @@ fn put_back(p: &Path, earlier: &[u8], pages: &[u64]) {
 /// attempt wrote, and a later fsync can still succeed. The retry writes
 /// them again, so the file it commits reads back whole, earlier memories
 /// included (a commit repacks its tail record page). At the finding's
-/// three sizes.
+/// three sizes. Unix only: see `put_back`.
+#[cfg(unix)]
 #[test]
 fn a_retry_after_a_failed_barrier_writes_dropped_pages_again() {
     for (n, k) in [(200, 1), (3000, 1), (3000, 1500)] {
@@ -323,8 +331,8 @@ fn a_retry_after_a_failed_barrier_writes_dropped_pages_again() {
 /// RB-016.2: a retry after a failed barrier seals its runs under a new
 /// generation. Change something between the attempt and the retry, then
 /// put the failed attempt's images back: they either fail to authenticate
-/// or aren't referenced, so the change holds. Sealed under the attempt's
-/// generation again, they'd undo it with `verify` passing.
+/// or aren't referenced, so the change holds. Unix only: see `put_back`.
+#[cfg(unix)]
 #[test]
 fn a_retry_after_a_failed_barrier_seals_under_a_new_generation() {
     let dir = tempdir().unwrap();
