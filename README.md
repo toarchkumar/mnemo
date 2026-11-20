@@ -180,7 +180,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.20.0", "semantic", key="current-release")
+    db.remember_text("the current release is v0.20.1", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -201,6 +201,18 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.20.1: agents wake when work arrives
+
+- **`mnemo wait` wakes an idle agent when a message or task arrives for
+  it.** Run it in the background: it exits with the items' ids as soon as
+  there's work, and that exit starts the agent's next turn. It works in
+  Claude Code and Antigravity today. The usual wake limits apply (at most
+  12 an hour, 60 s apart), and `mnemo wake pause` stops them all.
+- **MCP results are much smaller.** Tools leave each memory's vector out
+  unless the call passes `include_vector: true`: a 10-hit recall went from
+  119,181 to 21,336 bytes. The CLI and the library are unchanged.
+- The Swift and Android libraries stay at 0.20.0.
 
 ## What's new in v0.20.0: sessions sharing a brain stay fast
 
