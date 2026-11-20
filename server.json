@@ -3,7 +3,7 @@
   "name": "io.github.toarchkumar/mnemo",
   "title": "MNemo",
   "description": "Shared memory for your coding agents, in one encrypted file: recall, tasks, an inbox and claims.",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "websiteUrl": "https://toarchkumar.github.io/mnemo/",
   "repository": {
     "url": "https://github.com/toarchkumar/mnemo",
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/toarchkumar/mnemo/releases/download/v0.20.0/mnemo-v0.20.0.mcpb",
+      "identifier": "https://github.com/toarchkumar/mnemo/releases/download/v0.20.1/mnemo-v0.20.1.mcpb",
       "transport": {
         "type": "stdio"
       }
