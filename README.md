@@ -3,6 +3,7 @@
 [![CI](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml/badge.svg)](https://github.com/toarchkumar/mnemo/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/mnemo-engine)](https://pypi.org/project/mnemo-engine/)
 [![crates.io](https://img.shields.io/crates/v/mnemo-engine)](https://crates.io/crates/mnemo-engine)
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%2Fio.github.toarchkumar%252Fmnemo%2Fversions%2Flatest&query=%24.server.version&label=MCP%20Registry)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.toarchkumar/mnemo)
 [![PyPI downloads](https://img.shields.io/pypi/dm/mnemo-engine?label=PyPI%20downloads)](https://pypi.org/project/mnemo-engine/)
 [![crates.io downloads](https://img.shields.io/crates/d/mnemo-engine?label=crates.io%20downloads)](https://crates.io/crates/mnemo-engine)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
