@@ -404,6 +404,12 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
       Antigravity) has no hooks. It reads through the CLI
       (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
       `recall` before a task, and gets its pointers relayed by the user.
+    - **Each session keeps a background `mnemo wait --as <its name>`
+      running** (from v0.20.1; user decision 2026-11-20), beside the
+      cross-session messages. After it exits 0, read the inbox and start
+      it again; after exit 1 or 4, don't. `reviewer-a` runs it in
+      Antigravity with `run_command` and a short `WaitMsBeforeAsync`, so
+      a brain post wakes it without the user's relay.
 
 ### `Planner` rules
 
