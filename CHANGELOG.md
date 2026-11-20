@@ -8,6 +8,33 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **`mnemo wait`** (v0201-1, spec.v0201-wait, after RB-017): one wake
+  signal from the brain for every editor. It exits 0 when something may
+  wake its agent (a pre-approved task for its role, or a message to it by
+  id), marks it delivered and prints the ids, senders and task names,
+  never a message's text (`--json` for one object). Run as a background
+  command in Claude Code or Google Antigravity, its exit starts a turn in
+  an idle session; start it again after every exit 0. It checks the
+  file's first page once a second, holding no handle or lock between
+  checks, and opens the file only when that changed. A locked brain keeps
+  it waiting. A newer `mnemo wait` for the same agent retires the older
+  one (exit 4), as does the end of the process that started it (Unix).
+  Exit 1 when it can't wait (no agent, `MNEMO_WAKE=off`, no usable key,
+  an old format, a refused folder, a missing file), 3 after `--timeout`.
+  The wake-up limits are the Stop hook's: up to 12 an hour per agent, at
+  least 60 s apart, and `mnemo wake pause` stops them all. Delivery is at
+  most once. Codex, Cursor, VS Code and Devin Desktop cap a foreground
+  command too tightly for it, so they aren't woken while idle yet (the
+  guide says so for each).
+- **`Mnemo::wake_items` and `Mnemo::may_wake`** (RB-017.1, RB-017.4):
+  `wake_items` is `wake` returning the tasks and messages it marked
+  delivered (`WakeItems`), and `wake` is now a wrapper over it, with the
+  same signature and behaviour. `may_wake` reads the same candidates
+  without the guardrails, on a read-only handle, so an idle check shares
+  the lock.
+
 ## [0.20.0] — 2026-11-19
 
 Shared access gets faster and becomes the MCP server's default. A shared

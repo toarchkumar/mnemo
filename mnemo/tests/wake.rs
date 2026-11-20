@@ -4,8 +4,8 @@
 //! replies; the pair burst; the per-recipient rate and cooldown.
 
 use mnemo_engine::{
-    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, TaskSpec, Wake, WriteOutcome,
-    HOP_CAP, PAIR_BURST, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
+    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, MnemoError, TaskSpec, Wake, WakeItems,
+    WriteOutcome, HOP_CAP, PAIR_BURST, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
 };
 
 const PW: &str = "wake-test-passphrase";
@@ -206,6 +206,67 @@ fn a_burst_between_two_agents_and_a_reply_past_the_hop_cap_wake_nobody() {
     assert!(last.hops > HOP_CAP);
     let w = db.wake(&last.to.clone(), None).unwrap();
     assert_eq!(w, Wake::Held("the thread reached its hop cap"));
+}
+
+/// v0.20.1 (RB-017.1, RB-017.4): `wake_items` names what `wake` counts,
+/// and `may_wake` reads the same candidates on a read-only handle.
+#[test]
+fn wake_items_names_the_items_and_may_wake_reads_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = db(&dir, true);
+    assert!(!db.may_wake("worker-a", Some("worker")).unwrap());
+    assert_eq!(
+        db.wake_items("worker-a", Some("worker")).unwrap(),
+        WakeItems::Nothing
+    );
+    task(&mut db, "Small fix", true);
+    let msg = db
+        .post("worker-a", "to you", "", &[], None, Some("planner-a"), None)
+        .unwrap();
+    db.post(
+        "role:worker",
+        "to the role",
+        "",
+        &[],
+        None,
+        Some("planner-a"),
+        None,
+    )
+    .unwrap();
+    db.close().unwrap();
+    let path = dir.path().join("w.mnemo");
+    {
+        let mut ro = Mnemo::open_read_only(&path, PW).unwrap();
+        assert!(ro.may_wake("worker-a", Some("worker")).unwrap());
+        assert!(!ro.may_wake("worker-b", None).unwrap());
+        assert!(matches!(
+            ro.wake_items("worker-a", Some("worker")),
+            Err(MnemoError::ReadOnly)
+        ));
+    }
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    match db.wake_items("worker-a", Some("worker")).unwrap() {
+        WakeItems::Now { tasks, messages } => {
+            assert_eq!(
+                tasks.iter().map(|t| t.slug.as_str()).collect::<Vec<_>>(),
+                ["small-fix"]
+            );
+            assert_eq!(messages.iter().map(|m| m.id).collect::<Vec<_>>(), [msg.id]);
+            assert_eq!(messages[0].from, "planner-a");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Delivered: nothing may wake it now, and `wake` agrees.
+    assert!(!db.may_wake("worker-a", Some("worker")).unwrap());
+    assert_eq!(db.wake("worker-a", Some("worker")).unwrap(), Wake::Nothing);
+    // A guardrail holds it the same way for both.
+    db.post("worker-a", "again", "", &[], None, Some("planner-a"), None)
+        .unwrap();
+    assert!(db.may_wake("worker-a", Some("worker")).unwrap());
+    assert_eq!(
+        db.wake_items("worker-a", Some("worker")).unwrap(),
+        WakeItems::Held("the cooldown between wake-ups")
+    );
 }
 
 #[test]
