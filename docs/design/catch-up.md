@@ -437,6 +437,18 @@ segment. On its own timeline those are the few pages of commits since its
 last catalog change. When the check fails, the handle does the full
 reload, with a fresh page cache and no `adopt_column`.
 
+**The guard's limit (RB-016.3).** It assumes the copy replaced the whole
+file. `cp`, `std::fs::write` and a snapshot rollback do: each cuts the file
+to the copy's length, so a held run past the copy's end reads as nothing or
+zeros and fails the check. A copy written over the head of the file without
+cutting it (`dd conv=notrunc`, a block-level restore) leaves the overwritten
+timeline's tail on disk. A held run that lies in that tail keeps its nonce,
+so the check passes, and a reader can keep column rows and cached pages that
+a fresh open doesn't have (REVIEWER-B's test showed it). There's no guard for
+it: one would need something per commit that can't repeat, which is a
+format change. The rule instead, in `docs/shared-mode.md`: restore a copy by
+replacing the file, not by writing it over the file in place.
+
 The cost is two short reads per checked run (at most nine runs), one when
 the state is taken and one at the check. Over two alternating runs of
 cell 10 (load 2.9 to 5.0, p50), the catch-up took 0.450 and 0.403 ms at

@@ -417,9 +417,16 @@ let store = try MnemoStore(
   `HeaderTampered`, `UnsupportedVersion`, `NotAMnemoFile`, `NotFound`,
   `ReadOnly`, `NeedsWriteOpen`, `DimensionMismatch`, `EmbedderMismatch`
   and `FormatTooOld` (v0.13), `Invalid`, `Io`, `Kdf`, `Crypto`, `Corrupt`, `Closed`,
-  `Embedder`. `MnemoStore` never surfaces
+  `Embedder`, and since v0.20.0 `MaybeStored`. `MnemoStore` never surfaces
   `Closed`: it reopens the file and retries once, and a handle a panic
   poisoned is treated the same way.
+- `MaybeStored(message:)`: an earlier commit on the handle failed past its
+  commit point (a full disk at the checkpoint, say), so the engine can't
+  tell whether it's in the file and refuses every later write. The call
+  that hits it throws, `MnemoStore` drops the handle without flushing, and
+  the next call reopens the file, which finishes that commit or drops it.
+  Writes made after that commit are lost; check what's there before writing
+  them again.
 - `MnemoStoreError` comes from this layer: `keyMissing(keyID:path:)`,
   `keychain(status:operation:)`, `file(message:)`, `noBackgroundTime` and
   `keyPolicyMismatch(stored:configured:)`, with `isRetryable` (the first two
@@ -430,6 +437,6 @@ apart for `MnemoError`):
 
 | Class | Errors | What to do |
 |---|---|---|
-| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`; `keychain(status:operation:)`, `noBackgroundTime` | Try again later, on the next launch, say. The data is fine. |
+| Retry later | `Locked`, `Io`, `Kdf` (the KDF couldn't get its memory), `Closed`, `MaybeStored` (check first; see above); `keychain(status:operation:)`, `noBackgroundTime` | Try again later, on the next launch, say. The data is fine. |
 | Fix the call | `Invalid`, `DimensionMismatch`, `EmbedderMismatch`, `FormatTooOld` (a v8 file: convert it with `mnemo compact` on a Mac), `ReadOnly`, `NeedsWriteOpen`, `NotFound`, `WrongPassphrase`, `Embedder`; `keyPolicyMismatch` | Change what's passed (or open read-write once, for `NeedsWriteOpen`). |
 | The data is unreadable | `Corrupt` (integrity failures only), `HeaderTampered`, `Crypto`, `NotAMnemoFile`, `UnsupportedVersion`; `keyMissing` | Restore from a backup or an export. Only here is deleting the file ever the answer. |

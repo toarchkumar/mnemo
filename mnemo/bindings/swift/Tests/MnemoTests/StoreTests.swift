@@ -234,6 +234,39 @@ import Testing
         try await store.close()
     }
 
+    @Test func aMaybeStoredRefusalDropsTheHandleAndTheNextCallReopens() async throws {
+        let keys = MemoryKeyStore()
+        let store = try MnemoStore(
+            configuration: MnemoStoreConfiguration(name: "refused", dimensions: 4, directory: try scratchDirectory()),
+            keyStore: keys)
+        try await store.remember("one", vector: vec(0))
+        try await store.flush()
+
+        // After a commit that failed past its commit point, the engine
+        // refuses every later write on that handle (RB-016.3). The call
+        // reports it, and the store lets go of the file.
+        await store.setNextCommitFault(.MaybeStored(message: "commit 7 failed after its commit point; reopen the file"))
+        do {
+            try await store.flush()
+            Issue.record("the flush was refused")
+        } catch let error as MnemoError {
+            guard case .MaybeStored = error else {
+                Issue.record("expected MaybeStored, got \(error)")
+                return
+            }
+            #expect(error.isRetryable())
+        }
+        #expect(await store.isOpen == false)
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 1)
+
+        // The next call reopens the file.
+        try await store.remember("two", vector: vec(1))
+        #expect(await store.isOpen)
+        #expect(try await store.count() == 2)
+        try await store.close()
+        try assertUnlockedAndDurable(store.fileURL, keys: keys, count: 2)
+    }
+
     @Test func callsRacingBackgroundClosesNeverSeeClosed() async throws {
         let store = try MnemoStore(
             configuration: MnemoStoreConfiguration(name: "race", dimensions: 4, directory: try scratchDirectory()),

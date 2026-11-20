@@ -41,6 +41,12 @@ import kotlinx.coroutines.withContext
  * - **Reopens transparently.** After [close], or if the engine reports the
  *   handle closed, the next call reopens the file. No call fails with
  *   [MnemoException.Closed].
+ * - **After a commit that failed past its commit point** (a full disk at
+ *   the checkpoint, say), the engine refuses every later write on that
+ *   handle. The call that hits the refusal throws
+ *   [MnemoException.MaybeStored], the store drops the handle without
+ *   flushing, and the next call reopens the file, which finishes that
+ *   commit or drops it. Writes made after it are lost (v0.20.0).
  * - **Files** live in `noBackupFilesDir/mnemo/<name>.mnemo` by default,
  *   device-only like their keys.
  *
@@ -294,7 +300,8 @@ class MnemoStore private constructor(
      * Flushes and closes the file, releasing its lock. The next call reopens
      * it. If the final flush fails (a full disk, say), the file stays open
      * with every unflushed write and the error is thrown: free space and
-     * call [flush] or `close()` again (v0.12.2).
+     * call [flush] or `close()` again (v0.12.2). A
+     * [MnemoException.MaybeStored] refusal closes it anyway (v0.20.0).
      */
     suspend fun close() = locked { closeLocked() }
 
@@ -320,6 +327,9 @@ class MnemoStore private constructor(
         val session = MnemoSession(handle())
         try {
             body(session)
+        } catch (e: MnemoException.MaybeStored) {
+            dropHandle()
+            throw e
         } finally {
             session.end()
             if (session.writes > 0 && configuration.flushPolicy != FlushPolicy.Manual) commitLocked()
@@ -423,6 +433,13 @@ class MnemoStore private constructor(
     /** Closes the engine handle behind the store's back (tests of the reopen path). */
     internal suspend fun closeHandleUnderneath() = locked { db?.closeFile() ?: Unit }
 
+    /**
+     * The next commit throws this instead of flushing (tests of the
+     * [MnemoException.MaybeStored] path, which needs a commit that fails
+     * past its commit point).
+     */
+    @Volatile internal var nextCommitFault: MnemoException? = null
+
     private suspend fun importFrom(source: File, passphrase: String) = locked {
         ensureDirectory(file.parentFile)
         val key = io.github.toarchkumar.mnemo.importWithPassphrase(source.path, passphrase, file.path)
@@ -448,14 +465,21 @@ class MnemoStore private constructor(
      * Runs [body] on the open handle, opening it first if needed. Nothing
      * closes the handle while [body] runs; if the engine reports `Closed`
      * anyway, the store reopens once and retries (`Closed` is reported
-     * before any work is done, so the retry is safe).
+     * before any work is done, so the retry is safe). A
+     * [MnemoException.MaybeStored] refusal drops the handle and is thrown:
+     * the next call reopens.
      */
     private suspend fun <T> withDatabase(write: Boolean = false, body: (MnemoDb) -> T): T = locked {
         val value = try {
-            body(handle())
-        } catch (e: MnemoException.Closed) {
+            try {
+                body(handle())
+            } catch (e: MnemoException.Closed) {
+                dropHandle()
+                body(handle())
+            }
+        } catch (e: MnemoException.MaybeStored) {
             dropHandle()
-            body(handle())
+            throw e
         }
         if (write) noteWriteLocked()
         value
@@ -481,11 +505,24 @@ class MnemoStore private constructor(
         }
     }
 
-    /** Flushes the open file and clears the coalesced state. A no-op while the file is closed. */
+    /**
+     * Flushes the open file and clears the coalesced state. A no-op while
+     * the file is closed. A [MnemoException.MaybeStored] refusal drops the
+     * handle (the binding already let go of the file) and is thrown.
+     */
     private fun commitLocked() {
         cancelPendingCommitLocked()
         val open = db ?: return
-        open.flush()
+        try {
+            nextCommitFault?.let {
+                nextCommitFault = null
+                throw it
+            }
+            open.flush()
+        } catch (e: MnemoException.MaybeStored) {
+            dropHandle()
+            throw e
+        }
         commits += 1
     }
 
@@ -529,8 +566,15 @@ class MnemoStore private constructor(
         cancelPendingCommitLocked()
         // The binding's close flushes first; if that fails it keeps its
         // handle (and the writes) and throws, and so does this, with the
-        // store still holding the open handle for a retry.
-        open.closeFile()
+        // store still holding the open handle for a retry. Except a
+        // `MaybeStored` refusal, which no retry gets past: the binding has
+        // dropped its handle, and the store drops its own.
+        try {
+            open.closeFile()
+        } catch (e: MnemoException.MaybeStored) {
+            dropHandle()
+            throw e
+        }
         db = null
         commits += 1
         open.close() // frees the Kotlin handle

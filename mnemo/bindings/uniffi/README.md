@@ -50,7 +50,9 @@ Swift and Kotlin layers add async wrappers).
 **Errors:** one enum, `MnemoError` (Swift) / `MnemoException` (Kotlin):
 `Locked`, `WrongPassphrase`, `HeaderTampered`, `UnsupportedVersion`,
 `NotFound`, `ReadOnly`, `DimensionMismatch`, `Invalid`, `Io`, `Corrupt`,
-`Closed`, `Embedder`. No panic crosses the FFI; a handle whose lock was
+`Closed`, `Embedder`, and since v0.20.0 `MaybeStored` (a commit failed past
+its commit point; the handle is dropped, so reopen the file, which finishes
+that commit or drops it). No panic crosses the FFI; a handle whose lock was
 poisoned by a panic reports `Corrupt` on every later call (reopen the
 file).
 

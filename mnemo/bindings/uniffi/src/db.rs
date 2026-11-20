@@ -95,13 +95,22 @@ impl MnemoDb {
     /// while the handle was in use) drops the handle, so this and every
     /// later call is `Closed`: the stores reopen the file (v0.12.2; it was
     /// `Corrupt`, which reads as a damaged file).
+    ///
+    /// A call refused with `MaybeStored` drops the handle too, without
+    /// flushing (v0.20.0, RB-016.3): after a commit that failed at or after
+    /// its commit point, the handle refuses every write until the file is
+    /// opened again, and keeping it would only keep the lock.
     fn with<T>(
         &self,
         f: impl FnOnce(&mut Mnemo) -> Result<T, mnemo_engine::MnemoError>,
     ) -> Result<T, MnemoError> {
         let mut guard = self.lock_handle();
         let db = guard.as_mut().ok_or(MnemoError::Closed)?;
-        f(db).map_err(MnemoError::from)
+        let result = f(db).map_err(MnemoError::from);
+        if matches!(result, Err(MnemoError::MaybeStored { .. })) {
+            *guard = None;
+        }
+        result
     }
 
     /// The handle's slot. After a panic poisoned it, the handle is dropped
@@ -342,6 +351,12 @@ impl MnemoDb {
     /// the file stays open with every unflushed write, the error is
     /// returned, and `flush()` or `close()` can be retried once the cause is
     /// fixed (v0.12.2; before, the writes were lost).
+    ///
+    /// Except after a commit that failed at or after its commit point: then
+    /// the flush is refused with `MaybeStored`, which no retry on this handle
+    /// can get past, so the handle is dropped without flushing and the error
+    /// returned. Open the file again; the open finishes that commit or drops
+    /// it (v0.20.0, RB-016.3).
     pub fn close(&self) -> Result<(), MnemoError> {
         let mut guard = self.lock_handle();
         match guard.take() {
@@ -349,8 +364,11 @@ impl MnemoDb {
                 Ok(()) => Ok(()),
                 Err(e) => {
                     let (db, error) = e.into_parts();
-                    *guard = Some(db);
-                    Err(error.into())
+                    let error = MnemoError::from(error);
+                    if !matches!(error, MnemoError::MaybeStored { .. }) {
+                        *guard = Some(db);
+                    }
+                    Err(error)
                 }
             },
             None => Ok(()),

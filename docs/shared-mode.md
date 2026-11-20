@@ -167,6 +167,15 @@ compaction). Compact, or rekey with `--rotate`, when no agent is working.
   are kept across reloads. `cache_stats` counts hits and misses since the
   handle's last reload: another process's commit makes the handle rebuild,
   and the counters start again.
+- **Restore a copy by replacing the file.** Before a shared handle catches
+  up, it checks that the runs it holds are still on disk. That catches an
+  older copy put back with `cp`, `std::fs::write` or a snapshot rollback,
+  since each cuts the file to the copy's length. A copy written over the
+  start of the file without cutting it (`dd conv=notrunc`, a block-level
+  restore) leaves the newer file's tail behind it, and a handle that was
+  open across the restore can then keep state that a fresh open doesn't
+  have. Replace the file whole, or close every handle on it before writing
+  over it.
 
 ## Errors
 
