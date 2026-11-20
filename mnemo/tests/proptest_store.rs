@@ -1298,7 +1298,18 @@ proptest! {
         };
         prop_assert!(retried || res.is_err(), "a refusal follows a failure");
         if retried {
-            prop_assert_eq!(db.stats().unwrap().fsyncs_last_flush, if res.is_err() { 3 } else { 0 });
+            let fsyncs = db.stats().unwrap().fsyncs_last_flush;
+            if res.is_ok() {
+                prop_assert_eq!(fsyncs, 0);
+            } else if matches!(fail, BigFail::Sync(0)) {
+                // RB-016.2: a failure in the barrier puts the header back,
+                // so the retry takes a new lease (one header-only commit,
+                // 2 fsyncs) before its own 3.
+                prop_assert_eq!(fsyncs, 5);
+            } else {
+                // A failed write: 3, or 5 when it was in the staged part.
+                prop_assert!(fsyncs == 3 || fsyncs == 5, "the retry made {} fsyncs", fsyncs);
+            }
         }
         let mut db = reopen(db, &path);
         let observed = observed_set(&mut db);

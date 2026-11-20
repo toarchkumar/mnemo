@@ -9,6 +9,8 @@
 #![cfg(feature = "failpoints")]
 
 use mnemo_engine::__failpoints::{self as fp, IoEvent};
+#[cfg(unix)]
+use mnemo_engine::MnemoError;
 use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig};
 use std::path::Path;
 use tempfile::tempdir;
@@ -191,10 +193,14 @@ fn a_failed_sync_is_pre_or_post_and_a_failed_barrier_is_pre() {
 }
 
 /// The barrier's flag stays set until a sync succeeds, so a commit retried
-/// after its barrier failed syncs the pages the first attempt wrote, even
-/// when the retry writes no page of its own before the commit. And the
-/// failed attempt's header and free list are put back, so the retry commits
-/// over the committed state, not over the runs the failed attempt staged.
+/// after its barrier failed syncs before its commit. And the failed
+/// attempt's header and free list are put back, so the retry commits over
+/// the committed state, not over the runs the failed attempt staged.
+///
+/// RB-016.1: the retry writes the data pages the failed attempt wrote again,
+/// since the OS may have dropped them. RB-016.2: it takes a new generation
+/// lease first (one header-only commit), so its runs aren't sealed under the
+/// failed attempt's generation.
 #[test]
 fn a_retry_after_a_failed_barrier_syncs_before_its_commit() {
     let dir = tempdir().unwrap();
@@ -202,15 +208,170 @@ fn a_retry_after_a_failed_barrier_syncs_before_its_commit() {
     let mut db = Mnemo::open(&p, "pw").unwrap();
     db.remember(mem(60_000)).unwrap();
     fp::set_syncs_until_fail(0);
+    fp::set_io_trace(true);
     assert!(db.flush().is_err());
+    let first = pages_written(&fp::io_trace());
     fp::set_syncs_until_fail(-1);
     fp::set_io_trace(true);
     db.flush().unwrap();
     let trace = fp::io_trace();
     fp::set_io_trace(false);
-    assert_one_barrier(&trace);
+    let commits: Vec<usize> = (0..trace.len())
+        .filter(|&i| trace[i] == IoEvent::WalCommit)
+        .collect();
+    assert_eq!(commits.len(), 2, "the lease, then the commit: {trace:?}");
+    // The lease: its WAL commit, the header folded in, then the commit
+    // under test.
+    assert_eq!(
+        trace[commits[0]..commits[0] + 4],
+        [
+            IoEvent::WalCommit,
+            IoEvent::Sync,
+            IoEvent::Page(0),
+            IoEvent::Sync
+        ],
+        "{trace:?}"
+    );
+    let retry = &trace[commits[0] + 4..];
+    assert_one_barrier(retry);
+    let again = pages_written(retry);
+    for page in &first {
+        assert!(
+            again.contains(page),
+            "page {page} not written again: {trace:?}"
+        );
+    }
     db.close().unwrap();
     assert_eq!(state(&p), (3001, 3001));
+}
+
+/// The pages a trace wrote, page 0 (the header) aside.
+fn pages_written(trace: &[IoEvent]) -> Vec<u64> {
+    let mut v: Vec<u64> = trace
+        .iter()
+        .filter_map(|e| match e {
+            IoEvent::Page(n) if *n != 0 => Some(*n),
+            _ => None,
+        })
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// Put `pages` of `p` back to their bytes in `earlier` (zeros past its
+/// end): a stand-in for a kernel that dropped those writes after a failed
+/// fsync (RB-016.1).
+///
+/// It writes under the open handle's lock, which Windows enforces (a
+/// byte-range lock there refuses other handles' reads and writes), so it
+/// and the two tests that use it run on Unix only.
+#[cfg(unix)]
+fn put_back(p: &Path, earlier: &[u8], pages: &[u64]) {
+    use std::io::{Seek, SeekFrom, Write};
+    const PAGE: usize = mnemo_engine::__wal::PAGE_SIZE;
+    let mut f = std::fs::OpenOptions::new().write(true).open(p).unwrap();
+    for &n in pages {
+        let at = n as usize * PAGE;
+        let mut img = vec![0u8; PAGE];
+        if at < earlier.len() {
+            let end = (at + PAGE).min(earlier.len());
+            img[..end - at].copy_from_slice(&earlier[at..end]);
+        }
+        f.seek(SeekFrom::Start(at as u64)).unwrap();
+        f.write_all(&img).unwrap();
+    }
+    f.sync_all().unwrap();
+}
+
+/// RB-016.1: after a failed barrier the OS may have dropped the pages the
+/// attempt wrote, and a later fsync can still succeed. The retry writes
+/// them again, so the file it commits reads back whole, earlier memories
+/// included (a commit repacks its tail record page). At the finding's
+/// three sizes. Unix only: see `put_back`.
+#[cfg(unix)]
+#[test]
+fn a_retry_after_a_failed_barrier_writes_dropped_pages_again() {
+    for (n, k) in [(200, 1), (3000, 1), (3000, 1500)] {
+        let dir = tempdir().unwrap();
+        let p = base(dir.path(), n);
+        let mut db = Mnemo::open(&p, "pw").unwrap();
+        stage(&mut db, k).unwrap();
+        let earlier = std::fs::read(&p).unwrap();
+        fp::set_syncs_until_fail(0);
+        fp::set_io_trace(true);
+        assert!(db.flush().is_err(), "{n} + {k}: the barrier failed");
+        fp::set_syncs_until_fail(-1);
+        let wrote = pages_written(&fp::io_trace());
+        fp::set_io_trace(false);
+        assert!(!wrote.is_empty(), "{n} + {k}");
+        put_back(&p, &earlier, &wrote);
+        db.flush().unwrap();
+        db.close().unwrap();
+
+        let mut db = Mnemo::open(&p, "pw").unwrap();
+        assert_eq!(db.len(), n + k, "{n} + {k}");
+        assert_eq!(db.verify().unwrap(), n + k, "{n} + {k}");
+        let all = db.memories().unwrap();
+        assert_eq!(all.len(), n + k, "{n} + {k}");
+        for m in &all {
+            assert_eq!(db.get(&m.id).unwrap().content, m.content, "{n} + {k}");
+        }
+        let mut want: Vec<String> = (0..n)
+            .chain(100_000..100_000 + k)
+            .map(|i| format!("memory {i}"))
+            .collect();
+        let mut got: Vec<String> = all.into_iter().map(|m| m.content).collect();
+        want.sort();
+        got.sort();
+        assert_eq!(got, want, "{n} + {k}");
+    }
+}
+
+/// RB-016.2: a retry after a failed barrier seals its runs under a new
+/// generation. Change something between the attempt and the retry, then
+/// put the failed attempt's images back: they either fail to authenticate
+/// or aren't referenced, so the change holds. Unix only: see `put_back`.
+#[cfg(unix)]
+#[test]
+fn a_retry_after_a_failed_barrier_seals_under_a_new_generation() {
+    let dir = tempdir().unwrap();
+    let p = base(dir.path(), 3000);
+    let mut db = Mnemo::open(&p, "pw").unwrap();
+    let ids: Vec<_> = (0..1500)
+        .map(|i| db.remember(mem(100_000 + i)).unwrap())
+        .collect();
+    fp::set_syncs_until_fail(0);
+    fp::set_io_trace(true);
+    assert!(db.flush().is_err());
+    fp::set_syncs_until_fail(-1);
+    let first = pages_written(&fp::io_trace());
+    fp::set_io_trace(false);
+    let copy = std::fs::read(&p).unwrap();
+    db.delete(&ids[7]).unwrap();
+    db.flush().unwrap();
+    db.close().unwrap();
+    assert_eq!(state(&p), (4499, 4499));
+
+    // Every page the failed attempt wrote, back to its image.
+    assert!(first.len() > 2, "{first:?}");
+    put_back(&p, &copy, &first);
+    match Mnemo::open(&p, "pw") {
+        Err(MnemoError::PageAuthFailed(_)) => {}
+        Err(e) => panic!("{e}"),
+        Ok(mut db) => {
+            assert_eq!(db.len(), 4499, "the delete was undone");
+            match db.get(&ids[7]) {
+                Err(MnemoError::NotFound(_)) | Err(MnemoError::PageAuthFailed(_)) => {}
+                other => panic!("the deleted memory came back: {other:?}"),
+            }
+            match db.verify() {
+                Ok(n) => assert_eq!(n, 4499),
+                Err(MnemoError::PageAuthFailed(_)) => {}
+                Err(e) => panic!("{e}"),
+            }
+        }
+    }
 }
 
 /// A big commit that fails at a write before the barrier (its data pages,

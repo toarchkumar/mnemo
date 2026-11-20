@@ -292,6 +292,13 @@ impl Mnemo {
             Ok(staged) => staged,
             Err(e) => {
                 (self.header, self.free, self.free_dirty) = saved;
+                // RB-016.1: no sync has covered step 2's pages, so the retry
+                // writes them again (a failed barrier already put them back).
+                self.pager.rewrite_unsynced();
+                // RB-016.2: the retry seals its runs under a new generation.
+                // With the header put back it would otherwise compute this
+                // attempt's id again, for the same page numbers.
+                self.gen_leased = false;
                 return Err(e);
             }
         };
@@ -735,7 +742,10 @@ impl Mnemo {
         //    2's data pages and step 3's direct runs durable before the
         //    header that references them can be. `unsynced` stays set until
         //    a sync succeeds, so a retry after a failed commit syncs pages an
-        //    earlier attempt wrote. It must stay a sync of its own: never
+        //    earlier attempt wrote, and step 2's pages stay pinned until a
+        //    sync covers them, so the retry writes them again (RB-016.1:
+        //    after a failed fsync the OS may have dropped them, and a later
+        //    fsync can still succeed). It must stay a sync of its own: never
         //    fold it into the commit's fsync below, since within one fsync
         //    the disk may persist the commit frame before those pages.
         if self.pager.unsynced() {

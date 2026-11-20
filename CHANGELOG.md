@@ -118,6 +118,18 @@ mobile packages are published at 0.20.0. There's no format change.
   whether the write is there. A flush that fails before the commit point is
   still retried on the same handle. Shared handles weren't affected: they
   reload after such a failure. v0.19.1 has the bug.
+- **A flush retried after a failed barrier fsync writes its data pages
+  again** (RB-016.1, found in this release's review, never released).
+  With the one-fsync barrier above, the pages were counted as clean once
+  written, so a retry on the same handle only synced again. After a
+  failed fsync the OS may have dropped those writes, and a later fsync
+  can still succeed, so the retry could commit a file it couldn't read,
+  earlier memories included. The pages now stay pinned in the cache until
+  a sync covers them, and a failed sync puts them back on the next
+  flush's list, as v0.19.1 did; a batch commit still makes 3 fsyncs. A
+  retried flush also seals its runs under a new generation (RB-016.2),
+  which adds one small header-only commit to a retry after a failed
+  barrier.
 
 ## [0.19.1] — 2026-11-18
 
