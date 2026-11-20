@@ -35,6 +35,17 @@ Pre-1.0, the minor component carries the breaking-change signal.
   without the guardrails, on a read-only handle, so an idle check shares
   the lock.
 
+### Changed
+
+- **MCP tools leave vectors out by default** (v0201-2,
+  status.mcp-recall-vectors). `recall`, `history`, `about` and `list` no
+  longer return each memory's `vector` unless the call passes
+  `include_vector: true` (`list` still takes its older name,
+  `include_vectors`). A recall of 10 hits on the project brain (384-wide)
+  went from 119,181 bytes to 21,336. `max_bytes` caps only `content`, so it
+  didn't help. **Callers that read vectors from these tools must pass
+  `include_vector: true`.** The CLI and the library are unchanged.
+
 ## [0.20.0] — 2026-11-19
 
 Shared access gets faster and becomes the MCP server's default. A shared

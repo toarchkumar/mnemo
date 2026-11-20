@@ -111,8 +111,9 @@ since v0.18, `finding` (review findings: `add`, `triage`, `verify`, `list`,
 `serve --mcp --shared` with `MNEMO_AGENT` holds that agent's presence lock
 in the sidecar directory for its life, and since v0.17.2 writes its
 presence record at start, so `who` sees it alive before its first call; it
-never holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Every mutation flushes before
-returning.
+never holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Since v0.20.1, `recall`,
+`history`, `about` and `list` leave each memory's `vector` out unless the call
+passes `include_vector: true`. Every mutation flushes before returning.
 
 With no `--embed-cmd`, the server embeds `text` with the built-in embedder
 (v0.15; see "The built-in embedder" below), loaded once at start. On a
