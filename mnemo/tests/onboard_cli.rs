@@ -514,6 +514,136 @@ fn undo_removes_only_what_onboard_wrote_in_each_scope() {
 }
 
 #[cfg(unix)]
+/// v0.20.2 (v0202-4o): Claude Code's allow rules for `mnemo wait`, `inbox`
+/// and `ack` and the MCP tools, in the hooks' settings file: shown in the
+/// plan, written beside the user's own rules in their order, an older mnemo
+/// rule replaced, a rerun writing nothing, `--undo` taking only ours, and no
+/// absolute path in a project's committed settings.
+#[test]
+fn claude_code_allow_rules_for_the_wake_commands() {
+    let e = Env::new();
+    e.stub_claude();
+    let exe = env!("CARGO_BIN_EXE_mnemo");
+    let settings = e.p("repo/.claude/settings.local.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let theirs = r#"{
+  "model": "opus",
+  "permissions": {
+    "deny": ["Bash(rm *)"],
+    "allow": ["Bash(npm run *)", "Bash(/old/bin/mnemo inbox *)", "Read(./notes)"],
+    "defaultMode": "acceptEdits"
+  }
+}
+"#;
+    std::fs::write(&settings, theirs).unwrap();
+    let plan = e.ok(&["--client", "claude-code", "--no-model", "--print"]);
+    for want in [
+        "+ permissions.allow: Bash(mnemo wait *)",
+        &format!("+ permissions.allow: Bash({exe} ack *)"),
+        "+ permissions.allow: mcp__mnemo__*",
+    ] {
+        assert!(plan.contains(want), "{want:?} in {plan}");
+    }
+    assert_eq!(
+        e.read("repo/.claude/settings.local.json"),
+        theirs,
+        "--print wrote"
+    );
+    e.ok(&["--client", "claude-code", "--no-model", "--yes"]);
+    let text = e.read("repo/.claude/settings.local.json");
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let mut want: Vec<String> = vec!["Bash(npm run *)".into(), "Read(./notes)".into()];
+    for p in ["mnemo", exe] {
+        for c in ["wait", "inbox", "ack"] {
+            want.push(format!("Bash({p} {c} *)"));
+        }
+    }
+    want.push("mcp__mnemo__*".into());
+    assert_eq!(v["permissions"]["allow"], json!(want), "{text}");
+    assert_eq!(v["permissions"]["deny"], json!(["Bash(rm *)"]));
+    assert_eq!(v["model"], "opus");
+    // The members keep their order: model, permissions (deny, allow,
+    // defaultMode), then hooks.
+    let at = |k: &str| text.find(k).unwrap_or_else(|| panic!("{k} in {text}"));
+    assert!(at("\"model\"") < at("\"permissions\"") && at("\"permissions\"") < at("\"hooks\""));
+    assert!(at("\"deny\"") < at("\"allow\"") && at("\"allow\"") < at("\"defaultMode\""));
+    // A rerun: nothing to write.
+    let again = e.ok(&["--client", "claude-code", "--no-model", "--yes"]);
+    assert!(again.contains("already set up"), "{again}");
+    assert_eq!(e.read("repo/.claude/settings.local.json"), text);
+    // Undo: only ours go.
+    e.ok(&["--client", "claude-code", "--undo", "--yes"]);
+    let v: Value = serde_json::from_str(&e.read("repo/.claude/settings.local.json")).unwrap();
+    assert_eq!(
+        v["permissions"],
+        json!({"deny": ["Bash(rm *)"], "allow": ["Bash(npm run *)", "Read(./notes)"],
+               "defaultMode": "acceptEdits"}),
+        "{v}"
+    );
+    assert!(v.get("hooks").is_none(), "{v}");
+    // The project scope: committed, so no absolute path.
+    e.ok(&[
+        "--client",
+        "claude-code",
+        "--scope",
+        "project",
+        "--no-model",
+        "--yes",
+    ]);
+    let v: Value = serde_json::from_str(&e.read("repo/.claude/settings.json")).unwrap();
+    let rules: Vec<&str> = v["permissions"]["allow"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            "Bash(mnemo wait *)",
+            "Bash(mnemo inbox *)",
+            "Bash(mnemo ack *)",
+            "mcp__mnemo__*"
+        ]
+    );
+    // A mnemo under the home directory is also spelled `~/...`, as a session
+    // types it: run a copy from there.
+    let bin = e.p("home/.local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(exe, bin.join("mnemo")).unwrap();
+    let c = e.cmd(
+        &e.p("repo"),
+        &[
+            "onboard",
+            "--client",
+            "claude-code",
+            "--no-model",
+            "--print",
+        ],
+    );
+    let mut copy = Command::new(bin.join("mnemo"));
+    copy.args(c.get_args())
+        .current_dir(e.p("repo"))
+        .stdin(Stdio::null());
+    for (k, v) in c.get_envs() {
+        match v {
+            Some(v) => copy.env(k, v),
+            None => copy.env_remove(k),
+        };
+    }
+    let o = copy.output().unwrap();
+    let plan = out(&o);
+    assert!(
+        o.status.success(),
+        "{plan}{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(
+        plan.contains("+ permissions.allow: Bash(~/.local/bin/mnemo wait *)"),
+        "{plan}"
+    );
+}
+
 #[test]
 fn claude_code_local_and_project_scopes() {
     let e = Env::new();
@@ -1183,6 +1313,7 @@ fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
         "[ ADDED ] Brain: .git/mnemo/project.mnemo (a generated key, kept in the keychain)",
         "[ ADDED ] Claude Code: the SessionStart, PreCompact, SessionEnd and UserPromptSubmit hooks (.claude/settings.local.json)",
         "[ ADDED ] Claude Code: the skill (.claude/skills/mnemo/SKILL.md)",
+        "[ ADDED ] Claude Code: allow rules for mnemo wait, inbox, ack and its MCP tools (.claude/settings.local.json)",
         "[ ADDED ] Cursor: the rule (.cursor/rules/mnemo.mdc)",
         "files changed.",
         "Next: 1. Restart Claude Code and Cursor (or start a new session) so they load the changes.",
@@ -1230,7 +1361,7 @@ fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
         for want in [
             "\nClaude Code\n  Will add: the UserPromptSubmit hook (.claude/settings.local.json)\n",
             "\n  Will update: the skill (.claude/skills/mnemo/SKILL.md, +0 -1 lines)\n",
-            "\n  Already right: the MCP server (.mcp.json) and 3 hooks\n",
+            "\n  Already right: the MCP server (.mcp.json), 3 hooks and 7 allow rules\n",
             "\nNothing was written; run mnemo onboard --yes to write it.\n",
         ] {
             assert!(t.contains(want), "{want:?} in {t}");
@@ -1244,7 +1375,7 @@ fn at_a_terminal_lines_are_tagged_like_a_boot_log() {
     for want in [
         "[ ADDED ] Claude Code: the UserPromptSubmit hook (.claude/settings.local.json)",
         "[UPDATED] Claude Code: the skill (.claude/skills/mnemo/SKILL.md, +0 -1 lines)",
-        "[  OK   ] Claude Code: the MCP server (.mcp.json) and 3 hooks already right",
+        "[  OK   ] Claude Code: the MCP server (.mcp.json), 3 hooks and 7 allow rules already right",
         "[  OK   ] Cursor: the MCP server (.cursor/mcp.json), 4 hooks and the rule already right",
         "Done: 2 files changed.",
         "1. Restart Claude Code (or start a new session) so it loads the changes.",

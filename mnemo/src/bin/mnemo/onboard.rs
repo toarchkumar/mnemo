@@ -352,6 +352,137 @@ pub fn is_our_server(entry: &Value) -> bool {
     is_mnemo(program) && serve
 }
 
+/// v0.20.2 (v0202-4o): the commands a session runs while it waits for
+/// work, which Claude Code may run without asking. Each writes only the
+/// brain.
+const ALLOWED_COMMANDS: [&str; 3] = ["wait", "inbox", "ack"];
+
+/// v0.20.2: every tool of the mnemo MCP server (`mcp__<server>__*`).
+const MCP_RULE: &str = "mcp__mnemo__*";
+
+/// v0.20.2 (v0202-4o): the Claude Code `permissions.allow` rules `onboard`
+/// writes. A Bash rule matches the command as written, so each command gets
+/// one rule per way a session spells the program: bare `mnemo` (on the
+/// PATH), `~/...` when the binary is under the home directory, and (local
+/// scope only, since a project's settings are committed) its absolute path.
+fn allow_rules(ctx: &Ctx) -> Vec<String> {
+    // As a session types it: plain when the shell needs no quotes.
+    let plain = |p: &str| {
+        p.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+~:\\".contains(c))
+    };
+    let mut programs = vec!["mnemo".to_string()];
+    let exe = Path::new(&ctx.exe);
+    // `exe` is canonical; `HOME` may not be (macOS's `/var` is `/private/var`).
+    let home = std::fs::canonicalize(&ctx.home).unwrap_or_else(|_| ctx.home.clone());
+    if let Ok(rest) = exe
+        .strip_prefix(&home)
+        .or_else(|_| exe.strip_prefix(&ctx.home))
+    {
+        // A quoted `~` doesn't expand, so a path that needs quotes has no
+        // `~` form.
+        if let Some(r) = rest.to_str().filter(|r| plain(r)) {
+            programs.push(format!("~/{}", r.replace('\\', "/")));
+        }
+    }
+    if ctx.scope == Scope::Local {
+        programs.push(if plain(&ctx.exe) {
+            ctx.exe.clone()
+        } else {
+            quote(&ctx.exe)
+        });
+    }
+    programs.dedup();
+    let mut out: Vec<String> = programs
+        .iter()
+        .flat_map(|p| {
+            ALLOWED_COMMANDS
+                .iter()
+                .map(move |c| format!("Bash({p} {c} *)"))
+        })
+        .collect();
+    out.push(MCP_RULE.to_string());
+    out
+}
+
+/// Whether a `permissions.allow` rule is one `onboard` writes: the mnemo MCP
+/// server's wildcard, or a Bash rule for `mnemo` (any directory, `~` too)
+/// running `wait`, `inbox` or `ack`.
+pub fn is_our_rule(rule: &str) -> bool {
+    if rule == MCP_RULE {
+        return true;
+    }
+    let Some(inner) = rule.strip_prefix("Bash(").and_then(|r| r.strip_suffix(')')) else {
+        return false;
+    };
+    let (program, rest) = first_word(inner);
+    is_mnemo(&program)
+        && ALLOWED_COMMANDS
+            .iter()
+            .any(|c| rest.trim_start() == format!("{c} *"))
+}
+
+/// The `permissions` member's text with our allow rules removed, then (when
+/// `add`) ours appended; its other members, and the other rules, in their
+/// order. `None` when nothing is left.
+fn with_allow_rules(perms: Option<&str>, add: &[String]) -> Result<Option<String>, String> {
+    let mut m = match perms {
+        Some(t) => members(t)?,
+        None => Vec::new(),
+    };
+    let i = m.iter().position(|(k, _)| k == "allow");
+    let mut allow: Vec<Value> = match i {
+        Some(i) => serde_json::from_str::<Vec<Value>>(&m[i].1)
+            .map_err(|_| "permissions.allow isn't a list; left alone".to_string())?,
+        None => Vec::new(),
+    };
+    allow.retain(|r| !r.as_str().is_some_and(is_our_rule));
+    for r in add {
+        let v = Value::String(r.clone());
+        if !allow.contains(&v) {
+            allow.push(v);
+        }
+    }
+    let text = (!allow.is_empty()).then(|| mi::pretty_at(&Value::Array(allow), 2));
+    match (i, text) {
+        (Some(i), Some(t)) => m[i].1 = t,
+        (Some(i), None) => {
+            m.remove(i);
+        }
+        (None, Some(t)) => m.push(("allow".into(), t)),
+        (None, None) => {}
+    }
+    Ok((!m.is_empty()).then(|| mi::write_object(&m, 1)))
+}
+
+/// Our allow rules in a `permissions` member's text.
+fn our_rules(perms: Option<&str>) -> Vec<String> {
+    perms
+        .and_then(|t| member(t, "allow").ok().flatten())
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|r| is_our_rule(r))
+        .map(str::to_string)
+        .collect()
+}
+
+/// The text with `key`'s member set to `raw` (a value's JSON text, added
+/// last if new), or removed with `None`.
+fn set_member_raw(old: &str, key: &str, raw: Option<String>) -> Result<String, String> {
+    let mut m = members(old)?;
+    match (m.iter().position(|(k, _)| k == key), raw) {
+        (Some(i), Some(v)) => m[i].1 = v,
+        (Some(i), None) => {
+            m.remove(i);
+        }
+        (None, Some(v)) => m.push((key.to_string(), v)),
+        (None, None) => {}
+    }
+    Ok(format!("{}\n", mi::write_object(&m, 0)))
+}
+
 // --- JSON edits ----------------------------------------------------------------
 
 /// The top-level members of a JSON object's text (an empty text is `{}`).
@@ -717,6 +848,31 @@ fn plan_hooks_file(ctx: &Ctx, client: Client, path: &Path, undo: bool, items: &m
         Ok(t) => t,
         Err(e) => return items.push(Item::Failed(format!("{label}: {e}"))),
     };
+    // v0.20.2 (v0202-4o): Claude Code's allow rules for the wake commands,
+    // in the same file.
+    let perms_old: Option<String> = match members(&text) {
+        Ok(m) => m
+            .into_iter()
+            .find(|(k, _)| k == "permissions")
+            .map(|(_, v)| v),
+        Err(e) => return items.push(Item::Failed(format!("{label}: {e}"))),
+    };
+    let rules = if client == Client::ClaudeCode && !undo {
+        allow_rules(ctx)
+    } else {
+        Vec::new()
+    };
+    let had_rules = our_rules(perms_old.as_deref());
+    if client == Client::ClaudeCode {
+        let perms_new = match with_allow_rules(perms_old.as_deref(), &rules) {
+            Ok(p) => p,
+            Err(e) => return items.push(Item::Failed(format!("{label}: {e}"))),
+        };
+        new = match set_member_raw(&new, "permissions", perms_new) {
+            Ok(t) => t,
+            Err(e) => return items.push(Item::Failed(format!("{label}: {e}"))),
+        };
+    }
     if client == Client::Cursor && !undo && member(&new, "version").ok().flatten().is_none() {
         // Cursor's hooks.json starts with its version.
         let mut m = members(&new).unwrap_or_default();
@@ -724,7 +880,7 @@ fn plan_hooks_file(ctx: &Ctx, client: Client, path: &Path, undo: bool, items: &m
         new = format!("{}\n", mi::write_object(&m, 0));
     }
     if undo {
-        if hooks == member(&new, "hooks").ok().flatten() {
+        if hooks == member(&new, "hooks").ok().flatten() && had_rules.is_empty() {
             return;
         }
         // Cursor's version alone left: the file was ours.
@@ -736,23 +892,65 @@ fn plan_hooks_file(ctx: &Ctx, client: Client, path: &Path, undo: bool, items: &m
         } else {
             new
         };
-        items.push(remove_or_write(
-            path,
-            old,
-            new,
-            "- mnemo's hooks\n".into(),
-            vec![(Mark::Remove, format!("mnemo's hooks ({label})"))],
-        ));
+        let (mut shown, mut tty) = (String::new(), Vec::new());
+        if hooks != member(&new, "hooks").ok().flatten() {
+            shown.push_str("- mnemo's hooks\n");
+            tty.push((Mark::Remove, format!("mnemo's hooks ({label})")));
+        }
+        if !had_rules.is_empty() {
+            shown.push_str(&format!(
+                "- mnemo's {} permissions.allow rules\n",
+                had_rules.len()
+            ));
+            tty.push((Mark::Remove, format!("mnemo's allow rules ({label})")));
+        }
+        items.push(remove_or_write(path, old, new, shown, tty));
         return;
     }
     if old.as_deref() == Some(new.as_str()) {
-        return items.push(Item::Ok {
-            line: format!("{label}: the hooks are already right"),
-            what: hooks_count(ours.len()),
-        });
+        let (line, what) = if client == Client::ClaudeCode {
+            (
+                format!("{label}: the hooks and allow rules are already right"),
+                format!(
+                    "{} and {} allow rules",
+                    hooks_count(ours.len()),
+                    rules.len()
+                ),
+            )
+        } else {
+            (
+                format!("{label}: the hooks are already right"),
+                hooks_count(ours.len()),
+            )
+        };
+        return items.push(Item::Ok { line, what });
     }
-    let shown = shown_hooks(&hooks, &ours);
-    let tty = hook_changes(&hooks, &ours, &label);
+    let mut shown = shown_hooks(&hooks, &ours);
+    let mut tty = hook_changes(&hooks, &ours, &label);
+    if client == Client::ClaudeCode {
+        let added: Vec<&String> = rules.iter().filter(|r| !had_rules.contains(r)).collect();
+        let gone = had_rules.iter().filter(|r| !rules.contains(r)).count();
+        for r in &added {
+            shown.push_str(&format!("+ permissions.allow: {r}\n"));
+        }
+        if gone > 0 {
+            shown.push_str(&format!("- {gone} older mnemo allow rule(s)\n"));
+        }
+        if !added.is_empty() || gone > 0 {
+            // The rules are the change, not "the file".
+            tty.retain(|(m, l)| !(*m == Mark::Change && *l == label));
+            tty.push((
+                if had_rules.is_empty() {
+                    Mark::Add
+                } else {
+                    Mark::Change
+                },
+                format!("allow rules for mnemo wait, inbox, ack and its MCP tools ({label})"),
+            ));
+        } else {
+            tty.push((Mark::Same, format!("{} allow rules", rules.len())));
+        }
+    }
     items.push(Item::Write {
         path: path.to_path_buf(),
         old,
@@ -2251,6 +2449,33 @@ fn trust_step(ctx: &Ctx, clients: &[Client]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn our_allow_rules_and_no_others() {
+        for ours in [
+            "mcp__mnemo__*",
+            "Bash(mnemo wait *)",
+            "Bash(~/.local/bin/mnemo inbox *)",
+            "Bash(/opt/x/mnemo ack *)",
+            "Bash(\"/a b/mnemo\" wait *)",
+            "Bash(C:\\tools\\mnemo.exe wait *)",
+        ] {
+            assert!(is_our_rule(ours), "{ours}");
+        }
+        for theirs in [
+            "mcp__mnemo__recall",
+            "mcp__other__*",
+            "Bash(mnemo post *)",
+            "Bash(mnemo wait)",
+            "Bash(mnemo wait --as worker-a)",
+            "Bash(mnemo *)",
+            "Bash(notmnemo wait *)",
+            "Bash(npm run *)",
+            "Read(./mnemo wait *)",
+        ] {
+            assert!(!is_our_rule(theirs), "{theirs}");
+        }
+    }
 
     #[test]
     fn our_hooks_and_servers_are_recognised_in_both_forms() {
