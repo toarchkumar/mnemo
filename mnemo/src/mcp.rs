@@ -3142,7 +3142,14 @@ fn tool_snapshot_list(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
 }
 
 fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
-    let s = db.stats().map_err(mnemo_err)?;
+    Ok(stats_json(db).map_err(mnemo_err)?.to_string())
+}
+
+/// v0.20.2 (G9): what the `stats` tool returns, for `mnemo stats` too: the
+/// fields of [`crate::Stats`] by their names, the snapshot count, and the
+/// page cache's use.
+pub fn stats_json(db: &mut Mnemo) -> Result<Value> {
+    let s = db.stats()?;
     let (cache_pages, cache_capacity) = db.page_cache_stats();
     let snapshot_count = db.snapshots().len();
     // Field names mirror `Stats` in `store/mod.rs` verbatim so MCP clients
@@ -3164,8 +3171,7 @@ fn tool_stats(db: &mut Mnemo) -> std::result::Result<String, RpcError> {
         "snapshot_pinned_bytes": s.snapshot_pinned_bytes,
         "cache_pages": cache_pages,
         "cache_capacity": cache_capacity,
-    })
-    .to_string())
+    }))
 }
 
 // --- Result-cache tool handlers (Phase 10.4) -----------------------------

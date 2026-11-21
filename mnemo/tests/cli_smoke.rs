@@ -2027,6 +2027,99 @@ fn cli_get_by_key_is_get_by_the_live_id() {
     assert!(err.contains("--key"), "{err}");
 }
 
+/// v0.20.2 (G8, G9): `mnemo supersede` (by id and by key), the old unkeyed
+/// facts in `mnemo stale`, and `mnemo stats` with the MCP tool's fields.
+#[test]
+fn cli_supersede_stale_and_stats() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cli-stale.mnemo");
+    let pp = "stale-pw";
+    let (a, b, c) = {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        let mut f = |t: &str, v: f32| {
+            db.remember(Memory::new(t, MemoryType::Episodic, vec![v, 1.0, 0.0, 0.0]))
+                .unwrap()
+                .to_string()
+        };
+        let ids = (
+            f("old plan: sync first", 1.0),
+            f("new plan: perf first", 2.0),
+            f("old order", 3.0),
+        );
+        db.remember_keyed(
+            Memory::new(
+                "order: perf, then sync",
+                MemoryType::Episodic,
+                vec![4.0, 1.0, 0.0, 0.0],
+            ),
+            "decision.order",
+        )
+        .unwrap();
+        db.flush().unwrap();
+        ids
+    };
+    let p = path.to_str().unwrap();
+    let (st, out, err) = run_cli(&["supersede", p, &a, "--by", &b], pp);
+    assert!(st.success(), "{err}");
+    assert_eq!(out.trim(), format!("{a}\tsuperseded\tby {b}"));
+    let (st, out, _) = run_cli(&["supersede", p, &a, "--by", &b], pp);
+    assert!(st.success() && out.contains("unchanged"), "{out}");
+    // By key: its live version.
+    let (st, out, err) = run_cli(&["supersede", p, &c, "--by", "decision.order"], pp);
+    assert!(st.success(), "{err}");
+    assert!(out.contains("superseded"), "{out}");
+    let (st, _, err) = run_cli(&["supersede", p, &b, "--by", "no.such-key"], pp);
+    assert!(!st.success());
+    assert!(err.contains("no key of that name"), "{err}");
+    let (st, _, err) = run_cli(&["supersede", p, &b], pp);
+    assert!(!st.success() && err.contains("--by"), "{err}");
+
+    // `stale`: a month and a day on, the live unkeyed episodic fact (b).
+    let month = (mnemo_engine::UNKEYED_STALE_SECS + 86_400).to_string();
+    let out = Command::new(bin())
+        .args(["stale", p, "--format", "json"])
+        .env("MNEMO_PASSPHRASE", pp)
+        .env("MNEMO_DEV_CLOCK_OFFSET", &month)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ids: Vec<&str> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["what"] == "unkeyed episodic")
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [b.as_str()], "{rows}");
+
+    // `stats`: the MCP tool's fields, as JSON and as a table.
+    let (st, out, err) = run_cli(&["stats", p, "--format", "json"], pp);
+    assert!(st.success(), "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    for k in [
+        "memories",
+        "file_bytes",
+        "dimensions",
+        "snapshot_count",
+        "cache_capacity",
+    ] {
+        assert!(v.get(k).is_some(), "no {k}: {v}");
+    }
+    assert_eq!(v["dimensions"], 4);
+    let (st, out, err) = run_cli(&["stats", p], pp);
+    assert!(st.success(), "{err}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("dimensions") && l.trim_end().ends_with(" 4")),
+        "{out}"
+    );
+}
+
 // === Phase 12.7d: end-to-end MCP threads + essence ========================
 
 /// Run one scripted MCP session against `path` with the fake 4-D

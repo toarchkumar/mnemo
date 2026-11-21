@@ -523,4 +523,10 @@ reads them, and their history stays.
 - **Freshness:** `--review-by 30d` on `remember` asks for a look later.
   `mnemo stale` lists what's past its date, or older than its kind allows
   (a `state` item after 14 days, a task with no update after 3, an unread
-  message after 3), and `about` marks them `[stale since <date>]`.
+  message after 3), and `about` marks them `[stale since <date>]`. It also
+  lists dated facts written without a key that are over 30 days old: a
+  keyed fact's newer version replaces the old one, but these stay in
+  recall until you retire one.
+- **Retire an old fact:** `mnemo supersede <old id> --by <newer id or
+  key>` marks a fact written without a key as replaced, so recall leaves
+  it out, as it leaves out a keyed fact's older versions.
