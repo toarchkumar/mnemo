@@ -1479,7 +1479,14 @@ pub(crate) fn create_temp(
         match Mnemo::create_secret_new(&tmp, secret, kind, config, salt) {
             Ok(new) => return Ok((tmp, new)),
             Err(e) if is_name_taken(&e) && attempt + 1 < TEMP_NAME_ATTEMPTS => attempt += 1,
-            Err(e) => return Err(e),
+            Err(e) => {
+                // v0.21.0: a create that failed after making the file (a
+                // write error) leaves nothing; a taken name isn't ours.
+                if !is_name_taken(&e) {
+                    let _ = std::fs::remove_file(&tmp);
+                }
+                return Err(e);
+            }
         }
     }
 }

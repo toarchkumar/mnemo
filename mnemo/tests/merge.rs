@@ -7,9 +7,10 @@
 use std::path::{Path, PathBuf};
 
 use mnemo_engine::{
-    EssenceScope, EssenceSection, KdfParams, KeyScope, Memory, MemoryPatch, MemoryType,
-    MergeOptions, MergeReport, MergeSecret, MergeSide, Mnemo, MnemoConfig, TaskSpec, Ulid,
-    MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_SOURCE,
+    CachePutOpts, Embedder, EmbedderIdentity, EssenceScope, EssenceSection, FindingSpec, KdfParams,
+    KeyScope, Memory, MemoryPatch, MemoryType, MergeOptions, MergeReport, MergeSecret, MergeSide,
+    Mnemo, MnemoConfig, RecallRequest, TaskSpec, ThreadTurn, Ulid, VisibilitySet,
+    MERGE_LEAD_WARN_MS, MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_SOURCE,
 };
 use serde_json::Value;
 
@@ -527,4 +528,468 @@ fn an_edit_on_one_side_only_is_no_conflict() {
         r.conflicts,
         r.conflict_ids
     );
+}
+
+fn edit(db: &mut Mnemo, id: &Ulid, text: &str) {
+    db.update(
+        id,
+        MemoryPatch {
+            content: Some(text.into()),
+            vector: Some(v(text.len() as f32)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+}
+
+fn copies(db: &mut Mnemo) -> Vec<Memory> {
+    db.memories()
+        .unwrap()
+        .into_iter()
+        .filter(|m| meta(m, MNEMO_META_MERGE_SOURCE).is_some())
+        .collect()
+}
+
+#[test]
+fn eight_edits_on_one_side_are_known_and_nine_fall_back_to_a_copy() {
+    // decision.v0210-ancestry: a version keeps the 8 latest before it.
+    for (n, want_copy) in [(8, false), (9, true)] {
+        let p = pair();
+        let mut a = open(&p.a);
+        for i in 0..n {
+            edit(&mut a, &p.base_fact, &format!("edit number {i}"));
+        }
+        a.close().unwrap();
+        let (out, r) = p.check_laws(wall_ms() + 1_000);
+        let mut db = Mnemo::open(&out, PW).unwrap();
+        assert_eq!(
+            db.get(&p.base_fact).unwrap().content,
+            format!("edit number {}", n - 1)
+        );
+        let c = copies(&mut db);
+        assert_eq!(
+            c.len(),
+            usize::from(want_copy),
+            "{n} edits: {:?}",
+            r.conflicts
+        );
+        if want_copy {
+            assert_eq!(c[0].content, "the base fact");
+        }
+    }
+}
+
+#[test]
+fn an_older_builds_edit_on_both_sides_is_a_conflict() {
+    // An older build edits in place and keeps the stamp it found: both
+    // sides end with the base's stamp and different content.
+    let p = pair();
+    for (path, text) in [(&p.a, "old build edit in a"), (&p.b, "old build edit in b")] {
+        let mut db = open(path);
+        let mut m = db.get(&p.base_fact).unwrap();
+        m.content = text.into();
+        db.__put_unvalidated_for_testing(m).unwrap();
+        db.close().unwrap();
+    }
+    let (out, r) = p.check_laws(wall_ms() + 1_000);
+    assert_eq!(r.conflicts.get("fact"), Some(&1));
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    assert_eq!(copies(&mut db).len(), 1);
+}
+
+#[test]
+fn equal_stamps_on_one_id_and_equal_times_in_histories() {
+    let p = pair();
+    {
+        let mut a = open(&p.a);
+        a.set_author(Some("planner-a".into()));
+        let mut spec = TaskSpec::new("Same second");
+        spec.role = Some("worker".into());
+        a.task_add(&spec).unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+    }
+    let t = wall_ms();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    for (db, who, text) in [
+        (&mut a, "worker-a", "same ms, a"),
+        (&mut b, "worker-b", "same ms, b"),
+    ] {
+        db.__freeze_hlc_clock_for_testing(Some(t));
+        edit(db, &p.base_fact, text);
+        db.set_author(Some(who.into()));
+        db.task_next(Some("worker")).unwrap().unwrap();
+    }
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, r) = p.check_laws(t + 1_000);
+    assert_eq!(
+        r.conflicts.get("fact"),
+        Some(&1),
+        "equal stamps, different content"
+    );
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    let task = db
+        .tasks(None, None)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.slug == "same-second")
+        .unwrap();
+    assert_eq!(task.status, "active");
+}
+
+#[test]
+fn a_copy_an_hour_ahead_is_reported() {
+    let p = pair();
+    let mut b = open(&p.b);
+    b.__set_hlc_offset_for_testing(2 * MERGE_LEAD_WARN_MS);
+    b.remember(Memory::new("written ahead", MemoryType::Semantic, v(2.0)))
+        .unwrap();
+    b.close().unwrap();
+    let (_, r) = p.check_laws(wall_ms());
+    assert!(r.lead_ms[1] > MERGE_LEAD_WARN_MS, "{:?}", r.lead_ms);
+    assert!(r.lead_ms[0] <= 0, "{:?}", r.lead_ms);
+}
+
+#[test]
+fn merge_x_x_is_x_compacted() {
+    // With deletes, a re-created id, an expired record and a pruned
+    // message: merging a copy with itself gives what compaction keeps.
+    let p = pair();
+    let mut a = open(&p.a);
+    let gone = a
+        .remember(Memory::new("deleted", MemoryType::Semantic, v(2.0)))
+        .unwrap();
+    a.delete(&gone).unwrap();
+    a.delete(&p.base_fact).unwrap();
+    let mut back = Memory::new("the base fact, written again", MemoryType::Semantic, v(1.5));
+    back.id = p.base_fact;
+    a.remember(back).unwrap();
+    let mut old = Memory::new("expired", MemoryType::Working, v(3.0));
+    old.created_at -= 100;
+    old.ttl_secs = Some(10);
+    a.remember(old).unwrap();
+    a.set_author(Some("worker-a".into()));
+    let msg = a
+        .post(
+            "planner-a",
+            "DONE: x",
+            "",
+            &[],
+            None,
+            Some("worker-a"),
+            None,
+        )
+        .unwrap();
+    a.ack(&msg.id, None, Some("planner-a")).unwrap();
+    a.prune_messages(-1).unwrap();
+    a.close().unwrap();
+    let compacted = p.out("compacted.mnemo");
+    copy(&p.a, &compacted);
+    Mnemo::compact_file(compacted.to_str().unwrap(), PW).unwrap();
+    let out = p.out("xx.mnemo");
+    let r = merge(&p.a, &p.a, &out, wall_ms());
+    assert_eq!(records(&out), records(&compacted));
+    assert!(r.conflicts.is_empty() && r.dropped == 1, "{r:?}");
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    assert_eq!(
+        db.get(&p.base_fact).unwrap().content,
+        "the base fact, written again"
+    );
+}
+
+#[test]
+fn a_forgotten_record_is_gone_from_every_read() {
+    let p = pair();
+    let k = {
+        let mut a = open(&p.a);
+        let (k, _) = a
+            .remember_keyed(
+                Memory::new("zanzibar is the secret word", MemoryType::Semantic, v(7.0)),
+                "word",
+            )
+            .unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+        k
+    };
+    let turn = |text: &str| ThreadTurn {
+        turn_id: "u1".into(),
+        role: "user".into(),
+        content: text.into(),
+        timestamp: None,
+    };
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    // The turn saved in both copies, under two ids.
+    a.ingest_thread_with_vectors("t", &[turn("zanzibar in a turn")], &[v(8.0)])
+        .unwrap();
+    b.ingest_thread_with_vectors("t", &[turn("zanzibar in a turn")], &[v(8.0)])
+        .unwrap();
+    // a forgets both; b edits the fact and caches a result naming it.
+    a.delete(&k).unwrap();
+    a.thread_forget("t").unwrap();
+    edit(&mut b, &k, "zanzibar, edited where it wasn't forgotten");
+    b.cache_put("answers", "q", b"zanzibar", CachePutOpts::default())
+        .unwrap();
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, _) = p.check_laws(wall_ms() + 1_000);
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    let all = db.memories().unwrap();
+    assert!(
+        all.iter().all(|m| !m.content.contains("zanzibar")),
+        "{all:?}"
+    );
+    for req in [
+        RecallRequest::new(v(7.0)).top_k(50),
+        RecallRequest::keywords_only("zanzibar").top_k(50),
+    ] {
+        let hits = db
+            .recall(&req.visibility(VisibilitySet::ALL).track_access(false))
+            .unwrap();
+        assert!(hits.iter().all(|h| !h.memory.content.contains("zanzibar")));
+    }
+    assert!(db
+        .history_in("word", KeyScope::private_default())
+        .unwrap()
+        .is_empty());
+    assert!(db.thread_export("t").unwrap().is_empty());
+    assert!(copies(&mut db).is_empty());
+    assert!(
+        db.cache_get("answers", "q").unwrap().is_none(),
+        "no cached result is carried"
+    );
+}
+
+#[test]
+fn a_supersede_against_an_edit_keeps_the_mark() {
+    let p = pair();
+    let g = {
+        let mut a = open(&p.a);
+        let g = a
+            .remember(Memory::new("the newer fact", MemoryType::Semantic, v(2.0)))
+            .unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+        g
+    };
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    a.supersede(&p.base_fact, &g).unwrap();
+    edit(&mut b, &p.base_fact, "the base fact, edited");
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, _) = p.check_laws(wall_ms() + 1_000);
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    let f = db.get(&p.base_fact).unwrap();
+    assert_eq!(f.metadata["_mnemo.superseded_by"], g.to_string());
+}
+
+#[test]
+fn two_findings_with_one_id_and_an_after_cycle_are_reported() {
+    let p = pair();
+    {
+        let mut a = open(&p.a);
+        a.set_author(Some("planner-a".into()));
+        for slug in ["t1", "t2"] {
+            let mut spec = TaskSpec::new(format!("Task {slug}"));
+            spec.slug = Some(slug.into());
+            a.task_add(&spec).unwrap();
+        }
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+    }
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    for (db, slug, after, title) in [
+        (&mut a, "t1", "t2", "Seen in a"),
+        (&mut b, "t2", "t1", "Seen in b"),
+    ] {
+        db.set_author(Some("planner-a".into()));
+        let mut spec = TaskSpec::new(format!("Task {slug}"));
+        spec.slug = Some(slug.into());
+        spec.after = vec![after.into()];
+        db.task_add(&spec).unwrap();
+        db.set_author(Some("reviewer-b".into()));
+        db.finding_add(&FindingSpec::new("RB-099.1", "CORRECTNESS", "LOW", title))
+            .unwrap();
+    }
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, r) = p.check_laws(wall_ms() + 1_000);
+    assert_eq!(
+        r.after_cycles,
+        vec![vec!["t1".to_string(), "t2".to_string()]]
+    );
+    assert_eq!(r.renamed.len(), 1);
+    assert_eq!(r.renamed[0].kind, "finding");
+    assert_eq!(r.renamed[0].to, "RB-099.1-merge-2");
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    assert!(db.finding("RB-099.1").unwrap().is_some());
+    assert!(db.finding("RB-099.1-merge-2").unwrap().is_some());
+}
+
+struct LenEmbedder;
+impl Embedder for LenEmbedder {
+    fn identity(&self) -> EmbedderIdentity {
+        EmbedderIdentity {
+            name: "len".into(),
+            dimensions: 4,
+            normalize: false,
+            ..Default::default()
+        }
+    }
+    fn embed(&self, texts: &[&str]) -> mnemo_engine::Result<Vec<Vec<f32>>> {
+        Ok(texts.iter().map(|t| v(t.len() as f32)).collect())
+    }
+}
+
+#[test]
+fn more_refusals_say_why() {
+    let p = pair();
+    let try_merge = |a: &Path, sa: MergeSecret, b: &Path, sb: MergeSecret, out: &Path| {
+        Mnemo::merge_files(a, sa, b, sb, out, &MergeOptions::default())
+            .unwrap_err()
+            .to_string()
+    };
+    let pw = MergeSecret::Passphrase(PW);
+    // Different embedders.
+    let mut b = open(&p.b);
+    b.set_embedder(Box::new(LenEmbedder)).unwrap();
+    b.close().unwrap();
+    let e = try_merge(&p.a, pw, &p.b, pw, &p.out("o1.mnemo"));
+    assert!(e.contains("embedders differ"), "{e}");
+    // Float vectors on one side only.
+    let floats = p.out("floats.mnemo");
+    let mut c = cfg();
+    c.store_float_vectors = true;
+    Mnemo::create(&floats, PW, c).unwrap().close().unwrap();
+    let e = try_merge(&p.a, pw, &floats, pw, &p.out("o2.mnemo"));
+    assert!(e.contains("float vectors"), "{e}");
+    // A v8 input (a read-only open takes it; the merge doesn't).
+    let v8 = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v8/v8_passphrase.mnemo");
+    let e = try_merge(
+        &p.a,
+        pw,
+        &v8,
+        MergeSecret::Passphrase("v8-fixture-passphrase"),
+        &p.out("o3.mnemo"),
+    );
+    assert!(
+        e.contains("older than format 9") && e.contains("mnemo compact"),
+        "{e}"
+    );
+    // A wrong secret is the open's own error.
+    let e = try_merge(
+        &p.a,
+        pw,
+        &p.a,
+        MergeSecret::Passphrase("wrong"),
+        &p.out("o4.mnemo"),
+    );
+    assert!(e.to_lowercase().contains("passphrase"), "{e}");
+}
+
+#[cfg(feature = "failpoints")]
+#[test]
+fn an_input_that_needs_a_write_open_is_refused_with_the_fix() {
+    let p = pair();
+    let mut found = false;
+    for n in 0..40 {
+        let path = p.out(&format!("pending-{n}.mnemo"));
+        copy(&p.a, &path);
+        let mut db = open(&path);
+        db.remember(Memory::new("pending", MemoryType::Semantic, v(2.0)))
+            .unwrap();
+        mnemo_engine::__failpoints::set_writes_until_fail(n);
+        let _ = db.flush();
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
+        drop(db);
+        if !matches!(
+            Mnemo::open_read_only(&path, PW),
+            Err(mnemo_engine::MnemoError::NeedsWriteOpen { .. })
+        ) {
+            continue;
+        }
+        let e = Mnemo::merge_files(
+            &p.a,
+            MergeSecret::Passphrase(PW),
+            &path,
+            MergeSecret::Passphrase(PW),
+            p.out("o.mnemo"),
+            &MergeOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("needs a read-write open") && e.contains("mnemo index"),
+            "{e}"
+        );
+        found = true;
+        break;
+    }
+    assert!(found, "no n left a pending WAL");
+}
+
+#[cfg(feature = "failpoints")]
+#[test]
+fn a_failure_mid_merge_leaves_nothing() {
+    let p = pair();
+    let dir = p.a.parent().unwrap().to_path_buf();
+    let names = || -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+    let before = names();
+    let out = p.out("o.mnemo");
+    // How many writes a whole merge makes, then each of them failing.
+    mnemo_engine::__failpoints::set_writes_failing(&[]);
+    merge(&p.a, &p.b, &p.out("counted.mnemo"), wall_ms());
+    let writes = mnemo_engine::__failpoints::writes_seen() as i64;
+    std::fs::remove_file(p.out("counted.mnemo")).unwrap();
+    assert!(writes > 2, "{writes}");
+    for n in 0..writes {
+        mnemo_engine::__failpoints::set_writes_until_fail(n);
+        let r = Mnemo::merge_files(
+            &p.a,
+            MergeSecret::Passphrase(PW),
+            &p.b,
+            MergeSecret::Passphrase(PW),
+            &out,
+            &MergeOptions::default(),
+        );
+        mnemo_engine::__failpoints::set_writes_until_fail(-1);
+        assert!(r.is_err(), "write {n} failed, so the merge did");
+        assert_eq!(names(), before, "nothing left after a failure at write {n}");
+    }
+}
+
+#[test]
+fn the_output_has_its_own_data_key_and_stamps_go_past_both_inputs() {
+    let p = pair();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    a.__set_hlc_offset_for_testing(MERGE_LEAD_WARN_MS);
+    edit(&mut a, &p.base_fact, "edited ahead in a");
+    b.remember(Memory::new("in b", MemoryType::Semantic, v(2.0)))
+        .unwrap();
+    a.close().unwrap();
+    b.close().unwrap();
+    let out = p.out("o.mnemo");
+    merge(&p.a, &p.b, &out, wall_ms());
+    let key = |x: &Path| Mnemo::__wrapped_key_for_testing(x).unwrap();
+    assert_ne!(key(&out), key(&p.a));
+    assert_ne!(key(&out), key(&p.b));
+    let stamp = |m: &Memory| m.metadata["_mnemo.hlc"].as_u64().unwrap();
+    let in_a = stamp(
+        &Mnemo::open_read_only(&p.a, PW)
+            .unwrap()
+            .get(&p.base_fact)
+            .unwrap(),
+    );
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    edit(&mut db, &p.base_fact, "edited again after the merge");
+    assert!(stamp(&db.get(&p.base_fact).unwrap()) > in_a);
 }

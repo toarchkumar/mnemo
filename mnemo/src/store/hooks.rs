@@ -49,6 +49,17 @@ impl Mnemo {
         Ok((i.records, i.deleted))
     }
 
+    /// **Not a stable API.** v0.21.0 (13.7): the wrapped data key in the
+    /// header of the file at `path`, read without a key, so a test can see
+    /// that a merge's output has a key of its own.
+    #[doc(hidden)]
+    pub fn __wrapped_key_for_testing(path: impl AsRef<Path>) -> Result<Vec<u8>> {
+        let mut file = File::open(path.as_ref())?;
+        let mut page = [0u8; PAGE_SIZE];
+        file.read_exact(&mut page)?;
+        Ok(Header::from_page(&page)?.wrapped_dek.to_vec())
+    }
+
     /// **Not a stable API.** v0.21.0 (RB-019.8): move this handle's clock
     /// for stamps by `ms` (negative: behind), so a test can run one copy
     /// ahead of another. `MNEMO_DEV_HLC_OFFSET_MS` adds to it.
