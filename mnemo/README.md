@@ -113,7 +113,10 @@ in the sidecar directory for its life, and since v0.17.2 writes its
 presence record at start, so `who` sees it alive before its first call; it
 never holds the brain's lock between calls. Since v0.17, `recall` and `about` take `visibility` (private records only when asked), and `about` with `stale: true` lists the stale records. Since v0.20.1, `recall`,
 `history`, `about` and `list` leave each memory's `vector` out unless the call
-passes `include_vector: true`. Every mutation flushes before returning.
+passes `include_vector: true`. Since v0.20.2, `get` returns one memory, by
+`id` or by `key` (exactly one; by `key` the slot's live version, the slot
+resolved as for `history`), with the same `visibility` and `include_vector`.
+Every mutation flushes before returning.
 
 With no `--embed-cmd`, the server embeds `text` with the built-in embedder
 (v0.15; see "The built-in embedder" below), loaded once at start. On a
@@ -1001,7 +1004,7 @@ cargo run --bin mnemo -- <command>
 | `list`    | Browse live memories (table / json / jsonl, filters). Since v0.17 private records only with `--visibility private` (or `all`, which marks them `[private]`); `history` takes `--visibility` too |
 | `export`  | Readable plaintext export (Markdown or JSON Lines, filters); `--git` for diff-clean output. Since v0.17 private records are left out (a stderr line says how many) unless `--visibility all`, which says it included them; `--git` never writes them, nor messages, claims or presence. Since v0.18, `--git` writes the findings (every status, in id order) after the tasks, then the project essence (its open items by section, then those resolved in the last 30 days); it leaves out thread essence, and a `SECURITY` finding until it's `verified`, and its Markdown header says it's the backup and names the build that wrote it. Since v0.18.1 it also leaves out a task whose refs name such a finding |
 | `inspect` | Browse the file in a local, read-only web view (memories, keyed history, threads and essence, review findings, tasks, snapshots, about) |
-| `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1) |
+| `get`     | Fetch one memory by its ULID, with its whole content. `get <ID>` uses the project brain, and `get <PATH> <ID>` a file (v0.16.1). Since v0.20.2, `get --key <KEY>` (or `get <PATH> --key <KEY>`) prints a keyed fact's live version the same way, from the slot `history --key` walks (`--agent`, `--shared`), and exits 1 when the key has none |
 | `post <TO> <SUBJECT>` | Post a message to an agent (`worker-a`), a role (`role:worker`) or `all`, with `--body`, `--refs`, `--conversation` (a reply). Prints its id and hop count. `--as <agent>` and `--role <role>` say who you are, else `MNEMO_AGENT` and `MNEMO_ROLE`; `--brain <PATH>` for a brain outside the repository (v0.17) |
 | `inbox [PATH]` | Your messages (to you, your role or `all`, never your own) not yet acked; `--all` for acked ones too, `--visibility` for private ones; listing marks them seen. `--prune [--days N]` deletes those acked more than 30 (or N) days ago. `--as`, `--role`, `--format` (v0.17) |
 | `ack [PATH] <ID>` | Ack a message (`unread` to `acked`), with `--note`; `--as` (v0.17) |

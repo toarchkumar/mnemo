@@ -508,6 +508,7 @@ fn mcp_serve_initialize_list_and_call_tools() {
         "list",
         "snapshot_list",
         "stats",
+        "get",
     ] {
         assert!(
             names.contains(&expected),
@@ -1968,6 +1969,62 @@ fn cli_history_rejects_agent_with_shared() {
             || (stderr.contains("--agent") && stderr.contains("--shared")),
         "expected a clap 'conflicts' message, got: {stderr}"
     );
+}
+
+/// v0.20.2 (G1): `get --key` prints the slot's live version exactly as
+/// `get <id>` prints it, in each format; a key with no live version, or an
+/// id and a key together, fails with a clear message.
+#[test]
+fn cli_get_by_key_is_get_by_the_live_id() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cli-get-key.mnemo");
+    let pp = "get-key-pw";
+    let live_id = {
+        let mut db = Mnemo::create(&path, pp, fast_cfg(4)).unwrap();
+        for (text, v) in [("release: v1", 1.0), ("release: v2", 2.0)] {
+            db.remember_keyed(
+                Memory::new(text, MemoryType::Semantic, vec![v, 1.0, 0.0, 0.0]),
+                "process.release",
+            )
+            .unwrap();
+        }
+        db.flush().unwrap();
+        db.history("process.release", None).unwrap()[0]
+            .id
+            .to_string()
+    };
+    let p = path.to_str().unwrap();
+    for format in ["table", "json", "jsonl"] {
+        let (st, by_key, err) = run_cli(
+            &["get", p, "--key", "process.release", "--format", format],
+            pp,
+        );
+        assert!(st.success(), "{format}: {err}");
+        let (st, by_id, err) = run_cli(&["get", p, &live_id, "--format", format], pp);
+        assert!(st.success(), "{format}: {err}");
+        assert_eq!(by_key, by_id, "{format}");
+        assert!(by_key.contains("release: v2"), "{format}: {by_key}");
+        assert!(!by_key.contains("release: v1"), "{format}: {by_key}");
+    }
+    let (st, _, err) = run_cli(&["get", p, "--key", "process.nope"], pp);
+    assert!(!st.success());
+    assert!(
+        err.contains("key=process.nope has no live version"),
+        "{err}"
+    );
+    // The shared slot holds nothing under this key.
+    let (st, _, err) = run_cli(&["get", p, "--key", "process.release", "--shared"], pp);
+    assert!(!st.success());
+    assert!(err.contains("no live version"), "{err}");
+    let (st, _, err) = run_cli(&["get", p, &live_id, "--key", "process.release"], pp);
+    assert!(!st.success());
+    assert!(
+        err.contains("cannot be used with") || err.contains("not both"),
+        "{err}"
+    );
+    let (st, _, err) = run_cli(&["get", p, "--agent", "alice"], pp);
+    assert!(!st.success(), "--agent needs --key");
+    assert!(err.contains("--key"), "{err}");
 }
 
 // === Phase 12.7d: end-to-end MCP threads + essence ========================

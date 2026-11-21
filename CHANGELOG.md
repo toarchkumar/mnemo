@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **Keyed reads: `mnemo get --key` and an MCP `get` tool** (v0202-1,
+  spec.v0202 step 1, G1 and G4). `mnemo get --key <KEY>` prints a keyed
+  fact's live version exactly as `get <id>` prints it (table, json or
+  jsonl), from the slot `history --key` walks (`--agent`, `--shared`), so
+  reading a fact no longer takes `history` and then `get`. It needs no
+  path in a repository (`get <PATH> --key <KEY>` for a file), and exits 1
+  with a clear message when the key has no live version. The MCP `get`
+  tool takes `id` or `key` (exactly one), applies the visibility levels
+  as `recall` does (default public and team), and leaves the vector out
+  unless `include_vector` is true. The guide's card names it.
+
 ## [0.20.1] — 2026-11-20
 
 A wake signal from the brain, and smaller MCP results. `mnemo wait`

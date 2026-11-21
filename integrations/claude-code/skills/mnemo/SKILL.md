@@ -10,7 +10,8 @@ description: Use the mnemo MCP tools to recall project context before a task, an
   project essence with `essence` (`op: "render"`, `project: true`).
 - **When something will matter later** (a decision, a fact, a
   convention, a fix that worked), call `remember`. When it replaces an
-  earlier version, give it a `key`, like `decision.release-order`.
+  earlier version, give it a `key`, like `decision.release-order`;
+  `get` with that `key` reads its current version.
 - **During a long task,** keep the state with `essence`: `add` to the
   `decisions`, `open` or `next` sections, `resolve` when done.
 - **Never store secrets:** keys, tokens, passwords, recovery codes.
@@ -31,6 +32,7 @@ one brain. `onboard` starts it for your client. The tools you'll use most:
 | `about` | The brain's briefing: what it is, its conventions, the project essence |
 | `recall` | The memories most relevant to a question |
 | `remember` | Store a memory. With `key`, replace the earlier version |
+| `get` | One memory, by `id`, or a key's current version by `key` |
 | `history` | Every version of a key, newest first |
 | `essence` | The working state of a task or the project: add, resolve, render |
 | `forget` | Delete a memory by id |
@@ -65,8 +67,15 @@ a decision, a preference.
 ```
 
 ```json
+{"name": "get", "arguments": {"key": "process.release-branch"}}
+```
+
+```json
 {"name": "history", "arguments": {"key": "process.release-branch"}}
 ```
+
+`get` returns the current version alone; `history` returns every version,
+newest first.
 
 Good keys are short and stable: `decision.<topic>`, `status.<thing>`,
 `convention.<topic>`, `user.<preference>`.

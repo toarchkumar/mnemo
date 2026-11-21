@@ -130,6 +130,25 @@ fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
     // v0.17 (CLI-PATHLESS-2): the same for `update` and `essence
     // update|resolve|remove`, whose second argument is a ULID too, and
     // `thread start`, whose second is a thread id.
+    // v0.20.2 (G1): with `--key`, a lone argument is the brain's path, and
+    // a ULID there means both an id and a key were given.
+    if let Command::Get {
+        path,
+        id,
+        key: Some(_),
+        ..
+    } = cmd
+    {
+        if id.is_some() || parse_ulid(path).is_ok() {
+            return Err("`get` takes a memory's id or `--key`, not both".into());
+        }
+        return Ok(());
+    }
+    if let Command::Get { path, id: None, .. } = cmd {
+        if path.is_empty() {
+            return Err("`get` needs a memory's id, or `--key <KEY>`".into());
+        }
+    }
     let (name, path, id, ulid) = match cmd {
         Command::Get { path, id, .. } => ("get", path, id, true),
         Command::Update { path, id, .. } => ("update", path, id, true),
@@ -592,17 +611,29 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
-    /// Fetch a single memory by its ULID.
+    /// Fetch a single memory by its ULID, or a keyed fact's live version
+    /// with `--key`.
     Get {
         /// Path to the `.mnemo` file, then the memory's ULID. With one
         /// argument it's the ULID, and the brain is this project's
         /// (`<git-common-dir>/mnemo/project.mnemo`, v0.16.1), as for
-        /// `recall`.
-        #[arg(value_name = "PATH")]
+        /// `recall`. With `--key`, the path alone, or nothing.
+        #[arg(value_name = "PATH", default_value = "", hide_default_value = true)]
         path: String,
         /// ULID of the memory to fetch (when PATH is given).
         #[arg(value_name = "ID")]
         id: Option<String>,
+        /// v0.20.2 (G1): the live version of this keyed fact
+        /// (`decision.release-order`), from the slot `history --key` walks.
+        #[arg(long, conflicts_with = "id")]
+        key: Option<String>,
+        /// With `--key`: the private slot for this agent (default: the
+        /// brain's default agent).
+        #[arg(long, requires = "key", conflicts_with = "shared")]
+        agent: Option<String>,
+        /// With `--key`: the shared slot (one per file).
+        #[arg(long, requires = "key", conflicts_with = "agent")]
+        shared: bool,
         /// Output format.
         #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
         format: OutputFormat,
@@ -4098,6 +4129,9 @@ fn run() -> std::result::Result<(), String> {
         Command::Get {
             path,
             id,
+            key,
+            agent,
+            shared,
             format,
             verbose,
             vector,
@@ -4105,9 +4139,32 @@ fn run() -> std::result::Result<(), String> {
         } => {
             // `get` is a plain catalog lookup + record read — no writes.
             let pp = secret_for(&path, &pp, &None)?;
-            let ulid = parse_ulid(id.as_deref().unwrap_or_default())?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
-            let m = db.get(&ulid).map_err(fmt)?;
+            let m = match key {
+                // v0.20.2 (G1): the slot as `history --key` resolves it.
+                Some(key) => {
+                    use mnemo_engine::KeyScope;
+                    let scope = if shared {
+                        KeyScope::Shared
+                    } else {
+                        match agent.or(db.default_agent().map_err(fmt)?) {
+                            Some(a) => KeyScope::Private(a),
+                            None => KeyScope::private_default(),
+                        }
+                    };
+                    let live = db.history_in(&key, scope).map_err(fmt)?.into_iter().next();
+                    live.ok_or_else(|| {
+                        format!(
+                            "key={key} has no live version in that slot \
+                             (`mnemo history --key {key}` shows its chain)"
+                        )
+                    })?
+                }
+                None => {
+                    let ulid = parse_ulid(id.as_deref().unwrap_or_default())?;
+                    db.get(&ulid).map_err(fmt)?
+                }
+            };
             // One memory: its whole content, even in the table.
             print_memory(&m, format, verbose, vector, true);
         }

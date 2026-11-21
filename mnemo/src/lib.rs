@@ -48,6 +48,9 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+// v0.20.2: the MCP `tools/list` schema is one `json!` literal, and the
+// `get` tool took it past the macro's default depth of 128.
+#![recursion_limit = "256"]
 // Since step 5a (MSRV 1.92, now 1.94): `as_chunks` (stable since 1.88) is within the
 // MSRV, so clippy suggests it for every constant-size `chunks_exact`. Those
 // are the hot kernels (PQ distance tables, fp16 vectors, the WAL checksum);
