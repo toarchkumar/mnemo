@@ -7,11 +7,19 @@
 //! writes is picked up by v0.19's next load. And v0.18.1's own `index`
 //! command writes layout 1, which v0.19 still reads, and rewrites as layout
 //! 2 with its next base run.
+//!
+//! v0.21.0 (RB-019.1): v0.18.1 doesn't know the tombstone kind either, so
+//! its `compact` writes each tombstone's row back as a `working` fact row.
+//! v0.21 still finds them, counts them as tombstones, and keeps them out of
+//! recall, and its own compaction re-tags them.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use mnemo_engine::{KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest};
+use mnemo_engine::{
+    KdfParams, Memory, MemoryType, Mnemo, MnemoConfig, RecallRequest, ThreadTurn, MNEMO_META_KIND,
+    MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_TURN,
+};
 use tempfile::tempdir;
 
 const PASS: &str = "v0-18-compat-passphrase";
@@ -184,4 +192,115 @@ fn an_older_builds_index_is_read_and_rewritten() {
     let mut db = Mnemo::open(&p, PASS).unwrap();
     assert_eq!(top(&mut db, &vector(7_777)), "note 7777");
     assert_eq!(top(&mut db, &vector(12)), "note 12");
+}
+
+fn tombstones(db: &mut Mnemo) -> Vec<Memory> {
+    db.memories()
+        .unwrap()
+        .into_iter()
+        .filter(|m| {
+            m.metadata
+                .get(MNEMO_META_KIND)
+                .and_then(serde_json::Value::as_str)
+                == Some("tombstone")
+        })
+        .collect()
+}
+
+#[test]
+fn an_older_builds_compact_hides_no_tombstone() {
+    let Some(old) = old_bin() else {
+        eprintln!("MNEMO_V0_18_1_BIN not set: skipped");
+        return;
+    };
+    let dir = tempdir().unwrap();
+    let p = dir.path().join("marked.mnemo");
+    let (plain, keyed) = {
+        let cfg = MnemoConfig {
+            dimensions: 4,
+            kdf: KdfParams::fast(),
+            ..Default::default()
+        };
+        let mut db = Mnemo::create(&p, PASS, cfg).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        for i in 0..5 {
+            db.remember(Memory::new(
+                format!("note {i}"),
+                MemoryType::Working,
+                vector(i),
+            ))
+            .unwrap();
+        }
+        let plain = db
+            .remember(Memory::new(
+                "a plain fact",
+                MemoryType::Semantic,
+                vector(10),
+            ))
+            .unwrap();
+        let (keyed, _) = db
+            .remember_keyed(
+                Memory::new("a keyed fact", MemoryType::Episodic, vector(11)),
+                "fact.k",
+            )
+            .unwrap();
+        let turns = [ThreadTurn {
+            turn_id: "u-1".into(),
+            role: "user".into(),
+            content: "a turn".into(),
+            timestamp: None,
+        }];
+        db.ingest_thread_with_vectors("t", &turns, &[vector(12)])
+            .unwrap();
+        db.delete(&plain).unwrap();
+        db.delete(&keyed).unwrap();
+        assert_eq!(db.thread_forget("t").unwrap(), 1);
+        db.close().unwrap();
+        (plain, keyed)
+    };
+    let counts = {
+        let mut db = Mnemo::open(&p, PASS).unwrap();
+        let c = db.kind_counts().unwrap();
+        assert_eq!(c.tombstones, 3);
+        assert_eq!(db.mistagged_coordination().unwrap(), 0);
+        c
+    };
+    let path = p.to_str().unwrap();
+    run_old(&old, &["verify", path]);
+    run_old(&old, &["compact", path]);
+
+    let mut db = Mnemo::open(&p, PASS).unwrap();
+    // Every tombstone is found, said to be tagged as a fact, and counted
+    // as what it is.
+    assert_eq!(db.mistagged_coordination().unwrap(), 3);
+    assert_eq!(db.kind_counts().unwrap(), counts);
+    let ts = tombstones(&mut db);
+    let of: Vec<String> = ts
+        .iter()
+        .map(|t| {
+            t.metadata[MNEMO_META_TOMBSTONE_OF]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert!(of.contains(&plain.to_string()) && of.contains(&keyed.to_string()));
+    assert!(ts
+        .iter()
+        .any(|t| t.metadata.get(MNEMO_META_TOMBSTONE_TURN).is_some()));
+    // Out of recall still, and the working facts beside them are found.
+    let hits = db
+        .recall(&RecallRequest::new(vector(1)).top_k(20).track_access(false))
+        .unwrap();
+    assert!(hits
+        .iter()
+        .all(|h| !mnemo_engine::is_coordination(&h.memory)));
+    assert!(hits.iter().any(|h| h.memory.content == "note 1"));
+    db.close().unwrap();
+    // A v0.21 compaction re-tags them.
+    Mnemo::compact_file(path, PASS).unwrap();
+    let mut db = Mnemo::open(&p, PASS).unwrap();
+    assert_eq!(db.mistagged_coordination().unwrap(), 0);
+    assert_eq!(db.kind_counts().unwrap(), counts);
+    assert_eq!(tombstones(&mut db).len(), 3);
 }

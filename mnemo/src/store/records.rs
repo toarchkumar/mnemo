@@ -1572,13 +1572,47 @@ impl Mnemo {
     /// v0.21.0 (13.7): the next clock stamp: now in unix milliseconds, or
     /// past the largest stamp this handle has seen, or past `prev` (the
     /// record's own earlier stamp), whichever is largest.
+    ///
+    /// A stamp more than [`HLC_AHEAD_NOTICE_MS`] ahead of the clock (a copy
+    /// written on a computer whose clock ran ahead) is still gone past, and
+    /// the handle says so once in its [`Mnemo::notices`].
     pub(super) fn next_hlc(&mut self, prev: u64) -> u64 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
-        let hlc = now.max(self.hlc_last + 1).max(prev + 1);
+        let now = self.hlc_now_ms();
+        let seen = self.hlc_last.max(prev);
+        if seen > now.saturating_add(HLC_AHEAD_NOTICE_MS) && !self.hlc_clock.ahead_noted {
+            self.hlc_clock.ahead_noted = true;
+            self.notices.push(clock_ahead_notice(seen - now));
+        }
+        let hlc = now
+            .max(self.hlc_last.saturating_add(1))
+            .max(prev.saturating_add(1));
         self.hlc_last = hlc;
+        self.hlc_clock.first.get_or_insert(hlc);
         hlc
+    }
+
+    /// v0.21.0 (13.7): the clock stamps are taken from, in unix ms: the
+    /// wall clock, or in a dev-hooks build a frozen one, plus the tests'
+    /// offset (RB-019.8).
+    pub(super) fn hlc_now_ms(&self) -> u64 {
+        let wall = self.hlc_clock.frozen_ms.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64)
+        });
+        #[cfg(feature = "dev-hooks")]
+        let env: i64 = std::env::var("MNEMO_DEV_HLC_OFFSET_MS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        #[cfg(not(feature = "dev-hooks"))]
+        let env: i64 = 0;
+        let offset = self.hlc_clock.offset_ms.saturating_add(env);
+        if offset < 0 {
+            wall.saturating_sub(offset.unsigned_abs())
+        } else {
+            wall.saturating_add(offset as u64)
+        }
     }
 
     /// `stamp`: a write from this build (not a copy of a record already in
@@ -1851,6 +1885,21 @@ fn decode_into_column(
         col.have[i] = true;
     }
     Ok(())
+}
+
+/// v0.21.0 (13.7): the notice for a stamp `lead_ms` ahead of the clock.
+fn clock_ahead_notice(lead_ms: u64) -> String {
+    let hours = lead_ms / 3_600_000;
+    let lead = if hours >= 48 {
+        format!("{} days", hours / 24)
+    } else {
+        format!("{hours} hours")
+    };
+    format!(
+        "a record in this file is stamped {lead} ahead of this computer's clock (it was \
+         written where the clock ran ahead); new writes are stamped after it, so a merge \
+         takes them as newer"
+    )
 }
 
 #[cfg(test)]

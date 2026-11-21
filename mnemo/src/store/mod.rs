@@ -59,8 +59,9 @@ pub(crate) use crate::memory::{
     MNEMO_META_HOPS, MNEMO_META_TO,
 };
 pub(crate) use crate::memory::{
-    is_tombstone, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_KIND_TOMBSTONE,
-    MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER,
+    is_tombstone, HLC_AHEAD_NOTICE_MS, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_HLC_SINCE,
+    MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF,
+    MNEMO_META_TOMBSTONE_OWNER, MNEMO_META_TOMBSTONE_THREAD, MNEMO_META_TOMBSTONE_TURN,
 };
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
@@ -1210,6 +1211,8 @@ pub struct Mnemo {
     /// v0.21.0 (13.7): the largest `_mnemo.hlc` this handle has stamped or
     /// read; the next stamp goes past it.
     hlc_last: u64,
+    /// v0.21.0 (13.7): the rest of the clock's state for this handle.
+    hlc_clock: HlcClock,
     /// RB-013.1: the ids of coordination records whose v9 row an older
     /// build re-tagged as a fact (its `compact` rewrites every row), found
     /// once per handle by decrypting the `episodic` fact rows.
@@ -1285,6 +1288,24 @@ pub(crate) struct KeySlot {
     pub(crate) scope_owner: Option<String>,
     /// The caller-supplied key string, exactly as given (no case-fold).
     pub(crate) key: String,
+}
+
+/// v0.21.0 (13.7): a handle's clock state beyond its largest stamp.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct HlcClock {
+    /// Milliseconds added to the wall clock (tests only, through a
+    /// dev-hooks setter or `MNEMO_DEV_HLC_OFFSET_MS`; RB-019.8).
+    pub(super) offset_ms: i64,
+    /// A wall clock held at this many unix ms (tests only), so two copies
+    /// can stamp the same millisecond.
+    pub(super) frozen_ms: Option<u64>,
+    /// The first stamp this handle wrote, for the manifest's
+    /// `_mnemo.hlc_since` (RB-019.1).
+    pub(super) first: Option<u64>,
+    /// The manifest was checked for `_mnemo.hlc_since` (and given it).
+    pub(super) since_done: bool,
+    /// The clock-ahead notice was given ([`HLC_AHEAD_NOTICE_MS`]).
+    pub(super) ahead_noted: bool,
 }
 
 /// True if a memory's metadata marks it as the canonical onboarding manifest

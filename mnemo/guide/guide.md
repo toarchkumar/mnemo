@@ -145,6 +145,15 @@ newest first.
 Good keys are short and stable: `decision.<topic>`, `status.<thing>`,
 `convention.<topic>`, `user.<preference>`.
 
+### Forgetting
+
+`forget` deletes a memory by id. It leaves a small tombstone in its place:
+the id, its key if it had one, and the time, never the content. A merge of
+two copies of the brain reads it to know the memory was deleted, not
+missing. A tombstone takes about as much space as a short fact, so a
+delete doesn't make the file smaller, and `mnemo compact` keeps the
+tombstones.
+
 ## 3. Organize memory
 
 ### The four types

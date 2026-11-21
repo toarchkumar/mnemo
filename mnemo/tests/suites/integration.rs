@@ -1620,7 +1620,7 @@ fn session_discard_deletes_turns() {
         assert!(db.get(id).is_err(), "discarded turns must be gone");
     }
     assert_eq!(db.len(), 2, "only the two tombstones");
-    assert_eq!(db.kind_counts().tombstones, 2);
+    assert_eq!(db.kind_counts().unwrap().tombstones, 2);
 }
 
 /// A session's recall is scoped to its own agent — another agent's private

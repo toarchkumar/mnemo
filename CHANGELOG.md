@@ -20,13 +20,29 @@ Pre-1.0, the minor component carries the breaking-change signal.
   a discarded session) now also writes a tombstone: an engine record
   (`_mnemo.kind: tombstone`) holding the deleted id, its key and owner
   when it was keyed, a stamp past the deleted record's, and the time,
-  never any of its content. Tombstones stay out of recall and the search
+  never any of its content; a deleted turn's also names its thread and
+  turn id, so a merge removes every copy of the turn (RB-019.2). A
+  message prune leaves none: a merge drops what compaction drops, so a
+  message pruned at the default keep time can't come back (RB-019.7).
+  Tombstones stay out of recall and the search
   indexes like other engine records, are counted on their own
   (`KindCounts::tombstones`, and `tombstones` in the Python
   `kind_counts()`), are left out of `about`'s counts and of `export
   --git`, can't be deleted, and are kept by compaction: they're how the
   coming `mnemo merge` tells a deleted record from one that never
   existed. No format change.
+- **The first stamp, the test clock, and a clock far ahead** (v0210-1b,
+  spec.v0210 step 1b). The manifest records the first stamp a v0.21 build
+  wrote in the file (`_mnemo.hlc_since`, set once at the first commit
+  that stamps a write, and kept when a keyed write replaces the manifest),
+  so a merge can say which deletes it can't know of (those made before
+  it, or by an older build; RB-019.1). When a stamp the handle has seen
+  runs more than a day ahead of the clock (a copy written where the clock
+  ran ahead), new writes still stamp past it, `Mnemo::clock_lead_ms` says
+  by how much, and the handle adds a notice once (`Mnemo::notices`); the
+  CLI prints it on stderr after a write. Dev-hooks builds can move or
+  hold a handle's clock for tests (`__set_hlc_offset_for_testing`,
+  `__freeze_hlc_clock_for_testing`, `MNEMO_DEV_HLC_OFFSET_MS`; RB-019.8).
 
 ### Changed
 
@@ -38,8 +54,15 @@ Pre-1.0, the minor component carries the breaking-change signal.
   and `verify` count tombstones, as they count messages and tasks. A
   mass delete's tombstones are written in the commit that frees the
   deleted pages, so they land at the file's tail and the file keeps its
-  length until `mnemo compact`; the freed pages are reused by later
-  writes.
+  length; the freed pages are reused by later writes. `mnemo compact`
+  gives back the deleted records' space but keeps every tombstone, so a
+  delete no longer makes the file smaller, even after a compaction.
+- **`Mnemo::kind_counts` takes `&mut self` and returns a `Result`**
+  (v0210-1b, RB-019.1). It now counts a coordination record an older
+  build's `compact` tagged as a fact as what it is, tombstones included:
+  the RB-013.1 scan, which also reads the `working` fact rows now, finds
+  them. `about`'s counts stay right after such a compaction. The Python
+  `kind_counts()` is unchanged.
 
 ### Fixed
 

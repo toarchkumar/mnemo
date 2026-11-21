@@ -392,8 +392,22 @@ impl Mnemo {
     /// slot when it had one, a clock stamp past the record's own, and the
     /// time, never any of its content. Compaction keeps it, so a merge can
     /// tell a deleted record from one that never existed. A tombstone
-    /// itself can't be deleted.
+    /// itself can't be deleted. A turn's tombstone also holds its thread
+    /// and turn id (RB-019.2), so a merge removes every copy of the turn.
     pub fn delete(&mut self, id: &Ulid) -> Result<()> {
+        self.delete_inner(id, None, true)
+    }
+
+    /// [`Mnemo::delete`], given the record when the caller has already read
+    /// it (`known`, the same id), and with `marker` false for a delete that
+    /// leaves no tombstone: a message prune, whose rule a merge applies on
+    /// its own (RB-019.7).
+    pub(super) fn delete_inner(
+        &mut self,
+        id: &Ulid,
+        known: Option<Memory>,
+        marker: bool,
+    ) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
@@ -414,9 +428,19 @@ impl Mnemo {
         // v0.21.0: a keyed record is read for its key slot, which its
         // tombstone records (a v9 row says whether it has one).
         let keyed = entry.v9.is_none_or(|r| r.key_hash != 0);
+        // RB-019.2: and a turn, for its thread and turn id.
+        let turn = entry
+            .v9
+            .is_none_or(|r| r.kind == super::records::ROW_KIND_TURN);
+        let known = known.filter(|m| m.id == *id);
         let mut old_meta: Option<Memory> = None;
-        if !entry.deleted && (self.layers.is_some() || maybe_finding || keyed) {
-            let old = self.read_memory(&entry)?;
+        if !entry.deleted
+            && (known.is_some() || self.layers.is_some() || maybe_finding || keyed || turn)
+        {
+            let old = match known {
+                Some(m) => m,
+                None => self.read_memory(&entry)?,
+            };
             if super::findings::is_finding(&old) {
                 return Err(super::findings::finding_write_refused("deleted"));
             }
@@ -465,7 +489,7 @@ impl Mnemo {
         // and delete of a superseded record frees a `history` entry. When
         // the caches are built, `note_removed` above did that exactly;
         // otherwise they're built from scratch on first use anyway.
-        if was_live {
+        if was_live && marker {
             self.put_tombstone(id, old_meta.as_ref())?;
         }
         Ok(())
@@ -489,6 +513,16 @@ impl Mnemo {
                 md.insert(MNEMO_META_TOMBSTONE_KEY.into(), Value::String(slot.key));
                 if let Some(owner) = slot.scope_owner {
                     md.insert(MNEMO_META_TOMBSTONE_OWNER.into(), Value::String(owner));
+                }
+            }
+            // RB-019.2: a turn's thread and turn id (ids, never content).
+            if meta_str(o, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {
+                if let (Some(t), Some(turn)) = (
+                    meta_str(o, MNEMO_META_THREAD),
+                    meta_str(o, MNEMO_META_TURN_ID),
+                ) {
+                    md.insert(MNEMO_META_TOMBSTONE_THREAD.into(), Value::String(t.into()));
+                    md.insert(MNEMO_META_TOMBSTONE_TURN.into(), Value::String(turn.into()));
                 }
             }
             // Its stamp goes past the deleted record's (`put` adds one).

@@ -2534,7 +2534,7 @@ impl Mnemo {
     /// `turns`, `essence`, `coordination` and (v0.21.0) `tombstones`, the
     /// records deletes leave, counted on their own.
     fn kind_counts(&mut self, py: Python<'_>) -> PyResult<PyObject> {
-        let c = self.rd(|db| Ok(db.kind_counts()))?;
+        let c = self.rd(|db| db.kind_counts())?;
         let d = PyDict::new_bound(py);
         d.set_item("facts", c.facts)?;
         d.set_item("turns", c.turns)?;

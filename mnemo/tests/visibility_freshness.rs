@@ -319,7 +319,7 @@ fn stale_records_by_kind_and_review_date() {
         .unwrap();
     assert!(!what(&mut db).iter().any(|(k, _)| k == "task active"));
     // ABOUT-COUNT.
-    let c = db.kind_counts();
+    let c = db.kind_counts().unwrap();
     // Three facts; three essence items; the task, the message and the
     // task's claim (nothing here touched presence).
     assert_eq!((c.facts, c.essence, c.coordination), (3, 3, 3), "{c:?}");
