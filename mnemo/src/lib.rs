@@ -147,6 +147,11 @@ pub use memory::{
 pub use memory::{
     HOP_CAP, MNEMO_META_WAKE_PAUSED, PAIR_BURST, PAIR_BURST_SECS, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
 };
+/// v0.21.0 (13.7): the clock stamp and the tombstone's keys.
+pub use memory::{
+    MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY,
+    MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER,
+};
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,
     DEFAULT_BATCH_MAX_AGE, DEFAULT_BATCH_MAX_DIRTY, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES,

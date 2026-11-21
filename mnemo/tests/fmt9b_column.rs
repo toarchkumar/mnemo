@@ -250,13 +250,26 @@ fn vector_pages_are_packed_vacuumed_and_freed() {
         pages <= 2,
         "{pages} vector pages for 60 single-commit vectors"
     );
-    // Delete everything: every vector page is freed.
+    // Delete everything: the 60 vectors' pages are freed, and the 60
+    // tombstones the deletes leave (v0.21.0) pack onto one page.
+    let before: Vec<u64> = ids
+        .iter()
+        .filter_map(|id| db.__vector_location(id))
+        .map(|l| l.0)
+        .collect();
     for id in &ids {
         db.delete(id).unwrap();
     }
     db.flush().unwrap();
-    assert_eq!(db.__vector_column().1, 0);
-    assert_eq!(db.verify().unwrap(), 0);
+    assert_eq!(db.__vector_column().1, 1);
+    assert_eq!(db.verify().unwrap(), 60);
+    let (runs, _) = db.__free_list();
+    assert!(
+        before
+            .iter()
+            .all(|p| runs.iter().any(|&(_, s, c)| s <= *p && *p < s + c)),
+        "the deleted vectors' pages are free: {before:?} {runs:?}"
+    );
     // And the space is reused.
     let tail = db.__next_page();
     for i in 0..10 {
@@ -266,7 +279,7 @@ fn vector_pages_are_packed_vacuumed_and_freed() {
     assert!(db.__next_page() <= tail + 2);
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.verify().unwrap(), 10);
+    assert_eq!(db.verify().unwrap(), 70);
 }
 
 #[test]
@@ -303,7 +316,8 @@ fn restore_brings_back_vectors_from_quarantined_pages() {
         .recall(&RecallRequest::new(vector(7)).top_k(1).track_access(false))
         .unwrap();
     assert_eq!(hits[0].memory.id, ids[7]);
-    assert_eq!(db.verify().unwrap(), 30);
+    // The 30 restored records and the churn's 60 tombstones.
+    assert_eq!(db.verify().unwrap(), 90);
 }
 
 #[test]
@@ -435,10 +449,11 @@ fn single_commits_fill_pages_and_deletes_vacuum_them() {
     for (i, id) in ids[..20].iter().enumerate() {
         assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
     }
-    assert_eq!(db.verify().unwrap(), 30);
+    // 30 records and the 180 deletes' tombstones.
+    assert_eq!(db.verify().unwrap(), 210);
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.verify().unwrap(), 30);
+    assert_eq!(db.verify().unwrap(), 210);
 }
 
 #[test]
@@ -460,7 +475,11 @@ fn big_records_span_whole_pages() {
     assert_eq!(db.get(&id).unwrap().content, big);
     db.delete(&id).unwrap();
     db.flush().unwrap();
-    assert_eq!(db.verify().unwrap(), 1);
+    assert_eq!(
+        db.verify().unwrap(),
+        2,
+        "the small record and the tombstone"
+    );
 }
 
 struct AxisEmbedder;
@@ -521,10 +540,10 @@ fn a_record_deleted_before_its_first_flush_reopens_cleanly() {
     db.delete(&gone).unwrap();
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.len(), 1);
+    assert_eq!(db.len(), 2, "the kept record and the tombstone");
     db.get(&keep).unwrap();
     assert!(db.get(&gone).is_err());
-    assert_eq!(db.verify().unwrap(), 1);
+    assert_eq!(db.verify().unwrap(), 2);
 }
 
 /// MOBILE-2d: an entry of the fp16 column (16 dims: 32 value bytes and a

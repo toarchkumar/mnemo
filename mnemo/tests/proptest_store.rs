@@ -100,8 +100,18 @@ fn observed_set(db: &mut Mnemo) -> BTreeSet<Fingerprint> {
     db.memories()
         .expect("memories() should never fail on a healthy handle")
         .iter()
+        .filter(|m| !is_tombstone(m))
         .map(fp)
         .collect()
+}
+
+/// v0.21.0: a delete leaves a tombstone, an engine record the models here
+/// leave out (`tests/merge_groundwork.rs` checks them).
+fn is_tombstone(m: &mnemo_engine::Memory) -> bool {
+    m.metadata
+        .get(mnemo_engine::MNEMO_META_KIND)
+        .and_then(|v| v.as_str())
+        == Some(mnemo_engine::MNEMO_META_KIND_TOMBSTONE)
 }
 
 /// Fresh `.mnemo` file in a scratch tempdir. Returns the dir so the
@@ -1139,6 +1149,7 @@ fn shared_set(s: &mut SharedMnemo) -> BTreeSet<Fingerprint> {
     s.read(|db| db.memories())
         .expect("a shared read")
         .iter()
+        .filter(|m| !is_tombstone(m))
         .map(fp)
         .collect()
 }
@@ -1199,6 +1210,7 @@ proptest! {
                 TwoOp::Delete { second, idx } => {
                     let h = if *second { &mut b } else { &mut a };
                     let mut live = h.read(|db| db.memories()).unwrap();
+                    live.retain(|m| !is_tombstone(m));
                     if live.is_empty() {
                         continue;
                     }

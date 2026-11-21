@@ -97,7 +97,7 @@ fn the_index_survives_reopen_and_follows_deletes_and_rewrites() {
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(top(&mut db, "v0.11.0"), vec![b]);
     assert!(!top(&mut db, "v0.9.0").contains(&a));
-    assert_eq!(db.verify().unwrap(), 1);
+    assert_eq!(db.verify().unwrap(), 2, "b and the delete's tombstone");
 }
 
 #[test]

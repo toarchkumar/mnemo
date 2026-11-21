@@ -386,6 +386,13 @@ impl Mnemo {
     ///
     /// A review finding is refused (RB-014): a wrong one is `rejected`
     /// with [`Mnemo::finding_triage`], which keeps its history.
+    ///
+    /// v0.21.0 (13.7): a delete also writes a tombstone, a small engine
+    /// record (`_mnemo.kind: tombstone`) holding the deleted id, its key
+    /// slot when it had one, a clock stamp past the record's own, and the
+    /// time, never any of its content. Compaction keeps it, so a merge can
+    /// tell a deleted record from one that never existed. A tombstone
+    /// itself can't be deleted.
     pub fn delete(&mut self, id: &Ulid) -> Result<()> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
@@ -404,15 +411,26 @@ impl Mnemo {
             r.kind == super::records::ROW_KIND_COORDINATION
                 || r.kind == super::records::ROW_KIND_FACT
         });
-        if !entry.deleted && (self.layers.is_some() || maybe_finding) {
+        // v0.21.0: a keyed record is read for its key slot, which its
+        // tombstone records (a v9 row says whether it has one).
+        let keyed = entry.v9.is_none_or(|r| r.key_hash != 0);
+        let mut old_meta: Option<Memory> = None;
+        if !entry.deleted && (self.layers.is_some() || maybe_finding || keyed) {
             let old = self.read_memory(&entry)?;
             if super::findings::is_finding(&old) {
                 return Err(super::findings::finding_write_refused("deleted"));
             }
+            if is_tombstone(&old) {
+                return Err(MnemoError::Invalid(format!(
+                    "{id} is a tombstone: it records a delete for a merge, and stays"
+                )));
+            }
             if self.layers.is_some() {
                 self.note_removed(&old)?;
             }
+            old_meta = Some(old);
         }
+        let was_live = !entry.deleted;
         if !self.catalog[idx].deleted {
             self.catalog[idx].deleted = true;
             self.dirty_catalog = true;
@@ -447,6 +465,48 @@ impl Mnemo {
         // and delete of a superseded record frees a `history` entry. When
         // the caches are built, `note_removed` above did that exactly;
         // otherwise they're built from scratch on first use anyway.
+        if was_live {
+            self.put_tombstone(id, old_meta.as_ref())?;
+        }
+        Ok(())
+    }
+
+    /// v0.21.0 (13.7): the tombstone for `id`, deleted just now. `old` is
+    /// the deleted record when it was read (always, when it had a key).
+    fn put_tombstone(&mut self, id: &Ulid, old: Option<&Memory>) -> Result<()> {
+        let mut md = Map::new();
+        md.insert(
+            MNEMO_META_KIND.into(),
+            Value::String(MNEMO_META_KIND_TOMBSTONE.into()),
+        );
+        md.insert(
+            MNEMO_META_TOMBSTONE_OF.into(),
+            Value::String(id.to_string()),
+        );
+        if let Some(o) = old {
+            if let Some(k) = o.metadata.get(MNEMO_META_KEY).and_then(Value::as_str) {
+                let slot = Self::key_slot_for(o, k);
+                md.insert(MNEMO_META_TOMBSTONE_KEY.into(), Value::String(slot.key));
+                if let Some(owner) = slot.scope_owner {
+                    md.insert(MNEMO_META_TOMBSTONE_OWNER.into(), Value::String(owner));
+                }
+            }
+            // Its stamp goes past the deleted record's (`put` adds one).
+            if let Some(h) = o.metadata.get(MNEMO_META_HLC) {
+                md.insert(MNEMO_META_HLC.into(), h.clone());
+            }
+        }
+        md.insert(
+            MNEMO_META_DELETED_AT.into(),
+            Value::Number(memory::now_secs().into()),
+        );
+        // A tombstone is the one coordination record of type `working`
+        // (the others are `episodic`), so its catalog row says what it is
+        // without a decrypt (`kind_counts`).
+        let mut m = Memory::new(String::new(), MemoryType::Working, self.sentinel_vector())
+            .with_scope(Scope::Shared);
+        m.metadata = md;
+        self.put(m)?;
         Ok(())
     }
 
@@ -528,7 +588,12 @@ impl Mnemo {
     /// v9 vector-column read [`Mnemo::read_memory`] adds.
     pub(super) fn read_memory_meta(&mut self, e: &CatalogEntry) -> Result<Memory> {
         let bytes = self.read_record(e)?;
-        self.decode_memory(&bytes)
+        let m = self.decode_memory(&bytes)?;
+        // v0.21.0 (13.7): what this handle has seen, its next stamp passes.
+        if let Some(h) = m.metadata.get(MNEMO_META_HLC).and_then(Value::as_u64) {
+            self.hlc_last = self.hlc_last.max(h);
+        }
+        Ok(m)
     }
 
     /// The live catalog entries for `ids` (ids that are gone are skipped).

@@ -348,16 +348,37 @@ pub const MNEMO_META_KIND_CLAIM: &str = "claim";
 pub const MNEMO_META_KIND_PRESENCE: &str = "presence";
 /// v0.18.0 (13a step 8b): `_mnemo.kind` of a review finding.
 pub const MNEMO_META_KIND_FINDING: &str = "finding";
+/// v0.21.0 (13.7): `_mnemo.kind` of a tombstone, the record a delete
+/// leaves so a merge can tell a deleted record from one that never
+/// existed. It holds the deleted id, its key slot if it had one, the
+/// clock and the time, and never any of the deleted record's content.
+pub const MNEMO_META_KIND_TOMBSTONE: &str = "tombstone";
+/// v0.21.0: a tombstone's deleted id.
+pub const MNEMO_META_TOMBSTONE_OF: &str = "_mnemo.tombstone_of";
+/// v0.21.0: a tombstone's deleted record's key, when it had one.
+pub const MNEMO_META_TOMBSTONE_KEY: &str = "_mnemo.tombstone_key";
+/// v0.21.0: the agent whose private key slot the deleted record was in
+/// (absent for a shared slot, or a record with no key).
+pub const MNEMO_META_TOMBSTONE_OWNER: &str = "_mnemo.tombstone_owner";
+/// v0.21.0: when a tombstone's record was deleted, in unix seconds.
+pub const MNEMO_META_DELETED_AT: &str = "_mnemo.deleted_at";
+/// v0.21.0 (13.7): a hybrid logical clock stamp, on every write and
+/// in-place update: unix milliseconds, raised past the largest stamp the
+/// writing handle has seen (the record's own earlier stamp included), so
+/// a handle's stamps never go backwards. A merge orders concurrent
+/// changes by it. Older builds carry it through.
+pub const MNEMO_META_HLC: &str = "_mnemo.hlc";
 /// 13a: the coordination kinds. Each is an ordinary record in the shared
 /// scope with the sentinel vector, never embedded, and never a hit in
 /// `recall`, the keyword index, the ANN or `about`: each is read through
 /// its own API (`docs/design/13a-coordination.md`, section 1).
-pub const COORDINATION_KINDS: [&str; 5] = [
+pub const COORDINATION_KINDS: [&str; 6] = [
     MNEMO_META_KIND_MESSAGE,
     MNEMO_META_KIND_TASK,
     MNEMO_META_KIND_CLAIM,
     MNEMO_META_KIND_PRESENCE,
     MNEMO_META_KIND_FINDING,
+    MNEMO_META_KIND_TOMBSTONE,
 ];
 
 /// 13a: who wrote a record, the writing handle's author
@@ -738,6 +759,11 @@ pub fn check_caller_key(key: &str, value: &Value) -> std::result::Result<(), Str
         },
         _ => Err(format!("{key} isn't a key a caller may set")),
     }
+}
+
+/// v0.21.0 (13.7): whether a record is a tombstone.
+pub fn is_tombstone(m: &Memory) -> bool {
+    m.metadata.get(MNEMO_META_KIND).and_then(|v| v.as_str()) == Some(MNEMO_META_KIND_TOMBSTONE)
 }
 
 /// Whether a record is one of the coordination kinds ([`COORDINATION_KINDS`]).

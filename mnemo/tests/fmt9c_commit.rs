@@ -53,38 +53,56 @@ fn the_file_shrinks_when_its_tail_is_free() {
     db.set_max_snapshots(1);
     let small: Vec<Ulid> = (0..10).map(|i| db.remember(mem(i)).unwrap()).collect();
     db.flush().unwrap();
-    // 2 KB records: their pages dwarf the catalog (whose tombstones stay).
-    let big: Vec<Ulid> = (10..4000)
-        .map(|i| {
-            let mut m = mem(i);
-            m.content = format!("{} {}", m.content, "b".repeat(2_000));
-            db.remember(m).unwrap()
-        })
-        .collect();
+    let big = |db: &mut Mnemo, from: usize, n: usize| -> Vec<Ulid> {
+        (from..from + n)
+            .map(|i| {
+                let mut m = mem(i);
+                m.content = format!("{} {}", m.content, "b".repeat(2_000));
+                db.remember(m).unwrap()
+            })
+            .collect()
+    };
+    // 2 KB records: their pages dwarf the catalog.
+    let wave: Vec<Ulid> = big(&mut db, 10, 3990);
     db.flush().unwrap();
     let grown = file_len(&path);
-    for id in &big {
+    for id in &wave {
         db.delete(id).unwrap();
     }
     db.flush().unwrap();
-    // Two more small commits let the frees clear quarantine and the tail
-    // come off.
+    // Two more small commits let the frees clear quarantine.
     for i in 0..3 {
         db.remember(mem(5000 + i)).unwrap();
         db.flush().unwrap();
     }
-    let shrunk = file_len(&path);
+    // v0.21.0: the deletes' tombstones were written in the commit that freed
+    // the big pages, so they went to the tail and hold it: the file keeps
+    // its length (plus the tombstones) until a compaction. The freed pages
+    // are reused: a second wave of the same size barely grows it.
+    let after_delete = file_len(&path);
     assert!(
-        shrunk * 2 < grown,
-        "the file shrank: {grown} -> {shrunk} bytes"
+        after_delete < grown + grown / 5,
+        "the tombstones are small: {grown} -> {after_delete} bytes"
+    );
+    big(&mut db, 6000, 3990);
+    db.flush().unwrap();
+    let refilled = file_len(&path);
+    assert!(
+        refilled < after_delete + after_delete / 5,
+        "the second wave reused the freed pages: {after_delete} -> {refilled} bytes"
     );
     for id in &small {
         db.get(id).unwrap();
     }
-    assert_eq!(db.verify().unwrap(), 13);
+    // 4,003 records and the 3,990 tombstones.
+    assert_eq!(db.verify().unwrap(), 4003 + 3990);
     db.close().unwrap();
+    // And compaction keeps the tombstones, in less space than the records.
+    Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
+    let compacted = file_len(&path);
+    assert!(compacted < refilled, "{refilled} -> {compacted} bytes");
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.verify().unwrap(), 13);
+    assert_eq!(db.verify().unwrap(), 4003 + 3990);
 }
 
 #[test]
@@ -133,7 +151,8 @@ fn retention_bounds_pinned_space_under_churn() {
     for id in &keep {
         db.get(id).unwrap();
     }
-    assert_eq!(db.verify().unwrap(), 200);
+    // The 200 kept records and the churn's 8,000 tombstones.
+    assert_eq!(db.verify().unwrap(), 8200);
 }
 
 /// The big runs are written before the commit, outside the WAL: a crash at
@@ -195,7 +214,10 @@ fn small_commits_append_catalog_deltas_and_reopen() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("t.mnemo");
     let mut db = Mnemo::create(&path, "pw", cfg()).unwrap();
-    for i in 0..1000 {
+    // A base big enough that a quarter of it (the fold limit) is more than
+    // 20 commits can touch even when each commit's vacuum re-packs a whole
+    // record page of rows (~50 to 60 at this record size).
+    for i in 0..6000 {
         db.remember(mem(i)).unwrap();
     }
     db.flush().unwrap();
@@ -211,16 +233,16 @@ fn small_commits_append_catalog_deltas_and_reopen() {
     let (rows, chain, base_after) = db.__catalog_shape();
     assert_eq!(
         (rows, chain, base_after),
-        (1020, 20, base),
+        (6020, 20, base),
         "one delta per commit"
     );
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.__catalog_shape().0, 1020);
+    assert_eq!(db.__catalog_shape().0, 6020);
     for (i, id) in ids.iter().enumerate() {
         assert_eq!(db.get(id).unwrap().content, format!("memory {}", 2000 + i));
     }
-    assert_eq!(db.verify().unwrap(), 1020);
+    assert_eq!(db.verify().unwrap(), 6020);
 }
 
 #[test]
@@ -257,8 +279,8 @@ fn deleted_rows_are_dropped_from_a_new_base() {
     db.flush().unwrap();
     assert_eq!(
         db.__catalog_shape().0,
-        40,
-        "tombstones dropped with the base"
+        100,
+        "deleted rows dropped with the base; the 60 tombstone records stay"
     );
     for (i, id) in ids.iter().enumerate().skip(60) {
         assert_eq!(db.get(id).unwrap().content, format!("memory {i}"));
@@ -266,8 +288,8 @@ fn deleted_rows_are_dropped_from_a_new_base() {
     assert!(db.get(&ids[0]).is_err());
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.len(), 40);
-    assert_eq!(db.verify().unwrap(), 40);
+    assert_eq!(db.len(), 100);
+    assert_eq!(db.verify().unwrap(), 100);
     let hits = db
         .recall(
             &mnemo_engine::RecallRequest::new(mem(70).vector)

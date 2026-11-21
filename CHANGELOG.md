@@ -8,6 +8,46 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+### Added
+
+- **The merge groundwork: a clock stamp on every write, and tombstones**
+  (v0210-1, spec.v0210 step 1, 13.7). Every write and in-place update
+  from this build stamps `_mnemo.hlc`, a hybrid logical clock in wall
+  milliseconds that a handle bumps past the largest stamp it has written
+  or read, so it never goes backwards; compaction and re-embedding copy
+  a record with its stamp, and older builds carry it through as metadata.
+  A delete (`forget`, `essence remove`, `thread forget`, a message prune,
+  a discarded session) now also writes a tombstone: an engine record
+  (`_mnemo.kind: tombstone`) holding the deleted id, its key and owner
+  when it was keyed, a stamp past the deleted record's, and the time,
+  never any of its content. Tombstones stay out of recall and the search
+  indexes like other engine records, are counted on their own
+  (`KindCounts::tombstones`, and `tombstones` in the Python
+  `kind_counts()`), are left out of `about`'s counts and of `export
+  --git`, can't be deleted, and are kept by compaction: they're how the
+  coming `mnemo merge` tells a deleted record from one that never
+  existed. No format change.
+
+### Changed
+
+- **A delete no longer frees all of its record's space** (v0210-1). Each
+  tombstone costs about as much file as a small fact: measured on a
+  384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone
+  (a 184-byte record, its vector-column entry and its catalog row),
+  against 1,039 to 1,057 bytes for the short facts deleted. `Mnemo::len`
+  and `verify` count tombstones, as they count messages and tasks. A
+  mass delete's tombstones are written in the commit that frees the
+  deleted pages, so they land at the file's tail and the file keeps its
+  length until `mnemo compact`; the freed pages are reused by later
+  writes.
+
+### Fixed
+
+- **Snapshot retention's pin cap counts every page a commit frees**
+  (v0210-1). The check left out the old free-list run and a rewritten
+  key-slot run, so the retained snapshots could pin a page more than the
+  cap allowed.
+
 ## [0.20.2] — 2026-11-20
 
 Using what's already built. A keyed fact reads back in one call (`mnemo

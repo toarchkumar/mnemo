@@ -139,15 +139,23 @@ fn freed_pages_are_reused_once_unpinned() {
         db.__next_page() < tail + 10,
         "the file grew less than 10 pages"
     );
-    assert_eq!(db.verify().unwrap(), 20);
+    assert_eq!(
+        db.verify().unwrap(),
+        30,
+        "20 live records and the 10 deletes' tombstones"
+    );
     db.close().unwrap();
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.len(), 20);
+    assert_eq!(db.len(), 30);
     for (i, id) in ids[10..].iter().chain(fresh.iter()).enumerate() {
         assert_eq!(db.get(id).unwrap().content, content(i + 10));
     }
-    assert_eq!(db.verify().unwrap(), 20);
+    assert_eq!(
+        db.verify().unwrap(),
+        30,
+        "20 live records and the 10 deletes' tombstones"
+    );
 }
 
 #[test]
@@ -208,10 +216,11 @@ fn retained_snapshots_pin_freed_pages_and_restore_stays_intact() {
     for (i, id) in ids.iter().enumerate() {
         assert_eq!(db.get(id).unwrap().content, content(i));
     }
-    assert_eq!(db.verify().unwrap(), 10);
+    // The 10 restored records and the churn's 32 tombstones.
+    assert_eq!(db.verify().unwrap(), 42);
     db.close().unwrap();
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.verify().unwrap(), 10);
+    assert_eq!(db.verify().unwrap(), 42);
 }
 
 #[test]
@@ -383,10 +392,10 @@ fn compacting_a_v9_file_keeps_v9() {
     db.delete(&ids[0]).unwrap();
     db.close().unwrap();
     let report = Mnemo::compact_file(path.to_str().unwrap(), "pw").unwrap();
-    assert_eq!(report.after, 5);
+    assert_eq!(report.after, 6, "5 records and the delete's tombstone");
     let mut db = Mnemo::open(&path, "pw").unwrap();
     assert_eq!(db.__format_version(), 9);
-    assert_eq!(db.verify().unwrap(), 5);
+    assert_eq!(db.verify().unwrap(), 6);
 }
 
 #[test]
@@ -445,14 +454,15 @@ mod crash {
         drop(db);
 
         let mut db = Mnemo::open(&path, "pw").unwrap();
-        assert_eq!(db.len(), 10, "the uncommitted records are gone");
+        // 10 survivors and the 10 deletes' tombstones.
+        assert_eq!(db.len(), 20, "the uncommitted records are gone");
         for id in &survivors {
             db.get(id).unwrap();
         }
         for id in &fresh {
             assert!(db.get(id).is_err());
         }
-        assert_eq!(db.verify().unwrap(), 10);
+        assert_eq!(db.verify().unwrap(), 20);
         // And the file is still writable, reusing the same pages.
         db.set_max_snapshots(1);
         for i in 30..35 {
@@ -460,7 +470,7 @@ mod crash {
         }
         db.close().unwrap();
         let mut db = Mnemo::open(&path, "pw").unwrap();
-        assert_eq!(db.verify().unwrap(), 15);
+        assert_eq!(db.verify().unwrap(), 25);
     }
 
     /// Fail every write of one commit in turn: whatever survives is the

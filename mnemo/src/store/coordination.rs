@@ -2510,6 +2510,9 @@ pub struct KindCounts {
     pub essence: usize,
     /// Messages, tasks, claims and presence records.
     pub coordination: usize,
+    /// v0.21.0 (13.7): tombstones, the records deletes leave for a merge.
+    /// `about` leaves them out of its counts.
+    pub tombstones: usize,
 }
 
 impl Mnemo {
@@ -2519,11 +2522,15 @@ impl Mnemo {
     pub fn kind_counts(&self) -> KindCounts {
         use super::records::{ROW_KIND_ESSENCE, ROW_KIND_THREAD_LINK, ROW_KIND_TURN};
         let mut c = KindCounts::default();
+        // v0.21.0: a tombstone's row is a coordination row of type
+        // `working` (`put_tombstone`); no other coordination record is.
+        let working = super::records::memory_type_code(MemoryType::Working);
         for e in self.catalog.iter().filter(|e| !e.deleted) {
-            match e.v9.map(|r| r.kind) {
-                Some(ROW_KIND_TURN | ROW_KIND_THREAD_LINK) => c.turns += 1,
-                Some(ROW_KIND_ESSENCE) => c.essence += 1,
-                Some(ROW_KIND_COORDINATION) => c.coordination += 1,
+            match e.v9.map(|r| (r.kind, r.memory_type)) {
+                Some((ROW_KIND_TURN | ROW_KIND_THREAD_LINK, _)) => c.turns += 1,
+                Some((ROW_KIND_ESSENCE, _)) => c.essence += 1,
+                Some((ROW_KIND_COORDINATION, t)) if t == working => c.tombstones += 1,
+                Some((ROW_KIND_COORDINATION, _)) => c.coordination += 1,
                 _ => c.facts += 1,
             }
         }

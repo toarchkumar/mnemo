@@ -192,8 +192,13 @@ pub(super) fn resources_read(
 /// about`'s header, v0.17.2), the onboarding memories (the manifest first)
 /// and the project essence.
 pub(super) fn about_text(m: &mut Mnemo) -> std::result::Result<String, RpcError> {
-    let memories = m.stats().map_err(mnemo_err)?.memories;
     let c = m.kind_counts();
+    // v0.21.0: tombstones aren't the brain's content.
+    let memories = m
+        .stats()
+        .map_err(mnemo_err)?
+        .memories
+        .saturating_sub(c.tombstones);
     let mut out = format!(
         "{}\n\n{}\n\n## About this brain\n\n{memories} memories: {} facts, {} turns, {} essence, \
          {} coordination\n",

@@ -165,14 +165,17 @@ def test_delete_and_stats():
         b = db.remember("drop", "semantic", [0.0, 1.0])
         db.delete(b)
         db.flush()
-        assert len(db) == 1
+        # v0.21.0: the delete leaves a tombstone record, which len() and
+        # stats() count, as they count messages and tasks.
+        assert len(db) == 2
+        assert db.kind_counts()["tombstones"] == 1
         try:
             db.get(b)
             raise AssertionError("deleted memory should not be retrievable")
         except RuntimeError:
             pass
         s = db.stats()
-        assert s["memories"] == 1 and s["encrypted"] is True
+        assert s["memories"] == 2 and s["encrypted"] is True
         assert s["dimensions"] == 2
         assert s["recall_mode"] == "exact_resident"
         # v0.13 (INSP-1 step 4): what a restore can reach right now.
@@ -186,7 +189,7 @@ def test_delete_and_stats():
             raise AssertionError("a _mnemo.* metadata key should be refused")
         except (RuntimeError, ValueError) as e:
             assert "reserved" in str(e), e
-        assert len(db) == 1
+        assert len(db) == 2
         db.close()
     print("ok  delete / stats")
 
@@ -258,7 +261,8 @@ def test_session_discard_and_context_manager():
         s1.add_turn(mnemo.Turn.user("noise", [0.0, 1.0]))
         removed = s1.discard()
         assert removed == 2
-        assert len(db) == 0
+        # v0.21.0: only the two turns' tombstones are left.
+        assert len(db) == 2 and db.kind_counts()["tombstones"] == 2
 
         # The `with` form consolidates on exit.
         with db.session("agent") as s2:
@@ -709,19 +713,19 @@ def test_compact_file_module_fn():
         drop = db.remember("drop", "semantic", [0.0, 1.0])
         db.delete(drop)
         db.flush()
-        assert len(db) == 1
+        assert len(db) == 2  # keep and the delete's tombstone (v0.21.0)
         db.close()
         del db
 
         report = mnemo.compact_file(path, "pw")
-        assert report["before"] == 1, f"compact 'before' should count live only: {report}"
-        assert report["after"] == 1
+        assert report["before"] == 2, f"compact 'before' should count live only: {report}"
+        assert report["after"] == 2
         assert isinstance(report["before"], int)
         assert isinstance(report["after"], int)
 
         # File still opens; the surviving memory is intact.
         db2 = mnemo.open(path, "pw")
-        assert len(db2) == 1
+        assert len(db2) == 2
         assert db2.get(keep)["content"] == "keep"
         db2.close()
         del db2
@@ -741,9 +745,9 @@ def test_compact_file_with_key():
         db.close()
         del db
         report = mnemo.compact_file_with_key(path, key)
-        assert report["before"] == 1 and report["after"] == 1, report
+        assert report["before"] == 2 and report["after"] == 2, report
         db = mnemo.open_with_key(path, key)
-        assert len(db) == 1 and db.get(keep)["content"] == "keep"
+        assert len(db) == 2 and db.get(keep)["content"] == "keep"
         db.close()
         try:
             mnemo.compact_file_with_key(path, b"short")
@@ -1480,7 +1484,11 @@ def test_visibility_freshness_and_counts():
             st = db.stale()
             assert [x["text"] for x in st] == ["to review"] and st[0]["what"] == "fact", st
             c = db.kind_counts()
-            assert c == {"facts": 3, "turns": 0, "essence": 0, "coordination": 0}, c
+            assert c == {"facts": 3, "turns": 0, "essence": 0, "coordination": 0, "tombstones": 0}, c
+            # v0.21.0: a delete leaves a tombstone, counted on its own.
+            db.delete(db.remember("gone", "semantic", [0.0, 0.0, 1.0, 0.0]))
+            c = db.kind_counts()
+            assert c["facts"] == 3 and c["tombstones"] == 1, c
             assert db.about(visibility=["all"]) == db.about()
             try:
                 db.recall(v, visibility=["secret"])

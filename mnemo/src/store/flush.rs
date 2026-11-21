@@ -638,9 +638,19 @@ impl Mnemo {
                 }),
             });
             if v9 {
+                // Everything this commit frees: also the runs staged after
+                // this point, the old key-slot run when it's rewritten and
+                // the old free-list run (v0210-1: a bigger catalog left the
+                // cap a page short without them).
                 let extra = self.pending_free.iter().map(|r| r.1).sum::<u64>()
                     + superseded.iter().map(|r| r.1).sum::<u64>()
-                    + self.header.manifest_pages;
+                    + self.header.manifest_pages
+                    + if self.dirty_keys {
+                        self.header.keys.pages
+                    } else {
+                        0
+                    }
+                    + self.header.free.pages;
                 self.apply_retention(&mut manifest, extra);
             }
             let man_bytes =
