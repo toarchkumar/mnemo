@@ -8,6 +8,19 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.20.2] — 2026-11-20
+
+Using what's already built. A keyed fact reads back in one call (`mnemo
+get --key`, and an MCP `get` tool); the essence render keeps every item
+that fits, says how many it cut, renders the same way every time and can
+show each item's id; `recall --thread` searches one past session; the
+brief after a resume or a compaction shows the session's own essence; a
+fact written without a key can be retired (`mnemo supersede`), and `mnemo
+stale` lists the old ones; `mnemo stats` prints the MCP tool's numbers;
+and `mnemo onboard` lets Claude Code run the wake commands without
+asking. No format change. The Swift and Android packages aren't published
+in this release: they stay at 0.20.0, which has the same mobile code.
+
 ### Added
 
 - **Keyed reads: `mnemo get --key` and an MCP `get` tool** (v0202-1,
@@ -5157,7 +5170,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.2...HEAD
+[0.20.2]: https://github.com/toarchkumar/mnemo/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...v0.20.0
 [0.19.1]: https://github.com/toarchkumar/mnemo/compare/v0.19.0...v0.19.1
