@@ -81,6 +81,8 @@ fn brain_arg(cmd: &mut Command) -> Option<&mut String> {
         | Command::DefaultAgent { path, .. }
         | Command::Inbox { path, .. }
         | Command::Stale { path, .. }
+        | Command::Supersede { path, .. }
+        | Command::Stats { path, .. }
         | Command::Ack { path, .. }
         | Command::Post { brain: path, .. }
         | Command::Claim { brain: path, .. }
@@ -153,6 +155,7 @@ fn shift_get_args(cmd: &mut Command) -> std::result::Result<(), String> {
         Command::Get { path, id, .. } => ("get", path, id, true),
         Command::Update { path, id, .. } => ("update", path, id, true),
         Command::Ack { path, id, .. } => ("ack", path, id, true),
+        Command::Supersede { path, id, .. } => ("supersede", path, id, true),
         Command::Essence {
             cmd:
                 EssenceCmd::Update { path, id, .. }
@@ -718,6 +721,39 @@ enum Command {
         note: Option<String>,
         #[command(flatten)]
         who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// v0.20.2 (G8): mark an unkeyed memory superseded by a newer one, so
+    /// recall and `about` leave it out, as they leave out an old keyed
+    /// version. `--by` takes the newer memory's ULID, or a key (its live
+    /// version). A keyed memory, an engine record (a turn, essence item,
+    /// task, message or finding) and the manifest are refused.
+    Supersede {
+        /// Path to the `.mnemo` file, then the old memory's ULID. With one
+        /// argument it's the ULID, and the brain is this project's.
+        #[arg(value_name = "PATH")]
+        path: String,
+        /// The old memory's ULID (when PATH is given).
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        /// The newer memory: its ULID, or a key (`decision.roadmap-order`),
+        /// whose live version in the default agent's slot is used.
+        #[arg(long, value_name = "ID|KEY")]
+        by: String,
+        #[command(flatten)]
+        who: AsArgs,
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// v0.20.2 (G9): what the MCP `stats` tool returns: the memory count,
+    /// the file's size, the index, the snapshots and the page cache.
+    Stats {
+        /// Path to the `.mnemo` file. Leave it out for this project's brain.
+        #[arg(default_value = "", hide_default_value = true)]
+        path: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -4705,6 +4741,9 @@ fn run() -> std::result::Result<(), String> {
             let mut db = open_ro(&path, &pp).map_err(fmt)?;
             note_mistagged(&mut db);
             let mut rows = db.stale().map_err(fmt)?;
+            // v0.20.2 (G8): and the old unkeyed episodic facts, oldest first.
+            rows.extend(db.stale_unkeyed().map_err(fmt)?);
+            rows.sort_by_key(|r| (r.since, r.id));
             if mine {
                 rows.retain(|r| r.whose == agent);
             }
@@ -4738,6 +4777,73 @@ fn run() -> std::result::Result<(), String> {
                                 .unwrap_or_default(),
                             r.text
                         );
+                    }
+                }
+            }
+        }
+        Command::Supersede {
+            path,
+            id,
+            by,
+            who,
+            passphrase: pp,
+        } => {
+            let (agent, role) = who.resolve()?;
+            let old = parse_ulid(id.as_deref().unwrap_or_default())?;
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_w(&path, &pp, "supersede").map_err(fmt)?;
+            note_mistagged(&mut db);
+            if agent.is_some() {
+                db.set_author(agent.clone());
+                let _ = db.touch_presence(role.as_deref(), Some("cli"));
+            }
+            let by = match parse_ulid(&by) {
+                Ok(u) => u,
+                Err(_) => {
+                    use mnemo_engine::KeyScope;
+                    let scope = match db.default_agent().map_err(fmt)? {
+                        Some(a) => KeyScope::Private(a),
+                        None => KeyScope::private_default(),
+                    };
+                    let live = db.history_in(&by, scope).map_err(fmt)?.into_iter().next();
+                    live.ok_or_else(|| {
+                        format!("--by {by}: not a ULID, and no key of that name has a live version")
+                    })?
+                    .id
+                }
+            };
+            let outcome = db.supersede(&old, &by).map_err(fmt)?;
+            db.flush().map_err(fmt)?;
+            let s = match outcome {
+                mnemo_engine::WriteOutcome::Unchanged => "unchanged",
+                _ => "superseded",
+            };
+            println!("{old}\t{s}\tby {by}");
+        }
+        Command::Stats {
+            path,
+            format,
+            passphrase: pp,
+        } => {
+            let pp = secret_for(&path, &pp, &None)?;
+            let mut db = open_r(&path, &pp).map_err(fmt)?;
+            let v = mnemo_engine::mcp::stats_json(&mut db).map_err(fmt)?;
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into())
+                ),
+                OutputFormat::Jsonl => println!("{v}"),
+                OutputFormat::Table => {
+                    if let Some(obj) = v.as_object() {
+                        let w = obj.keys().map(String::len).max().unwrap_or(0);
+                        for (k, val) in obj {
+                            let shown = match val {
+                                serde_json::Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            };
+                            println!("{k:<w$}  {shown}");
+                        }
                     }
                 }
             }

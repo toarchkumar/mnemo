@@ -2380,7 +2380,64 @@ pub struct Stale {
     pub visibility: String,
 }
 
+/// v0.20.2 (G8): how old a live, unkeyed episodic fact is before
+/// [`Mnemo::stale_unkeyed`] lists it: 30 days.
+pub const UNKEYED_STALE_SECS: i64 = 30 * 86_400;
+
 impl Mnemo {
+    /// v0.20.2 (G8): the live, unkeyed episodic facts older than
+    /// [`UNKEYED_STALE_SECS`], oldest first, as `unkeyed episodic` rows
+    /// whose `since` is the day they passed it. A keyed fact's newer
+    /// version supersedes the old one, but an unkeyed dated decision stays
+    /// live and keeps ranking in recall; this is the list to review, with
+    /// [`Mnemo::supersede`] for those a newer record replaces. Nothing here
+    /// infers which record replaces which: a text match on keys found none
+    /// in the project brain and only false ones on their topic words.
+    /// Separate from [`Mnemo::stale`], so the counts in `about` and the
+    /// session brief don't change.
+    pub fn stale_unkeyed(&mut self) -> Result<Vec<Stale>> {
+        use super::records::{ROW_KIND_FACT, ROW_SUPERSEDED};
+        self.ensure_key_caches()?;
+        let now = self.coordination_now();
+        let entries: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter(|e| {
+                e.v9.is_none_or(|r| {
+                    r.kind == ROW_KIND_FACT && r.key_hash == 0 && r.flags & ROW_SUPERSEDED == 0
+                })
+            })
+            .cloned()
+            .collect();
+        let mut out = Vec::new();
+        for e in entries {
+            if self.superseded.as_ref().is_some_and(|s| s.contains(&e.id)) {
+                continue;
+            }
+            let m = self.read_memory(&e)?;
+            if m.memory_type != crate::memory::MemoryType::Episodic
+                || m.metadata.contains_key(MNEMO_META_KIND)
+                || m.metadata.contains_key(crate::memory::MNEMO_META_KEY)
+                || m.metadata
+                    .contains_key(crate::memory::MNEMO_META_SUPERSEDED_BY)
+                || now - m.created_at <= UNKEYED_STALE_SECS
+            {
+                continue;
+            }
+            out.push(Stale {
+                id: m.id,
+                what: "unkeyed episodic".to_string(),
+                since: m.created_at + UNKEYED_STALE_SECS,
+                text: m.content.lines().next().unwrap_or("").to_string(),
+                whose: meta_string(&m, crate::memory::MNEMO_META_AUTHOR),
+                visibility: crate::memory::visibility_of(&m).to_string(),
+            });
+        }
+        out.sort_by_key(|x| (x.since, x.id.0));
+        Ok(out)
+    }
+
     /// 13a (13.6): every record that's stale now
     /// ([`crate::memory::stale_since`]), oldest first: past its `review_by`,
     /// or older than its kind's default (essence `state` and `next` 14

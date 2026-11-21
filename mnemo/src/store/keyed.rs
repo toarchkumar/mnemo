@@ -665,3 +665,86 @@ impl Mnemo {
         Ok((a != b).then_some((a, b)))
     }
 }
+
+impl Mnemo {
+    /// v0.20.2 (G8): mark the unkeyed record `old` superseded by `by`, a
+    /// live record already in the file, the way a newer keyed version
+    /// supersedes an older one: `old` gets `_mnemo.superseded_by` and
+    /// `_mnemo.invalid_at`, and recall and `about` leave it out. `by` is
+    /// unchanged. Marking it again with the same `by` is
+    /// [`WriteOutcome::Unchanged`].
+    ///
+    /// Refused with [`MnemoError::Invalid`] when either id doesn't exist or
+    /// is deleted, when they're the same, when `old` is superseded by
+    /// something else or has a key (a keyed record is superseded by its
+    /// key's next version), when `by` is superseded, and when either is an
+    /// engine record (any `_mnemo.kind`: a turn, essence item, task,
+    /// message or finding; or the manifest). [`MnemoError::ReadOnly`] on a
+    /// read-only handle.
+    pub fn supersede(&mut self, old: &Ulid, by: &Ulid) -> Result<WriteOutcome> {
+        if self.read_only {
+            return Err(MnemoError::ReadOnly);
+        }
+        self.ensure_key_caches()?;
+        let bad = |id: &Ulid, why: &str| MnemoError::Invalid(format!("supersede {id}: {why}"));
+        if old == by {
+            return Err(bad(old, "a memory can't supersede itself"));
+        }
+        let mut load = |id: &Ulid| -> Result<Memory> {
+            let idx = self
+                .index
+                .get(id.0, &self.catalog)
+                .ok_or_else(|| bad(id, "no such memory"))?;
+            let entry = self.catalog[idx].clone();
+            if entry.deleted {
+                return Err(bad(id, "the memory is deleted"));
+            }
+            let m = self.read_memory(&entry)?;
+            if m.metadata.contains_key(MNEMO_META_KIND) || is_manifest(&m) {
+                return Err(bad(
+                    id,
+                    "it is an engine record (a thread, essence, task, message, finding or the \
+                     manifest)",
+                ));
+            }
+            Ok(m)
+        };
+        let mut om = load(old)?;
+        let bm = load(by)?;
+        if bm.metadata.contains_key(MNEMO_META_SUPERSEDED_BY)
+            || self.superseded.as_ref().is_some_and(|s| s.contains(&by.0))
+        {
+            return Err(bad(by, "it is superseded itself; name its live version"));
+        }
+        match om
+            .metadata
+            .get(MNEMO_META_SUPERSEDED_BY)
+            .and_then(Value::as_str)
+        {
+            Some(b) if b == by.to_string() => return Ok(WriteOutcome::Unchanged),
+            Some(b) => return Err(bad(old, &format!("it is already superseded by {b}"))),
+            None => {}
+        }
+        if let Some(k) = om.metadata.get(MNEMO_META_KEY).and_then(Value::as_str) {
+            return Err(bad(
+                old,
+                &format!(
+                    "it has a key ({k}); a keyed record is superseded by its key's next version"
+                ),
+            ));
+        }
+        om.metadata.insert(
+            MNEMO_META_SUPERSEDED_BY.into(),
+            Value::String(by.to_string()),
+        );
+        om.metadata.insert(
+            MNEMO_META_INVALID_AT.into(),
+            Value::Number(memory::now_secs().into()),
+        );
+        self.put(om)?;
+        if let Some(s) = self.superseded.as_mut() {
+            s.insert(old.0);
+        }
+        Ok(WriteOutcome::Superseded)
+    }
+}

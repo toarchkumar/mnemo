@@ -160,6 +160,7 @@ pub use store::BudgetReport;
 pub use store::{
     slug_of, Alive, Claim, ClaimOutcome, ClaimStatus, KindCounts, Message, NewWork, Presence,
     Stale, Task, TaskClaim, TaskLost, TaskOutcome, TaskSpec, TaskTaken, Wake, WakeItems,
+    UNKEYED_STALE_SECS,
 };
 /// v0.18.0 (13a step 8b): review findings.
 pub use store::{valid_finding_id, Finding, FindingFilter, FindingSpec};

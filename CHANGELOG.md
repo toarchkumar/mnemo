@@ -34,6 +34,22 @@ Pre-1.0, the minor component carries the breaking-change signal.
   the project items a thread render also shows; `None` when the thread has
   none.
 
+- **`mnemo supersede <ID> --by <ID|KEY>`** (v0202-4, spec.v0202 step 4,
+  G8) and `Mnemo::supersede`: retire a fact written without a key in
+  favour of a newer record, so recall and `about` leave it out as they
+  leave out a keyed fact's older versions (`_mnemo.superseded_by`,
+  `_mnemo.invalid_at`). It refuses a keyed fact, an engine record and the
+  manifest.
+- **`mnemo stale` lists old unkeyed episodic facts** (v0202-4, G8): live,
+  unkeyed, episodic and over 30 days old (`Mnemo::stale_unkeyed`,
+  `UNKEYED_STALE_SECS`), the dated decisions nothing supersedes on its
+  own. It doesn't guess which record replaced which: matching key names in
+  the text found none in the project brain, and matching their topic
+  words found only wrong ones. `about` and the session brief count as
+  before.
+- **`mnemo stats`** (v0202-4, G9): what the MCP `stats` tool returns, as a
+  table or JSON (`mcp::stats_json`, shared by both).
+
 ### Changed
 
 - **The resume and compaction brief shows the thread's own essence**
