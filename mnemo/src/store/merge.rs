@@ -1279,7 +1279,7 @@ impl Mnemo {
             for m in records {
                 new.put_existing(m)?;
             }
-            if want_index && new.len() > 0 {
+            if want_index && !new.is_empty() {
                 new.build_index_with(IndexConfig::default())?;
             }
             let positions: Vec<usize> = (0..da.cache_dir.len()).collect();

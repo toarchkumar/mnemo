@@ -565,3 +565,49 @@ fn a_rewrite_from_another_handle_goes_past_the_records_stamp() {
     writer.remember(m).unwrap();
     assert!(hlc(&writer.get(&id).unwrap()) > ahead);
 }
+
+#[test]
+fn an_in_place_rewrite_lists_the_versions_before_it() {
+    // decision.v0210-ancestry: each stamped write names its version
+    // (`_mnemo.ver`); each in-place rewrite lists the one it replaced, as
+    // `[stamp, version]`, keeping the 8 latest.
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    let id = fact(&mut db, "version 0", 1.0);
+    let first = db.get(&id).unwrap();
+    assert!(first.metadata["_mnemo.ver"].is_u64());
+    assert!(
+        first.metadata.get("_mnemo.hlc_prev").is_none(),
+        "a new record lists none"
+    );
+    let mut seen = vec![(hlc(&first), first.metadata["_mnemo.ver"].as_u64().unwrap())];
+    for i in 1..=10 {
+        db.update(
+            &id,
+            MemoryPatch {
+                content: Some(format!("version {i}")),
+                vector: Some(vec![i as f32 + 1.0, 1.0, 0.0, 0.0]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let m = db.get(&id).unwrap();
+        let listed: Vec<(u64, u64)> = m.metadata["_mnemo.hlc_prev"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p[0].as_u64().unwrap(), p[1].as_u64().unwrap()))
+            .collect();
+        let mut want = seen.clone();
+        want.sort();
+        want.reverse();
+        want.truncate(8);
+        assert_eq!(listed, want, "after {i} rewrites");
+        let ver = m.metadata["_mnemo.ver"].as_u64().unwrap();
+        assert!(
+            seen.iter().all(|(_, v)| *v != ver),
+            "a new version, a new hash"
+        );
+        seen.push((hlc(&m), ver));
+    }
+}

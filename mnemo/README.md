@@ -667,6 +667,33 @@ compaction closes the old file before the rename, and the identity check
 before each commit is what catches a write that would land in the replaced
 file.
 
+**Merging two copies** (v0.21.0, 13.7). `Mnemo::merge_files(a, a_secret,
+b, b_secret, out, &opts)` combines two copies of one brain that diverged (a
+laptop and a desktop, say) into a new file at `out`. It never changes its
+inputs: each is opened read-only, with its own secret, so a copy rekeyed
+since still merges. Two files are one brain when their salts match or their
+manifests have the same id. The output takes the first input's secret, salt
+and KDF settings, with a new data key, like a compaction.
+
+- A delete in either copy wins, by id, with no clock: the record is gone
+  from the output, unless that copy wrote the id again afterwards. A delete
+  made by an older build (a deleted row and no tombstone) counts too; one
+  made before the copy was last compacted by an older build doesn't.
+- A record edited in one copy only takes that edit. Edited in both, the
+  newer edit wins, and a fact keeps the other text as a conflict copy
+  (`_mnemo.merge_conflict`, `_mnemo.merge_source`). Each in-place rewrite
+  lists the versions before it (`_mnemo.hlc_prev`, the 8 latest), which is
+  how a merge tells one from the other.
+- A key written in both copies becomes one chain, both versions in
+  history; the one the merge superseded is flagged. Essence items, tasks
+  and findings merge their status (`done`, `verified` and `resolved` are
+  final); two tasks or findings under one name keep both, the later
+  renamed `<name>-merge-2`.
+
+`MergeReport` says what came from each side, what conflicted, what was
+deleted, and how far each copy's clock ran ahead. The inputs are held for
+readers for the whole merge, so merge copies, not a brain in use.
+
 **Shared mode** (v0.14, 12.4): `Mnemo::open_shared` returns a
 `SharedMnemo`, which takes the lock for each call (`read` under the shared
 lock, `write` under the exclusive one, committing before it returns) and

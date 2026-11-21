@@ -435,6 +435,21 @@ fn the_index_follows() {
             check(&mut r, &p, "pw", &format!("index commit {i}"));
         }
     }
+    // The steps below must each catch up incrementally, so none may be the
+    // commit a new catalog base falls on. Where a base falls depends on how
+    // many records the hot page holds, so on record sizes: write until one
+    // falls, and start them on a fresh chain.
+    let mut n = 0;
+    loop {
+        w.write(move |db| db.remember(mem(9200 + n))).unwrap();
+        let how = catch_up(&mut r);
+        n += 1;
+        if how == FULL {
+            break;
+        }
+        assert!(n < 64, "a new catalog base within 64 commits");
+    }
+    check(&mut r, &p, "pw", "a fresh catalog base");
 
     // Writes from a writer without the index loaded, so the reader's
     // reconcile has to see them. First an old row's importance: its record

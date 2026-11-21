@@ -44,8 +44,42 @@ Pre-1.0, the minor component carries the breaking-change signal.
   hold a handle's clock for tests (`__set_hlc_offset_for_testing`,
   `__freeze_hlc_clock_for_testing`, `MNEMO_DEV_HLC_OFFSET_MS`; RB-019.8).
 
+- **`Mnemo::merge_files`: merge two diverged copies of one brain into a
+  new file** (v0210-2, spec.v0210 step 2, 13.7; the library: the CLI
+  command is the next step). The inputs are opened read-only with a secret
+  each (one brain: the same salt, or the same manifest id, so a rekeyed
+  copy merges); the output follows compaction (the first input's secret,
+  salt and KDF settings, a new data key, the engine's own cache entries
+  only, one snapshot), written to a temp file and linked into place only
+  if the name is free. The rules are a pure function of the two inputs and
+  a fixed `now`: deletes first, by id, with no clock (a tombstone, or an
+  older build's deleted row); one number per record (the larger of
+  `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
+  other wins (decision.v0210-ancestry); concurrent edits of a fact keep
+  the newer and a conflict copy; a key slot becomes one chain; essence
+  items, tasks, findings and messages merge their status and history;
+  claims and presence come from the first input. `merge(a,b)` and
+  `merge(b,a)` give the same records, merging an output again with an
+  input changes nothing, and three copies merge to the same records in
+  either grouping (property tests on two and three copies, with clocks
+  ahead, behind and in the same millisecond). `MergeReport` gives what
+  came from each side, conflicts by kind, removals, keys deleted on one
+  side and written on the other, renamed tasks and findings, `after`
+  cycles, and each input's clock lead. Refused, with the reason: not one
+  brain, different embedders, dimensions or float-vector settings, an
+  input older than format 9 or needing a read-write open, an output that
+  exists or is an input. Fixtures written by the published v0.20.2 are in
+  `tests/fixtures/v0_20_2/`.
+
 ### Changed
 
+- **Each stamped write names its version, and an in-place rewrite lists
+  the ones before it** (v0210-2, decision.v0210-ancestry): `_mnemo.ver`
+  (a hash of the version) and `_mnemo.hlc_prev` (the 8 latest earlier
+  versions, each `[stamp, version]`), so a merge can tell an edit made in
+  one copy from edits made in both. 20 bytes on every stamped record, and
+  up to 169 more on one rewritten in place eight times or more (measured
+  with the engine's MessagePack encoder). No format change.
 - **A delete no longer frees all of its record's space** (v0210-1). Each
   tombstone costs about as much file as a small fact: measured on a
   384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone
@@ -66,6 +100,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **`history_in` stops at a version with no row** (v0210-2): a key whose
+  middle version was deleted and then compacted away made it fail
+  ("superseded chain references missing id"); it now stops there, as at a
+  deleted row.
+- **A compaction, re-embed or export whose temp file fails as it's
+  created removes it** (v0210-2): a write error while creating the temp
+  file left it beside the brain until the next compaction.
 - **Snapshot retention's pin cap counts every page a commit frees**
   (v0210-1). The check left out the old free-list run and a rewritten
   key-slot run, so the retained snapshots could pin a page more than the

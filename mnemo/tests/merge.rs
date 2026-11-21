@@ -993,3 +993,35 @@ fn the_output_has_its_own_data_key_and_stamps_go_past_both_inputs() {
     edit(&mut db, &p.base_fact, "edited again after the merge");
     assert!(stamp(&db.get(&p.base_fact).unwrap()) > in_a);
 }
+
+#[test]
+fn claims_come_from_the_first_input_only() {
+    let p = pair();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    a.set_author(Some("worker-a".into()));
+    a.claim("tree:a", Some(600)).unwrap();
+    b.set_author(Some("worker-b".into()));
+    b.claim("tree:b", Some(600)).unwrap();
+    a.close().unwrap();
+    b.close().unwrap();
+    for (first, second, want) in [(&p.a, &p.b, "tree:a"), (&p.b, &p.a, "tree:b")] {
+        let out = p.out(&format!("claims-{want}.mnemo"));
+        merge(first, second, &out, wall_ms());
+        let mut db = Mnemo::open(&out, PW).unwrap();
+        let topics: Vec<String> = db.claims().unwrap().into_iter().map(|c| c.topic).collect();
+        assert_eq!(topics, [want]);
+    }
+}
+
+#[test]
+fn a_record_deleted_in_both_leaves_one_tombstone() {
+    let p = pair();
+    for path in [&p.a, &p.b] {
+        let mut db = open(path);
+        db.delete(&p.base_fact).unwrap();
+        db.close().unwrap();
+    }
+    let (out, _) = p.check_laws(wall_ms());
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    assert_eq!(db.kind_counts().unwrap().tombstones, 1);
+}
