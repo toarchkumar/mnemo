@@ -50,6 +50,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
 - **`mnemo stats`** (v0202-4, G9): what the MCP `stats` tool returns, as a
   table or JSON (`mcp::stats_json`, shared by both).
 
+- **`mnemo onboard` allows the wake commands in Claude Code** (v0202-4o,
+  spec.v0202 step 5, decision.onboard-allow-rules). In the settings file
+  it already writes the hooks to (`.claude/settings.local.json`, or
+  `.claude/settings.json` for the project scope), it adds
+  `permissions.allow` rules for `mnemo wait`, `inbox` and `ack` and
+  `mcp__mnemo__*`, so a session can wait for work and read its inbox
+  without a prompt for each. A Bash rule matches the command as written,
+  so each command gets one rule per spelling: bare `mnemo`,
+  `~/.local/bin/mnemo` (when the binary is under the home directory) and,
+  in the local scope only, its absolute path (a project's settings are
+  committed). The plan and the terminal view show them, the file's other
+  rules and members keep their order, an older mnemo rule is replaced,
+  and `onboard --undo` removes only ours. Nothing that writes outside the
+  brain is allowed.
+
 ### Changed
 
 - **The resume and compaction brief shows the thread's own essence**

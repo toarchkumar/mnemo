@@ -50,7 +50,9 @@ mnemo onboard --yes
 - It downloads the built-in embedding model (91 MB, checked against
   pinned SHA-256 hashes).
 - It connects Claude Code and Cursor: the MCP server, the hooks that load
-  and save memory, and a rule file with the card above.
+  and save memory, and a rule file with the card above. For Claude Code it
+  also allows `mnemo wait`, `inbox` and `ack` and the mnemo MCP tools to
+  run without asking, so an idle session can wait for work.
 - It prints this guide.
 
 Without a terminal, `mnemo onboard` only shows what it would write. Run
