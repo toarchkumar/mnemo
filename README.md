@@ -180,7 +180,7 @@ with mnemo_engine.open("agent.mnemo") as db:   # the key comes from the keychain
         print(round(hit["score"], 3), hit["content"])
 
     # A fact that changes: the key replaces the old version, and history is kept
-    db.remember_text("the current release is v0.20.1", "semantic", key="current-release")
+    db.remember_text("the current release is v0.20.2", "semantic", key="current-release")
 ```
 
 To create a file from Python, pass a passphrase and the width:
@@ -201,6 +201,28 @@ the keychain.
 The full Rust API, every CLI command, the cache, the file format, durability
 and the security model are documented in [`mnemo/README.md`](mnemo/README.md).
 The Python API is in [`mnemo-python/README.md`](mnemo-python/README.md).
+
+## What's new in v0.20.2: the features agents reach for
+
+- **Read a fact by its key.** `mnemo get --key decision.release-order`
+  prints the fact's current version, and the MCP has a `get` tool that
+  takes an `id` or a `key`.
+- **The essence never drops an item without saying so.** A render keeps
+  every item that fits its budget, ends a cut section with `+N more`, and
+  gives the same output every time. `essence render --ids` shows each
+  item's id, for `update` and `resolve`.
+- **Search one past session.** `recall --thread <id>` (and `thread` on the
+  MCP `recall`) searches that session's saved turns. After a compaction,
+  a session gets back its own essence, not a repeat of the project's.
+- **Retire old knowledge.** `mnemo supersede <id> --by <id or key>` marks
+  an old unkeyed fact as replaced, so recall stops returning it, and
+  `mnemo stale` lists unkeyed episodic facts older than 30 days. `mnemo stats`
+  shows the brain's numbers from the CLI.
+- **`mnemo onboard` allows the wake commands in Claude Code.** It adds
+  allow rules for `mnemo wait`, `inbox`, `ack` and the mnemo MCP tools, so
+  an agent woken by new work doesn't stop at an approval prompt. They're
+  in the plan it shows before asking, and `onboard --undo` removes them.
+- The Swift and Android libraries stay at 0.20.0.
 
 ## What's new in v0.20.1: agents wake when work arrives
 

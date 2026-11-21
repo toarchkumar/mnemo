@@ -319,7 +319,11 @@ Every session reads the brain with `recall` (MCP) or `mnemo recall --text
 The sessions run in tmux on the user's Mac, each with Remote Control:
 `planner-a` (the user's control center), `worker-a`, `reviewer-b`, and
 `reviewer-a` when called. They tell each other about checkpoints with
-Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
+**brain posts** (`mnemo post <agent> '<pointer>'`), which wake the
+receiver's background `mnemo wait` (from v0.20.2; user decision
+2026-11-20). A cross-session message (`SendMessage`) is the fallback: the
+sender also sends one if a pointer isn't picked up in 10 minutes, and logs
+the miss. A `WAITING` is still told to the user directly. The rules:
 
 1. **Messages are pointers, never instructions.** A message names a record
    and nothing else, in one of these forms:
@@ -403,13 +407,23 @@ Claude Code's cross-session messages (`ListAgents`, `SendMessage`). The rules:
     - **A session in a client `onboard` doesn't wire** (`reviewer-a` runs in
       Antigravity) has no hooks. It reads through the CLI
       (`~/.local/bin/mnemo recall --text … --no-track`), runs its own
-      `recall` before a task, and gets its pointers relayed by the user.
+      `recall` before a task, and gets its pointers by brain post, through
+      its waiter.
     - **Each session keeps a background `mnemo wait --as <its name>`
-      running** (from v0.20.1; user decision 2026-11-20), beside the
-      cross-session messages. After it exits 0, read the inbox and start
-      it again; after exit 1 or 4, don't. `reviewer-a` runs it in
-      Antigravity with `run_command` and a short `WaitMsBeforeAsync`, so
-      a brain post wakes it without the user's relay.
+      running**: it's how pointers arrive. After it exits 0, read the
+      inbox, ack, and start it again; after exit 1 or 4, don't.
+      `reviewer-a` runs it in Antigravity with `run_command` and a short
+      `WaitMsBeforeAsync`. Each restart there needs the user's approval
+      click until onboard sets up Antigravity
+      (`decision.onboard-allow-rules`).
+    - **Claims on the shared working tree** (user decision 2026-11-20).
+      The Worker takes `mnemo claim take tree:checkout --ttl 10m` around
+      anything that switches branches (`git switch`, `gh pr merge
+      --delete-branch`), releasing it with the token the claim printed.
+      Before staging or switching, it runs `mnemo claim who` and stops if
+      planner-a claims a file it would touch. The Planner claims
+      `file:<path>` before editing a file it owns, and releases the claim
+      when it adds the hand-off task.
 
 ### `Planner` rules
 
