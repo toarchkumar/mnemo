@@ -58,6 +58,10 @@ pub(crate) use crate::memory::{
     MNEMO_META_CONVERSATION, MNEMO_META_DEFAULT_AGENT, MNEMO_META_DELIVERY, MNEMO_META_FROM,
     MNEMO_META_HOPS, MNEMO_META_TO,
 };
+pub(crate) use crate::memory::{
+    is_tombstone, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_KIND_TOMBSTONE,
+    MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER,
+};
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
     self, BatchState, CacheBudget, CacheDirectoryEntry, CacheEntry, CacheFlushPolicy, CachePutOpts,
@@ -1203,6 +1207,9 @@ pub struct Mnemo {
     /// 13a: seconds added to the clock coordination reads (tests only, via
     /// a dev-hooks setter).
     clock_offset: i64,
+    /// v0.21.0 (13.7): the largest `_mnemo.hlc` this handle has stamped or
+    /// read; the next stamp goes past it.
+    hlc_last: u64,
     /// RB-013.1: the ids of coordination records whose v9 row an older
     /// build re-tagged as a fact (its `compact` rewrites every row), found
     /// once per handle by decrypting the `episodic` fact rows.

@@ -4064,7 +4064,8 @@ fn run() -> std::result::Result<(), String> {
                         "stats": {
                             "format_version": stats.format_version,
                             "upgrade_hint": upgrade_hint(&path, stats.format_version),
-                            "memories": stats.memories,
+                            // v0.21.0: tombstones aren't the brain's content.
+                            "memories": stats.memories.saturating_sub(counts.tombstones),
                             "counts": {
                                 "facts": counts.facts,
                                 "turns": counts.turns,
@@ -4094,7 +4095,7 @@ fn run() -> std::result::Result<(), String> {
                     println!(
                         "# {}  ({} memories: {} facts, {} turns, {} essence, {} coordination · {}-dim · {} · {} snapshots{})",
                         path,
-                        stats.memories,
+                        stats.memories.saturating_sub(counts.tombstones),
                         counts.facts,
                         counts.turns,
                         counts.essence,

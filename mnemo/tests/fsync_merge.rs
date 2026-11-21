@@ -351,7 +351,8 @@ fn a_retry_after_a_failed_barrier_seals_under_a_new_generation() {
     db.delete(&ids[7]).unwrap();
     db.flush().unwrap();
     db.close().unwrap();
-    assert_eq!(state(&p), (4499, 4499));
+    // 4,499 records and the delete's tombstone.
+    assert_eq!(state(&p), (4500, 4500));
 
     // Every page the failed attempt wrote, back to its image.
     assert!(first.len() > 2, "{first:?}");
@@ -360,13 +361,13 @@ fn a_retry_after_a_failed_barrier_seals_under_a_new_generation() {
         Err(MnemoError::PageAuthFailed(_)) => {}
         Err(e) => panic!("{e}"),
         Ok(mut db) => {
-            assert_eq!(db.len(), 4499, "the delete was undone");
+            assert_eq!(db.len(), 4500, "the delete was undone");
             match db.get(&ids[7]) {
                 Err(MnemoError::NotFound(_)) | Err(MnemoError::PageAuthFailed(_)) => {}
                 other => panic!("the deleted memory came back: {other:?}"),
             }
             match db.verify() {
-                Ok(n) => assert_eq!(n, 4499),
+                Ok(n) => assert_eq!(n, 4500),
                 Err(MnemoError::PageAuthFailed(_)) => {}
                 Err(e) => panic!("{e}"),
             }

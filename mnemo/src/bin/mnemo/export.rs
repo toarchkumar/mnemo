@@ -229,7 +229,8 @@ pub fn select(mut all: Vec<Memory>, o: &ExportOptions) -> Vec<Memory> {
             .unwrap_or(0);
     all.retain(|m| !matches!(kind_of(m), Some("claim" | "presence")));
     if o.git {
-        all.retain(|m| kind_of(m) != Some("message"));
+        // v0.21.0: tombstones are for a merge, not a backup to read.
+        all.retain(|m| !matches!(kind_of(m), Some("message" | "tombstone")));
         all.retain(|m| !done_long_ago(m, now));
         all.retain(|m| !resolved_long_ago(m, now));
         all.retain(|m| !kept_out_of_git(m));

@@ -532,15 +532,19 @@ fn delete_then_compact_drops_tombstones() {
         .unwrap();
     db.delete(&drop_id).unwrap();
     db.flush().unwrap();
-    assert_eq!(db.len(), 1);
+    // `keep` and the delete's tombstone record (v0.21.0), which compaction
+    // keeps; the deleted row is what it drops.
+    assert_eq!(db.len(), 2);
     db.close().unwrap();
 
     let report = Mnemo::compact_file(path_str, "pw").unwrap();
-    assert_eq!(report.before, 1);
-    assert_eq!(report.after, 1);
+    assert_eq!(report.before, 2);
+    assert_eq!(report.after, 2);
 
     let mut db = Mnemo::open(&path, "pw").unwrap();
-    assert_eq!(db.len(), 1);
+    assert_eq!(db.len(), 2);
+    assert_eq!(db.stats_summary().deleted, 0);
+    assert!(db.get(&drop_id).is_err());
     assert!(db.get(&keep).is_ok());
 }
 
@@ -1615,7 +1619,8 @@ fn session_discard_deletes_turns() {
     for id in &ids {
         assert!(db.get(id).is_err(), "discarded turns must be gone");
     }
-    assert_eq!(db.len(), 0);
+    assert_eq!(db.len(), 2, "only the two tombstones");
+    assert_eq!(db.kind_counts().tombstones, 2);
 }
 
 /// A session's recall is scoped to its own agent — another agent's private

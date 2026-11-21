@@ -1557,7 +1557,7 @@ impl Mnemo {
 
     /// Serialize and store a memory (insert or overwrite by ID).
     pub(super) fn put(&mut self, m: Memory) -> Result<Ulid> {
-        self.put_checked(m, true)
+        self.put_checked(m, true, true)
     }
 
     /// [`Mnemo::put`] for a record already in a file: the compaction copy
@@ -1566,10 +1566,24 @@ impl Mnemo {
     /// a file written before that rule can hold an all-zero vector, and
     /// compaction must still carry it.
     pub(super) fn put_existing(&mut self, m: Memory) -> Result<Ulid> {
-        self.put_checked(m, false)
+        self.put_checked(m, false, false)
     }
 
-    fn put_checked(&mut self, mut m: Memory, refuse_zero: bool) -> Result<Ulid> {
+    /// v0.21.0 (13.7): the next clock stamp: now in unix milliseconds, or
+    /// past the largest stamp this handle has seen, or past `prev` (the
+    /// record's own earlier stamp), whichever is largest.
+    pub(super) fn next_hlc(&mut self, prev: u64) -> u64 {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        let hlc = now.max(self.hlc_last + 1).max(prev + 1);
+        self.hlc_last = hlc;
+        hlc
+    }
+
+    /// `stamp`: a write from this build (not a copy of a record already in
+    /// a file), so it gets a fresh `_mnemo.hlc`.
+    fn put_checked(&mut self, mut m: Memory, refuse_zero: bool, stamp: bool) -> Result<Ulid> {
         if m.vector.len() != self.dimensions {
             return Err(MnemoError::DimensionMismatch {
                 expected: self.dimensions,
@@ -1592,6 +1606,16 @@ impl Mnemo {
         }
         if m.id == Ulid::nil() {
             m.id = Ulid::new();
+        }
+        if stamp {
+            let prev = m
+                .metadata
+                .get(MNEMO_META_HLC)
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let hlc = self.next_hlc(prev);
+            m.metadata
+                .insert(MNEMO_META_HLC.to_string(), Value::from(hlc));
         }
         let id_u: u128 = m.id.0;
         // 13a: a new record (an id the catalog doesn't hold live) carries

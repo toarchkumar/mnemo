@@ -653,3 +653,63 @@ fn git_leaves_out_a_task_that_refs_an_unverified_security_finding() {
         ]
     );
 }
+
+/// v0.21.0 (v0210-1): a delete's tombstone is an engine record. `--git`
+/// leaves it out, as it leaves out messages; the plain export shows it (with
+/// no content); `about`'s header total and its kinds leave it out.
+#[test]
+fn git_and_about_leave_out_a_deletes_tombstone() {
+    let (_d, path) = seed();
+    let before = jsonl(&export(&path, &["--git", "--format", "jsonl"]));
+    let mut db = Mnemo::open(&path, PW).unwrap();
+    let gone = db
+        .remember(Memory::new("a passing note", MemoryType::Episodic, v(5)).with_agent("ops"))
+        .unwrap();
+    db.delete(&gone).unwrap();
+    db.close().unwrap();
+    let after = jsonl(&export(&path, &["--git", "--format", "jsonl"]));
+    assert_eq!(
+        after, before,
+        "the git export is unchanged by a write and its delete"
+    );
+    let plain = jsonl(&export(&path, &["--format", "jsonl"]));
+    let t: Vec<&Value> = plain
+        .iter()
+        .filter(|r| r["metadata"]["_mnemo.kind"] == "tombstone")
+        .collect();
+    assert_eq!(t.len(), 1, "{plain:?}");
+    assert_eq!(t[0]["content"], "");
+    assert_eq!(t[0]["metadata"]["_mnemo.tombstone_of"], gone.to_string());
+
+    let (ok, out, err) = run(&["about", path.to_str().unwrap()], PW);
+    assert!(ok, "{err}");
+    let header = out.lines().next().unwrap();
+    // The total is the sum of the kinds: no tombstone in either.
+    let n = |label: &str| -> usize {
+        let at = header
+            .find(label)
+            .unwrap_or_else(|| panic!("{label}: {header}"));
+        header[..at]
+            .rsplit([' ', '('])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let total = n(" memories");
+    assert_eq!(
+        total,
+        n(" facts") + n(" turns") + n(" essence") + n(" coordination"),
+        "{header}"
+    );
+    let (ok, json, err) = run(&["about", path.to_str().unwrap(), "--format", "json"], PW);
+    assert!(ok, "{err}");
+    let doc: Value = serde_json::from_str(&json).unwrap();
+    let stats = &doc["stats"];
+    assert_eq!(
+        stats["memories"].as_u64().unwrap() as usize,
+        total,
+        "{json}"
+    );
+    assert!(stats["counts"].get("tombstones").is_none(), "{json}");
+}

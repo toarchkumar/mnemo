@@ -2531,7 +2531,8 @@ impl Mnemo {
     }
 
     /// 13a (ABOUT-COUNT): the live records by kind: a dict with `facts`,
-    /// `turns`, `essence` and `coordination`.
+    /// `turns`, `essence`, `coordination` and (v0.21.0) `tombstones`, the
+    /// records deletes leave, counted on their own.
     fn kind_counts(&mut self, py: Python<'_>) -> PyResult<PyObject> {
         let c = self.rd(|db| Ok(db.kind_counts()))?;
         let d = PyDict::new_bound(py);
@@ -2539,6 +2540,7 @@ impl Mnemo {
         d.set_item("turns", c.turns)?;
         d.set_item("essence", c.essence)?;
         d.set_item("coordination", c.coordination)?;
+        d.set_item("tombstones", c.tombstones)?;
         Ok(d.into_any().unbind())
     }
 
