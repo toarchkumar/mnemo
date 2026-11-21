@@ -220,6 +220,9 @@ jobs:
           persist-credentials: false
       - name: shellcheck install.sh
         run: shellcheck --shell=sh install.sh
+      # site-1: the script that assembles the site Pages publishes.
+      - name: shellcheck the site's assembly script
+        run: shellcheck --shell=sh .github/scripts/assemble-site.sh
       # v0200-d3: the MCP bundle's build script and launcher.
       - name: shellcheck the MCP bundle scripts
         run: shellcheck --shell=sh integrations/mcpb/build.sh integrations/mcpb/mnemo.sh
