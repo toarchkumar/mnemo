@@ -645,6 +645,8 @@ fn get_search_and_snapshots_take_no_path() {
     // One argument that isn't an id says so.
     let err = e.fails(&main, &["get", e.brain().to_str().unwrap()]);
     assert!(err.contains("`get` takes `[PATH] <ID>`"), "{err}");
+    let err = e.fails(&main, &["get"]);
+    assert!(err.contains("needs a memory's id, or `--key"), "{err}");
     // `search` and `snapshots`, from a subdirectory.
     let out = e.ok(
         &e.p("main/sub"),
@@ -655,6 +657,45 @@ fn get_search_and_snapshots_take_no_path() {
         "{out}"
     );
     e.ok(&e.p("main/sub"), &["snapshots"]);
+    // v0.20.2 (G1): `--key` takes no path, or the path alone.
+    let embed = format!("{} \"{}\"", python(), e.p("embed.py").display());
+    for text in ["release: v1", "release: v2"] {
+        e.ok(
+            &main,
+            &[
+                "remember",
+                "--text",
+                text,
+                "--type",
+                "semantic",
+                "--key",
+                "process.release",
+                "--embed-cmd",
+                &embed,
+                "--embed-name",
+                "test-4",
+            ],
+        );
+    }
+    let out = e.ok(&e.p("main/sub"), &["get", "--key", "process.release"]);
+    assert!(
+        out.contains("release: v2") && !out.contains("release: v1"),
+        "{out}"
+    );
+    let brain = e.brain().to_str().unwrap().to_string();
+    let m: Value = serde_json::from_str(&e.ok(
+        &main,
+        &[
+            "get",
+            &brain,
+            "--key",
+            "process.release",
+            "--format",
+            "json",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(m["content"], "release: v2", "{m}");
 }
 
 /// 13a step 1 (v0.17): `default-agent`; a write that names no agent goes to

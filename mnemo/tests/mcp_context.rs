@@ -1050,6 +1050,88 @@ fn findings_round_trip_over_mcp() {
 /// memories (`recall`, `history`, `about`, `list`) leave each one's vector
 /// out unless the call passes `include_vector: true` (`list` also takes its
 /// older `include_vectors`).
+/// v0.20.2 (G4): the `get` tool, by key (the live version) and by id (the
+/// same memory), its argument errors, and the visibility levels.
+#[test]
+fn the_get_tool_by_key_and_by_id() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        seed(&b, shared);
+        let body = |r: &Value| -> Value {
+            serde_json::from_str(ok(r)["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        let rs = b.session(
+            shared,
+            true,
+            &[
+                tool("get", json!({"key": "process.release"})),
+                tool(
+                    "remember",
+                    json!({"content": "deploys go to staging-7",
+                    "memory_type": "semantic", "key": "fact.deploy", "visibility": "private"}),
+                ),
+                tool("get", json!({"key": "fact.deploy"})),
+                tool("get", json!({"key": "fact.deploy", "visibility": ["all"]})),
+                tool("get", json!({})),
+                tool("get", json!({"key": "process.nope"})),
+                tool("get", json!({"key": "process.release", "shared": true})),
+                tool("get", json!({"id": "not-a-ulid"})),
+                tool("get", json!({"id": "01M7ESWBTNXMB0KEM5XF95YGX3"})),
+                tool(
+                    "get",
+                    json!({"key": "process.release", "agent": "a", "shared": true}),
+                ),
+            ],
+        );
+        let live = body(&rs[1]);
+        assert_eq!(
+            live["content"],
+            "Releases are cut from the release branch, then main is fast-forwarded at the tag.",
+            "{live}"
+        );
+        assert!(live.get("vector").is_none(), "{live}");
+        ok(&rs[2]);
+        let private_err = &rs[3]["error"];
+        assert_eq!(private_err["code"], -32602, "{}", rs[3]);
+        assert!(
+            private_err["message"]
+                .as_str()
+                .unwrap()
+                .contains("visibility"),
+            "{}",
+            rs[3]
+        );
+        assert_eq!(body(&rs[4])["content"], "deploys go to staging-7");
+        for (i, says) in [
+            (5, "exactly one of 'id' and 'key'"),
+            (6, "key=process.nope has no live version"),
+            (7, "no live version"),
+            (8, "invalid ULID"),
+            (9, "no memory 01M7ESWBTNXMB0KEM5XF95YGX3"),
+            (10, "mutually exclusive"),
+        ] {
+            assert_eq!(rs[i]["error"]["code"], -32602, "{}", rs[i]);
+            let m = rs[i]["error"]["message"].as_str().unwrap();
+            assert!(m.contains(says), "{i}: {m}");
+        }
+        let id = live["id"].as_str().unwrap().to_string();
+        let rs = b.session(
+            shared,
+            true,
+            &[
+                tool("get", json!({"id": id})),
+                tool("get", json!({"id": id, "include_vector": true})),
+                tool("get", json!({"id": id, "key": "process.release"})),
+                tool("get", json!({"id": id, "agent": "a"})),
+            ],
+        );
+        assert_eq!(body(&rs[1]), live);
+        assert_eq!(body(&rs[2])["vector"].as_array().map(Vec::len), Some(4));
+        assert_eq!(rs[3]["error"]["code"], -32602, "{}", rs[3]);
+        assert_eq!(rs[4]["error"]["code"], -32602, "{}", rs[4]);
+    });
+}
+
 #[test]
 fn no_tool_returns_vectors_unless_asked() {
     both_modes(|shared| {

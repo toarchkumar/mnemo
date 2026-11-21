@@ -8,7 +8,8 @@
   project essence with `essence` (`op: "render"`, `project: true`).
 - **When something will matter later** (a decision, a fact, a
   convention, a fix that worked), call `remember`. When it replaces an
-  earlier version, give it a `key`, like `decision.release-order`.
+  earlier version, give it a `key`, like `decision.release-order`;
+  `get` with that `key` reads its current version.
 - **During a long task,** keep the state with `essence`: `add` to the
   `decisions`, `open` or `next` sections, `resolve` when done.
 - **Never store secrets:** keys, tokens, passwords, recovery codes.

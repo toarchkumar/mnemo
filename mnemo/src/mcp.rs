@@ -248,6 +248,7 @@ fn is_read_tool(name: &str) -> bool {
         name,
         "about"
             | "history"
+            | "get"
             | "thread_export"
             | "recall"
             | "list"
@@ -1544,6 +1545,22 @@ fn tools_list() -> Value {
                 }
             },
             {
+                "name": "get",
+                "description": "v0.20.2: one memory, by `id` or by `key` (exactly one). By `key` it's the slot's live version, the slot resolved as for `history`: the default agent's private slot, or `agent`'s, or the shared one with `shared: true`. The visibility levels apply as for `recall` (default public and team). The memory leaves out its `vector` unless `include_vector` is true.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "The memory's ULID. Mutually exclusive with `key`." },
+                        "key": { "type": "string", "description": "A keyed slot's name (`decision.release-order`); returns its live version. Mutually exclusive with `id`." },
+                        "agent": { "type": "string", "description": "With `key`: the private slot for this agent. Mutually exclusive with `shared`." },
+                        "shared": { "type": "boolean", "default": false, "description": "With `key`: the shared slot (one per file). Mutually exclusive with `agent`." },
+                        "visibility": { "type": "array", "items": { "type": "string", "enum": ["public", "team", "private", "all"] }, "description": "The visibility levels returned (default public and team)." },
+                        "include_vector": { "type": "boolean", "default": false, "description": "Include the memory's `vector` (left out by default)." }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
                 "name": "recall",
                 "description": "Score every live memory (or the ANN-narrowed candidate set) against a query and return the top-k. Pass EITHER `query` (explicit vector) OR `text` (embedded by the server; requires --embed-cmd at serve start). Phase 12.6: add a `filter` object to restrict candidates before scoring (`session_id` plus per-metadata-key conditions: equality, `$in`, `$exists`, `$gte`/`$lte`). Phase 12.1: superseded records never appear. Phase 12.8: set `max_bytes: N` to cap the total UTF-8 bytes of returned `content` fields; the response is then shaped as `{hits: [...], truncated: bool}` so the caller can tell whether the budget cut hits. Without `max_bytes`, the response is a bare JSON array of hits (unchanged). Keyword matching (v9 files): a recall by `text` also matches the text's words (hybrid by default, since v0.15); put identifiers the text doesn't contain (a version like v0.9.0, a PR number, a function name) in `keywords`, which then replace the text for keyword matching, or pass `keywords: \"\"` for vector-only recall. Parts of dotted names and possessives match too (`nosync` finds `mnemo.nosync`). `keywords` alone (no `query`/`text`) is keyword-only recall. Hits leave out their `vector` unless `include_vector` is true (since v0.20.1).",
                 "inputSchema": {
@@ -1717,6 +1734,7 @@ fn tools_call(db: &mut Mnemo, params: &Value) -> std::result::Result<Value, RpcE
         "remember" => tool_remember(db, args)?,
         "update" => tool_update(db, args)?,
         "history" => tool_history(db, args)?,
+        "get" => tool_get(db, args)?,
         "task" => tool_task(db, args)?,
         "inbox" => tool_inbox(db, args)?,
         "claim" => tool_claim(db, args)?,
@@ -2668,12 +2686,16 @@ fn tool_thread_ingest(db: &mut Mnemo, args: &Value) -> std::result::Result<Strin
     .to_string())
 }
 
-fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+/// The keyed slot a call's `agent` and `shared` name, resolved as keyed
+/// `remember` resolves it (v0.8.1 bugfix, lane A): `shared` is the shared
+/// slot, else `agent`'s private slot, else the brain's default agent's
+/// (13a, AGENT-DEFAULT).
+fn key_scope_arg(
+    db: &mut Mnemo,
+    args: &Value,
+    tool: &str,
+) -> std::result::Result<crate::KeyScope, RpcError> {
     use crate::KeyScope;
-    let key = args
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "history: missing 'key'"))?;
     let agent = args.get("agent").and_then(|v| v.as_str());
     let shared = args
         .get("shared")
@@ -2682,14 +2704,12 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
     if shared && agent.is_some() {
         return Err(RpcError::new(
             INVALID_PARAMS,
-            "history: 'agent' and 'shared' are mutually exclusive",
+            format!("{tool}: 'agent' and 'shared' are mutually exclusive"),
         ));
     }
-    // v0.8.1 bugfix (lane A): match keyed `remember` slot resolution.
-    let scope = if shared {
+    Ok(if shared {
         KeyScope::Shared
     } else {
-        // 13a (AGENT-DEFAULT): no `agent`, the brain's default agent.
         match agent
             .map(str::to_string)
             .or(db.default_agent().map_err(mnemo_err)?)
@@ -2697,7 +2717,80 @@ fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
             Some(a) => KeyScope::Private(a),
             None => KeyScope::private_default(),
         }
+    })
+}
+
+/// v0.20.2 (G1, G4): one memory, by `id`, or by `key` (the slot's live
+/// version, the slot resolved as `history` resolves it). The visibility
+/// levels apply as in every read tool, and the vector is left out unless
+/// asked (v0.20.1).
+fn tool_get(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let id = args.get("id").and_then(|v| v.as_str());
+    let key = args.get("key").and_then(|v| v.as_str());
+    let vis = visibility_arg(args)?;
+    let (m, what) = match (id, key) {
+        (Some(id), None) => {
+            if args.get("agent").is_some() || args.get("shared").is_some() {
+                return Err(RpcError::new(
+                    INVALID_PARAMS,
+                    "get: 'agent' and 'shared' choose a key's slot, so they go with 'key'",
+                ));
+            }
+            let u = crate::Ulid::from_string(id)
+                .map_err(|_| RpcError::new(INVALID_PARAMS, format!("get: invalid ULID '{id}'")))?;
+            let m = match db.get(&u) {
+                Ok(m) => m,
+                Err(MnemoError::NotFound(_)) => {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        format!("get: no memory {id}"),
+                    ))
+                }
+                Err(e) => return Err(mnemo_err(e)),
+            };
+            (m, format!("memory {id}"))
+        }
+        (None, Some(key)) => {
+            let scope = key_scope_arg(db, args, "get")?;
+            let live = db
+                .history_in(key, scope)
+                .map_err(mnemo_err)?
+                .into_iter()
+                .next();
+            let m = live.ok_or_else(|| {
+                RpcError::new(
+                    INVALID_PARAMS,
+                    format!("get: key={key} has no live version in that slot"),
+                )
+            })?;
+            (m, format!("key={key}'s live version"))
+        }
+        _ => {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                "get: give exactly one of 'id' and 'key'",
+            ))
+        }
     };
+    if !vis.shows(&m) {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            format!(
+                "get: {what} isn't at the visibility levels asked (default public and team; \
+                 pass visibility to see others)"
+            ),
+        ));
+    }
+    let v = memory_to_json(&m, include_vector_arg(args));
+    Ok(serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".into()))
+}
+
+fn tool_history(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(INVALID_PARAMS, "history: missing 'key'"))?;
+    let scope = key_scope_arg(db, args, "history")?;
     // RB-013.2: each version's state first, then the levels shown.
     let vis = visibility_arg(args)?;
     let chain = db.history_in(key, scope).map_err(mnemo_err)?;
