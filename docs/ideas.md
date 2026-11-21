@@ -4,6 +4,28 @@ Ideas that were looked at and aren't on the roadmap, with what we found
 and what would bring each one back. The roadmap itself is in the project
 brain (`decision.roadmap-order`).
 
+## One brain for many projects, and namespaces (2026-11-21)
+
+**The idea:** one `.mnemo` file holding several projects, like one SQLite
+file holding several apps.
+
+**What the review found** (REVIEWER-A, `REV-016`):
+- **One file for many projects: no.** Visibility is a filter, not
+  encryption, so a file can't keep one project's memories from another's.
+  Unrelated projects would also crowd each other's recall, wait on the
+  same write lock, and lose the automatic `.git` discovery.
+- **The rule (user, 2026-11-21):** one file is one trust boundary. Files
+  separate trust, sharing, sync and lifecycle.
+- **Reading across brains** is on the roadmap instead: **attached brains**
+  (`--attach`, step 4b, after smarter memory). A session attaches other
+  brains, read-only first, such as a personal brain or a playbook beside
+  the project's, and one recall searches them all.
+- **Namespaces** (`_mnemo.namespace`, `--namespace`) could organize goals
+  or areas inside one owner's brain, for a monorepo or an app.
+
+**Status:** namespaces aren't on the roadmap. They come back if one brain
+holds several unrelated goals and recall or the essence gets crowded.
+
 ## Hosted brains for an agent harness (2026-11-19)
 
 **The idea:** one encrypted `.mnemo` file per client in cloud storage,
