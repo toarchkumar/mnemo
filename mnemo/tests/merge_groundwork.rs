@@ -4,11 +4,18 @@
 //! stamp. A delete leaves a tombstone, an engine record with the deleted id,
 //! its key slot and the time and none of its content, which compaction
 //! keeps and recall, `about`'s counts and the git export leave out.
+//!
+//! Step 1b (RB-019.1, .2, .7, .8): a turn's tombstone names its thread and
+//! turn id; a message prune leaves none; the manifest records the first
+//! stamp a v0.21 build wrote (`_mnemo.hlc_since`); a dev-hooks clock lets a
+//! test run a copy ahead, behind or in the same millisecond; and a stamp far
+//! ahead of the clock is gone past and said once.
 
 use mnemo_engine::{
     EssenceScope, EssenceSection, KdfParams, Memory, MemoryPatch, MemoryType, Mnemo, MnemoConfig,
-    RecallRequest, ThreadTurn, Ulid, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_KIND,
-    MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER,
+    RecallRequest, ThreadTurn, Ulid, HLC_AHEAD_NOTICE_MS, MNEMO_META_DELETED_AT, MNEMO_META_HLC,
+    MNEMO_META_HLC_SINCE, MNEMO_META_KIND, MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF,
+    MNEMO_META_TOMBSTONE_OWNER, MNEMO_META_TOMBSTONE_THREAD, MNEMO_META_TOMBSTONE_TURN,
 };
 use serde_json::Value;
 
@@ -180,7 +187,7 @@ fn a_delete_leaves_a_tombstone_with_no_content() {
         )
         .unwrap();
     let keyed_hlc = hlc(&db.get(&keyed).unwrap());
-    let counts_before = db.kind_counts();
+    let counts_before = db.kind_counts().unwrap();
     db.delete(&plain).unwrap();
     db.delete(&keyed).unwrap();
     // Deleting again is a no-op, as before, and leaves no second tombstone.
@@ -226,7 +233,7 @@ fn a_delete_leaves_a_tombstone_with_no_content() {
     assert!(hits
         .iter()
         .all(|h| h.memory.metadata.get(MNEMO_META_TOMBSTONE_OF).is_none()));
-    let c = db.kind_counts();
+    let c = db.kind_counts().unwrap();
     assert_eq!(c.tombstones, 2);
     assert_eq!(c.coordination, counts_before.coordination);
     assert_eq!(c.facts, counts_before.facts - 2);
@@ -237,11 +244,11 @@ fn a_delete_leaves_a_tombstone_with_no_content() {
     let after: Vec<String> = tombstones(&mut db).iter().map(of).collect();
     assert_eq!(after.len(), 2, "{after:?}");
     assert!(db.get(&plain).is_err() && db.get(&keyed).is_err());
-    assert_eq!(db.kind_counts().tombstones, 2);
+    assert_eq!(db.kind_counts().unwrap().tombstones, 2);
 }
 
 #[test]
-fn essence_remove_thread_forget_and_message_prunes_leave_tombstones() {
+fn essence_remove_and_thread_forget_leave_tombstones_and_a_prune_leaves_none() {
     let dir = tempfile::tempdir().unwrap();
     let mut db = create(&dir);
     let item = db
@@ -281,13 +288,262 @@ fn essence_remove_thread_forget_and_message_prunes_leave_tombstones() {
         .unwrap();
     db.ack(&msg.id, None, Some("planner-a")).unwrap();
     assert_eq!(db.prune_messages(-1).unwrap(), 1);
+    assert!(db.get(&msg.id).is_err(), "the message is gone");
     let ts = tombstones(&mut db);
-    assert_eq!(ts.len(), 2 + forgotten, "{}", ts.len());
-    for gone in [item, msg.id] {
-        assert!(ts
-            .iter()
-            .any(|t| t.metadata[MNEMO_META_TOMBSTONE_OF] == gone.to_string()));
+    // RB-019.7: the prune left none (a merge drops what compaction drops).
+    assert_eq!(ts.len(), 1 + forgotten, "{}", ts.len());
+    assert!(ts
+        .iter()
+        .any(|t| t.metadata[MNEMO_META_TOMBSTONE_OF] == item.to_string()));
+    assert!(ts
+        .iter()
+        .all(|t| t.metadata[MNEMO_META_TOMBSTONE_OF] != msg.id.to_string()));
+    // RB-019.2: each turn's names its thread and turn id; the essence
+    // item's names neither.
+    let mut turn_ids: Vec<&str> = ts
+        .iter()
+        .filter_map(|t| {
+            let thread = t.metadata.get(MNEMO_META_TOMBSTONE_THREAD)?;
+            assert_eq!(thread, "t1");
+            t.metadata.get(MNEMO_META_TOMBSTONE_TURN)?.as_str()
+        })
+        .collect();
+    turn_ids.sort();
+    assert_eq!(turn_ids, ["u-0", "u-1", "u-2"]);
+    let essence_t = ts
+        .iter()
+        .find(|t| t.metadata[MNEMO_META_TOMBSTONE_OF] == item.to_string())
+        .unwrap();
+    assert!(essence_t
+        .metadata
+        .get(MNEMO_META_TOMBSTONE_THREAD)
+        .is_none());
+    // No content of a turn is on its tombstone.
+    for t in &ts {
+        let text = serde_json::to_string(&t.metadata).unwrap();
+        assert!(!text.contains("turn 1"), "{text}");
     }
+}
+
+#[test]
+fn a_single_turn_delete_names_its_turn_too() {
+    // Through `delete`, not `thread_forget`, with the handle caches cold.
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    let turns = [ThreadTurn {
+        turn_id: "a-7".into(),
+        role: "assistant".into(),
+        content: "the answer".into(),
+        timestamp: None,
+    }];
+    db.ingest_thread_with_vectors("t2", &turns, &[vec![1.0, 2.0, 0.0, 0.0]])
+        .unwrap();
+    let id = db
+        .memories()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.metadata.get(MNEMO_META_KIND).and_then(Value::as_str) == Some("turn"))
+        .expect("one turn written")
+        .id;
+    db.close().unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    db.delete(&id).unwrap();
+    let ts = tombstones(&mut db);
+    assert_eq!(ts.len(), 1);
+    assert_eq!(ts[0].metadata[MNEMO_META_TOMBSTONE_THREAD], "t2");
+    assert_eq!(ts[0].metadata[MNEMO_META_TOMBSTONE_TURN], "a-7");
+}
+
+fn since(db: &mut Mnemo) -> Option<u64> {
+    db.about_in(mnemo_engine::VisibilitySet::ALL)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.metadata.get("topic").and_then(Value::as_str) == Some("manifest"))
+        .and_then(|m| m.metadata.get(MNEMO_META_HLC_SINCE).and_then(Value::as_u64))
+}
+
+#[test]
+fn the_manifest_records_the_first_stamp_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    let manifest = db.remember(Memory::scaffold_manifest(4)).unwrap();
+    let first = hlc(&db.get(&manifest).unwrap());
+    db.flush().unwrap();
+    assert_eq!(since(&mut db), Some(first));
+    fact(&mut db, "a later fact", 2.0);
+    db.close().unwrap();
+    // Later handles leave it as it is, and so does compaction.
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    fact(&mut db, "another fact", 3.0);
+    db.close().unwrap();
+    Mnemo::compact_file(&path(&dir), PW).unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    assert_eq!(since(&mut db), Some(first));
+    // A read-only open writes nothing.
+    db.close().unwrap();
+    let before = std::fs::read(path(&dir)).unwrap();
+    let mut ro = Mnemo::open_read_only(path(&dir), PW).unwrap();
+    assert_eq!(since(&mut ro), Some(first));
+    drop(ro);
+    assert_eq!(std::fs::read(path(&dir)).unwrap(), before);
+}
+
+#[test]
+fn a_file_with_no_manifest_gets_the_field_with_its_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    fact(&mut db, "before any manifest", 1.0);
+    db.flush().unwrap();
+    assert_eq!(since(&mut db), None);
+    let manifest = db.remember(Memory::scaffold_manifest(4)).unwrap();
+    db.close().unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    let got = since(&mut db).expect("set at the commit that wrote the manifest");
+    assert!(got <= hlc(&db.get(&manifest).unwrap()));
+}
+
+#[test]
+fn a_new_manifest_keeps_the_first_stamp() {
+    // The live manifest lacks the field (an older build wrote it, or a
+    // caller built it afresh): the earliest an older one held is kept.
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    db.remember_keyed(Memory::scaffold_manifest(4), "manifest")
+        .unwrap();
+    db.close().unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    let first = since(&mut db).unwrap();
+    let mut newer = Memory::scaffold_manifest(4);
+    newer.content = "MNEMO MANIFEST, rewritten".into();
+    let (id, _) = db.remember_keyed(newer, "manifest").unwrap();
+    db.close().unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    let m = db.get(&id).unwrap();
+    assert_eq!(m.metadata[MNEMO_META_HLC_SINCE], first);
+    assert_eq!(since(&mut db), Some(first));
+}
+
+fn wall_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[test]
+fn the_test_clock_runs_a_copy_ahead_behind_or_in_the_same_millisecond() {
+    const HOUR: u64 = 3_600_000;
+    // The same millisecond on two copies, then one apart.
+    let (da, db_) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let at = 1_900_000_000_000u64;
+    let (mut a, mut b) = (create(&da), create(&db_));
+    a.__freeze_hlc_clock_for_testing(Some(at));
+    b.__freeze_hlc_clock_for_testing(Some(at));
+    let (ia, ib) = (fact(&mut a, "in a", 1.0), fact(&mut b, "in b", 1.0));
+    assert_eq!(hlc(&a.get(&ia).unwrap()), at);
+    assert_eq!(hlc(&b.get(&ib).unwrap()), at);
+    let ia2 = fact(&mut a, "in a again", 2.0);
+    assert_eq!(
+        hlc(&a.get(&ia2).unwrap()),
+        at + 1,
+        "a held clock still rises"
+    );
+    // An hour ahead, and an hour behind, of the wall clock.
+    let dc = tempfile::tempdir().unwrap();
+    let mut c = create(&dc);
+    c.__set_hlc_offset_for_testing(HOUR as i64);
+    let before = wall_ms();
+    let ic = fact(&mut c, "ahead", 1.0);
+    let h = hlc(&c.get(&ic).unwrap());
+    assert!(h >= before + HOUR && h <= wall_ms() + HOUR, "{h}");
+    let dd = tempfile::tempdir().unwrap();
+    let mut d = create(&dd);
+    d.__set_hlc_offset_for_testing(-(HOUR as i64));
+    let before = wall_ms();
+    let id_ = fact(&mut d, "behind", 1.0);
+    let h = hlc(&d.get(&id_).unwrap());
+    assert!(h + HOUR >= before && h + HOUR <= wall_ms(), "{h}");
+    // Behind its own clock, a copy still stamps past what it has seen.
+    d.__set_hlc_offset_for_testing(-(3 * HOUR as i64));
+    let id2 = fact(&mut d, "further behind", 2.0);
+    assert!(hlc(&d.get(&id2).unwrap()) > h);
+}
+
+#[test]
+fn a_stamp_far_ahead_is_gone_past_and_said_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut db = create(&dir);
+    let ahead = wall_ms() + 3 * HLC_AHEAD_NOTICE_MS;
+    let mut m = Memory::new("x", MemoryType::Semantic, vec![1.0, 1.0, 0.0, 0.0]);
+    m.metadata.insert(MNEMO_META_HLC.into(), ahead.into());
+    let id = db.__put_unvalidated_for_testing(m).unwrap();
+    db.close().unwrap();
+    let mut db = Mnemo::open(path(&dir), PW).unwrap();
+    assert_eq!(db.clock_lead_ms(), 0, "nothing read yet");
+    db.get(&id).unwrap();
+    let lead = db.clock_lead_ms();
+    assert!(
+        lead > 2 * HLC_AHEAD_NOTICE_MS && lead <= 3 * HLC_AHEAD_NOTICE_MS,
+        "{lead}"
+    );
+    assert!(db.notices().is_empty(), "said at a write, not a read");
+    let n = fact(&mut db, "after it", 2.0);
+    assert!(hlc(&db.get(&n).unwrap()) > ahead);
+    fact(&mut db, "and again", 3.0);
+    let said: Vec<&String> = db
+        .notices()
+        .iter()
+        .filter(|n| n.contains("ahead of this computer's clock"))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains("3 days") || said[0].contains("2 days"),
+        "{}",
+        said[0]
+    );
+}
+
+#[test]
+fn a_cli_write_says_once_when_a_stamp_is_far_ahead() {
+    let dir = tempfile::tempdir().unwrap();
+    create(&dir).close().unwrap();
+    let p = path(&dir);
+    let post = |offset_ms: Option<u64>| {
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_mnemo"));
+        c.args([
+            "post",
+            "planner-a",
+            "DONE: x",
+            "--brain",
+            &p,
+            "--as",
+            "worker-a",
+        ])
+        .env("MNEMO_PASSPHRASE", PW)
+        .env_remove("MNEMO_AGENT")
+        .env_remove("MNEMO_ROLE")
+        .env_remove("MNEMO_DEV_HLC_OFFSET_MS");
+        if let Some(o) = offset_ms {
+            c.env("MNEMO_DEV_HLC_OFFSET_MS", o.to_string());
+        }
+        let out = c.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    // A copy whose clock ran three days ahead wrote one message.
+    let ahead = post(Some(3 * HLC_AHEAD_NOTICE_MS));
+    assert!(!ahead.contains("ahead of this computer's clock"), "{ahead}");
+    // This one reads it before it writes, and says so once.
+    let err = post(None);
+    assert_eq!(
+        err.matches("ahead of this computer's clock").count(),
+        1,
+        "{err}"
+    );
 }
 
 #[test]

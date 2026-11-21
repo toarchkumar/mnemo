@@ -435,6 +435,7 @@ impl Mnemo {
             presence_held: false,
             clock_offset: 0,
             hlc_last: 0,
+            hlc_clock: HlcClock::default(),
             legacy_coordination: None,
             free: FreeList::default(),
             pending_free: Vec::new(),
@@ -925,6 +926,7 @@ impl Mnemo {
             presence_held: false,
             clock_offset: 0,
             hlc_last: 0,
+            hlc_clock: HlcClock::default(),
             legacy_coordination: None,
             free,
             pending_free: Vec::new(),
@@ -1257,6 +1259,7 @@ impl Mnemo {
             presence_held: false,
             clock_offset: 0,
             hlc_last: 0,
+            hlc_clock: HlcClock::default(),
             legacy_coordination: None,
             free,
             pending_free: Vec::new(),
@@ -1342,6 +1345,15 @@ impl Mnemo {
     /// (the keys note, section 1, rule 7), with the fix. Empty otherwise.
     pub fn notices(&self) -> &[String] {
         &self.notices
+    }
+
+    /// v0.21.0 (13.7): how far, in ms, the largest clock stamp this handle
+    /// has read or written runs ahead of this computer's clock (0 when it
+    /// doesn't). New writes are stamped past it all the same. Past
+    /// [`HLC_AHEAD_NOTICE_MS`], the next write adds a notice
+    /// ([`Mnemo::notices`]); the library prints nothing.
+    pub fn clock_lead_ms(&self) -> u64 {
+        self.hlc_last.saturating_sub(self.hlc_now_ms())
     }
 
     /// Embedding dimensionality this database expects.

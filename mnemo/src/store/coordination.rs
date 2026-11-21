@@ -246,18 +246,24 @@ impl Mnemo {
     /// so only `episodic` fact rows whose vector is the sentinel are
     /// decrypted (COORD-LEGACY-SCAN, v0.17.2); a row whose vector can't be
     /// read is decrypted, as before. A write of one re-tags its row.
+    ///
+    /// v0.21.0 (RB-019.1): the `working` fact rows too, where a tombstone
+    /// lands after an older build's `compact` (it's the one coordination
+    /// record of that type).
     fn legacy_coordination_ids(&mut self) -> Result<std::collections::HashSet<u128>> {
         if let Some(ids) = &self.legacy_coordination {
             return Ok(ids.clone());
         }
         let episodic = super::records::memory_type_code(MemoryType::Episodic);
+        let working = super::records::memory_type_code(MemoryType::Working);
         let candidates: Vec<CatalogEntry> = self
             .catalog
             .iter()
             .filter(|e| !e.deleted)
             .filter(|e| {
                 e.v9.is_some_and(|r| {
-                    r.kind == super::records::ROW_KIND_FACT && r.memory_type == episodic
+                    r.kind == super::records::ROW_KIND_FACT
+                        && (r.memory_type == episodic || r.memory_type == working)
                 })
             })
             .cloned()
@@ -564,22 +570,27 @@ impl Mnemo {
     /// 13a (R-010.8): delete messages acked more than `older_than_secs` ago
     /// ([`crate::memory::MESSAGE_ACKED_KEEP_SECS`] by default in the CLI).
     /// Returns how many went. `compact` drops the same ones.
+    ///
+    /// v0.21.0 (RB-019.7): a prune leaves no tombstone. A merge drops the
+    /// messages compaction drops, from both inputs, so one pruned at the
+    /// default keep time can't come back; one pruned sooner can, from a
+    /// copy that still holds it.
     pub fn prune_messages(&mut self, older_than_secs: i64) -> Result<usize> {
         if self.read_only {
             return Err(MnemoError::ReadOnly);
         }
         let now = memory::now_secs();
-        let old: Vec<Ulid> = self
+        let old: Vec<Memory> = self
             .messages()?
-            .iter()
-            .filter_map(Message::from_memory)
-            .filter(|m| prunable(m, now, older_than_secs))
-            .map(|m| m.id)
+            .into_iter()
+            .filter(|m| Message::from_memory(m).is_some_and(|x| prunable(&x, now, older_than_secs)))
             .collect();
-        for id in &old {
-            self.delete(id)?;
+        let n = old.len();
+        for m in old {
+            let id = m.id;
+            self.delete_inner(&id, Some(m), false)?;
         }
-        Ok(old.len())
+        Ok(n)
     }
 }
 
@@ -2519,14 +2530,29 @@ impl Mnemo {
     /// 13a (ABOUT-COUNT): how many live records of each kind, from the
     /// catalog's rows (a v8 file's records have none and count as facts).
     /// Superseded versions count too, as in [`Mnemo::len`].
-    pub fn kind_counts(&self) -> KindCounts {
-        use super::records::{ROW_KIND_ESSENCE, ROW_KIND_THREAD_LINK, ROW_KIND_TURN};
+    ///
+    /// v0.21.0 (RB-019.1): a coordination record an older build's
+    /// `compact` tagged as a fact is counted as what it is (the RB-013.1
+    /// scan finds it), so this takes `&mut self` and can fail.
+    pub fn kind_counts(&mut self) -> Result<KindCounts> {
+        use super::records::{
+            ROW_KIND_ESSENCE, ROW_KIND_FACT, ROW_KIND_THREAD_LINK, ROW_KIND_TURN,
+        };
+        let legacy = self.legacy_coordination_ids()?;
         let mut c = KindCounts::default();
         // v0.21.0: a tombstone's row is a coordination row of type
         // `working` (`put_tombstone`); no other coordination record is.
         let working = super::records::memory_type_code(MemoryType::Working);
         for e in self.catalog.iter().filter(|e| !e.deleted) {
-            match e.v9.map(|r| (r.kind, r.memory_type)) {
+            let row = e.v9.map(|r| {
+                let kind = if r.kind == ROW_KIND_FACT && legacy.contains(&e.id) {
+                    ROW_KIND_COORDINATION
+                } else {
+                    r.kind
+                };
+                (kind, r.memory_type)
+            });
+            match row {
                 Some((ROW_KIND_TURN | ROW_KIND_THREAD_LINK, _)) => c.turns += 1,
                 Some((ROW_KIND_ESSENCE, _)) => c.essence += 1,
                 Some((ROW_KIND_COORDINATION, t)) if t == working => c.tombstones += 1,
@@ -2534,7 +2560,7 @@ impl Mnemo {
                 _ => c.facts += 1,
             }
         }
-        c
+        Ok(c)
     }
 }
 

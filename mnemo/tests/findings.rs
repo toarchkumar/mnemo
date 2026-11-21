@@ -238,7 +238,7 @@ fn a_finding_is_never_a_recall_hit() {
         .unwrap()
         .iter()
         .all(|m| !mnemo_engine::is_coordination(m)));
-    assert_eq!(db.kind_counts().coordination, 1);
+    assert_eq!(db.kind_counts().unwrap().coordination, 1);
 }
 
 /// Review round 1 (RB-014): a finding needs its author, and its id is

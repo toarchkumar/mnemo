@@ -65,6 +65,70 @@ impl Mnemo {
             }))
     }
 
+    /// v0.21.0 (RB-019.1): once a handle has stamped a write, give the
+    /// manifest `_mnemo.hlc_since` if it lacks it: the earliest an older
+    /// version of the manifest held, else this handle's first stamp. Once
+    /// per handle; a file with no manifest is asked again at the next
+    /// commit. The manifest is found by its row, so the rest of the file
+    /// isn't decrypted.
+    pub(super) fn record_hlc_since(&mut self) -> Result<()> {
+        let Some(first) = self.hlc_clock.first else {
+            return Ok(());
+        };
+        if self.hlc_clock.since_done || !self.is_v9() {
+            return Ok(());
+        }
+        let rows: Vec<CatalogEntry> = self
+            .catalog
+            .iter()
+            .filter(|e| {
+                !e.deleted
+                    && e.v9
+                        .is_some_and(|r| r.kind == super::records::ROW_KIND_ONBOARDING)
+            })
+            .cloned()
+            .collect();
+        let mut since: Option<u64> = None;
+        // The manifest `about` shows: the live one of highest importance,
+        // then the oldest.
+        let mut live: Option<(CatalogEntry, Memory)> = None;
+        for e in rows {
+            let m = self.read_memory_meta(&e)?;
+            if !is_manifest(&m) || is_coordination(&m) {
+                continue;
+            }
+            if let Some(h) = m.metadata.get(MNEMO_META_HLC_SINCE).and_then(Value::as_u64) {
+                since = Some(since.map_or(h, |s| s.min(h)));
+            }
+            if m.metadata.contains_key(MNEMO_META_SUPERSEDED_BY) {
+                continue;
+            }
+            let better = live.as_ref().is_none_or(|(_, b)| {
+                m.importance
+                    .total_cmp(&b.importance)
+                    .then_with(|| b.created_at.cmp(&m.created_at))
+                    .is_gt()
+            });
+            if better {
+                live = Some((e, m));
+            }
+        }
+        let Some((entry, m)) = live else {
+            return Ok(());
+        };
+        self.hlc_clock.since_done = true;
+        if m.metadata.contains_key(MNEMO_META_HLC_SINCE) {
+            return Ok(());
+        }
+        let mut m = self.finish_memory(&entry, m)?;
+        m.metadata.insert(
+            MNEMO_META_HLC_SINCE.into(),
+            Value::from(since.unwrap_or(first).min(first)),
+        );
+        self.put(m)?;
+        Ok(())
+    }
+
     /// 13a (AGENT-DEFAULT): set (or with `None`, clear) the manifest's
     /// `_mnemo.default_agent`, in place: the manifest keeps its id, content
     /// and vector. `agent` must be 1 to 64 of `[A-Za-z0-9._-]`. Returns

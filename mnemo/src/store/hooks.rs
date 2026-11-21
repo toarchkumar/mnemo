@@ -17,6 +17,23 @@ impl Mnemo {
         self.put_coordination(kind, content.to_string(), metadata)
     }
 
+    /// **Not a stable API.** v0.21.0 (RB-019.8): move this handle's clock
+    /// for stamps by `ms` (negative: behind), so a test can run one copy
+    /// ahead of another. `MNEMO_DEV_HLC_OFFSET_MS` adds to it.
+    #[doc(hidden)]
+    pub fn __set_hlc_offset_for_testing(&mut self, ms: i64) {
+        self.hlc_clock.offset_ms = ms;
+    }
+
+    /// **Not a stable API.** v0.21.0 (RB-019.8): hold this handle's wall
+    /// clock for stamps at `at_ms` unix ms (`None`: the real clock again),
+    /// so two copies can stamp the same millisecond. Each stamp still goes
+    /// past the last, so a held clock gives `at_ms`, `at_ms + 1`, ...
+    #[doc(hidden)]
+    pub fn __freeze_hlc_clock_for_testing(&mut self, at_ms: Option<u64>) {
+        self.hlc_clock.frozen_ms = at_ms;
+    }
+
     /// **Not a stable API.** PERF-2 (v0.19.0): load the ANN index and write
     /// it again as a new base run, in the current layout (or the one
     /// `__set_index_layout_for_testing` asked for), without retraining it.

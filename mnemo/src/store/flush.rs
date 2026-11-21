@@ -184,6 +184,8 @@ impl Mnemo {
                  the commit or drops it"
             )));
         }
+        // v0.21.0 (RB-019.1): the manifest's first stamp, in this commit.
+        self.record_hlc_since()?;
         // Snapshot the thread-local fsync counter. Every `sync_all` the
         // pager / wal / checkpoint path makes between here and the end
         // of this function bumps the same counter; `delta` lands on

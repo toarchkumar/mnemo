@@ -362,6 +362,18 @@ pub const MNEMO_META_TOMBSTONE_KEY: &str = "_mnemo.tombstone_key";
 pub const MNEMO_META_TOMBSTONE_OWNER: &str = "_mnemo.tombstone_owner";
 /// v0.21.0: when a tombstone's record was deleted, in unix seconds.
 pub const MNEMO_META_DELETED_AT: &str = "_mnemo.deleted_at";
+/// v0.21.0 (RB-019.2): a deleted turn's thread id, on its tombstone, so a
+/// merge removes every copy of the turn (a turn saved twice has two ids).
+pub const MNEMO_META_TOMBSTONE_THREAD: &str = "_mnemo.tombstone_thread";
+/// v0.21.0 (RB-019.2): a deleted turn's `_mnemo.turn_id`, on its tombstone.
+pub const MNEMO_META_TOMBSTONE_TURN: &str = "_mnemo.tombstone_turn";
+/// v0.21.0 (RB-019.1): on the manifest, the first clock stamp a v0.21 or
+/// later build wrote in this file, set once. A merge can't know of a
+/// delete made before it, or by an older build.
+pub const MNEMO_META_HLC_SINCE: &str = "_mnemo.hlc_since";
+/// v0.21.0 (13.7): how far past the clock a handle's largest stamp seen
+/// may run before it says so ([`crate::Mnemo::notices`]): one day, in ms.
+pub const HLC_AHEAD_NOTICE_MS: u64 = 86_400_000;
 /// v0.21.0 (13.7): a hybrid logical clock stamp, on every write and
 /// in-place update: unix milliseconds, raised past the largest stamp the
 /// writing handle has seen (the record's own earlier stamp included), so

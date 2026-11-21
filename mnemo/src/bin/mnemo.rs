@@ -2411,6 +2411,20 @@ fn warn_notices(db: Mnemo) -> Mnemo {
 /// How many of the open handle's notices [`warn_notices`] has shown.
 static NOTICES_SHOWN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// v0.21.0: a command's write, then what the handle found to tell its
+/// owner meanwhile (a clock stamp far ahead, 13.7), once, on stderr.
+trait FlushNoting {
+    fn flush_noting(&mut self) -> std::result::Result<(), String>;
+}
+
+impl FlushNoting for Mnemo {
+    fn flush_noting(&mut self) -> std::result::Result<(), String> {
+        self.flush().map_err(fmt)?;
+        warn_late_notices(self);
+        Ok(())
+    }
+}
+
 /// RB-015.1: say what the handle found to tell its owner after it opened
 /// (a damaged index, met on the first recall), once, on stderr.
 fn warn_late_notices(db: &Mnemo) {
@@ -3785,7 +3799,7 @@ fn run() -> std::result::Result<(), String> {
                 db.remember(m).map_err(fmt)?;
                 count += 1;
             }
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("imported {count} memories into {path}");
         }
         Command::Remember {
@@ -3896,7 +3910,7 @@ fn run() -> std::result::Result<(), String> {
             match key {
                 None => {
                     let id = db.remember(memory).map_err(fmt)?;
-                    db.flush().map_err(fmt)?;
+                    db.flush_noting()?;
                     println!("{id}");
                 }
                 Some(k) => {
@@ -3908,7 +3922,7 @@ fn run() -> std::result::Result<(), String> {
                         None => db.remember_keyed(memory, &k),
                     }
                     .map_err(fmt)?;
-                    db.flush().map_err(fmt)?;
+                    db.flush_noting()?;
                     let outcome_str = match outcome {
                         mnemo_engine::WriteOutcome::Added => "added",
                         mnemo_engine::WriteOutcome::Superseded => "superseded",
@@ -3944,7 +3958,7 @@ fn run() -> std::result::Result<(), String> {
             let mut db = open_w(&path, &pp, "index").map_err(fmt)?;
             if drop {
                 db.drop_index();
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
                 println!("dropped ANN index on {path}");
             } else if rebuild {
                 // BP.1: re-cluster + retrain under the current
@@ -3965,7 +3979,7 @@ fn run() -> std::result::Result<(), String> {
                     )));
                 }
                 let info = db.rebuild_index().map_err(fmt)?;
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
                 println!(
                     "rebuilt ANN index on {path}: {} vectors, {} partitions, {} PQ subspaces",
                     info.vectors, info.partitions, info.subspaces
@@ -3979,7 +3993,7 @@ fn run() -> std::result::Result<(), String> {
                     ..Default::default()
                 };
                 let info = db.build_index_with(cfg).map_err(fmt)?;
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
                 println!(
                     "built ANN index on {path}: {} vectors, {} partitions, {} PQ subspaces",
                     info.vectors, info.partitions, info.subspaces
@@ -4023,7 +4037,7 @@ fn run() -> std::result::Result<(), String> {
             let mut db = open_ro(&path, &secret).map_err(fmt)?;
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
-            let counts = db.kind_counts();
+            let counts = db.kind_counts().map_err(fmt)?;
             let now = db.coordination_now();
             let mut entries = db.about_in(vis).map_err(fmt)?;
             // 12.7d: the project essence follows the manifest and the
@@ -4711,7 +4725,7 @@ fn run() -> std::result::Result<(), String> {
             // mutate, so skip the flush and avoid the needless
             // `ReadOnly` error from a read-only handle.
             if !effective_no_track {
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
             }
             print_recall_hits(&resp.hits, format);
             // Phase 12.8: if the max_bytes budget cut anything, say
@@ -4814,7 +4828,7 @@ fn run() -> std::result::Result<(), String> {
                 }
             };
             let outcome = db.supersede(&old, &by).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             let s = match outcome {
                 mnemo_engine::WriteOutcome::Unchanged => "unchanged",
                 _ => "superseded",
@@ -4896,7 +4910,7 @@ fn run() -> std::result::Result<(), String> {
                 WakeCmd::Pause | WakeCmd::Resume => {
                     let pause = matches!(cmd, WakeCmd::Pause);
                     let o = db.set_wake_paused(pause).map_err(fmt)?;
-                    db.flush().map_err(fmt)?;
+                    db.flush_noting()?;
                     let word = if pause { "paused" } else { "resumed" };
                     match o {
                         mnemo_engine::WriteOutcome::Unchanged => {
@@ -5136,7 +5150,7 @@ fn run() -> std::result::Result<(), String> {
                     }
                 },
             };
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             out?;
         }
         Command::Finding {
@@ -5263,7 +5277,7 @@ fn run() -> std::result::Result<(), String> {
                 },
             };
             if writes {
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
             }
             out?;
         }
@@ -5392,7 +5406,7 @@ fn run() -> std::result::Result<(), String> {
                     Ok(())
                 }
             };
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             out?;
         }
         Command::Post {
@@ -5424,7 +5438,7 @@ fn run() -> std::result::Result<(), String> {
                     role.as_deref(),
                 )
                 .map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("{}\thop {}", m.id, m.hops);
         }
         Command::Inbox {
@@ -5447,7 +5461,7 @@ fn run() -> std::result::Result<(), String> {
             }
             if prune {
                 let n = db.prune_messages(i64::from(days) * 86_400).map_err(fmt)?;
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
                 println!("pruned {n} acked message{}", if n == 1 { "" } else { "s" });
                 return Ok(());
             }
@@ -5464,7 +5478,7 @@ fn run() -> std::result::Result<(), String> {
                 .map_err(fmt)?;
             let unseen: Vec<mnemo_engine::Ulid> = msgs.iter().map(|m| m.id).collect();
             db.mark_seen(&unseen).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             match format {
                 OutputFormat::Json => println!(
                     "{}",
@@ -5505,7 +5519,7 @@ fn run() -> std::result::Result<(), String> {
             let outcome = db
                 .ack(&ulid, note.as_deref(), agent.as_deref())
                 .map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             let s = match outcome {
                 mnemo_engine::WriteOutcome::Unchanged => "unchanged",
                 _ => "acked",
@@ -5528,7 +5542,7 @@ fn run() -> std::result::Result<(), String> {
             } else {
                 let mut db = open_w(&path, &pp, "default-agent").map_err(fmt)?;
                 let outcome = db.set_default_agent(set.as_deref()).map_err(fmt)?;
-                db.flush().map_err(fmt)?;
+                db.flush_noting()?;
                 let what = set.as_deref().unwrap_or("(none)");
                 match outcome {
                     mnemo_engine::WriteOutcome::Unchanged => println!("{what}\tunchanged"),
@@ -5633,7 +5647,7 @@ fn run() -> std::result::Result<(), String> {
                     (db, outcome)
                 }
             };
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             let outcome_str = match outcome {
                 WriteOutcome::Updated => "updated",
                 WriteOutcome::Unchanged => "unchanged",
@@ -5931,7 +5945,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
                         println!();
                     }
                     // Persist the access-stats bump.
-                    db.flush().map_err(fmt)?;
+                    db.flush_noting()?;
                 }
                 None => {
                     return Err(format!("cache miss on ({ns}, {key})"));
@@ -5966,7 +5980,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             };
             let mut db = open_w(&path, &pp, "cache put").map_err(fmt)?;
             db.cache_put(&ns, &key, &bytes, opts).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("cached {} bytes at ({ns}, {key})", bytes.len());
         }
         CacheOp::Delete {
@@ -5978,7 +5992,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "cache delete").map_err(fmt)?;
             db.cache_delete(&ns, &key).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("deleted ({ns}, {key}) (space reclaimed on next compact)");
         }
         CacheOp::Stats {
@@ -6010,7 +6024,7 @@ fn run_cache_op(op: CacheOp) -> std::result::Result<(), String> {
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "cache purge").map_err(fmt)?;
             let n = db.cache_purge(ns.as_deref(), expired).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("purged {n} entr{}", if n == 1 { "y" } else { "ies" });
         }
     }
@@ -6136,7 +6150,7 @@ fn ingest_turns(
         db.ingest_thread_with_vectors(thread, turns, &vectors)
             .map_err(fmt)?
     };
-    db.flush().map_err(fmt)?;
+    db.flush_noting()?;
     Ok(report)
 }
 
@@ -6248,7 +6262,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "thread forget").map_err(fmt)?;
             let n = db.thread_forget(&thread).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!(
                 "forgot {n} record(s) in thread '{thread}' (run `mnemo compact {path}` to reclaim space)"
             );
@@ -6264,7 +6278,7 @@ fn handle_thread_cmd(cmd: ThreadCmd) -> std::result::Result<(), String> {
             let pp = secret_for(&path, &pp, &None)?;
             let mut db = open_w(&path, &pp, "thread start").map_err(fmt)?;
             let id = db.thread_start(&new, &from).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!(
                 "thread '{new}' continues from '{from}' (link record {id}; try `mnemo essence {path} --thread {new}`)"
             );
@@ -6339,7 +6353,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             let id = db
                 .essence_add(scope, section, &text, parse_refs(refs))
                 .map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("{id}\tadded");
             Ok(())
         }
@@ -6357,7 +6371,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             let id = db
                 .essence_append_timeline(scope, &text, parse_refs(refs))
                 .map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("{id}\tappended");
             Ok(())
         }
@@ -6375,7 +6389,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             let outcome = db
                 .essence_update(&ulid, &text, parse_refs(refs))
                 .map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             let s = match outcome {
                 mnemo_engine::WriteOutcome::Updated => "updated",
                 mnemo_engine::WriteOutcome::Unchanged => "unchanged",
@@ -6394,7 +6408,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence resolve").map_err(fmt)?;
             let outcome = db.essence_resolve(&ulid).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             let s = match outcome {
                 mnemo_engine::WriteOutcome::Updated => "resolved",
                 mnemo_engine::WriteOutcome::Unchanged => "already-resolved",
@@ -6413,7 +6427,7 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             let ulid = parse_ulid(&id)?;
             let mut db = open_w(&path, &pp, "essence remove").map_err(fmt)?;
             db.essence_remove(&ulid).map_err(fmt)?;
-            db.flush().map_err(fmt)?;
+            db.flush_noting()?;
             println!("{id}\tremoved");
             Ok(())
         }

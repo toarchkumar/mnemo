@@ -143,14 +143,15 @@ pub use memory::{
     CLAIM_LAPSE_GRACE_SECS, CLAIM_TOPIC_MAX, CLAIM_TTL_DEFAULT, CLAIM_TTL_MAX, CLAIM_TTL_MIN,
     PRESENCE_EVERY_SECS,
 };
+/// v0.21.0 (13.7): the clock stamp and the tombstone's keys.
+pub use memory::{
+    HLC_AHEAD_NOTICE_MS, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_HLC_SINCE,
+    MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF,
+    MNEMO_META_TOMBSTONE_OWNER, MNEMO_META_TOMBSTONE_THREAD, MNEMO_META_TOMBSTONE_TURN,
+};
 /// 13a (13.1b): the wake-up guardrails.
 pub use memory::{
     HOP_CAP, MNEMO_META_WAKE_PAUSED, PAIR_BURST, PAIR_BURST_SECS, WAKE_COOLDOWN_SECS, WAKE_PER_HOUR,
-};
-/// v0.21.0 (13.7): the clock stamp and the tombstone's keys.
-pub use memory::{
-    MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY,
-    MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER,
 };
 pub use result_cache::{
     CacheBudget, CacheFlushPolicy, CachePutOpts, CacheStats, CachedValue, SemanticCachePutOpts,

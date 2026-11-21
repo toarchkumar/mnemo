@@ -532,7 +532,7 @@ impl Mnemo {
         // Collect first, then delete — can't hold catalog borrows
         // across `self.delete`.
         let entries = self.thread_entries(thread_id)?;
-        let mut victims: Vec<Ulid> = Vec::new();
+        let mut victims: Vec<Memory> = Vec::new();
         for e in &entries {
             let m = self.read_memory(e)?;
             if m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str()) != Some(thread_id) {
@@ -543,11 +543,14 @@ impl Mnemo {
             {
                 continue;
             }
-            victims.push(m.id);
+            victims.push(m);
         }
         let n = victims.len();
-        for id in &victims {
-            self.delete(id)?;
+        // Each turn's tombstone names its thread and turn id, from the
+        // record already read here.
+        for m in victims {
+            let id = m.id;
+            self.delete_inner(&id, Some(m), true)?;
         }
         Ok(n)
     }
