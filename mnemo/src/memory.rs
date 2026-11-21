@@ -371,6 +371,16 @@ pub const MNEMO_META_TOMBSTONE_TURN: &str = "_mnemo.tombstone_turn";
 /// later build wrote in this file, set once. A merge can't know of a
 /// delete made before it, or by an older build.
 pub const MNEMO_META_HLC_SINCE: &str = "_mnemo.hlc_since";
+/// v0.21.0 (13.7): a record a merge found in conflict (`true`): a key both
+/// inputs wrote, an essence item, task or finding whose text and status
+/// both differ, a renamed task or finding, or a conflict copy.
+pub const MNEMO_META_MERGE_CONFLICT: &str = "_mnemo.merge_conflict";
+/// v0.21.0 (13.7): on a merge's conflict copy, the id of the record whose
+/// other version it holds. A tombstone for that id removes the copy too.
+pub const MNEMO_META_MERGE_SOURCE: &str = "_mnemo.merge_source";
+/// v0.21.0 (13.7): on a task or finding a merge renamed, the name both
+/// inputs used.
+pub const MNEMO_META_MERGE_NAME: &str = "_mnemo.merge_name";
 /// v0.21.0 (13.7): how far past the clock a handle's largest stamp seen
 /// may run before it says so ([`crate::Mnemo::notices`]): one day, in ms.
 pub const HLC_AHEAD_NOTICE_MS: u64 = 86_400_000;

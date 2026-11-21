@@ -668,9 +668,11 @@ impl Mnemo {
         let mut out = Vec::new();
         let mut cursor = live_id;
         while let Some(id_u) = cursor {
-            let idx = self.index.get(id_u, &self.catalog).ok_or_else(|| {
-                MnemoError::Invalid("history: superseded chain references missing id".into())
-            })?;
+            // A version deleted and then compacted (or left out of a merge)
+            // has no row: the chain stops there, as at a deleted row.
+            let Some(idx) = self.index.get(id_u, &self.catalog) else {
+                break;
+            };
             let entry = self.catalog[idx].clone();
             if entry.deleted {
                 break;
