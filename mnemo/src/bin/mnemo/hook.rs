@@ -558,13 +558,13 @@ pub fn session_start(o: &Opts, input: &Value) -> String {
                 .unwrap_or_default();
         }
         parts.push(("Project essence", guide::escape_brain(essence.trim())));
-        // 4. The session thread's essence, on resume and compact.
+        // 4. The session thread's own essence, on resume and compact, when
+        // it has items (v0.20.2, G2: not the project items again, which a
+        // thread render also shows).
         let mut t4 = String::new();
         if let (true, Some(t)) = (resume, &thread) {
-            if let Ok(r) = db.essence(EssenceScope::Thread(t.clone()), room.max(256)) {
-                if r.lines().any(|l| l.starts_with("## ")) {
-                    t4 = guide::escape_brain(r.trim());
-                }
+            if let Ok(Some(r)) = db.essence_own(t, room.max(256)) {
+                t4 = guide::escape_brain(r.trim());
             }
         }
         parts.push(("This session's thread", t4));
@@ -1320,10 +1320,12 @@ fn stop(o: &Opts, input: &Value) {
 /// Claude Code's compaction instructions (its PreCompact stdout).
 pub fn compact_instructions(client: Client, id: &str) -> String {
     let t = format!(
-        "Keep in the summary: this session's earlier turns are saved in mnemo as thread `{}`; \
-         the `essence` and `recall` tools bring them back. Before going on, save any durable \
-         fact or decision from this part of the session with `remember` and a `key`.\n",
-        thread_id(client, id)
+        "Keep in the summary: this session's earlier turns are saved in mnemo as thread `{t}`; \
+         `recall` with `thread: \"{t}\"` brings them back. Before going on, save any durable \
+         fact or decision from this part of the session with `remember` and a `key`, and keep \
+         this task's state with `essence` `add` (`thread: \"{t}\"`, section `state`, `next` or \
+         `open`), so it comes back after compaction.\n",
+        t = thread_id(client, id)
     );
     fit_plain(&t, COMPACT_MAX)
 }
@@ -1606,6 +1608,19 @@ mod tests {
         let t = compact_instructions(Client::ClaudeCode, &"x".repeat(128));
         assert!(t.len() <= COMPACT_MAX, "{}", t.len());
         assert!(t.contains("claude-code:"));
+        // v0.20.2 (G2): with a session id's usual length, the whole text,
+        // the thread's essence included.
+        let id = "0f9e8d7c-6b5a-4938-a7b6-c5d4e3f2a1b0";
+        let t = compact_instructions(Client::ClaudeCode, id);
+        assert!(t.ends_with("so it comes back after compaction.\n"), "{t}");
+        assert!(
+            t.contains(&format!("`essence` `add` (`thread: \"claude-code:{id}\"`")),
+            "{t}"
+        );
+        assert!(
+            t.contains(&format!("`recall` with `thread: \"claude-code:{id}\"`")),
+            "{t}"
+        );
     }
 
     #[test]

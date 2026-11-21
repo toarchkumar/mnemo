@@ -378,7 +378,7 @@ impl Mnemo {
     /// knows how to drill in deeper (`mnemo thread export …` or
     /// `recall --thread …`).
     pub fn essence(&mut self, scope: EssenceScope, max_bytes: usize) -> Result<String> {
-        self.render_essence(scope, max_bytes, false)
+        Ok(self.render_essence(scope, max_bytes, false, false)?.0)
     }
 
     /// v0.20.2 (G7): [`Mnemo::essence`] with each item's full id after its
@@ -386,15 +386,30 @@ impl Mnemo {
     /// `essence_update` or `essence_resolve` an item straight from the
     /// render. The continuation prelude is unchanged.
     pub fn essence_with_ids(&mut self, scope: EssenceScope, max_bytes: usize) -> Result<String> {
-        self.render_essence(scope, max_bytes, true)
+        Ok(self.render_essence(scope, max_bytes, true, false)?.0)
     }
 
+    /// v0.20.2 (G2): a thread's own essence: the render of `thread`'s
+    /// items, without the project items a thread render also shows (a
+    /// caller that shows the project essence beside it would show them
+    /// twice), with its continuation prelude. `None` when the thread has
+    /// no items of its own and no prelude.
+    pub fn essence_own(&mut self, thread: &str, max_bytes: usize) -> Result<Option<String>> {
+        let (out, items) =
+            self.render_essence(EssenceScope::Thread(thread.into()), max_bytes, false, true)?;
+        Ok((items > 0).then_some(out))
+    }
+
+    /// The render, and how many items it had to show (its own sections'
+    /// items, plus one for a continuation prelude). `own_only` leaves the
+    /// project items out of a thread render.
     fn render_essence(
         &mut self,
         scope: EssenceScope,
         max_bytes: usize,
         ids: bool,
-    ) -> Result<String> {
+        own_only: bool,
+    ) -> Result<(String, usize)> {
         let max_bytes = if max_bytes == 0 {
             ESSENCE_DEFAULT_RENDER_BYTES
         } else {
@@ -422,7 +437,9 @@ impl Mnemo {
             let rec_thread = m.metadata.get(MNEMO_META_THREAD).and_then(|v| v.as_str());
             let matches_scope = match (&scope, rec_thread) {
                 (EssenceScope::Project, None) => true,
-                (EssenceScope::Thread(_), None) => true, // project-scope always shows
+                // Project-scope always shows, unless the caller asked for
+                // the thread's own items.
+                (EssenceScope::Thread(_), None) => !own_only,
                 (EssenceScope::Thread(t), Some(rt)) => rt == t,
                 (EssenceScope::Project, Some(_)) => false,
             };
@@ -487,12 +504,14 @@ impl Mnemo {
         // the thread has a `_mnemo.continues` link, pull the prior
         // thread's open section items, its `next`, and its last-N
         // timeline entries in ahead of the new thread's own essence.
+        let mut items: usize = by_section.values().map(Vec::len).sum();
         if let EssenceScope::Thread(new_id) = &scope {
             if let Some(prev_id) = self.predecessor_thread(new_id)? {
                 let continuation = self
                     .render_continuation_prelude(&prev_id, max_bytes.saturating_sub(out.len()))?;
                 if !continuation.is_empty() && out.len() + continuation.len() <= max_bytes {
                     out.push_str(&continuation);
+                    items += 1;
                 }
             }
         }
@@ -519,7 +538,7 @@ impl Mnemo {
         if out.len() + pointer.len() <= max_bytes {
             out.push_str(&pointer);
         }
-        Ok(out)
+        Ok((out, items))
     }
 
     // --- essence internal helpers ----------------------------------

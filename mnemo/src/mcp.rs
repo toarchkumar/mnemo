@@ -1575,6 +1575,7 @@ fn tools_list() -> Value {
                         "types": { "type": "array", "items": { "type": "string" } },
                         "agent": { "type": "string" },
                         "metric": { "type": "string", "enum": ["cosine", "l2", "dot"], "default": "cosine" },
+                        "thread": { "type": "string", "description": "v0.20.2: search one thread's saved turns (a past session, `claude-code:<session id>`), as `filter` `{\"metadata\": {\"_mnemo.thread\": id, \"_mnemo.kind\": \"turn\"}}` would." },
                         "max_bytes": { "type": "integer", "minimum": 1, "description": "Phase 12.8 budget: stop adding hits once the UTF-8 bytes of their `content` fields would exceed N. Always returns at least the top hit. When set, the response is `{hits, truncated}` instead of a bare array." },
                         "include_vector": { "type": "boolean", "default": false, "description": "v0.20.1: include each memory's `vector` (left out by default)." },
                         "filter": {
@@ -2940,8 +2941,28 @@ fn tool_recall(db: &mut Mnemo, args: &Value) -> std::result::Result<String, RpcE
     //                   "k2": {"$in": [v1, v2]},
     //                   "k3": {"$exists": true},
     //                   "k4": {"$gte": 5, "$lte": 10} } }
-    if let Some(filter_obj) = args.get("filter").and_then(|v| v.as_object()) {
-        req = req.filter(parse_mcp_filter(filter_obj)?);
+    let mut filter = match args.get("filter").and_then(|v| v.as_object()) {
+        Some(filter_obj) => Some(parse_mcp_filter(filter_obj)?),
+        None => None,
+    };
+    // v0.20.2 (G3): `thread` searches one thread's saved turns, as a
+    // filter on `_mnemo.thread` and `_mnemo.kind: turn` would.
+    if let Some(t) = args.get("thread") {
+        let t = t
+            .as_str()
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "recall: 'thread' is a thread id"))?;
+        filter = Some(
+            filter
+                .unwrap_or_default()
+                .metadata_eq(crate::memory::MNEMO_META_THREAD, json!(t))
+                .metadata_eq(
+                    crate::memory::MNEMO_META_KIND,
+                    json!(crate::memory::MNEMO_META_KIND_TURN),
+                ),
+        );
+    }
+    if let Some(f) = filter {
+        req = req.filter(f);
     }
     // Phase 12.8: `max_bytes` opts into the budgeted response shape.
     let has_max_bytes = args.get("max_bytes").is_some();

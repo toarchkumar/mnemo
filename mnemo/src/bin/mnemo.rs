@@ -1069,6 +1069,11 @@ enum Command {
         /// Phase 12.6: restrict recall to this session_id.
         #[arg(long)]
         session: Option<String>,
+        /// v0.20.2 (G3): search one thread's saved turns (a past session,
+        /// `claude-code:<session id>`): the same as `--filter
+        /// _mnemo.thread=<ID> --filter _mnemo.kind=turn`.
+        #[arg(long, value_name = "ID")]
+        thread: Option<String>,
         /// Phase 12.6: repeatable metadata filter, applied before
         /// scoring. Shorthand forms, matched left-to-right:
         ///
@@ -2871,6 +2876,18 @@ fn parse_ulid(s: &str) -> std::result::Result<Ulid, String> {
 /// Values are tried as JSON first (so numbers, booleans, null, arrays
 /// and quoted strings round-trip through serde cleanly); anything else
 /// is treated as a plain string.
+/// v0.20.2 (G3): a filter for one thread's saved turns.
+fn thread_filter(f: mnemo_engine::Filter, thread: String) -> mnemo_engine::Filter {
+    f.metadata_eq(
+        mnemo_engine::MNEMO_META_THREAD,
+        serde_json::Value::String(thread),
+    )
+    .metadata_eq(
+        mnemo_engine::MNEMO_META_KIND,
+        serde_json::Value::String(mnemo_engine::MNEMO_META_KIND_TURN.into()),
+    )
+}
+
 fn parse_filter_expr(
     expr: &str,
     f: mnemo_engine::Filter,
@@ -4413,6 +4430,7 @@ fn run() -> std::result::Result<(), String> {
             n_rerank,
             no_track,
             session,
+            thread,
             filter,
             max_bytes,
             embed_cmd,
@@ -4621,6 +4639,9 @@ fn run() -> std::result::Result<(), String> {
             let mut f = mnemo_engine::Filter::default();
             if let Some(s) = session {
                 f = f.with_session(s);
+            }
+            if let Some(t) = thread {
+                f = thread_filter(f, t);
             }
             for expr in filter {
                 f = parse_filter_expr(&expr, f)?;
