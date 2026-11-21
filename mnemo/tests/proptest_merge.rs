@@ -12,8 +12,10 @@
 //! - merge(x,x) = x; merge(merge(a,b),b) = merge(a,b) = merge(merge(a,b),a);
 //! - merge(merge(a,b),c) = merge(a,merge(b,c));
 //! - every (id, content) of a fact in either input is in the output, as the
-//!   record or as a conflict copy, unless a delete names it; and nothing a
-//!   delete names is in the output under any id.
+//!   record or as a conflict copy, unless a delete names it or the output's
+//!   version descends from it (decision.v0210-ancestry: its stamp and hash
+//!   are among the output version's `_mnemo.hlc_prev`); and nothing a delete names is
+//!   in the output under any id.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -318,6 +320,26 @@ fn covered(input: &Input, out: &[Memory], removed: &BTreeSet<Ulid>) -> Result<()
         if kind_of(r).is_some() || removed.contains(&r.id) {
             continue;
         }
+        let version = (
+            r.metadata.get("_mnemo.hlc").cloned(),
+            r.metadata.get("_mnemo.ver").cloned(),
+        );
+        let descends = by_id.get(&r.id).is_some_and(|m| {
+            m.metadata
+                .get("_mnemo.hlc_prev")
+                .and_then(Value::as_array)
+                .is_some_and(|p| {
+                    p.iter().any(|x| {
+                        let x = x.as_array();
+                        version.0.is_some()
+                            && x.map(|x| (x.first().cloned(), x.get(1).cloned()))
+                                == Some((version.0.clone(), version.1.clone()))
+                    })
+                })
+        });
+        if descends {
+            continue;
+        }
         let as_record = by_id.get(&r.id).is_some_and(|m| m.content == r.content);
         let as_copy = out.iter().any(|m| {
             m.metadata
@@ -367,6 +389,28 @@ fn nothing_deleted_survives(inputs: &[&Input], out: &[Memory]) -> Result<(), Str
     Ok(())
 }
 
+/// The records that differ, for a short failure message.
+fn diff(l: &[Value], r: &[Value]) -> String {
+    let key = |v: &Value| v["id"].as_str().unwrap_or("").to_string();
+    let lm: BTreeMap<String, &Value> = l.iter().map(|v| (key(v), v)).collect();
+    let rm: BTreeMap<String, &Value> = r.iter().map(|v| (key(v), v)).collect();
+    let mut out = String::new();
+    for k in lm.keys().chain(rm.keys()).collect::<BTreeSet<_>>() {
+        let (a, b) = (lm.get(k), rm.get(k));
+        if a != b {
+            let short = |v: Option<&&Value>| {
+                v.map_or("absent".to_string(), |v| {
+                    let mut v = (*v).clone();
+                    v.as_object_mut().unwrap().remove("vector");
+                    v.to_string()
+                })
+            };
+            out += &format!("\n{k}\n  left:  {}\n  right: {}", short(a), short(b));
+        }
+    }
+    out
+}
+
 fn as_input(recs: Vec<Memory>) -> Input {
     (recs, Vec::new())
 }
@@ -394,7 +438,7 @@ proptest! {
 
         let (ab, r_ab) = merge(&a, &b, now);
         let (ba, r_ba) = merge(&b, &a, now);
-        prop_assert_eq!(norm(&ab), norm(&ba), "merge(a,b) = merge(b,a)");
+        prop_assert!(norm(&ab) == norm(&ba), "merge(a,b) = merge(b,a):{}", diff(&norm(&ab), &norm(&ba)));
         prop_assert_eq!(mirrored(&r_ab), r_ba, "the report, mirrored");
 
         let out = as_input(ab.clone());
@@ -435,7 +479,8 @@ proptest! {
         let now = wall_ms();
         let ab_c = merge(&as_input(merge(&a, &b, now).0), &c, now).0;
         let a_bc = merge(&a, &as_input(merge(&b, &c, now).0), now).0;
-        prop_assert_eq!(norm(&ab_c), norm(&a_bc), "merge(merge(a,b),c) = merge(a,merge(b,c))");
+        prop_assert!(norm(&ab_c) == norm(&a_bc),
+            "merge(merge(a,b),c) = merge(a,merge(b,c)):{}", diff(&norm(&ab_c), &norm(&a_bc)));
         prop_assert!(nothing_deleted_survives(&[&a, &b, &c], &ab_c).is_ok(),
             "{:?}", nothing_deleted_survives(&[&a, &b, &c], &ab_c));
     }

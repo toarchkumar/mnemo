@@ -371,6 +371,19 @@ pub const MNEMO_META_TOMBSTONE_TURN: &str = "_mnemo.tombstone_turn";
 /// later build wrote in this file, set once. A merge can't know of a
 /// delete made before it, or by an older build.
 pub const MNEMO_META_HLC_SINCE: &str = "_mnemo.hlc_since";
+/// v0.21.0 (decision.v0210-ancestry): the versions a record had before its
+/// in-place rewrites, each `[stamp, version]` (its `_mnemo.hlc` and
+/// `_mnemo.ver`), the [`HLC_PREV_KEEP`] largest, newest first. A merge
+/// takes a version in another version's list as its ancestor: the
+/// descendant wins, with no conflict. Two copies can stamp the same
+/// millisecond, so a stamp alone doesn't name a version.
+pub const MNEMO_META_HLC_PREV: &str = "_mnemo.hlc_prev";
+/// v0.21.0 (decision.v0210-ancestry): a hash of the version a stamped
+/// write wrote (its content and metadata, with its stamp), so the next
+/// in-place rewrite can name it in `_mnemo.hlc_prev`.
+pub const MNEMO_META_VER: &str = "_mnemo.ver";
+/// v0.21.0: how many earlier stamps `_mnemo.hlc_prev` keeps.
+pub const HLC_PREV_KEEP: usize = 8;
 /// v0.21.0 (13.7): a record a merge found in conflict (`true`): a key both
 /// inputs wrote, an essence item, task or finding whose text and status
 /// both differ, a renamed task or finding, or a conflict copy.

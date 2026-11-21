@@ -1650,6 +1650,19 @@ impl Mnemo {
             let hlc = self.next_hlc(prev);
             m.metadata
                 .insert(MNEMO_META_HLC.to_string(), Value::from(hlc));
+            // decision.v0210-ancestry: an in-place rewrite (the record
+            // carries the version it was read as) keeps that version among
+            // the ones before, so a merge can tell this one descends from
+            // it; then this version's own hash.
+            let old_ver = m.metadata.get(MNEMO_META_VER).and_then(Value::as_u64);
+            if let (true, Some(v)) = (prev > 0, old_ver) {
+                let mut before = hlc_prev(&m);
+                before.insert((prev, v));
+                set_hlc_prev(&mut m, before);
+            }
+            let ver = version_hash(&m);
+            m.metadata
+                .insert(MNEMO_META_VER.to_string(), Value::from(ver));
         }
         let id_u: u128 = m.id.0;
         // 13a: a new record (an id the catalog doesn't hold live) carries
@@ -1886,6 +1899,62 @@ fn decode_into_column(
     }
     Ok(())
 }
+
+/// v0.21.0 (decision.v0210-ancestry): a record's earlier versions, as
+/// `(stamp, version)`.
+pub(super) fn hlc_prev(m: &Memory) -> std::collections::BTreeSet<(u64, u64)> {
+    m.metadata
+        .get(MNEMO_META_HLC_PREV)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|p| {
+                    let p = p.as_array()?;
+                    Some((p.first()?.as_u64()?, p.get(1)?.as_u64()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Keep the [`HLC_PREV_KEEP`] largest of `before` as `_mnemo.hlc_prev`
+/// (none: the key goes).
+pub(super) fn set_hlc_prev(m: &mut Memory, before: std::collections::BTreeSet<(u64, u64)>) {
+    let keep: Vec<Value> = before
+        .into_iter()
+        .rev()
+        .take(HLC_PREV_KEEP)
+        .map(|(s, v)| Value::Array(vec![Value::from(s), Value::from(v)]))
+        .collect();
+    if keep.is_empty() {
+        m.metadata.remove(MNEMO_META_HLC_PREV);
+    } else {
+        m.metadata
+            .insert(MNEMO_META_HLC_PREV.to_string(), Value::Array(keep));
+    }
+}
+
+/// A version's hash: the record as written (its stamp included), less its
+/// list of earlier versions, its own hash and its access stats, with the
+/// vector after fp16 rounding. 62 bits: it stays an exact JSON integer, and
+/// bit 62 is left for a merge's own versions ([`VER_MERGED`]).
+pub(super) fn version_hash(m: &Memory) -> u64 {
+    use sha2::{Digest, Sha256};
+    let mut c = m.clone();
+    c.metadata.remove(MNEMO_META_HLC_PREV);
+    c.metadata.remove(MNEMO_META_VER);
+    c.vector = crate::veccol::dequantize(&crate::veccol::quantize(&c.vector).0);
+    c.accessed_at = 0;
+    c.access_count = 0;
+    let bytes = rmp_serde::to_vec(&c).unwrap_or_default();
+    let d = Sha256::digest(&bytes);
+    u64::from_be_bytes(d[..8].try_into().expect("8 bytes")) >> 2
+}
+
+/// v0.21.0: set on the hash of a version a merge made (neither input's).
+/// A merge never lists such a version as an earlier one, so the lists name
+/// only real writes, whatever order copies are merged in.
+pub(super) const VER_MERGED: u64 = 1 << 62;
 
 /// v0.21.0 (13.7): the notice for a stamp `lead_ms` ahead of the clock.
 fn clock_ahead_notice(lead_ms: u64) -> String {

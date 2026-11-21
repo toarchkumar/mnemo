@@ -231,6 +231,49 @@ fn delivery_rank(s: Option<&str>) -> u8 {
     }
 }
 
+fn stamp(m: &Memory) -> Option<u64> {
+    m.metadata.get(MNEMO_META_HLC).and_then(Value::as_u64)
+}
+
+fn version(m: &Memory) -> Option<(u64, u64)> {
+    Some((
+        stamp(m)?,
+        m.metadata.get(MNEMO_META_VER).and_then(Value::as_u64)?,
+    ))
+}
+
+/// decision.v0210-ancestry: `x` is an ancestor of `y` when `x`'s version
+/// (its stamp and hash) is among the versions `y` had before. Equal stamps
+/// with different content (an older build's edit of both, or two copies
+/// in one millisecond) are never ancestry.
+fn ancestor(x: &Memory, y: &Memory) -> bool {
+    version(x).is_some_and(|v| super::records::hlc_prev(y).contains(&v))
+}
+
+/// A conflict flag stays once set, whichever version wins.
+fn keep_flag(a: &Memory, b: &Memory, body: &mut Memory) {
+    if [a, b]
+        .iter()
+        .any(|m| m.metadata.contains_key(MNEMO_META_MERGE_CONFLICT))
+    {
+        body.metadata
+            .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+    }
+}
+
+/// A merged record's earlier versions: the [`HLC_PREV_KEEP`] largest of
+/// both inputs' versions and lists, less its own.
+fn merged_prev(a: &Memory, b: &Memory, body: &mut Memory) {
+    let own = version(body);
+    let mut all = super::records::hlc_prev(a);
+    all.extend(super::records::hlc_prev(b));
+    for m in [a, b] {
+        all.extend(version(m).filter(|(_, v)| v & super::records::VER_MERGED == 0));
+    }
+    all.retain(|v| Some(*v) != own);
+    super::records::set_hlc_prev(body, all);
+}
+
 /// What resolving one id found.
 struct Resolved {
     body: Memory,
@@ -246,6 +289,22 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
     body.accessed_at = a.accessed_at.max(b.accessed_at);
     body.access_count = a.access_count.max(b.access_count);
     if record_bytes(a) == record_bytes(b) {
+        return Resolved {
+            body,
+            copy: None,
+            conflict: None,
+        };
+    }
+    // One version descends from the other (a one-sided edit or move): the
+    // descendant wins whole, with no copy and no flag.
+    let (a_anc, b_anc) = (ancestor(a, b), ancestor(b, a));
+    if a_anc != b_anc {
+        let d = if a_anc { b } else { a };
+        let mut body = d.clone();
+        body.accessed_at = a.accessed_at.max(b.accessed_at);
+        body.access_count = a.access_count.max(b.access_count);
+        merged_prev(a, b, &mut body);
+        keep_flag(a, b, &mut body);
         return Resolved {
             body,
             copy: None,
@@ -402,10 +461,30 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
         }
         Kind::Turn | Kind::Local | Kind::Tombstone | Kind::Engine => {}
     }
+    keep_flag(a, b, &mut body);
     if conflict.is_some() && copy.is_none() {
         body.metadata
             .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
     }
+    // The version: an input's when the merge left it as it was; else one
+    // of the merge's own, named by its hash and marked as made by a merge.
+    if stamp(&body).is_some() {
+        let core = |m: &Memory| {
+            let mut c = m.clone();
+            c.metadata.remove(MNEMO_META_VER);
+            c.metadata.remove(MNEMO_META_HLC_PREV);
+            record_bytes(&c)
+        };
+        let same = [a, b].into_iter().find(|m| core(m) == core(&body));
+        let v = match same {
+            Some(m) => m.metadata.get(MNEMO_META_VER).cloned(),
+            None => Some(Value::from(
+                super::records::version_hash(&body) | super::records::VER_MERGED,
+            )),
+        };
+        set_or_remove(&mut body, MNEMO_META_VER, v);
+    }
+    merged_prev(a, b, &mut body);
     Resolved {
         body,
         copy,
