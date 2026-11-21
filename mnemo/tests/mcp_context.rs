@@ -1132,6 +1132,51 @@ fn the_get_tool_by_key_and_by_id() {
     });
 }
 
+/// v0.20.2 (G3): MCP `recall` with `thread` searches one thread's saved
+/// turns; a bad `thread` is refused.
+#[test]
+fn recall_with_thread_searches_one_threads_turns() {
+    both_modes(|shared| {
+        let b = Brain::new();
+        let dir = b.path().parent().unwrap().to_path_buf();
+        let mut calls = Vec::new();
+        for (t, answer) in [
+            ("t1", "It deploys to staging-7."),
+            ("t2", "It deploys to staging-9."),
+        ] {
+            let file = dir.join(format!("{t}.jsonl"));
+            std::fs::write(
+                &file,
+                format!(
+                    "{}\n{}\n",
+                    json!({"turn_id": "u", "role": "user", "content": "Where does it deploy?", "timestamp": 1_700_000_000}),
+                    json!({"turn_id": "a", "role": "assistant", "content": answer, "timestamp": 1_700_000_001}),
+                ),
+            )
+            .unwrap();
+            calls.push(tool(
+                "thread_ingest",
+                json!({"thread": t, "transcript_path": file.to_str().unwrap()}),
+            ));
+        }
+        calls.push(tool(
+            "recall",
+            json!({"text": "deploy", "top_k": 10, "thread": "t1"}),
+        ));
+        calls.push(tool("recall", json!({"text": "deploy", "top_k": 10})));
+        calls.push(tool("recall", json!({"text": "deploy", "thread": 7})));
+        let rs = b.session(shared, true, &calls);
+        let hits = |r: &Value| ok(r)["content"][0]["text"].as_str().unwrap().to_string();
+        let one = hits(&rs[3]);
+        assert!(
+            one.contains("staging-7") && !one.contains("staging-9"),
+            "{one}"
+        );
+        assert!(!hits(&rs[4]).contains("staging-"), "{}", hits(&rs[4]));
+        assert_eq!(rs[5]["error"]["code"], -32602, "{}", rs[5]);
+    });
+}
+
 #[test]
 fn no_tool_returns_vectors_unless_asked() {
     both_modes(|shared| {

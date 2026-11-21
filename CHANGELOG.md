@@ -25,6 +25,28 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `Mnemo::essence_with_ids`), so `essence update|resolve|remove` needs no
   `list --format json` scan. The default render has no ids.
 
+- **`recall --thread <ID>`** (v0202-3, spec.v0202 step 3, G3), and
+  `thread` on the MCP `recall`: one thread's saved turns, a past session's
+  (`claude-code:<session id>`), the same as filtering on `_mnemo.thread`
+  and `_mnemo.kind: turn`. The essence render's footer already named
+  `recall --thread <id>`, which the CLI didn't have.
+- **`Mnemo::essence_own`** (v0202-3, G2): a thread's own essence, without
+  the project items a thread render also shows; `None` when the thread has
+  none.
+
+### Changed
+
+- **The resume and compaction brief shows the thread's own essence**
+  (v0202-3, G2). Since v0.16 the session-start hook added a "This
+  session's thread" part on Claude Code's `resume` and `compact`, but it
+  rendered the thread scope, which includes the project items, so a
+  session with no items of its own got the project essence twice. The
+  part now holds only the thread's items, and only when it has some.
+- **The compaction note** (Claude Code's PreCompact) names `recall` with
+  the session's `thread`, and asks to keep the task's state with
+  `essence` `add` in that thread (`state`, `next` or `open`), so it comes
+  back after compaction. No hook calls a model.
+
 ### Fixed
 
 - **The essence render no longer drops items silently** (v0202-2, G10).

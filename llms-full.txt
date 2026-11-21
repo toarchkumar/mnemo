@@ -208,11 +208,25 @@ for them. Add the turn filter:
 mnemo recall --text "where the parser bug was" --top-k 5 --filter _mnemo.kind=turn
 ```
 
-To search one session only, filter on its thread instead:
-`{"_mnemo.thread": "claude-code:<session id>"}`. Turns are found by
-meaning, not by keyword (they aren't in the keyword index), so this needs
-the built-in model. The hooks save turns only when the model is there
-anyway.
+To search one session only, give its thread, `claude-code:<session id>`
+(the essence render's footer and the compaction note name it):
+
+```json
+{"name": "recall", "arguments": {"text": "where the parser bug was", "top_k": 5, "thread": "claude-code:s1"}}
+```
+
+```sh
+mnemo recall --text "where the parser bug was" --top-k 5 --thread claude-code:s1
+```
+
+Turns are found by meaning, not by keyword (they aren't in the keyword
+index), so this needs the built-in model. The hooks save turns only when
+the model is there anyway.
+
+**Keep a task's state in its thread.** `essence` `add` with `thread` (the
+`state`, `next` or `open` section) keeps where this task stands. When the
+session resumes or its context is compacted, the brief shows the thread's
+own items again.
 
 ### Budgets
 

@@ -508,6 +508,53 @@ fn resume_and_compact_carry_the_thread_essence() {
             "{source}: {ctx}"
         );
     }
+    // v0.20.2 (G2): the thread's part holds its own items, not the project's
+    // (the project essence part has those), and a session with no items of
+    // its own gets no thread part.
+    e.ok_cmd(
+        &repo,
+        &[
+            "essence",
+            "add",
+            "--project",
+            "--section",
+            "decisions",
+            "--text",
+            "ship from the release branch",
+        ],
+    );
+    let ctx = e.start(
+        &repo,
+        &[],
+        &json!({"session_id": "s1", "source": "compact"}),
+    );
+    let thread_part = ctx
+        .split("## This session's thread")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no thread part: {ctx}"));
+    // Up to the next part (the render has its own `## open` heading).
+    let thread_part = ["\n## Your work", "\n## Relevant memories"]
+        .iter()
+        .filter_map(|t| thread_part.find(t))
+        .min()
+        .map_or(thread_part, |i| &thread_part[..i]);
+    assert!(thread_part.contains("the flaky upload test"), "{ctx}");
+    assert!(
+        !thread_part.contains("ship from the release branch"),
+        "{ctx}"
+    );
+    assert_eq!(
+        ctx.matches("ship from the release branch").count(),
+        1,
+        "{ctx}"
+    );
+    let ctx = e.start(
+        &repo,
+        &[],
+        &json!({"session_id": "s2", "source": "compact"}),
+    );
+    assert!(!ctx.contains("## This session's thread"), "{ctx}");
+    assert!(ctx.contains("ship from the release branch"), "{ctx}");
     // Cursor's shape.
     let o = e.hook(
         &repo,
@@ -1028,6 +1075,55 @@ fn marker_only_turns_are_saved_but_not_recalled() {
         !out.contains("[thinking]") && !out.contains("[tool_use"),
         "{out}"
     );
+}
+
+/// v0.20.2 (G3): `recall --thread <id>` searches one session's saved
+/// turns, and no other session's.
+#[test]
+fn recall_thread_searches_one_sessions_turns() {
+    let e = Env::new();
+    for (id, answer) in [
+        ("s1", "It deploys to staging-7."),
+        ("s2", "It deploys to staging-9."),
+    ] {
+        let t = e.transcript(
+            &format!("{id}.jsonl"),
+            &[
+                ("user", json!("Where does this project deploy?")),
+                ("assistant", json!(answer)),
+            ],
+        );
+        save(&e, "session-end", id, &t);
+    }
+    let recall = |extra: &[&str]| {
+        let mut args = vec![
+            "recall",
+            "--text",
+            "deploy",
+            "--top-k",
+            "10",
+            "--no-track",
+            "--format",
+            "json",
+        ];
+        args.extend_from_slice(extra);
+        let embed = e.embed_cmd();
+        args.extend(["--embed-cmd", &embed, "--embed-name", "test-4"]);
+        e.ok_cmd(&e.p("repo"), &args)
+    };
+    let one = recall(&["--thread", "claude-code:s1"]);
+    assert!(
+        one.contains("staging-7") && !one.contains("staging-9"),
+        "{one}"
+    );
+    let other = recall(&["--thread", "claude-code:s2"]);
+    assert!(
+        other.contains("staging-9") && !other.contains("staging-7"),
+        "{other}"
+    );
+    // Without it, turns stay out of recall.
+    let none = recall(&[]);
+    assert!(!none.contains("staging-"), "{none}");
 }
 
 /// 13a step 1 (v0.17): a hook reads `MNEMO_AGENT`, so the turns it saves
