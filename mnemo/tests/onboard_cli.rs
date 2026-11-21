@@ -644,6 +644,7 @@ fn claude_code_allow_rules_for_the_wake_commands() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn claude_code_local_and_project_scopes() {
     let e = Env::new();
