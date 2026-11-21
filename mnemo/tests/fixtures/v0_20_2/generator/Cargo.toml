@@ -1,0 +1,19 @@
+# The v0.20.2 merge fixtures' generator (v0.21.0, spec.v0210 step 2,
+# RB-019.8 case 5). It writes and changes the committed files in `..` with
+# the **published** v0.20.2 engine, the last release before the merge, so
+# `tests/merge_v0_20_2.rs` reads what an older build really leaves:
+#
+#   cargo test --test merge_v0_20_2 -- --ignored   # the v0.21 inputs, first
+#   cd mnemo/tests/fixtures/v0_20_2/generator && cargo run --locked
+#
+# Not part of the mnemo workspace: its own `[workspace]` table keeps it out.
+[package]
+name = "mnemo-v0-20-2-fixture-generator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+mnemo-engine = "=0.20.2"
+
+[workspace]
