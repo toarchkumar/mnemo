@@ -175,11 +175,21 @@ Add an item when a goal, a decision, an open problem or the next step
 appears. `resolve` an item when it's done. Don't rewrite the essence as a
 whole; change one item at a time.
 
+A render that fits its `budget` shows every item. When it doesn't, a
+section that's cut ends with `+N more`; render again with a bigger
+budget. To change an item, render with `ids: true`, which puts each
+item's id after its status, then `update` or `resolve` that id.
+
+```json mcp
+{"name": "essence", "arguments": {"op": "render", "project": true, "ids": true}}
+```
+
 From a shell:
 
 ```sh test
 mnemo essence add --project --section open --text "The flaky upload test needs a fix."
 mnemo essence render --project --budget 2000
+mnemo essence render --project --ids
 ```
 
 ### Threads

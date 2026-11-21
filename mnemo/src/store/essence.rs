@@ -15,18 +15,105 @@ pub(super) fn status_of(m: &Memory) -> Option<&str> {
 /// Phase 12.7b helper: render one essence item as a markdown bullet.
 /// Timeline entries get a date tag; section items get `[open]` /
 /// `[resolved]` so the reader can scan active work quickly.
-fn render_essence_item(section: EssenceSection, m: &Memory, now: i64) -> String {
+fn render_essence_item(section: EssenceSection, m: &Memory, now: i64, ids: bool) -> String {
+    // v0.20.2 (G7): with `ids`, the item's full id after its status (or,
+    // in the timeline, its date), so `essence update|resolve` needs no list.
+    let id = if ids {
+        format!("{} ", m.id)
+    } else {
+        String::new()
+    };
     if section == EssenceSection::Timeline {
         let date = format_unix_date(m.created_at);
-        format!("- [{date}] {}\n", m.content)
+        format!("- [{date}] {id}{}\n", m.content)
     } else {
         let status = status_of(m).unwrap_or(essence_status::OPEN);
         // 13a (13.6): an item past its review date, or its section's age.
         let stale = crate::memory::stale_since(m, now)
             .map(|t| format!(" [stale since {}]", format_unix_date(t)))
             .unwrap_or_default();
-        format!("- [{status}] {}{stale}\n", m.content)
+        format!("- [{status}] {id}{}{stale}\n", m.content)
     }
+}
+
+/// A section's share of the body budget in a render that doesn't fit
+/// whole: intent, conventions and decisions frame the work and get more;
+/// the timeline can fold.
+fn section_share(section: EssenceSection, body_budget: usize) -> usize {
+    match section {
+        EssenceSection::Intent => body_budget / 8,
+        EssenceSection::Conventions => body_budget / 6,
+        EssenceSection::Decisions => body_budget / 4,
+        EssenceSection::State => body_budget / 8,
+        EssenceSection::Open => body_budget / 8,
+        EssenceSection::Next => body_budget / 12,
+        EssenceSection::Lessons => body_budget / 12,
+        EssenceSection::Timeline => body_budget / 4,
+    }
+}
+
+/// The sections after `out` (the header and any continuation), in render
+/// order. With `body_budget`, each section gets its share plus whatever
+/// the sections before it left unused (v0.20.2, G10), and a cut section
+/// ends with a line that counts what it left out; without, every item is
+/// rendered while it fits `max_bytes`. Returns the render and whether any
+/// item was left out.
+fn render_sections(
+    mut out: String,
+    by_section: &std::collections::BTreeMap<&'static str, Vec<Memory>>,
+    body_budget: Option<usize>,
+    max_bytes: usize,
+    now: i64,
+    ids: bool,
+) -> (String, bool) {
+    let mut carry = 0usize;
+    let mut cut = false;
+    for section in EssenceSection::render_order() {
+        let share = body_budget.map(|b| section_share(*section, b));
+        let items = match by_section.get(section.as_str()) {
+            Some(v) if !v.is_empty() => v,
+            _ => {
+                carry += share.unwrap_or(0);
+                continue;
+            }
+        };
+        let budget = share.map_or(usize::MAX, |s| s + carry);
+        let section_header = format!("## {}\n", section.as_str());
+        if out.len() + section_header.len() > max_bytes {
+            cut = true;
+            break;
+        }
+        out.push_str(&section_header);
+        let mut used = 0usize;
+        let mut rendered = 0usize;
+        for item in items {
+            let line = render_essence_item(*section, item, now, ids);
+            if used + line.len() > budget || out.len() + line.len() > max_bytes {
+                break;
+            }
+            out.push_str(&line);
+            used += line.len();
+            rendered += 1;
+        }
+        if rendered < items.len() {
+            cut = true;
+            let left = items.len() - rendered;
+            let fold = if *section == EssenceSection::Timeline {
+                format!("- +{left} earlier milestones\n")
+            } else {
+                format!("- +{left} more (essence render --budget <bytes>)\n")
+            };
+            if out.len() + fold.len() <= max_bytes {
+                out.push_str(&fold);
+                used += fold.len();
+            }
+        }
+        carry = budget.saturating_sub(used);
+        if out.len() < max_bytes {
+            out.push('\n');
+        }
+    }
+    (out, cut)
 }
 
 /// Minimal unix-seconds → `YYYY-MM-DD` formatter (no chrono/time
@@ -277,15 +364,37 @@ impl Mnemo {
     /// Phase 12.7b: deterministic, budgeted markdown render of the
     /// essence layer for a thread (or the project layer when
     /// `scope = EssenceScope::Project`). `max_bytes` caps the output;
-    /// sections are emitted in the fixed [`EssenceSection::render_order`],
-    /// and each section's own budget is proportional to its position
-    /// in the order. Oldest timeline entries fold into a
-    /// `+N earlier milestones` tail when the budget runs out.
+    /// sections are emitted in the fixed [`EssenceSection::render_order`].
+    /// When every item fits, every item is rendered (v0.20.2, G10).
+    /// Otherwise each section gets a share of the budget (more for intent,
+    /// conventions and decisions) plus whatever the sections before it
+    /// left unused, and a section that's still cut ends with a
+    /// `+N more (essence render --budget <bytes>)` line; the timeline's
+    /// oldest entries fold into `+N earlier milestones`. Items in a section
+    /// sort open before resolved, then by time, then by id, so two renders
+    /// of the same brain are byte-identical.
     ///
     /// The render always ends with an archive pointer so the reader
     /// knows how to drill in deeper (`mnemo thread export …` or
     /// `recall --thread …`).
     pub fn essence(&mut self, scope: EssenceScope, max_bytes: usize) -> Result<String> {
+        self.render_essence(scope, max_bytes, false)
+    }
+
+    /// v0.20.2 (G7): [`Mnemo::essence`] with each item's full id after its
+    /// status (in the timeline, after its date), so a caller can
+    /// `essence_update` or `essence_resolve` an item straight from the
+    /// render. The continuation prelude is unchanged.
+    pub fn essence_with_ids(&mut self, scope: EssenceScope, max_bytes: usize) -> Result<String> {
+        self.render_essence(scope, max_bytes, true)
+    }
+
+    fn render_essence(
+        &mut self,
+        scope: EssenceScope,
+        max_bytes: usize,
+        ids: bool,
+    ) -> Result<String> {
         let max_bytes = if max_bytes == 0 {
             ESSENCE_DEFAULT_RENDER_BYTES
         } else {
@@ -351,35 +460,21 @@ impl Mnemo {
                 match (a_resolved, b_resolved) {
                     (false, true) => std::cmp::Ordering::Less,
                     (true, false) => std::cmp::Ordering::Greater,
+                    // v0.20.2 (G10): ties (the same second) by id, so two
+                    // renders of the same brain are byte-identical.
                     _ => {
                         if newest_first {
-                            b.created_at.cmp(&a.created_at)
+                            (b.created_at, b.id).cmp(&(a.created_at, a.id))
                         } else {
-                            a.created_at.cmp(&b.created_at)
+                            (a.created_at, a.id).cmp(&(b.created_at, b.id))
                         }
                     }
                 }
             });
         }
 
-        // Per-section budget: give intent / conventions / decisions a
-        // larger share (they frame the thread), timeline a smaller
-        // share (it can fold). This is deterministic because it
-        // depends only on `max_bytes`.
         let header_reserve = 256usize; // header + archive pointer
         let body_budget = max_bytes.saturating_sub(header_reserve);
-        let per_section_budget = |section: EssenceSection| -> usize {
-            match section {
-                EssenceSection::Intent => body_budget / 8,
-                EssenceSection::Conventions => body_budget / 6,
-                EssenceSection::Decisions => body_budget / 4,
-                EssenceSection::State => body_budget / 8,
-                EssenceSection::Open => body_budget / 8,
-                EssenceSection::Next => body_budget / 12,
-                EssenceSection::Lessons => body_budget / 12,
-                EssenceSection::Timeline => body_budget / 4,
-            }
-        };
 
         let mut out = String::with_capacity(max_bytes);
         let scope_label = match &scope {
@@ -402,43 +497,6 @@ impl Mnemo {
             }
         }
 
-        for section in EssenceSection::render_order() {
-            let items = match by_section.get(section.as_str()) {
-                Some(v) if !v.is_empty() => v,
-                _ => continue,
-            };
-            let budget = per_section_budget(*section);
-            let section_header = format!("## {}\n", section.as_str());
-            if out.len() + section_header.len() > max_bytes {
-                break;
-            }
-            out.push_str(&section_header);
-            let mut used = 0usize;
-            let mut rendered = 0usize;
-            for item in items {
-                let line = render_essence_item(*section, item, now);
-                if used + line.len() > budget {
-                    break;
-                }
-                if out.len() + line.len() > max_bytes {
-                    break;
-                }
-                out.push_str(&line);
-                used += line.len();
-                rendered += 1;
-            }
-            // Fold the remainder for timeline.
-            if *section == EssenceSection::Timeline && rendered < items.len() {
-                let fold = format!("- +{} earlier milestones\n", items.len() - rendered);
-                if out.len() + fold.len() <= max_bytes {
-                    out.push_str(&fold);
-                }
-            }
-            if out.len() < max_bytes {
-                out.push('\n');
-            }
-        }
-
         // Archive pointer.
         let pointer = match &scope {
             EssenceScope::Thread(t) => format!(
@@ -447,6 +505,16 @@ impl Mnemo {
             EssenceScope::Project => String::from(
                 "> full history: `mnemo thread export <file> --thread <id>` or `recall --thread <id>`\n",
             ),
+        };
+        // v0.20.2 (G10): the whole render first, with room for the pointer;
+        // only when it doesn't fit do the sections get shares, so a render
+        // within its budget never leaves an item out.
+        let room = max_bytes.saturating_sub(pointer.len());
+        let (whole, cut) = render_sections(out.clone(), &by_section, None, room, now, ids);
+        let mut out = if cut {
+            render_sections(out, &by_section, Some(body_budget), max_bytes, now, ids).0
+        } else {
+            whole
         };
         if out.len() + pointer.len() <= max_bytes {
             out.push_str(&pointer);

@@ -20,6 +20,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
   tool takes `id` or `key` (exactly one), applies the visibility levels
   as `recall` does (default public and team), and leaves the vector out
   unless `include_vector` is true. The guide's card names it.
+- **`essence render --ids`** (v0202-2, spec.v0202 step 2, G7): each item's
+  full id after its status (MCP `essence` `op: render` with `ids: true`;
+  `Mnemo::essence_with_ids`), so `essence update|resolve|remove` needs no
+  `list --format json` scan. The default render has no ids.
+
+### Fixed
+
+- **The essence render no longer drops items silently** (v0202-2, G10).
+  Each section had a fixed share of the budget and passed nothing on, so
+  a render well under its budget could leave out some of a section's
+  items, with no word of the rest. A render that fits now shows
+  every item. One that doesn't gives each section its share plus what the
+  sections before it left unused, and a section that's still cut ends with
+  `- +N more (essence render --budget <bytes>)`, as the timeline folds.
+- **The essence render is deterministic** (v0202-2, G10): items written in
+  the same second sorted by catalog order, which changed between opens, so
+  two renders of one brain could differ (and so could which item was cut).
+  They now sort by id after time, here and in a continued thread's prelude.
 
 ## [0.20.1] — 2026-11-20
 

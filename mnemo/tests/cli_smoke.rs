@@ -2191,6 +2191,11 @@ fn mcp_end_to_end_threads_essence_and_commit_deltas() {
                 "recall",
                 json!({"text": "the user prefers tea", "top_k": 3}),
             ),
+            (
+                12,
+                "essence",
+                json!({"op": "render", "thread": "t1", "ids": true}),
+            ),
         ],
     );
 
@@ -2240,6 +2245,25 @@ fn mcp_end_to_end_threads_essence_and_commit_deltas() {
         texts[&11].contains("the user prefers tea"),
         "recall should find the text-only fact: {}",
         texts[&11]
+    );
+
+    // v0.20.2 (G7): `ids` puts each item's id after its status, over MCP
+    // and the CLI; the default render has none.
+    let open_id = serde_json::from_str::<serde_json::Value>(&texts[&2]).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let want = format!("- [open] {open_id} finish 12.7d\n");
+    assert!(texts[&12].contains(&want), "{}", texts[&12]);
+    let p = path.to_str().unwrap();
+    let (st, out, err) = run_cli(&["essence", "render", p, "--thread", "t1", "--ids"], pp);
+    assert!(st.success(), "{err}");
+    assert!(out.contains(&want), "{out}");
+    let (st, out, err) = run_cli(&["essence", "render", p, "--thread", "t1"], pp);
+    assert!(st.success(), "{err}");
+    assert!(
+        out.contains("- [open] finish 12.7d\n") && !out.contains(&open_id),
+        "{out}"
     );
 }
 

@@ -1834,6 +1834,10 @@ enum EssenceCmd {
         /// Byte budget for the render (default 6144).
         #[arg(long, default_value_t = 6144)]
         budget: usize,
+        /// v0.20.2 (G7): put each item's id after its status, for
+        /// `essence update|resolve|remove`.
+        #[arg(long)]
+        ids: bool,
         #[arg(long)]
         passphrase: Option<String>,
     },
@@ -6169,12 +6173,18 @@ fn handle_essence_cmd(cmd: EssenceCmd) -> std::result::Result<(), String> {
             thread,
             project,
             budget,
+            ids,
             passphrase: pp,
         } => {
             let pp = secret_for(&path, &pp, &None)?;
             let scope = resolve_scope(thread, project)?;
             let mut db = open_r(&path, &pp).map_err(fmt)?;
-            let out = db.essence(scope, budget).map_err(fmt)?;
+            let out = if ids {
+                db.essence_with_ids(scope, budget)
+            } else {
+                db.essence(scope, budget)
+            }
+            .map_err(fmt)?;
             print!("{out}");
             Ok(())
         }

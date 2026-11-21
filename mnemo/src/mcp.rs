@@ -1424,7 +1424,8 @@ fn tools_list() -> Value {
                         "id": { "type": "string", "description": "ULID of the section item. Required for update / resolve / remove." },
                         "text": { "type": "string", "description": "Required for add / append / update." },
                         "refs": { "type": "array", "items": { "type": "string" }, "description": "Optional free-form reference strings (turn ids, memory ids, commits, paths)." },
-                        "budget": { "type": "integer", "default": 6144, "description": "Byte budget for `op: render`." }
+                        "budget": { "type": "integer", "default": 6144, "description": "Byte budget for `op: render`. A render that fits shows every item; a section that's cut ends with `+N more`." },
+                        "ids": { "type": "boolean", "default": false, "description": "v0.20.2: for `op: render`, put each item's id after its status, for update / resolve / remove." }
                     },
                     "additionalProperties": false
                 }
@@ -2637,7 +2638,14 @@ fn tool_essence(db: &mut Mnemo, args: &Value) -> std::result::Result<String, Rpc
         "render" => {
             let budget = args.get("budget").and_then(|v| v.as_u64()).unwrap_or(6144) as usize;
             let scope = scope_from(thread, project)?;
-            let rendered = db.essence(scope, budget).map_err(mnemo_err)?;
+            // v0.20.2 (G7): `ids: true` puts each item's id after its status.
+            let ids = args.get("ids").and_then(|v| v.as_bool()).unwrap_or(false);
+            let rendered = if ids {
+                db.essence_with_ids(scope, budget)
+            } else {
+                db.essence(scope, budget)
+            }
+            .map_err(mnemo_err)?;
             Ok(rendered)
         }
         other => Err(RpcError::new(
