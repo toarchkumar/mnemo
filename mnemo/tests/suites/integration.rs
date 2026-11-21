@@ -3990,6 +3990,103 @@ fn essence_render_respects_budget() {
     );
 }
 
+/// v0.20.2 (G10): a render that fits its budget shows every item, even
+/// when a section holds more than its share would allow (the brain's
+/// `next` had 7 items and showed 5, with no word of the rest). `intent`
+/// is first, so no unused share reaches it: only the whole render keeps
+/// its items.
+#[test]
+fn essence_render_within_budget_keeps_every_item() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-whole.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    let mut texts = Vec::new();
+    for (section, n) in [(EssenceSection::Intent, 6), (EssenceSection::Next, 7)] {
+        for i in 0..n {
+            let t = format!(
+                "{} #{i}: {}",
+                section.as_str(),
+                "a fairly long description ".repeat(7)
+            );
+            db.essence_add(EssenceScope::Project, section, &t, None)
+                .unwrap();
+            texts.push(t);
+        }
+    }
+    let out = db.essence(EssenceScope::Project, 6144).unwrap();
+    assert!(out.len() < 6144 / 2, "{} bytes", out.len());
+    for t in &texts {
+        assert!(out.contains(t.as_str()), "dropped {t:?}:\n{out}");
+    }
+    assert!(!out.contains("more ("), "{out}");
+}
+
+/// v0.20.2 (G10): when the render doesn't fit, a section gets its share
+/// plus what the empty sections before it left, and says how many items
+/// it left out.
+#[test]
+fn essence_render_cut_section_gets_the_unused_share_and_says_how_many() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-cut.mnemo");
+    let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+    db.remember(Memory::scaffold_manifest(4)).unwrap();
+    for i in 0..20 {
+        let t = format!("step {i:02}: {}", "word ".repeat(48));
+        db.essence_add(EssenceScope::Project, EssenceSection::Next, &t, None)
+            .unwrap();
+    }
+    let out = db.essence(EssenceScope::Project, 2048).unwrap();
+    assert!(out.len() <= 2048, "over budget: {} bytes", out.len());
+    let shown = out.lines().filter(|l| l.starts_with("- [open] step ")).count();
+    // `next`'s own share (1/12 of the body) holds no item of ~260 bytes;
+    // the five empty sections before it leave room for several.
+    assert!(shown >= 4, "{shown} shown:\n{out}");
+    let fold = format!("- +{} more (essence render --budget <bytes>)", 20 - shown);
+    assert!(out.contains(&fold), "no {fold:?}:\n{out}");
+    assert!(out.contains("> full history:"), "{out}");
+}
+
+/// v0.20.2 (G10): items written in the same second sort by id, so renders
+/// in separate opens are byte-identical; `essence_with_ids` names each
+/// item's id after its status.
+#[test]
+fn essence_render_is_the_same_in_every_open_and_names_ids_when_asked() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("ess-det.mnemo");
+    let mut ids = Vec::new();
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        db.remember(Memory::scaffold_manifest(4)).unwrap();
+        for i in 0..12 {
+            for section in [EssenceSection::Decisions, EssenceSection::Next] {
+                let t = format!("{} item {i:02}", section.as_str());
+                ids.push((
+                    db.essence_add(EssenceScope::Project, section, &t, None)
+                        .unwrap(),
+                    t,
+                ));
+            }
+        }
+        db.close().unwrap();
+    }
+    let renders: Vec<String> = (0..4)
+        .map(|_| {
+            let mut db = Mnemo::open(&path, "pw").unwrap();
+            db.essence(EssenceScope::Project, 6144).unwrap()
+        })
+        .collect();
+    for r in &renders[1..] {
+        assert_eq!(r, &renders[0]);
+    }
+    let mut db = Mnemo::open(&path, "pw").unwrap();
+    let with = db.essence_with_ids(EssenceScope::Project, 6144).unwrap();
+    for (id, t) in &ids {
+        assert!(with.contains(&format!("- [open] {id} {t}\n")), "{id}:\n{with}");
+        assert!(!renders[0].contains(&id.to_string()), "{id}");
+    }
+}
+
 #[test]
 fn essence_project_and_thread_scopes_are_independent() {
     let dir = tempdir().unwrap();

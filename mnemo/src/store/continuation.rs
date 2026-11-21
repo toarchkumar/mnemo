@@ -102,8 +102,12 @@ impl Mnemo {
                 _ => {}
             }
         }
+        // v0.20.2 (G10): oldest first, ties by id, so the prelude is the
+        // same in every render.
+        open_items.sort_by_key(|m| (m.created_at, m.id));
+        next_items.sort_by_key(|m| (m.created_at, m.id));
         // Newest-first timeline, cap to last N.
-        timeline_items.sort_by_key(|m| std::cmp::Reverse(m.created_at));
+        timeline_items.sort_by_key(|m| std::cmp::Reverse((m.created_at, m.id)));
         timeline_items.truncate(CONTINUATION_TIMELINE_ENTRIES);
         // Oldest-first for stable chronological read in the render.
         timeline_items.reverse();
