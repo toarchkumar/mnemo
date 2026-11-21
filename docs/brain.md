@@ -1,6 +1,6 @@
 # mnemo export
 
-The brain's backup, written by mnemo 0.20.1 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
+The brain's backup, written by mnemo 0.20.2 with `--git` to be committed beside the project, from a `.mnemo` file (format v9, 384 dimensions). It's plaintext: read the diff before committing.
 
 Keyed memories by key, then tasks, findings and the project essence, then the rest by id. Left out: vectors, thread turns, thread essence, messages, claims, presence, private records, access stats, and security findings until they're verified against a release.
 
@@ -606,6 +606,20 @@ Decision (2026-11-17): v0.18.1 adds public field `refs` to TaskSpec and Task (no
 2026-11-11 decision (user), restated for 12.2 on 2026-11-15: mnemo onboard is the one entry point, safe to re-run. It finds or creates the project brain through git rev-parse --git-common-dir (every worktree shares one file), keeps its generated key in the OS keychain (the one step that may need the human), installs the built-in model, wires Claude Code and Cursor (MCP through mcp install, rules, hooks), and prints the guide; onboard --guide prints only the guide, and mnemo init stays the low-level create. GUIDE-1 is one source text compiled into the binary, delivered by onboard --guide, the MCP server, the rule files and llms.txt, and every command in it runs in CI. Layers: 1 setup and 2 organizing memory ship with 12.2, 3 orchestration with 13a. Trust boundary: the guide lives in the binary; project conventions in the manifest are project notes that never override it. Acceptance: a fresh agent, told only how to install mnemo and then 'run mnemo onboard', runs this project's workflow unaided; the only human step is the keychain prompt. Design note: docs/design/12.2-onboard.md (v0.16.0 step 0, PR 91).
 ```
 
+## 01M7Y0SJ4JQQ8D0CVZPKA10AKA
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.onboard-allow-rules`
+- scope: private
+- created: 2026-11-21T03:00:58Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.onboard-allow-rules"}`
+
+```text
+decision.onboard-allow-rules (user 'Yes', 2026-11-20). Goal: an agent's wake (mnemo wait, inbox, ack) needs no per-command approval click, with one user consent at onboard instead of hand setup per client; an agent never grants itself permissions. (1) Claude Code: in v0.20.2 (spec.v0202 STEP 5, v0202-4o), onboard writes permissions.allow rules for mnemo wait/inbox/ack and mcp__mnemo__*, shown in its plan, removed by onboard --remove. (2) Antigravity: in the 'more editors in onboard' roadmap step. Its first part is a one-hour check: do allow-listed commands (~/.gemini/antigravity-cli/settings.json command(...) rules, or the IDE's Terminal Command Auto Execution allow list) run without a prompt when they must run outside the sandbox, as mnemo does for the keychain (reviewer-a saw BypassSandbox: true on every mnemo command)? The docs (antigravity.google/docs/sandbox) say out-of-sandbox commands still ask, and forum reports say the allow list is sometimes ignored. If they still ask, the step designs a waiter that needn't reach the keychain on every start (e.g. key handed over once), which gets a REVIEWER-B security look before it's built. Evidence: status.pointer-trial F1.
+```
+
 ## 01M7PGEBHXDYV6EDD1PHMA3QCF
 
 - type: episodic
@@ -721,10 +735,24 @@ Release rule (PLANNER-A decision 2026-11-17, in RELEASING.md since v0180-2): any
 - scope: private
 - created: 2026-11-17T20:07:37Z
 - importance: 0.75
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-after-0.18"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795238619,"_mnemo.key":"decision.roadmap-after-0.18","_mnemo.superseded_by":"01M7Y8YTT09WX9Y9XVYS9YWAEZ"}`
 
 ```text
 Roadmap after v0.18.0 (user decision 2026-11-17): HARNESS-DOGFOOD-1 Run 2, then PERF-2 (partition-major index loading and a lazy vector-column fill; first recall at 100K toward <= 15 ms, at 10K toward <= 5 ms, no format bump). Sync (Pro, then Teams) waits: it is decided later on the waitlist's numbers, since the waitlist had 1 sign-up and was not visible until the site's top bar (2bf9b74).
+```
+
+## 01M7Y8YTT09WX9Y9XVYS9YWAEZ
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.roadmap-after-0.18`
+- scope: private
+- created: 2026-11-21T05:23:39Z
+- importance: 0.2
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.roadmap-after-0.18","_mnemo.supersedes":"01M7NHYHJ72W9YCKSBASD0PW0P"}`
+
+```text
+decision.roadmap-after-0.18: retired (planner-a, 2026-11-20). The roadmap after v0.18.0 is history: those steps shipped in v0.18.1 to v0.20.1. The current order is decision.roadmap-order; read that instead.
 ```
 
 ## 01M7RKEDCKA17T3B4CKXAKY0T7
@@ -921,6 +949,34 @@ Decision (2026-11-17): a SECURITY finding record is written private until verifi
 
 ```text
 Decision (user, 2026-11-18): build the whole sync product, not gated on the waitlist ("Let's not wait for signups, we build the full product ... the product is [what's important]"). After v0.20.0, in docs/design/sync.md's build order, each step its own release with a REVIEWER-B pass: (1) 13.7 mnemo merge with the HLC and merge conflicts (free); (2) change sets on disk, mnemo sync export/import (free); (3) the relay protocol with a test relay; (4) the hosted relay, Pro (private repo; pricing, hosting and the business prerequisites are the user's, before it ships); (5) Teams after 13.2 key slots and 13.4 signatures. Planner's default: messages don't sync in the first version.
+```
+
+## 01M7XY27P8DD5GQP8MJ3V67ATB
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0202-use-what-we-built`
+- scope: private
+- created: 2026-11-21T02:13:17Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795228480,"_mnemo.key":"decision.v0202-use-what-we-built","_mnemo.superseded_by":"01M7XZ9D2KMK7VVW74BHF1EK3E"}`
+
+```text
+decision.v0202-use-what-we-built (user, 2026-11-20): (1) YES: a v0.20.2 patch, 'use what we built', after v0.20.1 and before merge, from status.dogfood-gaps: G1 get --key, G3 turn recall and recall --thread (the essence footer advertises it; it doesn't exist), G4 an MCP get, G7 ids in essence render, G8 stale unkeyed decisions ranking in recall, G9 a CLI stats, and G2's hooks (thread essence). The Planner writes spec.v0202 and the tasks after v0.20.1 ships. (2) YES, as a trial ('let's see if it works in actual practice'): G6 brain-only pointers. Once v0.20.1 is released and every session runs mnemo wait, a pointer is a brain post only (mnemo post <agent> '<pointer>'), with no cross-session message; the WAITING for the user is still told to the user directly. Fallback: if a pointer isn't picked up within 10 minutes, the sender also sends the cross-session message and logs the miss in status.pointer-trial. Protocol text (AGENTS.md tmux rule 1 and 10) changes through a hand-off on release-0.20.2 after the trial's first few pointers. (3) G5 claims for shared files: explained to the user, awaiting their answer.
+```
+
+## 01M7XZ9D2KMK7VVW74BHF1EK3E
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `decision.v0202-use-what-we-built`
+- scope: private
+- created: 2026-11-21T02:34:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"decision.v0202-use-what-we-built","_mnemo.supersedes":"01M7XY27P8DD5GQP8MJ3V67ATB"}`
+
+```text
+decision.v0202-use-what-we-built (user, 2026-11-20): (1) YES: a v0.20.2 patch, 'use what we built', after v0.20.1 and before merge, from status.dogfood-gaps: G1 get --key, G3 turn recall and recall --thread (the essence footer advertises it; it doesn't exist), G4 an MCP get, G7 ids in essence render, G8 stale unkeyed decisions ranking in recall, G9 a CLI stats, and G2's hooks (thread essence). The Planner writes spec.v0202 and the tasks after v0.20.1 ships. (2) YES, as a trial ('let's see if it works in actual practice'): G6 brain-only pointers. Once v0.20.1 is released and every session runs mnemo wait, a pointer is a brain post only (mnemo post <agent> '<pointer>'), with no cross-session message; the WAITING for the user is still told to the user directly. Fallback: if a pointer isn't picked up within 10 minutes, the sender also sends the cross-session message and logs the miss in status.pointer-trial. Protocol text (AGENTS.md tmux rule 1 and 10) changes through a hand-off on release-0.20.2 after the trial's first few pointers. (3) YES, a small test (user, 2026-11-20): G5 claims in v0.20.2. The Planner takes a claim (mnemo claim take file:<path>) before editing a Planner-owned file and releases it at the hand-off; the Worker takes tree:checkout while it switches branches and runs mnemo claim who before staging or switching. Advisory only; misses and friction go in status.pointer-trial.
 ```
 
 ## 01M7RXSC9R1RYP7Q6TZ9E2SFZR
@@ -1593,6 +1649,34 @@ Dogfooding layout (since the v0.16 switch, 2026-11-15): the brain is .git/mnemo/
 
 ```text
 fact.flake-cli-shared-embed (worker-a, 2026-11-19): cli_shared::a_shared_mcp_server_embeds_before_it_takes_the_lock (tests/cli_shared.rs:470) failed once on a hosted Windows runner (PR 154, job 135826405514): 'the import waited 1.9746906s' against a 1.2 s cap, while the import got the lock within its --wait 500ms. The time was the CLI process (start, KDF, open), not the lock. It passed on the re-run. The sibling the_cli_embeds_before_it_takes_the_lock had the same kind of Ubuntu failure in v0.15 (01M7DQC8). Logged, not changed; the Planner decides if it recurs (a fix would split the process time from the lock wait, as that sibling's message does).
+```
+
+## 01M7YFYWF9QS1TQHSEY8RNFNDT
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `fact.flake-pager-streamed-windows`
+- scope: private
+- created: 2026-11-21T07:26:01Z
+- importance: 0.6
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795245996,"_mnemo.key":"fact.flake-pager-streamed-windows","_mnemo.superseded_by":"01M7YFZYP8S54SD890BPT3ETHA","area":"ci","topic":"flake"}`
+
+```text
+fact.flake-pager-streamed-windows (worker-a, 2026-11-20): an intermittent Windows CI failure, seen once. CI run 44878117654 attempt 1 on release-0.20.2 at 4529142 (a docs-only commit: AGENTS.md, README.md, index.html) failed rust (windows-latest) cargo test in the lib unit test pager::tests::streamed_reads_reach_the_sink_once_each, src/pager.rs:1306: after the test damages page 100 with a write through a second handle (OpenOptions, offset 100*PAGE_SIZE+64), the threads=Some(1) for_each_page_with returned Ok instead of Err(PageAuthFailed(100)) (the message printed 'Some(1): None'); 90 of 91 lib tests passed. The same code passed every platform at f3def96 just before; `gh run rerun 44878117654 --failed` passed (attempt 2). Cause not investigated. If it recurs, look at whether the damaging write is visible to the next open on Windows (the earlier pager `p` with a dirty cached page 2 is still alive in the test).
+```
+
+## 01M7YFZYP8S54SD890BPT3ETHA
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `fact.flake-pager-streamed-windows`
+- scope: private
+- created: 2026-11-21T07:26:36Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"fact.flake-pager-streamed-windows","_mnemo.supersedes":"01M7YFYWF9QS1TQHSEY8RNFNDT"}`
+
+```text
+fact.flake-pager-streamed-windows (planner-a, 2026-11-20, supersedes worker-a's): NOT a Windows or timing flake. pager::tests::streamed_reads_reach_the_sink_once_each damages page 100 by writing the byte 0x5A at offset 100*PAGE_SIZE+64 (src/pager.rs:1299-1302); the ciphertext there is random per run, so 1 run in 256 the byte is already 0x5A, the page is unchanged, and for_each_page_with returns Ok instead of PageAuthFailed(100). Seen once on CI 44878117654 (Windows, attempt 1; attempt 2 passed). Fix: read the byte and write it XOR 0xFF (and any other test that 'damages' by overwriting a fixed byte). Test-only; queued for the next release (status.backlog-small).
 ```
 
 ## 01M7W6N36EJBM8RVHK4J11VAPY
@@ -3700,6 +3784,160 @@ report.v0201-4 (worker-a, 2026-11-20): READY. RECALL: found (report.v0201-4's WA
 report.v0201-4 (worker-a, 2026-11-20): READY. RECALL: found (report.v0201-4's WAITING version, report.v0201-1, decision.dogfood, decision.mnemo-wait-protocol). STEP 1 (before WAITING): built release-0.20.1 at 25496c9 with --locked --features keychain,embed-candle, installed to ~/.local/bin/mnemo by one atomic mv: mnemo 0.20.1, mtime 2026-11-20T14:28:12-0800, SHA-256 063e3d4999da3f15378e2ccdb535af03ea1abb391c9b7fa38b828f1aa7255e8c (re-checked now: same). STEP 2 (after READ: v0201-4): the three mnemo serve --mcp --shared servers are pids 84765, 84794, 84810, started 17:57:53-17:58:14, after the install. With the installed build, mnemo about printed the brain's header (27987 memories, 428 facts, 384-dim, encrypted) and the briefing, and mnemo recall --text 'dogfood mnemo wait 0.20.1 ...' --no-track returned 10 hits; no keychain dialog appeared for either. mnemo wait --as worker-a --role worker started in the background at 17:58:50 (pid 85117) beside SendMessage, and was still waiting (no output, no exit) when checked; planner-a's own waiter (pid 85021, started 17:58:40) was running beside it. ADDENDUM: I posted 'ready: v0201-4' to planner-a at 17:59:10 (hop 0); at 17:59:14 planner-a's waiter pid 85021 was no longer running and mine (85117) still was, so the post woke the addressee only. I didn't see planner-a's exit code, which is in its own session. My waiter's own wake is still to be seen, on planner-a's next post to worker-a. Verdict: worked so far (about, recall and wait all run on the 0.20.1 RC, and one wake was observed through ps). Rollback copy of the 0.20.0 release binary is still in my scratchpad (mnemo-0.20.0-release.bak).
 ```
 
+## 01M7XYJPMWQ40DQKY1BGTPS8XV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0201-5`
+- scope: private
+- created: 2026-11-21T02:22:16Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795228646,"_mnemo.key":"report.v0201-5","_mnemo.superseded_by":"01M7XZEFC7H84NAGXA99XXWXP8","area":"report","topic":"v0201-5"}`
+
+```text
+report.v0201-5 (worker-a, 2026-11-20): WAITING for the user's approval click. RECALL: found (the backup procedure 01M7NBTP73WBC2SHVX5M4SE7WY, report.v0200-12, report.v0201-3 with its dry run). DRY RUN: 44823898767 at cabe7a6 (mobile false) succeeded; since then only AGENTS.md, README.md and index.html changed (git diff --stat cabe7a6..25496c9: 3 files), so it wasn't run again. CI 44826488031 and Mobile CI 44826488002 passed on 25496c9. THE BACKUP: 618838d 'docs(brain): the brain's backup for v0.20.1, from the release candidate (v0201-5)', docs/brain.md alone, exported by the installed RC mnemo 0.20.1 (SHA-256 063e3d49...5e8c) with mnemo export --git -o docs/brain.md: 528 memories, 2 private records left out, header 'written by mnemo 0.20.1'. Diff read: 308 insertions, 9 deletions. Secret shapes (GitHub, PyPI, OpenAI-style tokens, AWS keys, private keys, JWTs), email addresses and home paths: none. Finding ids named: RB-016.2 (SECURITY, fixed in v0.20.0) and RB-016.4 (SECURITY, deferred, by id only in neutral words, as in the v0.20.0 backup), plus RB-017.1-6, RB-018.2, REV-013.1 (not SECURITY). tests/brain_backup.rs: 2 passed. THE TAG: origin/main e1ec037 was an ancestor; main fast-forwarded e1ec037..618838d; annotated tag v0.20.1 ('MNemo 0.20.1') on 618838d, pushed. RELEASE RUN 44853813465 (tag push, mobile false): 21 jobs succeeded (version check, 5 CLI binaries, 5 wheels, sdist and its check, 5 artifact checks with the built-in embedder, SHA256SUMS, the MCP bundle and server.json, the MCP bundle check), 2 skipped (mobile Swift and Android builds, mobile false). It waits at 'approve the release (v0.20.1, mobile false)' since 18:21:56 local for the user's click. WAKE NOTE (from v0201-4): my background mnemo wait (pid 85117) did not wake when planner-a added v0201-5. That is by design: wake_candidates (store/coordination.rs) wakes only for unread sent messages to the agent and pre-approved sent tasks; v0201-5 is a plain queued task and its pointer came by SendMessage, not a brain post.
+```
+
+## 01M7XZEFC7H84NAGXA99XXWXP8
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0201-5`
+- scope: private
+- created: 2026-11-21T02:37:26Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0201-5","_mnemo.supersedes":"01M7XYJPMWQ40DQKY1BGTPS8XV","area":"report","topic":"v0201-5"}`
+
+```text
+report.v0201-5 (worker-a, 2026-11-20): DONE: v0.20.1 released (updated after READ: v0201-5). RECALL: found (the backup procedure 01M7NBTP73WBC2SHVX5M4SE7WY, report.v0200-12, report.v0201-3 with its dry run). DRY RUN: 44823898767 at cabe7a6 (mobile false) succeeded; since then only AGENTS.md, README.md and index.html changed (git diff --stat cabe7a6..25496c9: 3 files), so it wasn't run again. CI 44826488031 and Mobile CI 44826488002 passed on 25496c9. THE BACKUP: 618838d 'docs(brain): the brain's backup for v0.20.1, from the release candidate (v0201-5)', docs/brain.md alone, exported by the installed RC mnemo 0.20.1 (SHA-256 063e3d49...5e8c) with mnemo export --git -o docs/brain.md: 528 memories, 2 private records left out, header 'written by mnemo 0.20.1'. Diff read: 308 insertions, 9 deletions. Secret shapes (GitHub, PyPI, OpenAI-style tokens, AWS keys, private keys, JWTs), email addresses and home paths: none. Finding ids named: RB-016.2 (SECURITY, fixed in v0.20.0) and RB-016.4 (SECURITY, deferred, by id only in neutral words, as in the v0.20.0 backup), plus RB-017.1-6, RB-018.2, REV-013.1 (not SECURITY). tests/brain_backup.rs: 2 passed. THE TAG: origin/main e1ec037 was an ancestor; main fast-forwarded e1ec037..618838d; annotated tag v0.20.1 ('MNemo 0.20.1') on 618838d, pushed. RELEASE RUN 44853813465 (tag push, mobile false): 21 jobs succeeded (version check, 5 CLI binaries, 5 wheels, sdist and its check, 5 artifact checks with the built-in embedder, SHA256SUMS, the MCP bundle and server.json, the MCP bundle check), 2 skipped (mobile Swift and Android builds, mobile false). It waited at 'approve the release (v0.20.1, mobile false)' from 18:21:56 local. WAKE NOTE (from v0201-4): my background mnemo wait (pid 85117) did not wake when planner-a added v0201-5. That is by design: wake_candidates (store/coordination.rs) wakes only for unread sent messages to the agent and pre-approved sent tasks; v0201-5 is a plain queued task and its pointer came by SendMessage, not a brain post. APPROVAL: GitHub's approvals API for run 44853813465: toarchkumar, approved, environment release. The run completed success at 18:35:57 local: 29 jobs succeeded, 5 skipped (the Swift and Android build, publish and verify jobs, mobile false); approve, publish to crates.io, publish to PyPI, the gate, attest, Create GitHub Release, attach engine assets and the mobile release note all succeeded. AFTER-TAG CHECKS, each from a command: crates.io mnemo-engine max_version 0.20.1; PyPI mnemo-engine 0.20.1 with 6 files; mnemo-swift newest tag 0.20.0 and Maven Central latest/release 0.20.0 (expected: mobile false). The GitHub Release v0.20.1: not a draft, not a prerelease, 14 assets (5 CLI binaries, 5 wheels, the sdist, SHA256SUMS, mnemo-v0.20.1.mcpb, server.json). MCP BUNDLE: server.json version 0.20.1, its fileSha256 equals the .mcpb's SHA-256 (bde89c2693f929da09ce31e73c4a6b6f4ae1328904626cbcccf3fc3b26b76a59). gh attestation verify (--signer-workflow release.yml, --source-ref refs/tags/v0.20.1) exited 0 for the aarch64-apple-darwin binary, the .mcpb and server.json. SITE: Pages built 618838d; install.sh, install.ps1, llms.txt and llms-full.txt are byte-equal to main's (SHA-256); the page shows v0.20.1. INSTALL: the released mnemo-v0.20.1-aarch64-apple-darwin (matched SHA256SUMS) went to ~/.local/bin/mnemo by one atomic mv: mnemo --version 'mnemo 0.20.1'; 10,849,760 bytes; mtime 2026-11-20T18:36:59-0800; SHA-256 dddf902ba30b67fa21b887a1ce178298225ef1036bc488c47492922da8e3ee24. The RC (063e3d49...) is kept in worker-a's scratchpad as mnemo-0.20.1-rc.bak. KEYCHAIN: the released binary is a new code identity, so its first brain read will wait on a macOS keychain dialog (KEYCHAIN-REPROMPT); this report and the task update were written with the RC backup through MNEMO_BIN. The running mnemo serve processes and waiters (mine, pid 85117) still run the RC's inode until restarted. BRANCH: release-0.20.1 (an ancestor of origin/main) deleted on origin and locally; the tree is on main at 618838d, clean apart from the untracked .claude/. LEFT FOR THE USER: the keychain click (Always Allow) for the released binary, the /mcp reconnects (then planner-a checks server start times against 18:36:59 local), and the MCP registry publish (RELEASING.md's maintainer step). Supersedes the WAITING version of this report.
+```
+
+## 01M7Y1R2P2NJ99E5SMPED02MNN
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-1`
+- scope: private
+- created: 2026-11-21T03:17:38Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-1","area":"report","topic":"v0202-1"}`
+
+```text
+report.v0202-1 (worker-a, 2026-11-20): DONE. RECALL: found (spec.v0202, status.pointer-trial, decision.v0202-use-what-we-built via the spec; the v0201-2 include_vector work). BEFORE: restarted my background mnemo wait on the released 0.20.1 (the RC waiter pid 85117 had exited 0 at 18:45:11 on planner-a's brain post 01M7XZWMNKBWPYZ1T9JSYSZDG6 'READ: v0202-1', printing 'message ... from planner-a': the first wake of worker-a's waiter seen; acked). Under a tree:checkout claim (claim who first: no planner-a claims), created release-0.20.2 from main at 618838d, pushed, and branched v0202-1-get-key; released the claim. SPEC CHECK against live code: correct. There was no MCP get tool (tools_call in src/mcp.rs); Mnemo::history_in returns the live version first (store/keyed.rs), which both new paths use; the CLI get took a required PATH, so it now defaults to '' as history does. SHIPPED: PR #162, squash-merged as 7f32024 into release-0.20.2 (branch commit b0d4ac1, branch deleted). CLI: mnemo get --key <KEY> [--agent A | --shared] prints the live version exactly as get <id> (table/json/jsonl byte-equal, tested); no path in a repo, or get <PATH> --key <KEY>; exit 1 'key=K has no live version in that slot (`mnemo history --key K` shows its chain)'; refuses an id with --key, and --agent/--shared without --key; bare `mnemo get` says it needs an id or --key. MCP: get tool, id or key (exactly one), agent/shared with key only, visibility as recall (a private record errors unless asked), include_vector false by default; listed in is_read_tool (read window in shared mode). history and get share key_scope_arg. DEVIATIONS: (1) --agent and --shared added on get --key, to match history's slot choice (the spec named only --key). (2) src/lib.rs gets #![recursion_limit = "256"]: the tools/list json! literal passed the default 128 with one more tool (compile error, no runtime effect). DOCS: guide card names get ('`get` with that `key` reads its current version'; card 1,006 bytes with markers, under 1,200), the tool table, a json mcp model example and a shell line; mnemo/README.md CLI row and MCP paragraph; CHANGELOG [Unreleased] Added; llms.txt, llms-full.txt and the plugin SKILL.md regenerated. TESTS (local): cli_smoke 45 passed (new cli_get_by_key_is_get_by_the_live_id; get added to the tools/list check), mcp_context 17 passed (new the_get_tool_by_key_and_by_id, both modes), project_brain 24 passed (pathless get --key), guide 5 passed; clippy --all-targets -D warnings and fmt clean. MUTATION: returning the oldest version (.last() for .next()) failed the CLI test and, separately, the MCP test. CI on PR #162: 21 checks passed. TRIAL NOTES (for status.pointer-trial): the brain post READ: v0202-1 woke my waiter with no relay; claim release needs the token take printed (friction: a script has to capture it); gh pr merge --delete-branch switches the tree, so it went inside a tree:checkout claim too.
+```
+
+## 01M7Y49BED6STKT8ZP30WHATN1
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-2`
+- scope: private
+- created: 2026-11-21T04:02:01Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-2","area":"report","topic":"v0202-2"}`
+
+```text
+report.v0202-2 (worker-a, 2026-11-20): DONE. RECALL: found (spec.v0202; status.dogfood-gaps G7 and G10, read with history --key then get, since the installed 0.20.1 has no get --key yet). Woken by planner-a's brain post 'READ: v0202-2' (my waiter exited 0 at 19:18:00; acked; waiter restarted). Branch v0202-2-essence-render from release-0.20.2 at 7f32024 inside a tree:checkout claim. SPEC CHECK against live code: G10's description holds (store/essence.rs: fixed per-section shares of body_budget, no carry, only the timeline folded; the sort compared created_at only). One claim of (a) is wrong as a mechanism: forward carry alone does not make 'a render under its budget never drop an item', since intent is first and nothing carries to it (6 intent items over its 1/8 share would be cut in a half-budget render). DEVIATION, so the goal holds: the render tries every item first (with room for the archive pointer) and keeps them all when they fit; only otherwise do the shares apply, each with the unused share of the sections before it. SHIPPED: PR #163, squash-merged as cb0847e into release-0.20.2 (branch commit 8549853, branch deleted). (a) whole render first, then shares plus forward carry (render_sections, section_share); (b) a cut section ends with '- +N more (essence render --budget <bytes>)', the timeline keeps '+N earlier milestones'; (c) ties sort by (created_at, id) in the render and in the continuation prelude (its open and next items were in catalog order); the essence() doc comment now says this; (d) essence render --ids, MCP essence op render ids:true, Mnemo::essence_with_ids put the full ULID after the status (after the date in the timeline). Mnemo::essence's signature is unchanged, so no binding changed. TESTS (local): integration 129 passed (new essence_render_within_budget_keeps_every_item, essence_render_cut_section_gets_the_unused_share_and_says_how_many, essence_render_is_the_same_in_every_open_and_names_ids_when_asked: 4 separate opens byte-identical); cli_smoke 45 (ids over MCP and CLI, default render has none); mcp_context 17; hook_cli 30; project_brain 24; guide 5; retrieval 14; visibility_freshness 4; mnemo-uniffi 21 passed, 1 ignored; clippy -D warnings and fmt clean. MUTATIONS, each failing its test: shares only (no whole render) failed the within-budget test (after I strengthened it with intent items: the first version, next-only, passed under that mutation because carry alone covered it); no carry failed the cut-section test; no id tie-break failed the separate-opens test. CI on PR #163: 21 checks passed. DOCS: guide essence section (cut lines, ids, a json mcp example, a shell line), mnemo/README.md CLI row for essence, CHANGELOG [Unreleased] Added (--ids) and Fixed (no silent drops; deterministic), llms-full.txt and the plugin SKILL.md regenerated (llms.txt unchanged: the card is unchanged). NOT DONE: the render of the real project brain was not run with the new build (rule: no new binary on the real brain before the RC install, v0202-6).
+```
+
+## 01M7Y6RP6GQCYJA5KS0XZ10Z8H
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-3`
+- scope: private
+- created: 2026-11-21T04:45:21Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-3","area":"report","topic":"v0202-3"}`
+
+```text
+report.v0202-3 (worker-a, 2026-11-20): DONE. RECALL: found (spec.v0202; 01M7F7TZS7FWZQFGRSTQNYJ61A, searching past sessions with the turn filter and _mnemo.thread; status.dogfood-gaps G2, G3). Woken by planner-a's brain post 'READ: v0202-3' (waiter exit 0 at 20:02:20; acked; restarted). Branch v0202-3-past-sessions from release-0.20.2 at cb0847e inside a tree:checkout claim. SPEC CHECK: (a) correct: the CLI had no recall --thread; the hooks write _mnemo.thread (MNEMO_META_THREAD); recall leaves turns out unless the filter names an _mnemo.* key, and a thread-pinned filter scans exactly. (b) WRONG AS STATED: the session-start brief has added 'This session's thread' on resume and compact since v0.16.0 (#95, hook.rs part 4). Its flaw: it rendered the thread scope, which always includes project items (essence.rs scope match), so with no thread items (the usual case, G2) it repeated the project essence. Built to the spec's own words ('this thread's own essence render when it has items'), not around it: Mnemo::essence_own(thread, max_bytes) -> Option<String> renders the thread's items only (plus a continuation prelude), None when it has none, and the part uses it inside the existing shares. (c) correct: compact_instructions (hook.rs) extended. SHIPPED: PR #164, squash-merged as 6dea4fc into release-0.20.2 (branch commit 7c30005, branch deleted). recall --thread <ID> (CLI; thread_filter adds _mnemo.thread=<ID> and _mnemo.kind=turn) and MCP recall 'thread' (a non-string is refused, -32602); essence_own in the brief; the compaction note names `recall` with `thread: "<id>"` and asks to keep the task's state with `essence` `add` in that thread (state, next or open) so it comes back after compaction; no model call in any hook. TESTS (local): hook_cli 31 passed (new recall_thread_searches_one_sessions_turns; resume_and_compact_carry_the_thread_essence now checks the thread part has no project item, the project item appears once, and a session with no items gets no part); mcp_context 18 (new recall_with_thread_searches_one_threads_turns, both modes); mnemo bin unit tests 21 (the compaction text whole for a 36-char session id, under COMPACT_MAX 600); cli_smoke 45; integration 129; onboard_cli 18; project_brain 24; guide 5; clippy and fmt clean; a no-hit recall --thread on a scratch brain printed 'No results' and exited 0 (for the guide's model blocks, which only CI's builtin embedder job runs). MUTATIONS, each failing its test: essence_own with project items; the CLI ignoring --thread; MCP ignoring thread. CI on PR #164: 21 checks passed. DOCS: guide 'Search past sessions' (thread examples, json mcp model and sh test model; 'Keep a task's state in its thread'), mnemo/README.md recall row, CHANGELOG [Unreleased] Added (recall --thread, essence_own) and Changed (the brief's thread part, the compaction note), llms-full.txt and the plugin SKILL.md regenerated. The guide's card still says 'add the turn filter (see the guide)'; unchanged.
+```
+
+## 01M7Y8Y6F350H635P1T0HMMBWK
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-4`
+- scope: private
+- created: 2026-11-21T05:23:19Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-4","area":"report","topic":"v0202-4"}`
+
+```text
+report.v0202-4 (worker-a, 2026-11-20): DONE, with one spec claim reported wrong. RECALL: found (spec.v0202; 01M7DZPNVHB41Z76JX6PBTSFGT, remember_keyed_superseding and why unkeyed facts couldn't be superseded; status.dogfood-gaps G8, G9). Woken by planner-a's brain post 'READ: v0202-4' (waiter exit 0 at 20:45:38; acked; restarted). Branch v0202-4-stale-knowledge from release-0.20.2 at 6dea4fc inside a tree:checkout claim. SPEC CLAIM WRONG (not built around): G8's example 01M7NHYHJ72W9YCKSBASD0PW0P ('Roadmap after v0.18.0') is NOT unkeyed: its metadata has _mnemo.key decision.roadmap-after-0.18 (author planner-a), episodic, created 2026-11-17, and it is that key's live version. So mnemo supersede refuses it (the spec says to refuse a key's live version) and stale_unkeyed doesn't list it (3 days old, keyed). The Planner's planned step 'supersedes 01M7NHYHJ72W9YCKSBASD0PW0P itself' can't use supersede; what works today: write that key's next version (remember --key decision.roadmap-after-0.18 ...) or forget it. The Planner's call. SPEC CHECK otherwise: (a) correct: recall drops records in the superseded set (recall.rs row and record paths), which the cache rebuild fills from _mnemo.superseded_by (crud.rs); a catch-up drops the caches on any change (catchup.rs), so a shared reader sees it. (b) measured on the brain with the installed CLI (list --format jsonl): 442 facts, oldest 2026-05-25; 48 live unkeyed episodic facts, 21 of them over 30 days old; of those 21, 0 contain a live key's full name and 8 contain a key's topic word (after the dot), all false (May's PERF notes match decision.dogfood on 'dogfood'). RULE CHOSEN: live, unkeyed, episodic, over 30 days old; no inference of what replaced what; separate from Mnemo::stale so about's and the brief's stale counts don't change. (c) correct: the CLI had no stats. SHIPPED: PR #165, squash-merged as 93c6c89 into release-0.20.2 (branch commit 902379b, branch deleted). Mnemo::supersede(old, by) -> WriteOutcome (Superseded, or Unchanged for the same by again); mnemo supersede [PATH] <ID> --by <ID|KEY> (a key's live version in the default agent's slot); refusals: keyed old, engine record either side (any _mnemo.kind) or manifest, superseded by, same id, missing/deleted, read-only. Mnemo::stale_unkeyed and pub UNKEYED_STALE_SECS (30 days), shown by mnemo stale as 'unkeyed episodic' rows (since = created_at + 30 d), with --mine and --visibility applied. mnemo stats [PATH] [--format table|json|jsonl] from pub mcp::stats_json, which the MCP tool now calls. No MCP supersede (spec). TESTS (local): new tests/stale_knowledge.rs 2 passed; cli_smoke 46 (new cli_supersede_stale_and_stats); integration 129; mcp_context 18; hook_cli 31; project_brain 24; visibility_freshness 4; guide 5; catch_up 13 with --features failpoints; clippy and fmt clean. MUTATIONS, each failing a test: supersede writing nothing; stale_unkeyed without the episodic check; without the key checks. CI on PR #165: 21 checks passed. DOCS: guide freshness part (stale's new rows, supersede), mnemo/README.md (stale row; supersede and stats rows), CHANGELOG [Unreleased] Added, llms-full.txt regenerated (llms.txt and the skill unchanged). NOT DONE: a pathless `mnemo supersede <ID>` test in project_brain (the shift goes through the same shift_get_args path as ack and update).
+```
+
+## 01M7YC85T48HFFKVQ2FDYW2W6N
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-4o`
+- scope: private
+- created: 2026-11-21T06:21:11Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-4o","area":"report","topic":"v0202-4o"}`
+
+```text
+report.v0202-4o (worker-a, 2026-11-20): DONE. RECALL: spec.v0202 STEP 5 and decision.onboard-allow-rules read by key (history then get; the installed 0.20.1 has no get --key). Woken by planner-a's brain post 'READ: v0202-4o' (waiter exit 0 at 21:23:42; acked; restarted). Branch v0202-4o-allow-rules from release-0.20.2 at 93c6c89 inside a tree:checkout claim. RULE SYNTAX, from Claude Code's permissions docs (code.claude.com/docs/en/permissions, fetched): a Bash rule matches the command text as written (Bash(curl *) doesn't match /usr/bin/curl ...); a trailing ' *' also matches the bare command; ':*' is equivalent; compound commands need every part allowed; mcp__<server>__* matches every tool of one server. SPEC CHECK: correct (plan_claude/plan_hooks_file in onboard.rs, no permissions before); one name differs: the removal flag is --undo, not --remove. SHIPPED: PR #166, squash-merged as 5dc64f4 into release-0.20.2 (branch commits cf7523c and cff28d6, branch deleted). allow_rules(ctx): Bash(<p> wait|inbox|ack *) for p in bare mnemo, ~/<rest> when the canonical binary is under HOME (canonical HOME too, for macOS /var vs /private/var), and the absolute path in the local scope only (a project's settings.json is committed); a path needing shell quotes is quoted and gets no ~ form; plus mcp__mnemo__*. is_our_rule (unit-tested true and false cases). The rules are merged into the raw members of permissions (with_allow_rules, set_member_raw), since this crate's serde_json has no preserve_order: other rules and members keep order and text, an older mnemo rule is replaced, a rerun writes nothing, --undo removes only ours. Plan lines '+ permissions.allow: <rule>'; terminal tag '[ ADDED ] Claude Code: allow rules for mnemo wait, inbox, ack and its MCP tools (<file>)' and '3 hooks and 7 allow rules already right'. Not in --plugin mode or Cursor; Antigravity later (decision). CI: the first run failed on Windows with E0599 (no stub_claude, claude_json): I had inserted the new test between claude_code_local_and_project_scopes and its #[cfg(unix)]; cff28d6 restores it; the re-run's 21 checks passed. TESTS (local): onboard_cli 19 passed (new claude_code_allow_rules_for_the_wake_commands: plan, write, order, replacement, rerun, undo, project scope without an absolute path, and the ~ spelling from a copy of the binary under the test's HOME; at_a_terminal_lines_are_tagged_like_a_boot_log updated for the rule lines); mnemo bin unit 22 (new our_allow_rules_and_no_others); cli_smoke 46; hook_cli 31; mcp_install_cli 14; guide 5; clippy and fmt clean. MUTATIONS, each failing the new test: is_our_rule never matching; no ~ spelling. Stub claude and temp homes only; the real config untouched. DOCS: guide onboard list, mnemo/README.md onboard row, CHANGELOG [Unreleased] Added, llms-full.txt, AGENTS.md's onboard task-table row (technical section; claim who showed no file claims; AGENTS.md had no other changes). FOR THE USER, after the RC install (v0202-6): re-running `mnemo onboard --yes` in this repo would add the rules to .claude/settings.local.json; not done (never onboard against real configs).
+```
+
+## 01M7YEDB8S6CGEQWFEWGVSFBG0
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-5`
+- scope: private
+- created: 2026-11-21T06:58:58Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-5","area":"report","topic":"v0202-5"}`
+
+```text
+report.v0202-5 (worker-a, 2026-11-20): READY. v0.20.2 READY. release-0.20.2 at f3def96 (PR #167, branch commit ffdd401, squash-merged; branch deleted); origin/main is an ancestor. The branch holds 7f32024 (v0202-1, get --key and MCP get), cb0847e (v0202-2, essence render), 6dea4fc (v0202-3, recall --thread and the thread's own essence), 93c6c89 (v0202-4, supersede, stale, stats), 5dc64f4 (v0202-4o, onboard allow rules) and f3def96. RECALL: found report.v0201-3 (the bump list and the steps). Woken by planner-a's brain post 'READ: v0202-5' (waiter exit 0 at 22:21:35; acked; restarted). THE BUMP 0.20.1 -> 0.20.2, the same file list as v0201-3: mnemo/Cargo.toml; mnemo/Cargo.lock (mnemo-engine, mnemo-node, mnemo-uniffi); mnemo-python/Cargo.toml, Cargo.lock (mnemo-engine, mnemo-python) and pyproject.toml; bindings/node and bindings/uniffi Cargo.toml; the Kotlin gradle.properties VERSION_NAME; examples/mobile/ios/project.yml MARKETING_VERSION; the Android sample's mnemo-android dependency; root server.json (version, and the bundle URL .../download/v0.20.2/mnemo-v0.20.2.mcpb). integrations/mcpb has no version string. Lockfiles via cargo update --workspace --offline (only workspace packages changed, 5 lines each way); both pass cargo metadata --locked. MOBILE false (.github/release-mobile unchanged): git diff v0.20.1 HEAD -- mnemo/bindings examples/mobile is empty, so Swift and Android stay at 0.20.0. CHANGELOG: [Unreleased] cut into [0.20.2] — 2026-11-20 with an intro (no format change: git diff v0.20.1 HEAD -- mnemo/src/format.rs mnemo/src/store/records.rs is empty; mobile not published) and the compare links. LOCAL (macOS): cargo fmt --check ok; cargo test --locked --features failpoints: release_names 2, cli_smoke 46, guide 5, brain_backup 2, all passed. CI: PR #167, 27 of 27 passed; on f3def96's push, CI 44876861290 and Mobile CI 44876861281 succeeded. DRY RUN 44876865720 on release-0.20.2 at f3def96 (-f dry_run=true -f mobile=false) succeeded: 25 jobs succeeded and 9 skipped (the Swift and Android build, publish and verify jobs, the gate, attest, the approval and Create GitHub Release). No Reviewer pass (a patch). VERSION TEXT FOR THE PLANNER'S HAND-OFF (v0202-5h): README.md line 183, the example string 'the current release is v0.20.1' -> v0.20.2; a new 'What's new in v0.20.2' section above line 205 (the current v0.20.1 one); the mobile lines stay 0.20.0: 112 ('current 0.20.0'), 116 (mnemo-swift from: 0.20.0), 121 (mnemo-android:0.20.0), 215. index.html: line 466, the pill v0.20.1 -> v0.20.2; line 757, '38 tagged releases' -> 39 (git tag -l 'v*' counts 38 now); line 771, 'These examples use v0.20.1.' -> v0.20.2; line 796, the example string -> v0.20.2. The pointer and claims trials' AGENTS.md protocol text is the Planner's (spec.v0202 THEN). LEFT for v0202-6 and v0202-7: the RC install (as v0201-4), docs/brain.md exported by the RC, main's fast-forward, the tag, the approval click. After the RC install, `mnemo onboard --yes` in this repo would add v0202-4o's allow rules to .claude/settings.local.json (the user's call).
+```
+
+## 01M7YFYWYS5V6X3CYRAXBWFZM7
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-5h`
+- scope: private
+- created: 2026-11-21T07:26:02Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-5h","area":"report","topic":"v0202-5h"}`
+
+```text
+report.v0202-5h (worker-a, 2026-11-20): DONE. RECALL: the hand-off pattern from v0201-3h (hand-off files as their own commit on the release branch). Woken by planner-a's brain post 'READ: v0202-5h' (waiter exit 0 at 22:59:14; acked; restarted). claim who showed no file: or tree: claims (planner-a released its file claims, per the task). The tree held exactly AGENTS.md, README.md and index.html modified (plus the untracked .claude/); no 'name 2.ext' files. COMMIT: 4529142 'docs: v0.20.2 version text, and brain-post pointers and claims in the protocol', exactly those three files (48 insertions, 12 deletions), on release-0.20.2, pushed. Read before committing: README's 'What's new in v0.20.2' and the example string v0.20.2; index.html's pill v0.20.2, '39 tagged releases', 'These examples use v0.20.2.' and the example string; AGENTS.md's tmux opening (brain posts carry pointers; SendMessage the 10-minute fallback; WAITING still told to the user), rule 10's waiter bullet, and the new claims bullet. No home paths, emails or token shapes in the diff. CI on 4529142: Mobile CI 44878117656 success; CI 44878117654 attempt 1 failed only rust (windows-latest), the lib unit test pager::tests::streamed_reads_reach_the_sink_once_each (src/pager.rs:1306, PageAuthFailed(100) expected, Ok returned for threads Some(1)); the commit is docs-only and the same code passed every platform at f3def96; `gh run rerun --failed` attempt 2 succeeded. Logged as fact.flake-pager-streamed-windows. release-0.20.2 is at 4529142.
+```
+
+## 01M7YG56C7BAWSF2P7SHG8Y9RD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-6`
+- scope: private
+- created: 2026-11-21T07:29:28Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.invalid_at":1795247126,"_mnemo.key":"report.v0202-6","_mnemo.superseded_by":"01M7YH2DQXSG3SN189M5Y5CMTV","area":"report","topic":"v0202-6"}`
+
+```text
+report.v0202-6 (worker-a, 2026-11-20): WAITING for the user (step 1 done). RECALL: the v0201-4 procedure (report.v0201-4). Woken by planner-a's brain post 'READ: v0202-6' (waiter exit 0 at 23:26:38; acked; restarted at 23:26:51 on 0.20.1, pid 48158). BUILT release-0.20.2 at 45291426fe7d2ba0aa0af6e12060a7f3f2859da4 (clean tree but .claude/) with cargo build --release --locked --features keychain,embed-candle (release.yml's features; 2m 08s). INSTALLED to ~/.local/bin/mnemo by one atomic mv (cp to ~/.local/bin/.mnemo.new, chmod 755, mv -f): mnemo --version 'mnemo 0.20.2'; 10,948,400 bytes; mtime 2026-11-20T23:29:14-0800; SHA-256 f76910bf4562b011884b8b089e04138291a73b8b79cfc2c7828cabb598ee1939. The 0.20.1 release binary (dddf902b...) is kept in worker-a's scratchpad as mnemo-0.20.1-release.bak; this report, the task update and the post went through it (MNEMO_BIN), since the new binary's first brain read waits on the keychain dialog (KEYCHAIN-REPROMPT). RUNNING at install time, all still on 0.20.1 until restarted: mnemo serve --mcp --shared pids 90470, 90488, 90504 (started 18:43); waiters planner-a 47983 (23:26:36) and worker-a 48158 (23:26:51). FOR THE USER: approve the keychain prompt for the new ~/.local/bin/mnemo (Always Allow), with the Mac awake; reconnect mnemo with /mcp in each session; then planner-a checks the server start times against 23:29:14 and sends READ: v0202-6. ON READ I run with the new build on the real brain: get --key report.v0202-5, essence render --project --ids, recall --thread on my own thread, stale, stats; and restart my waiter on 0.20.2.
+```
+
+## 01M7YH2DQXSG3SN189M5Y5CMTV
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `report.v0202-6`
+- scope: private
+- created: 2026-11-21T07:45:26Z
+- importance: 0.8
+- metadata: `{"_mnemo.author":"worker-a","_mnemo.key":"report.v0202-6","_mnemo.supersedes":"01M7YG56C7BAWSF2P7SHG8Y9RD","area":"report","topic":"v0202-6"}`
+
+```text
+report.v0202-6 (worker-a, 2026-11-20): DONE (updated after READ: v0202-6). STEP 1 as in the WAITING version: built release-0.20.2 at 45291426fe7d2ba0aa0af6e12060a7f3f2859da4 with --features keychain,embed-candle, installed by one atomic mv: mnemo 0.20.2, 10,948,400 bytes, mtime 2026-11-20T23:29:14-0800, SHA-256 f76910bf4562b011884b8b089e04138291a73b8b79cfc2c7828cabb598ee1939; the 0.20.1 release binary is kept as mnemo-0.20.1-release.bak in worker-a's scratchpad. AFTER READ (planner-a's note: servers 49437, 49457, 49477 on 0.20.2 from 23:43:34-23:43:47): the new CLI read the brain with no keychain dialog; my waiter restarted on 0.20.2 (the 0.20.1 one had exited 0 at 23:44:11 on the READ post). CHECKS on the real brain, each run: (1) get --key report.v0202-5: the table line starts '01M7YEDB8S6CGEQWFEWGVSFBG0  [episodic]  agent=cursor-agent  imp=0.80  report.v0202-5 ...'; its SHA-256 equals that of get 01M7YEDB8S6CGEQWFEWGVSFBG0 (53fb730c47fe both); --format json has no vector; get --key no.such-key exits 1 with 'key=no.such-key has no live version in that slot (`mnemo history --key no.such-key` shows its chain)'. MCP get with key fact.flake-pager-streamed-windows returned planner-a's live version (it supersedes mine), no vector. (2) essence render --project --ids: 2,033 bytes, sections decisions, state, open, next; 7 items, all 7 as '- [open] <26-char ULID> <text>'; no '+N more' line (fits whole). Three default renders hashed the same (85e5c0310734 x3). (3) recall --text 'install the release candidate keychain prompt' --thread claude-code:ac58fe13-1fb0-496d-bb51-b159c87e2361 --top-k 5: 5 hits, all _mnemo.kind turn and that thread, in 0.83 s; an unknown thread prints 'no results'. One of the top 3 is a saved <task-notification> turn (harness text in the transcript), noise rather than a bug of --thread. (4) stale: 21 rows, all 'unkeyed episodic' (the same 21 measured in v0202-4), oldest '2026-05-25: Started MNemo dogfooding ...' stale since 2026-06-24; nothing else stale; 0.05 s. (5) stats: the 16 fields of the MCP tool: memories 28057, deleted 0, dimensions 384, file_bytes 46776320, encrypted true, recall_mode exact_resident, index null, snapshot_count 115, snapshots_retained 115, wal_pages 17, cache_pages 256 of 256, agents [cursor-agent, default]. ROUGH EDGES (not wrong per spec, for the backlog): stats' table prints created_at and oldest_restorable_at as raw unix seconds and index/agents as JSON (null, an array); stats.memories 28057 counts coordination records (backlog 2), as about's header does not. Nothing else wrong.
+```
+
 ## 01M7PEYPQ3MXR42MYWFEHJCE0J
 
 - type: procedural
@@ -3811,6 +4049,47 @@ spec.v0201-wait (planner-a, 2026-11-19, revised after RB-017; the user go 2026-1
 spec.v0201-wait (planner-a, 2026-11-19, revised after RB-017; the user go 2026-11-19). v0.20.1: mnemo wait, one wake signal from the brain for every editor (status.cross-editor-wake). COMMAND: mnemo wait [PATH] [--as AGENT] [--role ROLE] [--timeout DUR] [--json]. Agent and role default to MNEMO_AGENT and MNEMO_ROLE; no agent: exit 1. MNEMO_WAKE=off: exit at once with one line (RB-017.2). ENGINE (RB-017.1): split Mnemo::wake into a function that returns the ids it marked delivered (task ids, message ids, or the Held reason), with wake() a wrapper that keeps its signature and behaviour for the Stop hook; no public type changes shape. Add a read-only candidates check so an idle check takes a read window and the write window only when something may wake (RB-017.4). OUTPUT: on Now print the message ids and senders and the task slugs, escaped; no message text unless after guide::FRAMING through escape_brain, cut to a fixed length (default: no text; the agent calls inbox). Same fields in --json. Print, flush, exit 0, nothing in between. DELIVERY is at most once; say so in the guide (RB-017.3). NEWEST WAITER WINS: at start a waiter writes a sidecar note for its agent with a random token (beside the hooks hook.turn notes); before each full check it reads it and exits 4 without calling wake when the token is not its own. On Unix it also exits 4 when its parent changes. THE CHECK (RB-017.4): poll Mnemo::file_stamp by path every 1 s with jitter, no handle or lock kept between checks, no file watcher (RB-017.5). Rules: read the stamp before the open, never after; compare for different, not newer, None counts as changed; the first check is unconditional; wait writes nothing but wake (no touch_presence, no hold_presence). A floor between full checks that grows to about 5 s while checks return Nothing on a file that keeps changing. While Held, re-check every 15 s. Locked or a passing I/O error: keep waiting, owe a check, back off 2 s to 30 s, say it once on stderr; use the hooks 2 s lock wait. Exit 1 only for what cannot clear by itself: no key, wrong key (the line says to start it again after a rekey), old or unknown format, a refused network or synced folder, a missing file. Each shared-mode notice once per process. Look for a change before looking at the timeout. Exit 3 on --timeout. KEY: read once at start, held like the MCP server in a zeroizing buffer, nothing derived kept (RB-017.5). LIMITS stated in the guide (RB-017.2): up to 12 wake-ups an hour per agent and 60 s between them (wake limits), stopped by mnemo wake pause; a pre-approved task wakes one waiter per role. CLIENT USE (revised after REV-015, 2026-11-19; the guide, the plugin skill, AGENTS.md tmux rules): Claude Code and Google Antigravity run it as a background command; its exit starts a turn in an idle session (Antigravity live-tested by reviewer-a, REV-015.2: run_command with a short WaitMsBeforeAsync, not a daemon). They start it again after every exit 0, never after exit 1 or 4. No foreground loop in v0.20.1: the other editors cap a foreground command at about 15 to 120 s (Codex about 30 s, Cursor about 25 to 30 s, VS Code unconfirmed, Devin Desktop unconfirmed), so each timeout would cost a model turn, up to hundreds an hour. For Codex, Cursor, VS Code and Devin Desktop the guide says they are not woken while idle yet; step 2 wires their end-of-turn hooks (which keep an active session going) and a notification to the user as the fallback. The user bound (status.v0201-wait-bound) applies to any later foreground use. DOGFOOD: planner-a swaps its polling loop for a background mnemo wait; reviewer-a runs a background mnemo wait in Antigravity; worker-a and reviewer-b add it beside SendMessage; the release dogfood check counts running waiters with the servers. TESTS (RB-017.6): an item sent before start wakes at once; a message by id wakes (assert order, generous bound); one to a role or all does not; a pre-approved task wakes, a plain one does not; two waiters, one message: exactly one exits 0, the older exits 4; a commit between the stamp and the check (dev-hooks pause) still wakes; an exclusive holder: keeps waiting, wakes after it closes (Windows too); compact during the wait then a message: woken; a restore in place: one check, carries on; cooldown and hourly limit held then woken (dev-hooks switches for the tick and the re-check); paused holds, resume releases; MNEMO_WAKE=off, no agent, a wrong key; output escaping (a fake framing line, control characters, 10 KB); a waiter killed while idle leaves items sent; idle waiter: a plain Mnemo::open without wait succeeds repeatedly and the stamp is unchanged after 5 s; --timeout exits 3; --json shape. Not testable in CI, as dogfood checks: a background exit starts a Claude Code turn; the foreground wait fits each editor tool limit. OUT OF SCOPE (step 2): an MCP wait tool (needs a reader thread and per-request cancel in serve_inner), per-editor onboard wiring, OS notifications.
 ```
 
+## 01M7XZW3CVE1TMJR7VQXT7XN7T
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.v0202`
+- scope: private
+- created: 2026-11-21T02:44:53Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795230058,"_mnemo.key":"spec.v0202","_mnemo.superseded_by":"01M7Y0SHKPY9GFS7PATWRDCSNY"}`
+
+```text
+spec.v0202 (planner-a, 2026-11-20; decision.v0202-use-what-we-built, status.dogfood-gaps G1-G10). v0.20.2 'use what we built': a patch on release-0.20.2 (from main at 618838d), engine and CLI and MCP only, mobile false, no REVIEWER-B pass (patch). Each step is its own PR into release-0.20.2 with tests, the README CLI table, the guide where a command changes, and a CHANGELOG line. Check each claim below against live code first; if one is wrong, report it, don't build around it.
+STEP 1 (v0202-1) keyed reads, G1 + G4: `mnemo get --key <key>` prints the live version of a keyed fact (same output as get <id>; exit 1 with a clear message when the key has no live version; --format json). The MCP gets a `get` tool: by `id` or `key` (exactly one), with include_vector false by default like the other tools (v0201-2). The guide's card names it if it fits the 1,200-byte card.
+STEP 2 (v0202-2) the essence render, G10 + G7: (a) a section's unused share flows to the sections after it (render order), so a render under its budget never drops an item; (b) any section that is still cut ends with '- +N more (essence render --budget <bytes>)', like the timeline's fold; (c) items with the same created_at sort by id, so two renders of the same brain are byte-identical (a test renders twice in separate opens and compares); (d) `essence render --ids` (MCP essence op render, `ids: true`) puts each item's full ULID after its status, so update/resolve need no list --format json. Default output stays without ids. The doc comment at store/essence.rs:365-368 says it's deterministic; make it true.
+STEP 3 (v0202-3) past sessions, G3 + G2: (a) the render footer advertises `recall --thread <id>`, which the CLI doesn't have: add `recall --thread <id>` (filter on the thread's turns, same as --filter on its thread metadata; check which key the hooks write) and the same `thread` arg on MCP recall; (b) the session-start brief on a resume or after compaction (Claude Code's source resume or compact) adds this thread's own essence render when it has items, inside the existing budget; (c) compact_instructions (hook.rs:1321) also says: keep the thread's own state with `essence add` (thread scope, state/next/open) so it comes back after compaction. No model call in any hook.
+STEP 4 (v0202-4) stale knowledge and stats, G8 + G9: (a) `mnemo supersede <old-id> --by <new-id or key>` marks an unkeyed record superseded (_mnemo.superseded_by, _mnemo.invalid_at), so recall drops it the way it drops an old keyed version (check score_once in store/recall.rs); refuse a coordination record or a key's live version; MCP not needed. (b) `mnemo stale` also lists unkeyed episodic decisions older than 30 days whose text a keyed fact's key names (or simplest honest rule the code supports; report what you chose). (c) a CLI `mnemo stats` printing what the MCP stats tool returns (table and --format json). The Planner then supersedes 01M7NHYHJ72W9YCKSBASD0PW0P and any other stale unkeyed roadmap records itself.
+THEN: v0202-5 READY (versions 0.20.2 in manifests, lockfiles, server.json, integrations/mcpb, CHANGELOG; dry run mobile false); v0202-5h the Planner's hand-off (README, index.html, AGENTS.md protocol text for the pointer trial and claims if the trial holds); v0202-6 install the release candidate for dogfooding (as v0201-4); v0202-7 the release (as v0201-5). The MCP registry publish stays the user's.
+TRIALS during v0.20.2 (decision.v0202-use-what-we-built items 2 and 3; results in status.pointer-trial): pointers are brain posts (`mnemo post <agent> '<pointer>'`); no SendMessage unless one isn't picked up in 10 minutes (then send it too and log the miss). WAITING is still told to the user directly. The Worker takes `mnemo claim take tree:checkout --ttl 10m` around a branch switch and releases it after; before staging or switching it runs `mnemo claim who` and stops on a planner-a claim on a file it would touch. The Planner claims `file:<path>` before editing a Planner-owned file and releases it when the hand-off task is added.
+```
+
+## 01M7Y0SHKPY9GFS7PATWRDCSNY
+
+- type: procedural
+- agent: `cursor-agent`
+- key: `spec.v0202`
+- scope: private
+- created: 2026-11-21T03:00:58Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"spec.v0202","_mnemo.supersedes":"01M7XZW3CVE1TMJR7VQXT7XN7T"}`
+
+```text
+spec.v0202 (planner-a, 2026-11-20; decision.v0202-use-what-we-built, status.dogfood-gaps G1-G10). v0.20.2 'use what we built': a patch on release-0.20.2 (from main at 618838d), engine and CLI and MCP only, mobile false, no REVIEWER-B pass (patch). Each step is its own PR into release-0.20.2 with tests, the README CLI table, the guide where a command changes, and a CHANGELOG line. Check each claim below against live code first; if one is wrong, report it, don't build around it.
+STEP 1 (v0202-1) keyed reads, G1 + G4: `mnemo get --key <key>` prints the live version of a keyed fact (same output as get <id>; exit 1 with a clear message when the key has no live version; --format json). The MCP gets a `get` tool: by `id` or `key` (exactly one), with include_vector false by default like the other tools (v0201-2). The guide's card names it if it fits the 1,200-byte card.
+STEP 2 (v0202-2) the essence render, G10 + G7: (a) a section's unused share flows to the sections after it (render order), so a render under its budget never drops an item; (b) any section that is still cut ends with '- +N more (essence render --budget <bytes>)', like the timeline's fold; (c) items with the same created_at sort by id, so two renders of the same brain are byte-identical (a test renders twice in separate opens and compares); (d) `essence render --ids` (MCP essence op render, `ids: true`) puts each item's full ULID after its status, so update/resolve need no list --format json. Default output stays without ids. The doc comment at store/essence.rs:365-368 says it's deterministic; make it true.
+STEP 3 (v0202-3) past sessions, G3 + G2: (a) the render footer advertises `recall --thread <id>`, which the CLI doesn't have: add `recall --thread <id>` (filter on the thread's turns, same as --filter on its thread metadata; check which key the hooks write) and the same `thread` arg on MCP recall; (b) the session-start brief on a resume or after compaction (Claude Code's source resume or compact) adds this thread's own essence render when it has items, inside the existing budget; (c) compact_instructions (hook.rs:1321) also says: keep the thread's own state with `essence add` (thread scope, state/next/open) so it comes back after compaction. No model call in any hook.
+STEP 4 (v0202-4) stale knowledge and stats, G8 + G9: (a) `mnemo supersede <old-id> --by <new-id or key>` marks an unkeyed record superseded (_mnemo.superseded_by, _mnemo.invalid_at), so recall drops it the way it drops an old keyed version (check score_once in store/recall.rs); refuse a coordination record or a key's live version; MCP not needed. (b) `mnemo stale` also lists unkeyed episodic decisions older than 30 days whose text a keyed fact's key names (or simplest honest rule the code supports; report what you chose). (c) a CLI `mnemo stats` printing what the MCP stats tool returns (table and --format json). The Planner then supersedes 01M7NHYHJ72W9YCKSBASD0PW0P and any other stale unkeyed roadmap records itself.
+STEP 5 (v0202-4o) onboard writes allow rules, Claude Code (user, 2026-11-20, decision.onboard-allow-rules): `mnemo onboard` adds Claude Code permissions.allow entries, in the same settings file it already writes hooks to for the scope (.claude/settings.local.json or .claude/settings.json; plan_claude/plan_hooks_file in onboard.rs, no permissions today): Bash rules for the installed mnemo's `wait`, `inbox` and `ack` (the exact command shapes a session runs, full path and bare `mnemo`; check Claude Code's rule syntax in its docs) and `mcp__mnemo__*`. They show in the plan before the question and in the terminal view's tags, are recognised as ours like is_our_hook, keep other entries in order (mcp_install's merge), and `onboard --remove` takes out only ours. No rule for anything that writes outside the brain. Tests in tests/onboard_cli.rs (the stub claude, never the real config). Antigravity is not in this step.
+THEN: v0202-5 READY (versions 0.20.2 in manifests, lockfiles, server.json, integrations/mcpb, CHANGELOG; dry run mobile false); v0202-5h the Planner's hand-off (README, index.html, AGENTS.md protocol text for the pointer trial and claims if the trial holds); v0202-6 install the release candidate for dogfooding (as v0201-4); v0202-7 the release (as v0201-5). The MCP registry publish stays the user's.
+TRIALS during v0.20.2 (decision.v0202-use-what-we-built items 2 and 3; results in status.pointer-trial): pointers are brain posts (`mnemo post <agent> '<pointer>'`); no SendMessage unless one isn't picked up in 10 minutes (then send it too and log the miss). WAITING is still told to the user directly. The Worker takes `mnemo claim take tree:checkout --ttl 10m` around a branch switch and releases it after; before staging or switching it runs `mnemo claim who` and stops on a planner-a claim on a file it would touch. The Planner claims `file:<path>` before editing a Planner-owned file and releases it when the hand-off task is added.
+```
+
 ## 01M7T8MPYWH528MY8WC0AYSD8Y
 
 - type: episodic
@@ -3889,10 +4168,52 @@ status.backlog-small (planner-a, 2026-11-19): small items for the smarter-memory
 - scope: private
 - created: 2026-11-20T19:45:10Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.backlog-small","_mnemo.supersedes":"01M7VD4PSW09Z1ZGY8E5A96ZTN"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795246003,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7YG04TAJH7CC32YRFE70J9G","_mnemo.supersedes":"01M7VD4PSW09Z1ZGY8E5A96ZTN"}`
 
 ```text
 status.backlog-small ((planner-a, 2026-11-20)): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand). (10) mnemo task has no cancelled status, so a task added by mistake or superseded can only be noted (rev-014, 2026-11-19). (11) Review batch ids have no allocator: REVIEWER-A used REV-014 for a user-called review while the Planner had named a task's batch REV-014; a 'mnemo finding next-batch REV' or a check at finding add would catch it. (12) `mnemo essence render` shows no item ids, so updating an item needs a full `mnemo list --format json` scan (planner-a, v0.20.0 close). (13) `finding triage` cannot move accepted to deferred: RB-018.2 was accepted pending a timing, the timing showed +0.9 percent, and the deferral (keep pinned pages off the LRU list if a big commit at 1M shows it) lives only in its triage text and here. (14) A new binary (release candidate, then release) re-prompts the keychain each time, and in dark wake the CLI fails with "no UI possible" (KEYCHAIN-REPROMPT, seen twice in v0.20.0).
+```
+
+## 01M7YG04TAJH7CC32YRFE70J9G
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-21T07:26:43Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795247061,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7YH0E5HM0MRED1SHEMRDZX2","_mnemo.supersedes":"01M7X7VJG36A1N5PA28JXSWSF8"}`
+
+```text
+status.backlog-small ((planner-a, 2026-11-20)): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand). (10) mnemo task has no cancelled status, so a task added by mistake or superseded can only be noted (rev-014, 2026-11-19). (11) Review batch ids have no allocator: REVIEWER-A used REV-014 for a user-called review while the Planner had named a task's batch REV-014; a 'mnemo finding next-batch REV' or a check at finding add would catch it. (12) `mnemo essence render` shows no item ids, so updating an item needs a full `mnemo list --format json` scan (planner-a, v0.20.0 close). (13) `finding triage` cannot move accepted to deferred: RB-018.2 was accepted pending a timing, the timing showed +0.9 percent, and the deferral (keep pinned pages off the LRU list if a big commit at 1M shows it) lives only in its triage text and here. (14) A new binary (release candidate, then release) re-prompts the keychain each time, and in dark wake the CLI fails with "no UI possible" (KEYCHAIN-REPROMPT, seen twice in v0.20.0). (15) The pager test's damage byte (fact.flake-pager-streamed-windows): write the byte XOR 0xFF, not a fixed 0x5A, in streamed_reads_reach_the_sink_once_each and any test that damages a page the same way; 1 run in 256 fails today. Next release. (16) mnemo claim release takes the token as a positional argument; a --token flag (or claim release by topic for the holder) would match how agents first try it (status.pointer-trial F4).
+```
+
+## 01M7YH0E5HM0MRED1SHEMRDZX2
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-21T07:44:21Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795247140,"_mnemo.key":"status.backlog-small","_mnemo.superseded_by":"01M7YH2W11YT30JXGNP84JZRHM","_mnemo.supersedes":"01M7YG04TAJH7CC32YRFE70J9G"}`
+
+```text
+status.backlog-small ((planner-a, 2026-11-20)): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand). (10) mnemo task has no cancelled status, so a task added by mistake or superseded can only be noted (rev-014, 2026-11-19). (11) Review batch ids have no allocator: REVIEWER-A used REV-014 for a user-called review while the Planner had named a task's batch REV-014; a 'mnemo finding next-batch REV' or a check at finding add would catch it. (12) `mnemo essence render` shows no item ids, so updating an item needs a full `mnemo list --format json` scan (planner-a, v0.20.0 close). (13) `finding triage` cannot move accepted to deferred: RB-018.2 was accepted pending a timing, the timing showed +0.9 percent, and the deferral (keep pinned pages off the LRU list if a big commit at 1M shows it) lives only in its triage text and here. (14) A new binary (release candidate, then release) re-prompts the keychain each time, and in dark wake the CLI fails with "no UI possible" (KEYCHAIN-REPROMPT, seen twice in v0.20.0). (15) The pager test's damage byte (fact.flake-pager-streamed-windows): write the byte XOR 0xFF, not a fixed 0x5A, in streamed_reads_reach_the_sink_once_each and any test that damages a page the same way; 1 run in 256 fails today. Next release. (16) mnemo claim release takes the token as a positional argument; a --token flag (or claim release by topic for the holder) would match how agents first try it (status.pointer-trial F4). (17) Since v0202-2 the essence render keeps every item that fits, so resolved items now always show (2 resolved next items in the project render on 0.20.2; before, the per-section share happened to cut them). Small context first: fold resolved items into '- +N resolved (essence render --all)' or leave them out by default. Next release.
+```
+
+## 01M7YH2W11YT30JXGNP84JZRHM
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.backlog-small`
+- scope: private
+- created: 2026-11-21T07:45:40Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.backlog-small","_mnemo.supersedes":"01M7YH0E5HM0MRED1SHEMRDZX2"}`
+
+```text
+status.backlog-small ((planner-a, 2026-11-20)): small items for the smarter-memory step (mnemo doctor and friends), after v0.20.0: (1) `mnemo task next --slug` or similar, since the Worker took and requeued the wrong task about 8 times this release reaching a pointed slug; (2) stats.memories counts coordination records such as presence, which recall leaves out (found in v0200-4); (3) the catch-up leftovers in decision.catch-up-results (base-diff middle path, second-recall 5.7 ms, incremental catch-up rising to 1.2 ms over 200 commits); (4) a stale MCP server: the sessions' `mnemo serve --mcp --shared` processes ran the 2026-11-17 build while ~/.local/bin/mnemo was 0.19.1 (installed 2026-11-19 09:40). A doctor check, or a one-line notice from the server or the hook when the installed binary is newer than the running one, would catch it. Until then each session reconnects mnemo (/mcp), a user step; planner-a and reviewer-b did so 13:43, worker-a pending. (5) the CLI has no `mnemo stats` (the MCP tool has it; the Planner reached for it and had to use MCP). (6) RELEASING.md "Before the tag" step 7 still says to commit PLAN.md and reviewer_notes.md, which AGENTS.md froze (report.v0200-5); fix in the next docs pass. (7) vhs-action installs ttyd and ffmpeg at latest, so the demo tools are not fully pinned (report.v0200-5). (8) README and index.html: an MCP registry badge once the listing exists, after the v0.20.0 tag (decision.discoverability). (9) REV-013.1 part 3, for v0.21.0: mnemo inspect's favicon and palette follow docs/brand.md, and the social preview shows the locked mark (decision.brand). (10) mnemo task has no cancelled status, so a task added by mistake or superseded can only be noted (rev-014, 2026-11-19). (11) Review batch ids have no allocator: REVIEWER-A used REV-014 for a user-called review while the Planner had named a task's batch REV-014; a 'mnemo finding next-batch REV' or a check at finding add would catch it. (12) `mnemo essence render` shows no item ids, so updating an item needs a full `mnemo list --format json` scan (planner-a, v0.20.0 close). (13) `finding triage` cannot move accepted to deferred: RB-018.2 was accepted pending a timing, the timing showed +0.9 percent, and the deferral (keep pinned pages off the LRU list if a big commit at 1M shows it) lives only in its triage text and here. (14) A new binary (release candidate, then release) re-prompts the keychain each time, and in dark wake the CLI fails with "no UI possible" (KEYCHAIN-REPROMPT, seen twice in v0.20.0). (15) The pager test's damage byte (fact.flake-pager-streamed-windows): write the byte XOR 0xFF, not a fixed 0x5A, in streamed_reads_reach_the_sink_once_each and any test that damages a page the same way; 1 run in 256 fails today. Next release. (16) mnemo claim release takes the token as a positional argument; a --token flag (or claim release by topic for the holder) would match how agents first try it (status.pointer-trial F4). (17) Since v0202-2 the essence render keeps every item that fits, so resolved items now always show (2 resolved next items in the project render on 0.20.2; before, the per-section share happened to cut them). Small context first: fold resolved items into '- +N resolved (essence render --all)' or leave them out by default. Next release. (18) From the v0.20.2 RC dogfood (report.v0202-6): the stats table prints created_at and oldest_restorable_at as unix seconds and index/agents as JSON; stats.memories (28,057) counts coordination records, which about's header doesn't (backlog 2); recall --thread returns saved <task-notification> harness turns among the top hits (the hooks could skip harness-only turns when saving).
 ```
 
 ## 01M7VCPBA62E61X32SMQ76BCXM
@@ -3973,10 +4294,24 @@ status.discoverability (planner-a, 2026-11-19): done: the repo description ("Sha
 - scope: private
 - created: 2026-11-20T22:07:06Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.dogfood-gaps"}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795227268,"_mnemo.key":"status.dogfood-gaps","_mnemo.superseded_by":"01M7XY4DKMVKWG5V0M6PKE88CD"}`
 
 ```text
 status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve.
+```
+
+## 01M7XY4DKMVKWG5V0M6PKE88CD
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.dogfood-gaps`
+- scope: private
+- created: 2026-11-21T02:14:28Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.dogfood-gaps","_mnemo.supersedes":"01M7XFZES1HDEDMSYHC6AVHQW9"}`
+
+```text
+status.dogfood-gaps (planner-a, 2026-11-20; the user: "if there are gaps to prevent us from using mnemo available features ... mark them and improve to allow us to use it ... even within single platform use cases, the features of mnemo should be value add"). Measured: tool calls across the 7 session transcripts (scratchpad usage/count.py), the brain header, and live commands. FRICTION GAPS (a feature with value we don't use because of the product): G1 no `get --key`: every report read is history --key then get <id>. G2 thread essence unused: 0 thread-scoped items in the brain (7 essence items, all project); resumes after compaction run on Claude Code's summary, not mnemo. G3 turn recall works (--filter _mnemo.kind=turn found the right exchange in 0.6 s) but nothing in our flow calls it, and the essence footer advertises `recall --thread <id>`, which the CLI does not have. G4 the MCP surface is barely used: 7 MCP recall calls in all sessions against hundreds of CLI calls; no MCP get or wait; AGENTS.md examples are CLI. G5 claims used only inside task next; Planner/Worker file ownership (AGENTS.md, README) is a prose rule, not a claim. G6 two channels per pointer (SendMessage plus a brain post), so every checkpoint is acked twice; after mnemo wait the brain can be the only channel. G7 essence render shows no ids (backlog 12). G8 old unkeyed decisions stay live and rank in recall beside keyed ones (01M7NHYHJ72W9YCKSBASD0PW0P 'Roadmap after v0.18.0'); stale reports nothing. G9 no CLI stats (backlog 5). NO FIT FOUND (not forced): the result cache, thread_start/commit_deltas, import; snapshots/restore have value as a release restore drill only. Proposal to the user: a v0.20.2 'use what we built' patch for G1, G3, G4 (MCP get), G7, G8 (a stale check), G9 and G2's hook part; protocol items G5 and G6 are the user's to approve. G10 (found 2026-11-20 on 0.20.1, a correctness gap): essence render --project silently drops items. mnemo/src/store/essence.rs:371-421 gives each section a fixed share of the 6,144-byte budget (next gets 1/12, 490 bytes), never passes unused bytes on, and folds only the timeline; so the project render was 1,268 bytes but showed 5 of 7 items, with no '+N more'. The order isn't deterministic either: items with the same created_at second sort by catalog order, which changed between runs (4 different md5s in 6 runs), so which item dropped changed. Workaround applied: next consolidated to one item. For v0.20.2: unused share flows to later sections, a '+N more (essence render --budget N)' line for any section that's cut, and a tie-break by id. User answers (2026-11-20, decision.v0202-use-what-we-built): v0.20.2 yes; G6 brain-only pointers yes as a trial; G5 explained, pending.
 ```
 
 ## 01M7XF61YHCMXVE1YBHFYBFRAH
@@ -4033,6 +4368,34 @@ status.mcp-recall-vectors (planner-a, 2026-11-19, dogfood; raised by REVIEWER-B 
 
 ```text
 status.metrics (planner-a, 2026-11-19, baseline before v0.20.0): GitHub: 2 stars, 0 forks, 0 watchers, 0 issues; views 14 days 201 total / 22 unique (one 62-view day 11-15 from 1 visitor); clones 12,668 / 746 unique (mostly CI runners); referrers aocr.org 7, github.com 4, toarchkumar.github.io 3; release assets about 16-24 downloads per release. crates.io mnemo-engine: 814 total, 796 in 90 days, 12-31 a day. PyPI mnemo-engine (pypistats, no mirrors): 7,751 last month, 4,064 last week; 7,596 of 8,674 have no OS or Python version (bots, scanners, caches); with an OS: Linux 689, macOS 387, Windows 2. Our CI does not pip install from PyPI. No launch yet (user decision).
+```
+
+## 01M7XZVDPZH3BKR9BC7FJKX7MT
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.pointer-trial`
+- scope: private
+- created: 2026-11-21T02:44:31Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.invalid_at":1795242108,"_mnemo.key":"status.pointer-trial","_mnemo.superseded_by":"01M7YC9A0E7Q162FSHA29MS65K"}`
+
+```text
+status.pointer-trial (planner-a, 2026-11-20; decision.v0202-use-what-we-built items 2 and 3). The record for the brain-only pointer trial (G6) and the claims test (G5); every miss and friction point goes here. mnemo wait on 0.20.1, measured: (1) Claude Code: planner-a's background mnemo wait exited 0 on worker-a's brain post 01M7XX8D39NC8MB9S3WPRHNT3K and on reviewer-a's 01M7XY4R4JSRBM82DT7CECCB5R, each starting a turn with no user relay. (2) Antigravity (reviewer-a): idle wake confirmed: planner-a posted 01M7XZMSRJDZ55W3YB65A109BG at 02:40:54.034Z after reviewer-a's waiter had run 34 s idle; it exited 0 and Antigravity resumed on its own at 02:40:55Z (about 1 s). First attempt didn't test an idle wake: the waiter found the message on its first check because its start waited 28 s for an approval click. (3) What does NOT wake: a task added without --pre-approved and a cross-session SendMessage (worker-a's report.v0201-5, by design of wake_candidates in store/coordination.rs); so trial pointers are brain posts. FRICTION: F1 Antigravity asks for an approval click (BypassSandbox) for every ~/.local/bin/mnemo command, each re-arm included, so unattended waking needs the user to add mnemo wait (and inbox, ack) to Antigravity's command allowlist; F2 every new mnemo binary re-prompts the keychain and blocks every CLI call and waiter until the user clicks (KEYCHAIN-REPROMPT), twice per release (RC and release); F3 the MCP registry publish needs a fresh mcp-publisher login each release (the token expires) and server.json from the release (gh release download -R toarchkumar/mnemo outside the repo).
+```
+
+## 01M7YC9A0E7Q162FSHA29MS65K
+
+- type: episodic
+- agent: `cursor-agent`
+- key: `status.pointer-trial`
+- scope: private
+- created: 2026-11-21T06:21:48Z
+- importance: 0.5
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.key":"status.pointer-trial","_mnemo.supersedes":"01M7XZVDPZH3BKR9BC7FJKX7MT"}`
+
+```text
+status.pointer-trial (planner-a, 2026-11-20; decision.v0202-use-what-we-built items 2 and 3). The record for the brain-only pointer trial (G6) and the claims test (G5); every miss and friction point goes here. mnemo wait on 0.20.1, measured: (1) Claude Code: planner-a's background mnemo wait exited 0 on worker-a's brain post 01M7XX8D39NC8MB9S3WPRHNT3K and on reviewer-a's 01M7XY4R4JSRBM82DT7CECCB5R, each starting a turn with no user relay. (2) Antigravity (reviewer-a): idle wake confirmed: planner-a posted 01M7XZMSRJDZ55W3YB65A109BG at 02:40:54.034Z after reviewer-a's waiter had run 34 s idle; it exited 0 and Antigravity resumed on its own at 02:40:55Z (about 1 s). First attempt didn't test an idle wake: the waiter found the message on its first check because its start waited 28 s for an approval click. (3) What does NOT wake: a task added without --pre-approved and a cross-session SendMessage (worker-a's report.v0201-5, by design of wake_candidates in store/coordination.rs); so trial pointers are brain posts. FRICTION: F1 Antigravity asks for an approval click (BypassSandbox) for every ~/.local/bin/mnemo command, each re-arm included, so unattended waking needs the user to add mnemo wait (and inbox, ack) to Antigravity's command allowlist; F2 every new mnemo binary re-prompts the keychain and blocks every CLI call and waiter until the user clicks (KEYCHAIN-REPROMPT), twice per release (RC and release); F3 the MCP registry publish needs a fresh mcp-publisher login each release (the token expires) and server.json from the release (gh release download -R toarchkumar/mnemo outside the repo). RESULTS SO FAR (v0.20.2 steps 1 to 5, 2026-11-20): pointers: 10 of 10 brain posts picked up with no SendMessage and no miss (READ: v0202-1 to -4o, planner-a to worker-a; DONE: v0202-1 to -4o, worker-a to planner-a); worker-a's waiter exited 0 at each READ (18:45:11, 19:18:00, 20:02:20, 20:45:38, 21:23:42), v0202-1 went active 21 s after the post. Claims: worker-a took tree:checkout around every branch switch and ran claim who before editing AGENTS.md's task table (no planner-a claims). FRICTION: F4 claim release needs the token take printed, so a script must keep it; F5 gh pr merge --delete-branch switches the tree, so it needs the tree:checkout claim too; F6 every pointer is acked by hand (ack), which is fine.
 ```
 
 ## 01M7V63PZEV1P84FP7MBDY2CYD
@@ -5270,7 +5633,7 @@ First step: recall. As v0200-11 (decision.dogfood item 4), for this patch too, b
 - scope: shared
 - created: 2026-11-20T20:44:39Z
 - importance: 0.5
-- metadata: `{"_mnemo.after":["v0201-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0201-5","_mnemo.status":"active","_mnemo.status_history":[{"at":1795226392,"by":"worker-a","from":"queued","to":"active"}]}`
+- metadata: `{"_mnemo.after":["v0201-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0201-5","_mnemo.status":"done","_mnemo.status_history":[{"at":1795226392,"by":"worker-a","from":"queued","to":"active"},{"at":1795227736,"by":"worker-a","from":"active","note":"report.v0201-5","to":"blocked"},{"at":1795228480,"by":"planner-a","from":"blocked","note":"planner-a: the user approved the release deployment for run 44853813465 (2026-11-20). Verified before: origin/main and tag v0.20.1 (annotated) at 618838d; 25496c9..v0.20.1 changes docs/brain.md only.","to":"blocked"},{"at":1795228495,"by":"worker-a","from":"blocked","to":"active"},{"at":1795228646,"by":"worker-a","from":"active","note":"report.v0201-5","to":"ready"},{"at":1795228857,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: run 44853813465 completed success; GitHub Release v0.20.1 has 14 assets; crates.io and PyPI 0.20.1; installed ~/.local/bin/mnemo SHA-256 dddf902b...ee24 equals SHA256SUMS' mnemo-v0.20.1-aarch64-apple-darwin; origin/release-0.20.1 deleted; site shows v0.20.1. Pending the user: mcp-publisher publish (registry shows 0.20.0) and /mcp in all three sessions (servers date from 17:58).","to":"done"},{"at":1795229028,"by":"planner-a","from":"done","note":"planner-a: the user published to the MCP registry (0.20.1, publishedAt 2026-11-21T02:42:51Z, checked) and reconnected /mcp: servers 90470/90488/90504 started 18:43:16-18:43:28, after the 18:36 install.","to":"done"}]}`
 
 ```text
 v0.20.1: the release
@@ -5291,6 +5654,141 @@ First step: recall. As v0200-12 and RELEASING.md: docs/brain.md exported by the 
 REVIEWER-B: the v0.20.1 mnemo wait spec, before build (batch RB-017)
 
 First step: recall. The user asked for a spec check before the Worker builds (2026-11-19). Read spec.v0201-wait and status.cross-editor-wake. Reading only: no build or benchmarks needed (worker-a has v0200-8 open). Scope, and only this: (1) Is reusing Mnemo::wake (store/coordination.rs ~2182) unchanged right for a long-lived waiter: the delivered marking, the guardrails, the hourly limit and cooldown counted on the presence record, and Held vs Nothing? Anything that makes a waiter spin, miss a wake, or wake twice? (2) The change check without decrypting (file metadata and the header's transaction id) and never holding the lock or a handle between checks: is it sound in shared mode and with an exclusive holder, after compact (rename) and after a restore in place? Polling every 1 s versus a file watcher (a new dependency): which, and why. (3) Races: a message committed between a check and the sleep; two waiters for one agent. (4) Windows, and a network or synced folder. (5) The keychain read once at start, and a long-lived process holding the key. (6) Whether an MCP wait tool is feasible later given serve_inner's one-request-at-a-time loop (step 2; a sentence is enough). (7) Anything in the tests list that's missing or untestable. Findings as records RB-017.<n>, each saying whether the spec should change before build. Then set this task ready and send REVIEW DONE: RB-017 to planner-a.
+```
+
+## 01M7XZWD2WKQ75FHY2S9BW5V4S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T02:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0201-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-1","_mnemo.status":"done","_mnemo.status_history":[{"at":1795229128,"by":"worker-a","from":"queued","to":"active"},{"at":1795231058,"by":"worker-a","from":"active","note":"report.v0202-1","to":"ready"},{"at":1795231078,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR #162 MERGED into release-0.20.2 as 7f32024 (0 failed of 21 checks); origin/release-0.20.2 is main + 7f32024 (12 files, +399/-20); the get tool is in tools_list (src/mcp.rs:1548). Deviations accepted: --agent/--shared on get --key (matches history), recursion_limit 256. Trial: pointer READ: v0202-1 by brain post woke worker-a; DONE: v0202-1 by brain post woke planner-a. Dogfood of get --key waits for the RC (v0202-6).","to":"done"}]}`
+
+```text
+v0.20.2: keyed reads, get --key and an MCP get (G1, G4)
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. Before anything: start your background mnemo wait again on the released 0.20.1 (your pid 85117 still runs the replaced RC file), and create release-0.20.2 from main at 618838d inside a tree:checkout claim. Then spec.v0202 STEP 1: get --key and the MCP get tool (G1, G4).
+```
+
+## 01M7XZWD4VSG9SZQ8Z79V4YH30
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T02:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-1"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-2","_mnemo.status":"done","_mnemo.status_history":[{"at":1795231089,"by":"worker-a","from":"queued","to":"active"},{"at":1795233721,"by":"worker-a","from":"active","note":"report.v0202-2","to":"ready"},{"at":1795233739,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR #163 MERGED into release-0.20.2 as cb0847e (0 failed of 21); section_share and render_sections in store/essence.rs, the '+N more (essence render --budget <bytes>)' line at :104. Deviation accepted: whole render first, then shares with forward carry (forward carry alone couldn't keep intent items). Real-brain render waits for the RC (v0202-6); then I re-split next into items.","to":"done"}]}`
+
+```text
+v0.20.2: the essence render: no silent drops, deterministic, --ids (G10, G7)
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0202 STEP 2: the essence render keeps every item under its budget, says +N more when cut, sorts ties by id, and --ids (G10, G7).
+```
+
+## 01M7XZWD6YAH7AZH0QVGM7J0XF
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T02:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-2"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-3","_mnemo.status":"done","_mnemo.status_history":[{"at":1795233747,"by":"worker-a","from":"queued","to":"active"},{"at":1795236321,"by":"worker-a","from":"active","note":"report.v0202-3","to":"ready"},{"at":1795236338,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR #164 MERGED into release-0.20.2 as 6dea4fc (0 failed of 21); Mnemo::essence_own at store/essence.rs:397; recall --thread in the CLI. Spec (b) was mine and wrong: the brief already had a thread part since v0.16.0, which repeated the project essence; the fix (thread items only, none when empty) is the right reading, accepted.","to":"done"}]}`
+
+```text
+v0.20.2: past sessions: recall --thread and the thread's essence after compaction (G3, G2)
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0202 STEP 3: recall --thread (CLI and MCP), the thread's essence in the resume/compact brief, and the compaction instructions (G3, G2).
+```
+
+## 01M7XZWD8ZAZHPFSKXYCC7JW2S
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T02:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-3"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-4","_mnemo.status":"done","_mnemo.status_history":[{"at":1795236345,"by":"worker-a","from":"queued","to":"active"},{"at":1795238599,"by":"worker-a","from":"active","note":"report.v0202-4","to":"ready"},{"at":1795238620,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR #165 MERGED into release-0.20.2 as 93c6c89 (0 failed of 21). Spec error was mine: 01M7NHYHJ72W9YCKSBASD0PW0P is keyed (decision.roadmap-after-0.18), so supersede rightly refuses it; I wrote that key's next version (retired, points to decision.roadmap-order). Stale rule accepted (live unkeyed episodic over 30 days, no inference).","to":"done"}]}`
+
+```text
+v0.20.2: stale knowledge: supersede, stale, and a CLI stats (G8, G9)
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0202 STEP 4: mnemo supersede for unkeyed records, stale for old unkeyed decisions, and a CLI stats (G8, G9).
+```
+
+## 01M7Y0SJACH95VP845VPTA4370
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T03:00:58Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-4"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-4o","_mnemo.status":"done","_mnemo.status_history":[{"at":1795238629,"by":"worker-a","from":"queued","to":"active"},{"at":1795242071,"by":"worker-a","from":"active","note":"report.v0202-4o","to":"ready"},{"at":1795242094,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: PR #166 MERGED into release-0.20.2 as 5dc64f4 (0 failed of 21, after cff28d6 fixed the Windows cfg slip); AGENTS.md change is the technical task-table row only. --undo, not --remove: my wording, accepted. The user's re-run of mnemo onboard on this repo comes after the RC install (v0202-6).","to":"done"}]}`
+
+```text
+v0.20.2: onboard writes Claude Code allow rules for the wake commands
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. spec.v0202 STEP 5: mnemo onboard writes Claude Code allow rules for mnemo wait, inbox, ack and the mnemo MCP tools, in its plan, removed by onboard --remove (decision.onboard-allow-rules).
+```
+
+## 01M7XZWDB1KHCDS70E0MRKR7PJ
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T02:45:03Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-4o"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-5","_mnemo.status":"done","_mnemo.status_history":[{"at":1795242102,"by":"worker-a","from":"queued","to":"active"},{"at":1795244338,"by":"worker-a","from":"active","note":"report.v0202-5","to":"ready"},{"at":1795244353,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: origin/release-0.20.2 at f3def96, main an ancestor; dry run 44876865720 success; server.json and mnemo/Cargo.toml at 0.20.2. My version text matches the report's list (README 183 and the new section, index.html 466/757/771/796); mobile lines stay 0.20.0.","to":"done"}]}`
+
+```text
+v0.20.2: READY
+
+First step: recall. Spec: spec.v0202 (history --key, then get), which also sets the pointer and claims trials for this release (status.pointer-trial). Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0201-3: READY for v0.20.2: versions 0.20.2 in the manifests, lockfiles, server.json and integrations/mcpb, CHANGELOG, the dry run (mobile false). Ask in the report for the Planner's version text (v0202-5h).
+```
+
+## 01M7YE1N3DMNEADPWG0D7K1EBB
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T06:52:35Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-5"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-5h","_mnemo.status":"done","_mnemo.status_history":[{"at":1795244361,"by":"worker-a","from":"queued","to":"active"},{"at":1795245962,"by":"worker-a","from":"active","note":"report.v0202-5h","to":"ready"},{"at":1795245996,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: 4529142 on origin/release-0.20.2 is exactly AGENTS.md, README.md, index.html (48+/12-), my text. CI 44878117654 attempt 1 failed on Windows in pager::tests::streamed_reads_reach_the_sink_once_each, attempt 2 success. Cause found (not timing): the test 'damages' page 100 by writing 0x5A at a ciphertext byte (src/pager.rs:1302); when that byte is already 0x5A (1 in 256, the ciphertext is random per run) nothing changes and the read is Ok. Test-only; fix (XOR the byte) queued in status.backlog-small, not in v0.20.2.","to":"done"}]}`
+
+```text
+v0.20.2: commit the Planner's hand-off (AGENTS.md, README.md, index.html)
+
+First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. Planner hand-off on release-0.20.2: commit exactly AGENTS.md, README.md and index.html as their own commit, message 'docs: v0.20.2 version text, and brain-post pointers and claims in the protocol'. AGENTS.md: the tmux section's opening (brain posts carry pointers, SendMessage the 10-minute fallback), rule 10's waiter bullet, the new claims bullet (user approved 2026-11-20). README: What's new in v0.20.2 and the example string. index.html: the pill, 39 tagged releases, the examples line and string. planner-a released its file: claims when this task was added. Cite the hash in the report.
+```
+
+## 01M7YE1N5SYN1KN4RAG1WNY7HD
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T06:52:35Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-5h"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.ready_seen_by":["planner-a"],"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-6","_mnemo.status":"done","_mnemo.status_history":[{"at":1795246004,"by":"worker-a","from":"queued","to":"active"},{"at":1795246168,"by":"worker-a","from":"active","note":"report.v0202-6","to":"blocked"},{"at":1795247049,"by":"planner-a","from":"blocked","note":"planner-a: the user approved the keychain prompt and reconnected /mcp (2026-11-20). VERIFIED all three servers on 0.20.2: pids 49437 (planner-a, 23:43:34), 49457 (worker-a, 23:43:41), 49477 (reviewer-b, 23:43:47), after the 23:29:14 install. Dogfood: planner-a read this report with the new mnemo get --key report.v0202-6 (first use on the real brain; output as get <id>).","to":"blocked"},{"at":1795247068,"by":"worker-a","from":"blocked","to":"active"},{"at":1795247126,"by":"worker-a","from":"active","note":"report.v0202-6","to":"ready"},{"at":1795247140,"by":"planner-a","from":"ready","note":"VERIFIED by planner-a: 0.20.2 RC (f76910bf...) on all three servers; I ran get --key and essence render --project --ids on the real brain myself (3 identical renders, ids shown). One report detail is off: the render has 7 items, 5 open and 2 resolved (next), not 7 open; the resolved ones showing is backlog (17). Rough edges logged as backlog (18).","to":"done"}]}`
+
+```text
+v0.20.2: install the release candidate for dogfooding
+
+First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0201-4 (decision.dogfood item 4): build release-0.20.2 head with release.yml's features, install to ~/.local/bin/mnemo by one atomic move, report commit, version, mtime and SHA-256, then set blocked with report.v0202-6 and post WAITING: v0202-6 (the user approves the keychain prompt and reconnects /mcp everywhere). On READ: v0202-6, run with the new build on the real brain: get --key report.v0202-5, essence render --project --ids, recall --thread on your own thread, stale, stats; report each output's shape and anything wrong.
+```
+
+## 01M7YE1N8MM2TBPJYYYXDNRBM7
+
+- type: episodic
+- agent: `default`
+- scope: shared
+- created: 2026-11-21T06:52:35Z
+- importance: 0.5
+- metadata: `{"_mnemo.after":["v0202-6"],"_mnemo.author":"planner-a","_mnemo.creator":"planner-a","_mnemo.delivery":"sent","_mnemo.kind":"task","_mnemo.owner":"worker-a","_mnemo.pre_approved":false,"_mnemo.role":"worker","_mnemo.seen_by":["worker-a"],"_mnemo.slug":"v0202-7","_mnemo.status":"active","_mnemo.status_history":[{"at":1795247149,"by":"worker-a","from":"queued","to":"active"}]}`
+
+```text
+v0.20.2: the release
+
+First step: recall. Report: report.<slug>; then send the pointer as a brain post: mnemo post planner-a '<DONE|BLOCKED|WAITING>: <slug>'. As v0201-5 and RELEASING.md: docs/brain.md exported by the installed release candidate and committed by path; fast-forward main, the annotated tag v0.20.2, the release run (mobile false); WAITING: v0202-7 at the approval stop. After it: crates.io, PyPI, the GitHub Release with the MCP bundle and server.json, the site; install the released binary and report version and SHA-256; delete release-0.20.2. The MCP registry publish stays the user's.
 ```
 
 ## 01M7Q2PG6MWEMS2V21TFFSKKJF
@@ -5990,10 +6488,10 @@ Every task starts with a recall; its report says found, partial, not stored or n
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795203895}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.run-2","status.v0.18.1"],"_mnemo.section":"state","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795229110}`
 
 ```text
-v0.20.0 released 2026-11-20 (engine, Swift, Android; MCP bundle): catch-up 0.4/0.8 ms, the fsync merge, serve --mcp shared by default, the retry and mobile-store fixes (RB-016, RB-018). Site shows v0.20.0 and the locked logo.
+v0.20.1 released 2026-11-20 (mnemo wait: idle wake checked in Claude Code and Antigravity, ~1 s; MCP results without vectors). Registries, site and the MCP registry show 0.20.1. v0.20.0 before it (catch-up, the fsync merge, RB-016, RB-018).
 ```
 
 ## 01M7PEZZ06ZB9C0VRTDF2P6PE5
@@ -6016,10 +6514,10 @@ Carried: the shared_lock and EmbedQueueTests timing flakes (logged, change only 
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795203895}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["spec.perf-2","spec.inspect-date-filter"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795229110}`
 
 ```text
-v0.20.1 (decision.roadmap-order step 0): v0201-1 mnemo wait (spec.v0201-wait, status.v0201-wait-bound), then v0201-2 MCP results drop vectors by default. Then merge, more editors, change sets.
+v0.20.2 'use what we built' (spec.v0202, v0202-1 to -5): get --key, MCP get, a render that drops nothing, recall --thread, supersede, CLI stats; pointer and claims trials (status.pointer-trial). Then decision.roadmap-order: merge, editors, change sets.
 ```
 
 ## 01M7PEZYTHY4K8FJG46J6CTCVF
@@ -6029,7 +6527,7 @@ v0.20.1 (decision.roadmap-order step 0): v0201-1 mnemo wait (spec.v0201-wait, st
 - scope: private
 - created: 2026-11-18T04:35:12Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["status.roadmap"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1794976512,"status":"open"}],"_mnemo.updated_at":1795142289}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["status.roadmap"],"_mnemo.section":"next","_mnemo.status":"resolved","_mnemo.status_history":[{"at":1794976512,"status":"open"},{"at":1795227253,"status":"resolved"}],"_mnemo.updated_at":1795227253}`
 
 ```text
 After v0.20.0 (decision.roadmap-order): v0.20.1 mnemo wait (spec.v0201-wait, RB-017 spec check, REV-014 editors); merge; more editors in onboard; sync change sets; smarter memory; public benchmarks; Node.js; mobile screens. Paid work on hold. Ideas: docs/ideas.md.
@@ -6042,7 +6540,7 @@ After v0.20.0 (decision.roadmap-order): v0.20.1 mnemo wait (spec.v0201-wait, RB-
 - scope: private
 - created: 2026-11-19T03:32:14Z
 - importance: 0.5
-- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.vercel-supabase-ideas","decision.roadmap-order"],"_mnemo.section":"next","_mnemo.status":"open","_mnemo.status_history":[{"at":1795059134,"status":"open"}]}`
+- metadata: `{"_mnemo.author":"planner-a","_mnemo.kind":"essence","_mnemo.refs":["decision.vercel-supabase-ideas","decision.roadmap-order"],"_mnemo.section":"next","_mnemo.status":"resolved","_mnemo.status_history":[{"at":1795059134,"status":"open"},{"at":1795227253,"status":"resolved"}],"_mnemo.updated_at":1795227253}`
 
 ```text
 Folded into the roadmap (decision.vercel-supabase-ideas): confirmation before destructive MCP tools and mnemo doctor health checks go in smarter memory; an AI SDK memory package, an eve extension and a sandbox guide lead the Node.js step. Backlog: public repeatable benchmarks.
