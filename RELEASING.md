@@ -190,6 +190,11 @@ git push origin vX.Y.Z
 
 ## After the tag
 
+The tag's fast-forward of `main` runs `pages.yml`, which publishes the
+assembled site (decision.site-publish). Check its run is green and that
+`https://toarchkumar.github.io/mnemo/install.sh` matches the tag's
+`install.sh` (it installs the latest release, so it names no version).
+
 Check all four registries:
 
 - **crates.io:** `cargo search mnemo-engine` shows `X.Y.Z`.
