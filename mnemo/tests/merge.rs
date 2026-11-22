@@ -1102,7 +1102,7 @@ fn three_copies_two_writing_the_same_text_merge_alike_in_either_grouping() {
     let want = records(&o("ab_c.mnemo"));
     assert_eq!(records(&o("a_bc.mnemo")), want, "merge(a, merge(b, c))");
     assert_eq!(records(&o("ac_b.mnemo")), want, "merge(merge(a, c), b)");
-    let mut db = Mnemo::open(&o("ab_c.mnemo"), PW).unwrap();
+    let mut db = Mnemo::open(o("ab_c.mnemo"), PW).unwrap();
     assert_eq!(db.get(&id).unwrap().content, "edited to 0");
     let c = copies(&mut db);
     assert_eq!(c.len(), 1, "{c:?}");
@@ -1112,7 +1112,8 @@ fn three_copies_two_writing_the_same_text_merge_alike_in_either_grouping() {
 #[test]
 fn an_output_edited_afterwards_merges_with_an_input_without_a_new_conflict() {
     // The merged version lists both inputs' versions, so an edit made on
-    // the output descends from both.
+    // the output descends from both: no new conflict, and the first one's
+    // copy goes.
     let p = pair();
     let t = wall_ms();
     edit_at(&p.a, &p.base_fact, "edited in a", t);
@@ -1129,7 +1130,9 @@ fn an_output_edited_afterwards_merges_with_an_input_without_a_new_conflict() {
             db.get(&p.base_fact).unwrap().content,
             "edited after the merge"
         );
-        assert_eq!(copies(&mut db).len(), 1, "{name}: only the first merge's");
+        // The edit descends from both versions, so the copy goes too
+        // (decision.v0210-conflict-flags).
+        assert!(copies(&mut db).is_empty(), "{name}");
     }
 }
 
@@ -1178,4 +1181,126 @@ fn a_version_a_merge_made_is_never_listed_as_an_earlier_one() {
             .all(|p| p[1].as_u64().unwrap() & VER_MERGED == 0),
         "{prev:?}"
     );
+}
+
+/// Three copies of a base holding one essence item; returns their paths
+/// and the item.
+fn three_with_an_item(dir: &Path) -> ([PathBuf; 3], Ulid) {
+    let base_path = dir.join("base.mnemo");
+    base(&base_path);
+    let mut db = open(&base_path);
+    let item = db
+        .essence_add(
+            EssenceScope::Project,
+            EssenceSection::Open,
+            "the item",
+            None,
+        )
+        .unwrap();
+    db.close().unwrap();
+    let paths = ["a", "b", "c"].map(|n| dir.join(format!("{n}.mnemo")));
+    for x in &paths {
+        copy(&base_path, x);
+    }
+    (paths, item)
+}
+
+fn flagged(p: &Path, id: &Ulid) -> bool {
+    let mut db = Mnemo::open_read_only(p, PW).unwrap();
+    meta(&db.get(id).unwrap(), MNEMO_META_MERGE_CONFLICT) == Some(&Value::Bool(true))
+}
+
+#[test]
+fn an_essence_flag_follows_its_texts_in_every_grouping() {
+    // The proptest's seed 083bdc4a: a edits the item to one text, b to
+    // another, c resolves it and writes b's text. Two concurrent texts:
+    // flagged and resolved, whichever two merge first.
+    let dir = tempfile::tempdir().unwrap();
+    let ([a, b, c], item) = three_with_an_item(dir.path());
+    let t = wall_ms() + 10_000;
+    for (path, resolve, text) in [
+        (&a, false, "the item, take 0"),
+        (&b, false, "the item, take 2"),
+        (&c, true, "the item, take 2"),
+    ] {
+        let mut db = open(path);
+        db.__freeze_hlc_clock_for_testing(Some(t));
+        if resolve {
+            db.essence_resolve(&item).unwrap();
+        }
+        db.essence_update(&item, text, None).unwrap();
+        db.close().unwrap();
+    }
+    let o = |n: &str| dir.path().join(n);
+    let now = t + 1_000;
+    merge(&a, &b, &o("ab.mnemo"), now);
+    merge(&o("ab.mnemo"), &c, &o("ab_c.mnemo"), now);
+    merge(&b, &c, &o("bc.mnemo"), now);
+    merge(&a, &o("bc.mnemo"), &o("a_bc.mnemo"), now);
+    assert_eq!(records(&o("ab_c.mnemo")), records(&o("a_bc.mnemo")));
+    assert!(flagged(&o("ab_c.mnemo"), &item));
+    assert!(!flagged(&o("bc.mnemo"), &item), "one text: no flag");
+    let mut db = Mnemo::open_read_only(o("ab_c.mnemo"), PW).unwrap();
+    assert_eq!(db.get(&item).unwrap().metadata["_mnemo.status"], "resolved");
+}
+
+#[test]
+fn an_essence_flag_goes_once_an_edit_descends_from_both_texts() {
+    let dir = tempfile::tempdir().unwrap();
+    let ([a, b, _], item) = three_with_an_item(dir.path());
+    let t = wall_ms();
+    for (path, at, text) in [(&a, t, "text in a"), (&b, t + 1_000, "text in b")] {
+        let mut db = open(path);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        db.essence_update(&item, text, None).unwrap();
+        db.close().unwrap();
+    }
+    let m = dir.path().join("m.mnemo");
+    merge(&a, &b, &m, t + 2_000);
+    assert!(flagged(&m, &item));
+    let mut db = open(&m);
+    db.__freeze_hlc_clock_for_testing(Some(t + 3_000));
+    db.essence_update(&item, "one text for both", None).unwrap();
+    db.close().unwrap();
+    for (input, name) in [(&a, "ma.mnemo"), (&b, "mb.mnemo")] {
+        let out = dir.path().join(name);
+        let r = merge(&m, input, &out, t + 4_000);
+        assert!(r.conflicts.is_empty(), "{name}: {:?}", r.conflicts);
+        let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+        let got = db.get(&item).unwrap();
+        assert_eq!(got.content, "one text for both");
+        // The edit descends from both texts: the flag and the list go.
+        assert!(!flagged(&out, &item), "{name}");
+        assert!(got.metadata.get("_mnemo.merge_heads").is_none(), "{name}");
+    }
+}
+
+#[test]
+fn a_copy_of_a_copy_merges_alike_in_either_grouping() {
+    // x writes 'text p'; y, copied from x, rewrites it 'text q'; z, from
+    // the base, writes 'text q'. y was edited from x's text, so no grouping
+    // keeps a copy of it.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    let id = base(&base_path);
+    let o = |n: &str| dir.path().join(n);
+    let t = wall_ms() + 10_000;
+    copy(&base_path, &o("x.mnemo"));
+    edit_at(&o("x.mnemo"), &id, "text p", t);
+    copy(&o("x.mnemo"), &o("y.mnemo"));
+    edit_at(&o("y.mnemo"), &id, "text q", t + 10);
+    copy(&base_path, &o("z.mnemo"));
+    edit_at(&o("z.mnemo"), &id, "text q", t + 5);
+    let now = t + 1_000;
+    let (x, y, z) = (o("x.mnemo"), o("y.mnemo"), o("z.mnemo"));
+    merge(&x, &z, &o("xz.mnemo"), now);
+    merge(&o("xz.mnemo"), &y, &o("xz_y.mnemo"), now);
+    merge(&z, &y, &o("zy.mnemo"), now);
+    merge(&x, &o("zy.mnemo"), &o("x_zy.mnemo"), now);
+    assert_eq!(records(&o("xz_y.mnemo")), records(&o("x_zy.mnemo")));
+    let mut db = Mnemo::open_read_only(o("xz_y.mnemo"), PW).unwrap();
+    assert_eq!(db.get(&id).unwrap().content, "text q");
+    assert!(copies(&mut db).is_empty());
+    // Before y arrived, x and z were a conflict.
+    assert_eq!(copies(&mut open(&o("xz.mnemo"))).len(), 1);
 }

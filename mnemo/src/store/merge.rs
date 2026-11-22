@@ -26,8 +26,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use super::*;
 use crate::memory::{
     finding_status, task_status, MNEMO_META_FINDING_ID, MNEMO_META_MERGE_CONFLICT,
-    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY,
-    MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_OWNER,
+    MNEMO_META_READY_SEEN_BY, MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS,
+    MNEMO_META_STATUS_HISTORY,
 };
 
 /// One input of the rules: its live records (with vectors and access
@@ -251,12 +252,184 @@ fn version(m: &Memory) -> Option<(u64, u64)> {
     ))
 }
 
-/// decision.v0210-ancestry: `x` is an ancestor of `y` when `x`'s version
-/// (its stamp and hash) is among the versions `y` had before. Equal stamps
-/// with different content (an older build's edit of both, or two copies
-/// in one millisecond) are never ancestry.
-fn ancestor(x: &Memory, y: &Memory) -> bool {
-    version(x).is_some_and(|v| super::records::hlc_prev(y).contains(&v))
+/// decision.v0210-conflict-flags: one of the concurrent versions a record
+/// combines: its stamp, its version hash, and a hash of the text a merge
+/// compares for its kind (an essence item's, a task's or a finding's text;
+/// all a user sees of anything else).
+type Head = (u64, u64, u64);
+
+fn group(m: &Memory) -> u64 {
+    let h: [u8; 32] = match kind(m) {
+        Kind::Essence | Kind::Task | Kind::Finding => {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(m.content.as_bytes()).into()
+        }
+        _ => content_hash(m),
+    };
+    u64::from_be_bytes(h[..8].try_into().expect("8 bytes")) >> 2
+}
+
+/// A version as one head: an older build's record (no stamp, or no
+/// version hash) by its number and the hash of what it holds.
+fn own_head(m: &Memory) -> Head {
+    (
+        stamp(m).unwrap_or_else(|| number(m)),
+        m.metadata
+            .get(MNEMO_META_VER)
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| super::records::version_hash(m)),
+        group(m),
+    )
+}
+
+/// The versions a record combines: the list a merge left on it, else the
+/// record's own.
+fn heads(m: &Memory) -> BTreeSet<Head> {
+    let listed: BTreeSet<Head> = m
+        .metadata
+        .get(MNEMO_META_MERGE_HEADS)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            let e = e.as_array()?;
+            Some((
+                e.first()?.as_u64()?,
+                e.get(1)?.as_u64()?,
+                e.get(2)?.as_u64()?,
+            ))
+        })
+        .collect();
+    if listed.is_empty() {
+        BTreeSet::from([own_head(m)])
+    } else {
+        listed
+    }
+}
+
+fn heads_value(hs: &BTreeSet<Head>) -> Value {
+    Value::Array(
+        hs.iter()
+            .map(|h| Value::Array(vec![h.0.into(), h.1.into(), h.2.into()]))
+            .collect(),
+    )
+}
+
+fn pair(h: &Head) -> (u64, u64) {
+    (h.0, h.1)
+}
+
+/// decision.v0210-ancestry, with decision.v0210-conflict-flags: `y`
+/// covers `x` when every version `x` combines is one `y` combines too or
+/// one of `y`'s earlier versions. For two single versions, that's `x` being
+/// `y`'s ancestor. Equal stamps with different content (an older build's
+/// edit of both, or two copies in one millisecond) are never ancestry.
+fn covers(y: &Memory, hy: &BTreeSet<Head>, hx: &BTreeSet<Head>) -> bool {
+    let prev = super::records::hlc_prev(y);
+    hx.iter()
+        .all(|h| prev.contains(&pair(h)) || hy.iter().any(|k| pair(k) == pair(h)))
+}
+
+/// Two inputs' heads as one set, less each one the other input was edited
+/// from (among its earlier versions, and not one of its own heads).
+fn joined_heads(
+    a: &Memory,
+    ha: &BTreeSet<Head>,
+    b: &Memory,
+    hb: &BTreeSet<Head>,
+) -> BTreeSet<Head> {
+    let edited_from = |m: &Memory, hm: &BTreeSet<Head>| -> BTreeSet<(u64, u64)> {
+        let own: BTreeSet<(u64, u64)> = hm.iter().map(pair).collect();
+        super::records::hlc_prev(m)
+            .into_iter()
+            .filter(|p| !own.contains(p))
+            .collect()
+    };
+    let (ea, eb) = (edited_from(a, ha), edited_from(b, hb));
+    ha.iter()
+        .filter(|h| !eb.contains(&pair(h)))
+        .chain(hb.iter().filter(|h| !ea.contains(&pair(h))))
+        .copied()
+        .collect()
+}
+
+/// Whether the merge's flag on this kind follows its heads (two of them
+/// with different text) rather than staying once set.
+fn flag_follows_heads(m: &Memory) -> bool {
+    matches!(kind(m), Kind::Essence | Kind::Task | Kind::Finding)
+}
+
+/// An essence item's, a task's or a finding's flag from the versions it
+/// combines: set while two hold different text, or while a merge's rename
+/// stands; else cleared. Returns whether it's set.
+fn set_flag(body: &mut Memory, hs: &BTreeSet<Head>) -> bool {
+    let texts: BTreeSet<u64> = hs.iter().map(|h| h.2).collect();
+    let on = texts.len() >= 2 || body.metadata.contains_key(MNEMO_META_MERGE_NAME);
+    set_or_remove(
+        body,
+        MNEMO_META_MERGE_CONFLICT,
+        on.then_some(Value::Bool(true)),
+    );
+    on
+}
+
+/// The merged record's version: an input's when the merge left it as that
+/// input had it; else one of the merge's own, named by its hash and marked
+/// as made by a merge.
+fn name_version(a: &Memory, b: &Memory, body: &mut Memory) {
+    if stamp(body).is_none() {
+        return;
+    }
+    let same = [a, b]
+        .into_iter()
+        .find(|m| core_bytes(m) == core_bytes(body));
+    let v = match same {
+        Some(m) => m.metadata.get(MNEMO_META_VER).cloned(),
+        None => Some(Value::from(
+            super::records::version_hash(body) | super::records::VER_MERGED,
+        )),
+    };
+    set_or_remove(body, MNEMO_META_VER, v);
+}
+
+/// A conflict copy of `source` holding `cand`'s text, rebuilt from what a
+/// user sees of it and the versions it holds (`list`), so it reads the same
+/// whichever merge made it.
+fn build_copy(source: u128, cand: &Memory, list: &BTreeSet<Head>, src: Option<&Memory>) -> Memory {
+    let mut c = cand.clone();
+    c.id = Ulid(copy_id(source, &content_hash(cand)));
+    c.vector = rounded(&cand.vector);
+    c.metadata = visible_metadata(cand);
+    let top = list.iter().max_by_key(|h| pair(h)).expect("one version");
+    c.metadata.insert(MNEMO_META_HLC.into(), Value::from(top.0));
+    c.metadata.insert(MNEMO_META_VER.into(), Value::from(top.1));
+    c.metadata.insert(
+        MNEMO_META_UPDATED_AT.into(),
+        Value::from((top.0 / 1000) as i64),
+    );
+    c.metadata
+        .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+    c.metadata.insert(
+        MNEMO_META_MERGE_SOURCE.into(),
+        Value::String(Ulid(source).to_string()),
+    );
+    c.metadata
+        .insert(MNEMO_META_MERGE_HEADS.into(), heads_value(list));
+    if let Some(s) = src {
+        for k in [MNEMO_META_SUPERSEDED_BY, MNEMO_META_INVALID_AT] {
+            set_or_remove(&mut c, k, s.metadata.get(k).cloned());
+        }
+    }
+    c.accessed_at = c.created_at;
+    c.access_count = 0;
+    c
+}
+
+/// A conflict copy as a merge made it (its id still names its text).
+fn pristine_copy(m: &Memory) -> bool {
+    kind(m) == Kind::Fact
+        && ulid_at(m, MNEMO_META_MERGE_SOURCE)
+            .is_some_and(|s| m.id.0 == copy_id(s, &content_hash(m)))
 }
 
 /// A conflict flag stays once set, whichever version wins.
@@ -304,16 +477,23 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
             conflict: None,
         };
     }
-    // One version descends from the other (a one-sided edit or move): the
-    // descendant wins whole, with no copy and no flag.
-    let (a_anc, b_anc) = (ancestor(a, b), ancestor(b, a));
-    if a_anc != b_anc {
-        let d = if a_anc { b } else { a };
+    // One covers the other (a one-sided edit or move, or a record edited
+    // from every version the other combines): it wins whole, with no copy
+    // and no new flag.
+    let (ha, hb) = (heads(a), heads(b));
+    let (a_covers, b_covers) = (covers(a, &ha, &hb), covers(b, &hb, &ha));
+    if a_covers != b_covers {
+        let d = if b_covers { b } else { a };
         let mut body = d.clone();
         body.accessed_at = a.accessed_at.max(b.accessed_at);
         body.access_count = a.access_count.max(b.access_count);
+        if flag_follows_heads(d) {
+            set_flag(&mut body, &heads(d));
+        } else {
+            keep_flag(a, b, &mut body);
+        }
+        name_version(a, b, &mut body);
         merged_prev(a, b, &mut body);
-        keep_flag(a, b, &mut body);
         return Resolved {
             body,
             copy: None,
@@ -378,9 +558,7 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
             };
             set_or_remove(&mut body, MNEMO_META_STATUS, status);
             put_history(&mut body, a, b, union_history(a, b));
-            if a.content != b.content && st(a) != st(b) {
-                conflict = Some("essence");
-            }
+            conflict = Some("essence");
         }
         Kind::Task | Kind::Finding => {
             let finding = kind(w) == Kind::Finding;
@@ -426,9 +604,7 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
             }
             set_or_remove(&mut body, MNEMO_META_STATUS, status.map(Value::String));
             put_history(&mut body, a, b, history);
-            if a.content != b.content && st(a) != st(b) {
-                conflict = Some(if finding { "finding" } else { "task" });
-            }
+            conflict = Some(if finding { "finding" } else { "task" });
         }
         Kind::Message => {
             let d = [a, b]
@@ -472,25 +648,23 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
         }
         Kind::Turn | Kind::Local | Kind::Tombstone | Kind::Engine => {}
     }
-    keep_flag(a, b, &mut body);
-    if conflict.is_some() && copy.is_none() {
-        body.metadata
-            .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+    // The concurrent versions this one combines. An essence item's, a
+    // task's or a finding's flag follows them: set while two hold different
+    // text (decision.v0210-conflict-flags). Others' flags stay once set.
+    let hs = joined_heads(a, &ha, b, &hb);
+    if flag_follows_heads(w) {
+        if !set_flag(&mut body, &hs) {
+            conflict = None;
+        }
+    } else {
+        keep_flag(a, b, &mut body);
     }
-    // The version: an input's when the merge left it as it was; else one
-    // of the merge's own, named by its hash and marked as made by a merge.
-    if stamp(&body).is_some() {
-        let same = [a, b]
-            .into_iter()
-            .find(|m| core_bytes(m) == core_bytes(&body));
-        let v = match same {
-            Some(m) => m.metadata.get(MNEMO_META_VER).cloned(),
-            None => Some(Value::from(
-                super::records::version_hash(&body) | super::records::VER_MERGED,
-            )),
-        };
-        set_or_remove(&mut body, MNEMO_META_VER, v);
-    }
+    set_or_remove(
+        &mut body,
+        MNEMO_META_MERGE_HEADS,
+        (hs.len() >= 2).then(|| heads_value(&hs)),
+    );
+    name_version(a, b, &mut body);
     merged_prev(a, b, &mut body);
     Resolved {
         body,
@@ -656,8 +830,6 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     let mut conflicts: BTreeMap<String, usize> = BTreeMap::new();
     let mut conflict_ids: BTreeSet<u128> = BTreeSet::new();
     let mut copies: Vec<Memory> = Vec::new();
-    // Ids both inputs hold in different versions.
-    let mut contested: BTreeSet<u128> = BTreeSet::new();
     let ids: BTreeSet<u128> = sides[0]
         .by_id
         .keys()
@@ -668,8 +840,9 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         match (sides[0].by_id.get(&id), sides[1].by_id.get(&id)) {
             (Some(x), Some(y)) => {
                 report.both += 1;
-                if record_bytes(x) != record_bytes(y) {
-                    contested.insert(id);
+                if pristine_copy(x) && pristine_copy(y) {
+                    copies.extend([x.clone(), y.clone()]);
+                    continue;
                 }
                 if kind(x) == Kind::Local {
                     out.insert(id, x.clone());
@@ -692,6 +865,10 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 if kind(x) != Kind::Local {
                     report.a_only.push(Ulid(id));
                 }
+                if pristine_copy(x) {
+                    copies.push(x.clone());
+                    continue;
+                }
                 out.insert(id, x.clone());
             }
             (None, Some(y)) => {
@@ -700,43 +877,49 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                     continue;
                 }
                 report.b_only.push(Ulid(id));
+                if pristine_copy(y) {
+                    copies.push(y.clone());
+                    continue;
+                }
                 out.insert(id, y.clone());
             }
             (None, None) => {}
         }
     }
+    // Conflict copies (decision.v0210-conflict-flags): for each source,
+    // one per text among the versions it combines, other than its own, and
+    // each holding those versions; a text whose versions the source was
+    // edited from has none. The inputs' copies and this merge's new ones
+    // are only where the text comes from.
+    let mut cands: BTreeMap<u128, BTreeMap<u64, Vec<Memory>>> = BTreeMap::new();
     for c in copies {
-        // A copy an earlier merge made of the same content is the same
-        // record, though maybe of another version (two copies wrote the
-        // same text): the two resolve like any two versions of one id, so
-        // every grouping of three copies keeps the same one.
-        match out.remove(&c.id.0) {
-            None => {
-                out.insert(c.id.0, c);
-            }
-            Some(e) => {
-                let r = resolve(&e, &c);
-                if let Some(cc) = r.copy {
-                    out.entry(cc.id.0).or_insert(cc);
-                }
-                out.insert(c.id.0, r.body);
-            }
+        if let Some(s) = ulid_at(&c, MNEMO_META_MERGE_SOURCE) {
+            cands
+                .entry(s)
+                .or_default()
+                .entry(group(&c))
+                .or_default()
+                .push(c);
         }
     }
-    // A copy that holds what its source now holds is no conflict any more
-    // (a third copy wrote the same text): dropped, when this merge resolved
-    // that source, so every grouping keeps the same copies.
-    let redundant: Vec<u128> = out
-        .iter()
-        .filter_map(|(id, m)| {
-            let s = ulid_at(m, MNEMO_META_MERGE_SOURCE)?;
-            let src = out.get(&s)?;
-            (contested.contains(&s) && same_visible(m, src) && *id == copy_id(s, &content_hash(m)))
-                .then_some(*id)
-        })
-        .collect();
-    for id in redundant {
-        out.remove(&id);
+    for (s, by_text) in cands {
+        let src = out.get(&s).cloned();
+        let hs = src.as_ref().map(heads);
+        let own = src.as_ref().map(group);
+        for (g, cs) in by_text {
+            let list: BTreeSet<Head> = match &hs {
+                Some(hs) => hs.iter().filter(|h| h.2 == g).copied().collect(),
+                // A copy whose source isn't here: what its copies hold.
+                None => cs.iter().flat_map(heads).collect(),
+            };
+            if own == Some(g) || list.is_empty() {
+                continue;
+            }
+            let c = build_copy(s, &cs[0], &list, src.as_ref());
+            if !removed.contains(&c.id.0) {
+                out.insert(c.id.0, c);
+            }
+        }
     }
 
     relink_slots(&mut out, &sides, &mut conflicts, &mut conflict_ids);

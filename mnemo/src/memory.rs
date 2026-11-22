@@ -394,6 +394,13 @@ pub const MNEMO_META_MERGE_SOURCE: &str = "_mnemo.merge_source";
 /// v0.21.0 (13.7): on a task or finding a merge renamed, the name both
 /// inputs used.
 pub const MNEMO_META_MERGE_NAME: &str = "_mnemo.merge_name";
+/// v0.21.0 (13.7, decision.v0210-conflict-flags): on a version a merge
+/// made, the concurrent versions it combines, each `[stamp, version, text]`
+/// (`text` a hash of what the merge compares). A later merge drops the
+/// ones the other input was edited from; `_mnemo.merge_conflict` stays
+/// while two of them hold different text. On a conflict copy, the versions
+/// it holds. A new write of the record leaves it out.
+pub const MNEMO_META_MERGE_HEADS: &str = "_mnemo.merge_heads";
 /// v0.21.0 (13.7): how far past the clock a handle's largest stamp seen
 /// may run before it says so ([`crate::Mnemo::notices`]): one day, in ms.
 pub const HLC_AHEAD_NOTICE_MS: u64 = 86_400_000;

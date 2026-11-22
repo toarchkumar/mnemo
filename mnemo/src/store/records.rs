@@ -1660,6 +1660,8 @@ impl Mnemo {
                 before.insert((prev, v));
                 set_hlc_prev(&mut m, before);
             }
+            // A new write is one version, not the merge's combination.
+            m.metadata.remove(crate::memory::MNEMO_META_MERGE_HEADS);
             let ver = version_hash(&m);
             m.metadata
                 .insert(MNEMO_META_VER.to_string(), Value::from(ver));

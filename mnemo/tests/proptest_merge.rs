@@ -484,4 +484,47 @@ proptest! {
         prop_assert!(nothing_deleted_survives(&[&a, &b, &c], &ab_c).is_ok(),
             "{:?}", nothing_deleted_survives(&[&a, &b, &c], &ab_c));
     }
+
+    /// decision.v0210-conflict-flags: a fourth copy made from the first
+    /// after its ops (a copy of a copy, whose edits descend from the
+    /// first's), merged in four groupings.
+    #[test]
+    fn prop_a_copy_of_a_copy(
+        ops_a in prop::collection::vec(op(), 0..6),
+        ops_b in prop::collection::vec(op(), 0..6),
+        ops_c in prop::collection::vec(op(), 0..6),
+        ops_d in prop::collection::vec(op(), 0..6),
+        ca in clock(),
+        cb in clock(),
+        cc in clock(),
+        cd in clock(),
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("base.mnemo");
+        base(&p);
+        let paths: Vec<_> = ["a", "b", "c", "d"].iter().map(|n| dir.path().join(format!("{n}.mnemo"))).collect();
+        for q in &paths[..3] {
+            std::fs::copy(&p, q).unwrap();
+        }
+        let t = wall_ms();
+        let a = diverge(&paths[0], &ops_a, t, ca, "worker-a");
+        std::fs::copy(&paths[0], &paths[3]).unwrap();
+        let b = diverge(&paths[1], &ops_b, t, cb, "worker-b");
+        let c = diverge(&paths[2], &ops_c, t, cc, "worker-c");
+        let d = diverge(&paths[3], &ops_d, t, cd, "worker-d");
+        let now = wall_ms();
+        let m = |x: &Input, y: &Input| as_input(merge(x, y, now).0);
+        let groupings = [
+            ("((a+b)+c)+d", m(&m(&m(&a, &b), &c), &d)),
+            ("a+(b+(c+d))", m(&a, &m(&b, &m(&c, &d)))),
+            ("(a+d)+(b+c)", m(&m(&a, &d), &m(&b, &c))),
+            ("(d+c)+(b+a)", m(&m(&d, &c), &m(&b, &a))),
+        ];
+        let first = norm(&groupings[0].1.0);
+        for (name, g) in &groupings[1..] {
+            prop_assert!(norm(&g.0) == first, "{} = {}:{}", groupings[0].0, name, diff(&first, &norm(&g.0)));
+        }
+        prop_assert!(nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0).is_ok(),
+            "{:?}", nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0));
+    }
 }

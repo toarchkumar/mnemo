@@ -56,13 +56,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
   older build's deleted row); one number per record (the larger of
   `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
   other wins (decision.v0210-ancestry); concurrent edits of a fact keep
-  the newer and a conflict copy; a key slot becomes one chain; essence
-  items, tasks, findings and messages merge their status and history;
-  claims and presence come from the first input. `merge(a,b)` and
+  the newer and a conflict copy of each other text; a key slot becomes one
+  chain; essence items, tasks, findings and messages merge their status
+  and history; claims and presence come from the first input. A version a
+  merge makes lists the concurrent versions it combines
+  (`_mnemo.merge_heads`, each `[stamp, version, text hash]`), and conflict
+  flags and copies follow them (decision.v0210-conflict-flags): an essence
+  item, task or finding is flagged while two of them hold different text,
+  and a conflict copy goes once the record is edited from the version it
+  holds, so a copy of a copy merges like any other. `merge(a,b)` and
   `merge(b,a)` give the same records, merging an output again with an
-  input changes nothing, and three copies merge to the same records in
-  either grouping (property tests on two and three copies, with clocks
-  ahead, behind and in the same millisecond). `MergeReport` gives what
+  input changes nothing, and three copies, or four with one copied from
+  another, merge to the same records in any grouping (property tests, with
+  clocks ahead, behind and in the same millisecond). Ancestry reaches back
+  8 versions: past that, a merge keeps an extra conflict copy or flag,
+  never loses a version. `MergeReport` gives what
   came from each side, conflicts by kind, removals, keys deleted on one
   side and written on the other, renamed tasks and findings, `after`
   cycles, and each input's clock lead. Refused, with the reason: not one
@@ -79,7 +87,8 @@ Pre-1.0, the minor component carries the breaking-change signal.
   versions, each `[stamp, version]`), so a merge can tell an edit made in
   one copy from edits made in both. 20 bytes on every stamped record, and
   up to 169 more on one rewritten in place eight times or more (measured
-  with the engine's MessagePack encoder). No format change.
+  with the engine's MessagePack encoder). A new write of a record leaves
+  out the `_mnemo.merge_heads` a merge put on it. No format change.
 - **A delete no longer frees all of its record's space** (v0210-1). Each
   tombstone costs about as much file as a small fact: measured on a
   384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone

@@ -683,7 +683,14 @@ and KDF settings, with a new data key, like a compaction.
   newer edit wins, and a fact keeps the other text as a conflict copy
   (`_mnemo.merge_conflict`, `_mnemo.merge_source`). Each in-place rewrite
   lists the versions before it (`_mnemo.hlc_prev`, the 8 latest), which is
-  how a merge tells one from the other.
+  how a merge tells one from the other. Past 8 versions a merge can't
+  tell, and keeps a conflict copy rather than lose one.
+- A record a merge combines lists the concurrent versions it holds
+  (`_mnemo.merge_heads`). An essence item, task or finding is flagged while
+  two of them hold different text, and a conflict copy stays while its
+  text is one of them: edit the record (from the merged file) and the
+  next merge drops the flag or the copy. So copies merge to the same
+  records in any order, a copy of a copy too.
 - A key written in both copies becomes one chain, both versions in
   history; the one the merge superseded is flagged. Essence items, tasks
   and findings merge their status (`done`, `verified` and `resolved` are
