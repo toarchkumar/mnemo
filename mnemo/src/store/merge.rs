@@ -282,8 +282,10 @@ fn own_head(m: &Memory) -> Head {
     )
 }
 
-/// The versions a record combines: the list a merge left on it, else the
-/// record's own.
+/// The versions a record combines: the list a merge left on it; for a fact
+/// a merge only relinked or flagged, the write it holds (its earlier
+/// version at its own stamp), so a later edit of that write covers it;
+/// else the record's own.
 fn heads(m: &Memory) -> BTreeSet<Head> {
     let listed: BTreeSet<Head> = m
         .metadata
@@ -300,11 +302,21 @@ fn heads(m: &Memory) -> BTreeSet<Head> {
             ))
         })
         .collect();
-    if listed.is_empty() {
-        BTreeSet::from([own_head(m)])
-    } else {
-        listed
+    if !listed.is_empty() {
+        return listed;
     }
+    let own = own_head(m);
+    if kind(m) == Kind::Fact && own.1 & super::records::VER_MERGED != 0 {
+        let held: BTreeSet<Head> = super::records::hlc_prev(m)
+            .into_iter()
+            .filter(|p| p.0 == own.0 && p.1 & super::records::VER_MERGED == 0)
+            .map(|p| (p.0, p.1, own.2))
+            .collect();
+        if !held.is_empty() {
+            return held;
+        }
+    }
+    BTreeSet::from([own])
 }
 
 fn heads_value(hs: &BTreeSet<Head>) -> Value {
@@ -479,7 +491,8 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
     }
     // One covers the other (a one-sided edit or move, or a record edited
     // from every version the other combines): it wins whole, with no copy
-    // and no new flag.
+    // and no new flag. The other's flag goes with it, since the winner
+    // descends from every version that one combines.
     let (ha, hb) = (heads(a), heads(b));
     let (a_covers, b_covers) = (covers(a, &ha, &hb), covers(b, &hb, &ha));
     if a_covers != b_covers {
@@ -489,8 +502,6 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
         body.access_count = a.access_count.max(b.access_count);
         if flag_follows_heads(d) {
             set_flag(&mut body, &heads(d));
-        } else {
-            keep_flag(a, b, &mut body);
         }
         name_version(a, b, &mut body);
         merged_prev(a, b, &mut body);
@@ -507,6 +518,20 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
         .max();
     if let Some(h) = hlc {
         body.metadata.insert(MNEMO_META_HLC.into(), Value::from(h));
+    }
+    // And the later of its two update times, whichever body it took (two
+    // with one number and one text tie on bytes the merge itself changes).
+    let updated = [a, b]
+        .iter()
+        .filter_map(|m| {
+            m.metadata
+                .get(MNEMO_META_UPDATED_AT)
+                .and_then(Value::as_i64)
+        })
+        .max();
+    if let Some(u) = updated {
+        body.metadata
+            .insert(MNEMO_META_UPDATED_AT.into(), Value::from(u));
     }
     let mut copy = None;
     let mut conflict = None;
@@ -678,6 +703,8 @@ struct Side {
     by_id: BTreeMap<u128, Memory>,
     /// Ids this input ever held: live, deleted, or named by its tombstones.
     known: HashSet<u128>,
+    /// Ids this input deleted (a deleted row or a tombstone, not void).
+    deletes: HashSet<u128>,
 }
 
 fn turn_of(m: &Memory) -> Option<(String, String)> {
@@ -731,6 +758,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     let mut removed: BTreeSet<u128> = BTreeSet::new();
     let mut removed_turns: BTreeSet<(String, String)> = BTreeSet::new();
     let mut known: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
+    let mut deletes: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
     let mut named: [Vec<&Memory>; 2] = [Vec::new(), Vec::new()];
     for i in 0..2 {
         let live: HashSet<u128> = kept[i].iter().map(|m| m.id.0).collect();
@@ -744,6 +772,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
             known[i].insert(d.0);
             if !live.contains(&d.0) {
                 removed.insert(d.0);
+                deletes[i].insert(d.0);
             }
         }
         for t in kept[i].iter().filter(|m| kind(m) == Kind::Tombstone) {
@@ -755,6 +784,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 continue; // written again after the delete: void
             }
             removed.insert(x);
+            deletes[i].insert(x);
             named[i].push(t);
             if let (Some(th), Some(tu)) = (
                 meta_str(t, MNEMO_META_TOMBSTONE_THREAD),
@@ -786,12 +816,14 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         sides.push(Side {
             by_id,
             known: known[i].clone(),
+            deletes: deletes[i].clone(),
         });
     }
     report.removed = gone_ids.iter().map(|&u| Ulid(u)).collect();
 
-    // Keys deleted in one input and written in the other.
-    let mut kept_keys: BTreeMap<(MergeSide, Option<String>, String), BTreeSet<u128>> =
+    // Keys deleted in one input and written in the other, in key order
+    // (so the report reads alike whichever input is first).
+    let mut kept_keys: BTreeMap<(Option<String>, String, MergeSide), BTreeSet<u128>> =
         BTreeMap::new();
     for (i, side) in [MergeSide::A, MergeSide::B].into_iter().enumerate() {
         let other = &sides[1 - i];
@@ -808,7 +840,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 if slot.key == key && slot.scope_owner == owner && !sides[i].known.contains(&m.id.0)
                 {
                     kept_keys
-                        .entry((side, owner.clone(), key.to_string()))
+                        .entry((owner.clone(), key.to_string(), side))
                         .or_default()
                         .insert(m.id.0);
                 }
@@ -817,7 +849,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     }
     report.kept_keys = kept_keys
         .into_iter()
-        .map(|((deleted_in, owner, key), ids)| MergeKeptKey {
+        .map(|((owner, key, deleted_in), ids)| MergeKeptKey {
             key,
             owner,
             deleted_in,
@@ -927,6 +959,7 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     report.after_cycles = after_cycles(&out);
     keep_one_turn_copy(&mut out, &sides);
     keep_one_tombstone(&mut out);
+    name_final_versions(&mut out, &sides);
 
     report.a_only.retain(|u| out.contains_key(&u.0));
     report.b_only.retain(|u| out.contains_key(&u.0));
@@ -941,10 +974,14 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
 }
 
 /// A key slot's versions from both inputs as one chain: each input's own
-/// order kept; versions on different branches by number, then created_at,
-/// then id; linked again both ways. An id a link names that isn't in the
-/// output (deleted) keeps its place, so the links around it stay as an
-/// input had them.
+/// order kept; versions on different branches by the number each was first
+/// written with, then created_at, then id; linked again both ways. An id a
+/// link names that isn't in the output keeps its place, so the links around
+/// it stay as an input had them, unless the merge deleted it and that input
+/// didn't: then it leaves that input's chain, which closes up around it, so
+/// every grouping of three or more copies gives the same chain. A chain
+/// that ended at a forgotten live version stays ended, unless an input
+/// wrote a version after the one before it.
 fn relink_slots(
     out: &mut BTreeMap<u128, Memory>,
     sides: &[Side],
@@ -966,6 +1003,7 @@ fn relink_slots(
         let mut nodes: BTreeSet<u128> = member_set.clone();
         let mut edges: BTreeSet<(u128, u128)> = BTreeSet::new();
         for side in sides {
+            let mut own: BTreeSet<(u128, u128)> = BTreeSet::new();
             for id in &members {
                 let Some(v) = side.by_id.get(id) else {
                     continue;
@@ -981,17 +1019,75 @@ fn relink_slots(
                     if out.contains_key(&t) && !member_set.contains(&t) {
                         continue;
                     }
-                    nodes.insert(t);
-                    edges.insert(if forward { (*id, t) } else { (t, *id) });
+                    own.insert(if forward { (*id, t) } else { (t, *id) });
                 }
             }
+            // A version only the other input deleted leaves this input's
+            // chain, which closes up around it (x, t, y becomes x, y).
+            let skipped: BTreeSet<u128> = own
+                .iter()
+                .flat_map(|&(x, y)| [x, y])
+                .filter(|t| {
+                    !out.contains_key(t)
+                        && !side.deletes.contains(t)
+                        && sides.iter().any(|s| s.deletes.contains(t))
+                })
+                .collect();
+            for t in skipped {
+                let before: Vec<u128> = own.iter().filter(|e| e.1 == t).map(|e| e.0).collect();
+                let after: Vec<u128> = own.iter().filter(|e| e.0 == t).map(|e| e.1).collect();
+                own.retain(|e| e.0 != t && e.1 != t);
+                for &x in &before {
+                    for &y in &after {
+                        if x != y {
+                            own.insert((x, y));
+                        }
+                    }
+                }
+            }
+            for &(x, y) in &own {
+                nodes.extend([x, y]);
+                edges.insert((x, y));
+            }
         }
-        let key_of = |n: u128| -> (u64, i64, u128) {
+        // A forgotten head (left out, nothing after it) ends its chain only
+        // where nothing else follows the version before it: a version
+        // another input wrote after that one takes its place.
+        let left_out = |n: &u128| !member_set.contains(n);
+        let sink = |n: &u128, e: &BTreeSet<(u128, u128)>| !e.iter().any(|x| x.0 == *n);
+        let ends: Vec<(u128, u128)> = edges
+            .iter()
+            .copied()
+            .filter(|&(p, t)| {
+                left_out(&t)
+                    && sink(&t, &edges)
+                    && edges
+                        .iter()
+                        .any(|&(q, u)| q == p && (!left_out(&u) || !sink(&u, &edges)))
+            })
+            .collect();
+        for e in ends {
+            edges.remove(&e);
+        }
+        nodes.retain(|n| !left_out(n) || edges.iter().any(|e| e.0 == *n || e.1 == *n));
+        // A version is placed by the number it was first written with,
+        // which a later write superseding it doesn't change, so every
+        // grouping orders its branches alike. A version the merge left out
+        // goes first once it's ready, so it stays next to the version
+        // before it: its number isn't known, and its id's time is another
+        // clock's.
+        let key_of = |n: u128| -> (bool, u64, i64, u128) {
             match out.get(&n) {
-                Some(m) => (number(m), m.created_at, n),
+                Some(m) => {
+                    let first = super::records::hlc_prev(m)
+                        .into_iter()
+                        .map(|p| p.0)
+                        .fold(number(m), u64::min);
+                    (true, first, m.created_at, n)
+                }
                 None => {
                     let ms = (n >> 80) as u64;
-                    (ms, (ms / 1000) as i64, n)
+                    (false, ms, (ms / 1000) as i64, n)
                 }
             }
         };
@@ -1017,7 +1113,7 @@ fn relink_slots(
                     .min()
                     .expect("a node left")
             });
-            let n = next.2;
+            let n = next.3;
             done.insert(n);
             order.push(n);
             for (from, to) in &edges {
@@ -1045,7 +1141,13 @@ fn relink_slots(
             if !member_set.contains(&n) {
                 continue;
             }
-            let prev = pos.checked_sub(1).map(|p| order[p]);
+            // After a version the merge left out, only an input's own link
+            // to it: a chain that ended there (its head was forgotten) stays
+            // ended, as the engine leaves it.
+            let prev = pos
+                .checked_sub(1)
+                .map(|p| order[p])
+                .filter(|&p| member_set.contains(&p) || edges.contains(&(p, n)));
             let next = order.get(pos + 1).copied();
             let next_created = next.map(|x| created_secs(x, out));
             let m = out.get_mut(&n).expect("a member");
@@ -1073,6 +1175,14 @@ fn relink_slots(
                         );
                     }
                 }
+            }
+        }
+        // The slot's live version is no longer one another superseded: a
+        // flag a merge left on it for that goes (the version that beat it
+        // was deleted), as if the delete had come first.
+        if let Some(t) = order.last().filter(|t| member_set.contains(t)) {
+            if let Some(m) = out.get_mut(t) {
+                m.metadata.remove(MNEMO_META_MERGE_CONFLICT);
             }
         }
         // Both inputs wrote different content to the slot since they
@@ -1290,6 +1400,53 @@ fn keep_one_turn_copy(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         for id in drop {
             out.remove(&id);
         }
+    }
+}
+
+/// Each output version's `_mnemo.ver`, from what it finally holds (after
+/// relinking): an input's version it equals keeps that one's; any other
+/// is the hash of its bytes, which is a write's own `_mnemo.ver` when it
+/// holds exactly what that write did, so a version it already lists (an
+/// earlier one) is named so again, and the rest are marked a merge's. Naming it before the links settle would name
+/// one record differently in different groupings of three or more copies.
+/// A conflict copy keeps its source's version
+/// (decision.v0210-conflict-flags).
+fn name_final_versions(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
+    use super::records::{hlc_prev, set_hlc_prev, version_hash, VER_MERGED};
+    for (id, m) in out.iter_mut() {
+        if m.metadata.contains_key(MNEMO_META_MERGE_SOURCE) {
+            continue;
+        }
+        let Some(st) = stamp(m) else {
+            continue;
+        };
+        let inputs: Vec<&Memory> = sides.iter().filter_map(|s| s.by_id.get(id)).collect();
+        let core = core_bytes(m);
+        let mut prev = hlc_prev(m);
+        let v = match inputs.iter().find(|x| core_bytes(x) == core) {
+            Some(x) => match x.metadata.get(MNEMO_META_VER).and_then(Value::as_u64) {
+                Some(v) => v,
+                None => continue, // an older build's version, as it was
+            },
+            None => {
+                let h = version_hash(m);
+                let real =
+                    prev.contains(&(st, h)) || inputs.iter().any(|x| version(x) == Some((st, h)));
+                if real {
+                    h
+                } else {
+                    h | VER_MERGED
+                }
+            }
+        };
+        let old = version(m);
+        if old.map(|o| o.1) == Some(v) {
+            continue;
+        }
+        prev.extend(old.filter(|(_, x)| x & VER_MERGED == 0));
+        prev.remove(&(st, v));
+        m.metadata.insert(MNEMO_META_VER.into(), Value::from(v));
+        set_hlc_prev(m, prev);
     }
 }
 

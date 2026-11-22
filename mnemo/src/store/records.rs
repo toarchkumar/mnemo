@@ -1641,13 +1641,37 @@ impl Mnemo {
         if m.id == Ulid::nil() {
             m.id = Ulid::new();
         }
+        let id_u: u128 = m.id.0;
+        // 13a: a new record (an id the catalog doesn't hold live) carries
+        // its handle's author; an overwrite in place keeps its own. Before the
+        // version's hash, so `_mnemo.ver` is the hash of what is stored.
+        if let Some(a) = &self.author {
+            let live = self
+                .index
+                .get(id_u, &self.catalog)
+                .is_some_and(|i| !self.catalog[i].deleted);
+            if !live {
+                m.metadata
+                    .entry(MNEMO_META_AUTHOR.to_string())
+                    .or_insert_with(|| Value::String(a.clone()));
+            }
+        }
         if stamp {
             let prev = m
                 .metadata
                 .get(MNEMO_META_HLC)
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let hlc = self.next_hlc(prev);
+            // Never before the write's own `_mnemo.updated_at`, so a
+            // record's number (the larger of the two) is its stamp and a
+            // later version's is always larger. The wall clock gives that
+            // already; a test's frozen clock might not.
+            let updated_ms = m
+                .metadata
+                .get(crate::memory::MNEMO_META_UPDATED_AT)
+                .and_then(Value::as_i64)
+                .map_or(0, |s| s.max(0) as u64 * 1000);
+            let hlc = self.next_hlc(prev.max(updated_ms.saturating_sub(1)));
             m.metadata
                 .insert(MNEMO_META_HLC.to_string(), Value::from(hlc));
             // decision.v0210-ancestry: an in-place rewrite (the record
@@ -1665,20 +1689,6 @@ impl Mnemo {
             let ver = version_hash(&m);
             m.metadata
                 .insert(MNEMO_META_VER.to_string(), Value::from(ver));
-        }
-        let id_u: u128 = m.id.0;
-        // 13a: a new record (an id the catalog doesn't hold live) carries
-        // its handle's author; an overwrite in place keeps its own.
-        if let Some(a) = &self.author {
-            let live = self
-                .index
-                .get(id_u, &self.catalog)
-                .is_some_and(|i| !self.catalog[i].deleted);
-            if !live {
-                m.metadata
-                    .entry(MNEMO_META_AUTHOR.to_string())
-                    .or_insert_with(|| Value::String(a.clone()));
-            }
         }
         // R-004.2: an overwrite with the handle caches built reads the
         // stored version first (one decrypt), so the caches drop exactly

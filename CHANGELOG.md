@@ -57,7 +57,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
   other wins (decision.v0210-ancestry); concurrent edits of a fact keep
   the newer and a conflict copy of each other text; a key slot becomes one
-  chain; essence items, tasks, findings and messages merge their status
+  chain, its branches ordered by the stamp each version was first written
+  with (a version one input deleted keeps its place in that input's
+  order, and leaves the other's, which closes up around it; a chain that
+  ended at a forgotten live version stays ended, unless another input
+  wrote a version after the one before it); the slot's live version
+  carries no conflict flag, so one flagged for losing to a version
+  deleted later is unflagged; essence items, tasks, findings and messages merge their status
   and history; claims and presence come from the first input. A version a
   merge makes lists the concurrent versions it combines
   (`_mnemo.merge_heads`, each `[stamp, version, text hash]`), and conflict
@@ -88,7 +94,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   one copy from edits made in both. 20 bytes on every stamped record, and
   up to 169 more on one rewritten in place eight times or more (measured
   with the engine's MessagePack encoder). A new write of a record leaves
-  out the `_mnemo.merge_heads` a merge put on it. No format change.
+  out the `_mnemo.merge_heads` a merge put on it. A version is the hash
+  of what is stored, its author included; a merge names each output
+  version from what it holds once the chains are relinked. A stamp is
+  never before the write's own `_mnemo.updated_at`, so a later version's
+  number is always the larger. No format change.
 - **A delete no longer frees all of its record's space** (v0210-1). Each
   tombstone costs about as much file as a small fact: measured on a
   384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone

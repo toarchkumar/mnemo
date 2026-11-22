@@ -692,7 +692,12 @@ and KDF settings, with a new data key, like a compaction.
   next merge drops the flag or the copy. So copies merge to the same
   records in any order, a copy of a copy too.
 - A key written in both copies becomes one chain, both versions in
-  history; the one the merge superseded is flagged. Essence items, tasks
+  history, ordered by when each was first written; the one the merge
+  superseded is flagged, until the version that beat it is deleted. A
+  version one copy deleted keeps its place in that copy's order, and the
+  chain closes up around it in the other's. Forgetting a key's live
+  version ends its chain, and a merge keeps it ended unless the other
+  copy wrote a version after the one before it. Essence items, tasks
   and findings merge their status (`done`, `verified` and `resolved` are
   final); two tasks or findings under one name keep both, the later
   renamed `<name>-merge-2`.
