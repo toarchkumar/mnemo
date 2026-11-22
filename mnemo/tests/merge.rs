@@ -1025,3 +1025,157 @@ fn a_record_deleted_in_both_leaves_one_tombstone() {
     let mut db = Mnemo::open(&out, PW).unwrap();
     assert_eq!(db.kind_counts().unwrap().tombstones, 1);
 }
+
+/// Edits `id` to `text` with the copy's clock frozen at `at_ms`.
+fn edit_at(path: &Path, id: &Ulid, text: &str, at_ms: u64) {
+    let mut db = open(path);
+    db.__freeze_hlc_clock_for_testing(Some(at_ms));
+    edit(&mut db, id, text);
+    db.close().unwrap();
+}
+
+#[test]
+fn an_edit_in_the_same_millisecond_on_each_side_is_never_ancestry() {
+    // Both copies edit at one stamp, then one edits again: its list names
+    // its own first edit by stamp and hash, never the other copy's.
+    let p = pair();
+    let t = wall_ms() + 10_000;
+    edit_at(&p.a, &p.base_fact, "first edit in a", t);
+    edit_at(&p.b, &p.base_fact, "the edit in b", t);
+    edit_at(&p.a, &p.base_fact, "second edit in a", t);
+    let (out, r) = p.check_laws(t + 1_000);
+    assert_eq!(r.conflicts.get("fact"), Some(&1), "{r:?}");
+    let mut db = Mnemo::open(&out, PW).unwrap();
+    assert_eq!(db.get(&p.base_fact).unwrap().content, "second edit in a");
+    let c = copies(&mut db);
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].content, "the edit in b");
+}
+
+#[test]
+fn a_forgotten_record_takes_its_conflict_copies_with_it() {
+    let p = pair();
+    let t = wall_ms();
+    edit_at(&p.a, &p.base_fact, "edited in a", t);
+    edit_at(&p.b, &p.base_fact, "edited in b", t + 1_000);
+    let m = p.out("m.mnemo");
+    merge(&p.a, &p.b, &m, t + 2_000);
+    let copy_id = copies(&mut open(&m))[0].id;
+    let m2 = p.out("m2.mnemo");
+    copy(&m, &m2);
+    let mut db = open(&m2);
+    db.delete(&p.base_fact).unwrap();
+    db.close().unwrap();
+    for (x, y, name) in [(&m2, &m, "fx.mnemo"), (&m, &m2, "fy.mnemo")] {
+        let out = p.out(name);
+        let r = merge(x, y, &out, t + 3_000);
+        assert!(r.removed.contains(&copy_id), "{r:?}");
+        let mut db = Mnemo::open(&out, PW).unwrap();
+        assert!(db.get(&p.base_fact).is_err());
+        assert!(copies(&mut db).is_empty());
+    }
+}
+
+#[test]
+fn three_copies_two_writing_the_same_text_merge_alike_in_either_grouping() {
+    // a and b edit in one millisecond, c later writes b's text: whichever
+    // two merge first, the output holds c's version and one copy, of a's.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    let id = base(&base_path);
+    let [a, b, c] = ["a", "b", "c"].map(|n| dir.path().join(format!("{n}.mnemo")));
+    for x in [&a, &b, &c] {
+        copy(&base_path, x);
+    }
+    let t = wall_ms() + 10_000;
+    edit_at(&a, &id, "edited to 3", t);
+    edit_at(&b, &id, "edited to 0", t);
+    edit_at(&c, &id, "edited to 0", t + 40);
+    let o = |n: &str| dir.path().join(n);
+    let now = t + 1_000;
+    merge(&a, &b, &o("ab.mnemo"), now);
+    merge(&o("ab.mnemo"), &c, &o("ab_c.mnemo"), now);
+    merge(&b, &c, &o("bc.mnemo"), now);
+    merge(&a, &o("bc.mnemo"), &o("a_bc.mnemo"), now);
+    merge(&a, &c, &o("ac.mnemo"), now);
+    merge(&o("ac.mnemo"), &b, &o("ac_b.mnemo"), now);
+    let want = records(&o("ab_c.mnemo"));
+    assert_eq!(records(&o("a_bc.mnemo")), want, "merge(a, merge(b, c))");
+    assert_eq!(records(&o("ac_b.mnemo")), want, "merge(merge(a, c), b)");
+    let mut db = Mnemo::open(&o("ab_c.mnemo"), PW).unwrap();
+    assert_eq!(db.get(&id).unwrap().content, "edited to 0");
+    let c = copies(&mut db);
+    assert_eq!(c.len(), 1, "{c:?}");
+    assert_eq!(c[0].content, "edited to 3");
+}
+
+#[test]
+fn an_output_edited_afterwards_merges_with_an_input_without_a_new_conflict() {
+    // The merged version lists both inputs' versions, so an edit made on
+    // the output descends from both.
+    let p = pair();
+    let t = wall_ms();
+    edit_at(&p.a, &p.base_fact, "edited in a", t);
+    edit_at(&p.b, &p.base_fact, "edited in b", t + 1_000);
+    let m = p.out("m.mnemo");
+    merge(&p.a, &p.b, &m, t + 2_000);
+    edit_at(&m, &p.base_fact, "edited after the merge", t + 3_000);
+    for (input, name) in [(&p.a, "ma.mnemo"), (&p.b, "mb.mnemo")] {
+        let out = p.out(name);
+        let r = merge(&m, input, &out, t + 4_000);
+        assert!(r.conflicts.is_empty(), "{name}: {:?}", r.conflicts);
+        let mut db = Mnemo::open(&out, PW).unwrap();
+        assert_eq!(
+            db.get(&p.base_fact).unwrap().content,
+            "edited after the merge"
+        );
+        assert_eq!(copies(&mut db).len(), 1, "{name}: only the first merge's");
+    }
+}
+
+/// Two versions of one fact, by hand: `(content, stamp, version hash)`.
+fn versions(spec: [(&str, u64, u64); 2]) -> [Memory; 2] {
+    let first = Memory::new(spec[0].0, MemoryType::Semantic, v(1.0));
+    spec.map(|(text, hlc, ver)| {
+        let mut m = first.clone();
+        m.content = text.into();
+        m.metadata.insert("_mnemo.hlc".into(), Value::from(hlc));
+        m.metadata.insert("_mnemo.ver".into(), Value::from(ver));
+        m
+    })
+}
+
+#[test]
+fn a_conflict_flag_stays_whichever_version_wins() {
+    let [mut older, newer] = versions([("older, flagged", 1_000, 11), ("newer", 2_000, 22)]);
+    older
+        .metadata
+        .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+    let (out, _) =
+        Mnemo::__merge_records_for_testing(vec![older], vec![], vec![newer.clone()], vec![], 3_000);
+    let won = out.iter().find(|m| m.id == newer.id).unwrap();
+    assert_eq!(won.content, "newer");
+    assert_eq!(
+        meta(won, MNEMO_META_MERGE_CONFLICT),
+        Some(&Value::Bool(true))
+    );
+}
+
+#[test]
+fn a_version_a_merge_made_is_never_listed_as_an_earlier_one() {
+    const VER_MERGED: u64 = 1 << 62;
+    let [x, y] = versions([
+        ("made by a merge", 1_000, VER_MERGED | 11),
+        ("a write", 2_000, 22),
+    ]);
+    let (out, _) =
+        Mnemo::__merge_records_for_testing(vec![x], vec![], vec![y.clone()], vec![], 3_000);
+    let won = out.iter().find(|m| m.id == y.id).unwrap();
+    let prev = meta(won, "_mnemo.hlc_prev").and_then(Value::as_array);
+    assert!(
+        prev.into_iter()
+            .flatten()
+            .all(|p| p[1].as_u64().unwrap() & VER_MERGED == 0),
+        "{prev:?}"
+    );
+}

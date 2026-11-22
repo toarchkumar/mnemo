@@ -148,10 +148,19 @@ fn same_visible(a: &Memory, b: &Memory) -> bool {
     content_hash(a) == content_hash(b)
 }
 
+/// A version's bytes without the lists a merge changes (`_mnemo.ver` and
+/// `_mnemo.hlc_prev`): the same version reads the same in every grouping.
+fn core_bytes(m: &Memory) -> Vec<u8> {
+    let mut c = m.clone();
+    c.metadata.remove(MNEMO_META_VER);
+    c.metadata.remove(MNEMO_META_HLC_PREV);
+    record_bytes(&c)
+}
+
 /// Whether `a` wins over `b` (the same id): the larger number, then the
-/// larger content hash, then the larger bytes.
+/// larger content hash, then the larger bytes of the version itself.
 fn wins(a: &Memory, b: &Memory) -> bool {
-    (number(a), content_hash(a), record_bytes(a)) >= (number(b), content_hash(b), record_bytes(b))
+    (number(a), content_hash(a), core_bytes(a)) >= (number(b), content_hash(b), core_bytes(b))
 }
 
 /// A conflict copy's id: the source's time part (so it sorts beside it) and
@@ -340,7 +349,9 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
             if !same_visible(a, b) {
                 let mut c = l.clone();
                 c.id = Ulid(copy_id(l.id.0, &content_hash(l)));
-                for k in [MNEMO_META_KEY, MNEMO_META_SUPERSEDES] {
+                // A copy is a new record: the versions its source had
+                // before aren't its own (and differ by grouping).
+                for k in [MNEMO_META_KEY, MNEMO_META_SUPERSEDES, MNEMO_META_HLC_PREV] {
                     c.metadata.remove(k);
                 }
                 for k in [MNEMO_META_SUPERSEDED_BY, MNEMO_META_INVALID_AT] {
@@ -469,13 +480,9 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
     // The version: an input's when the merge left it as it was; else one
     // of the merge's own, named by its hash and marked as made by a merge.
     if stamp(&body).is_some() {
-        let core = |m: &Memory| {
-            let mut c = m.clone();
-            c.metadata.remove(MNEMO_META_VER);
-            c.metadata.remove(MNEMO_META_HLC_PREV);
-            record_bytes(&c)
-        };
-        let same = [a, b].into_iter().find(|m| core(m) == core(&body));
+        let same = [a, b]
+            .into_iter()
+            .find(|m| core_bytes(m) == core_bytes(&body));
         let v = match same {
             Some(m) => m.metadata.get(MNEMO_META_VER).cloned(),
             None => Some(Value::from(
@@ -649,6 +656,8 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     let mut conflicts: BTreeMap<String, usize> = BTreeMap::new();
     let mut conflict_ids: BTreeSet<u128> = BTreeSet::new();
     let mut copies: Vec<Memory> = Vec::new();
+    // Ids both inputs hold in different versions.
+    let mut contested: BTreeSet<u128> = BTreeSet::new();
     let ids: BTreeSet<u128> = sides[0]
         .by_id
         .keys()
@@ -659,6 +668,9 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         match (sides[0].by_id.get(&id), sides[1].by_id.get(&id)) {
             (Some(x), Some(y)) => {
                 report.both += 1;
+                if record_bytes(x) != record_bytes(y) {
+                    contested.insert(id);
+                }
                 if kind(x) == Kind::Local {
                     out.insert(id, x.clone());
                     continue;
@@ -694,8 +706,37 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         }
     }
     for c in copies {
-        // A copy an earlier merge made is the same record.
-        out.entry(c.id.0).or_insert(c);
+        // A copy an earlier merge made of the same content is the same
+        // record, though maybe of another version (two copies wrote the
+        // same text): the two resolve like any two versions of one id, so
+        // every grouping of three copies keeps the same one.
+        match out.remove(&c.id.0) {
+            None => {
+                out.insert(c.id.0, c);
+            }
+            Some(e) => {
+                let r = resolve(&e, &c);
+                if let Some(cc) = r.copy {
+                    out.entry(cc.id.0).or_insert(cc);
+                }
+                out.insert(c.id.0, r.body);
+            }
+        }
+    }
+    // A copy that holds what its source now holds is no conflict any more
+    // (a third copy wrote the same text): dropped, when this merge resolved
+    // that source, so every grouping keeps the same copies.
+    let redundant: Vec<u128> = out
+        .iter()
+        .filter_map(|(id, m)| {
+            let s = ulid_at(m, MNEMO_META_MERGE_SOURCE)?;
+            let src = out.get(&s)?;
+            (contested.contains(&s) && same_visible(m, src) && *id == copy_id(s, &content_hash(m)))
+                .then_some(*id)
+        })
+        .collect();
+    for id in redundant {
+        out.remove(&id);
     }
 
     relink_slots(&mut out, &sides, &mut conflicts, &mut conflict_ids);

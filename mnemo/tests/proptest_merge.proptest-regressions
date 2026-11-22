@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9072db1bae41893824afcc3131d343f52c84fdc3dc63c4414b65009666955cd7 # shrinks to ops_a = [], ops_b = [EssenceEdit(2)], ops_c = [EssenceEdit(2), EssenceResolve], ca = 0, cb = 0, cc = 0
+cc 0815b793f62bac8ab74d81993d7b36b29d79337dc447b51403bbdc7f2ed20103 # shrinks to ops_a = [Edit(190, 0)], ops_b = [Edit(130, 0)], ops_c = [Edit(64, 1)], ca = 1, cb = -3600000, cc = 0
+cc 083bdc4a26bf594a8f4dab22bf1f0a3db6bb34e584264360cbd7fb6529e5bbab # shrinks to ops_a = [EssenceEdit(0)], ops_b = [EssenceEdit(2)], ops_c = [EssenceResolve, EssenceEdit(2)], ca = 0, cb = 0, cc = 0
