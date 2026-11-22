@@ -1304,3 +1304,168 @@ fn a_copy_of_a_copy_merges_alike_in_either_grouping() {
     // Before y arrived, x and z were a conflict.
     assert_eq!(copies(&mut open(&o("xz.mnemo"))).len(), 1);
 }
+
+#[test]
+fn a_copy_of_the_text_that_wins_goes() {
+    // a writes 'text one', b later 'text two', c later still 'text one'.
+    // merge(a, b) keeps a copy of a's text; once c's version of that text
+    // wins, the copy goes and the one left holds b's.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    let id = base(&base_path);
+    let o = |n: &str| dir.path().join(n);
+    let t = wall_ms() + 10_000;
+    for (n, text, at) in [
+        ("a", "text one", t),
+        ("b", "text two", t + 10),
+        ("c", "text one", t + 40),
+    ] {
+        let p = o(&format!("{n}.mnemo"));
+        copy(&base_path, &p);
+        edit_at(&p, &id, text, at);
+    }
+    let now = t + 1_000;
+    let (a, b, c) = (o("a.mnemo"), o("b.mnemo"), o("c.mnemo"));
+    merge(&a, &b, &o("ab.mnemo"), now);
+    let mut db = Mnemo::open_read_only(o("ab.mnemo"), PW).unwrap();
+    assert_eq!(
+        copies(&mut db)
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>(),
+        ["text one"]
+    );
+    merge(&o("ab.mnemo"), &c, &o("ab_c.mnemo"), now);
+    merge(&b, &c, &o("bc.mnemo"), now);
+    merge(&a, &o("bc.mnemo"), &o("a_bc.mnemo"), now);
+    assert_eq!(records(&o("ab_c.mnemo")), records(&o("a_bc.mnemo")));
+    let mut db = Mnemo::open_read_only(o("ab_c.mnemo"), PW).unwrap();
+    assert_eq!(db.get(&id).unwrap().content, "text one");
+    let c = copies(&mut db);
+    assert_eq!(
+        c.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(),
+        ["text two"],
+        "{c:?}"
+    );
+}
+
+#[test]
+fn an_output_merged_with_its_own_later_edit_keeps_no_copy() {
+    // Both files hold the merge's copy unchanged; the edit descends from
+    // both versions, so the copy goes.
+    let p = pair();
+    let t = wall_ms();
+    edit_at(&p.a, &p.base_fact, "edited in a", t);
+    edit_at(&p.b, &p.base_fact, "edited in b", t + 1_000);
+    let (m, m2) = (p.out("m.mnemo"), p.out("m2.mnemo"));
+    merge(&p.a, &p.b, &m, t + 2_000);
+    copy(&m, &m2);
+    edit_at(&m2, &p.base_fact, "edited after the merge", t + 3_000);
+    assert_eq!(
+        copies(&mut open(&m2)).len(),
+        1,
+        "the copy is still in the edited file"
+    );
+    for (x, y, name) in [(&m, &m2, "mm2.mnemo"), (&m2, &m, "m2m.mnemo")] {
+        let out = p.out(name);
+        let r = merge(x, y, &out, t + 4_000);
+        assert!(r.conflicts.is_empty(), "{name}: {:?}", r.conflicts);
+        let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+        assert_eq!(
+            db.get(&p.base_fact).unwrap().content,
+            "edited after the merge"
+        );
+        assert!(copies(&mut db).is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn an_ack_and_the_agents_a_message_was_shown_to_are_kept_from_either_side() {
+    // a acks a message and b, later, marks it seen; a broadcast is shown
+    // to worker-a in a and to reviewer-b in b. Whichever side is newer,
+    // the message stays acked and the broadcast lists both agents.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let mut db = open(&base_path);
+    let direct = db
+        .post(
+            "planner-a",
+            "DONE: x",
+            "",
+            &[],
+            None,
+            Some("worker-a"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let all = db
+        .post("all", "a broadcast", "", &[], None, Some("planner-a"), None)
+        .unwrap()
+        .id;
+    db.close().unwrap();
+    let o = |n: &str| dir.path().join(n);
+    let (a, b) = (o("a.mnemo"), o("b.mnemo"));
+    copy(&base_path, &a);
+    copy(&base_path, &b);
+    let t = wall_ms() + 10_000;
+    let mut db = open(&a);
+    db.__freeze_hlc_clock_for_testing(Some(t));
+    db.ack(&direct, None, Some("planner-a")).unwrap();
+    db.set_author(Some("worker-a".into()));
+    db.mark_seen(&[all]).unwrap();
+    db.close().unwrap();
+    let mut db = open(&b);
+    db.__freeze_hlc_clock_for_testing(Some(t + 10));
+    db.set_author(Some("reviewer-b".into()));
+    assert_eq!(db.mark_seen(&[direct, all]).unwrap(), 2);
+    db.close().unwrap();
+    for (x, y, name) in [(&a, &b, "ab.mnemo"), (&b, &a, "ba.mnemo")] {
+        let out = o(name);
+        merge(x, y, &out, t + 1_000);
+        let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+        let d = db.get(&direct).unwrap();
+        assert_eq!(
+            meta(&d, "_mnemo.status").and_then(Value::as_str),
+            Some("acked"),
+            "{name}"
+        );
+        let bc = db.get(&all).unwrap();
+        let seen: Vec<&str> = meta(&bc, "_mnemo.seen_by")
+            .and_then(Value::as_array)
+            .map(|v| v.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        assert_eq!(seen, ["reviewer-b", "worker-a"], "{name}");
+    }
+}
+
+#[test]
+fn a_turn_saved_on_both_sides_is_kept_once() {
+    // Each copy saves the same turn of one thread, under its own id.
+    let p = pair();
+    for (path, n) in [(&p.a, 5.0), (&p.b, 6.0)] {
+        let mut db = open(path);
+        db.ingest_thread_with_vectors(
+            "t",
+            &[ThreadTurn {
+                turn_id: "u1".into(),
+                role: "user".into(),
+                content: "one turn".into(),
+                timestamp: None,
+            }],
+            &[v(n)],
+        )
+        .unwrap();
+        db.close().unwrap();
+    }
+    let turns = |path: &Path| {
+        records(path)
+            .into_iter()
+            .filter(|m| m["metadata"]["_mnemo.turn_id"] == "u1")
+            .count()
+    };
+    assert_eq!((turns(&p.a), turns(&p.b)), (1, 1));
+    let (ab, _) = p.check_laws(wall_ms());
+    assert_eq!(turns(&ab), 1);
+}
