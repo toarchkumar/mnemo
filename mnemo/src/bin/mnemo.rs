@@ -370,6 +370,49 @@ enum Command {
         #[arg(long)]
         passphrase: Option<String>,
     },
+    /// Merge two diverged copies of one brain into a new file (v0.21.0,
+    /// 13.7).
+    ///
+    /// The copies are read, never changed: merge copies of a brain, not
+    /// the brain in use, since each copy is held for readers for the whole
+    /// merge. The output takes the first copy's secret, salt and KDF
+    /// settings with a new data key, like `compact`. A delete in either
+    /// copy wins; an edit made in one copy wins over the copy that didn't
+    /// change it; edits made in both keep the newer and flag the conflict
+    /// (`about` counts them, `inspect` lists them). Refused, with the
+    /// reason and exit 1, when the copies aren't one brain, their embedders
+    /// differ, a copy is older than format 9, or the output exists.
+    ///
+    /// The second copy's secret is its own flag; without one, a copy whose
+    /// key is in the key store is found by its own salt, else the first
+    /// copy's secret opens it too.
+    Merge {
+        /// The first copy.
+        a: String,
+        /// The second copy.
+        b: String,
+        /// The new file. Refused if anything is at the path.
+        #[arg(short = 'o', long = "out", value_name = "PATH")]
+        out: String,
+        /// Unlock the first copy with a raw key (32 bytes, 64 hex digits or
+        /// a recovery code) instead of a passphrase.
+        #[arg(long, value_name = "PATH", conflicts_with = "passphrase")]
+        key_file: Option<String>,
+        /// The first copy's passphrase.
+        #[arg(long)]
+        passphrase: Option<String>,
+        /// Unlock the second copy with a raw key, when its secret differs
+        /// from the first's (a copy rekeyed since).
+        #[arg(long, value_name = "PATH", conflicts_with = "b_passphrase")]
+        b_key_file: Option<String>,
+        /// The second copy's passphrase, when it differs from the first's.
+        #[arg(long)]
+        b_passphrase: Option<String>,
+        /// `table` (default) or `json`, with the ids of the records each
+        /// copy alone held, the ones flagged and the ones removed.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
+        format: OutputFormat,
+    },
     /// Embed every live memory again with a new embedder, and record its
     /// identity (12.3 step 4).
     ///
@@ -2494,6 +2537,161 @@ fn secret_for(
     }
 }
 
+/// v0.21.0 (13.7): a secret as [`Mnemo::merge_files`] takes it.
+fn merge_secret(s: &inspect::Secret) -> mnemo_engine::MergeSecret<'_> {
+    match s {
+        inspect::Secret::Passphrase(p) => mnemo_engine::MergeSecret::Passphrase(p),
+        inspect::Secret::Key(k) => mnemo_engine::MergeSecret::Key(k),
+    }
+}
+
+/// v0.21.0 (13.7): the same secret again, for `merge`'s second copy.
+fn same_secret(s: &inspect::Secret) -> inspect::Secret {
+    match s {
+        inspect::Secret::Passphrase(p) => inspect::Secret::Passphrase(p.clone()),
+        inspect::Secret::Key(k) => inspect::Secret::Key(k.clone()),
+    }
+}
+
+/// v0.21.0 (13.7): `merge`'s second copy, given no flag: its own entry in
+/// the chain (the key store finds a rekeyed copy by its own salt), else
+/// the first copy's secret, never a second prompt.
+fn second_copy_secret(
+    path: &str,
+    first: &inspect::Secret,
+) -> std::result::Result<inspect::Secret, String> {
+    use mnemo_engine::keys::{self, Resolution};
+    let store = keys::default_store();
+    match keys::resolve(path, store.as_deref(), keys::CLI_COMMAND_TIMEOUT).map_err(fmt)? {
+        Resolution::Found(r) => Ok(r.secret),
+        Resolution::NoSource { .. } => Ok(same_secret(first)),
+    }
+}
+
+/// v0.21.0 (13.7): what `merge` did, as a table or one JSON document. An
+/// input's clock running more than an hour ahead is said on stderr too.
+fn print_merge_report(
+    a: &str,
+    b: &str,
+    out: &str,
+    r: &mnemo_engine::MergeReport,
+    format: OutputFormat,
+) {
+    let names = [a, b];
+    for (i, lead) in r.lead_ms.iter().enumerate() {
+        if *lead > mnemo_engine::MERGE_LEAD_WARN_MS {
+            eprintln!(
+                "warning: {}'s clock ran {} min ahead of this one's; its writes count as later \
+                 than they were",
+                names[i],
+                lead / 60_000
+            );
+        }
+    }
+    let ids = |v: &[mnemo_engine::Ulid]| v.iter().map(|u| u.to_string()).collect::<Vec<_>>();
+    let side = |s: mnemo_engine::MergeSide| names[usize::from(s == mnemo_engine::MergeSide::B)];
+    if matches!(format, OutputFormat::Json | OutputFormat::Jsonl) {
+        let doc = serde_json::json!({
+            "a": a,
+            "b": b,
+            "out": out,
+            "merged": r.merged,
+            "both": r.both,
+            "a_only": ids(&r.a_only),
+            "b_only": ids(&r.b_only),
+            "conflicts": r.conflicts,
+            "conflict_ids": ids(&r.conflict_ids),
+            "removed": ids(&r.removed),
+            "dropped": r.dropped,
+            "kept_keys": r.kept_keys.iter().map(|k| serde_json::json!({
+                "key": k.key,
+                "owner": k.owner,
+                "deleted_in": k.deleted_in.as_str(),
+                "kept": ids(&k.kept),
+            })).collect::<Vec<_>>(),
+            "renamed": r.renamed.iter().map(|n| serde_json::json!({
+                "kind": n.kind,
+                "from": n.from,
+                "to": n.to,
+                "id": n.id.to_string(),
+            })).collect::<Vec<_>>(),
+            "after_cycles": r.after_cycles,
+            "lead_ms": r.lead_ms,
+            "hlc_since": r.hlc_since,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
+        );
+        return;
+    }
+    println!("merged {a} and {b} into {out}: {} records", r.merged);
+    println!(
+        "  from {a} only: {}, from {b} only: {}, in both: {}",
+        r.a_only.len(),
+        r.b_only.len(),
+        r.both
+    );
+    if r.conflicts.is_empty() {
+        println!("  conflicts: none");
+    } else {
+        let by_kind: Vec<String> = r
+            .conflicts
+            .iter()
+            .map(|(k, n)| format!("{n} {k}"))
+            .collect();
+        let n = r.conflict_ids.len();
+        println!(
+            "  conflicts: {} ({n} record{} flagged; `mnemo inspect {out}` lists them)",
+            by_kind.join(", "),
+            if n == 1 { "" } else { "s" }
+        );
+    }
+    println!("  removed, deleted in a copy: {}", r.removed.len());
+    if r.dropped > 0 {
+        println!("  left out, as compaction leaves them out: {}", r.dropped);
+    }
+    for k in &r.kept_keys {
+        let owner = k
+            .owner
+            .as_deref()
+            .map(|o| format!(" ({o}'s)"))
+            .unwrap_or_default();
+        println!(
+            "  key {}{owner} deleted in {}, written in {}: {} version{} kept",
+            k.key,
+            side(k.deleted_in),
+            side(k.deleted_in.other()),
+            k.kept.len(),
+            if k.kept.len() == 1 { "" } else { "s" }
+        );
+    }
+    for n in &r.renamed {
+        println!("  renamed {} {} to {}", n.kind, n.from, n.to);
+    }
+    for c in &r.after_cycles {
+        println!("  task `after` cycle: {}", c.join(" -> "));
+    }
+    let since: Vec<String> = r
+        .hlc_since
+        .iter()
+        .zip(names)
+        .map(|(t, name)| {
+            let when = t.map_or_else(
+                || "no v0.21 write yet".to_string(),
+                |t| mnemo_engine::date_of((t / 1000) as i64),
+            );
+            format!("{name}: {when}")
+        })
+        .collect();
+    println!(
+        "note: a merge doesn't know deletes made by an older build, or before a v0.21 build \
+         first wrote to a copy ({})",
+        since.join(", ")
+    );
+    println!("note: {a} and {b} still hold the records the merge removed");
+}
+
 /// A read-write open with either secret (waiting, as [`open_w`]).
 fn open_rw(path: &str, s: &inspect::Secret, op: &str) -> mnemo_engine::Result<Mnemo> {
     match s {
@@ -3670,6 +3868,35 @@ fn run() -> std::result::Result<(), String> {
                 );
             }
         }
+        Command::Merge {
+            a,
+            b,
+            out,
+            key_file,
+            passphrase: pp,
+            b_key_file,
+            b_passphrase,
+            format,
+        } => {
+            let sa = secret_for(&a, &pp, &key_file)?;
+            let sb = if b_key_file.is_some() || b_passphrase.is_some() {
+                secret_for(&b, &b_passphrase, &b_key_file)?
+            } else if key_file.is_some() || pp.is_some() {
+                same_secret(&sa)
+            } else {
+                second_copy_secret(&b, &sa)?
+            };
+            let report = Mnemo::merge_files(
+                &a,
+                merge_secret(&sa),
+                &b,
+                merge_secret(&sb),
+                &out,
+                &mnemo_engine::MergeOptions::default(),
+            )
+            .map_err(fmt)?;
+            print_merge_report(&a, &b, &out, &report, format);
+        }
         Command::Reembed {
             path,
             embed_cmd,
@@ -4038,6 +4265,8 @@ fn run() -> std::result::Result<(), String> {
             let stats = db.stats().map_err(fmt)?;
             let snapshots = db.snapshots().len();
             let counts = db.kind_counts().map_err(fmt)?;
+            // v0.21.0 (13.7): the records a merge flagged.
+            let conflicts = db.merge_conflicts().map_err(fmt)?.len();
             let now = db.coordination_now();
             let mut entries = db.about_in(vis).map_err(fmt)?;
             // 12.7d: the project essence follows the manifest and the
@@ -4091,6 +4320,7 @@ fn run() -> std::result::Result<(), String> {
                             "encrypted": stats.encrypted,
                             "snapshots": snapshots,
                             "has_index": stats.index.is_some(),
+                            "merge_conflicts": conflicts,
                         },
                         "manifest": manifest.map(|m| memory_to_json(m, false)),
                         "onboarding": entries
@@ -4129,6 +4359,13 @@ fn run() -> std::result::Result<(), String> {
                     );
                     if let Some(line) = mistagged_line(&mut db) {
                         println!("# {line}");
+                    }
+                    if conflicts > 0 {
+                        println!(
+                            "# {conflicts} record{} flagged by a merge as in conflict; \
+                             `mnemo inspect` lists them",
+                            if conflicts == 1 { "" } else { "s" }
+                        );
                     }
                     if let Some(hint) = upgrade_hint(&path, stats.format_version) {
                         println!("# {hint}");

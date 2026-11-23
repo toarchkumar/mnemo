@@ -104,7 +104,9 @@ pub use memory::{
     MNEMO_META_REVIEW_BY, MNEMO_META_VISIBILITY, VISIBILITY_LEVELS,
 };
 /// 13a (13.5, 13.6): visibility and freshness.
-pub use memory::{date_of, stale_after, stale_since, visibility_of, VisibilitySet};
+pub use memory::{
+    date_of, is_merge_conflict, stale_after, stale_since, visibility_of, VisibilitySet,
+};
 /// 13a (13.1): messages between agents.
 pub use memory::{
     delivery, MESSAGE_ACKED, MESSAGE_ACKED_KEEP_SECS, MESSAGE_BODY_MAX, MESSAGE_PAIR_CARRY_SECS,

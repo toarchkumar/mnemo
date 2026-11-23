@@ -3998,6 +3998,109 @@ fn compact_file_with_key(py: Python<'_>, path: &str, key: &[u8]) -> PyResult<PyO
     compact_report_dict(py, report)
 }
 
+/// v0.21.0 (13.7): merge two diverged copies of one brain, `a` and `b`,
+/// into a new file at `out`, leaving both as they were. `a` opens with
+/// `passphrase` or `key` (32 bytes), and so does the output; `b` with
+/// `b_passphrase` or `b_key` (a copy rekeyed since), else with `a`'s.
+/// Merge copies, not a brain in use: each input is held for readers for
+/// the whole merge.
+///
+/// Returns the report as a dict: `merged`, `both`, `a_only` and `b_only`
+/// (ids), `conflicts` (by kind), `conflict_ids`, `removed` (ids),
+/// `dropped`, `kept_keys`, `renamed`, `after_cycles`, `lead_ms` and
+/// `hlc_since` (one per input). Raises `InvalidArgumentError` with the
+/// reason when the merge is refused (not one brain, different embedders,
+/// a copy older than format 9, an output that exists).
+#[pyfunction]
+#[pyo3(signature = (a, b, out, *, passphrase=None, key=None, b_passphrase=None, b_key=None))]
+#[allow(clippy::too_many_arguments)]
+fn merge_files(
+    py: Python<'_>,
+    a: &str,
+    b: &str,
+    out: &str,
+    passphrase: Option<&str>,
+    key: Option<&[u8]>,
+    b_passphrase: Option<&str>,
+    b_key: Option<&[u8]>,
+) -> PyResult<PyObject> {
+    enum S {
+        P(String),
+        K([u8; 32]),
+    }
+    fn as_secret(s: &S) -> mnemo_core::MergeSecret<'_> {
+        match s {
+            S::P(p) => mnemo_core::MergeSecret::Passphrase(p.as_str()),
+            S::K(k) => mnemo_core::MergeSecret::Key(k),
+        }
+    }
+    let pick = |p: Option<&str>, k: Option<&[u8]>, which: &str| -> PyResult<Option<S>> {
+        match (p, k) {
+            (Some(_), Some(_)) => Err(PyValueError::new_err(format!(
+                "merge_files: give {which}'s passphrase or its key, not both"
+            ))),
+            (Some(p), None) => Ok(Some(S::P(p.to_string()))),
+            (None, Some(k)) => Ok(Some(S::K(key_from_bytes(k)?))),
+            (None, None) => Ok(None),
+        }
+    };
+    let sa = pick(passphrase, key, "a")?
+        .ok_or_else(|| PyValueError::new_err("merge_files: give a's passphrase= or key="))?;
+    let sb = pick(b_passphrase, b_key, "b")?;
+    let (a, b, out) = (a.to_string(), b.to_string(), out.to_string());
+    let report = py
+        .allow_threads(move || {
+            let second = sb.as_ref().unwrap_or(&sa);
+            Core::merge_files(
+                &a,
+                as_secret(&sa),
+                &b,
+                as_secret(second),
+                &out,
+                &mnemo_core::MergeOptions::default(),
+            )
+        })
+        .map_err(to_py)?;
+    let ids = |v: &[mnemo_core::Ulid]| v.iter().map(|u| u.to_string()).collect::<Vec<_>>();
+    let d = PyDict::new_bound(py);
+    d.set_item("merged", report.merged)?;
+    d.set_item("both", report.both)?;
+    d.set_item("a_only", ids(&report.a_only))?;
+    d.set_item("b_only", ids(&report.b_only))?;
+    let conflicts = PyDict::new_bound(py);
+    for (k, n) in &report.conflicts {
+        conflicts.set_item(k, n)?;
+    }
+    d.set_item("conflicts", conflicts)?;
+    d.set_item("conflict_ids", ids(&report.conflict_ids))?;
+    d.set_item("removed", ids(&report.removed))?;
+    d.set_item("dropped", report.dropped)?;
+    let kept = PyList::empty_bound(py);
+    for k in &report.kept_keys {
+        let e = PyDict::new_bound(py);
+        e.set_item("key", &k.key)?;
+        e.set_item("owner", &k.owner)?;
+        e.set_item("deleted_in", k.deleted_in.as_str())?;
+        e.set_item("kept", ids(&k.kept))?;
+        kept.append(e)?;
+    }
+    d.set_item("kept_keys", kept)?;
+    let renamed = PyList::empty_bound(py);
+    for r in &report.renamed {
+        let e = PyDict::new_bound(py);
+        e.set_item("kind", &r.kind)?;
+        e.set_item("from", &r.from)?;
+        e.set_item("to", &r.to)?;
+        e.set_item("id", r.id.to_string())?;
+        renamed.append(e)?;
+    }
+    d.set_item("renamed", renamed)?;
+    d.set_item("after_cycles", report.after_cycles.clone())?;
+    d.set_item("lead_ms", report.lead_ms.to_vec())?;
+    d.set_item("hlc_since", report.hlc_since.to_vec())?;
+    Ok(d.into_any().unbind())
+}
+
 /// Report this build's cryptographic backend configuration.
 ///
 /// Returns a dict with the mnemo-engine version, the target triple
@@ -4090,6 +4193,7 @@ fn mnemo_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_key, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file, m)?)?;
     m.add_function(wrap_pyfunction!(compact_file_with_key, m)?)?;
+    m.add_function(wrap_pyfunction!(merge_files, m)?)?;
     m.add_function(wrap_pyfunction!(build_info, m)?)?;
     m.add_function(wrap_pyfunction!(install_builtin_embedder, m)?)?;
     m.add_function(wrap_pyfunction!(builtin_embedder_info, m)?)?;

@@ -315,8 +315,13 @@ mod run {
                 format!("http://{}", l.local_addr().unwrap())
             };
             let bin = Path::new(env!("CARGO_BIN_EXE_mnemo")).parent().unwrap();
-            let path = std::env::join_paths([bin.to_path_buf(), tool_dir("git"), tool_dir("bash")])
-                .unwrap();
+            let path = std::env::join_paths([
+                bin.to_path_buf(),
+                tool_dir("git"),
+                tool_dir("bash"),
+                tool_dir("cp"),
+            ])
+            .unwrap();
             c.env("HOME", self.p("home"))
                 .env("PATH", path)
                 .env("GIT_CONFIG_NOSYSTEM", "1")
