@@ -15,7 +15,7 @@ build-backend = "maturin"
 # sites unchanged). See the "Breaking: import name" section in
 # CHANGELOG.md for the full migration.
 name = "mnemo-engine"
-version = "0.20.2"
+version = "0.21.0"
 description = "Shared memory for your coding agents, in one encrypted file: Python bindings for the embedded MNemo engine, with recall"
 readme = "README.md"
 requires-python = ">=3.8"

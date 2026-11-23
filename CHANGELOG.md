@@ -8,6 +8,21 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-11-23
+
+Two copies of one brain become one again. `mnemo merge <a> <b> -o <out>`
+(and `Mnemo::merge_files`, and `merge_files` in Python) merges two
+diverged copies into a new file: deletes by id first, one version per
+record, a key's versions as one chain, each kind by its own rule (essence
+items, tasks and findings by their history), and a conflict copy, a
+flag and a line in the report wherever both copies changed the same
+thing. The same copies give the same output in any order and grouping.
+To make that possible every write now carries a clock stamp and its
+version, and a delete leaves a small tombstone. `about` and `mnemo
+inspect` show what a merge flagged. No format change: older builds read
+the new metadata and carry it through. The Swift and Android packages
+aren't published in this release: they stay at 0.20.0.
+
 ### Added
 
 - **The merge groundwork: a clock stamp on every write, and tombstones**
@@ -5341,7 +5356,8 @@ bindings via PyO3 (released as `mnemo` on PyPI; renamed in 0.2.0). CLI
 binary with `init`, `info`, `import`, `index`, `search`, `verify`,
 `rekey`, `compact`, `snapshots`, `restore`, `demo` subcommands.
 
-[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.20.2...HEAD
+[Unreleased]: https://github.com/toarchkumar/mnemo/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/toarchkumar/mnemo/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/toarchkumar/mnemo/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/toarchkumar/mnemo/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/toarchkumar/mnemo/compare/v0.19.1...v0.20.0
