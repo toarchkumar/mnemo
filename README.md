@@ -8,13 +8,15 @@
 [![crates.io downloads](https://img.shields.io/crates/d/mnemo-engine?label=crates.io%20downloads)](https://crates.io/crates/mnemo-engine)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-**Shared memory for your coding agents, in one encrypted file. Written in Rust.**
+**Shared memory for your coding agents. It replaces the `CLAUDE.md` junk
+drawer and the plain-text notes folder with one encrypted file on your
+machine, which Claude Code, Cursor and any MCP client share.**
 
-MNemo doesn't compete with vector databases. It competes with `CLAUDE.md`
-and a notes folder. It's a project's memory that every session can search,
-that several agents can share their work through, and that you can open
-and read. It's one encrypted `.mnemo` file inside `.git`, with no server
-and no account, and it's free.
+Keep your rules in `CLAUDE.md` or `AGENTS.md`. Everything your agents
+learn along the way goes into MNemo: a project's memory that every session
+can search, that several agents can share their work through, and that you
+can open and read. It's one `.mnemo` file inside `.git`, encrypted and
+local-first, with no server and no account, and it's free.
 
 ```sh
 curl -fsSL https://toarchkumar.github.io/mnemo/install.sh | sh
