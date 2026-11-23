@@ -1072,7 +1072,7 @@ fn claims_come_from_the_first_input_only() {
     a.close().unwrap();
     b.close().unwrap();
     for (first, second, want) in [(&p.a, &p.b, "tree:a"), (&p.b, &p.a, "tree:b")] {
-        let out = p.out(&format!("claims-{want}.mnemo"));
+        let out = p.out(&format!("claims-{}.mnemo", want.replace(':', "-")));
         merge(first, second, &out, wall_ms());
         let mut db = Mnemo::open(&out, PW).unwrap();
         let topics: Vec<String> = db.claims().unwrap().into_iter().map(|c| c.topic).collect();
