@@ -275,6 +275,10 @@ fn memory_json(m: &Memory) -> Value {
     if mnemo_engine::visibility_of(m) == "private" {
         r.insert("private".into(), json!(true));
     }
+    // v0.21.0 (13.7): a record a merge flagged.
+    if mnemo_engine::is_merge_conflict(m) {
+        r.insert("conflict".into(), json!(true));
+    }
     if let Some(s) = &m.session_id {
         r.insert("session".into(), json!(s));
     }
@@ -398,6 +402,12 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         .collect();
     let contents = KeywordIndex::new(shown.iter().map(|m| m.content.as_str()));
     let memories: Vec<Value> = shown.iter().map(|m| memory_json(m)).collect();
+    // v0.21.0 (13.7): every record a merge flagged (a merge never flags a
+    // turn, so the shown records hold them all).
+    let conflicts = memories
+        .iter()
+        .filter(|m| m.get("conflict").is_some())
+        .count();
     let agents: Vec<String> = shown
         .iter()
         .map(|m| m.agent_id.clone())
@@ -468,6 +478,7 @@ pub fn load(path: &str, secret: &Secret) -> Result<Loaded, String> {
         "keys": keys.len(),
         "findings": findings.len(),
         "tasks": tasks.len(),
+        "conflicts": conflicts,
     });
     let snapshots = json!({
         "retained": summary.snapshots_retained,
@@ -932,6 +943,7 @@ fn route_in(l: &Loaded, req: &Request, range: (Option<i64>, Option<i64>)) -> Opt
                         Some("no") => m.get("key").is_none(),
                         _ => true,
                     }
+                    && (q("conflict") != Some("yes") || m.get("conflict").is_some())
             };
             // RB-003.7: count the matches, then clone only the page.
             let matches: Vec<(usize, Option<f32>)> = order

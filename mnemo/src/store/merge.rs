@@ -1768,4 +1768,27 @@ impl Mnemo {
         }
         Ok(report)
     }
+
+    /// v0.21.0 (13.7): the live records a merge flagged
+    /// ([`crate::is_merge_conflict`]), conflict copies and superseded
+    /// versions included, in id order. Reads every live record but thread
+    /// turns, which a merge never flags.
+    pub fn merge_conflicts(&mut self) -> Result<Vec<Memory>> {
+        let entries: Vec<_> = self
+            .catalog
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter(|e| e.v9.is_none_or(|r| r.kind != super::records::ROW_KIND_TURN))
+            .cloned()
+            .collect();
+        let mut out = Vec::new();
+        for e in &entries {
+            let m = self.read_memory(e)?;
+            if crate::memory::is_merge_conflict(&m) {
+                out.push(m);
+            }
+        }
+        out.sort_by_key(|m| m.id);
+        Ok(out)
+    }
 }

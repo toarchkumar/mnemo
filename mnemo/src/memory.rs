@@ -458,6 +458,14 @@ pub const MNEMO_META_REVIEW_BY: &str = "_mnemo.review_by";
 /// [`crate::Mnemo::set_default_agent`]; a new brain's manifest has none.
 pub const MNEMO_META_DEFAULT_AGENT: &str = "_mnemo.default_agent";
 
+/// v0.21.0 (13.7): whether a merge flagged this record
+/// (`_mnemo.merge_conflict`): a conflict copy, a key's version that was
+/// written over concurrently, or an essence item, task or finding the
+/// copies changed differently.
+pub fn is_merge_conflict(m: &Memory) -> bool {
+    m.metadata.get(MNEMO_META_MERGE_CONFLICT) == Some(&serde_json::Value::Bool(true))
+}
+
 /// 13a (13.5): a record's visibility level: `_mnemo.visibility`, or `team`
 /// when it has none. A filter, not a security boundary: everyone holding
 /// the key reads every record.

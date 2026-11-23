@@ -44,9 +44,24 @@ Pre-1.0, the minor component carries the breaking-change signal.
   hold a handle's clock for tests (`__set_hlc_offset_for_testing`,
   `__freeze_hlc_clock_for_testing`, `MNEMO_DEV_HLC_OFFSET_MS`; RB-019.8).
 
+- **`mnemo merge <a> <b> -o <out>`: the merge from a shell** (v0210-3,
+  spec.v0210 step 3). It prints what came from each copy, the conflicts
+  by kind, the removals, keys deleted in one copy and written in the
+  other, renamed tasks and findings, and `after` cycles (`--format json`
+  adds the ids), says on stderr when a copy's clock ran more than an hour
+  ahead, and exits 1 with the reason when the merge is refused. The output
+  opens with the first copy's secret; the second copy takes its own
+  (`--b-passphrase`, `--b-key-file`), else the key store's entry for its
+  salt, else the first copy's. `about` says how many records a merge
+  flagged (`merge_conflicts` in its JSON), and `mnemo inspect` tags them
+  `merge conflict`, filters them on the memories tab and counts them on
+  the about tab, through `Mnemo::merge_conflicts` and `is_merge_conflict`.
+  The guide has a section with a tested example, and the Python binding
+  has `merge_files(a, b, out, passphrase=..., b_passphrase=...)`, which
+  returns the report as a dict. No MCP tool.
 - **`Mnemo::merge_files`: merge two diverged copies of one brain into a
-  new file** (v0210-2, spec.v0210 step 2, 13.7; the library: the CLI
-  command is the next step). The inputs are opened read-only with a secret
+  new file** (v0210-2, spec.v0210 step 2, 13.7; the library under
+  `mnemo merge`). The inputs are opened read-only with a secret
   each (one brain: the same salt, or the same manifest id, so a rekeyed
   copy merges); the output follows compaction (the first input's secret,
   salt and KDF settings, a new data key, the engine's own cache entries

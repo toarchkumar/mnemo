@@ -292,6 +292,28 @@ mnemo export --git
 - `mnemo mcp install --client cursor` adds the MCP server to one client by
   hand.
 
+### Merge two copies
+
+When a brain was copied (to a laptop, say) and both copies changed,
+`mnemo merge` combines them into a new file and leaves both as they were:
+
+```sh
+cp .git/mnemo/project.mnemo laptop.mnemo
+cp .git/mnemo/project.mnemo desktop.mnemo
+mnemo essence add laptop.mnemo --project --section next --text "Ship the merge command"
+mnemo essence add desktop.mnemo --project --section open --text "Which copy is newer?"
+mnemo merge laptop.mnemo desktop.mnemo -o merged.mnemo
+mnemo about merged.mnemo
+```
+
+A delete in either copy wins. An edit made in one copy wins over the
+copy that didn't change it. Edits made in both keep the newer, and the
+merge flags the conflict: `about` counts the flagged records and
+`mnemo inspect` lists them. The output opens with the first copy's
+secret; give a copy rekeyed since its own with `--b-passphrase` or
+`--b-key-file`. Merge copies, not the brain in use: each input is held
+for readers for the whole merge, so a session can't write to it.
+
 ## 5. Hooks and MCP extras
 
 `onboard` installs four hooks: `mnemo hook session-start`, `mnemo hook

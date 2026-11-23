@@ -125,7 +125,7 @@ async function session() {
 }
 const main = document.getElementById("main");
 let view = "memories";
-const state = { q: "", type: "", agent: "", keyed: "", thread: "", key: null, threadId: null,
+const state = { q: "", type: "", agent: "", keyed: "", thread: "", conflict: "", key: null, threadId: null,
   fStatus: "", fCategory: "", fPriority: "", findingId: null, tStatus: "", taskSlug: null,
   dFrom: "", dTo: "", tDate: "created" };
 
@@ -190,6 +190,7 @@ function memoryCard(m) {
   if (m.thread) tags.push(el("span", { class: "tag mono" }, "thread " + m.thread));
   if (m.kind) tags.push(el("span", { class: "tag" }, m.kind));
   if (m.private) tags.push(el("span", { class: "tag" }, "private"));
+  if (m.conflict) tags.push(el("span", { class: "tag" }, "merge conflict"));
   if (m.superseded_by) tags.push(el("span", {}, "superseded " + when(m.invalid_at)));
   if (m.score != null) tags.push(el("span", {}, "score " + m.score.toFixed(2)));
   tags.push(el("span", {}, when(m.created_at)), el("span", {}, "importance " + m.importance));
@@ -202,7 +203,7 @@ function memoryCard(m) {
 
 async function showMemories() {
   const params = withRange({ limit: 200 });
-  for (const k of ["q", "type", "agent", "keyed", "thread"]) if (state[k]) params[k] = state[k];
+  for (const k of ["q", "type", "agent", "keyed", "thread", "conflict"]) if (state[k]) params[k] = state[k];
   const [data, threads] = await Promise.all([api("/api/memories", params), api("/api/threads")]);
   const sel = (name, opts) => {
     const s = el("select", { onchange: e => { state[name] = e.target.value; render(); } },
@@ -217,6 +218,7 @@ async function showMemories() {
     sel("agent", [["", "All agents"], ...data.agents.map(a => [a, a])]),
     sel("keyed", [["", "Keyed or not"], ["yes", "Keyed"], ["no", "Not keyed"]]),
     sel("thread", [["", "Any thread"], ...threads.threads.map(t => [t.id, t.id])]),
+    sel("conflict", [["", "Flagged or not"], ["yes", "Merge conflicts"]]),
     ...dateInputs());
   const shown = data.memories.length;
   const note = shown < data.total ? `showing ${shown} of ${data.total}` : `${data.total} ${data.total === 1 ? "memory" : "memories"}`;
@@ -416,6 +418,7 @@ async function showAbout() {
     ["Memories", `${a.memories} live, ${a.tombstoned} tombstoned`],
     ["Threads / keyed facts", `${a.threads} / ${a.keys}`],
     ["Findings / tasks", `${a.findings} / ${a.tasks}`],
+    ["Merge conflicts", a.conflicts ? `${a.conflicts} (Memories, "Merge conflicts" lists them)` : "none"],
     ["Agents", a.agents.join(", ") || "—"],
     ["File size", bytes(a.file_bytes)],
     ["Vector column", bytes(a.vector_column_bytes)],

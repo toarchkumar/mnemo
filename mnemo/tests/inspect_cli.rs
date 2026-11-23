@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use mnemo_engine::{
-    Embedder, EmbedderIdentity, EssenceScope, EssenceSection, KdfParams, Memory, MemoryType, Mnemo,
-    MnemoConfig, Scope, ThreadTurn,
+    Embedder, EmbedderIdentity, EssenceScope, EssenceSection, KdfParams, Memory, MemoryPatch,
+    MemoryType, MergeOptions, MergeSecret, Mnemo, MnemoConfig, Scope, ThreadTurn,
 };
 use serde_json::Value;
 
@@ -1088,4 +1088,66 @@ fn the_date_range_filters_every_dated_tab() {
     ] {
         assert!(!page.contains(sink), "the page uses {sink}");
     }
+}
+
+#[test]
+fn a_merged_file_counts_its_conflicts_and_lists_them() {
+    // v0.21.0 (13.7): two copies edit one fact differently; the merge keeps
+    // the newer and a flagged conflict copy of the other text. The
+    // inspector counts it and lists it under the conflict filter.
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = || MnemoConfig {
+        dimensions: 4,
+        kdf: KdfParams::fast(),
+        ..Default::default()
+    };
+    let base = dir.path().join("base.mnemo");
+    let mut db = Mnemo::create(&base, PW, cfg()).unwrap();
+    let fact = db
+        .remember(Memory::new(
+            "the base fact",
+            MemoryType::Semantic,
+            vec![1.0, 0.5, 0.25, 1.0],
+        ))
+        .unwrap();
+    db.close().unwrap();
+    let (a, b) = (dir.path().join("a.mnemo"), dir.path().join("b.mnemo"));
+    for (path, text, x) in [(&a, "edited in a", 2.0), (&b, "edited in b", 3.0)] {
+        std::fs::copy(&base, path).unwrap();
+        let mut db = Mnemo::open(path, PW).unwrap();
+        db.update(
+            &fact,
+            MemoryPatch {
+                content: Some(text.into()),
+                vector: Some(vec![x, 0.5, 0.25, 1.0]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        db.close().unwrap();
+    }
+    let out = dir.path().join("out.mnemo");
+    let r = Mnemo::merge_files(
+        &a,
+        MergeSecret::Passphrase(PW),
+        &b,
+        MergeSecret::Passphrase(PW),
+        &out,
+        &MergeOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(r.conflict_ids.len(), 1);
+    let ins = spawn(&out, PW, &[]);
+    assert_eq!(ins.json("/api/about", "")["conflicts"], 1);
+    assert_eq!(ins.json("/api/memories", "")["total"], 2);
+    let flagged = ins.json("/api/memories", "conflict=yes");
+    assert_eq!(flagged["total"], 1);
+    let m = &flagged["memories"][0];
+    assert_eq!(m["id"], r.conflict_ids[0].to_string());
+    assert_eq!(m["conflict"], true);
+    // An input has none.
+    drop(ins);
+    let ins = spawn(&a, PW, &[]);
+    assert_eq!(ins.json("/api/about", "")["conflicts"], 0);
+    assert_eq!(ins.json("/api/memories", "conflict=yes")["total"], 0);
 }

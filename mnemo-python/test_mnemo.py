@@ -757,6 +757,52 @@ def test_compact_file_with_key():
     print("ok  mnemo.compact_file_with_key(path, key)")
 
 
+def test_merge_files():
+    """v0.21.0 (13.7): `mnemo.merge_files(a, b, out, passphrase=...)` merges
+    two diverged copies of one brain into a new file and returns the
+    report; a refused merge raises `InvalidArgumentError` with the reason."""
+    import shutil
+    with tempfile.TemporaryDirectory() as d:
+        base, a, b, out = (os.path.join(d, n) for n in ("base.mnemo", "a.mnemo", "b.mnemo", "out.mnemo"))
+        db = mnemo.open(base, "pw", dimensions=2)
+        gone = db.remember("forgotten in b", "semantic", [1.0, 0.5])
+        db.close()
+        del db
+        shutil.copy(base, a)
+        shutil.copy(base, b)
+        db = mnemo.open(a, "pw")
+        xa = db.remember("written in a", "semantic", [1.0, 0.0])
+        db.close()
+        del db
+        db = mnemo.open(b, "pw")
+        xb = db.remember("written in b", "semantic", [0.0, 1.0])
+        db.delete(gone)
+        db.close()
+        del db
+        r = mnemo.merge_files(a, b, out, passphrase="pw")
+        # b's delete left a tombstone, which only b holds.
+        assert r["a_only"] == [xa] and xb in r["b_only"] and len(r["b_only"]) == 2, r
+        assert r["removed"] == [gone], r
+        assert r["conflicts"] == {} and r["conflict_ids"] == [], r
+        assert len(r["lead_ms"]) == 2 and len(r["hlc_since"]) == 2, r
+        db = mnemo.open(out, "pw")
+        assert db.get(xa)["content"] == "written in a"
+        assert db.get(xb)["content"] == "written in b"
+        db.close()
+        del db
+        try:
+            mnemo.merge_files(a, b, out, passphrase="pw")
+            raise AssertionError("an existing output should be refused")
+        except mnemo.InvalidArgumentError as e:
+            assert "already exists" in str(e), e
+        try:
+            mnemo.merge_files(a, b, os.path.join(d, "x.mnemo"))
+            raise AssertionError("a merge needs a's secret")
+        except ValueError as e:
+            assert "passphrase" in str(e), e
+    print("ok  mnemo.merge_files(a, b, out, passphrase=...)")
+
+
 def test_rekey_to_a_passphrase_gets_full_kdf_parameters():
     """12.3 (the keys note, section 1, rule 1): a rekey to a passphrase never
     keeps the raw-key parameters of a file made with a key, on a plain or a
@@ -2257,4 +2303,5 @@ if __name__ == "__main__":
     test_shared_notices_are_warned_once()
     test_shared_rekey_session_and_embedder()
     test_two_python_processes_share_a_file()
+    test_merge_files()
     print("\nall Python binding tests passed")

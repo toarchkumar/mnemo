@@ -450,5 +450,14 @@
       "area": "architecture",
       "topic": "builtin-embedder"
     }
+  },
+  {
+    "content": "MERGING TWO COPIES (v0.21.0, 13.7): mnemo merge <a> <b> -o <out> (Mnemo::merge_files; Python merge_files) combines two diverged copies of one brain into a new file and changes neither. A delete in either copy wins, by id. An edit made in one copy wins over the copy that didn't change it (each in-place rewrite lists its earlier versions in _mnemo.hlc_prev, the 8 latest). Edits made in both keep the newer; a fact keeps the other text as a conflict copy, a key becomes one chain ordered by when each version was first written (_mnemo.first_hlc), and essence items, tasks and findings merge their status. Every record the merge flags carries _mnemo.merge_conflict: mnemo about counts them and mnemo inspect lists them (a filter on the memories tab). The output opens with the first copy's secret; a copy rekeyed since takes its own (--b-passphrase, --b-key-file). Merge copies, never the brain in use: each input is held for readers for the whole merge.",
+    "memory_type": "procedural",
+    "importance": 0.7,
+    "metadata": {
+      "area": "conventions",
+      "topic": "merge"
+    }
   }
 ]
