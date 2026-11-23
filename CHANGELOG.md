@@ -156,6 +156,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **A key's old version ends when its next one was created** (v0210-4c): a
+  keyed write stamped the old version's `_mnemo.invalid_at` from a second
+  clock read, which could fall a second after the new version's
+  `created_at`; it now takes the new version's `created_at`. A merge always
+  writes that time too, rather than keeping an input's own, so files whose
+  two times differ (any written before this) merge to the same records in
+  every order.
 - **`about` keeps one order for onboarding entries tied on importance and
   creation time** (v0210-4b): entries written in the same second with the
   same importance came out in a different order on each open; they now go

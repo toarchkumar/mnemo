@@ -1404,16 +1404,16 @@ fn relink_slots(
                     m.metadata.remove(MNEMO_META_INVALID_AT);
                 }
                 Some(x) => {
-                    let same = ulid_at(m, MNEMO_META_SUPERSEDED_BY) == Some(x)
-                        && m.metadata.contains_key(MNEMO_META_INVALID_AT);
+                    // Always the next version's created_at, never the
+                    // input's own mark: a write before v0.21.0 could stamp
+                    // a second later, and which input's copy survives
+                    // depends on the grouping.
                     m.metadata.insert(
                         MNEMO_META_SUPERSEDED_BY.into(),
                         Value::String(Ulid(x).to_string()),
                     );
-                    if !same {
-                        m.metadata
-                            .insert(MNEMO_META_INVALID_AT.into(), Value::from(next_created));
-                    }
+                    m.metadata
+                        .insert(MNEMO_META_INVALID_AT.into(), Value::from(next_created));
                 }
             }
         }

@@ -1873,6 +1873,72 @@ fn a_chain_closes_up_around_a_version_another_copy_deleted() {
 }
 
 #[test]
+fn a_superseded_version_ends_when_its_next_was_created_in_every_grouping() {
+    // As above, but b's base version says it ended a second after b's
+    // version was created, as a write before v0.21.0 could stamp it (two
+    // clock reads across a second). Every grouping gives the base version
+    // one invalid_at: its next version's created_at.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let mut db = open(&base_path);
+    let (first, _) = db
+        .remember_keyed(Memory::new("k, base", MemoryType::Semantic, v(1.5)), "k")
+        .unwrap();
+    db.close().unwrap();
+    let o = |n: &str| dir.path().join(n);
+    let (a, b, d) = (o("a.mnemo"), o("b.mnemo"), o("d.mnemo"));
+    let t = wall_ms();
+    let mut ids = Vec::new();
+    for (p, at, x) in [(&a, t - 3_600_000, 2.0), (&b, t, 3.0)] {
+        copy(&base_path, p);
+        let mut db = open(p);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        let (id, _) = db
+            .remember_keyed(Memory::new("k is 0", MemoryType::Semantic, v(x)), "k")
+            .unwrap();
+        let next = db.get(&id).unwrap().created_at;
+        let mut old = db.get(&first).unwrap();
+        // The write stamps the old version from the new one's created_at.
+        assert_eq!(meta(&old, "_mnemo.invalid_at"), Some(&Value::from(next)));
+        if x == 3.0 {
+            old.metadata
+                .insert("_mnemo.invalid_at".into(), Value::from(next + 1));
+            db.__put_unvalidated_for_testing(old).unwrap();
+        }
+        ids.push(id);
+        db.close().unwrap();
+    }
+    copy(&a, &d);
+    let mut db = open(&d);
+    db.delete(&ids[0]).unwrap();
+    db.close().unwrap();
+    let now = t + 1_000;
+    merge(&a, &b, &o("ab.mnemo"), now);
+    merge(&o("ab.mnemo"), &d, &o("ab_d.mnemo"), now);
+    merge(&b, &d, &o("bd.mnemo"), now);
+    merge(&a, &o("bd.mnemo"), &o("a_bd.mnemo"), now);
+    merge(&a, &d, &o("ad.mnemo"), now);
+    merge(&o("ad.mnemo"), &b, &o("ad_b.mnemo"), now);
+    merge(&b, &a, &o("ba.mnemo"), now);
+    merge(&d, &o("ba.mnemo"), &o("d_ba.mnemo"), now);
+    for g in ["a_bd", "ad_b", "d_ba"] {
+        assert_same_records(&o(&format!("{g}.mnemo")), &o("ab_d.mnemo"), g);
+    }
+    let mut db = Mnemo::open_read_only(o("ab_d.mnemo"), PW).unwrap();
+    let base_version = db.get(&first).unwrap();
+    let next = db.get(&ids[1]).unwrap().created_at;
+    assert_eq!(
+        meta(&base_version, "_mnemo.superseded_by"),
+        Some(&Value::String(ids[1].to_string()))
+    );
+    assert_eq!(
+        meta(&base_version, "_mnemo.invalid_at"),
+        Some(&Value::from(next))
+    );
+}
+
+#[test]
 fn three_copies_writing_one_key_in_one_millisecond_name_its_versions_alike() {
     // Each copy's write rewrites the base version's link to it, in the
     // same millisecond. The merged base version is named from what it

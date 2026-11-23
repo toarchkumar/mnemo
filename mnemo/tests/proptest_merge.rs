@@ -440,6 +440,151 @@ fn as_input(recs: Vec<Memory>) -> Input {
     (recs, Vec::new())
 }
 
+/// merge(a,b) = merge(b,a) with the report mirrored, the idempotence laws,
+/// and coverage, on two copies.
+fn two_copies(ops_a: &[Op], ops_b: &[Op], ca: i64, cb: i64) -> Result<(), TestCaseError> {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("base.mnemo");
+    base(&p);
+    let (pa, pb) = (dir.path().join("a.mnemo"), dir.path().join("b.mnemo"));
+    std::fs::copy(&p, &pa).unwrap();
+    std::fs::copy(&p, &pb).unwrap();
+    let t = wall_ms();
+    let a = diverge(&pa, ops_a, t, ca, "worker-a");
+    let b = diverge(&pb, ops_b, t, cb, "worker-b");
+    let now = wall_ms();
+
+    let (ab, r_ab) = merge(&a, &b, now);
+    let (ba, r_ba) = merge(&b, &a, now);
+    prop_assert!(
+        norm(&ab) == norm(&ba),
+        "merge(a,b) = merge(b,a):{}",
+        diff(&norm(&ab), &norm(&ba))
+    );
+    prop_assert_eq!(mirrored(&r_ab), r_ba, "the report, mirrored");
+
+    let out = as_input(ab.clone());
+    prop_assert_eq!(
+        norm(&merge(&out, &b, now).0),
+        norm(&ab),
+        "merge(merge(a,b),b)"
+    );
+    prop_assert_eq!(
+        norm(&merge(&out, &a, now).0),
+        norm(&ab),
+        "merge(merge(a,b),a)"
+    );
+    for x in [&a, &b] {
+        let lone = (x.0.clone(), Vec::new());
+        prop_assert_eq!(
+            norm(&merge(&lone, &lone, now).0),
+            norm(&x.0),
+            "merge(x,x) = x"
+        );
+    }
+
+    let removed: BTreeSet<Ulid> = r_ab.removed.iter().copied().collect();
+    prop_assert!(
+        covered(&a, &ab, &removed).is_ok(),
+        "{:?}",
+        covered(&a, &ab, &removed)
+    );
+    prop_assert!(
+        covered(&b, &ab, &removed).is_ok(),
+        "{:?}",
+        covered(&b, &ab, &removed)
+    );
+    prop_assert!(
+        nothing_deleted_survives(&[&a, &b], &ab).is_ok(),
+        "{:?}",
+        nothing_deleted_survives(&[&a, &b], &ab)
+    );
+    Ok(())
+}
+
+/// merge(merge(a,b),c) = merge(a,merge(b,c)) on three copies.
+fn three_copies(ops: [&[Op]; 3], clocks: [i64; 3]) -> Result<(), TestCaseError> {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("base.mnemo");
+    base(&p);
+    let paths: Vec<_> = ["a", "b", "c"]
+        .iter()
+        .map(|n| dir.path().join(format!("{n}.mnemo")))
+        .collect();
+    for q in &paths {
+        std::fs::copy(&p, q).unwrap();
+    }
+    let t = wall_ms();
+    let a = diverge(&paths[0], ops[0], t, clocks[0], "worker-a");
+    let b = diverge(&paths[1], ops[1], t, clocks[1], "worker-b");
+    let c = diverge(&paths[2], ops[2], t, clocks[2], "worker-c");
+    let now = wall_ms();
+    let ab_c = merge(&as_input(merge(&a, &b, now).0), &c, now).0;
+    let a_bc = merge(&a, &as_input(merge(&b, &c, now).0), now).0;
+    prop_assert!(
+        norm(&ab_c) == norm(&a_bc),
+        "merge(merge(a,b),c) = merge(a,merge(b,c)):{}",
+        diff(&norm(&ab_c), &norm(&a_bc))
+    );
+    prop_assert!(
+        nothing_deleted_survives(&[&a, &b, &c], &ab_c).is_ok(),
+        "{:?}",
+        nothing_deleted_survives(&[&a, &b, &c], &ab_c)
+    );
+    Ok(())
+}
+
+/// decision.v0210-conflict-flags: a fourth copy made from the first after
+/// its ops (a copy of a copy, whose edits descend from the first's), merged
+/// in four groupings.
+fn a_copy_of_a_copy(ops: [&[Op]; 4], clocks: [i64; 4]) -> Result<(), TestCaseError> {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("base.mnemo");
+    base(&p);
+    let paths: Vec<_> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|n| dir.path().join(format!("{n}.mnemo")))
+        .collect();
+    for q in &paths[..3] {
+        std::fs::copy(&p, q).unwrap();
+    }
+    let t = wall_ms();
+    let a = diverge(&paths[0], ops[0], t, clocks[0], "worker-a");
+    std::fs::copy(&paths[0], &paths[3]).unwrap();
+    let b = diverge(&paths[1], ops[1], t, clocks[1], "worker-b");
+    let c = diverge(&paths[2], ops[2], t, clocks[2], "worker-c");
+    let d = diverge(&paths[3], ops[3], t, clocks[3], "worker-d");
+    let now = wall_ms();
+    let m = |x: &Input, y: &Input| as_input(merge(x, y, now).0);
+    let groupings = [
+        ("((a+b)+c)+d", m(&m(&m(&a, &b), &c), &d)),
+        ("a+(b+(c+d))", m(&a, &m(&b, &m(&c, &d)))),
+        ("(a+d)+(b+c)", m(&m(&a, &d), &m(&b, &c))),
+        ("(d+c)+(b+a)", m(&m(&d, &c), &m(&b, &a))),
+    ];
+    let first = norm(&groupings[0].1 .0);
+    for (name, g) in &groupings[1..] {
+        prop_assert!(
+            norm(&g.0) == first,
+            "{} = {}:{}",
+            groupings[0].0,
+            name,
+            diff(&first, &norm(&g.0))
+        );
+    }
+    // d descends from a: merging a with it changes nothing.
+    let dd = norm(&d.0);
+    for (name, g) in [("a+d", m(&a, &d)), ("d+a", m(&d, &a))] {
+        prop_assert!(norm(&g.0) == dd, "{} = d:{}", name, diff(&dd, &norm(&g.0)));
+    }
+    prop_assert!(
+        nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1 .0).is_ok(),
+        "{:?}",
+        nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1 .0)
+    );
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 24, .. ProptestConfig::default() })]
 
@@ -450,35 +595,7 @@ proptest! {
         ca in clock(),
         cb in clock(),
     ) {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("base.mnemo");
-        base(&p);
-        let (pa, pb) = (dir.path().join("a.mnemo"), dir.path().join("b.mnemo"));
-        std::fs::copy(&p, &pa).unwrap();
-        std::fs::copy(&p, &pb).unwrap();
-        let t = wall_ms();
-        let a = diverge(&pa, &ops_a, t, ca, "worker-a");
-        let b = diverge(&pb, &ops_b, t, cb, "worker-b");
-        let now = wall_ms();
-
-        let (ab, r_ab) = merge(&a, &b, now);
-        let (ba, r_ba) = merge(&b, &a, now);
-        prop_assert!(norm(&ab) == norm(&ba), "merge(a,b) = merge(b,a):{}", diff(&norm(&ab), &norm(&ba)));
-        prop_assert_eq!(mirrored(&r_ab), r_ba, "the report, mirrored");
-
-        let out = as_input(ab.clone());
-        prop_assert_eq!(norm(&merge(&out, &b, now).0), norm(&ab), "merge(merge(a,b),b)");
-        prop_assert_eq!(norm(&merge(&out, &a, now).0), norm(&ab), "merge(merge(a,b),a)");
-        for x in [&a, &b] {
-            let lone = (x.0.clone(), Vec::new());
-            prop_assert_eq!(norm(&merge(&lone, &lone, now).0), norm(&x.0), "merge(x,x) = x");
-        }
-
-        let removed: BTreeSet<Ulid> = r_ab.removed.iter().copied().collect();
-        prop_assert!(covered(&a, &ab, &removed).is_ok(), "{:?}", covered(&a, &ab, &removed));
-        prop_assert!(covered(&b, &ab, &removed).is_ok(), "{:?}", covered(&b, &ab, &removed));
-        prop_assert!(nothing_deleted_survives(&[&a, &b], &ab).is_ok(),
-            "{:?}", nothing_deleted_survives(&[&a, &b], &ab));
+        two_copies(&ops_a, &ops_b, ca, cb)?;
     }
 
     #[test]
@@ -490,29 +607,9 @@ proptest! {
         cb in clock(),
         cc in clock(),
     ) {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("base.mnemo");
-        base(&p);
-        let paths: Vec<_> = ["a", "b", "c"].iter().map(|n| dir.path().join(format!("{n}.mnemo"))).collect();
-        for q in &paths {
-            std::fs::copy(&p, q).unwrap();
-        }
-        let t = wall_ms();
-        let a = diverge(&paths[0], &ops_a, t, ca, "worker-a");
-        let b = diverge(&paths[1], &ops_b, t, cb, "worker-b");
-        let c = diverge(&paths[2], &ops_c, t, cc, "worker-c");
-        let now = wall_ms();
-        let ab_c = merge(&as_input(merge(&a, &b, now).0), &c, now).0;
-        let a_bc = merge(&a, &as_input(merge(&b, &c, now).0), now).0;
-        prop_assert!(norm(&ab_c) == norm(&a_bc),
-            "merge(merge(a,b),c) = merge(a,merge(b,c)):{}", diff(&norm(&ab_c), &norm(&a_bc)));
-        prop_assert!(nothing_deleted_survives(&[&a, &b, &c], &ab_c).is_ok(),
-            "{:?}", nothing_deleted_survives(&[&a, &b, &c], &ab_c));
+        three_copies([&ops_a, &ops_b, &ops_c], [ca, cb, cc])?;
     }
 
-    /// decision.v0210-conflict-flags: a fourth copy made from the first
-    /// after its ops (a copy of a copy, whose edits descend from the
-    /// first's), merged in four groupings.
     #[test]
     fn prop_a_copy_of_a_copy(
         ops_a in prop::collection::vec(op(), 0..6),
@@ -524,37 +621,251 @@ proptest! {
         cc in clock(),
         cd in clock(),
     ) {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("base.mnemo");
-        base(&p);
-        let paths: Vec<_> = ["a", "b", "c", "d"].iter().map(|n| dir.path().join(format!("{n}.mnemo"))).collect();
-        for q in &paths[..3] {
-            std::fs::copy(&p, q).unwrap();
-        }
-        let t = wall_ms();
-        let a = diverge(&paths[0], &ops_a, t, ca, "worker-a");
-        std::fs::copy(&paths[0], &paths[3]).unwrap();
-        let b = diverge(&paths[1], &ops_b, t, cb, "worker-b");
-        let c = diverge(&paths[2], &ops_c, t, cc, "worker-c");
-        let d = diverge(&paths[3], &ops_d, t, cd, "worker-d");
-        let now = wall_ms();
-        let m = |x: &Input, y: &Input| as_input(merge(x, y, now).0);
-        let groupings = [
-            ("((a+b)+c)+d", m(&m(&m(&a, &b), &c), &d)),
-            ("a+(b+(c+d))", m(&a, &m(&b, &m(&c, &d)))),
-            ("(a+d)+(b+c)", m(&m(&a, &d), &m(&b, &c))),
-            ("(d+c)+(b+a)", m(&m(&d, &c), &m(&b, &a))),
-        ];
-        let first = norm(&groupings[0].1.0);
-        for (name, g) in &groupings[1..] {
-            prop_assert!(norm(&g.0) == first, "{} = {}:{}", groupings[0].0, name, diff(&first, &norm(&g.0)));
-        }
-        // d descends from a: merging a with it changes nothing.
-        let dd = norm(&d.0);
-        for (name, g) in [("a+d", m(&a, &d)), ("d+a", m(&d, &a))] {
-            prop_assert!(norm(&g.0) == dd, "{} = d:{}", name, diff(&dd, &norm(&g.0)));
-        }
-        prop_assert!(nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0).is_ok(),
-            "{:?}", nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0));
+        a_copy_of_a_copy([&ops_a, &ops_b, &ops_c, &ops_d], [ca, cb, cc, cd])?;
+    }
+}
+
+// The cases proptest saved in `proptest_merge.proptest-regressions`, as
+// they shrank. A change to `op()` makes a saved seed replay another case
+// (v0210-4b added two ops), so each one is kept here as its inputs; the
+// comment names its seed's first 6 hex digits.
+
+/// A saved case: its seed's first 6 hex digits, each copy's ops and clock.
+type Saved<const N: usize> = (&'static str, [Vec<Op>; N], [i64; N]);
+
+#[test]
+fn saved_cases_of_two_copies() {
+    use Op::*;
+    let cases: [Saved<2>; 5] = [
+        (
+            "2217d7",
+            [vec![TaskTake, TaskReady], vec![TaskTake]],
+            [HOUR, HOUR],
+        ),
+        (
+            "a3c0f9",
+            [vec![Keyed(0, 0), ForgetKeyed(0)], vec![]],
+            [0, 0],
+        ),
+        (
+            "ed02c2",
+            [vec![Keyed(0, 0), ForgetKeyed(0), Keyed(0, 0)], vec![]],
+            [0, 0],
+        ),
+        (
+            "364a48",
+            [
+                vec![Keyed(1, 0), ForgetKeyed(0)],
+                vec![Keyed(0, 0), Keyed(1, 0), ForgetKeyed(1)],
+            ],
+            [0, 0],
+        ),
+        ("fd93c0", [vec![Keyed(0, 0)], vec![Keyed(0, 0)]], [0, 0]),
+    ];
+    for (seed, [a, b], [ca, cb]) in cases {
+        two_copies(&a, &b, ca, cb).unwrap_or_else(|e| panic!("{seed}: {e}"));
+    }
+}
+
+#[test]
+fn saved_cases_of_three_copies() {
+    use Op::*;
+    let cases: [Saved<3>; 8] = [
+        (
+            "3ec93e",
+            [vec![Keyed(0, 0)], vec![Keyed(0, 0)], vec![]],
+            [0, 0, 0],
+        ),
+        (
+            "9072db",
+            [
+                vec![],
+                vec![EssenceEdit(2)],
+                vec![EssenceEdit(2), EssenceResolve],
+            ],
+            [0, 0, 0],
+        ),
+        (
+            "0815b7",
+            [vec![Edit(190, 0)], vec![Edit(130, 0)], vec![Edit(64, 1)]],
+            [1, -HOUR, 0],
+        ),
+        (
+            "083bdc",
+            [
+                vec![EssenceEdit(0)],
+                vec![EssenceEdit(2)],
+                vec![EssenceResolve, EssenceEdit(2)],
+            ],
+            [0, 0, 0],
+        ),
+        (
+            "d05bcb",
+            [vec![TaskTake], vec![], vec![TaskTake, TaskReady]],
+            [0, 0, 0],
+        ),
+        (
+            "0344e8",
+            [
+                vec![EssenceEdit(0)],
+                vec![EssenceEdit(1)],
+                vec![EssenceEdit(0)],
+            ],
+            [0, 0, HOUR],
+        ),
+        (
+            "32adae",
+            [
+                vec![ForgetKeyed(0)],
+                vec![Keyed(0, 0), ForgetKeyed(0)],
+                vec![Keyed(0, 0)],
+            ],
+            [0, 0, 0],
+        ),
+        (
+            "f787fd",
+            [
+                vec![ThreadForget, AckAll, EssenceEdit(3), TaskReady, Post(2)],
+                vec![EssenceResolve, Post(0), TaskReady, Forget(252)],
+                vec![EssenceEdit(3), Remember(175)],
+            ],
+            [HOUR, HOUR, HOUR],
+        ),
+    ];
+    for (seed, [a, b, c], clocks) in cases {
+        three_copies([&a, &b, &c], clocks).unwrap_or_else(|e| panic!("{seed}: {e}"));
+    }
+}
+
+#[test]
+fn saved_cases_of_a_copy_of_a_copy() {
+    use Op::*;
+    let cases: [Saved<4>; 12] = [
+        (
+            "da61a6",
+            [
+                vec![Keyed(2, 0)],
+                vec![Keyed(2, 0)],
+                vec![],
+                vec![ForgetKeyed(2)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "a1a4b5",
+            [vec![TaskTake, TaskReady], vec![TaskTake], vec![], vec![]],
+            [0, 0, 0, 0],
+        ),
+        (
+            "a70856",
+            [
+                vec![Keyed(0, 0)],
+                vec![Keyed(0, 0)],
+                vec![],
+                vec![ForgetKeyed(0)],
+            ],
+            [-HOUR, 0, 0, 0],
+        ),
+        (
+            "2ab898",
+            [
+                vec![],
+                vec![Keyed(0, 0)],
+                vec![Keyed(0, 0)],
+                vec![Keyed(0, 0)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "e61eac",
+            [
+                vec![Keyed(1, 0)],
+                vec![],
+                vec![Keyed(1, 0)],
+                vec![Keyed(1, 1)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "0d4571",
+            [
+                vec![Keyed(2, 0)],
+                vec![],
+                vec![Keyed(2, 1)],
+                vec![ForgetKeyed(2)],
+            ],
+            [HOUR, 0, 0, 0],
+        ),
+        (
+            "e424a4",
+            [
+                vec![Turn(2), EssenceEdit(3)],
+                vec![
+                    TaskReady,
+                    Remember(165),
+                    AckAll,
+                    Remember(31),
+                    Remember(233),
+                ],
+                vec![ForgetKeyed(1), Turn(0), ForgetKeyed(0), EssenceResolve],
+                vec![EssenceEdit(0), Post(1), ForgetKeyed(1)],
+            ],
+            [1, 1, 0, 1],
+        ),
+        (
+            "91d13c",
+            [
+                vec![Keyed(2, 0)],
+                vec![],
+                vec![Keyed(2, 0)],
+                vec![Keyed(2, 1), ForgetKeyed(2)],
+            ],
+            [-HOUR, 0, 0, 0],
+        ),
+        (
+            "8be26e",
+            [vec![Turn(0), ThreadForget], vec![], vec![], vec![Turn(0)]],
+            [0, 0, 0, 0],
+        ),
+        (
+            "6e5fb2",
+            [
+                vec![Turn(1), ThreadForget],
+                vec![Turn(1)],
+                vec![],
+                vec![Turn(1)],
+            ],
+            [0, 0, 0, 0],
+        ),
+        (
+            "bd1071",
+            [
+                vec![],
+                vec![
+                    ThreadForget,
+                    Forget(178),
+                    ForgetKeyed(1),
+                    EssenceResolve,
+                    TaskAdd(2),
+                ],
+                vec![
+                    ForgetKeyed(2),
+                    Turn(3),
+                    EssenceResolve,
+                    Turn(3),
+                    ThreadForget,
+                ],
+                vec![EssenceEdit(0), Remember(243), Turn(0)],
+            ],
+            [1, 1, -HOUR, 0],
+        ),
+        (
+            "c0ae0d",
+            [vec![], vec![Edit(4, 1)], vec![], vec![Edit(184, 0)]],
+            [0, 0, 0, 0],
+        ),
+    ];
+    for (seed, [a, b, c, d], clocks) in cases {
+        a_copy_of_a_copy([&a, &b, &c, &d], clocks).unwrap_or_else(|e| panic!("{seed}: {e}"));
     }
 }
