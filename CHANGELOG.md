@@ -66,7 +66,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
   copy merges); the output follows compaction (the first input's secret,
   salt and KDF settings, a new data key, the engine's own cache entries
   only, one snapshot), written to a temp file and linked into place only
-  if the name is free. The rules are a pure function of the two inputs and
+  if the name is free; on a filesystem without hard links (exFAT, FAT32,
+  some FUSE mounts) it's copied into a file created only if the name is
+  free, and a failed copy leaves nothing (REV-017.1 (C), v0210-3b). The
+  records move through the rules by value, each input keeping its own copy
+  only of the records a later pass compares with, and an unchanged record
+  is recognised field by field rather than hashed (REV-017.2, v0210-3b);
+  `examples/merge_bench.rs` builds two diverged copies to time it. The rules are a pure function of the two inputs and
   a fixed `now`: deletes first, by id, with no clock (a tombstone, or an
   older build's deleted row); one number per record (the larger of
   `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the

@@ -547,6 +547,94 @@ fn the_inputs_bytes_are_unchanged() {
     assert!(before == after, "a merge writes nothing to its inputs");
 }
 
+/// The names in the pair's directory, sorted.
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+/// REV-017.1 (C): on a filesystem without hard links (exFAT, FAT32, some
+/// FUSE mounts) the output is a copy, made only if nothing has its name;
+/// a file that appears there first is left alone, and a failed copy leaves
+/// nothing.
+#[test]
+fn without_hard_links_the_output_is_a_copy_that_never_overwrites() {
+    let p = pair();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    a.remember(Memory::new("in a", MemoryType::Semantic, v(2.0)))
+        .unwrap();
+    b.delete(&p.base_fact).unwrap();
+    a.close().unwrap();
+    b.close().unwrap();
+    let now = wall_ms();
+    let dir = p.a.parent().unwrap().to_path_buf();
+    let linked = p.out("linked.mnemo");
+    let r_linked = merge(&p.a, &p.b, &linked, now);
+
+    Mnemo::__merge_without_hard_links_for_testing("no-links");
+    let copied = p.out("copied.mnemo");
+    assert_eq!(merge(&p.a, &p.b, &copied, now), r_linked);
+    assert_same_records(
+        &linked,
+        &copied,
+        "a copied output holds what a linked one does",
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&copied).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode & 0o077, 0, "owner-only, as the temp file is: {mode:o}");
+    }
+
+    Mnemo::__merge_without_hard_links_for_testing("taken");
+    let taken = p.out("taken.mnemo");
+    let e = Mnemo::merge_files(
+        &p.a,
+        MergeSecret::Passphrase(PW),
+        &p.b,
+        MergeSecret::Passphrase(PW),
+        &taken,
+        &MergeOptions::at(now),
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("already exists"), "{e}");
+    assert_eq!(
+        std::fs::read(&taken).unwrap(),
+        b"a file that appeared meanwhile",
+        "the file that appeared is left as it was"
+    );
+
+    Mnemo::__merge_without_hard_links_for_testing("copy-fails");
+    let failed = p.out("failed.mnemo");
+    let e = Mnemo::merge_files(
+        &p.a,
+        MergeSecret::Passphrase(PW),
+        &p.b,
+        MergeSecret::Passphrase(PW),
+        &failed,
+        &MergeOptions::at(now),
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("the copy failed"), "{e}");
+    assert!(!failed.exists(), "a failed copy leaves nothing");
+    // No temp file is left behind either.
+    assert_eq!(
+        names_in(&dir),
+        [
+            "a.mnemo",
+            "b.mnemo",
+            "base.mnemo",
+            "copied.mnemo",
+            "linked.mnemo",
+            "taken.mnemo"
+        ]
+    );
+}
+
 #[test]
 fn a_rekeyed_copy_merges_with_its_own_secret_and_the_output_takes_the_first() {
     let p = pair();
