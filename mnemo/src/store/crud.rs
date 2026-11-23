@@ -514,6 +514,17 @@ impl Mnemo {
                 if let Some(owner) = slot.scope_owner {
                     md.insert(MNEMO_META_TOMBSTONE_OWNER.into(), Value::String(owner));
                 }
+                // What it was written over, so a merge keeps the key's
+                // written history (decision.v0210-chain-rule).
+                let over = match o.metadata.get(crate::memory::MNEMO_META_MERGE_LINKED) {
+                    Some(v) => v.clone(),
+                    None => o
+                        .metadata
+                        .get(crate::memory::MNEMO_META_SUPERSEDES)
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                };
+                md.insert(crate::memory::MNEMO_META_TOMBSTONE_SUPERSEDES.into(), over);
             }
             // RB-019.2: a turn's thread and turn id (ids, never content).
             if meta_str(o, MNEMO_META_KIND) == Some(MNEMO_META_KIND_TURN) {

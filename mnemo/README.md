@@ -667,6 +667,53 @@ compaction closes the old file before the rename, and the identity check
 before each commit is what catches a write that would land in the replaced
 file.
 
+**Merging two copies** (v0.21.0, 13.7). `Mnemo::merge_files(a, a_secret,
+b, b_secret, out, &opts)` combines two copies of one brain that diverged (a
+laptop and a desktop, say) into a new file at `out`. It never changes its
+inputs: each is opened read-only, with its own secret, so a copy rekeyed
+since still merges. Two files are one brain when their salts match or their
+manifests have the same id. The output takes the first input's secret, salt
+and KDF settings, with a new data key, like a compaction.
+
+- A delete in either copy wins, by id, with no clock: the record is gone
+  from the output, unless that copy wrote the id again afterwards. A delete
+  made by an older build (a deleted row and no tombstone) counts too; one
+  made before the copy was last compacted by an older build doesn't.
+- A record edited in one copy only takes that edit. Edited in both, the
+  newer edit wins, and a fact keeps the other text as a conflict copy
+  (`_mnemo.merge_conflict`, `_mnemo.merge_source`). Each in-place rewrite
+  lists the versions before it (`_mnemo.hlc_prev`, the 8 latest), which is
+  how a merge tells one from the other. Past 8 versions a merge can't
+  tell, and keeps a conflict copy rather than lose one.
+- A record a merge combines lists the concurrent versions it holds
+  (`_mnemo.merge_heads`). An essence item, task or finding is flagged while
+  two of them hold different text, and a conflict copy stays while its
+  text is one of them: edit the record (from the merged file) and the
+  next merge drops the flag or the copy. So copies merge to the same
+  records in any order, a copy of a copy too.
+- A key written in both copies becomes one chain, both versions in
+  history, ordered by when each was first written (`_mnemo.first_hlc`).
+  When the versions nothing written follows hold different text, each but
+  the last is flagged. The
+  chain comes from what was written, never from links an earlier merge
+  made, so copies merge to the same chain in any order: each version keeps
+  the link its write made, a link the merge makes is marked
+  (`_mnemo.merge_linked`, with the version it was written over), and a
+  deleted version's tombstone keeps what it was written over
+  (`_mnemo.tombstone_supersedes`). Forgetting a key's live version ends
+  its chain, and a merge keeps it ended unless a version written after it
+  is kept. Essence items, tasks
+  and findings merge their status (`done`, `verified` and `resolved` are
+  final); two tasks or findings under one name keep both, the later
+  renamed `<name>-merge-2` and flagged until it can take its name back.
+- Forgetting a thread takes every copy of its turns saved before the
+  forget, in either copy; a turn saved again after it, in a copy that had
+  the forget, stays.
+
+`MergeReport` says what came from each side, what conflicted, what was
+deleted, and how far each copy's clock ran ahead. The inputs are held for
+readers for the whole merge, so merge copies, not a brain in use.
+
 **Shared mode** (v0.14, 12.4): `Mnemo::open_shared` returns a
 `SharedMnemo`, which takes the lock for each call (`read` under the shared
 lock, `write` under the exclusive one, committing before it returns) and

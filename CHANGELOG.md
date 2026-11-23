@@ -44,8 +44,73 @@ Pre-1.0, the minor component carries the breaking-change signal.
   hold a handle's clock for tests (`__set_hlc_offset_for_testing`,
   `__freeze_hlc_clock_for_testing`, `MNEMO_DEV_HLC_OFFSET_MS`; RB-019.8).
 
+- **`Mnemo::merge_files`: merge two diverged copies of one brain into a
+  new file** (v0210-2, spec.v0210 step 2, 13.7; the library: the CLI
+  command is the next step). The inputs are opened read-only with a secret
+  each (one brain: the same salt, or the same manifest id, so a rekeyed
+  copy merges); the output follows compaction (the first input's secret,
+  salt and KDF settings, a new data key, the engine's own cache entries
+  only, one snapshot), written to a temp file and linked into place only
+  if the name is free. The rules are a pure function of the two inputs and
+  a fixed `now`: deletes first, by id, with no clock (a tombstone, or an
+  older build's deleted row); one number per record (the larger of
+  `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
+  other wins (decision.v0210-ancestry); concurrent edits of a fact keep
+  the newer and a conflict copy of each other text; a key slot becomes one
+  chain computed from what was written, never from links a merge made
+  (decision.v0210-chain-rule): the versions by the stamp each was first
+  written with, each keeping the link its write made (to the version
+  before it, or to a deleted one between them); a chain that ended at a
+  forgotten version stays ended unless a version written after it is
+  kept; elsewhere the merge links the two and marks the later with what
+  it was written over (`_mnemo.merge_linked`), and a deleted version's
+  tombstone keeps what it was written over (`_mnemo.tombstone_supersedes`);
+  a key's conflict flags come from what was written too (REV-017.1):
+  when the versions nothing written follows hold different text, each of
+  them but the chain's last is flagged, and no other version of the key
+  is; essence items, tasks, findings and messages merge their status
+  and history; two tasks or findings under one name keep both, the later
+  renamed `<name>-merge-2` and flagged while the rename stands; a
+  thread's forget takes every copy of its turns saved before it, in any
+  input, and a turn saved again after it stays; claims and presence come
+  from the first input. A version a
+  merge makes lists the concurrent versions it combines
+  (`_mnemo.merge_heads`, each `[stamp, version, text hash]`), and conflict
+  flags and copies follow them (decision.v0210-conflict-flags): an essence
+  item, task or finding is flagged while two of them hold different text,
+  and a conflict copy goes once the record is edited from the version it
+  holds, so a copy of a copy merges like any other. `merge(a,b)` and
+  `merge(b,a)` give the same records, merging an output again with an
+  input changes nothing, and three copies, or four with one copied from
+  another, merge to the same records in any grouping (property tests, with
+  clocks ahead, behind and in the same millisecond). Ancestry reaches back
+  8 versions: past that, a merge keeps an extra conflict copy or flag,
+  never loses a version. `MergeReport` gives what
+  came from each side, conflicts by kind, removals, keys deleted on one
+  side and written on the other, renamed tasks and findings, `after`
+  cycles, and each input's clock lead. Refused, with the reason: not one
+  brain, different embedders, dimensions or float-vector settings, an
+  input older than format 9 or needing a read-write open, an output that
+  exists or is an input. Fixtures written by the published v0.20.2 are in
+  `tests/fixtures/v0_20_2/`.
+
 ### Changed
 
+- **Each stamped write names its version, and an in-place rewrite lists
+  the ones before it** (v0210-2, decision.v0210-ancestry): `_mnemo.ver`
+  (a hash of the version) and `_mnemo.hlc_prev` (the 8 latest earlier
+  versions, each `[stamp, version]`), so a merge can tell an edit made in
+  one copy from edits made in both. 20 bytes on every stamped record, and
+  up to 169 more on one rewritten in place eight times or more (measured
+  with the engine's MessagePack encoder). A new write of a record leaves
+  out the `_mnemo.merge_heads` a merge put on it. A version is the hash
+  of what is stored, its author included; a merge names each output
+  version from what it holds once the chains are relinked. A stamp is
+  never before the write's own `_mnemo.updated_at`, so a later version's
+  number is always the larger. A new record keeps the stamp it was first
+  written with (`_mnemo.first_hlc`, 26 bytes), which nothing changes after,
+  and a merge orders a key's versions by it however often they were
+  rewritten. No format change.
 - **A delete no longer frees all of its record's space** (v0210-1). Each
   tombstone costs about as much file as a small fact: measured on a
   384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone
@@ -66,6 +131,13 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **`history_in` stops at a version with no row** (v0210-2): a key whose
+  middle version was deleted and then compacted away made it fail
+  ("superseded chain references missing id"); it now stops there, as at a
+  deleted row.
+- **A compaction, re-embed or export whose temp file fails as it's
+  created removes it** (v0210-2): a write error while creating the temp
+  file left it beside the brain until the next compaction.
 - **Snapshot retention's pin cap counts every page a commit frees**
   (v0210-1). The check left out the old free-list run and a rewritten
   key-slot run, so the retained snapshots could pin a page more than the

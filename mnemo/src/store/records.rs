@@ -1641,19 +1641,10 @@ impl Mnemo {
         if m.id == Ulid::nil() {
             m.id = Ulid::new();
         }
-        if stamp {
-            let prev = m
-                .metadata
-                .get(MNEMO_META_HLC)
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let hlc = self.next_hlc(prev);
-            m.metadata
-                .insert(MNEMO_META_HLC.to_string(), Value::from(hlc));
-        }
         let id_u: u128 = m.id.0;
         // 13a: a new record (an id the catalog doesn't hold live) carries
-        // its handle's author; an overwrite in place keeps its own.
+        // its handle's author; an overwrite in place keeps its own. Before the
+        // version's hash, so `_mnemo.ver` is the hash of what is stored.
         if let Some(a) = &self.author {
             let live = self
                 .index
@@ -1664,6 +1655,53 @@ impl Mnemo {
                     .entry(MNEMO_META_AUTHOR.to_string())
                     .or_insert_with(|| Value::String(a.clone()));
             }
+        }
+        if stamp {
+            let prev = m
+                .metadata
+                .get(MNEMO_META_HLC)
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            // Never before the write's own `_mnemo.updated_at`, so a
+            // record's number (the larger of the two) is its stamp and a
+            // later version's is always larger. The wall clock gives that
+            // already; a test's frozen clock might not.
+            let updated_ms = m
+                .metadata
+                .get(crate::memory::MNEMO_META_UPDATED_AT)
+                .and_then(Value::as_i64)
+                .map_or(0, |s| s.max(0) as u64 * 1000);
+            let hlc = self.next_hlc(prev.max(updated_ms.saturating_sub(1)));
+            m.metadata
+                .insert(MNEMO_META_HLC.to_string(), Value::from(hlc));
+            // decision.v0210-ancestry: an in-place rewrite (the record
+            // carries the version it was read as) keeps that version among
+            // the ones before, so a merge can tell this one descends from
+            // it; then this version's own hash.
+            let old_ver = m.metadata.get(MNEMO_META_VER).and_then(Value::as_u64);
+            if let (true, Some(v)) = (prev > 0, old_ver) {
+                let mut before = hlc_prev(&m);
+                before.insert((prev, v));
+                set_hlc_prev(&mut m, before);
+            }
+            // A new write is one version, not the merge's combination.
+            m.metadata.remove(crate::memory::MNEMO_META_MERGE_HEADS);
+            // A new record's links are its own write's
+            // (decision.v0210-chain-rule). A rewrite in place keeps the mark,
+            // since the link it marks is unchanged.
+            let live = self
+                .index
+                .get(id_u, &self.catalog)
+                .is_some_and(|i| !self.catalog[i].deleted);
+            if !live {
+                m.metadata.remove(crate::memory::MNEMO_META_MERGE_LINKED);
+                m.metadata
+                    .entry(crate::memory::MNEMO_META_FIRST_HLC.to_string())
+                    .or_insert_with(|| Value::from(hlc));
+            }
+            let ver = version_hash(&m);
+            m.metadata
+                .insert(MNEMO_META_VER.to_string(), Value::from(ver));
         }
         // R-004.2: an overwrite with the handle caches built reads the
         // stored version first (one decrypt), so the caches drop exactly
@@ -1886,6 +1924,62 @@ fn decode_into_column(
     }
     Ok(())
 }
+
+/// v0.21.0 (decision.v0210-ancestry): a record's earlier versions, as
+/// `(stamp, version)`.
+pub(super) fn hlc_prev(m: &Memory) -> std::collections::BTreeSet<(u64, u64)> {
+    m.metadata
+        .get(MNEMO_META_HLC_PREV)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|p| {
+                    let p = p.as_array()?;
+                    Some((p.first()?.as_u64()?, p.get(1)?.as_u64()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Keep the [`HLC_PREV_KEEP`] largest of `before` as `_mnemo.hlc_prev`
+/// (none: the key goes).
+pub(super) fn set_hlc_prev(m: &mut Memory, before: std::collections::BTreeSet<(u64, u64)>) {
+    let keep: Vec<Value> = before
+        .into_iter()
+        .rev()
+        .take(HLC_PREV_KEEP)
+        .map(|(s, v)| Value::Array(vec![Value::from(s), Value::from(v)]))
+        .collect();
+    if keep.is_empty() {
+        m.metadata.remove(MNEMO_META_HLC_PREV);
+    } else {
+        m.metadata
+            .insert(MNEMO_META_HLC_PREV.to_string(), Value::Array(keep));
+    }
+}
+
+/// A version's hash: the record as written (its stamp included), less its
+/// list of earlier versions, its own hash and its access stats, with the
+/// vector after fp16 rounding. 62 bits: it stays an exact JSON integer, and
+/// bit 62 is left for a merge's own versions ([`VER_MERGED`]).
+pub(super) fn version_hash(m: &Memory) -> u64 {
+    use sha2::{Digest, Sha256};
+    let mut c = m.clone();
+    c.metadata.remove(MNEMO_META_HLC_PREV);
+    c.metadata.remove(MNEMO_META_VER);
+    c.vector = crate::veccol::dequantize(&crate::veccol::quantize(&c.vector).0);
+    c.accessed_at = 0;
+    c.access_count = 0;
+    let bytes = rmp_serde::to_vec(&c).unwrap_or_default();
+    let d = Sha256::digest(&bytes);
+    u64::from_be_bytes(d[..8].try_into().expect("8 bytes")) >> 2
+}
+
+/// v0.21.0: set on the hash of a version a merge made (neither input's).
+/// A merge never lists such a version as an earlier one, so the lists name
+/// only real writes, whatever order copies are merged in.
+pub(super) const VER_MERGED: u64 = 1 << 62;
 
 /// v0.21.0 (13.7): the notice for a stamp `lead_ms` ahead of the clock.
 fn clock_ahead_notice(lead_ms: u64) -> String {

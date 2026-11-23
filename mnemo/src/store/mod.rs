@@ -59,9 +59,10 @@ pub(crate) use crate::memory::{
     MNEMO_META_HOPS, MNEMO_META_TO,
 };
 pub(crate) use crate::memory::{
-    is_tombstone, HLC_AHEAD_NOTICE_MS, MNEMO_META_DELETED_AT, MNEMO_META_HLC, MNEMO_META_HLC_SINCE,
-    MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY, MNEMO_META_TOMBSTONE_OF,
-    MNEMO_META_TOMBSTONE_OWNER, MNEMO_META_TOMBSTONE_THREAD, MNEMO_META_TOMBSTONE_TURN,
+    is_tombstone, HLC_AHEAD_NOTICE_MS, HLC_PREV_KEEP, MNEMO_META_DELETED_AT, MNEMO_META_HLC,
+    MNEMO_META_HLC_PREV, MNEMO_META_HLC_SINCE, MNEMO_META_KIND_TOMBSTONE, MNEMO_META_TOMBSTONE_KEY,
+    MNEMO_META_TOMBSTONE_OF, MNEMO_META_TOMBSTONE_OWNER, MNEMO_META_TOMBSTONE_THREAD,
+    MNEMO_META_TOMBSTONE_TURN, MNEMO_META_VER,
 };
 use crate::pager::{LockedFile, Pager};
 use crate::result_cache::{
@@ -97,6 +98,7 @@ mod hooks;
 mod keyed;
 mod load;
 mod maintenance;
+mod merge;
 mod open;
 mod recall;
 mod records;
@@ -993,6 +995,151 @@ pub struct CompactReport {
     /// content and recall behaviour are the same as before.
     pub zero_vector_memories: usize,
 }
+
+/// v0.21.0 (13.7): the secret for one input of [`Mnemo::merge_files`].
+/// The output takes the first input's.
+#[derive(Clone, Copy, Debug)]
+pub enum MergeSecret<'a> {
+    /// A passphrase.
+    Passphrase(&'a str),
+    /// A raw 256-bit key.
+    Key(&'a [u8; crypto::KEY_LEN]),
+}
+
+impl MergeSecret<'_> {
+    pub(crate) fn bytes(&self) -> &[u8] {
+        match self {
+            MergeSecret::Passphrase(p) => p.as_bytes(),
+            MergeSecret::Key(k) => &k[..],
+        }
+    }
+
+    pub(crate) fn kind(&self) -> SecretKind {
+        match self {
+            MergeSecret::Passphrase(_) => SecretKind::Passphrase,
+            MergeSecret::Key(_) => SecretKind::Key,
+        }
+    }
+}
+
+/// v0.21.0 (13.7): options for [`Mnemo::merge_files`].
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub struct MergeOptions {
+    /// The time the merge takes as now, in unix milliseconds (`None`: the
+    /// clock, read once). It decides only what compaction would drop
+    /// (expired records, old acked messages) and the report's clock lead,
+    /// so a merge with a fixed `now_ms` is a pure function of its inputs.
+    pub now_ms: Option<u64>,
+}
+
+impl MergeOptions {
+    /// Options with `now_ms` fixed.
+    pub fn at(now_ms: u64) -> Self {
+        MergeOptions {
+            now_ms: Some(now_ms),
+        }
+    }
+}
+
+/// v0.21.0 (13.7): one of the two inputs of a merge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MergeSide {
+    /// The first input.
+    A,
+    /// The second input.
+    B,
+}
+
+impl MergeSide {
+    /// The other input.
+    pub fn other(self) -> MergeSide {
+        match self {
+            MergeSide::A => MergeSide::B,
+            MergeSide::B => MergeSide::A,
+        }
+    }
+
+    /// `"a"` or `"b"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MergeSide::A => "a",
+            MergeSide::B => "b",
+        }
+    }
+}
+
+/// v0.21.0 (13.7): a key deleted in one input whose versions the other
+/// input wrote without seeing the delete: those versions are kept.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MergeKeptKey {
+    /// The key.
+    pub key: String,
+    /// The agent whose private slot it is (`None`: the shared slot).
+    pub owner: Option<String>,
+    /// The input that deleted a version of it.
+    pub deleted_in: MergeSide,
+    /// The other input's versions the merge kept.
+    pub kept: Vec<Ulid>,
+}
+
+/// v0.21.0 (13.7): a task or finding the merge gave a new name, because
+/// both inputs had a different record under its name.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MergeRename {
+    /// `"task"` or `"finding"`.
+    pub kind: String,
+    /// The name both inputs used.
+    pub from: String,
+    /// The name it has now (`<name>-merge-2`, ...).
+    pub to: String,
+    /// The record renamed.
+    pub id: Ulid,
+}
+
+/// v0.21.0 (13.7): what [`Mnemo::merge_files`] did. With the inputs the
+/// other way round, the report is this one mirrored (a and b swapped).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MergeReport {
+    /// Records written to the output, not counting claims and presence
+    /// (which come from the first input only).
+    pub merged: usize,
+    /// Records the output holds from the first input only (by id; conflict
+    /// copies, claims and presence aren't counted).
+    pub a_only: Vec<Ulid>,
+    /// The same, from the second input only.
+    pub b_only: Vec<Ulid>,
+    /// Records both inputs held.
+    pub both: usize,
+    /// Conflicts, by kind: `fact` (a conflict copy), `key` (a key both
+    /// inputs wrote), `essence`, `task`, `finding`.
+    pub conflicts: std::collections::BTreeMap<String, usize>,
+    /// The records stamped `_mnemo.merge_conflict`, conflict copies
+    /// included.
+    pub conflict_ids: Vec<Ulid>,
+    /// Records removed because one input deleted them (a tombstone or a
+    /// deleted row), and the conflict copies made of them.
+    pub removed: Vec<Ulid>,
+    /// Records left out as compaction leaves them out: expired, and
+    /// messages acked more than 30 days ago.
+    pub dropped: usize,
+    /// Keys deleted in one input and written in the other.
+    pub kept_keys: Vec<MergeKeptKey>,
+    /// Tasks and findings renamed.
+    pub renamed: Vec<MergeRename>,
+    /// Task `after` cycles in the output, each as its task names.
+    pub after_cycles: Vec<Vec<String>>,
+    /// How far each input's largest stamp runs ahead of the merge's clock,
+    /// in ms (negative: behind). Past an hour it's worth a warning.
+    pub lead_ms: [i64; 2],
+    /// Each input's `_mnemo.hlc_since`: deletes made before it, or by an
+    /// older build, aren't known to a merge.
+    pub hlc_since: [Option<u64>; 2],
+}
+
+/// v0.21.0 (13.7): an input's lead past which the merge's report warns.
+pub const MERGE_LEAD_WARN_MS: i64 = 3_600_000;
 
 /// What [`Mnemo::reembed_file`] did (12.3 step 4, v0.15).
 #[derive(Clone, Debug, PartialEq, Eq)]

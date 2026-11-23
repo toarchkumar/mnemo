@@ -17,6 +17,49 @@ impl Mnemo {
         self.put_coordination(kind, content.to_string(), metadata)
     }
 
+    /// **Not a stable API.** v0.21.0 (13.7): the merge's rules alone, on two
+    /// inputs' live records and deleted-row ids, at `now_ms`: what
+    /// [`Mnemo::merge_files`] writes, and its report.
+    #[doc(hidden)]
+    pub fn __merge_records_for_testing(
+        a: Vec<Memory>,
+        a_deleted: Vec<Ulid>,
+        b: Vec<Memory>,
+        b_deleted: Vec<Ulid>,
+        now_ms: u64,
+    ) -> (Vec<Memory>, MergeReport) {
+        super::merge::merge_core(
+            super::merge::MergeInput {
+                records: a,
+                deleted: a_deleted,
+            },
+            super::merge::MergeInput {
+                records: b,
+                deleted: b_deleted,
+            },
+            now_ms,
+        )
+    }
+
+    /// **Not a stable API.** v0.21.0 (13.7): what a merge reads from this
+    /// handle: its live records and the ids of its deleted rows.
+    #[doc(hidden)]
+    pub fn __merge_input_for_testing(&mut self) -> Result<(Vec<Memory>, Vec<Ulid>)> {
+        let i = self.merge_input()?;
+        Ok((i.records, i.deleted))
+    }
+
+    /// **Not a stable API.** v0.21.0 (13.7): the wrapped data key in the
+    /// header of the file at `path`, read without a key, so a test can see
+    /// that a merge's output has a key of its own.
+    #[doc(hidden)]
+    pub fn __wrapped_key_for_testing(path: impl AsRef<Path>) -> Result<Vec<u8>> {
+        let mut file = File::open(path.as_ref())?;
+        let mut page = [0u8; PAGE_SIZE];
+        file.read_exact(&mut page)?;
+        Ok(Header::from_page(&page)?.wrapped_dek.to_vec())
+    }
+
     /// **Not a stable API.** v0.21.0 (RB-019.8): move this handle's clock
     /// for stamps by `ms` (negative: behind), so a test can run one copy
     /// ahead of another. `MNEMO_DEV_HLC_OFFSET_MS` adds to it.

@@ -1,0 +1,31 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9072db1bae41893824afcc3131d343f52c84fdc3dc63c4414b65009666955cd7 # shrinks to ops_a = [], ops_b = [EssenceEdit(2)], ops_c = [EssenceEdit(2), EssenceResolve], ca = 0, cb = 0, cc = 0
+cc 0815b793f62bac8ab74d81993d7b36b29d79337dc447b51403bbdc7f2ed20103 # shrinks to ops_a = [Edit(190, 0)], ops_b = [Edit(130, 0)], ops_c = [Edit(64, 1)], ca = 1, cb = -3600000, cc = 0
+cc 083bdc4a26bf594a8f4dab22bf1f0a3db6bb34e584264360cbd7fb6529e5bbab # shrinks to ops_a = [EssenceEdit(0)], ops_b = [EssenceEdit(2)], ops_c = [EssenceResolve, EssenceEdit(2)], ca = 0, cb = 0, cc = 0
+cc d05bcbca4a9ada4b478322851baec5fec2c8143022c224de8659404d6c072c46 # shrinks to ops_a = [TaskTake], ops_b = [], ops_c = [TaskTake, TaskReady], ca = 0, cb = 0, cc = 0
+cc 0344e87fc26a986936615846333930031c713fb7672c32861acb5c4b6452d66c # shrinks to ops_a = [EssenceEdit(0)], ops_b = [EssenceEdit(1)], ops_c = [EssenceEdit(0)], ca = 0, cb = 0, cc = 3600000
+cc da61a64fe095217b2fcc1cdb16f26908622d3c9c598ace645e4e51ad09137e00 # shrinks to ops_a = [Keyed(2, 0)], ops_b = [Keyed(2, 0)], ops_c = [], ops_d = [ForgetKeyed(2)], ca = 0, cb = 0, cc = 0, cd = 0
+cc a1a4b5f54543fa731ace56971799cad8c9f62eb342831e186a5e84ebff9889de # shrinks to ops_a = [TaskTake, TaskReady], ops_b = [TaskTake], ops_c = [], ops_d = [], ca = 0, cb = 0, cc = 0, cd = 0
+cc a7085628296c4fe8b125a52dd11bb2650dd5113bdd2558489411e308d339c78d # shrinks to ops_a = [Keyed(0, 0)], ops_b = [Keyed(0, 0)], ops_c = [], ops_d = [ForgetKeyed(0)], ca = -3600000, cb = 0, cc = 0, cd = 0
+cc 3ec93e623eebacf17600cd6964da93862a1eb8a85db4602b8a3b209802706731 # shrinks to ops_a = [Keyed(0, 0)], ops_b = [Keyed(0, 0)], ops_c = [], ca = 0, cb = 0, cc = 0
+cc 2217d7635563d98e3ec296dacb9d85287835cba901195c69513df26b98468e30 # shrinks to ops_a = [TaskTake, TaskReady], ops_b = [TaskTake], ca = 3600000, cb = 3600000
+cc 2ab898ff3daba111d40483ce31ca26baec0db353b3a65163eeb9a32150c1ca7b # shrinks to ops_a = [], ops_b = [Keyed(0, 0)], ops_c = [Keyed(0, 0)], ops_d = [Keyed(0, 0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc a3c0f9238a7f87ec6008ec510fe5f7c9f47ff35148429f44596876576493461c # shrinks to ops_a = [Keyed(0, 0), ForgetKeyed(0)], ops_b = [], ca = 0, cb = 0
+cc ed02c21878efad67b6b03186e0ad0c7bfd61a2f20f9cf7966cbd109ea1bf8400 # shrinks to ops_a = [Keyed(0, 0), ForgetKeyed(0), Keyed(0, 0)], ops_b = [], ca = 0, cb = 0
+cc 32adae72e830a402915a22c55abaec7c544b850fdf2698c75c65501e7e02d972 # shrinks to ops_a = [ForgetKeyed(0)], ops_b = [Keyed(0, 0), ForgetKeyed(0)], ops_c = [Keyed(0, 0)], ca = 0, cb = 0, cc = 0
+cc e61eac0bb1fec21b114b1ff604e4459a4b2d03894c8e183656232395a41c5f52 # shrinks to ops_a = [Keyed(1, 0)], ops_b = [], ops_c = [Keyed(1, 0)], ops_d = [Keyed(1, 1)], ca = 0, cb = 0, cc = 0, cd = 0
+cc 0d4571f73f6e04d6bfcdc4b4d1d7e98c43fa310d856a3adaba6cd165642f1ec2 # shrinks to ops_a = [Keyed(2, 0)], ops_b = [], ops_c = [Keyed(2, 1)], ops_d = [ForgetKeyed(2)], ca = 3600000, cb = 0, cc = 0, cd = 0
+cc e424a422491e4e1563c31eab604ad36f50c1447b709e50d99d52ff6d6feedb22 # shrinks to ops_a = [Turn(2), EssenceEdit(3)], ops_b = [TaskReady, Remember(165), AckAll, Remember(31), Remember(233)], ops_c = [ForgetKeyed(1), Turn(0), ForgetKeyed(0), EssenceResolve], ops_d = [EssenceEdit(0), Post(1), ForgetKeyed(1)], ca = 1, cb = 1, cc = 0, cd = 1
+cc f787fd6b69b23c6cd90261abd2aab5daf54e3623835dd37d4f695a8a75ae53a9 # shrinks to ops_a = [ThreadForget, AckAll, EssenceEdit(3), TaskReady, Post(2)], ops_b = [EssenceResolve, Post(0), TaskReady, Forget(252)], ops_c = [EssenceEdit(3), Remember(175)], ca = 3600000, cb = 3600000, cc = 3600000
+cc 364a48e54aa32d8571bafe6d125724502dc5d61a59d9620f0e992f5d966ae22b # shrinks to ops_a = [Keyed(1, 0), ForgetKeyed(0)], ops_b = [Keyed(0, 0), Keyed(1, 0), ForgetKeyed(1)], ca = 0, cb = 0
+cc 91d13c7c30471a706f49bf61aee2d43eb49c10deaa21dbeea178d25ddcaa1068 # shrinks to ops_a = [Keyed(2, 0)], ops_b = [], ops_c = [Keyed(2, 0)], ops_d = [Keyed(2, 1), ForgetKeyed(2)], ca = -3600000, cb = 0, cc = 0, cd = 0
+cc 8be26ef29a9988da4926d8b5f8039dd53ffa0147193ad94305e5db90d463ca26 # shrinks to ops_a = [Turn(0), ThreadForget], ops_b = [], ops_c = [], ops_d = [Turn(0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc 6e5fb2a2f558f3a737ffd648d8ec1ad2804d686252d007dec74fed2730214810 # shrinks to ops_a = [Turn(1), ThreadForget], ops_b = [Turn(1)], ops_c = [], ops_d = [Turn(1)], ca = 0, cb = 0, cc = 0, cd = 0
+cc bd1071264f0445992169b4595e20207dcaaf7461adb95db37037323aae84a496 # shrinks to ops_a = [], ops_b = [ThreadForget, Forget(178), ForgetKeyed(1), EssenceResolve, TaskAdd(2)], ops_c = [ForgetKeyed(2), Turn(3), EssenceResolve, Turn(3), ThreadForget], ops_d = [EssenceEdit(0), Remember(243), Turn(0)], ca = 1, cb = 1, cc = -3600000, cd = 0
+cc c0ae0d010bd5923f176614d9ab6f550312ddb768c226c83fdeee980ffd2df598 # shrinks to ops_a = [], ops_b = [Edit(4, 1)], ops_c = [], ops_d = [Edit(184, 0)], ca = 0, cb = 0, cc = 0, cd = 0
+cc fd93c00157de7d2f769b431c59743add508cc90730f0d0ef05aeb9c07d71307c # shrinks to ops_a = [Keyed(0, 0)], ops_b = [Keyed(0, 0)], ca = 0, cb = 0
