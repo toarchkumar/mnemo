@@ -390,7 +390,8 @@ pub const MNEMO_META_VER: &str = "_mnemo.ver";
 pub const HLC_PREV_KEEP: usize = 8;
 /// v0.21.0 (13.7): a record a merge found in conflict (`true`): a key both
 /// inputs wrote, an essence item, task or finding whose text and status
-/// both differ, a renamed task or finding, or a conflict copy.
+/// both differ, a task or finding both inputs moved to different statuses,
+/// a renamed task or finding, or a conflict copy.
 pub const MNEMO_META_MERGE_CONFLICT: &str = "_mnemo.merge_conflict";
 /// v0.21.0 (13.7): on a merge's conflict copy, the id of the record whose
 /// other version it holds. A tombstone for that id removes the copy too.
@@ -405,6 +406,12 @@ pub const MNEMO_META_MERGE_NAME: &str = "_mnemo.merge_name";
 /// while two of them hold different text. On a conflict copy, the versions
 /// it holds. A new write of the record leaves it out.
 pub const MNEMO_META_MERGE_HEADS: &str = "_mnemo.merge_heads";
+/// v0.21.0 (decision.v0210-task-status): on a task or finding a merge
+/// flagged because both inputs changed its status since they diverged and
+/// ended on different ones (`true`). The later change's status stands. It
+/// keeps `_mnemo.merge_conflict` set through later merges; a new write of
+/// the record leaves it out.
+pub const MNEMO_META_MERGE_STATUS_CONFLICT: &str = "_mnemo.merge_status_conflict";
 /// v0.21.0 (decision.v0210-chain-rule): on a key's version whose
 /// `_mnemo.supersedes` a merge set, the id it was written over (JSON null
 /// when written over none). A merge orders a key's versions from what was

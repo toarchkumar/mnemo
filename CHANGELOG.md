@@ -90,7 +90,11 @@ Pre-1.0, the minor component carries the breaking-change signal.
   when the versions nothing written follows hold different text, each of
   them but the chain's last is flagged, and no other version of the key
   is; essence items, tasks, findings and messages merge their status
-  and history; two tasks or findings under one name keep both, the later
+  and history (a task's or finding's status is its last change, never a
+  note: an input that changed it since they diverged keeps its own, and
+  when both did, the later change wins and the record is flagged if they
+  ended on different statuses, `_mnemo.merge_status_conflict`;
+  decision.v0210-task-status, v0210-4b); two tasks or findings under one name keep both, the later
   renamed `<name>-merge-2` and flagged while the rename stands; a
   thread's forget takes every copy of its turns saved before it, in any
   input, and a turn saved again after it stays; claims and presence come
@@ -152,6 +156,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
 
 ### Fixed
 
+- **`about` keeps one order for onboarding entries tied on importance and
+  creation time** (v0210-4b): entries written in the same second with the
+  same importance came out in a different order on each open; they now go
+  by id after that.
 - **`history_in` stops at a version with no row** (v0210-2): a key whose
   middle version was deleted and then compacted away made it fail
   ("superseded chain references missing id"); it now stops there, as at a

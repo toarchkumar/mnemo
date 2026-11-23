@@ -44,6 +44,10 @@ enum Op {
     TaskAdd(u8),
     TaskTake,
     TaskReady,
+    /// v0210-4b: a move to blocked, and a note that moves nothing
+    /// (decision.v0210-task-status).
+    TaskBlock,
+    TaskNote(u8),
     Post(u8),
     AckAll,
     Turn(u8),
@@ -62,6 +66,8 @@ fn op() -> impl Strategy<Value = Op> {
         (0u8..3).prop_map(Op::TaskAdd),
         Just(Op::TaskTake),
         Just(Op::TaskReady),
+        Just(Op::TaskBlock),
+        (0u8..4).prop_map(Op::TaskNote),
         (0u8..4).prop_map(Op::Post),
         Just(Op::AckAll),
         (0u8..4).prop_map(Op::Turn),
@@ -234,6 +240,23 @@ fn diverge(p: &Path, ops: &[Op], t: u64, offset: i64, who: &str) -> (Vec<Memory>
                     .collect();
                 match mine.first() {
                     Some(s) => db.task_update(s, Some("ready"), None, None).map(|_| ()),
+                    None => Ok(()),
+                }
+            }
+            Op::TaskBlock | Op::TaskNote(_) => {
+                let mine: Vec<String> = db
+                    .tasks(None, None)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|t| t.status == "active" && t.owner.as_deref() == Some(who))
+                    .map(|t| t.slug)
+                    .collect();
+                let (to, note) = match o {
+                    Op::TaskNote(x) => (None, format!("note {x} from {who}")),
+                    _ => (Some("blocked"), format!("blocked by {who}")),
+                };
+                match mine.first() {
+                    Some(s) => db.task_update(s, to, Some(&note), None).map(|_| ()),
                     None => Ok(()),
                 }
             }
