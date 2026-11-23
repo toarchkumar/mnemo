@@ -360,6 +360,10 @@ pub const MNEMO_META_TOMBSTONE_KEY: &str = "_mnemo.tombstone_key";
 /// v0.21.0: the agent whose private key slot the deleted record was in
 /// (absent for a shared slot, or a record with no key).
 pub const MNEMO_META_TOMBSTONE_OWNER: &str = "_mnemo.tombstone_owner";
+/// v0.21.0 (decision.v0210-chain-rule): what a deleted key's version was
+/// written over (an id, or JSON null), on its tombstone, so a merge keeps
+/// the key's written history once the version is gone.
+pub const MNEMO_META_TOMBSTONE_SUPERSEDES: &str = "_mnemo.tombstone_supersedes";
 /// v0.21.0: when a tombstone's record was deleted, in unix seconds.
 pub const MNEMO_META_DELETED_AT: &str = "_mnemo.deleted_at";
 /// v0.21.0 (RB-019.2): a deleted turn's thread id, on its tombstone, so a
@@ -401,6 +405,18 @@ pub const MNEMO_META_MERGE_NAME: &str = "_mnemo.merge_name";
 /// while two of them hold different text. On a conflict copy, the versions
 /// it holds. A new write of the record leaves it out.
 pub const MNEMO_META_MERGE_HEADS: &str = "_mnemo.merge_heads";
+/// v0.21.0 (decision.v0210-chain-rule): on a key's version whose
+/// `_mnemo.supersedes` a merge set, the id it was written over (JSON null
+/// when written over none). A merge orders a key's versions from what was
+/// written, never from links a merge made, as Git recomputes a merge base
+/// from its commits. A new record leaves it out.
+pub const MNEMO_META_MERGE_LINKED: &str = "_mnemo.merge_linked";
+/// v0.21.0 (REV-017.1): the clock stamp a record was first written with.
+/// `put` sets it once, on a new record, and nothing changes it after, so a
+/// merge orders a key's versions by it however often they were rewritten.
+/// A record from an older build has none: a merge takes the least of its
+/// `_mnemo.hlc` and its `_mnemo.hlc_prev` stamps.
+pub const MNEMO_META_FIRST_HLC: &str = "_mnemo.first_hlc";
 /// v0.21.0 (13.7): how far past the clock a handle's largest stamp seen
 /// may run before it says so ([`crate::Mnemo::notices`]): one day, in ms.
 pub const HLC_AHEAD_NOTICE_MS: u64 = 86_400_000;

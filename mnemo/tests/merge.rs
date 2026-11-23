@@ -394,6 +394,64 @@ fn done_is_final_and_two_tasks_under_one_slug_are_both_kept() {
 }
 
 #[test]
+fn a_renamed_task_whose_rival_is_forgotten_takes_its_name_back_and_its_flag_goes() {
+    // Two tasks under one slug: the merge renames the later one and flags
+    // it. Then one copy of the output forgets the first, and another edits
+    // the renamed one. The renamed task takes the slug back, and its flag
+    // goes with the rename, so merging the output again changes nothing.
+    let p = pair();
+    let t = wall_ms();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    b.__set_clock_offset_for_testing(60);
+    for db in [&mut a, &mut b] {
+        db.set_author(Some("planner-a".into()));
+        let mut spec = TaskSpec::new("Write the notes");
+        spec.role = Some("worker".into());
+        db.task_add(&spec).unwrap();
+    }
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, _) = p.check_laws(t + 120_000);
+    let ids = |path: &Path| -> Vec<(String, Ulid)> {
+        let mut db = Mnemo::open(path, PW).unwrap();
+        let tasks = db.tasks(None, None).unwrap();
+        tasks.into_iter().map(|t| (t.slug, t.id)).collect()
+    };
+    let before = ids(&out);
+    let first = before
+        .iter()
+        .find(|(s, _)| s == "write-the-notes")
+        .unwrap()
+        .1;
+    let renamed = before
+        .iter()
+        .find(|(s, _)| s == "write-the-notes-merge-2")
+        .unwrap()
+        .1;
+    assert!(flagged(&out, &renamed) && !flagged(&out, &first));
+    let qdir = tempfile::tempdir().unwrap();
+    let q = Pair {
+        a: qdir.path().join("x.mnemo"),
+        b: qdir.path().join("y.mnemo"),
+        _dir: qdir,
+        base_fact: p.base_fact,
+    };
+    copy(&out, &q.a);
+    copy(&out, &q.b);
+    let (mut x, mut y) = (open(&q.a), open(&q.b));
+    x.delete(&first).unwrap();
+    y.set_author(Some("planner-a".into()));
+    y.task_update("write-the-notes-merge-2", None, Some("a note"), None)
+        .unwrap();
+    x.close().unwrap();
+    y.close().unwrap();
+    let (out2, _) = q.check_laws(t + 240_000);
+    let after = ids(&out2);
+    assert_eq!(after, vec![("write-the-notes".to_string(), renamed)]);
+    assert!(!flagged(&out2, &renamed));
+}
+
+#[test]
 fn an_essence_item_resolved_on_one_side_is_resolved() {
     let p = pair();
     let item = {
@@ -1822,4 +1880,405 @@ fn one_text_written_in_two_copies_in_one_millisecond_merges_alike_in_every_group
     // One stamp: which text wins is the tie-break's, the status is final.
     let m = db.get(&item).unwrap();
     assert_eq!(m.metadata["_mnemo.status"], "resolved");
+}
+
+#[test]
+fn a_key_written_alone_in_two_copies_stays_apart_from_a_chain_a_copy_ended() {
+    // a and c each write the key, which had no version; d, copied from a,
+    // writes over a's version and forgets its own. a's chain ends at d's
+    // forgotten version in every grouping, though merging a with c alone
+    // links the two: a later merge reads the links a write made, never the
+    // ones a merge made (decision.v0210-chain-rule).
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let o = |n: &str| dir.path().join(n);
+    let (a, c, d) = (o("a.mnemo"), o("c.mnemo"), o("d.mnemo"));
+    let t = wall_ms();
+    let write = |p: &Path, at: u64, text: &str, x: f32| {
+        let mut db = open(p);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        let (id, _) = db
+            .remember_keyed(Memory::new(text, MemoryType::Semantic, v(x)), "k")
+            .unwrap();
+        db.close().unwrap();
+        id
+    };
+    copy(&base_path, &a);
+    copy(&base_path, &c);
+    let ka = write(&a, t - 3_600_000, "k is 0", 2.0);
+    let kc = write(&c, t, "k is 0", 3.0);
+    copy(&a, &d);
+    let kd = write(&d, t, "k is 1", 4.0);
+    let mut db = open(&d);
+    db.delete(&kd).unwrap();
+    db.close().unwrap();
+    let out = assert_three_groupings(dir.path(), &a, &c, &d, t + 1_000);
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    let first = db.get(&ka).unwrap();
+    assert_eq!(
+        meta(&first, "_mnemo.superseded_by").cloned(),
+        Some(Value::String(kd.to_string()))
+    );
+    let lone = db.get(&kc).unwrap();
+    assert_eq!(meta(&lone, "_mnemo.supersedes"), None);
+    assert_eq!(meta(&lone, "_mnemo.merge_linked"), None);
+}
+
+#[test]
+fn a_link_a_merge_made_is_marked_and_a_tombstone_keeps_what_was_written() {
+    // Both copies write over the key's base version. The merge links the
+    // later after the earlier and marks it with the version it was written
+    // over; forgetting it in the merged file leaves that on its tombstone.
+    let p = pair();
+    let base_k = {
+        let mut a = open(&p.a);
+        let (k, _) = a
+            .remember_keyed(Memory::new("k, base", MemoryType::Semantic, v(1.0)), "k")
+            .unwrap();
+        a.close().unwrap();
+        copy(&p.a, &p.b);
+        k
+    };
+    let t = wall_ms() + 10_000;
+    let mut ids = Vec::new();
+    for (path, at, x) in [(&p.a, t, 2.0), (&p.b, t + 5, 3.0)] {
+        let mut db = open(path);
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        let (id, _) = db
+            .remember_keyed(
+                Memory::new(format!("k is {x}"), MemoryType::Semantic, v(x)),
+                "k",
+            )
+            .unwrap();
+        ids.push(id);
+        db.close().unwrap();
+    }
+    let (out, _) = p.check_laws(t + 1_000);
+    let mut db = open(&out);
+    let later = db.get(&ids[1]).unwrap();
+    let id = |u: Ulid| Some(Value::String(u.to_string()));
+    assert_eq!(meta(&later, "_mnemo.supersedes").cloned(), id(ids[0]));
+    assert_eq!(meta(&later, "_mnemo.merge_linked").cloned(), id(base_k));
+    assert_eq!(meta(&db.get(&ids[0]).unwrap(), "_mnemo.merge_linked"), None);
+    db.delete(&ids[1]).unwrap();
+    db.close().unwrap();
+    let tomb = records(&out)
+        .into_iter()
+        .find(|r| r["metadata"]["_mnemo.tombstone_of"] == ids[1].to_string())
+        .expect("a tombstone");
+    assert_eq!(
+        tomb["metadata"]["_mnemo.tombstone_supersedes"],
+        Value::String(base_k.to_string())
+    );
+}
+
+#[test]
+fn a_turn_saved_again_after_its_thread_was_forgotten_is_kept() {
+    // a saves a turn and forgets the thread; d, copied from a, saves the
+    // turn again; c saves it too, never having seen the forget, before d
+    // or after it (the proptest's seed 6e5fb2a2: before, so c's copy has
+    // the earlier id). The forget takes every copy saved before it: d's
+    // turn stays, c's goes, in every grouping, and merging a with its own
+    // later copy d changes nothing.
+    for c_first in [false, true] {
+        saved_again_case(c_first);
+    }
+}
+
+fn saved_again_case(c_first: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let o = |n: &str| dir.path().join(n);
+    let (a, c, d) = (o("a.mnemo"), o("c.mnemo"), o("d.mnemo"));
+    let save = |p: &Path, text: &str, x: f32| {
+        let mut db = open(p);
+        db.ingest_thread_with_vectors(
+            "t",
+            &[ThreadTurn {
+                turn_id: "u1".into(),
+                role: "user".into(),
+                content: text.into(),
+                timestamp: None,
+            }],
+            &[v(x)],
+        )
+        .unwrap();
+        db.close().unwrap();
+    };
+    copy(&base_path, &a);
+    copy(&base_path, &c);
+    save(&a, "the turn", 2.0);
+    let mut db = open(&a);
+    db.thread_forget("t").unwrap();
+    db.close().unwrap();
+    copy(&a, &d);
+    if c_first {
+        save(&c, "the turn, elsewhere", 4.0);
+    }
+    save(&d, "the turn, again", 3.0);
+    if !c_first {
+        save(&c, "the turn, elsewhere", 4.0);
+    }
+    let now = wall_ms() + 1_000;
+    merge(&a, &d, &o("ad.mnemo"), now);
+    assert_same_records(&o("ad.mnemo"), &d, "merge(a, d)");
+    let out = assert_three_groupings(dir.path(), &a, &c, &d, now);
+    let texts: Vec<String> = records(&out)
+        .into_iter()
+        .filter(|r| r["metadata"]["_mnemo.kind"] == "turn")
+        .map(|r| r["content"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["the turn, again".to_string()],
+        "c first: {c_first}"
+    );
+}
+
+/// Copies of `base` that each write the key once, at their own frozen
+/// clock: (path, the version's id).
+fn keyed_copies(
+    dir: &Path,
+    base_path: &Path,
+    writes: &[(&str, u64, &str, f32)],
+) -> Vec<(PathBuf, Ulid)> {
+    writes
+        .iter()
+        .map(|&(name, at, text, x)| {
+            let p = dir.join(format!("{name}.mnemo"));
+            copy(base_path, &p);
+            let mut db = open(&p);
+            db.__freeze_hlc_clock_for_testing(Some(at));
+            let (id, _) = db
+                .remember_keyed(Memory::new(text, MemoryType::Semantic, v(x)), "k")
+                .unwrap();
+            db.close().unwrap();
+            (p, id)
+        })
+        .collect()
+}
+
+#[test]
+fn key_flags_come_from_what_was_written_two_alike_and_one_not() {
+    // REV-017.1 (A), its first case: a and b write the same text over the
+    // base version, c a different one, later. Every version nothing
+    // follows but the last is flagged, in every grouping.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let mut db = open(&base_path);
+    db.remember_keyed(Memory::new("k, base", MemoryType::Semantic, v(1.5)), "k")
+        .unwrap();
+    db.close().unwrap();
+    let t = wall_ms() + 10_000;
+    let w = keyed_copies(
+        dir.path(),
+        &base_path,
+        &[
+            ("a", t + 10, "X", 2.0),
+            ("b", t + 20, "X", 3.0),
+            ("c", t + 30, "Y", 4.0),
+        ],
+    );
+    let out = assert_three_groupings(dir.path(), &w[0].0, &w[1].0, &w[2].0, t + 1_000);
+    assert!(flagged(&out, &w[0].1));
+    assert!(flagged(&out, &w[1].1));
+    assert!(!flagged(&out, &w[2].1));
+}
+
+#[test]
+fn key_flags_come_from_what_was_written_a_version_written_over_is_not_flagged() {
+    // REV-017.1 (A), its second case: a writes X, c writes Y, and d, copied
+    // from a, writes Z over a's. a's version was written over, so it isn't
+    // flagged in any grouping; c's is, and d's, the last, isn't.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let t = wall_ms() + 10_000;
+    let w = keyed_copies(
+        dir.path(),
+        &base_path,
+        &[("a", t + 10, "X", 2.0), ("c", t + 20, "Y", 3.0)],
+    );
+    let d = dir.path().join("d.mnemo");
+    copy(&w[0].0, &d);
+    let mut db = open(&d);
+    db.__freeze_hlc_clock_for_testing(Some(t + 30));
+    let (kd, _) = db
+        .remember_keyed(Memory::new("Z", MemoryType::Semantic, v(4.0)), "k")
+        .unwrap();
+    db.close().unwrap();
+    let out = assert_three_groupings(dir.path(), &w[0].0, &w[1].0, &d, t + 1_000);
+    assert!(!flagged(&out, &w[0].1));
+    assert!(flagged(&out, &w[1].1));
+    assert!(!flagged(&out, &kd));
+}
+
+#[test]
+fn a_version_rewritten_nine_times_keeps_the_place_it_was_first_written_in() {
+    // REV-017.1 (B): a writes the key, c a version after it, then a
+    // rewrites its version in place nine times, past the eight earlier
+    // stamps a record lists. The merge still orders a's version by the
+    // stamp it was first written with, kept once in `_mnemo.first_hlc`.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let t = wall_ms() + 10_000;
+    let w = keyed_copies(
+        dir.path(),
+        &base_path,
+        &[("a", t, "k is a", 2.0), ("c", t + 5, "k is c", 3.0)],
+    );
+    let mut db = open(&w[0].0);
+    db.__freeze_hlc_clock_for_testing(Some(t + 10));
+    for i in 0..9 {
+        edit(&mut db, &w[0].1, &format!("k is a, take {i}"));
+    }
+    let first = db.get(&w[0].1).unwrap();
+    assert_eq!(
+        meta(&first, "_mnemo.first_hlc").and_then(Value::as_u64),
+        Some(t)
+    );
+    db.close().unwrap();
+    let out = dir.path().join("ac.mnemo");
+    merge(&w[0].0, &w[1].0, &out, t + 1_000);
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    assert_eq!(
+        meta(&db.get(&w[1].1).unwrap(), "_mnemo.supersedes").cloned(),
+        Some(Value::String(w[0].1.to_string()))
+    );
+}
+
+#[test]
+fn a_merged_edit_keeps_the_later_update_time_when_the_other_text_wins() {
+    // a's clock for stamps runs ahead of its wall clock, so its edit wins
+    // on number; b's edit came a second later on the wall clock. The
+    // merged record keeps the later update time, whichever text it took.
+    let p = pair();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    a.__freeze_hlc_clock_for_testing(Some(wall_ms() + 100_000));
+    let edit = |db: &mut Mnemo, text: &str| {
+        db.update(
+            &p.base_fact,
+            MemoryPatch {
+                content: Some(text.into()),
+                vector: Some(v(5.0)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    };
+    edit(&mut a, "edited in a, ahead");
+    std::thread::sleep(std::time::Duration::from_millis(1_100));
+    edit(&mut b, "edited in b, a second later");
+    let updated =
+        |db: &mut Mnemo| db.get(&p.base_fact).unwrap().metadata["_mnemo.updated_at"].clone();
+    let (ua, ub) = (updated(&mut a), updated(&mut b));
+    assert!(ub.as_i64() > ua.as_i64());
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, _) = p.check_laws(wall_ms() + 200_000);
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    let m = db.get(&p.base_fact).unwrap();
+    assert_eq!(m.content, "edited in a, ahead");
+    assert_eq!(m.metadata["_mnemo.updated_at"], ub);
+}
+
+#[test]
+fn a_renamed_task_edited_on_both_sides_is_reported_while_its_rename_stands() {
+    // Two tasks under one slug: the merge renames the later. Two copies of
+    // the output then add a note to the renamed one, the same text on both
+    // sides. Its rename still stands, so the merge flags it and reports it.
+    let p = pair();
+    let t = wall_ms();
+    let (mut a, mut b) = (open(&p.a), open(&p.b));
+    b.__set_clock_offset_for_testing(60);
+    for db in [&mut a, &mut b] {
+        db.set_author(Some("planner-a".into()));
+        let mut spec = TaskSpec::new("Write the notes");
+        spec.role = Some("worker".into());
+        db.task_add(&spec).unwrap();
+    }
+    a.close().unwrap();
+    b.close().unwrap();
+    let (out, _) = p.check_laws(t + 120_000);
+    let qdir = tempfile::tempdir().unwrap();
+    let q = Pair {
+        a: qdir.path().join("x.mnemo"),
+        b: qdir.path().join("y.mnemo"),
+        _dir: qdir,
+        base_fact: p.base_fact,
+    };
+    copy(&out, &q.a);
+    copy(&out, &q.b);
+    for (path, note) in [(&q.a, "a note from x"), (&q.b, "a note from y")] {
+        let mut db = open(path);
+        db.set_author(Some("planner-a".into()));
+        db.task_update("write-the-notes-merge-2", None, Some(note), None)
+            .unwrap();
+        db.close().unwrap();
+    }
+    let (out2, r) = q.check_laws(t + 240_000);
+    assert_eq!(r.conflicts.get("task"), Some(&1), "{:?}", r.conflicts);
+    let renamed = {
+        let mut db = Mnemo::open(&out2, PW).unwrap();
+        db.tasks(None, None)
+            .unwrap()
+            .into_iter()
+            .find(|t| t.slug == "write-the-notes-merge-2")
+            .unwrap()
+            .id
+    };
+    assert!(flagged(&out2, &renamed));
+}
+
+#[test]
+fn a_chain_a_later_version_continues_stays_linked_past_a_version_written_alone() {
+    // a writes G over the base's V1, and later M over G; a2, copied from a
+    // before M, forgets G. c writes X over V1, forgets it, then N, on its
+    // own. G is gone, but M was written after V1 through it, so V1's chain
+    // didn't end: the merge links V1 to N (stamped between), then N to M.
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base.mnemo");
+    base(&base_path);
+    let t = wall_ms() + 10_000;
+    let write = |db: &mut Mnemo, at: u64, text: &str, x: f32| -> Ulid {
+        db.__freeze_hlc_clock_for_testing(Some(at));
+        db.remember_keyed(Memory::new(text, MemoryType::Semantic, v(x)), "k")
+            .unwrap()
+            .0
+    };
+    let mut db = open(&base_path);
+    let v1 = write(&mut db, t, "k one", 2.0);
+    db.close().unwrap();
+    let o = |n: &str| dir.path().join(n);
+    let (a, a2, c) = (o("a.mnemo"), o("a2.mnemo"), o("c.mnemo"));
+    copy(&base_path, &a);
+    copy(&base_path, &c);
+    let mut db = open(&a);
+    let g = write(&mut db, t + 10, "k two", 3.0);
+    db.close().unwrap();
+    copy(&a, &a2);
+    let mut db = open(&a2);
+    db.delete(&g).unwrap();
+    db.close().unwrap();
+    let mut db = open(&c);
+    let x = write(&mut db, t + 20, "k three", 4.0);
+    db.delete(&x).unwrap();
+    let n = write(&mut db, t + 30, "k four", 5.0);
+    assert_eq!(meta(&db.get(&n).unwrap(), "_mnemo.supersedes"), None);
+    db.close().unwrap();
+    let mut db = open(&a);
+    let m = write(&mut db, t + 40, "k five", 6.0);
+    db.close().unwrap();
+    let out = assert_three_groupings(dir.path(), &a, &a2, &c, t + 1_000);
+    let mut db = Mnemo::open_read_only(&out, PW).unwrap();
+    let sb =
+        |db: &mut Mnemo, id: &Ulid| meta(&db.get(id).unwrap(), "_mnemo.superseded_by").cloned();
+    let s = |id: &Ulid| Some(Value::String(id.to_string()));
+    assert_eq!(sb(&mut db, &v1), s(&n));
+    assert_eq!(sb(&mut db, &n), s(&m));
+    assert_eq!(sb(&mut db, &m), None);
 }

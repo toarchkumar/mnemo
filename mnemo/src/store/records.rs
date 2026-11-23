@@ -1686,6 +1686,19 @@ impl Mnemo {
             }
             // A new write is one version, not the merge's combination.
             m.metadata.remove(crate::memory::MNEMO_META_MERGE_HEADS);
+            // A new record's links are its own write's
+            // (decision.v0210-chain-rule). A rewrite in place keeps the mark,
+            // since the link it marks is unchanged.
+            let live = self
+                .index
+                .get(id_u, &self.catalog)
+                .is_some_and(|i| !self.catalog[i].deleted);
+            if !live {
+                m.metadata.remove(crate::memory::MNEMO_META_MERGE_LINKED);
+                m.metadata
+                    .entry(crate::memory::MNEMO_META_FIRST_HLC.to_string())
+                    .or_insert_with(|| Value::from(hlc));
+            }
             let ver = version_hash(&m);
             m.metadata
                 .insert(MNEMO_META_VER.to_string(), Value::from(ver));

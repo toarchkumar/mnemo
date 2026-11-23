@@ -57,14 +57,23 @@ Pre-1.0, the minor component carries the breaking-change signal.
   `_mnemo.hlc` and `_mnemo.updated_at`); a version that descends from the
   other wins (decision.v0210-ancestry); concurrent edits of a fact keep
   the newer and a conflict copy of each other text; a key slot becomes one
-  chain, its branches ordered by the stamp each version was first written
-  with (a version one input deleted keeps its place in that input's
-  order, and leaves the other's, which closes up around it; a chain that
-  ended at a forgotten live version stays ended, unless another input
-  wrote a version after the one before it); the slot's live version
-  carries no conflict flag, so one flagged for losing to a version
-  deleted later is unflagged; essence items, tasks, findings and messages merge their status
-  and history; claims and presence come from the first input. A version a
+  chain computed from what was written, never from links a merge made
+  (decision.v0210-chain-rule): the versions by the stamp each was first
+  written with, each keeping the link its write made (to the version
+  before it, or to a deleted one between them); a chain that ended at a
+  forgotten version stays ended unless a version written after it is
+  kept; elsewhere the merge links the two and marks the later with what
+  it was written over (`_mnemo.merge_linked`), and a deleted version's
+  tombstone keeps what it was written over (`_mnemo.tombstone_supersedes`);
+  a key's conflict flags come from what was written too (REV-017.1):
+  when the versions nothing written follows hold different text, each of
+  them but the chain's last is flagged, and no other version of the key
+  is; essence items, tasks, findings and messages merge their status
+  and history; two tasks or findings under one name keep both, the later
+  renamed `<name>-merge-2` and flagged while the rename stands; a
+  thread's forget takes every copy of its turns saved before it, in any
+  input, and a turn saved again after it stays; claims and presence come
+  from the first input. A version a
   merge makes lists the concurrent versions it combines
   (`_mnemo.merge_heads`, each `[stamp, version, text hash]`), and conflict
   flags and copies follow them (decision.v0210-conflict-flags): an essence
@@ -98,7 +107,10 @@ Pre-1.0, the minor component carries the breaking-change signal.
   of what is stored, its author included; a merge names each output
   version from what it holds once the chains are relinked. A stamp is
   never before the write's own `_mnemo.updated_at`, so a later version's
-  number is always the larger. No format change.
+  number is always the larger. A new record keeps the stamp it was first
+  written with (`_mnemo.first_hlc`, 26 bytes), which nothing changes after,
+  and a merge orders a key's versions by it however often they were
+  rewritten. No format change.
 - **A delete no longer frees all of its record's space** (v0210-1). Each
   tombstone costs about as much file as a small fact: measured on a
   384-dimension file after compaction, 1,075 to 1,090 bytes a tombstone

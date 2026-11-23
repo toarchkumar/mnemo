@@ -11,6 +11,8 @@
 //!   report mirrored; claims and presence come from the first input only;
 //! - merge(x,x) = x; merge(merge(a,b),b) = merge(a,b) = merge(merge(a,b),a);
 //! - merge(merge(a,b),c) = merge(a,merge(b,c));
+//! - merging a copy with its own later copy (a copy of it, written on
+//!   after) gives that later copy;
 //! - every (id, content) of a fact in either input is in the output, as the
 //!   record or as a conflict copy, unless a delete names it or the output's
 //!   version descends from it (decision.v0210-ancestry: its stamp and hash
@@ -523,6 +525,11 @@ proptest! {
         let first = norm(&groupings[0].1.0);
         for (name, g) in &groupings[1..] {
             prop_assert!(norm(&g.0) == first, "{} = {}:{}", groupings[0].0, name, diff(&first, &norm(&g.0)));
+        }
+        // d descends from a: merging a with it changes nothing.
+        let dd = norm(&d.0);
+        for (name, g) in [("a+d", m(&a, &d)), ("d+a", m(&d, &a))] {
+            prop_assert!(norm(&g.0) == dd, "{} = d:{}", name, diff(&dd, &norm(&g.0)));
         }
         prop_assert!(nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0).is_ok(),
             "{:?}", nothing_deleted_survives(&[&a, &b, &c, &d], &groupings[0].1.0));

@@ -25,10 +25,11 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::*;
 use crate::memory::{
-    finding_status, task_status, MNEMO_META_FINDING_ID, MNEMO_META_MERGE_CONFLICT,
-    MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_OWNER,
-    MNEMO_META_READY_SEEN_BY, MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS,
-    MNEMO_META_STATUS_HISTORY,
+    finding_status, task_status, MNEMO_META_FINDING_ID, MNEMO_META_FIRST_HLC,
+    MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_LINKED,
+    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY,
+    MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
+    MNEMO_META_TOMBSTONE_SUPERSEDES,
 };
 
 /// One input of the rules: its live records (with vectors and access
@@ -703,8 +704,6 @@ struct Side {
     by_id: BTreeMap<u128, Memory>,
     /// Ids this input ever held: live, deleted, or named by its tombstones.
     known: HashSet<u128>,
-    /// Ids this input deleted (a deleted row or a tombstone, not void).
-    deletes: HashSet<u128>,
 }
 
 fn turn_of(m: &Memory) -> Option<(String, String)> {
@@ -757,8 +756,10 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     // (1) Deletes first, by id, with no clock.
     let mut removed: BTreeSet<u128> = BTreeSet::new();
     let mut removed_turns: BTreeSet<(String, String)> = BTreeSet::new();
+    // Turns an input holds beside a tombstone of their turn: saved again
+    // after the forget, which named only what it saw.
+    let mut saved_again: HashSet<u128> = HashSet::new();
     let mut known: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
-    let mut deletes: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
     let mut named: [Vec<&Memory>; 2] = [Vec::new(), Vec::new()];
     for i in 0..2 {
         let live: HashSet<u128> = kept[i].iter().map(|m| m.id.0).collect();
@@ -772,7 +773,6 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
             known[i].insert(d.0);
             if !live.contains(&d.0) {
                 removed.insert(d.0);
-                deletes[i].insert(d.0);
             }
         }
         for t in kept[i].iter().filter(|m| kind(m) == Kind::Tombstone) {
@@ -784,23 +784,33 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 continue; // written again after the delete: void
             }
             removed.insert(x);
-            deletes[i].insert(x);
             named[i].push(t);
             if let (Some(th), Some(tu)) = (
                 meta_str(t, MNEMO_META_TOMBSTONE_THREAD),
                 meta_str(t, MNEMO_META_TOMBSTONE_TURN),
             ) {
+                // The forget takes every copy of the turn, in any input;
+                // only the copies this input holds beside its tombstone,
+                // saved after the forget, stay.
                 let turn = (th.to_string(), tu.to_string());
-                if !live_turns.contains(&turn) {
-                    removed_turns.insert(turn);
+                if live_turns.contains(&turn) {
+                    saved_again.extend(
+                        kept[i]
+                            .iter()
+                            .filter(|m| kind(m) == Kind::Turn && turn_of(m).as_ref() == Some(&turn))
+                            .map(|m| m.id.0),
+                    );
                 }
+                removed_turns.insert(turn);
             }
         }
     }
     let gone = |m: &Memory| {
         removed.contains(&m.id.0)
             || ulid_at(m, MNEMO_META_MERGE_SOURCE).is_some_and(|s| removed.contains(&s))
-            || (kind(m) == Kind::Turn && turn_of(m).is_some_and(|t| removed_turns.contains(&t)))
+            || (kind(m) == Kind::Turn
+                && !saved_again.contains(&m.id.0)
+                && turn_of(m).is_some_and(|t| removed_turns.contains(&t)))
     };
     let mut gone_ids: BTreeSet<u128> = BTreeSet::new();
     let mut sides: Vec<Side> = Vec::new();
@@ -816,7 +826,6 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         sides.push(Side {
             by_id,
             known: known[i].clone(),
-            deletes: deletes[i].clone(),
         });
     }
     report.removed = gone_ids.iter().map(|&u| Ulid(u)).collect();
@@ -973,15 +982,29 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     (out.into_values().collect(), report)
 }
 
-/// A key slot's versions from both inputs as one chain: each input's own
-/// order kept; versions on different branches by the number each was first
-/// written with, then created_at, then id; linked again both ways. An id a
-/// link names that isn't in the output keeps its place, so the links around
-/// it stay as an input had them, unless the merge deleted it and that input
-/// didn't: then it leaves that input's chain, which closes up around it, so
-/// every grouping of three or more copies gives the same chain. A chain
-/// that ended at a forgotten live version stays ended, unless an input
-/// wrote a version after the one before it.
+/// The version a key's version was written over: its own link, unless a
+/// merge set that one (decision.v0210-chain-rule).
+fn written_over(m: &Memory) -> Option<u128> {
+    match m.metadata.get(MNEMO_META_MERGE_LINKED) {
+        Some(v) => v
+            .as_str()
+            .and_then(|s| Ulid::from_string(s).ok())
+            .map(|u| u.0),
+        None => ulid_at(m, MNEMO_META_SUPERSEDES),
+    }
+}
+
+/// A key slot's versions as one chain, from what was written, never from
+/// links a merge made (decision.v0210-chain-rule, as Git recomputes from
+/// its commits): so the chain is the same whichever copies were merged
+/// first. The versions go by the number each was first written with (a
+/// write's stamp is past the one it supersedes), then created_at, then id.
+/// Each keeps the link its write made, to the version before it or to a
+/// deleted one between them; where the version before ended in a forgotten
+/// version and nothing written follows it, the chain stays broken there, as
+/// the engine leaves it; anywhere else the merge links the two and marks
+/// the later with what it was written over (`_mnemo.merge_linked`). A
+/// deleted version's own link is on its tombstone.
 fn relink_slots(
     out: &mut BTreeMap<u128, Memory>,
     sides: &[Side],
@@ -998,164 +1021,193 @@ fn relink_slots(
             slots.entry((s.scope_owner, s.key)).or_default().push(*id);
         }
     }
+    // What each deleted version was written over: its tombstone's record of
+    // it; for an older tombstone, an input's copy of the version; else the
+    // version an input links to it from.
+    let mut gone_over: BTreeMap<u128, Option<u128>> = BTreeMap::new();
+    for m in out.values() {
+        if kind(m) != Kind::Tombstone {
+            continue;
+        }
+        let (Some(t), Some(v)) = (
+            ulid_at(m, MNEMO_META_TOMBSTONE_OF),
+            m.metadata.get(MNEMO_META_TOMBSTONE_SUPERSEDES),
+        ) else {
+            continue;
+        };
+        if !out.contains_key(&t) {
+            let over = v
+                .as_str()
+                .and_then(|s| Ulid::from_string(s).ok())
+                .map(|u| u.0);
+            gone_over.insert(t, over);
+        }
+    }
+    let mut linked_from: BTreeMap<u128, u128> = BTreeMap::new();
+    for side in sides {
+        for m in side.by_id.values() {
+            if let Some(t) = ulid_at(m, MNEMO_META_SUPERSEDED_BY) {
+                if !out.contains_key(&t) {
+                    let e = linked_from.entry(t).or_insert(m.id.0);
+                    *e = (*e).min(m.id.0);
+                }
+            }
+        }
+    }
+    for (&t, &p) in &linked_from {
+        if let std::collections::btree_map::Entry::Vacant(e) = gone_over.entry(t) {
+            e.insert(
+                sides
+                    .iter()
+                    .find_map(|s| s.by_id.get(&t))
+                    .map_or(Some(p), written_over),
+            );
+        }
+    }
     for members in slots.into_values() {
         let member_set: BTreeSet<u128> = members.iter().copied().collect();
-        let mut nodes: BTreeSet<u128> = member_set.clone();
-        let mut edges: BTreeSet<(u128, u128)> = BTreeSet::new();
-        for side in sides {
-            let mut own: BTreeSet<(u128, u128)> = BTreeSet::new();
-            for id in &members {
-                let Some(v) = side.by_id.get(id) else {
+        type Links = BTreeMap<u128, (Option<u128>, Option<u128>, Option<u128>, i64)>;
+        let (order, links, heads): (Vec<u128>, Links, Vec<u128>) = {
+            let gone = |n: &u128| !out.contains_key(n);
+            // What a version was written over, within the slot: a link to a
+            // record of another kind or slot is left out.
+            let over_of = |n: u128| -> Option<u128> {
+                let w = match out.get(&n) {
+                    Some(m) => written_over(m),
+                    None => gone_over.get(&n).copied().flatten(),
+                };
+                w.filter(|t| member_set.contains(t) || gone(t))
+            };
+            let gone_after = |p: u128| -> Vec<u128> {
+                gone_over
+                    .iter()
+                    .filter(|(t, o)| **o == Some(p) && gone(t))
+                    .map(|(t, _)| *t)
+                    .collect()
+            };
+            // Whether a version written after `p` (through deleted ones) is in
+            // the output.
+            let continues = |p: u128| -> bool {
+                let mut todo = vec![p];
+                let mut seen = BTreeSet::new();
+                while let Some(x) = todo.pop() {
+                    if !seen.insert(x) {
+                        continue;
+                    }
+                    if members.iter().any(|&m| m != p && over_of(m) == Some(x)) {
+                        return true;
+                    }
+                    todo.extend(gone_after(x));
+                }
+                false
+            };
+            // The deleted version right after `p` on the way back from `t`,
+            // when `t` was written after `p` through deleted versions only.
+            let gone_path = |p: u128, t: u128| -> Option<u128> {
+                let mut x = t;
+                for _ in 0..=gone_over.len() {
+                    match over_of(x) {
+                        Some(y) if y == p => return Some(x),
+                        Some(y) if gone(&y) => x = y,
+                        _ => return None,
+                    }
+                }
+                None
+            };
+            let ended = |p: u128| -> Option<u128> {
+                let after = gone_after(p);
+                if after.is_empty() || continues(p) {
+                    None
+                } else {
+                    after.into_iter().min()
+                }
+            };
+            // A version is placed by the number it was first written with,
+            // which a later write superseding it doesn't change.
+            let key_of = |n: u128| -> (u64, i64, u128) {
+                let m = &out[&n];
+                let first = m
+                    .metadata
+                    .get(MNEMO_META_FIRST_HLC)
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| {
+                        super::records::hlc_prev(m)
+                            .into_iter()
+                            .map(|p| p.0)
+                            .fold(number(m), u64::min)
+                    });
+                (first, m.created_at, n)
+            };
+            let mut order = members.clone();
+            order.sort_by_key(|&n| key_of(n));
+            // Each version's two links.
+            let mut before: BTreeMap<u128, Option<u128>> = BTreeMap::new();
+            let mut after: BTreeMap<u128, Option<u128>> = BTreeMap::new();
+            for (pos, &n) in order.iter().enumerate() {
+                let w = over_of(n);
+                let w_gone = w.filter(|t| gone(t));
+                let Some(p) = pos.checked_sub(1).map(|i| order[i]) else {
+                    before.insert(n, w_gone);
                     continue;
                 };
-                for (key, forward) in [
-                    (MNEMO_META_SUPERSEDES, false),
-                    (MNEMO_META_SUPERSEDED_BY, true),
-                ] {
-                    let Some(t) = ulid_at(v, key) else {
-                        continue;
-                    };
-                    // A link to a record of another kind or slot is left out.
-                    if out.contains_key(&t) && !member_set.contains(&t) {
-                        continue;
-                    }
-                    own.insert(if forward { (*id, t) } else { (t, *id) });
+                if w == Some(p) {
+                    before.insert(n, Some(p));
+                    after.insert(p, Some(n));
+                } else if let Some(x) = w_gone.and_then(|t| gone_path(p, t)) {
+                    before.insert(n, w_gone);
+                    after.insert(p, Some(x));
+                } else if let Some(t) = ended(p) {
+                    before.insert(n, w_gone);
+                    after.insert(p, Some(t));
+                } else {
+                    before.insert(n, Some(p));
+                    after.insert(p, Some(n));
                 }
             }
-            // A version only the other input deleted leaves this input's
-            // chain, which closes up around it (x, t, y becomes x, y).
-            let skipped: BTreeSet<u128> = own
+            if let Some(&last) = order.last() {
+                after.insert(last, ended(last));
+            }
+            let created_secs = |n: u128| -> i64 {
+                out.get(&n)
+                    .map_or_else(|| ((n >> 80) as u64 / 1000) as i64, |m| m.created_at)
+            };
+            let links = order
                 .iter()
-                .flat_map(|&(x, y)| [x, y])
-                .filter(|t| {
-                    !out.contains_key(t)
-                        && !side.deletes.contains(t)
-                        && sides.iter().any(|s| s.deletes.contains(t))
+                .map(|&n| {
+                    let next = after.get(&n).copied().flatten();
+                    (
+                        n,
+                        (
+                            over_of(n),
+                            before.get(&n).copied().flatten(),
+                            next,
+                            next.map_or(0, created_secs),
+                        ),
+                    )
                 })
                 .collect();
-            for t in skipped {
-                let before: Vec<u128> = own.iter().filter(|e| e.1 == t).map(|e| e.0).collect();
-                let after: Vec<u128> = own.iter().filter(|e| e.0 == t).map(|e| e.1).collect();
-                own.retain(|e| e.0 != t && e.1 != t);
-                for &x in &before {
-                    for &y in &after {
-                        if x != y {
-                            own.insert((x, y));
-                        }
-                    }
-                }
-            }
-            for &(x, y) in &own {
-                nodes.extend([x, y]);
-                edges.insert((x, y));
-            }
-        }
-        // A forgotten head (left out, nothing after it) ends its chain only
-        // where nothing else follows the version before it: a version
-        // another input wrote after that one takes its place.
-        let left_out = |n: &u128| !member_set.contains(n);
-        let sink = |n: &u128, e: &BTreeSet<(u128, u128)>| !e.iter().any(|x| x.0 == *n);
-        let ends: Vec<(u128, u128)> = edges
-            .iter()
-            .copied()
-            .filter(|&(p, t)| {
-                left_out(&t)
-                    && sink(&t, &edges)
-                    && edges
-                        .iter()
-                        .any(|&(q, u)| q == p && (!left_out(&u) || !sink(&u, &edges)))
-            })
-            .collect();
-        for e in ends {
-            edges.remove(&e);
-        }
-        nodes.retain(|n| !left_out(n) || edges.iter().any(|e| e.0 == *n || e.1 == *n));
-        // A version is placed by the number it was first written with,
-        // which a later write superseding it doesn't change, so every
-        // grouping orders its branches alike. A version the merge left out
-        // goes first once it's ready, so it stays next to the version
-        // before it: its number isn't known, and its id's time is another
-        // clock's.
-        let key_of = |n: u128| -> (bool, u64, i64, u128) {
-            match out.get(&n) {
-                Some(m) => {
-                    let first = super::records::hlc_prev(m)
-                        .into_iter()
-                        .map(|p| p.0)
-                        .fold(number(m), u64::min);
-                    (true, first, m.created_at, n)
-                }
-                None => {
-                    let ms = (n >> 80) as u64;
-                    (false, ms, (ms / 1000) as i64, n)
-                }
-            }
-        };
-        // Kahn's order, the smallest key first among those ready.
-        let mut indeg: BTreeMap<u128, usize> = nodes.iter().map(|&n| (n, 0)).collect();
-        for (_, to) in &edges {
-            *indeg.get_mut(to).expect("a node") += 1;
-        }
-        let mut order: Vec<u128> = Vec::new();
-        let mut done: BTreeSet<u128> = BTreeSet::new();
-        while order.len() < nodes.len() {
-            let ready = nodes
+            // The versions nothing written follows (no version, kept or
+            // deleted, was written over them).
+            let heads = order
                 .iter()
-                .filter(|n| !done.contains(n) && indeg[n] == 0)
-                .map(|&n| key_of(n))
-                .min();
-            // A cycle (the inputs disagree on an order): the smallest left.
-            let next = ready.unwrap_or_else(|| {
-                nodes
-                    .iter()
-                    .filter(|n| !done.contains(n))
-                    .map(|&n| key_of(n))
-                    .min()
-                    .expect("a node left")
-            });
-            let n = next.3;
-            done.insert(n);
-            order.push(n);
-            for (from, to) in &edges {
-                if *from == n && !done.contains(to) {
-                    let d = indeg.get_mut(to).expect("a node");
-                    *d = d.saturating_sub(1);
-                }
-            }
-        }
-        // Each input's live version, when it wrote it since they diverged.
-        let live_of = |s: &Side, other: &Side| {
-            members.iter().copied().find(|id| {
-                s.by_id
-                    .get(id)
-                    .is_some_and(|v| !v.metadata.contains_key(MNEMO_META_SUPERSEDED_BY))
-                    && !other.by_id.contains_key(id)
-            })
+                .copied()
+                .filter(|&n| {
+                    gone_after(n).is_empty() && !members.iter().any(|&m| over_of(m) == Some(n))
+                })
+                .collect();
+            (order, links, heads)
         };
-        let lives = (live_of(&sides[0], &sides[1]), live_of(&sides[1], &sides[0]));
-        let created_secs = |n: u128, out: &BTreeMap<u128, Memory>| -> i64 {
-            out.get(&n)
-                .map_or_else(|| ((n >> 80) as u64 / 1000) as i64, |m| m.created_at)
-        };
-        for (pos, &n) in order.iter().enumerate() {
-            if !member_set.contains(&n) {
-                continue;
-            }
-            // After a version the merge left out, only an input's own link
-            // to it: a chain that ended there (its head was forgotten) stays
-            // ended, as the engine leaves it.
-            let prev = pos
-                .checked_sub(1)
-                .map(|p| order[p])
-                .filter(|&p| member_set.contains(&p) || edges.contains(&(p, n)));
-            let next = order.get(pos + 1).copied();
-            let next_created = next.map(|x| created_secs(x, out));
+        for &n in &order {
+            let (w, prev, next, next_created) = links[&n];
             let m = out.get_mut(&n).expect("a member");
             set_or_remove(
                 m,
                 MNEMO_META_SUPERSEDES,
                 prev.map(|p| Value::String(Ulid(p).to_string())),
             );
+            let mark =
+                (prev != w).then(|| w.map_or(Value::Null, |t| Value::String(Ulid(t).to_string())));
+            set_or_remove(m, MNEMO_META_MERGE_LINKED, mark);
             match next {
                 None => {
                     m.metadata.remove(MNEMO_META_SUPERSEDED_BY);
@@ -1169,39 +1221,47 @@ fn relink_slots(
                         Value::String(Ulid(x).to_string()),
                     );
                     if !same {
-                        m.metadata.insert(
-                            MNEMO_META_INVALID_AT.into(),
-                            Value::from(next_created.unwrap_or(0)),
-                        );
+                        m.metadata
+                            .insert(MNEMO_META_INVALID_AT.into(), Value::from(next_created));
                     }
                 }
             }
         }
-        // The slot's live version is no longer one another superseded: a
-        // flag a merge left on it for that goes (the version that beat it
-        // was deleted), as if the delete had come first.
-        if let Some(t) = order.last().filter(|t| member_set.contains(t)) {
-            if let Some(m) = out.get_mut(t) {
+        // REV-017.1 (A): the key's conflict flags come from what was
+        // written, so every grouping flags alike. When the versions nothing
+        // written follows hold different text, each of them but the chain's
+        // last is flagged; no other version of the key is.
+        let tail = order.last().copied();
+        let differ = heads
+            .iter()
+            .any(|x| heads.iter().any(|y| !same_visible(&out[x], &out[y])));
+        let flagged: BTreeSet<u128> = if differ {
+            heads.iter().copied().filter(|h| Some(*h) != tail).collect()
+        } else {
+            BTreeSet::new()
+        };
+        let mut new_flags = Vec::new();
+        for &n in &order {
+            let m = out.get_mut(&n).expect("a member");
+            if flagged.contains(&n) {
+                m.metadata
+                    .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
+                let had = sides.iter().any(|s| {
+                    s.by_id
+                        .get(&n)
+                        .is_some_and(|v| v.metadata.contains_key(MNEMO_META_MERGE_CONFLICT))
+                });
+                if !had {
+                    new_flags.push(n);
+                }
+            } else {
                 m.metadata.remove(MNEMO_META_MERGE_CONFLICT);
             }
         }
-        // Both inputs wrote different content to the slot since they
-        // diverged: the live version the merge superseded is flagged.
-        if let (Some(la), Some(lb)) = lives {
-            let tail = order.last().copied();
-            let differ = !same_visible(&sides[0].by_id[&la], &sides[1].by_id[&lb]);
-            if la != lb && differ {
-                *conflicts.entry("key".into()).or_default() += 1;
-                for l in [la, lb] {
-                    if Some(l) != tail {
-                        if let Some(m) = out.get_mut(&l) {
-                            m.metadata
-                                .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
-                            conflict_ids.insert(l);
-                        }
-                    }
-                }
-            }
+        // The report counts a key this merge flagged anew.
+        if !new_flags.is_empty() {
+            *conflicts.entry("key".into()).or_default() += 1;
+            conflict_ids.extend(new_flags);
         }
     }
 }
@@ -1238,7 +1298,15 @@ fn rename_names(
                 if i == 0 {
                     m.metadata
                         .insert(field.into(), Value::String(canon.clone()));
-                    m.metadata.remove(MNEMO_META_MERGE_NAME);
+                    // A record a merge renamed takes its name back: the
+                    // rename no longer stands, so its flag follows only
+                    // the versions it combines, as a later merge sees it.
+                    if m.metadata.remove(MNEMO_META_MERGE_NAME).is_some() {
+                        let hs = heads(m);
+                        if !set_flag(m, &hs) {
+                            conflict_ids.remove(id);
+                        }
+                    }
                     continue;
                 }
                 let name = loop {
