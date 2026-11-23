@@ -40,6 +40,7 @@ exclude = [
     "examples/gen_*",
     "examples/device_budget.rs",
     "examples/fmt9_proto.rs",
+    "examples/merge_bench.rs",
 ]
 # crates.io takes at most 5 keywords, each at most 20 characters of ASCII
 # letters, digits, `_`, `-` or `+`, starting with a letter; pick the ones

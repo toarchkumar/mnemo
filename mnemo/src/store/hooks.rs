@@ -41,6 +41,21 @@ impl Mnemo {
         )
     }
 
+    /// **Not a stable API.** v0.21.0 (v0210-3b, REV-017.1 (C)): this
+    /// thread's next [`Mnemo::merge_files`] meets a filesystem without hard
+    /// links: `"no-links"` (the copy goes ahead), `"taken"` (a file appears
+    /// at the output first) or `"copy-fails"`. Anything else disarms.
+    #[doc(hidden)]
+    pub fn __merge_without_hard_links_for_testing(what: &str) {
+        use super::merge::link_hook::{arm, LinkHook};
+        arm(match what {
+            "no-links" => Some(LinkHook::Copies),
+            "taken" => Some(LinkHook::Taken),
+            "copy-fails" => Some(LinkHook::CopyFails),
+            _ => None,
+        });
+    }
+
     /// **Not a stable API.** v0.21.0 (13.7): what a merge reads from this
     /// handle: its live records and the ids of its deleted rows.
     #[doc(hidden)]

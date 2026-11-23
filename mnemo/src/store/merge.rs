@@ -21,7 +21,7 @@
 //!    and messages merge their status; engine records take the larger
 //!    number), then names, turns and tombstones are made unique.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::*;
 use crate::memory::{
@@ -160,9 +160,79 @@ fn core_bytes(m: &Memory) -> Vec<u8> {
 }
 
 /// Whether `a` wins over `b` (the same id): the larger number, then the
-/// larger content hash, then the larger bytes of the version itself.
+/// larger content hash, then the larger bytes of the version itself. Each
+/// is computed only when the ones before it tie (REV-017.2 (2)).
 fn wins(a: &Memory, b: &Memory) -> bool {
-    (number(a), content_hash(a), core_bytes(a)) >= (number(b), content_hash(b), core_bytes(b))
+    number(a)
+        .cmp(&number(b))
+        .then_with(|| content_hash(a).cmp(&content_hash(b)))
+        .then_with(|| core_bytes(a).cmp(&core_bytes(b)))
+        .is_ge()
+}
+
+/// Two JSON values that encode to the same bytes when this is true: like
+/// `==`, but a float compares by its bits (`0.0 == -0.0` would not encode
+/// alike) and an integer never equals a float.
+fn same_json(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            if x.is_f64() || y.is_f64() {
+                x.is_f64()
+                    && y.is_f64()
+                    && x.as_f64().map(f64::to_bits) == y.as_f64().map(f64::to_bits)
+            } else {
+                x == y
+            }
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(l, r)| same_json(l, r))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .zip(y)
+                    .all(|((kl, l), (kr, r))| kl == kr && same_json(l, r))
+        }
+        _ => a == b,
+    }
+}
+
+/// `a` and `b` hold the same record but for its access stats, field by
+/// field with no encoding (REV-017.2 (2)). When this is true their
+/// [`record_bytes`] and [`core_bytes`] are equal; when it's false they may
+/// still be (a vector that differs only below fp16), so a caller that needs
+/// the exact answer asks [`record_bytes`] next.
+fn same_record(a: &Memory, b: &Memory) -> bool {
+    a.id == b.id
+        && a.created_at == b.created_at
+        && a.memory_type == b.memory_type
+        && a.importance.to_bits() == b.importance.to_bits()
+        && a.scope == b.scope
+        && a.ttl_secs == b.ttl_secs
+        && a.agent_id == b.agent_id
+        && a.session_id == b.session_id
+        && a.content == b.content
+        && a.vector.len() == b.vector.len()
+        && a.vector
+            .iter()
+            .zip(&b.vector)
+            .all(|(x, y)| x.to_bits() == y.to_bits())
+        && a.metadata.len() == b.metadata.len()
+        && a.metadata
+            .iter()
+            .zip(&b.metadata)
+            .all(|((kx, x), (ky, y))| kx == ky && same_json(x, y))
+}
+
+/// What a merge may change after it places a record (its key's links and
+/// flags, a task's or a finding's name), so the later passes keep each
+/// input's own version of it to compare with.
+fn changed_later(m: &Memory) -> bool {
+    match kind(m) {
+        Kind::Task | Kind::Finding => true,
+        Kind::Fact => m.metadata.contains_key(MNEMO_META_KEY),
+        _ => false,
+    }
 }
 
 /// A conflict copy's id: the source's time part (so it sorts beside it) and
@@ -476,20 +546,15 @@ struct Resolved {
     conflict: Option<&'static str>,
 }
 
-/// Rule (3): the same id in both inputs.
+/// Rule (3): the same id in both inputs, holding different records (the
+/// caller keeps an input's record when the two are the same but for access
+/// stats: `a` wins that tie).
 fn resolve(a: &Memory, b: &Memory) -> Resolved {
     let a_wins = wins(a, b);
     let (w, l) = if a_wins { (a, b) } else { (b, a) };
     let mut body = w.clone();
     body.accessed_at = a.accessed_at.max(b.accessed_at);
     body.access_count = a.access_count.max(b.access_count);
-    if record_bytes(a) == record_bytes(b) {
-        return Resolved {
-            body,
-            copy: None,
-            conflict: None,
-        };
-    }
     // One covers the other (a one-sided edit or move, or a record edited
     // from every version the other combines): it wins whole, with no copy
     // and no new flag. The other's flag goes with it, since the winner
@@ -699,11 +764,30 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
     }
 }
 
-/// One input after rule (0) and the delete rule.
+/// One input after rule (0) and the delete rule, as the passes after rule
+/// (3) read it. The records themselves move into the output (REV-017.2
+/// (1)); an input keeps its own copy only of a record the later passes
+/// compare with or read (`held`).
 struct Side {
-    by_id: BTreeMap<u128, Memory>,
-    /// Ids this input ever held: live, deleted, or named by its tombstones.
-    known: HashSet<u128>,
+    /// The ids this input holds after the delete rule.
+    ids: HashSet<u128>,
+    /// This input's version of each record a later pass may change
+    /// ([`changed_later`]), and of each the inputs hold differently. Two
+    /// inputs holding the same version: the first input's only.
+    held: BTreeMap<u128, Memory>,
+    /// Each record's `_mnemo.superseded_by` mark: (the record, the target).
+    marks: Vec<(u128, u128)>,
+    /// What each record with a link was written over ([`written_over`]).
+    over: HashMap<u128, Option<u128>>,
+}
+
+impl Side {
+    /// [`written_over`] of this input's record `t`, if it holds `t`.
+    fn written_over(&self, t: u128) -> Option<Option<u128>> {
+        self.ids
+            .contains(&t)
+            .then(|| self.over.get(&t).copied().flatten())
+    }
 }
 
 fn turn_of(m: &Memory) -> Option<(String, String)> {
@@ -718,8 +802,12 @@ fn turn_of(m: &Memory) -> Option<(String, String)> {
 pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memory>, MergeReport) {
     let now_s = (now_ms / 1000) as i64;
     let mut report = MergeReport::default();
-    let inputs = [a, b];
-    for (i, input) in inputs.iter().enumerate() {
+
+    // (0) What compaction drops. Records move by value from here on.
+    let mut kept: [Vec<Memory>; 2] = [Vec::new(), Vec::new()];
+    let mut deleted: [Vec<Ulid>; 2] = [Vec::new(), Vec::new()];
+    let mut dropped: BTreeSet<u128> = BTreeSet::new();
+    for (i, input) in [a, b].into_iter().enumerate() {
         report.lead_ms[i] = input
             .records
             .iter()
@@ -737,17 +825,12 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
             })
             .filter_map(|m| m.metadata.get(MNEMO_META_HLC_SINCE).and_then(Value::as_u64))
             .min();
-    }
-
-    // (0) What compaction drops.
-    let mut kept: [Vec<Memory>; 2] = [Vec::new(), Vec::new()];
-    let mut dropped: BTreeSet<u128> = BTreeSet::new();
-    for (i, input) in inputs.iter().enumerate() {
-        for m in &input.records {
-            if m.is_expired(now_s) || super::coordination::compact_drops(m, now_s) {
+        deleted[i] = input.deleted;
+        for m in input.records {
+            if m.is_expired(now_s) || super::coordination::compact_drops(&m, now_s) {
                 dropped.insert(m.id.0);
             } else {
-                kept[i].push(m.clone());
+                kept[i].push(m);
             }
         }
     }
@@ -759,17 +842,20 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
     // Turns an input holds beside a tombstone of their turn: saved again
     // after the forget, which named only what it saw.
     let mut saved_again: HashSet<u128> = HashSet::new();
+    // Ids each input ever held: live, deleted, or named by its tombstones.
     let mut known: [HashSet<u128>; 2] = [HashSet::new(), HashSet::new()];
-    let mut named: [Vec<&Memory>; 2] = [Vec::new(), Vec::new()];
+    // The key slots of the records each input's tombstones name.
+    let mut deleted_keys: [Vec<(Option<String>, String)>; 2] = [Vec::new(), Vec::new()];
     for i in 0..2 {
         let live: HashSet<u128> = kept[i].iter().map(|m| m.id.0).collect();
-        let live_turns: HashSet<(String, String)> = kept[i]
-            .iter()
-            .filter(|m| kind(m) == Kind::Turn)
-            .filter_map(turn_of)
-            .collect();
+        let mut live_turns: HashMap<(String, String), Vec<u128>> = HashMap::new();
+        for m in kept[i].iter().filter(|m| kind(m) == Kind::Turn) {
+            if let Some(t) = turn_of(m) {
+                live_turns.entry(t).or_default().push(m.id.0);
+            }
+        }
         known[i].extend(live.iter().copied());
-        for d in &inputs[i].deleted {
+        for d in &deleted[i] {
             known[i].insert(d.0);
             if !live.contains(&d.0) {
                 removed.insert(d.0);
@@ -784,7 +870,10 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 continue; // written again after the delete: void
             }
             removed.insert(x);
-            named[i].push(t);
+            if let Some(key) = meta_str(t, MNEMO_META_TOMBSTONE_KEY) {
+                let owner = meta_str(t, MNEMO_META_TOMBSTONE_OWNER).map(str::to_string);
+                deleted_keys[i].push((owner, key.to_string()));
+            }
             if let (Some(th), Some(tu)) = (
                 meta_str(t, MNEMO_META_TOMBSTONE_THREAD),
                 meta_str(t, MNEMO_META_TOMBSTONE_TURN),
@@ -793,13 +882,8 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 // only the copies this input holds beside its tombstone,
                 // saved after the forget, stay.
                 let turn = (th.to_string(), tu.to_string());
-                if live_turns.contains(&turn) {
-                    saved_again.extend(
-                        kept[i]
-                            .iter()
-                            .filter(|m| kind(m) == Kind::Turn && turn_of(m).as_ref() == Some(&turn))
-                            .map(|m| m.id.0),
-                    );
+                if let Some(ids) = live_turns.get(&turn) {
+                    saved_again.extend(ids.iter().copied());
                 }
                 removed_turns.insert(turn);
             }
@@ -813,46 +897,46 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                 && turn_of(m).is_some_and(|t| removed_turns.contains(&t)))
     };
     let mut gone_ids: BTreeSet<u128> = BTreeSet::new();
-    let mut sides: Vec<Side> = Vec::new();
-    for (i, records) in kept.iter().enumerate() {
-        let mut by_id = BTreeMap::new();
+    let mut by_id: [BTreeMap<u128, Memory>; 2] = [BTreeMap::new(), BTreeMap::new()];
+    for (i, records) in kept.into_iter().enumerate() {
         for m in records {
-            if kind(m) != Kind::Tombstone && gone(m) {
+            if kind(&m) != Kind::Tombstone && gone(&m) {
                 gone_ids.insert(m.id.0);
             } else {
-                by_id.insert(m.id.0, m.clone());
+                by_id[i].insert(m.id.0, m);
             }
         }
-        sides.push(Side {
-            by_id,
-            known: known[i].clone(),
-        });
     }
     report.removed = gone_ids.iter().map(|&u| Ulid(u)).collect();
 
     // Keys deleted in one input and written in the other, in key order
-    // (so the report reads alike whichever input is first).
+    // (so the report reads alike whichever input is first). The other
+    // input's keyed records by slot, once (REV-017.2 (3)).
     let mut kept_keys: BTreeMap<(Option<String>, String, MergeSide), BTreeSet<u128>> =
         BTreeMap::new();
     for (i, side) in [MergeSide::A, MergeSide::B].into_iter().enumerate() {
-        let other = &sides[1 - i];
-        for t in &named[i] {
-            let Some(key) = meta_str(t, MNEMO_META_TOMBSTONE_KEY) else {
+        if deleted_keys[i].is_empty() {
+            continue;
+        }
+        let mut slots: HashMap<(Option<String>, String), Vec<u128>> = HashMap::new();
+        for m in by_id[1 - i].values() {
+            if let Some(k) = meta_str(m, MNEMO_META_KEY) {
+                let slot = Mnemo::key_slot_for(m, k);
+                slots
+                    .entry((slot.scope_owner, slot.key))
+                    .or_default()
+                    .push(m.id.0);
+            }
+        }
+        for (owner, key) in &deleted_keys[i] {
+            let Some(ids) = slots.get(&(owner.clone(), key.clone())) else {
                 continue;
             };
-            let owner = meta_str(t, MNEMO_META_TOMBSTONE_OWNER).map(str::to_string);
-            for m in other.by_id.values() {
-                let Some(k) = meta_str(m, MNEMO_META_KEY) else {
-                    continue;
-                };
-                let slot = Mnemo::key_slot_for(m, k);
-                if slot.key == key && slot.scope_owner == owner && !sides[i].known.contains(&m.id.0)
-                {
-                    kept_keys
-                        .entry((owner.clone(), key.to_string(), side))
-                        .or_default()
-                        .insert(m.id.0);
-                }
+            for &id in ids.iter().filter(|id| !known[i].contains(id)) {
+                kept_keys
+                    .entry((owner.clone(), key.clone(), side))
+                    .or_default()
+                    .insert(id);
             }
         }
     }
@@ -866,30 +950,76 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
         })
         .collect();
 
-    // (3) One record per id.
+    // What the passes after rule (3) read of each input.
+    let mut sides: Vec<Side> = Vec::new();
+    for records in &by_id {
+        let mut marks = Vec::new();
+        let mut over = HashMap::new();
+        for (&id, m) in records {
+            if let Some(t) = ulid_at(m, MNEMO_META_SUPERSEDED_BY) {
+                marks.push((id, t));
+            }
+            if m.metadata.contains_key(MNEMO_META_MERGE_LINKED)
+                || m.metadata.contains_key(MNEMO_META_SUPERSEDES)
+            {
+                over.insert(id, written_over(m));
+            }
+        }
+        sides.push(Side {
+            ids: records.keys().copied().collect(),
+            held: BTreeMap::new(),
+            marks,
+            over,
+        });
+    }
+
+    // (3) One record per id, in id order, each moved out of its input.
     let mut out: BTreeMap<u128, Memory> = BTreeMap::new();
     let mut conflicts: BTreeMap<String, usize> = BTreeMap::new();
     let mut conflict_ids: BTreeSet<u128> = BTreeSet::new();
     let mut copies: Vec<Memory> = Vec::new();
-    let ids: BTreeSet<u128> = sides[0]
-        .by_id
-        .keys()
-        .chain(sides[1].by_id.keys())
-        .copied()
-        .collect();
-    for id in ids {
-        match (sides[0].by_id.get(&id), sides[1].by_id.get(&id)) {
-            (Some(x), Some(y)) => {
+    let [in_a, in_b] = by_id;
+    let (mut xs, mut ys) = (in_a.into_iter().peekable(), in_b.into_iter().peekable());
+    loop {
+        let (x, y) = match (xs.peek(), ys.peek()) {
+            (None, None) => break,
+            (Some((i, _)), Some((j, _))) => match i.cmp(j) {
+                std::cmp::Ordering::Less => (xs.next(), None),
+                std::cmp::Ordering::Greater => (None, ys.next()),
+                std::cmp::Ordering::Equal => (xs.next(), ys.next()),
+            },
+            (Some(_), None) => (xs.next(), None),
+            (None, Some(_)) => (None, ys.next()),
+        };
+        match (x, y) {
+            (Some((id, x)), Some((_, y))) => {
                 report.both += 1;
-                if pristine_copy(x) && pristine_copy(y) {
-                    copies.extend([x.clone(), y.clone()]);
+                if pristine_copy(&x) && pristine_copy(&y) {
+                    copies.extend([x, y]);
                     continue;
                 }
-                if kind(x) == Kind::Local {
-                    out.insert(id, x.clone());
+                if kind(&x) == Kind::Local {
+                    out.insert(id, x);
                     continue;
                 }
-                let r = resolve(x, y);
+                // The same record in both (but for access stats): the first
+                // input's, as `wins` breaks the tie.
+                if same_record(&x, &y) || record_bytes(&x) == record_bytes(&y) {
+                    let accessed_at = x.accessed_at.max(y.accessed_at);
+                    let access_count = x.access_count.max(y.access_count);
+                    let mut body = if changed_later(&x) {
+                        let body = x.clone();
+                        sides[0].held.insert(id, x);
+                        body
+                    } else {
+                        x
+                    };
+                    body.accessed_at = accessed_at;
+                    body.access_count = access_count;
+                    out.insert(id, body);
+                    continue;
+                }
+                let r = resolve(&x, &y);
                 if let Some(c) = r.conflict {
                     *conflicts.entry(c.to_string()).or_default() += 1;
                     match &r.copy {
@@ -901,30 +1031,38 @@ pub(crate) fn merge_core(a: MergeInput, b: MergeInput, now_ms: u64) -> (Vec<Memo
                     copies.push(c);
                 }
                 out.insert(id, r.body);
+                sides[0].held.insert(id, x);
+                sides[1].held.insert(id, y);
             }
-            (Some(x), None) => {
-                if kind(x) != Kind::Local {
+            (Some((id, x)), None) => {
+                if kind(&x) != Kind::Local {
                     report.a_only.push(Ulid(id));
                 }
-                if pristine_copy(x) {
-                    copies.push(x.clone());
+                if pristine_copy(&x) {
+                    copies.push(x);
                     continue;
                 }
-                out.insert(id, x.clone());
+                if changed_later(&x) {
+                    sides[0].held.insert(id, x.clone());
+                }
+                out.insert(id, x);
             }
-            (None, Some(y)) => {
+            (None, Some((id, y))) => {
                 // Claims and presence: the first input's only.
-                if kind(y) == Kind::Local {
+                if kind(&y) == Kind::Local {
                     continue;
                 }
                 report.b_only.push(Ulid(id));
-                if pristine_copy(y) {
-                    copies.push(y.clone());
+                if pristine_copy(&y) {
+                    copies.push(y);
                     continue;
                 }
-                out.insert(id, y.clone());
+                if changed_later(&y) {
+                    sides[1].held.insert(id, y.clone());
+                }
+                out.insert(id, y);
             }
-            (None, None) => {}
+            (None, None) => unreachable!("one input has the id"),
         }
     }
     // Conflict copies (decision.v0210-conflict-flags): for each source,
@@ -1045,12 +1183,10 @@ fn relink_slots(
     }
     let mut linked_from: BTreeMap<u128, u128> = BTreeMap::new();
     for side in sides {
-        for m in side.by_id.values() {
-            if let Some(t) = ulid_at(m, MNEMO_META_SUPERSEDED_BY) {
-                if !out.contains_key(&t) {
-                    let e = linked_from.entry(t).or_insert(m.id.0);
-                    *e = (*e).min(m.id.0);
-                }
+        for &(id, t) in &side.marks {
+            if !out.contains_key(&t) {
+                let e = linked_from.entry(t).or_insert(id);
+                *e = (*e).min(id);
             }
         }
     }
@@ -1059,9 +1195,19 @@ fn relink_slots(
             e.insert(
                 sides
                     .iter()
-                    .find_map(|s| s.by_id.get(&t))
-                    .map_or(Some(p), written_over),
+                    .find_map(|s| s.written_over(t))
+                    .unwrap_or(Some(p)),
             );
+        }
+    }
+    // The deleted versions written over each version (REV-017.2 (3)), in
+    // id order.
+    let mut gone_children: BTreeMap<u128, Vec<u128>> = BTreeMap::new();
+    for (&t, o) in &gone_over {
+        if let Some(p) = *o {
+            if !out.contains_key(&t) {
+                gone_children.entry(p).or_default().push(t);
+            }
         }
     }
     for members in slots.into_values() {
@@ -1078,13 +1224,8 @@ fn relink_slots(
                 };
                 w.filter(|t| member_set.contains(t) || gone(t))
             };
-            let gone_after = |p: u128| -> Vec<u128> {
-                gone_over
-                    .iter()
-                    .filter(|(t, o)| **o == Some(p) && gone(t))
-                    .map(|(t, _)| *t)
-                    .collect()
-            };
+            let gone_after =
+                |p: u128| -> Vec<u128> { gone_children.get(&p).cloned().unwrap_or_default() };
             // Whether a version written after `p` (through deleted ones) is in
             // the output.
             let continues = |p: u128| -> bool {
@@ -1232,9 +1373,11 @@ fn relink_slots(
         // written follows hold different text, each of them but the chain's
         // last is flagged; no other version of the key is.
         let tail = order.last().copied();
-        let differ = heads
-            .iter()
-            .any(|x| heads.iter().any(|y| !same_visible(&out[x], &out[y])));
+        let differ = heads.iter().any(|x| {
+            heads
+                .iter()
+                .any(|y| x != y && !same_visible(&out[x], &out[y]))
+        });
         let flagged: BTreeSet<u128> = if differ {
             heads.iter().copied().filter(|h| Some(*h) != tail).collect()
         } else {
@@ -1247,7 +1390,7 @@ fn relink_slots(
                 m.metadata
                     .insert(MNEMO_META_MERGE_CONFLICT.into(), Value::Bool(true));
                 let had = sides.iter().any(|s| {
-                    s.by_id
+                    s.held
                         .get(&n)
                         .is_some_and(|v| v.metadata.contains_key(MNEMO_META_MERGE_CONFLICT))
                 });
@@ -1319,7 +1462,7 @@ fn rename_names(
                 used.insert(name.clone());
                 let was: BTreeSet<String> = sides
                     .iter()
-                    .filter_map(|s| s.by_id.get(id))
+                    .filter_map(|s| s.held.get(id))
                     .filter_map(|v| meta_str(v, field).map(str::to_string))
                     .collect();
                 m.metadata.insert(field.into(), Value::String(name.clone()));
@@ -1442,9 +1585,7 @@ fn keep_one_turn_copy(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         let only = |s: usize| -> Vec<u128> {
             ids.iter()
                 .copied()
-                .filter(|id| {
-                    sides[s].by_id.contains_key(id) && !sides[1 - s].by_id.contains_key(id)
-                })
+                .filter(|id| sides[s].ids.contains(id) && !sides[1 - s].ids.contains(id))
                 .collect()
         };
         let (oa, ob) = (only(0), only(1));
@@ -1454,7 +1595,7 @@ fn keep_one_turn_copy(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         let first = |s: usize| -> Option<u128> {
             ids.iter()
                 .copied()
-                .filter(|id| sides[s].by_id.contains_key(id))
+                .filter(|id| sides[s].ids.contains(id))
                 .min_by_key(|id| {
                     let part = out[id]
                         .metadata
@@ -1488,7 +1629,13 @@ fn name_final_versions(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         let Some(st) = stamp(m) else {
             continue;
         };
-        let inputs: Vec<&Memory> = sides.iter().filter_map(|s| s.by_id.get(id)).collect();
+        // A record no input holds a copy of is one the merge placed and
+        // never changed (REV-017.2 (2)): its version stands. So does one
+        // that's still the first input's copy.
+        let inputs: Vec<&Memory> = sides.iter().filter_map(|s| s.held.get(id)).collect();
+        if inputs.first().is_none_or(|x| same_record(m, x)) {
+            continue;
+        }
         let core = core_bytes(m);
         let mut prev = hlc_prev(m);
         let v = match inputs.iter().find(|x| core_bytes(x) == core) {
@@ -1515,6 +1662,118 @@ fn name_final_versions(out: &mut BTreeMap<u128, Memory>, sides: &[Side]) {
         prev.remove(&(st, v));
         m.metadata.insert(MNEMO_META_VER.into(), Value::from(v));
         set_hlc_prev(m, prev);
+    }
+}
+
+/// Put the finished temp file at `out` only if nothing has that name: a
+/// hard link, which fails if it does. Where the filesystem has no hard
+/// links (exFAT, FAT32, some FUSE and container mounts; REV-017.1 (C)), a
+/// copy into a file created only if the name is free (owner-only on Unix),
+/// synced; a copy that
+/// fails removes the file it made. std has no rename that refuses to
+/// overwrite, and the crate has no `unsafe` to call one.
+fn place_new(tmp: &Path, out: &Path) -> std::io::Result<()> {
+    match link(tmp, out) {
+        Err(e) if no_hard_links(&e) => {
+            // Owner-only on Unix, as the temp file is.
+            let mut file =
+                super::load::owner_only(File::options().write(true).create_new(true)).open(out)?;
+            let copied = (|| {
+                #[cfg(feature = "dev-hooks")]
+                if let Some(e) = link_hook::copy_error() {
+                    return Err(e);
+                }
+                std::io::copy(&mut File::open(tmp)?, &mut file)?;
+                file.sync_all()
+            })();
+            if copied.is_err() {
+                drop(file);
+                let _ = std::fs::remove_file(out);
+            }
+            copied
+        }
+        r => r,
+    }
+}
+
+fn link(tmp: &Path, out: &Path) -> std::io::Result<()> {
+    #[cfg(feature = "dev-hooks")]
+    if let Some(e) = link_hook::link_error(out) {
+        return Err(e);
+    }
+    std::fs::hard_link(tmp, out)
+}
+
+/// A link refused because the filesystem has none: unsupported, or not
+/// permitted (Linux's `EPERM` from `link`; a directory that can't be
+/// written fails the copy's create the same way, with its own error).
+fn no_hard_links(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    if matches!(
+        e.kind(),
+        ErrorKind::Unsupported | ErrorKind::PermissionDenied
+    ) {
+        return true;
+    }
+    // ENOTSUP and EOPNOTSUPP; Windows' ERROR_INVALID_FUNCTION and
+    // ERROR_NOT_SUPPORTED (FAT volumes).
+    let codes: &[i32] = if cfg!(target_os = "linux") || cfg!(target_os = "android") {
+        &[95]
+    } else if cfg!(any(target_os = "macos", target_os = "ios")) {
+        &[45, 102]
+    } else if cfg!(windows) {
+        &[1, 50]
+    } else {
+        &[]
+    };
+    e.raw_os_error().is_some_and(|c| codes.contains(&c))
+}
+
+/// The test hook for [`place_new`]: this thread's next merge sees a
+/// filesystem without hard links, and, if asked, a file appearing at the
+/// output first, or a copy that fails.
+#[cfg(feature = "dev-hooks")]
+pub(crate) mod link_hook {
+    use std::cell::Cell;
+    use std::io::{Error, ErrorKind};
+    use std::path::Path;
+
+    /// What the next placement on this thread meets.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum LinkHook {
+        /// The link is unsupported; the copy goes ahead.
+        Copies,
+        /// The link is unsupported, and a file has appeared at the output.
+        Taken,
+        /// The link is unsupported, and the copy fails.
+        CopyFails,
+    }
+
+    thread_local! {
+        static NEXT: Cell<Option<LinkHook>> = const { Cell::new(None) };
+        static COPY_FAILS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(crate) fn arm(h: Option<LinkHook>) {
+        NEXT.with(|c| c.set(h));
+    }
+
+    pub(super) fn link_error(out: &Path) -> Option<Error> {
+        let h = NEXT.with(|c| c.take())?;
+        if h == LinkHook::Taken {
+            let _ = std::fs::write(out, b"a file that appeared meanwhile");
+        }
+        COPY_FAILS.with(|c| c.set(h == LinkHook::CopyFails));
+        Some(Error::new(
+            ErrorKind::Unsupported,
+            "hard links unsupported (test hook)",
+        ))
+    }
+
+    pub(super) fn copy_error() -> Option<Error> {
+        COPY_FAILS
+            .with(|c| c.replace(false))
+            .then(|| Error::other("the copy failed (test hook)"))
     }
 }
 
@@ -1590,7 +1849,9 @@ impl Mnemo {
     /// KDF settings (never lower), a new data key, the engine's own cache
     /// entries only (no cached results), one snapshot, and the index when
     /// either input has one. It's written to a temp file beside `out` and
-    /// put in place with a call that fails if `out` exists; on any error
+    /// put in place with a hard link, which fails if `out` exists; on a
+    /// filesystem without hard links (exFAT, FAT32, some FUSE mounts), it's
+    /// copied into a file created only if `out` doesn't exist. On any error
     /// nothing is left behind.
     ///
     /// Refused, with the reason, when the inputs aren't one brain; when
@@ -1740,8 +2001,8 @@ impl Mnemo {
             }
             new.flush()?;
             drop(new);
-            // In place only if nothing has the name: a link fails if it does.
-            std::fs::hard_link(&tmp, out)?;
+            // In place only if nothing has the name.
+            place_new(&tmp, out)?;
             let _ = std::fs::remove_file(&tmp);
             #[cfg(unix)]
             if let Some(parent) = out.parent() {
