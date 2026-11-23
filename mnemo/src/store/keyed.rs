@@ -230,8 +230,11 @@ impl Mnemo {
             }
 
             // SUPERSESSION: insert the new record, then rewrite the old
-            // with `_mnemo.superseded_by` + `_mnemo.invalid_at`.
-            let now = memory::now_secs();
+            // with `_mnemo.superseded_by` + `_mnemo.invalid_at`. The old
+            // version stops being valid when the new one was created: one
+            // clock read, so a merge recomputing it from the chain (its next
+            // version's created_at) agrees with what the write stamped.
+            let now = memory.created_at;
             memory.id = Ulid::nil(); // force a fresh ULID in `put`
             memory.metadata.insert(
                 MNEMO_META_SUPERSEDES.into(),
@@ -370,7 +373,8 @@ impl Mnemo {
             }
             return Ok((*supersedes, WriteOutcome::Updated));
         }
-        let now = memory::now_secs();
+        // The new version's created_at, as in the plain keyed write.
+        let now = memory.created_at;
         memory.id = Ulid::nil();
         memory.metadata.insert(
             MNEMO_META_SUPERSEDES.into(),
