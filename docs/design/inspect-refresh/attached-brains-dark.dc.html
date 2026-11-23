@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inspect attached brains</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#0E1113}
+a{color:#6FD6CB}a:hover{color:#2BB3A6}
+</style>
+</helmet>
+<div style="background: #0E1113; color: #E8EAED; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.5; min-height: 1180px;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 14px 28px; border-bottom: 1px solid #252C31; background: rgba(14,17,19,.82);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="28" height="28" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M24 21v-7a8 8 0 0 1 16 0v7" stroke="#F0A35A" stroke-width="5.2" stroke-linecap="round"></path>
+        <path d="M17 20h26l9 9v26a5 5 0 0 1-5 5H17a5 5 0 0 1-5-5V25a5 5 0 0 1 5-5z" fill="#0E7C74"></path>
+        <path d="M43 20v6a3 3 0 0 0 3 3h6l-9-9z" fill="#5FD0C4"></path>
+        <path d="M22.5 51V33l9.5 9.5L41.5 33v18" stroke="#FFFFFF" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <span style="font-weight: 700; letter-spacing: -0.02em; font-size: 18px;">MNemo</span>
+      <span style="color: #848C96; font-size: 13px; font-weight: 500;">inspect</span>
+    </div>
+    <label style="display: flex; align-items: center; gap: 8px; margin-left: 12px;">
+      <span style="color: #848C96; font-size: 12px;">Brain</span>
+      <select style="font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #E8EAED; min-height: 36px;">
+        <option>All 3 brains in this session</option>
+      </select>
+    </label>
+    <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #6FD6CB; background: rgba(43,179,166,.13); padding: 3px 10px; border-radius: 999px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+      read-only view
+    </span>
+    <span style="flex: 1;"></span>
+    <button aria-label="Switch to light theme" style="display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #AEB5BD; cursor: pointer;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+    </button>
+    <button style="font: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; border: 0; border-radius: 8px; background: #2BB3A6; color: #06201D; cursor: pointer; min-height: 40px;">Reload</button>
+  </header>
+
+  <nav aria-label="Views" style="display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 28px; border-bottom: 1px solid #252C31;">
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Overview</button>
+    <button style="font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #E8EAED; min-height: 36px;">Memories</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Keyed history</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Threads</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Tasks</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Findings</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Messages</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">Snapshots</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #AEB5BD; min-height: 36px;">About</button>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 24px; max-width: 1384px; padding: 28px 28px 56px; box-sizing: border-box;">
+
+    <aside aria-labelledby="brains" style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+      <h2 id="brains" style="margin: 0; font-size: 13px; font-weight: 600; color: #848C96; text-transform: uppercase; letter-spacing: .06em;">Brains in this session</h2>
+      <sc-for list="{{brains}}" as="b" hint-placeholder-count="3">
+        <label style="display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid #252C31; border-radius: 12px; background: #151A1D; cursor: pointer;">
+          <input type="checkbox" checked="{{b.on}}" style="margin-top: 4px; width: 16px; height: 16px; accent-color: #2BB3A6;">
+          <span style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+            <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span aria-hidden="true" style="width: 10px; height: 10px; border-radius: 3px; background: {{b.color}};"></span>
+              <span style="font-weight: 600;">{{b.name}}</span>
+              <span style="font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: {{b.badgeBg}}; color: {{b.badgeInk}};">{{b.badge}}</span>
+            </span>
+            <span style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #848C96; overflow-wrap: anywhere;">{{b.path}}</span>
+            <span style="font-size: 12px; color: #AEB5BD;">{{b.stats}}</span>
+          </span>
+        </label>
+      </sc-for>
+      <div style="padding: 12px 14px; border: 1px dashed #333C42; border-radius: 12px; color: #848C96; font-size: 12px;">
+        Brains come from the session's <span style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; color: #AEB5BD;">--attach</span> setting. Each opens read-only with its own key; inspect never writes to any of them.
+      </div>
+    </aside>
+
+    <main style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+        <label style="flex: 1 1 320px; display: flex;">
+          <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Search memories</span>
+          <input type="search" value="how do we cut a release" style="flex: 1; font: inherit; font-size: 14px; padding: 10px 14px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #E8EAED; min-height: 44px;">
+        </label>
+        <select aria-label="Type" style="font: inherit; font-size: 13px; padding: 10px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #E8EAED; min-height: 44px;"><option>All types</option></select>
+        <select aria-label="Brain" style="font: inherit; font-size: 13px; padding: 10px; border: 1px solid #333C42; border-radius: 8px; background: #151A1D; color: #E8EAED; min-height: 44px;"><option>All brains</option></select>
+      </div>
+      <span style="color: #848C96; font-size: 12px;">5 results from 3 brains · example data: attached brains are roadmap step 4b</span>
+
+      <sc-for list="{{hits}}" as="h" hint-placeholder-count="5">
+        <article style="border: 1px solid #252C31; border-radius: 12px; background: #151A1D; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: #1B2125; color: #E8EAED;">
+              <span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: {{h.color}};"></span>{{h.brain}}
+            </span>
+            <span style="font-size: 12px; color: #848C96;">{{h.type}}</span>
+            <span style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #6FD6CB;">{{h.key}}</span>
+            <span style="flex: 1;"></span>
+            <span style="font-size: 12px; color: #848C96; font-variant-numeric: tabular-nums;">score {{h.score}}</span>
+          </div>
+          <p style="margin: 0; color: #E8EAED;">{{h.text}}</p>
+        </article>
+      </sc-for>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      brains: [
+        { on: true, color: '#2BB3A6', name: 'project brain', badge: 'this project', badgeBg: 'rgba(43,179,166,.13)', badgeInk: '#6FD6CB', path: '.git/mnemo/project.mnemo', stats: '32,927 records · 60.6 MB' },
+        { on: true, color: '#F0A35A', name: 'personal', badge: 'attached, read-only', badgeBg: 'rgba(240,163,90,.12)', badgeInk: '#F0A35A', path: '~/.mnemo/personal.mnemo', stats: 'example' },
+        { on: true, color: '#AEB5BD', name: 'release playbook', badge: 'attached, read-only', badgeBg: 'rgba(240,163,90,.12)', badgeInk: '#F0A35A', path: '~/playbooks/release.mnemo', stats: 'example' }
+      ],
+      hits: [
+        { brain: 'project brain', color: '#2BB3A6', type: 'procedural', key: 'RELEASING.md checklist', score: '0.91', text: 'One v* tag releases the engine, the Swift package and the Android library; a manual run is a dry run.' },
+        { brain: 'release playbook', color: '#AEB5BD', type: 'procedural', key: 'playbook.release-day', score: '0.87', text: 'Install the release candidate in every session before the tag, and reconnect each MCP server.' },
+        { brain: 'project brain', color: '#2BB3A6', type: 'episodic', key: 'decision.brain-backup', score: '0.74', text: 'At each release, mnemo backup writes a dated copy to ~/Documents/mnemo-backup.' },
+        { brain: 'personal', color: '#F0A35A', type: 'semantic', key: 'pref.release-notes', score: '0.69', text: 'Release notes in plain English, shortest first.' },
+        { brain: 'release playbook', color: '#AEB5BD', type: 'procedural', key: 'playbook.rollback', score: '0.62', text: 'A bad release is yanked from the registries, then fixed in a patch, never re-tagged.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

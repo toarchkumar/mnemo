@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inspect overview</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#FBFAF7}
+a{color:#0A5E58}a:hover{color:#0E7C74}
+</style>
+</helmet>
+<div style="background: #FBFAF7; color: #15181E; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 14px; line-height: 1.5; min-height: 1180px;">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 14px 28px; border-bottom: 1px solid #E7E3DA; background: rgba(251,250,247,.85);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="28" height="28" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="M24 21v-7a8 8 0 0 1 16 0v7" stroke="#F0A35A" stroke-width="5.2" stroke-linecap="round"></path>
+        <path d="M17 20h26l9 9v26a5 5 0 0 1-5 5H17a5 5 0 0 1-5-5V25a5 5 0 0 1 5-5z" fill="#0E7C74"></path>
+        <path d="M43 20v6a3 3 0 0 0 3 3h6l-9-9z" fill="#5FD0C4"></path>
+        <path d="M22.5 51V33l9.5 9.5L41.5 33v18" stroke="#FFFFFF" stroke-width="4.8" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <span style="font-weight: 700; letter-spacing: -0.02em; font-size: 18px;">MNemo</span>
+      <span style="color: #6E7583; font-size: 13px; font-weight: 500;">inspect</span>
+    </div>
+
+    <label style="display: flex; align-items: center; gap: 8px; margin-left: 12px;">
+      <span style="color: #6E7583; font-size: 12px;">Brain</span>
+      <select style="font: inherit; font-size: 13px; padding: 7px 10px; border: 1px solid #D9D4C8; border-radius: 8px; background: #FFFFFF; color: #15181E; min-height: 36px;">
+        <option>project brain · .git/mnemo/project.mnemo</option>
+      </select>
+    </label>
+    <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #0A5E58; background: #E3F2EF; padding: 3px 10px; border-radius: 999px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+      read-only view
+    </span>
+
+    <span style="flex: 1;"></span>
+    <span style="color: #6E7583; font-size: 12px;">Read 15:42, 0.4 s</span>
+    <button aria-label="Switch to dark theme" style="display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid #D9D4C8; border-radius: 8px; background: #FFFFFF; color: #4A5160; cursor: pointer;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+    </button>
+    <button style="font: inherit; font-size: 13px; font-weight: 600; padding: 9px 16px; border: 0; border-radius: 8px; background: #0E7C74; color: #FFFFFF; cursor: pointer; min-height: 40px;">Reload</button>
+  </header>
+
+  <nav aria-label="Views" style="display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 28px; border-bottom: 1px solid #E7E3DA; background: #FBFAF7;">
+    <button style="font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border: 1px solid #D9D4C8; border-radius: 8px; background: #FFFFFF; color: #15181E; min-height: 36px;">Overview</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Memories</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Keyed history</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Threads</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Tasks</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Findings</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Messages</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">Snapshots</button>
+    <button style="font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: none; color: #4A5160; min-height: 36px;">About</button>
+  </nav>
+
+  <main style="max-width: 1240px; padding: 28px 28px 56px; display: flex; flex-direction: column; gap: 24px;">
+
+    <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px;">
+      <h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.015em;">Overview</h1>
+      <span style="color: #6E7583; font-size: 13px;">60.6 MB · format v9 · 384-dim · encrypted · 139 snapshots</span>
+    </div>
+
+    <section aria-label="What the brain holds" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+      <sc-for list="{{tiles}}" as="t" hint-placeholder-count="6">
+        <div style="background: #FFFFFF; border: 1px solid #E7E3DA; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px;">
+          <span style="color: #6E7583; font-size: 12px; font-weight: 500;">{{t.label}}</span>
+          <span style="font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;">{{t.value}}</span>
+          <span style="color: #4A5160; font-size: 12px;">{{t.note}}</span>
+        </div>
+      </sc-for>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 24px;">
+
+      <section aria-labelledby="needs" style="flex: 999 1 560px; min-width: 0; background: #FFFFFF; border: 1px solid #E7E3DA; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+        <h2 id="needs" style="margin: 0; font-size: 15px; font-weight: 700;">Needs attention</h2>
+        <sc-for list="{{attention}}" as="a" hint-placeholder-count="4">
+          <div style="display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid #E7E3DA; border-radius: 8px; background: #FBFAF7;">
+            <span style="flex: none; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: {{a.tagBg}}; color: {{a.tagInk}};">{{a.tag}}</span>
+            <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+              <span style="font-weight: 600;">{{a.title}}</span>
+              <span style="color: #4A5160; font-size: 13px;">{{a.detail}}</span>
+            </div>
+          </div>
+        </sc-for>
+      </section>
+
+      <section aria-labelledby="who" style="flex: 1 1 320px; min-width: 0; background: #FFFFFF; border: 1px solid #E7E3DA; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+        <h2 id="who" style="margin: 0; font-size: 15px; font-weight: 700;">Agents</h2>
+        <sc-for list="{{agents}}" as="g" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #E7E3DA;">
+            <span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 50%; background: {{g.dot}};"></span>
+            <span style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; font-weight: 600;">{{g.name}}</span>
+            <span style="color: #6E7583; font-size: 12px;">{{g.role}}</span>
+            <span style="flex: 1;"></span>
+            <span style="color: #4A5160; font-size: 12px;">{{g.state}}</span>
+          </div>
+        </sc-for>
+      </section>
+    </div>
+
+    <section aria-labelledby="size" style="background: #FFFFFF; border: 1px solid #E7E3DA; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px;">
+        <h2 id="size" style="margin: 0; font-size: 15px; font-weight: 700;">Where the space goes</h2>
+        <span style="color: #6E7583; font-size: 13px;">60.6 MB in all</span>
+      </div>
+      <div role="img" aria-label="Vectors 27 MB, records and indexes 22.6 MB, snapshot history 10.9 MB" style="display: flex; height: 18px; border-radius: 999px; overflow: hidden; background: #F4F2EC;">
+        <span style="width: 44.6%; background: #0E7C74;"></span>
+        <span style="width: 37.4%; background: #5FD0C4;"></span>
+        <span style="width: 18%; background: #F0A35A;"></span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+        <sc-for list="{{sizes}}" as="s" hint-placeholder-count="3">
+          <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <span aria-hidden="true" style="flex: none; margin-top: 5px; width: 10px; height: 10px; border-radius: 3px; background: {{s.color}};"></span>
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-weight: 600;">{{s.label}} <span style="color: #4A5160; font-weight: 500; font-variant-numeric: tabular-nums;">{{s.value}}</span></span>
+              <span style="color: #6E7583; font-size: 12px;">{{s.note}}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: 8px; background: #FDF1E3; color: #A34B07; font-size: 13px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="flex: none; margin-top: 2px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16.5v.5"></path></svg>
+        <span>27,388 saved turns are placeholders like [tool_use name=Bash], about 22 MB of the vectors. Smarter memory folds them into the turn before.</span>
+      </div>
+    </section>
+
+    <section aria-labelledby="recent" style="background: #FFFFFF; border: 1px solid #E7E3DA; border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 6px;">
+      <h2 id="recent" style="margin: 0 0 6px; font-size: 15px; font-weight: 700;">Recent changes</h2>
+      <sc-for list="{{recent}}" as="r" hint-placeholder-count="5">
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid #E7E3DA;">
+          <span style="width: 52px; color: #6E7583; font-size: 12px; font-variant-numeric: tabular-nums;">{{r.time}}</span>
+          <span style="width: 74px; font-size: 12px; color: #0A5E58; font-weight: 600;">{{r.kind}}</span>
+          <span style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px;">{{r.name}}</span>
+          <span style="color: #4A5160; font-size: 13px; flex: 1 1 280px; min-width: 0;">{{r.text}}</span>
+        </div>
+      </sc-for>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      tiles: [
+        { label: 'Facts', value: '485', note: 'keyed decisions, specs, reports' },
+        { label: 'Saved turns', value: '32,092', note: '4 threads · 4,704 with real text' },
+        { label: 'Tasks', value: '4 open', note: '1 active, 3 queued · 79 done' },
+        { label: 'Findings', value: '36 open', note: '32 accepted, 4 deferred · 2 verified' },
+        { label: 'Messages', value: '0 unread', note: '116 delivered' },
+        { label: 'Essence', value: '21', note: 'items in state, next, open, decisions' }
+      ],
+      attention: [
+        { tag: 'active', tagBg: '#E3F2EF', tagInk: '#0A5E58', title: 'v0210-2 · worker-a', detail: 'Mnemo::merge: building option A of decision.v0210-conflict-flags' },
+        { tag: 'queued', tagBg: '#F4F2EC', tagInk: '#4A5160', title: 'v0210-3, v0210-4, v0210-5', detail: 'merge surfaces, the dogfood on copies, READY' },
+        { tag: 'conflict', tagBg: '#FDF1E3', tagInk: '#A34B07', title: 'Merge conflicts: none', detail: 'After a merge, conflict copies and flagged items show here (v0.21.0)' },
+        { tag: 'stale', tagBg: '#F4F2EC', tagInk: '#4A5160', title: 'Nothing stale', detail: 'Essence items past 14 days, tasks idle past 3 days' }
+      ],
+      agents: [
+        { name: 'planner-a', role: 'planner', state: 'waiting', dot: '#0E7C74' },
+        { name: 'worker-a', role: 'worker', state: 'on v0210-2', dot: '#0E7C74' },
+        { name: 'reviewer-b', role: 'reviewer', state: 'waiting', dot: '#0E7C74' },
+        { name: 'reviewer-a', role: 'reviewer', state: 'not running', dot: '#D9D4C8' }
+      ],
+      sizes: [
+        { label: 'Vectors', value: '27.0 MB', color: '#0E7C74', note: '772 bytes per record, kept in memory for recall' },
+        { label: 'Records and indexes', value: '22.6 MB', color: '#5FD0C4', note: 'text, labels, the catalog, the keyword index' },
+        { label: 'Snapshot history', value: '10.9 MB', color: '#F0A35A', note: 'old pages kept so restore can go back' }
+      ],
+      recent: [
+        { time: '15:22', kind: 'decision', name: 'decision.inspect-refresh', text: 'Refresh inspect to the brand; v0.21.2' },
+        { time: '15:11', kind: 'decision', name: 'decision.v0210-conflict-flags', text: 'Flags follow the versions that conflicted' },
+        { time: '15:09', kind: 'message', name: 'worker-a → planner-a', text: 'BLOCKED: v0210-2 (acked)' },
+        { time: '14:58', kind: 'decision', name: 'decision.brain-backup', text: 'Backups to iCloud, mnemo-backup' },
+        { time: '14:40', kind: 'status', name: 'status.dogfood-gaps', text: 'G13 backup command, G14 placeholder turns' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
