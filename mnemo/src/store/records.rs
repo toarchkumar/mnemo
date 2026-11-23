@@ -1686,6 +1686,8 @@ impl Mnemo {
             }
             // A new write is one version, not the merge's combination.
             m.metadata.remove(crate::memory::MNEMO_META_MERGE_HEADS);
+            m.metadata
+                .remove(crate::memory::MNEMO_META_MERGE_STATUS_CONFLICT);
             // A new record's links are its own write's
             // (decision.v0210-chain-rule). A rewrite in place keeps the mark,
             // since the link it marks is unchanged.

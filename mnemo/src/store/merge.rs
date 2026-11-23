@@ -27,9 +27,9 @@ use super::*;
 use crate::memory::{
     finding_status, task_status, MNEMO_META_FINDING_ID, MNEMO_META_FIRST_HLC,
     MNEMO_META_MERGE_CONFLICT, MNEMO_META_MERGE_HEADS, MNEMO_META_MERGE_LINKED,
-    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY,
-    MNEMO_META_SEEN_BY, MNEMO_META_SLUG, MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY,
-    MNEMO_META_TOMBSTONE_SUPERSEDES,
+    MNEMO_META_MERGE_NAME, MNEMO_META_MERGE_SOURCE, MNEMO_META_MERGE_STATUS_CONFLICT,
+    MNEMO_META_OWNER, MNEMO_META_READY_SEEN_BY, MNEMO_META_SEEN_BY, MNEMO_META_SLUG,
+    MNEMO_META_STATUS, MNEMO_META_STATUS_HISTORY, MNEMO_META_TOMBSTONE_SUPERSEDES,
 };
 
 /// One input of the rules: its live records (with vectors and access
@@ -259,6 +259,35 @@ fn history_of(m: &Memory) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// Whether a status history entry moved the status (a note-only entry, or
+/// a task taken again by its owner, has `from == to`).
+fn changes_status(e: &Value) -> bool {
+    e.get("from") != e.get("to")
+}
+
+/// decision.v0210-task-status: the latest status change `m` holds that
+/// `other` doesn't (a change since they diverged), by `at`, then its bytes.
+/// `None` when it made none. An input's own status is its own history's
+/// last change, in the order it was written; the union of two histories
+/// can't give that order back when two entries share a second.
+fn own_last_change(m: &Memory, other: &Memory) -> Option<(i64, Vec<u8>)> {
+    let theirs: BTreeSet<Vec<u8>> = history_of(other)
+        .iter()
+        .map(|e| serde_json::to_vec(e).unwrap_or_default())
+        .collect();
+    history_of(m)
+        .iter()
+        .filter(|e| changes_status(e))
+        .map(|e| {
+            (
+                e.get("at").and_then(Value::as_i64).unwrap_or(0),
+                serde_json::to_vec(e).unwrap_or_default(),
+            )
+        })
+        .filter(|(_, bytes)| !theirs.contains(bytes))
+        .max()
+}
+
 /// Two status histories as one: each entry once, by `at`, then its bytes.
 fn union_history(a: &Memory, b: &Memory) -> Vec<Value> {
     let mut seen: BTreeMap<(i64, Vec<u8>), Value> = BTreeMap::new();
@@ -443,11 +472,14 @@ fn flag_follows_heads(m: &Memory) -> bool {
 }
 
 /// An essence item's, a task's or a finding's flag from the versions it
-/// combines: set while two hold different text, or while a merge's rename
-/// stands; else cleared. Returns whether it's set.
+/// combines: set while two hold different text, while a merge's rename
+/// stands, or while the two statuses a merge found stand
+/// (decision.v0210-task-status); else cleared. Returns whether it's set.
 fn set_flag(body: &mut Memory, hs: &BTreeSet<Head>) -> bool {
     let texts: BTreeSet<u64> = hs.iter().map(|h| h.2).collect();
-    let on = texts.len() >= 2 || body.metadata.contains_key(MNEMO_META_MERGE_NAME);
+    let on = texts.len() >= 2
+        || body.metadata.contains_key(MNEMO_META_MERGE_NAME)
+        || body.metadata.contains_key(MNEMO_META_MERGE_STATUS_CONFLICT);
     set_or_remove(
         body,
         MNEMO_META_MERGE_CONFLICT,
@@ -660,15 +692,32 @@ fn resolve(a: &Memory, b: &Memory) -> Resolved {
             };
             let st = |m: &Memory| meta_str(m, MNEMO_META_STATUS).map(str::to_string);
             let history = union_history(a, b);
+            // decision.v0210-task-status: the status from the last change;
+            // a note-only entry never sets it. An input that changed it since
+            // they diverged keeps its own status; when both did, the later
+            // change's input does.
+            let (ca, cb) = (own_last_change(a, b), own_last_change(b, a));
             let status = if st(a).as_deref() == Some(fin) || st(b).as_deref() == Some(fin) {
                 Some(fin.to_string())
             } else {
-                history
-                    .iter()
-                    .rev()
-                    .find_map(|e| e.get("to").and_then(Value::as_str).map(str::to_string))
-                    .or_else(|| st(w))
+                match (&ca, &cb) {
+                    (Some(x), Some(y)) if y > x => st(b),
+                    (Some(_), _) => st(a),
+                    (None, Some(_)) => st(b),
+                    (None, None) => st(w),
+                }
             };
+            // Both moved it, to different statuses: flagged, and the mark
+            // keeps the flag through later merges (set_flag).
+            let moved_apart = [a, b]
+                .iter()
+                .any(|m| m.metadata.contains_key(MNEMO_META_MERGE_STATUS_CONFLICT))
+                || (ca.is_some() && cb.is_some() && st(a) != st(b));
+            set_or_remove(
+                &mut body,
+                MNEMO_META_MERGE_STATUS_CONFLICT,
+                moved_apart.then_some(Value::Bool(true)),
+            );
             if !finding {
                 let owner = if status.as_deref() == Some(task_status::QUEUED) {
                     None

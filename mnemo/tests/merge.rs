@@ -393,6 +393,127 @@ fn done_is_final_and_two_tasks_under_one_slug_are_both_kept() {
     assert_eq!(r.renamed[0].to, "write-the-notes-merge-2");
 }
 
+/// Two copies of a brain with one task, "dogfood-the-merge", that
+/// worker-a holds (active).
+fn pair_with_an_active_task() -> Pair {
+    let p = pair();
+    let mut a = open(&p.a);
+    a.set_author(Some("planner-a".into()));
+    let mut spec = TaskSpec::new("Dogfood the merge");
+    spec.role = Some("worker".into());
+    a.task_add(&spec).unwrap();
+    a.set_author(Some("worker-a".into()));
+    a.task_next(Some("worker")).unwrap().unwrap();
+    a.close().unwrap();
+    copy(&p.a, &p.b);
+    p
+}
+
+/// The merged task: its status, whether it's flagged, whether it holds the
+/// status-conflict mark, and its history's length.
+fn merged_task(out: &Path) -> (String, bool, bool, usize) {
+    let mut db = Mnemo::open_read_only(out, PW).unwrap();
+    let t = db
+        .tasks(None, None)
+        .unwrap()
+        .into_iter()
+        .find(|t| t.slug == "dogfood-the-merge")
+        .unwrap();
+    let m = db.get(&t.id).unwrap();
+    (
+        t.status,
+        mnemo_engine::is_merge_conflict(&m),
+        m.metadata
+            .contains_key(mnemo_engine::MNEMO_META_MERGE_STATUS_CONFLICT),
+        t.history.len(),
+    )
+}
+
+/// decision.v0210-task-status, the v0210-4 dogfood case: one copy moves the
+/// task, the other only adds a note a second later. The move stands (a
+/// note never sets the status) and nothing is flagged, whichever copy
+/// moved it.
+#[test]
+fn a_note_on_one_copy_never_undoes_a_move_on_the_other() {
+    for mover in 0..2 {
+        let p = pair_with_an_active_task();
+        let t = wall_ms();
+        let (mut a, mut b) = (open(&p.a), open(&p.b));
+        for db in [&mut a, &mut b] {
+            db.set_author(Some("worker-a".into()));
+        }
+        let (moves, notes) = if mover == 0 {
+            (&mut a, &mut b)
+        } else {
+            (&mut b, &mut a)
+        };
+        moves
+            .task_update("dogfood-the-merge", Some("blocked"), Some("moved"), None)
+            .unwrap();
+        notes.__set_clock_offset_for_testing(1);
+        notes
+            .task_update(
+                "dogfood-the-merge",
+                None,
+                Some("a note, a second later"),
+                None,
+            )
+            .unwrap();
+        a.close().unwrap();
+        b.close().unwrap();
+        let (out, r) = p.check_laws(t + 120_000);
+        let (status, flagged, mark, history) = merged_task(&out);
+        assert_eq!(status, "blocked", "mover {mover}");
+        assert!(!flagged && !mark, "mover {mover}: a note isn't a move");
+        assert_eq!(history, 3, "taken, moved and noted (mover {mover})");
+        assert_eq!(r.conflicts.get("task"), None, "mover {mover}");
+    }
+}
+
+/// Both copies move the task, to different statuses: the later move wins
+/// and the task is flagged, in every order, and the flag stays when the
+/// output is merged again with either input. To the same status: no flag.
+#[test]
+fn two_moves_to_different_statuses_flag_the_task_and_the_later_wins() {
+    for (to_a, to_b, flag) in [("blocked", "ready", true), ("blocked", "blocked", false)] {
+        let p = pair_with_an_active_task();
+        let t = wall_ms();
+        let (mut a, mut b) = (open(&p.a), open(&p.b));
+        for db in [&mut a, &mut b] {
+            db.set_author(Some("worker-a".into()));
+        }
+        a.task_update("dogfood-the-merge", Some(to_a), None, None)
+            .unwrap();
+        b.__set_clock_offset_for_testing(1);
+        b.task_update("dogfood-the-merge", Some(to_b), None, None)
+            .unwrap();
+        a.close().unwrap();
+        b.close().unwrap();
+        let (out, r) = p.check_laws(t + 120_000);
+        let (status, flagged, mark, history) = merged_task(&out);
+        assert_eq!(status, to_b, "the later move wins");
+        assert_eq!((flagged, mark), (flag, flag), "{to_a} and {to_b}");
+        assert_eq!(history, 3, "taken and the two moves");
+        assert_eq!(r.conflicts.get("task").copied(), flag.then_some(1));
+        if flag {
+            // A new write of the task drops the mark; the flag stays until
+            // a merge sees one version again.
+            let mut db = open(&out);
+            db.set_author(Some("worker-a".into()));
+            db.task_update("dogfood-the-merge", None, Some("seen the conflict"), None)
+                .unwrap();
+            db.close().unwrap();
+            let (_, flagged, mark, _) = merged_task(&out);
+            assert!(flagged && !mark);
+            let again = p.out("again.mnemo");
+            merge(&out, &p.a, &again, t + 120_000);
+            let (status, flagged, mark, _) = merged_task(&again);
+            assert_eq!(status, to_b);
+            assert!(!flagged && !mark, "the written version covers both moves");
+        }
+    }
+}
+
 #[test]
 fn a_renamed_task_whose_rival_is_forgotten_takes_its_name_back_and_its_flag_goes() {
     // Two tasks under one slug: the merge renames the later one and flags

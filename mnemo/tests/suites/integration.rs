@@ -5401,3 +5401,36 @@ fn raw_key_create_open_rekey_and_compact() {
     }
     assert!(Mnemo::open(&p2, "pw-again").is_ok());
 }
+
+/// v0210-4b (report.v0210-4): onboarding entries with the same importance
+/// and the same `created_at` second come out of `about` in one order, by
+/// id, on every open (the handle's onboarding set has no order of its own).
+#[test]
+fn about_keeps_one_order_for_entries_tied_on_importance_and_time() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("about-order.mnemo");
+    let mut ids = Vec::new();
+    {
+        let mut db = Mnemo::create(&path, "pw", fast_cfg(4)).unwrap();
+        for i in 0..8 {
+            let mut m = Memory::new(
+                format!("onboarding entry {i}"),
+                MemoryType::Semantic,
+                vec![i as f32 + 1.0, 1.0, 0.5, 0.25],
+            );
+            m.metadata.insert("area".into(), json!("onboarding"));
+            m.importance = 0.9;
+            m.created_at = 1_790_000_000;
+            ids.push(db.remember(m).unwrap());
+        }
+        db.close().unwrap();
+    }
+    ids.sort();
+    for _ in 0..6 {
+        let mut db = Mnemo::open(&path, "pw").unwrap();
+        let got: Vec<_> = db.about().unwrap().into_iter().collect();
+        assert!(got.iter().all(|m| m.created_at == 1_790_000_000));
+        let got: Vec<_> = got.into_iter().map(|m| m.id).collect();
+        assert_eq!(got, ids, "by id among ties, on every open");
+    }
+}

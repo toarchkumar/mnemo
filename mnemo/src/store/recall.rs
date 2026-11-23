@@ -163,11 +163,14 @@ impl Mnemo {
         out.sort_by(|a, b| {
             let a_manifest = is_manifest(a);
             let b_manifest = is_manifest(b);
-            // Manifest topic wins first; then importance desc; then created_at asc.
+            // Manifest topic wins first; then importance desc; then
+            // created_at asc; then id, so entries tied on both keep one
+            // order (the onboarding set has none; report.v0210-4).
             b_manifest
                 .cmp(&a_manifest)
                 .then_with(|| b.importance.total_cmp(&a.importance))
                 .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
         });
         Ok(out)
     }
